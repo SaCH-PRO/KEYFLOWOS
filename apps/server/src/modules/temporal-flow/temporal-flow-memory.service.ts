@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import type {
@@ -8,6 +8,19 @@ import type {
 } from './temporal-flow-memory.types';
 
 const EMBEDDING_CONFIDENCE_THRESHOLD = 0.7;
+
+/**
+ * An id or business a by-id query can use: a non-empty string. Prisma drops an undefined field from a
+ * where, so an absent id or business must never reach one (it would widen it).
+ */
+function isKey(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+/** An entity id a where can use: absent (null or undefined: a business-level memory) or a non-empty string. */
+function isEntityId(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || isKey(value);
+}
 
 @Injectable()
 export class TemporalFlowMemoryService {
@@ -19,6 +32,10 @@ export class TemporalFlowMemoryService {
   ) {}
 
   async createMemory(input: CreateTemporalFlowMemoryInput): Promise<TemporalFlowMemoryData> {
+    // MEM-TEMPORAL-SCOPE: without a business the lookup and the rewrite below would have no tenant predicate.
+    if (!isKey(input.businessId)) throw new BadRequestException('Temporal memory needs a business');
+    // An operator object ({not}, {in}) as the entity id would match, and rewrite, another memory.
+    if (!isEntityId(input.entityId)) throw new BadRequestException('Temporal memory entity id must be a non-empty string');
     const existing = await this.prisma.client.temporalFlowMemory.findFirst({
       where: {
         businessId: input.businessId,
@@ -39,7 +56,8 @@ export class TemporalFlowMemoryService {
     let record;
     if (existing) {
       record = await this.prisma.client.temporalFlowMemory.update({
-        where: { id: existing.id },
+        // MEM-TEMPORAL-SCOPE: the tenant predicate is in the update itself.
+        where: { id: existing.id, businessId: input.businessId },
         data,
       });
     } else {
@@ -84,6 +102,9 @@ export class TemporalFlowMemoryService {
     entityType: string,
     entityId?: string,
   ): Promise<TemporalFlowMemoryData[]> {
+    // MEM-TEMPORAL-SCOPE: no business, or an entity id that is not a string (an operator object, a list),
+    // matches nothing.
+    if (!isKey(businessId) || !isEntityId(entityId)) return [];
     return this.prisma.client.temporalFlowMemory.findMany({
       where: {
         businessId,
@@ -96,6 +117,7 @@ export class TemporalFlowMemoryService {
   }
 
   async findMany(businessId: string, query: TemporalFlowMemoryQuery = {}): Promise<TemporalFlowMemoryData[]> {
+    if (!isKey(businessId) || !isEntityId(query.entityId)) return [];
     return this.prisma.client.temporalFlowMemory.findMany({
       where: {
         businessId,
@@ -118,16 +140,32 @@ export class TemporalFlowMemoryService {
     });
   }
 
-  async deleteMemory(businessId: string, memoryId: string): Promise<boolean> {
-    const existing = await this.prisma.client.temporalFlowMemory.findFirst({
-      where: { id: memoryId, businessId },
-    });
-    if (!existing) return false;
-    await this.prisma.client.temporalFlowMemory.delete({ where: { id: memoryId } });
-    return true;
+  /**
+   * MEM-TEMPORAL-SCOPE: one memory of this business by id, or null. A foreign id reads as a missing one.
+   */
+  async findById(businessId: string, memoryId: string): Promise<TemporalFlowMemoryData | null> {
+    if (!isKey(businessId) || !isKey(memoryId)) return null;
+    return this.prisma.client.temporalFlowMemory.findFirst({ where: { id: memoryId, businessId } });
   }
 
+  async deleteMemory(businessId: string, memoryId: string): Promise<boolean> {
+    // MEM-TEMPORAL-SCOPE: the tenant predicate is in the delete itself, not only in a read before it.
+    // Prisma drops an undefined field from a where, so without an id deleteMany would match every row
+    // of the business: no id deletes nothing.
+    if (!isKey(businessId) || !isKey(memoryId)) return false;
+    const { count } = await this.prisma.client.temporalFlowMemory.deleteMany({
+      where: { id: memoryId, businessId },
+    });
+    return count > 0;
+  }
+
+  /**
+   * MEM-TEMPORAL-SCOPE: updates one memory of this business. The id and the business are both in the
+   * update's own where, so another business's id is refused exactly as a missing id is (NotFoundException
+   * 'Memory not found'), and nothing is written.
+   */
   async updateMemory(
+    businessId: string,
     memoryId: string,
     patch: {
       content?: string;
@@ -136,17 +174,24 @@ export class TemporalFlowMemoryService {
       metadata?: Record<string, unknown>;
     },
   ): Promise<TemporalFlowMemoryData> {
-    const existing = await this.prisma.client.temporalFlowMemory.findUnique({ where: { id: memoryId } });
-    if (!existing) throw new Error('Memory not found');
-    return this.prisma.client.temporalFlowMemory.update({
-      where: { id: memoryId },
-      data: {
-        content: patch.content,
-        confidence: patch.confidence,
-        sourceEventIds: patch.sourceEventIds,
-        metadata: patch.metadata,
-      },
-    });
+    if (!isKey(businessId) || !isKey(memoryId)) throw new NotFoundException('Memory not found');
+    try {
+      return await this.prisma.client.temporalFlowMemory.update({
+        where: { id: memoryId, businessId },
+        data: {
+          content: patch.content,
+          confidence: patch.confidence,
+          sourceEventIds: patch.sourceEventIds,
+          metadata: patch.metadata,
+        },
+      });
+    } catch (err) {
+      // P2025: no row matched the where (missing, or another business's).
+      if ((err as { code?: unknown } | null)?.code === 'P2025') {
+        throw new NotFoundException('Memory not found');
+      }
+      throw err;
+    }
   }
 
   async getStats(businessId: string) {

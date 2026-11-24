@@ -14,8 +14,9 @@
  * at its default (both, off, every hub standard). businessSettingsOf reads an answer by the same rule, so a value
  * this file does not know is never passed on to the nav. useBusinessSettings() is the hook the nav and the hubs
  * read: it says whether the settings are loading, ready or failed, and holds the defaults until they are ready.
- * These settings choose what the app shows; they grant nothing (every route is still guarded on the server), so a
- * failed read falling back to "every hub" hides nothing and opens nothing.
+ * These settings choose what the app shows; they grant nothing (every route is still guarded on the server). Until
+ * they are ready the nav takes what the business sells as unknown (FU-NAV-A1-CODEX-224): it shows only the hubs every
+ * business has, so a failed read never shows a hub the business does not have.
  *
  * WRITE, two doors, as the server has them:
  *   - saveBusinessSells: what the business sells, through the owner-only profile PATCH
@@ -32,7 +33,7 @@
  * session token; review SEC-1): after a sign-out and another member's sign-in, with or without a reload, the next
  * reader starts from nothing.
  */
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { apiGet, apiPatch } from "./api";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "./workspace";
 
@@ -156,6 +157,15 @@ const entries = new Map<string, Entry>();
 /** Per business id: the reads started, and the answers recorded, so a late read never undoes a newer answer. */
 const readsStarted = new Map<string, number>();
 const answersRecorded = new Map<string, number>();
+/**
+ * Per business id: the writes sent, and the newest write whose answer was recorded or whose outcome is uncertain
+ * (NAV-A1, with BIZ-SETTINGS-WEB's review note: the nav mounts the hook app-wide; FU-NAV-A1-CODEX-224). Each door
+ * answers the whole business, so an older write's answer that lands after a newer one's, or after a newer one that
+ * may have been applied, would put the older business back on screen: it records nothing, and the business is read
+ * again.
+ */
+const writesSent = new Map<string, number>();
+const newestWriteRecorded = new Map<string, number>();
 /** Reads in flight, per member and business id: readers that ask together share one. */
 const inFlight = new Map<string, Promise<void>>();
 /** Per business id: how many mounted hooks read it (they are read again when the cache is dropped or goes stale). */
@@ -340,6 +350,8 @@ export function noteBusinessSettings(businessId: string, answer: unknown, sentAs
 /** Forgets everything read (tests; nothing in the app needs it). */
 export function resetBusinessSettings(): void {
   entries.clear();
+  writesSent.clear();
+  newestWriteRecorded.clear();
   readsStarted.clear();
   answersRecorded.clear();
   inFlight.clear();
@@ -348,6 +360,13 @@ export function resetBusinessSettings(): void {
 }
 
 /* ─────────────────────────────── the two doors ─────────────────────────────── */
+
+/** The sequence number of a write about to be sent for `businessId`. */
+function nextWrite(businessId: string): number {
+  const sequence = (writesSent.get(businessId) ?? 0) + 1;
+  writesSent.set(businessId, sequence);
+  return sequence;
+}
 
 type WriteAnswer = Awaited<ReturnType<typeof apiPatch<Record<string, unknown>>>>;
 
@@ -365,7 +384,27 @@ const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show 
  * what was sent (`holds`); anything less is an error in plain words, and what the business holds is read again.
  * The answer is recorded for the member who sent the write (`sentAs`), never for one who took the browser since.
  */
-function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (settings: BusinessSettings) => boolean): WriteAnswer {
+function recorded(
+  businessId: string,
+  sentAs: string,
+  res: WriteAnswer,
+  holds: (settings: BusinessSettings) => boolean,
+  sequence: number,
+): WriteAnswer {
+  if (res.error === null && sentAs === actingMember() && (newestWriteRecorded.get(businessId) ?? 0) > sequence) {
+    // A newer write was answered first: this answer is older than what is held. It records nothing (any read still
+    // out is overtaken too), and the business is read again, so what it holds now is shown.
+    answerRecorded(businessId);
+    if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
+    else if (entries.delete(businessId)) emit();
+    const own = confirmedBusinessSettings(businessId, res.data);
+    if (!own) return { data: null, error: UNREADABLE_ANSWER, status: res.status };
+    return holds(own) ? res : { data: null, error: UNCONFIRMED_ANSWER, status: res.status };
+  }
+  // Only an answer recorded for the member acting raises the mark (review SEC-3).
+  if (res.error === null && sentAs === actingMember()) {
+    newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  }
   if (res.error !== null) {
     // The outcome is unknown when the server's answer never arrived (no status: a dropped connection, a timeout)
     // or was a 5xx (a gateway that gave up while the server went on, a failure after the write was stored): the
@@ -374,6 +413,12 @@ function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (
     // SEC6-1): if that re-read fails too, the next mount or look at the tab reads again. A 4xx is the server's
     // answer that nothing changed, and changes nothing here.
     if (res.status === undefined || res.status >= 500) {
+      // It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after
+      // theirs, so an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer
+      // check above takes an answer older than one recorded: nothing of it is recorded, and the business is read
+      // again. Raised whoever is acting now (review round 1): the write may have been applied whoever sent it, and
+      // the fence records nothing for anyone, it only discards an older answer (SEC-3 governs recording an answer).
+      newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
       answerRecorded(businessId);
       const held = entries.get(businessId);
       if (!watched.has(businessId)) {
@@ -405,8 +450,9 @@ function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (
 export async function saveBusinessSells(businessId: string, sells: BusinessSells): Promise<WriteAnswer> {
   if (!isBusinessSells(sells)) return notSent("Choose services, products or both.");
   const sentAs = actingMember();
+  const sequence = nextWrite(businessId);
   const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, { sells });
-  return recorded(businessId, sentAs, res, (held) => held.sells === sells);
+  return recorded(businessId, sentAs, res, (held) => held.sells === sells, sequence);
 }
 
 /** The body the door is sent: advancedCrm and depth as named, nothing else; null when that is not a write. */
@@ -438,6 +484,7 @@ export async function saveAdvancedSettings(businessId: string, write: BusinessAd
   const body = advancedSettingsBody(write);
   if (!body) return notSent("Choose the Advanced CRM switch or a hub's depth to change.");
   const sentAs = actingMember();
+  const sequence = nextWrite(businessId);
   const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}/advanced-settings`, body);
   return recorded(
     businessId,
@@ -451,6 +498,7 @@ export async function saveAdvancedSettings(businessId: string, write: BusinessAd
         const answered = isPlainObject(res.data) && isPlainObject(res.data.depth) ? res.data.depth : null;
         return answered !== null && hasOwn(answered, hub) && answered[hub] === depth && held.depth[hub as BusinessHub] === depth;
       }),
+    sequence,
   );
 }
 
@@ -467,21 +515,29 @@ export interface BusinessSettingsState extends BusinessSettings {
   reload: () => Promise<void>;
 }
 
-/** The business this browser is using, followed across a switch in this tab or another. */
+function subscribeToStoredBusiness(onChange: () => void): () => void {
+  window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+const noStoredBusinessOnServer = () => null;
+
+/**
+ * The business this browser is using, followed across a switch in this tab or another, and read again on every
+ * render (FU-NAV-A1-CODEX-224 review round 1): a business stored without an announcement (refreshWorkspace's
+ * membership resolution, a first business bootstrapped) is picked up on the next render, so the nav does not stay
+ * on "not known" until a remount. Null on the server and while hydrating.
+ */
 function useStoredBusinessId(enabled: boolean): string | null {
-  // Null on the server and on the first client render alike; the stored id is read once mounted.
-  const [businessId, setBusinessId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    const read = () => setBusinessId(getStoredBusinessId());
-    read();
-    window.addEventListener(BUSINESS_CHANGED_EVENT, read);
-    window.addEventListener("storage", read);
-    return () => {
-      window.removeEventListener(BUSINESS_CHANGED_EVENT, read);
-      window.removeEventListener("storage", read);
-    };
-  }, [enabled]);
+  const businessId = useSyncExternalStore(
+    subscribeToStoredBusiness,
+    () => (enabled ? getStoredBusinessId() : null),
+    noStoredBusinessOnServer,
+  );
   return enabled ? businessId : null;
 }
 

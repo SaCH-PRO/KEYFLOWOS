@@ -53,6 +53,10 @@ export function RevenueComposer({
     handleNewQuote,
   } = useQuoteForm();
 
+  // SWP-QUOTE-COMPOSER-CONTACT (BUG-095): the client field's error after a save with no client; cleared on a choice.
+  const [quoteContactError, setQuoteContactError] = useState<string | null>(null);
+  const [invoiceContactError, setInvoiceContactError] = useState<string | null>(null);
+
   const quoteItems = quoteForm.items;
   const setQuoteItems = useCallback(
     (updater: (prev: typeof quoteItems) => typeof quoteItems) => {
@@ -130,7 +134,9 @@ export function RevenueComposer({
   }, [showInvoiceBuilder]);
 
   const handleSaveQuote = useCallback(async () => {
-    if (!businessId || !quoteForm.contactId) return;
+    if (!businessId) return;
+    // BUG-095: a quote is to someone; say so at the client field and send nothing.
+    if (!quoteForm.contactId) { setQuoteContactError("Choose a client for this quote."); return; }
     setSavingQuote(true);
     try {
       // Create new products if needed
@@ -211,7 +217,9 @@ export function RevenueComposer({
   }, [businessId, quoteForm, editingQuoteId, currency, setQuotes, setProducts, setShowQuoteBuilder, resetQuoteForm]);
 
   const handleSaveInvoice = useCallback(async () => {
-    if (!businessId || !invoiceForm.contactId) return;
+    if (!businessId) return;
+    // The same for an invoice (the server requires its client too).
+    if (!invoiceForm.contactId) { setInvoiceContactError("Choose a client for this invoice."); return; }
     setSavingInvoice(true);
     try {
       for (const item of invoiceForm.items) {
@@ -295,7 +303,7 @@ export function RevenueComposer({
     <>
       <BillingFormModal
         open={showQuoteBuilder}
-        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); }}
+        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); setQuoteContactError(null); }}
         onSubmit={handleSaveQuote}
         docType="quote"
         isEditing={!!editingQuoteId}
@@ -304,7 +312,8 @@ export function RevenueComposer({
         products={products}
         currency={currency}
         contactId={quoteForm.contactId}
-        onContactChange={(id) => setQuoteForm((f) => ({ ...f, contactId: id }))}
+        onContactChange={(id) => { setQuoteContactError(null); setQuoteForm((f) => ({ ...f, contactId: id })); }}
+        contactError={quoteContactError}
         dateValue={quoteForm.expiryDate}
         onDateChange={(v) => setQuoteForm((f) => ({ ...f, expiryDate: v }))}
         items={quoteForm.items}
@@ -324,7 +333,7 @@ export function RevenueComposer({
 
       <BillingFormModal
         open={showInvoiceBuilder}
-        onClose={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); }}
+        onClose={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); setInvoiceContactError(null); }}
         onSubmit={handleSaveInvoice}
         docType="invoice"
         isEditing={!!editingInvoiceId}
@@ -333,7 +342,8 @@ export function RevenueComposer({
         products={products}
         currency={currency}
         contactId={invoiceForm.contactId}
-        onContactChange={(id) => setInvoiceForm((f) => ({ ...f, contactId: id }))}
+        onContactChange={(id) => { setInvoiceContactError(null); setInvoiceForm((f) => ({ ...f, contactId: id })); }}
+        contactError={invoiceContactError}
         dateValue={invoiceForm.dueDate}
         onDateChange={(v) => setInvoiceForm((f) => ({ ...f, dueDate: v }))}
         items={invoiceForm.items}

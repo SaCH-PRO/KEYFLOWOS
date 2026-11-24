@@ -10,6 +10,7 @@
  * label; it never adds one currency's figure to another's.
  */
 import { describe, it, expect } from 'vitest';
+import * as overviewModule from './finance-overview.service';
 import { LOW_RUNWAY_LISTED_CURRENCY_LIMIT, lowRunwayDetail } from './finance-overview.service';
 
 const HEAD = '~1.5 months at current burn (TTD cash only). Not counted: ';
@@ -72,5 +73,85 @@ describe('W10-LOW-RUNWAY review SEC-W10LR-1 (D-107): the LOW_RUNWAY text names o
       .toBe('~1.5 months at current burn (USD cash only). Not counted: TTD 40.00.');
     expect(lowRunwayDetail(1.5, 'PAY NOW', [{ currency: 'TTD', amount: 40 }]))
       .toBe('~1.5 months at current burn (business-currency cash only). Not counted: TTD 40.00.');
+  });
+});
+
+/**
+ * W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107): the "(TTD cash only). Not counted:
+ * ..." wording is shared by every runway alarm (LOW_RUNWAY, FIN_CASHFLOW_RISK, the 'Protect cash
+ * runway' money move) through notCountedCashNote, under SEC-W10LR-1's rules. lowRunwayDetail's
+ * output is unchanged: the cases above pin it, and the table below pins it byte for byte against
+ * the helper.
+ */
+describe('W11-RUNWAY-LEDGER-CASH (D-135): the other-currency cash note every runway alarm shares', () => {
+  const m = overviewModule as any;
+  const note = (cashCurrency: string, other: Array<{ currency: string; amount: number }>): string => m.notCountedCashNote(cashCurrency, other);
+  const codes = ['AAA', 'BBB', 'CCC', 'DDD', 'EEE', 'FFF', 'USD'].map((currency, i) => ({ currency, amount: i + 1 }));
+  const sentence = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
+
+  it('lowRunwayDetail is pinned unchanged: no other-currency cash, codes, a non-code label, more than five currencies, a non-code business currency', () => {
+    expect(lowRunwayDetail(1.5, 'TTD', [])).toBe('~1.5 months at current burn');
+    expect(lowRunwayDetail(0.44, 'TTD', [])).toBe('~0.4 months at current burn');
+    expect(lowRunwayDetail(1.5, 'TTD', [{ currency: 'USD', amount: 550 }]))
+      .toBe('~1.5 months at current burn (TTD cash only). Not counted: USD 550.00.');
+    expect(lowRunwayDetail(1.5, 'TTD', [{ currency: 'EUR', amount: 12 }, { currency: sentence, amount: 5 }, { currency: 'USD', amount: 635 }]))
+      .toBe('~1.5 months at current burn (TTD cash only). Not counted: EUR 12.00, USD 635.00; 1 amount held under a label that is not a currency code (label not shown).');
+    expect(lowRunwayDetail(1.5, 'TTD', codes))
+      .toBe('~1.5 months at current burn (TTD cash only). Not counted: AAA 1.00, BBB 2.00, CCC 3.00, DDD 4.00, USD 7.00; 2 more currencies (not listed).');
+    expect(lowRunwayDetail(1.5, 'TTD', [...codes, { currency: 'a b', amount: 1 }, { currency: '', amount: 2 }]))
+      .toBe('~1.5 months at current burn (TTD cash only). Not counted: AAA 1.00, BBB 2.00, CCC 3.00, DDD 4.00, USD 7.00; 2 more currencies (not listed); 2 amounts held under labels that are not currency codes (labels not shown).');
+    expect(lowRunwayDetail(1.5, 'PAY NOW', [{ currency: 'TTD', amount: -40.5 }]))
+      .toBe('~1.5 months at current burn (business-currency cash only). Not counted: TTD -40.50.');
+  });
+
+  it('notCountedCashNote yields the wording alone: empty with no other-currency cash, codes only, at most five listed with D-13 currencies first, labels counted and never echoed', () => {
+    expect(typeof m.notCountedCashNote, 'exported from finance-overview.service').toBe('function');
+    expect(note('TTD', [])).toBe('');
+    expect(note('TTD', [{ currency: 'USD', amount: 550 }])).toBe('(TTD cash only). Not counted: USD 550.00.');
+    expect(note('USD', [{ currency: 'TTD', amount: 40 }])).toBe('(USD cash only). Not counted: TTD 40.00.');
+    expect(note('PAY NOW', [{ currency: 'TTD', amount: 40 }])).toBe('(business-currency cash only). Not counted: TTD 40.00.');
+    expect(note('TTD', codes)).toBe('(TTD cash only). Not counted: AAA 1.00, BBB 2.00, CCC 3.00, DDD 4.00, USD 7.00; 2 more currencies (not listed).');
+    for (const label of [sentence, 'X'.repeat(5000), 'US', 'USDT', 'usd', ' USD', '']) {
+      expect(note('TTD', [{ currency: label, amount: 5 }]), JSON.stringify(label.slice(0, 10)))
+        .toBe('(TTD cash only). Not counted: 1 amount held under a label that is not a currency code (label not shown).');
+    }
+    const many = Array.from({ length: 2000 }, (_, i) => ({ currency: i % 2 ? `C${i}` : `label ${i} ${'x'.repeat(100)}`, amount: 1_000_000_000 + i }));
+    expect(note('TTD', many).length).toBeLessThan(400);
+  });
+
+  it('lowRunwayDetail is the runway followed by the note, byte for byte', () => {
+    const others = [[], [{ currency: 'USD', amount: 550 }], codes, [{ currency: sentence, amount: 5 }], [...codes, { currency: 'x y', amount: 3 }]];
+    for (const other of others) {
+      for (const currency of ['TTD', 'USD', 'pay now']) {
+        const expected = other.length === 0 ? '~2.3 months at current burn' : `~2.3 months at current burn ${note(currency, other)}`;
+        expect(lowRunwayDetail(2.31, currency, other)).toBe(expected);
+      }
+    }
+  });
+
+  it('notCountedCash (what the note lists, as data for FIN_CASHFLOW_RISK evidence): three-letter codes only, at most five, the rest counted', () => {
+    expect(typeof m.notCountedCash, 'exported from finance-overview.service').toBe('function');
+    expect(m.notCountedCash([])).toEqual({ listed: [], notListed: 0 });
+    expect(m.notCountedCash([{ currency: 'USD', amount: 550 }])).toEqual({ listed: [{ currency: 'USD', amount: 550 }], notListed: 0 });
+    const r = m.notCountedCash([...codes, { currency: sentence, amount: 5 }]);
+    expect(r.listed.map((o: any) => o.currency)).toEqual(['AAA', 'BBB', 'CCC', 'DDD', 'USD']);
+    expect(r.notListed, 'two codes past the limit and one label').toBe(3);
+    expect(JSON.stringify(r)).not.toMatch(/URGENT|WIRE/);
+  });
+
+  it('otherCurrencyCashWithheldNote (for a surface served outside revenue read, D-107): says cash is held apart, never a figure or a label', () => {
+    expect(typeof m.otherCurrencyCashWithheldNote, 'exported from finance-overview.service').toBe('function');
+    expect(m.otherCurrencyCashWithheldNote('TTD', [])).toBe('');
+    for (const other of [[{ currency: 'USD', amount: 550 }], codes, [{ currency: sentence, amount: 5 }]]) {
+      expect(m.otherCurrencyCashWithheldNote('TTD', other)).toBe('(TTD cash only). Cash held in other currencies is not counted (amounts not shown here).');
+    }
+    expect(m.otherCurrencyCashWithheldNote('pay now', [{ currency: 'USD', amount: 550 }]))
+      .toBe('(business-currency cash only). Cash held in other currencies is not counted (amounts not shown here).');
+  });
+
+  it('namedCashCurrency (review SEC-W11RL-1): the business currency as data is a three-letter code or null', () => {
+    expect(m.namedCashCurrency('TTD')).toBe('TTD');
+    expect(m.namedCashCurrency('USD')).toBe('USD');
+    for (const text of ['PAY ME NOW', 'ttd', 'US', 'USDT', ' USD', '']) expect(m.namedCashCurrency(text), JSON.stringify(text)).toBeNull();
   });
 });

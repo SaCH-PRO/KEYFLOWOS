@@ -29,6 +29,13 @@ import { contactWhereBase } from '../crm.helpers';
 import { resolveCrmAccess, visibilityClause } from '../crm-permissions.helper';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../../core/config/env';
+import {
+  CONTACT_CHILD_ROUTES,
+  CONTACT_REFERENCE_KEYS,
+  CONTACT_ROUTE_PREFIX,
+  FORGOTTEN_EVENT_METADATA_KEYS,
+  KEY_BUS_SOURCE,
+} from '../../business-events/business-event.service';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
@@ -99,7 +106,30 @@ const PURGE_RETAINED_BASIS_DETAIL =
  */
 const PURGE_NOT_SWEPT =
   'Records of other modules that reference the contact id and are not counted under erased or retained ' +
-  '(for example messaging, campaigns, deals and journeys) are not swept by this purge.';
+  '(for example messaging, campaigns, deals and journeys) are not swept by this purge. Business events are ' +
+  'swept when their subject is the contact, their route named it (routeContactId), or, for a contact ' +
+  'subject or a CRM note, task or contact-child route, the server response snapshot names it at the top level ' +
+  '(contactId, fromContactId, toContactId, targetContactId); so are the KEY cortex bus copies of such events. ' +
+  'Events of the retained records (invoices, quotes, bookings) and other non-contact ' +
+  'subjects are kept under the retained basis even when they carry its contactId, and events whose ' +
+  'snapshot names the person only inside a nested structure ' +
+  '(for example duplicate-check and import requests), or only in the request body (never read: a caller ' +
+  'could plant a contact id there), are not reached and not swept; nor are rows written before routeContactId ' +
+  'was recorded whose only pointer to the person was the route (outside the contact-child routes), nor the ' +
+  'copies the KEY cortex bus keeps in cognitive_events.';
+
+/** SQL: the route expression is a contact-child route (CONTACT_CHILD_ROUTES or under CONTACT_ROUTE_PREFIX). */
+function childRoute(route: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(${route} = ANY(${[...CONTACT_CHILD_ROUTES]}::text[]) OR ${route} = ${CONTACT_ROUTE_PREFIX} OR ${route} LIKE ${`${CONTACT_ROUTE_PREFIX}/%`})`;
+}
+
+/**
+ * V1-72 review round 2: the purge transaction scrubs the business's event log,
+ * which no index narrows by snapshot key, so it may not run under Prisma's 5 s
+ * interactive default; a timeout there would roll the whole erasure back on
+ * every cycle.
+ */
+const PURGE_TX_OPTIONS = { maxWait: 10_000, timeout: 120_000 } as const;
 
 /** Audit action recording export bundle objects the purge could not delete from storage. */
 const STORAGE_CLEANUP_FAILED_ACTION = 'forget_storage_cleanup_failed';
@@ -642,7 +672,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       });
       if (claimed.count === 0) return null;
       return this.eraseForgottenContact(tx as unknown as Prisma.TransactionClient, { requestId, businessId, contactId, contactHash, now, purgeStart });
-    });
+    }, PURGE_TX_OPTIONS);
 
     if (exportKeys === null) return false;
     await this.deleteExportBundles(requestId, businessId, contactHash, exportKeys);
@@ -730,7 +760,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         purgeStart,
         legacyPurgedAt: row.purgedAt,
       });
-    });
+    }, PURGE_TX_OPTIONS);
     if (exportKeys === null) return false;
     await this.deleteExportBundles(row.requestId, row.businessId, row.contactHash, exportKeys);
     return true;
@@ -752,7 +782,8 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
    *   4. delete the personal child rows of all of them and blank import raw
    *      data;
    *   5. scrub their audit trails down to the hash;
-   *   6. write the forget_purged entry.
+   *   6. scrub the business event log rows naming any of them (V1-72);
+   *   7. write the forget_purged entry.
    *
    * Returns the export bundle object keys to delete once the transaction has
    * committed.
@@ -881,6 +912,61 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       auditEntriesScrubbed += r.count;
     }
 
+    // 6. The business event log (V1-72, RR-ERASURE-BUSINESS-EVENTS). The
+    //    BusinessEventInterceptor stores the request body and the response of
+    //    every mutation, so a contact create or update holds the person's name,
+    //    email and phone, and its metadata the caller's ip. A row names them
+    //    when its subject is one of them (subject_type 'contact'), when the
+    //    route's :contactId the interceptor recorded (metadata.routeContactId)
+    //    is one of them, or, for a contact subject, when its after (the server's response; never
+    //    before, the raw request body a caller could plant a key in, SEC-1)
+    //    carries one of their ids as the top-level contactId (a
+    //    note, a task, the forget request itself), or another
+    //    CONTACT_REFERENCE_KEYS key (a relationship, a referral): the same rule
+    //    BusinessEventService.emit applies to rows written after the request.
+    //    The row is kept (event type, action, actor, subject, timestamps are
+    //    the business's evidence that something happened); before and after
+    //    become NULL and metadata keeps only FORGOTTEN_EVENT_METADATA_KEYS.
+    //    Raw SQL because the JSON paths are not Prisma-filterable in one
+    //    statement. Only rows that still hold something are counted.
+    const keptKeys = [...FORGOTTEN_EVENT_METADATA_KEYS];
+    const refKeys = [...CONTACT_REFERENCE_KEYS];
+    const businessEventsScrubbed = await tx.$executeRaw`
+      UPDATE business_events
+         SET "before" = NULL,
+             "after" = NULL,
+             metadata = CASE
+               WHEN metadata IS NULL THEN NULL
+               WHEN jsonb_typeof(metadata) = 'object' THEN (
+                 SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+                   FROM jsonb_each(metadata) e WHERE e.key = ANY(${keptKeys}))
+               ELSE NULL
+             END
+       WHERE business_id = ${businessId}
+         AND (
+           (lower(subject_type) = 'contact' AND subject_id = ANY(${ids}))
+           OR ((lower(subject_type) = 'contact' OR ${childRoute(Prisma.sql`metadata ->> 'route'`)})
+               AND EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" ->> k = ANY(${ids})))
+           OR metadata ->> 'routeContactId' = ANY(${ids})
+           -- The KEY cortex bus copy of a business event: the same rule over
+           -- the event it copies (its after), never that event's before.
+           OR (source = ${KEY_BUS_SOURCE} AND jsonb_typeof("after") = 'object' AND (
+                (lower("after" ->> 'subjectType') = 'contact' AND "after" ->> 'subjectId' = ANY(${ids}))
+                OR ((lower("after" ->> 'subjectType') = 'contact' OR ${childRoute(Prisma.sql`"after" -> 'metadata' ->> 'route'`)})
+                    AND EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" -> 'after' ->> k = ANY(${ids})))
+                OR "after" -> 'metadata' ->> 'routeContactId' = ANY(${ids})
+              ))
+         )
+         AND (
+           "before" IS NOT NULL
+           OR "after" IS NOT NULL
+           OR (metadata IS NOT NULL AND CASE
+             WHEN jsonb_typeof(metadata) = 'object'
+               THEN EXISTS (SELECT 1 FROM jsonb_object_keys(metadata) k WHERE NOT (k = ANY(${keptKeys})))
+             ELSE true
+           END)
+         )`;
+
     // What stays, and why. aggregate() also counts soft-deleted rows (the
     // soft-delete extension filters count()), so these are every retained row.
     const invoices = await tx.invoice.aggregate({ where: byContact, _count: { _all: true } });
@@ -925,6 +1011,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
             crmTasks: crmTasks.count,
             relationships: relationships.count,
             auditEntriesScrubbed,
+            businessEventsScrubbed,
           },
           // Deleted from object storage after this transaction commits; a key
           // that cannot be deleted is recorded in a forget_storage_cleanup_failed entry.

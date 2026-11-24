@@ -52,6 +52,11 @@ class PrismaStub {
 
 const at = (min: number) => new Date(Date.now() - min * 60_000);
 
+// FU-KEY-GENOME-READS-RESIDUAL (D-235): the feed is now read for a reader, and no reader fails closed (an item that
+// states money is withheld; genome-reads-residual.spec.ts pins that). These cases describe the whole feed, which a
+// revenue reader is served, so they ask for it.
+const FULL = { readsRevenue: true } as const;
+
 function seed(p: PrismaStub) {
   p.rows.push(
     {
@@ -112,14 +117,14 @@ describe('getAwareness', () => {
   });
 
   it('returns what KEY noticed, newest first', async () => {
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     expect(out.items.length).toBe(3);
     expect(out.items[0].kind).toBe('weakSignal'); // 10 min ago
     expect(out.items[2].kind).toBe('idea'); // 60 min ago
   });
 
   it('NEVER returns another business rows', async () => {
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     const text = JSON.stringify(out);
     expect(text).not.toContain('ANOTHER TENANT SIGNAL');
     expect(out.items.every((i) => i.id !== 'sig_other')).toBe(true);
@@ -128,14 +133,14 @@ describe('getAwareness', () => {
   it('scopes every query by businessId, not just the guard', async () => {
     // A guard establishes who is asking; it does not constrain what the query
     // returns. Both are required.
-    await svc.getAwareness('biz_1');
+    await svc.getAwareness('biz_1', FULL);
     for (const call of prisma.client.keyCortexMemory.findMany.mock.calls) {
       expect(call[0].where.businessId).toBe('biz_1');
     }
   });
 
   it('builds a usable headline per kind', async () => {
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     const by = (k: string) => out.items.find((i) => i.kind === k)!;
 
     expect(by('weakSignal').headline).toBe('Support replies slowed 40% this week');
@@ -144,7 +149,7 @@ describe('getAwareness', () => {
   });
 
   it('surfaces the suggested action where the layer recorded one', async () => {
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     const signal = out.items.find((i) => i.kind === 'weakSignal')!;
     expect(signal.suggestedAction).toBe('Check ticket volume against staffing');
   });
@@ -162,19 +167,19 @@ describe('getAwareness', () => {
         value: JSON.stringify({ unexpected: 'shape' }),
       },
     ];
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     expect(out.items[0].headline).toBe('Weak signal detected');
     expect(out.items[0].suggestedAction).toBeUndefined();
   });
 
   it('filters by kind when asked', async () => {
-    const out = await svc.getAwareness('biz_1', { kinds: ['churnRisk'] });
+    const out = await svc.getAwareness('biz_1', { ...FULL, kinds: ['churnRisk'] });
     expect(out.items).toHaveLength(1);
     expect(out.items[0].kind).toBe('churnRisk');
   });
 
   it('counts per kind', async () => {
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     expect(out.counts.weakSignal).toBe(1);
     expect(out.counts.churnRisk).toBe(1);
     expect(out.counts.idea).toBe(1);
@@ -182,7 +187,7 @@ describe('getAwareness', () => {
   });
 
   it('reports the newest timestamp, or null when nothing was noticed', async () => {
-    expect((await svc.getAwareness('biz_1')).latestAt).not.toBeNull();
+    expect((await svc.getAwareness('biz_1', FULL)).latestAt).not.toBeNull();
     expect((await svc.getAwareness('biz_empty')).latestAt).toBeNull();
   });
 
@@ -195,7 +200,7 @@ describe('getAwareness', () => {
       createdAt: at(2),
       value: '{not json',
     });
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     expect(out.items.some((i) => i.id === 'corrupt')).toBe(false);
     expect(out.items.length).toBe(3);
   });
@@ -203,13 +208,13 @@ describe('getAwareness', () => {
   it('a storage failure returns an empty feed, not a 500', async () => {
     // This backs a dashboard panel; an empty panel beats taking the page down.
     prisma.client.keyCortexMemory.findMany.mockRejectedValue(new Error('db down'));
-    const out = await svc.getAwareness('biz_1');
+    const out = await svc.getAwareness('biz_1', FULL);
     expect(out.items).toEqual([]);
     expect(out.latestAt).toBeNull();
   });
 
   it('bounds how much it reads per kind', async () => {
-    await svc.getAwareness('biz_1');
+    await svc.getAwareness('biz_1', FULL);
     for (const call of prisma.client.keyCortexMemory.findMany.mock.calls) {
       expect(call[0].take).toBeGreaterThan(0);
       expect(call[0].take).toBeLessThanOrEqual(50);

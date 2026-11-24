@@ -1,224 +1,80 @@
 /**
- * The default nav showed three items, and nothing said so.
+ * NAV-A1 (owner rulings D-150 'hubs', D-151 'labels'): the disclosure modes are gone.
  *
- * use-app-layout.ts filters nav items with a strict label allowlist:
+ * Startup, Growth and Enterprise filtered the nav through three label allowlists kept by hand in
+ * lib/disclosure-mode.ts, switched from a chip in the header and stored in this browser
+ * (kf_disclosure_mode). The allowlists drifted from the nav more than once and hid most of the app
+ * (this spec's earlier version recorded that history), and the default mode, startup, still dropped
+ * Team, Reports and Payments from the owner's menu. What the menu shows now follows what the business
+ * sells (stored on the business, BIZ-SETTINGS-WEB) and what the member may open (their module scopes),
+ * never a per-browser mode.
  *
- *   return MODE_OPERATE_ITEMS[disclosureMode].includes(i.label)
- *
- * A label that does not match is HIDDEN — silently, with no warning — and
- * `.filter((s) => s.items.length > 0)` then drops the emptied section entirely.
- * So a typo or a rename does not break a test or log an error. It removes a
- * feature from the product.
- *
- * The two files drifted. Measured at HEAD before this spec existed:
- *
- *   startup  allowed 6 labels, 3 existed. "Overview", "Directory" and
- *            "Pipeline" matched nothing — the real labels are "Command Center",
- *            "Contacts" and "Deals".
- *   growth   allowed 13, 8 existed.
- *   build    "Blueprint" was in all three lists; the label is "Business Genome",
- *            so the one thing a new business most needs to fill in was hidden.
- *
- * startup is the DEFAULT mode. Every new user opened KEYFLOWOS and saw Revenue,
- * Calendar and Bookings. No contacts, no inbox, no projects, no invoices. Only
- * `enterprise` looked right, because use-app-layout short-circuits it — which is
- * why this survived development.
- *
- * disclosure-mode.ts:69 already said "These labels must match the label field in
- * operateNav exactly". A constraint written in a comment and enforced by
- * nothing. This is that comment, made real.
+ *   DM-01 lib/disclosure-mode.ts no longer exists, and no source file imports it or reads its storage key.
+ *   DM-02 the header has no mode chip (no "Workspace Mode" menu, no Startup / Growth / Enterprise).
+ *   DM-03 the shell filters the nav by no label allowlist.
+ *   DM-04 an owner's menu has Team, Reports and Payments (startup, the default mode, dropped all three), and the
+ *         doors the old allowlists existed to keep: Invoices, Contacts' hub (Customers), the diary (Schedule), the
+ *         business profile.
+ *   DM-05 the bottom bar marks no slot by comparing a hard-coded route.
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import {
-  MODE_OPERATE_ITEMS,
-  MODE_BUILD_ITEMS,
-  type DisclosureMode,
-} from '../disclosure-mode';
-import { NAV_ROUTE_LABELS } from '../semantic-routes';
+import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { menuSectionsFor, hubsFor, type ModuleLevels } from "../nav-config";
 
-const MODES: DisclosureMode[] = ['startup', 'growth', 'enterprise'];
+const WEB_SRC = path.join(__dirname, "..", "..");
+const read = (rel: string) => fs.readFileSync(path.join(WEB_SRC, rel), "utf8");
 
-/**
- * Labels declared in nav-config, split by the section array they belong to.
- *
- * Read from source rather than imported: nav-config is a "use client" module
- * carrying lucide icon components, and importing it into a node test drags in
- * React. The labels are plain string literals, so reading them is exact.
- */
-function navLabels(): { operate: Set<string>; build: Set<string> } {
-  const src = readFileSync(join(__dirname, '..', 'nav-config.ts'), 'utf8');
-  const operateAt = src.indexOf('operateSections');
-  const buildAt = src.indexOf('buildSections');
-
-  expect(operateAt, 'operateSections not found — nav-config was restructured').toBeGreaterThan(-1);
-  expect(buildAt, 'buildSections not found — nav-config was restructured').toBeGreaterThan(operateAt);
-
-  // ITEM labels only. A NavSection also has a `label` — "Operating System",
-  // "Sales", "Governance" — and the filter never sees those: it runs over
-  // section.items. Matching every `label:` made this test demand that section
-  // headings appear in the allowlists, which is meaningless. Items are the ones
-  // that carry an href.
-  const grab = (from: number, to: number) =>
-    new Set([...src.slice(from, to).matchAll(/label: "([^"]+)",\s*href:/g)].map((m) => m[1]));
-
-  return { operate: grab(operateAt, buildAt), build: grab(buildAt, src.length) };
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (fs.statSync(full).isDirectory()) {
+      if (name === "__tests__" || name === "node_modules") continue;
+      out.push(...sourceFiles(full));
+    } else if (/\.(ts|tsx)$/.test(name) && !/\.(spec|test)\.tsx?$/.test(name)) {
+      out.push(full);
+    }
+  }
+  return out;
 }
 
-describe('every mode allowlist names labels that actually exist', () => {
-  const { operate, build } = navLabels();
+const OWNER = Object.fromEntries(
+  ["crm", "revenue", "bookings", "projects", "content", "expenses", "automations", "storefront", "settings", "ai", "team", "analytics", "operations", "connect"].map((m) => [m, "admin"]),
+) as ModuleLevels;
 
-  for (const mode of MODES) {
-    it(`${mode}: every Operate entry resolves to a real nav item`, () => {
-      const unknown = MODE_OPERATE_ITEMS[mode].filter((label) => !operate.has(label));
-
-      expect(
-        unknown,
-        `these labels hide nothing and show nothing — they simply do not exist: ${unknown.join(', ')}`,
-      ).toEqual([]);
+describe("NAV-A1: the disclosure modes are removed", () => {
+  it("DM-01 lib/disclosure-mode.ts is gone and nothing imports it or reads its storage key", () => {
+    expect(fs.existsSync(path.join(WEB_SRC, "lib", "disclosure-mode.ts"))).toBe(false);
+    const offenders = sourceFiles(WEB_SRC).filter((f) => {
+      const text = fs.readFileSync(f, "utf8");
+      return /disclosure-mode|kf_disclosure_mode|kf:disclosure-mode-changed/.test(text);
     });
-
-    it(`${mode}: every Build entry resolves to a real nav item`, () => {
-      const unknown = MODE_BUILD_ITEMS[mode].filter((label) => !build.has(label));
-
-      expect(unknown, `unknown Build labels: ${unknown.join(', ')}`).toEqual([]);
-    });
-  }
-});
-
-describe('the default mode is usable', () => {
-  const { operate, build } = navLabels();
-
-  it('startup shows enough of the Operate nav to run a business', () => {
-    // Not a magic number — the point is that a solopreneur can find their
-    // money, their people and their diary. Three items is a broken app; this
-    // asserts the floor that failure fell through.
-    const visible = MODE_OPERATE_ITEMS.startup.filter((l) => operate.has(l));
-
-    expect(visible.length).toBeGreaterThanOrEqual(6);
+    expect(offenders.map((f) => path.relative(WEB_SRC, f))).toEqual([]);
   });
 
-  it('startup can reach money, people and schedule', () => {
-    const visible = new Set(MODE_OPERATE_ITEMS.startup.filter((l) => operate.has(l)));
-
-    // Names streamlined 2026-08-06: "Revenue" -> "Sales", because one screen
-    // was reached as Revenue, Commerce AND Storefront. Which of the two it is
-    // now is D-09, so the label is read from the constant, not spelled here.
-    expect(visible.has(NAV_ROUTE_LABELS['/app/commerce']), 'no way to see money').toBe(true);
-    expect(visible.has('Contacts'), 'no way to see customers').toBe(true);
-    expect(visible.has('Calendar'), 'no way to see the diary').toBe(true);
+  it("DM-02 the header has no mode chip", () => {
+    const header = read("components/layout/app-header.tsx");
+    expect(header).not.toMatch(/Workspace Mode|MODE_LABELS|disclosureMode|modeMenu/);
+    const layout = read("app/app/layout.tsx");
+    expect(layout).not.toMatch(/disclosureMode|modeMenu/);
   });
 
-  it('startup can open invoices and quotes, the doors CF-20 found missing', () => {
-    // R0-08 could not add these: the nav entries alone are filtered out of
-    // startup and growth by this allowlist, so a new owner still saw no door.
-    const visible = new Set(MODE_OPERATE_ITEMS.startup.filter((l) => operate.has(l)));
-
-    expect(visible.has('Invoices'), 'no door to invoices in the default nav').toBe(true);
-    expect(visible.has('Quotes'), 'no door to quotes in the default nav').toBe(true);
+  it("DM-03 the shell filters the nav by no label allowlist", () => {
+    const hook = read("hooks/use-app-layout.ts");
+    expect(hook).not.toMatch(/MODE_OPERATE_ITEMS|MODE_BUILD_ITEMS|\.includes\(i\.label\)/);
   });
 
-  it('startup can reach the business profile, which onboarding asks them to fill in', () => {
-    // The sharpest single casualty of the original drift: the allowlist said
-    // "Blueprint", the nav said "Business Genome", so the screen the whole
-    // onboarding funnels toward was hidden from exactly the users being
-    // onboarded. Renamed to "Profile" when the nav was streamlined — genome is
-    // internal vocabulary, not something an owner would look for.
-    expect(MODE_BUILD_ITEMS.startup.filter((l) => build.has(l))).toContain('Profile');
-  });
-});
-
-describe('the D-09 label is keyed on the constant, not copied (R0-08b)', () => {
-  // A D-09 ruling is a change to NAV_ROUTE_LABELS. If this file spelled the
-  // commerce label out, the ruling would rename the nav entry and every mode
-  // would silently stop matching it — the original drift, reintroduced by a
-  // rename instead of a typo.
-  const src = readFileSync(join(__dirname, '..', 'disclosure-mode.ts'), 'utf8');
-
-  it('every mode lists the commerce entry through NAV_ROUTE_LABELS', () => {
-    expect([...src.matchAll(/NAV_ROUTE_LABELS\["\/app\/commerce"\]/g)], 'one per mode').toHaveLength(3);
-    for (const mode of MODES) expect(MODE_OPERATE_ITEMS[mode], mode).toContain(NAV_ROUTE_LABELS['/app/commerce']);
+  it("DM-04 an owner's menu has Team, Reports and Payments, and the doors the allowlists were for", () => {
+    const { hubSections, moreSections } = menuSectionsFor("both", OWNER);
+    const items = [...hubSections, ...moreSections].flatMap((s) => s.items.map((i) => i.label));
+    for (const label of ["Team", "Reports", "Payments", "Invoices", "Business profile"]) expect(items, label).toContain(label);
+    const hubs = hubsFor("both", OWNER).map((h) => h.label);
+    for (const hub of ["Customers", "Schedule", "Sales", "Money"]) expect(hubs, hub).toContain(hub);
   });
 
-  it('no mode spells the current value out beside it', () => {
-    expect(src).not.toContain(`"${NAV_ROUTE_LABELS['/app/commerce']}"`);
-  });
-});
-
-describe('the modes are nested, not arbitrary', () => {
-  // Progressive disclosure only makes sense if moving up a stage never takes
-  // something away. Without this, "upgrading" could hide a feature someone was
-  // already using.
-  it('growth shows everything startup shows', () => {
-    const missing = MODE_OPERATE_ITEMS.startup.filter((l) => !MODE_OPERATE_ITEMS.growth.includes(l));
-
-    expect(missing, `growth loses: ${missing.join(', ')}`).toEqual([]);
-  });
-
-  it('enterprise shows everything growth shows', () => {
-    const missing = MODE_OPERATE_ITEMS.growth.filter((l) => !MODE_OPERATE_ITEMS.enterprise.includes(l));
-
-    expect(missing, `enterprise loses: ${missing.join(', ')}`).toEqual([]);
-  });
-
-  it('the same holds for Build', () => {
-    expect(MODE_BUILD_ITEMS.startup.filter((l) => !MODE_BUILD_ITEMS.growth.includes(l))).toEqual([]);
-    expect(MODE_BUILD_ITEMS.growth.filter((l) => !MODE_BUILD_ITEMS.enterprise.includes(l))).toEqual([]);
-  });
-});
-
-describe('the mobile unread badge is attached to something that exists', () => {
-  // Same class of defect, third instance in this file's neighbourhood. The
-  // component gated the badge on `item.href === "/app/inbox"` while nav-config
-  // declares that item as "/app/data-inbox", so the unread count never rendered
-  // on mobile and nothing failed. It is a flag on the item now — a flag cannot
-  // drift from itself the way two copies of a route string can.
-  const nav = readFileSync(join(__dirname, '..', 'nav-config.ts'), 'utf8');
-  const component = readFileSync(
-    join(__dirname, '..', '..', 'components', 'layout', 'mobile-bottom-nav-v2.tsx'),
-    'utf8',
-  );
-
-  it('exactly one bottom-nav item claims the badge', () => {
-    const block = nav.slice(nav.indexOf('export const mobileBottomNav'));
-    const marked = [...block.slice(0, 900).matchAll(/showUnreadBadge: true/g)];
-
-    expect(marked).toHaveLength(1);
-  });
-
-  it('the component reads the flag rather than matching a route', () => {
-    expect(component).toMatch(/item\.showUnreadBadge\s*&&/);
-    expect(component, 'still comparing against a hardcoded route').not.toMatch(
-      /item\.href === ["']\/app\//,
-    );
-  });
-});
-
-describe('enterprise is complete, even though the filter skips it', () => {
-  const { operate } = navLabels();
-
-  it('lists every Operate label', () => {
-    // use-app-layout short-circuits enterprise, so this list is never read at
-    // runtime. That is exactly why it was wrong — it referenced "Accounting",
-    // "Cash Flow", "Agreements" and "Calls", none of which exist. A list nobody
-    // reads is where errors go to hide, and the other two modes were copied
-    // from it.
-    const missing = [...operate].filter((l) => !MODE_OPERATE_ITEMS.enterprise.includes(l));
-
-    expect(missing, `enterprise omits: ${missing.join(', ')}`).toEqual([]);
-  });
-});
-
-/**
- * PR195-PORT (owner PR #195 part 3): the General Journal (/app/finance/journal)
- * is a nav destination labelled "Journal entries" beside the General ledger,
- * shown where the ledger is (growth and enterprise), not in startup's short list.
- */
-describe('the General Journal is offered where the ledger is (PR195-PORT)', () => {
-  it('growth and enterprise list "Journal entries"; startup does not', () => {
-    expect(MODE_OPERATE_ITEMS.growth).toContain('Journal entries');
-    expect(MODE_OPERATE_ITEMS.enterprise).toContain('Journal entries');
-    expect(MODE_OPERATE_ITEMS.startup).not.toContain('Journal entries');
+  it("DM-05 the bottom bar compares no hard-coded route", () => {
+    const component = read("components/layout/mobile-bottom-nav-v2.tsx");
+    expect(component, "still comparing against a hardcoded route").not.toMatch(/item\.href === ["']\/app\//);
   });
 });

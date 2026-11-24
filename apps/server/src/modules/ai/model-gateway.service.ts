@@ -2,9 +2,21 @@ import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
-import { validateOutputContract, type ContractType } from './ai-output-contracts';
+import {
+  AiContractViolationError,
+  validateOutputContract,
+  type ContractType,
+  type ContractViolationAttempt,
+} from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
+import {
+  classifyProviderFailure,
+  failureCountsTowardCircuit,
+  failureIsRetryable,
+  ProviderHttpError,
+  type ProviderFailureClass,
+} from './provider-failure-class';
 import { keyDisabled } from '../../core/config/env';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'google' | 'native' | 'opensource';
@@ -77,6 +89,17 @@ export interface ContractValidationResult {
   contractType: ContractType;
 }
 
+/**
+ * RR-STRUCTURED-PARSE-INVALID-STATE: what complete() knows about the output it
+ * returns. 'valid': the expected contract held on the answer returned;
+ * 'valid_after_fallback': it held, but only after at least one candidate's
+ * answer violated it (that answer was paid for and is recorded as 'invalid');
+ * 'unchecked': the request named no contract. An invalid answer is never
+ * returned: it is recorded and the next candidate runs, or
+ * AiContractViolationError is thrown.
+ */
+export type GatewayOutputState = 'valid' | 'valid_after_fallback' | 'unchecked';
+
 export interface GatewayResponse {
   content: string | null;
   toolCalls?: Array<{
@@ -96,6 +119,25 @@ export interface GatewayResponse {
   fallbackUsed: boolean;
   fallbackProvider?: AiProvider;
   contractValidation?: ContractValidationResult;
+  outputState?: GatewayOutputState;
+}
+
+/**
+ * RR-STREAM-ERROR-NO-EFFECTS review SEC-A: a provider stream that reported an
+ * error part-way, or ended before its end marker. `providerErrorType` is the
+ * provider's error type only (e.g. overloaded_error), never its message.
+ */
+class ProviderStreamError extends Error {
+  readonly providerErrorType: string;
+  constructor(providerErrorType: unknown, detail: string) {
+    const type =
+      typeof providerErrorType === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(providerErrorType)
+        ? providerErrorType
+        : 'unknown_error';
+    super(`${detail} (${type})`);
+    this.name = 'ProviderStreamError';
+    this.providerErrorType = type;
+  }
 }
 
 export interface StreamChunk {
@@ -217,6 +259,13 @@ export interface ProviderHealth {
   lastErrorAt: Date | null;
   totalCalls: number;
   totalErrors: number;
+  /**
+   * Class of the most recent failure recorded on the platform credential of this
+   * provider (RR-GATEWAY-TYPED-FAILURES). Informational and additive: it is not
+   * cleared by a later success, and a failure on a business's own (BYOK) key never
+   * sets it, since this health is read by every business of the platform.
+   */
+  lastFailureClass: ProviderFailureClass | null;
 }
 
 export interface ModelStrategy {
@@ -649,6 +698,7 @@ interface ProviderMetrics {
   totalErrors: number;
   latencies: number[];
   lastErrorAt: Date | null;
+  lastFailureClass: ProviderFailureClass | null;
 }
 
 interface CircuitBreakerState {
@@ -777,6 +827,7 @@ export class ModelGatewayService {
         totalErrors: 0,
         latencies: [],
         lastErrorAt: null,
+        lastFailureClass: null,
       });
       this.circuitBreakers.set(provider, {
         failures: 0,
@@ -861,6 +912,10 @@ export class ModelGatewayService {
     let fallbackUsed = false;
     let fallbackProvider: AiProvider | undefined;
     let budgetDegraded = false;
+    // RR-STRUCTURED-PARSE-INVALID-STATE: every candidate whose answer violated
+    // the expected contract. Each was paid for and is costed as 'invalid'; if
+    // nothing valid follows, the caller gets them all in one typed 502.
+    const violations: ContractViolationAttempt[] = [];
 
     const effectiveCandidates = budgetFilteredCandidates.length > 0
       ? budgetFilteredCandidates
@@ -907,25 +962,35 @@ export class ModelGatewayService {
             ? response.toolCalls[0]?.function?.arguments
             : response.content;
 
-          if (contentToValidate) {
-            response.contractValidation = this.validateContract(
-              contentToValidate,
-              request.expectedContract,
-            );
+          // Empty output is a violation too: a request that named a contract
+          // never returns nothing as success.
+          response.contractValidation = contentToValidate
+            ? this.validateContract(contentToValidate, request.expectedContract)
+            : { valid: false, errors: ['Response is empty'], contractType: request.expectedContract };
 
-            if (!response.contractValidation.valid) {
-              const errors = response.contractValidation.errors.join('; ');
-              this.logger.error(
-                `Contract [${request.expectedContract}] enforcement failed for ${request.taskCategory}: ${errors}`,
-              );
-              throw new Error(
-                `AI output contract violation [${request.expectedContract}]: ${errors}`,
-              );
-            }
+          if (!response.contractValidation.valid) {
+            const errors = response.contractValidation.errors;
+            this.logger.error(
+              `Contract [${request.expectedContract}] enforcement failed for ${request.taskCategory} (${candidate.provider}/${response.model}): ${errors.join('; ')}`,
+            );
+            // The call was made and paid for: record it as invalid before moving on.
+            this.recordCostFromResponse(request, response, { outputState: 'invalid', contractErrors: errors }).catch(
+              (err: unknown) => {
+                this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+              },
+            );
+            // A violation is the model's answer, not the provider's health: it never counts toward a circuit,
+            // and the call was already counted by recordProviderSuccess inside executeWithRetries.
+            this.recordContractViolation(candidate.provider, preferences);
+            violations.push({ provider: candidate.provider, model: response.model, errors });
+            continue;
           }
+          response.outputState = violations.length > 0 ? 'valid_after_fallback' : 'valid';
+        } else {
+          response.outputState = 'unchecked';
         }
 
-        this.recordCostFromResponse(request, response).catch((err: unknown) => {
+        this.recordCostFromResponse(request, response, { outputState: response.outputState }).catch((err: unknown) => {
           this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
         });
 
@@ -938,6 +1003,19 @@ export class ModelGatewayService {
       }
     }
 
+    if (violations.length > 0 && request.expectedContract) {
+      // Nothing valid came back and at least one candidate answered badly: a
+      // typed 502, not the last provider's error, so the caller can tell a
+      // model that answered wrongly from a provider that did not answer.
+      // The detail names the other candidate's failure class only: the body is
+      // client-facing, and a provider's message can carry hosts, response
+      // bodies or key fragments (the full text is in the error log above).
+      throw new AiContractViolationError(
+        request.expectedContract,
+        violations,
+        lastError ? `another candidate failed with a provider error (${classifyProviderFailure(lastError)})` : undefined,
+      );
+    }
     throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
   }
 
@@ -971,6 +1049,7 @@ export class ModelGatewayService {
   private async recordCostFromResponse(
     request: GatewayRequest,
     response: GatewayResponse,
+    outcome: { outputState: GatewayOutputState | 'invalid'; contractErrors?: string[] } = { outputState: 'unchecked' },
   ): Promise<void> {
     // Trace FIRST, then cost. recordCost() awaits a DB write that can reject
     // (e.g. a database outage) — and that is precisely when we most want the
@@ -1005,7 +1084,11 @@ export class ModelGatewayService {
       totalCost: response.usage.estimatedCost,
       latencyMs: response.latencyMs,
       fallbackUsed: response.fallbackUsed,
-      metadata: { contractType: request.expectedContract },
+      metadata: {
+        contractType: request.expectedContract,
+        outputState: outcome.outputState,
+        ...(outcome.contractErrors ? { contractErrors: outcome.contractErrors } : {}),
+      },
     });
   }
 
@@ -1115,6 +1198,11 @@ export class ModelGatewayService {
         );
       }
 
+      // RR-STREAM-ERROR-NO-EFFECTS (D-261): once a chunk of this candidate has
+      // reached the consumer, its failure ends the stream; the next candidate is
+      // tried only while nothing has been yielded, so no second answer is spliced
+      // onto a partial one and no tool deltas of two providers mix.
+      let yieldedFromCandidate = false;
       try {
         const startTime = Date.now();
         const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
@@ -1133,6 +1221,7 @@ export class ModelGatewayService {
             lastUsageChunk = enriched;
           }
 
+          yieldedFromCandidate = true;
           yield enriched;
         }
 
@@ -1164,10 +1253,26 @@ export class ModelGatewayService {
         return;
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(candidate.provider, preferences);
+        const failureClass = classifyProviderFailure(err);
+        this.recordProviderError(candidate.provider, preferences, failureClass);
         this.logger.error(
-          `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
+          `Stream provider ${candidate.provider}/${candidate.model} failed (${failureClass}): ${lastError.message}`,
         );
+        if (yieldedFromCandidate) {
+          // Review SEC-C: the member is told the provider and the error class
+          // only; the provider's message stays in the log line above.
+          const errorClass = /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(lastError?.name ?? '') ? lastError.name : 'Error';
+          const errorType = lastError instanceof ProviderStreamError ? `: ${lastError.providerErrorType}` : '';
+          yield {
+            type: 'error',
+            error: `The ${candidate.provider} stream failed part-way (${errorClass}${errorType})`,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
+          return;
+        }
       }
     }
 
@@ -1373,7 +1478,7 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Anthropic streaming API error (${response.status}): ${errorText}`);
+      throw new ProviderHttpError('anthropic', response.status, `Anthropic streaming API error (${response.status}): ${errorText}`);
     }
 
     if (!response.body) {
@@ -1385,15 +1490,22 @@ export class ModelGatewayService {
     let buffer = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    // RR-STREAM-ERROR-NO-EFFECTS review SEC-A: an SSE error event (e.g.
+    // overloaded_error mid-stream) and a close before message_stop are a
+    // failed stream, not a finished one.
+    let sawMessageStop = false;
+    let sawErrorEvent = false;
+    let streamErrorEvent: { type?: unknown; message?: unknown } = {};
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        // Delta review: a last frame with no trailing newline is still read.
+        if (done && !buffer) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        buffer += done ? `${decoder.decode()}\n` : decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = done ? '' : lines.pop() || '';
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -1458,14 +1570,34 @@ export class ModelGatewayService {
               if (event.type === 'message_delta' && event.usage) {
                 outputTokens = event.usage.output_tokens ?? 0;
               }
+
+              if (event.type === 'message_stop') sawMessageStop = true;
+              if (event.type === 'error') {
+                sawErrorEvent = true;
+                streamErrorEvent = event.error && typeof event.error === 'object' ? event.error : {};
+              }
             } catch {
               /* intentionally empty */
             }
+            if (sawErrorEvent) {
+              // Provider text, logged on one bounded line (delta review).
+              const oneLine = (v: unknown, max: number) =>
+                Array.from(String(v ?? '').slice(0, max), (ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch)).join('');
+              this.logger.warn(
+                `Anthropic stream error event (${oneLine(streamErrorEvent.type, 64)}): ${oneLine(streamErrorEvent.message, 300)}`,
+              );
+              throw new ProviderStreamError(streamErrorEvent.type, 'Anthropic stream error event');
+            }
           }
         }
+        if (done) break;
       }
     } finally {
       reader.releaseLock();
+    }
+
+    if (!sawMessageStop) {
+      throw new ProviderStreamError('stream_ended_without_message_stop', 'Anthropic stream ended early');
     }
 
     const totalTokens = inputTokens + outputTokens;
@@ -2078,9 +2210,10 @@ export class ModelGatewayService {
         };
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(provider, preferences);
+        const failureClass = classifyProviderFailure(err);
+        this.recordProviderError(provider, preferences, failureClass);
 
-        if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
+        if (failureIsRetryable(failureClass) && attempt < ModelGatewayService.MAX_RETRIES) {
           await this.delay(ModelGatewayService.RETRY_DELAY_MS * (attempt + 1));
           continue;
         }
@@ -2325,7 +2458,7 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Anthropic API error (${response.status}): ${errorText}`);
+      throw new ProviderHttpError('anthropic', response.status, `Anthropic API error (${response.status}): ${errorText}`);
     }
 
     interface AnthropicContentBlock {
@@ -3019,6 +3152,7 @@ export class ModelGatewayService {
         lastErrorAt: metrics.lastErrorAt,
         totalCalls: metrics.totalCalls,
         totalErrors: metrics.totalErrors,
+        lastFailureClass: metrics.lastFailureClass,
       });
     }
 
@@ -3197,16 +3331,47 @@ export class ModelGatewayService {
    * A call failed. With the dispatch's preferences, the failure counts against
    * the circuit of the credential that was used (R0-07 review ST-1): a BYOK
    * key's failures open only that key's circuit. Without them, the platform's.
+   *
+   * Only a failure whose class says the provider or the credential cannot serve
+   * counts toward a circuit (RR-GATEWAY-TYPED-FAILURES): server, network,
+   * timeout, auth, quota_exhausted and unknown. A rate limit, a bad request or
+   * the caller's own abort is recorded in the metrics (it was a failed call)
+   * and in lastFailureClass, and leaves the circuit as it was: three 429s on
+   * the platform key must not take the provider away from every business for
+   * the cooldown.
    */
-  private recordProviderError(provider: AiProvider, preferences?: AiPreferences): void {
+  /**
+   * RR-STRUCTURED-PARSE-INVALID-STATE: the provider answered (that call is
+   * already in totalCalls through recordProviderSuccess) but the answer
+   * violated the expected contract. Health shows it as an error with class
+   * 'contract_violation'; no circuit is touched and no second call is counted.
+   */
+  private recordContractViolation(provider: AiProvider, preferences?: AiPreferences): void {
     const metrics = this.providerMetrics.get(provider);
+    if (!metrics) return;
+    metrics.totalErrors++;
+    metrics.lastErrorAt = new Date();
+    // As in recordProviderError: only the platform credential's failures set the class every business sees.
+    if (!this.byokCircuitId(provider, preferences)) metrics.lastFailureClass = 'contract_violation';
+  }
+
+  private recordProviderError(
+    provider: AiProvider,
+    preferences?: AiPreferences,
+    failureClass: ProviderFailureClass = 'unknown',
+  ): void {
+    const metrics = this.providerMetrics.get(provider);
+    const byokId = this.byokCircuitId(provider, preferences);
     if (metrics) {
       metrics.totalCalls++;
       metrics.totalErrors++;
       metrics.lastErrorAt = new Date();
+      // The class is shown to every business: only the platform credential's failures set it.
+      if (!byokId) metrics.lastFailureClass = failureClass;
     }
 
-    const byokId = this.byokCircuitId(provider, preferences);
+    if (!failureCountsTowardCircuit(failureClass)) return;
+
     let circuit: CircuitBreakerState | undefined;
     if (byokId) {
       circuit = this.byokCircuitBreakers.get(byokId);
@@ -3229,23 +3394,15 @@ export class ModelGatewayService {
       if (circuit.failures >= ModelGatewayService.CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
         circuit.openUntil = new Date(Date.now() + ModelGatewayService.CIRCUIT_BREAKER_COOLDOWN_MS);
         this.logger.warn(
-          `Circuit breaker opened for ${provider}${byokId ? " (a business's own key)" : ''} until ${circuit.openUntil.toISOString()}`,
+          `Circuit breaker opened for ${provider}${byokId ? " (a business's own key)" : ''} after ${failureClass} until ${circuit.openUntil.toISOString()}`,
         );
       }
     }
   }
 
-  private isRetryable(error: Error): boolean {
-    const msg = error.message.toLowerCase();
-    return (
-      msg.includes('rate limit') ||
-      msg.includes('timeout') ||
-      msg.includes('429') ||
-      msg.includes('503') ||
-      msg.includes('500') ||
-      msg.includes('econnreset') ||
-      msg.includes('socket hang up')
-    );
+  /** Whether an attempt is retried in place: by the failure's class, never by a bare substring. */
+  private isRetryable(error: unknown): boolean {
+    return failureIsRetryable(classifyProviderFailure(error));
   }
 
   private delay(ms: number): Promise<void> {

@@ -4,6 +4,7 @@ import { KeyGenomeBridgeController } from './key-genome-bridge.controller';
 import { GenomeRecommendationActionBridgeService } from './genome-recommendation-action-bridge.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 describe('KeyGenomeBridgeController', () => {
   let controller: KeyGenomeBridgeController;
@@ -13,6 +14,18 @@ describe('KeyGenomeBridgeController', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [KeyGenomeBridgeController],
       providers: [
+        // FU-KEY-ACTION-GENOME-PROJECTION: the controller reads the recommendation's domain before its revenue gate;
+        // an operations recommendation passes it (the gate itself is pinned by key-action-genome-projection).
+        {
+          provide: PrismaService,
+          useValue: {
+            client: {
+              genomeRecommendation: {
+                findFirst: vi.fn(async () => ({ domain: 'OPERATIONS', title: 'Action plan', diagnosis: 'Three appointments are unconfirmed.' })),
+              },
+            },
+          },
+        },
         {
           provide: GenomeRecommendationActionBridgeService,
           useValue: {

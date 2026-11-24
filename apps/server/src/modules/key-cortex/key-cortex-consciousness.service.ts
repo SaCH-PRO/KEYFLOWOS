@@ -92,6 +92,17 @@ import {
   KeyCortexEndocrineService,
   type EndocrineSignal,
 } from './key-cortex-endocrine.service';
+import { EVENT_MODULES } from './key-cortex-prompt-context.service';
+import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeRecommendationsForReader } from './genome-context-for-reader';
+
+/**
+ * MEM-SALIENCE-SIGHT (acceptance review MINOR-1; D-234, fail closed): the modules a reader needs to be told a conscious-
+ * pipeline dose derived from the business's whole context (the weak signals intuition finds over all its data, money
+ * included; the ethics flag and the calibration of an answer built from that context): every module, so only a reader
+ * who sees every module is told it, as it was before. The body malaise (organ health) names none: it is business-wide.
+ */
+const WHOLE_CONTEXT_MODULES = EVENT_MODULES;
 
 /**
  * One completed step of the consciousness pipeline, emitted as it finishes.
@@ -763,7 +774,8 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
           reasoningMode: reasoningResult.bestChain.mode,
           metacognition: selfModel,
           recentInsights: [], // populated by reflection service
-          activeGoals: this.activeGoalsCache.get(session.businessId) ?? [],
+          // D-235: the snapshot cache is business-wide, so it holds the goals of a reader without revenue read.
+          activeGoals: this.activeGoalsCache.get(`${session.businessId}:noRevenue`) ?? [],
           awareness: {
             businessHealth: 75, // placeholder — would come from genome
             userMood: emotionalState.primary,
@@ -882,6 +894,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         hormone: 'cortisol',
         magnitude: 0.2,
         reason: 'ethical review flagged a recommendation in this session',
+        modules: WHOLE_CONTEXT_MODULES,
       });
     }
 
@@ -895,6 +908,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         reason:
           `calibration reduced confidence by ` +
           `${Math.round(overconfidence * 100)} points on this query`,
+        modules: WHOLE_CONTEXT_MODULES,
       });
     }
 
@@ -905,6 +919,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         hormone: 'cortisol',
         magnitude: Math.min(weakSignalCount * 0.05, 0.25),
         reason: `${weakSignalCount} concurrent weak signals detected`,
+        modules: WHOLE_CONTEXT_MODULES,
       });
     }
 
@@ -1179,19 +1194,32 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
    *   2. Explicit user requests
    *   3. Proactive triggers (anomalies, opportunities)
    */
-  async getActiveGoals(businessId: string): Promise<string[]> {
-    const cached = this.activeGoalsCache.get(businessId);
+  // FU-KEY-GENOME-READS-RESIDUAL (D-235): the goals a reader may see: no finance or sales recommendation, no money
+  // request, no weak signal that states money for a reader without revenue read; no reader given fails closed. Cached
+  // per reader sight, so one reader's goals are never served to another.
+  async getActiveGoals(businessId: string, readsRevenue = false): Promise<string[]> {
+    const cacheKey = readsRevenue ? businessId : `${businessId}:noRevenue`;
+    const cached = this.activeGoalsCache.get(cacheKey);
     if (cached) return cached;
+    const hidden = (text: unknown) => !readsRevenue && typeof text === 'string' && (proposalTextStatesMoney(text) || isMoneyLabel(text));
 
     const goals: string[] = [];
 
     // ── 1. Genome-derived goals ─────────────────────────────────
     try {
       // getGenomeState does not exist; ranked recommendations are their own API.
-      const genomeState = await this.genomeBridge.getRankedRecommendations(businessId);
+      // Round 2 (correctness minor 2): a reader without revenue read is read with headroom before five are taken.
+      const genomeState = await this.genomeBridge.getRankedRecommendations(businessId, readsRevenue ? undefined : 50);
       if (genomeState) {
-        for (const rec of genomeState.slice(0, 5)) {
-          goals.push(`[Genome] ${rec}`);
+        // Round 4 (security NIT-2): projected and ordered as the reader's recommendations are (genomeRecommendationsForReader),
+        // not in the money-weighted rank.
+        const visible = readsRevenue
+          ? genomeState
+          : genomeRecommendationsForReader(genomeState.map((rec: any) => ({ ...rec, category: rec?.domain ?? rec?.category ?? null })), false);
+        for (const rec of visible.slice(0, 5)) {
+          const r = rec as unknown as { title?: string; recommendation?: string };
+          const label = typeof rec === 'string' ? rec : r.title ?? r.recommendation ?? 'Genome recommendation';
+          if (!hidden(label)) goals.push(`[Genome] ${label}`);
         }
       }
     } catch {
@@ -1206,7 +1234,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     const userRequests = userEvents
       .filter((e) => {
         const payload = e.metadata as Record<string, unknown>;
-        return (payload.acted as boolean) === false; // pending
+        return (payload.acted as boolean) === false && !hidden(payload.recommendation); // pending, and visible (D-235)
       })
       .map((e) => {
         const payload = e.metadata as Record<string, unknown>;
@@ -1218,7 +1246,12 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     try {
       const weakSignals = await this.intuition.detectWeakSignals(businessId);
       const highImpactSignals = weakSignals.filter(
-        (s) => s.potentialImpact === 'high' || s.potentialImpact === 'critical',
+        // Round 3 (security MINOR-3): judged by its sources too (revenue_data ...), as awareness judges every value.
+        (s) =>
+          (s.potentialImpact === 'high' || s.potentialImpact === 'critical') &&
+          !hidden(s.description) &&
+          !hidden(s.recommendedInvestigation) &&
+          !((s as { sources?: unknown }).sources instanceof Array && ((s as { sources?: unknown[] }).sources ?? []).some((src) => hidden(src))),
       );
       for (const signal of highImpactSignals.slice(0, 3)) {
         goals.push(
@@ -1231,7 +1264,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
 
     // Deduplicate and store
     const uniqueGoals = [...new Set(goals)].slice(0, 15);
-    this.activeGoalsCache.set(businessId, uniqueGoals);
+    this.activeGoalsCache.set(cacheKey, uniqueGoals);
 
     return uniqueGoals;
   }

@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { GENOME_RECOMMENDATION_POOL, GENOME_RECOMMENDATIONS_SERVED, GENOME_SIGNAL_POOL, GENOME_SIGNALS_SERVED } from './genome-context-for-reader';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService, actionResultOf, type KeyActionResult, type KeyCortexClaim } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
@@ -17,6 +18,7 @@ import {
   GenomeCrossDomainDomainKey,
   GenomeRankedRecommendation,
 } from '../business-genome/key-genome/key-genome.types';
+import { isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeIntelligence {
   businessId: string;
@@ -32,6 +34,13 @@ export interface GenomeIntelligence {
   }>;
   recommendations: Array<Record<string, unknown>>;
   signals: Array<Record<string, unknown>>;
+  /**
+   * FU-KEY-GENOME-READS-RESIDUAL round 8 (D-235): the newest NEW signals, of which `signals` are the first
+   * GENOME_SIGNALS_SERVED. Unprojected business data, read only to project the signals for a reader without revenue read.
+   */
+  signalPool?: Array<Record<string, unknown>>;
+  /** D-235 round 9: the top-ranked recommendations, of which `recommendations` are the first GENOME_RECOMMENDATIONS_SERVED. */
+  recommendationPool?: Array<Record<string, unknown>>;
   crossDomainInsights: Record<string, unknown> | null;
   opportunities: Array<Record<string, unknown>>;
   generatedAt: string;
@@ -140,9 +149,11 @@ export class KeyCortexGenomeBridgeService {
     const readiness = (genome?.executiveReadiness as number) ?? 0;
 
     // Load real signals, recommendations, opportunities, and readiness in parallel
-    const [signals, ranked, opportunities, crossDomain, moduleReadiness] = await Promise.all([
-      this.loadSignals(businessId),
-      this.loadRankedRecommendations(businessId, 10),
+    // Round 8 (D-235): the signals are read once as a pool, so a reader without revenue read is projected from more than
+    // what is left of the newest twenty; the signals are its first twenty, as before.
+    const [signalPool, ranked, opportunities, crossDomain, moduleReadiness] = await Promise.all([
+      this.loadSignals(businessId, { limit: GENOME_SIGNAL_POOL }),
+      this.loadRankedRecommendations(businessId, GENOME_RECOMMENDATION_POOL),
       this.loadOpportunities(businessId, 5),
       this.loadCrossDomainSnapshot(businessId),
       this.loadModuleReadiness(businessId),
@@ -157,8 +168,12 @@ export class KeyCortexGenomeBridgeService {
       executiveReadiness: readiness,
       stage,
       readiness: moduleReadiness,
-      recommendations: ranked.map((r) => this.toBridgeRecommendation(r)),
-      signals: signals.map((s) => this.toBridgeSignal(s)),
+      // Round 9 (D-235): ranked once as a pool; the recommendations are its first ten, as before (the ranker sorts, then
+      // takes the limit, so they are the same rows a limit of ten gives).
+      recommendations: ranked.slice(0, GENOME_RECOMMENDATIONS_SERVED).map((r) => this.toBridgeRecommendation(r)),
+      recommendationPool: ranked.map((r) => this.toBridgeRecommendation(r)),
+      signals: signalPool.slice(0, GENOME_SIGNALS_SERVED).map((s) => this.toBridgeSignal(s)),
+      signalPool: signalPool.map((s) => this.toBridgeSignal(s)),
       crossDomainInsights: crossDomain,
       opportunities: opportunities.map((o) => this.toBridgeOpportunity(o)),
       generatedAt: new Date().toISOString(),
@@ -732,6 +747,10 @@ export class KeyCortexGenomeBridgeService {
       // FU-KEY-CHAT-GENOME-MONEY-SIGHT (BLOCKING-1): the finance rule (isFinanceSignal) reads these too.
       section: signal.section ?? null,
       domain: signal.domain ?? null,
+      // CODEX-228 MAJOR-2: classify on the full stored row (field, evidence, proposedValue, sourceEntityType)
+      // before projecting to the compact bridge shape, so money beyond truncated reason or in evidence/proposedValue
+      // is withheld consistently with REST projections.
+      isFinance: isFinanceSignal(signal),
       severity: this.signalSeverity(signal),
       createdAt: signal.createdAt,
     };

@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 import { NewEntityMenu } from "./new-entity-menu";
 import { openKey } from "@/components/key/key-agent";
-import { MODE_LABELS, type DisclosureMode } from "@/lib/disclosure-mode";
 import { getCachedUser } from "@/lib/workspace";
 import { getNotificationIcon, getNotificationLink, relativeTime } from "@/lib/notifications";
 import type { AppNotification } from "@/lib/notifications";
@@ -32,11 +31,6 @@ import {
 interface AppHeaderProps {
   setMobileDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   copilotModule: CopilotModule;
-  disclosureMode: DisclosureMode;
-  setDisclosureMode: (mode: DisclosureMode) => void;
-  modeMenuOpen: boolean;
-  setModeMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  modeMenuRef: React.RefObject<HTMLDivElement | null>;
   addMenuOpen: boolean;
   setAddMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   notifications: AppNotification[];
@@ -100,11 +94,6 @@ function KEYSearchPlaceholder() {
 
 export function AppHeader({
   setMobileDrawerOpen,
-  disclosureMode,
-  setDisclosureMode,
-  modeMenuOpen,
-  setModeMenuOpen,
-  modeMenuRef,
   addMenuOpen,
   setAddMenuOpen,
   notifications,
@@ -129,12 +118,6 @@ export function AppHeader({
   // it, everywhere but onboarding, so the door is not shown there.
   const showKeyDoor = !pathname?.startsWith("/app/onboarding");
 
-  const modeColors = {
-    startup: { border: "border-emerald-500/30", bg: "bg-emerald-500/10", text: "text-emerald-400", glow: "shadow-[0_0_12px_hsl(142,71%,45%,0.2)]" },
-    growth: { border: "border-amber-500/30", bg: "bg-amber-500/10", text: "text-amber-400", glow: "shadow-[0_0_12px_hsl(38,92%,50%,0.2)]" },
-    enterprise: { border: "border-violet-500/30", bg: "bg-violet-500/10", text: "text-violet-400", glow: "shadow-[0_0_12px_hsl(260,70%,60%,0.2)]" },
-  };
-  const mc = modeColors[disclosureMode];
 
   return (
     <header
@@ -239,76 +222,6 @@ export function AppHeader({
           <Search className="w-5 h-5" />
         </button>
 
-        {/* Disclosure Mode Switcher — Mode Orbs */}
-        <div className="relative" ref={modeMenuRef}>
-          <button
-            onClick={() => setModeMenuOpen((v) => !v)}
-            className={cn(
-              "hidden sm:flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition-all shrink-0",
-              mc.border,
-              mc.bg,
-              mc.text,
-              "hover:brightness-110"
-            )}
-            title={`Mode: ${MODE_LABELS[disclosureMode].title}`}
-          >
-            <span className={cn("w-1.5 h-1.5 rounded-full", disclosureMode === "startup" ? "bg-emerald-400" : disclosureMode === "growth" ? "bg-amber-400" : "bg-violet-400", mc.glow)} />
-            <span>{MODE_LABELS[disclosureMode].title}</span>
-            <ChevronDown className="w-3 h-3" />
-          </button>
-          <AnimatePresence>
-            {modeMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-[55]" onClick={() => setModeMenuOpen(false)} />
-                <motion.div
-                  initial={{ opacity: 0, y: -8, scale: 0.97 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8, scale: 0.97 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-xl z-[56] p-1.5"
-                >
-                  <div className="px-3 py-2">
-                    <p className="text-xs font-semibold text-foreground">Workspace Mode</p>
-                    <p className="text-[11px] text-muted-foreground">Show only what you need</p>
-                  </div>
-                  <div className="border-t border-border my-1" />
-                  {(["startup", "growth", "enterprise"] as DisclosureMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => {
-                        setDisclosureMode(mode);
-                        setModeMenuOpen(false);
-                      }}
-                      className={cn(
-                        "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between",
-                        disclosureMode === mode
-                          ? "bg-muted font-medium"
-                          : "hover:bg-muted/50 text-muted-foreground"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={cn(
-                          "w-2 h-2 rounded-full",
-                          mode === "startup" ? "bg-emerald-400 shadow-[0_0_8px_hsl(142,71%,45%,0.4)]" :
-                          mode === "growth" ? "bg-amber-400 shadow-[0_0_8px_hsl(38,92%,50%,0.4)]" :
-                          "bg-violet-400 shadow-[0_0_8px_hsl(260,70%,60%,0.4)]"
-                        )} />
-                        <div>
-                          <p className="text-sm">{MODE_LABELS[mode].title}</p>
-                          <p className="text-[11px] text-muted-foreground">{MODE_LABELS[mode].subtitle}</p>
-                        </div>
-                      </div>
-                      {disclosureMode === mode && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))]" />
-                      )}
-                    </button>
-                  ))}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
-
         {/* New Entity Button */}
         <div className="relative">
           <motion.button
@@ -317,6 +230,8 @@ export function AppHeader({
             onClick={() => setAddMenuOpen((v) => !v)}
             className="kf-btn-glow inline-flex items-center gap-1.5 !px-2.5 !py-1.5 !text-xs !rounded-xl"
             title="New (⌘N)"
+            aria-haspopup="menu"
+            aria-expanded={addMenuOpen}
           >
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">New</span>
@@ -427,7 +342,7 @@ export function AppHeader({
           </AnimatePresence>
         </div>
 
-        {/* User Avatar with mode-colored ring */}
+        {/* User avatar */}
         <div className="hidden sm:flex items-center relative" ref={userMenuRef}>
           <button
             onClick={() => setUserMenuOpen((v) => !v)}
@@ -440,7 +355,7 @@ export function AppHeader({
             aria-haspopup="true"
           >
             {avatarUrl ? (
-              <div className={cn("relative rounded-full p-[2px]", disclosureMode === "startup" ? "bg-emerald-500/30" : disclosureMode === "growth" ? "bg-amber-500/30" : "bg-violet-500/30")}>
+              <div className="relative rounded-full p-[2px] bg-[hsl(var(--kf-accent1)/0.3)]">
                 <Image
                   src={avatarUrl}
                   alt={displayName || "User"}
@@ -498,7 +413,7 @@ export function AppHeader({
                   role="menuitem"
                 >
                   <Settings className="w-3.5 h-3.5 text-muted-foreground" />
-                  Studio
+                  Settings
                 </Link>
                 {isAdminUser && (
                   <Link

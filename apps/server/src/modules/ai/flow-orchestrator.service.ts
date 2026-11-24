@@ -52,6 +52,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
+import { classifyActionIntent } from '../key-cortex/action-intent';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -63,6 +64,17 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
+import {
+  UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS,
+  UNTRUSTED_MAX_CHARS,
+  capUntrusted,
+  containsUntrustedBlock,
+  exceedsUntrustedCap,
+  fenceUntrusted,
+  withoutInvisible,
+  withUntrustedContentRule,
+  withoutUntrustedBlocks,
+} from './untrusted-content';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
@@ -116,10 +128,13 @@ import {
   PROMPT_MEMORY_HEADROOM,
   moduleSightOf,
   promptMemoryReader,
+  readersModuleSight,
   readersOwnPromptMemory,
+  readsDocumentExtractions,
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
+import { aiMemoryRowVisibleTo, readerSearchOptions } from './semantic-memory-sight';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
   ActionNotClearedError,
@@ -195,6 +210,54 @@ export interface FlowToolResult {
    * executed; `actionId` is the server-issued id to confirm or approve.
    */
   notCleared?: { actionId: string | null; disposition: string; code: string };
+  /**
+   * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: set when the call was refused before any
+   * tool ran because its arguments did not parse to a JSON object. `error`
+   * carries the one visible text, 'not run: the arguments for <tool> were not
+   * valid JSON'; nothing from the arguments themselves.
+   */
+  notExecuted?: true;
+}
+
+/**
+ * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: the one parse step for a tool call's
+ * arguments. A missing or empty string means no arguments ({}), as the
+ * model's SDKs send it. Anything else that is not a JSON object (unparseable
+ * text, whitespace alone, an array, a string, a number, null) is refused: the
+ * call is never executed and never reaches governance, the boundary or
+ * confirmation.
+ */
+export function parseToolArguments(raw: string | null | undefined): { ok: true; args: Record<string, unknown> } | { ok: false } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, args: {} };
+  if (typeof raw !== 'string') return { ok: false };
+  try {
+    // JSON.parse tolerates whitespace around a value; whitespace alone is not a value and is refused.
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { ok: true, args: parsed as Record<string, unknown> };
+    }
+  } catch {
+    // fall through: refused
+  }
+  return { ok: false };
+}
+
+/** The visible result of a refused call. Names the tool only: the broken arguments are never echoed. */
+export function toolArgumentsRefusal(toolName: string): string {
+  return `not run: the arguments for ${toolName} were not valid JSON`;
+}
+
+/**
+ * The turn's tool results in the order the model made its calls: each refused
+ * call already sits in its slot, each empty slot takes the next executed
+ * result (executed in the same order). Positional, so a duplicated tool-call
+ * id cannot duplicate or drop a result. One result per call, always.
+ */
+export function fillToolResultSlots(slots: Array<FlowToolResult | null>, executed: FlowToolResult[]): FlowToolResult[] {
+  const queue = [...executed];
+  const results = slots.map((slot) => slot ?? queue.shift() ?? null).filter((r): r is FlowToolResult => r !== null);
+  // anything executed beyond the slots (never today) is kept rather than dropped
+  return [...results, ...queue];
 }
 
 /**
@@ -353,6 +416,81 @@ export interface FlowPageContext {
  * passes (StaffChatBridgeService does), and only one JobRolePolicyService issued; a
  * jobRoleEnvelope inside pageContext is dropped.
  */
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (D-202, review SEC-W1FPMS-2 / COR-W1FPMS-2) and MEM-DOC-EXTRACTION-SIGHT (COR-MDX-1): the
+ * member a flow turn's memory reads are read for, and the modules they may see. A member in the app: themselves while
+ * they are a member (promptMemoryReader), by their membership. The staff bridge's turn (no member, the position's
+ * envelope): the reader and modules JobRolePolicyService resolved for the position (perceptionOf, on an envelope it
+ * issued); when the reader it names is not found a member (removed since), no module (fail closed). A turn with
+ * neither (the support desk) and any other turn with no reader: nobody, and no module. Shared by the perception block
+ * and the semantic memory section; `self` is the orchestrator (its client, logger and job-role policy).
+ */
+async function turnMemorySight(
+  self: {
+    prisma: PrismaService;
+    logger: Pick<Logger, 'warn'>;
+    getJobRolePolicy(): Pick<JobRolePolicyService, 'isIssued' | 'perceptionOf'>;
+  },
+  businessId: string,
+  userId?: string,
+  server?: FlowServerContext,
+  logTag = 'perception',
+): Promise<{ reader: string | null; sight: ModuleSight }> {
+  let candidate: string | undefined = userId;
+  let positionModules: readonly string[] | undefined;
+  if (!userId && server) {
+    const perception = (() => {
+      try {
+        const policy = self.getJobRolePolicy();
+        return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
+      } catch {
+        return null;
+      }
+    })();
+    candidate = perception?.readerUserId ?? undefined;
+    positionModules = perception?.modules ?? [];
+  }
+  const reader = await promptMemoryReader(self.prisma, businessId, candidate, self.logger, logTag);
+  const sight: ModuleSight =
+    positionModules === undefined
+      ? await readersModuleSight(self.prisma, businessId, reader, self.logger, logTag)
+      : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
+  return { reader, sight };
+}
+
+/**
+ * MEM-PATTERNS-SIGHT (security review F1): whether a reader may read every pattern, whatever it states: a member reader
+ * with revenue read (readsDocumentExtractions) and expenses read, the two sights aiMemoryRowVisibleTo asks for.
+ */
+function readsEveryPattern(reader: string | null, sight: ModuleSight): boolean {
+  return reader !== null && readsDocumentExtractions(sight, reader) && sight('expenses');
+}
+
+/**
+ * MEM-PATTERNS-SIGHT (P0; D-257, D-100, D-234, D-203): which AiMemory 'patterns' rows a flow turn's "USER PREFERENCES &
+ * MEMORY" section may carry. PatternDetectorService stores a repeat late payer as "N overdue invoices totaling X"
+ * ("Overdue: <total>"), and the block put every pattern into every turn. A turn that names no member and no position
+ * (the support desk) sees only the conversation in front of it: no pattern at all. Any other turn: each pattern by the
+ * AiMemory-row rule its semantic copy is read by (aiMemoryRowVisibleTo, MEM-SEMANTIC-SIGHT): money only for a member
+ * reader with revenue read, an expense only for one with expenses read, for the reader and modules turnMemorySight
+ * resolves (as the perception block and the semantic section read). A sight that cannot be resolved keeps no pattern.
+ */
+async function turnPatternVisibility(
+  self: Parameters<typeof turnMemorySight>[0],
+  businessId: string,
+  userId?: string,
+  server?: FlowServerContext,
+): Promise<(row: { category: string; key: string; value: string }) => boolean> {
+  if (!userId && !server) return () => false;
+  try {
+    const who = await turnMemorySight(self, businessId, userId, server, 'memoryPatterns');
+    return (row) => aiMemoryRowVisibleTo(row, who);
+  } catch (err: unknown) {
+    self.logger.warn(`[memoryPatterns][${businessId}] reader sight unresolved, no pattern served: ${err instanceof Error ? err.message : String(err)}`);
+    return () => false;
+  }
+}
+
 export interface FlowServerContext {
   /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
   jobRoleEnvelope: JobRoleEnvelope;
@@ -678,6 +816,51 @@ function withEvidenceDiscipline(systemPrompt: string): string {
   const discipline = KeyCortexExpertiseLensService.EVIDENCE_DISCIPLINE;
   if (systemPrompt.includes(discipline)) return systemPrompt;
   return `${systemPrompt}\n\n=== EVIDENCE DISCIPLINE ===\n${discipline}`;
+}
+
+/**
+ * RR-UNTRUSTED-CONTENT-FENCE: when any message of a turn carries a fenced untrusted-data block (an
+ * attachment's extraction, a fenced tool result), the system prompt carries the rule that such blocks
+ * are data, never instructions. Once, and only then: a turn with no block is sent exactly as before.
+ * Replaces messages[0] rather than editing it, so an array spread from another shares nothing changed.
+ */
+function withUntrustedContentRuleWhereFenced(messages: GatewayMessage[]): GatewayMessage[] {
+  const system = messages[0];
+  if (system?.role !== 'system' || typeof system.content !== 'string') return messages;
+  if (!messages.some((m) => typeof m.content === 'string' && containsUntrustedBlock(m.content))) return messages;
+  messages[0] = { ...system, content: withUntrustedContentRule(system.content) };
+  return messages;
+}
+
+/**
+ * RR-UNTRUSTED-CONTENT-FENCE review M2: the line the server adds to a reply when an attachment's text
+ * was cut to its cap, so the member knows KEY read only part of it. Built here, not by the model, and
+ * naming each attachment by its position in the message, never by its file name: the name is the
+ * uploader's text, and this line is saved as KEY's reply and replayed to the model (round 4, security
+ * F2: a name could otherwise speak as KEY, carry a role sign-off, a link or a bidi override).
+ */
+function attachmentTruncationNotice(truncatedPositions: readonly number[], turnCapReached: boolean): string {
+  const lines = truncatedPositions.map(
+    (n) => `Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of attachment ${n} were read.`,
+  );
+  if (turnCapReached) {
+    lines.push(`Only the first ${UNTRUSTED_MAX_CHARS.attachment.toLocaleString('en-US')} characters of this message's attachments were read.`);
+  }
+  return lines.length ? `_${lines.join(' ')}_` : '';
+}
+
+/** The most characters of an attachment's name, type or MIME type rendered for the model. */
+export const ATTACHMENT_LABEL_MAX_CHARS = 200;
+
+/**
+ * An attachment's name, type or MIME type as rendered inside a fenced block (Codex P1, #225): the
+ * uploader's text, so one line (control characters become spaces), capped, never split mid-character.
+ * The fence around it neutralises any marker in it.
+ */
+function attachmentLabel(value: unknown): string {
+  const text = String(value ?? '').replace(/\p{Cc}/gu, ' ');
+  const cps = Array.from(text);
+  return cps.length > ATTACHMENT_LABEL_MAX_CHARS ? `${cps.slice(0, ATTACHMENT_LABEL_MAX_CHARS).join('')}…` : text;
 }
 
 /**
@@ -1238,12 +1421,9 @@ export class FlowOrchestratorService {
     if (triage?.tier !== 'deliberate') return false;
     if (hasAttachments) return false;
 
-    // Anything that asks KEY to DO something stays on the tool path.
-    if (
-      /\b(create|make|add|send|schedule|book|update|change|delete|remove|cancel|invoice|draft|generate|assign|move|set|mark|pay|refund|publish|post)\b/i.test(
-        message,
-      )
-    ) {
+    // Anything that asks KEY to DO something stays on the tool path (the one
+    // vocabulary, shared with the Cortex sites: RR-ACTION-INTENT-ONE-CLASSIFIER).
+    if (classifyActionIntent(message).isAction) {
       return false;
     }
 
@@ -1292,9 +1472,11 @@ export class FlowOrchestratorService {
           voice: 'default',
           mood: 'neutral',
           preferredProvider: 'openai',
+          // RR-UNTRUSTED-CONTENT-FENCE review F1: the cortex prompt carries no untrusted-content rule,
+          // so a fenced block from an earlier turn reaches it as a placeholder, not as its text.
           messages: conversationHistory.slice(-10).map((m) => ({
             role: m.role,
-            content: m.content,
+            content: typeof m.content === 'string' ? withoutUntrustedBlocks(m.content, '[attachment text withheld]') : m.content,
             timestamp: now,
           })),
           createdAt: now,
@@ -1408,22 +1590,12 @@ export class FlowOrchestratorService {
       // (D-73/D-93), and otherwise what its map grants, where it saw no module-named event at all. It is the reader and
       // nothing else (D-73/D-88): chat() still runs the turn with no principal, no standing-context viewer and no
       // conversation owner, and chatToolAction still reads the holder for call_create_task alone.
-      let candidate: string | undefined = userId;
-      let positionModules: readonly string[] | undefined;
-      if (!userId && server) {
-        const perception = (() => {
-          try {
-            const policy = this.getJobRolePolicy();
-            return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
-          } catch {
-            return null;
-          }
-        })();
-        candidate = perception?.readerUserId ?? undefined;
-        positionModules = perception?.modules ?? [];
-      }
+      // The reader and the modules are resolved by turnMemorySight (MEM-DOC-EXTRACTION-SIGHT: shared with the semantic
+      // memory section).
       const perceive = async () => {
-        const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'perception');
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): read before the memory, which takes document extractions only for a sight
+        // with revenue read.
+        const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
         const read = await memory.retrieveContext(businessId, {
           // `query` is deliberately NOT passed.
           //
@@ -1470,11 +1642,13 @@ export class FlowOrchestratorService {
           // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
+          documentExtractions: readsDocumentExtractions(sight, reader),
+          // MEM-PATTERNS-SIGHT (security review F1; D-100, D-146): the perception block renders AiMemory rows too, and a
+          // pattern states money ("N overdue invoices totaling X") or an expense in its text. A reader who may not read
+          // every pattern (aiMemoryRowVisibleTo: a member reader with revenue and expenses read reads them all) gets none
+          // here, unread so that none takes another row's place; the memory section carries the patterns they may read.
+          aiMemoryPatterns: readsEveryPattern(reader, sight),
         });
-        // A position's turn sees its position's modules; when the reader it names is not found a member (removed since),
-        // none (fail closed). Any other turn sees by its reader's membership (readersOwnPromptMemory's own read).
-        const sight: ModuleSight | undefined =
-          positionModules === undefined ? undefined : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
         return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception', sight);
       };
 
@@ -1949,6 +2123,8 @@ export class FlowOrchestratorService {
   private async buildAttachmentContext(
     businessId: string,
     attachments?: FlowAttachment[],
+    /** Filled with the 1-based position of each file whose extraction was cut to its cap (review M2). */
+    truncatedFiles?: number[],
   ): Promise<string> {
     if (!attachments?.length) return '';
     const docIntel = this.getDocumentIntelligence();
@@ -1970,7 +2146,7 @@ export class FlowOrchestratorService {
         // always publicly readable.
         if (att.objectPath?.startsWith('/objects/')) {
           try {
-            const { buffer, contentType } = await storage.getObjectEntityBuffer(att.objectPath);
+            const { buffer, contentType } = await storage.getObjectEntityBuffer(att.objectPath, businessId);
             extractionInput = {
               businessId,
               source: att.objectPath,
@@ -1989,12 +2165,16 @@ export class FlowOrchestratorService {
         const summary = result.rawText?.trim()
           ? `${result.documentType?.toUpperCase() ?? 'DOCUMENT'}\n${result.rawText}`
           : JSON.stringify(result);
+        // Measured, and cut, without the invisible characters the fence removes (round 4, correctness F2).
+        const visible = withoutInvisible(summary);
+        if (visible.length > UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) truncatedFiles?.push(attachments.indexOf(att) + 1);
         parts.push(
-          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${summary}`,
+          // RR-UNTRUSTED-CONTENT-FENCE review m1: each file has its own cap inside the turn's one block.
+          `[Attachment: ${attachmentLabel(filename)} (${attachmentLabel(att.type)}, ${attachmentLabel(extractionInput.mimeType ?? mimeType)})]\n${capUntrusted(visible, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
         );
       } catch (err: any) {
         parts.push(
-          `[Attachment: ${att.name ?? 'unnamed'} (${att.type}) — could not extract: ${err?.message ?? 'unknown error'}]`,
+          `[Attachment: ${attachmentLabel(att.name ?? 'unnamed')} (${attachmentLabel(att.type)}) — could not extract: ${attachmentLabel(err?.message ?? 'unknown error')}]`,
         );
       }
     }
@@ -2007,11 +2187,17 @@ export class FlowOrchestratorService {
     attachments?: FlowAttachment[],
   ): string {
     if (!attachments?.length) return content;
+    // RR-UNTRUSTED-CONTENT-FENCE Codex P1 (#225): an attachment's name and type are the uploader's text
+    // (and a replayed turn's attachments come from the client), so they never reach the model as the
+    // member's words. A turn saved since this packet holds its fenced extraction, which already names
+    // each file inside the block: nothing is added. A turn without one (saved before, or sent by the
+    // client) gets its metadata as a fenced block of its own.
+    if (containsUntrustedBlock(content)) return content;
     const fallbackParts = attachments.map(
       (att) =>
-        `[Attachment: ${att.name ?? 'unnamed'} (${att.type}) — see previous extraction above]`,
+        `[Attachment: ${attachmentLabel(att.name ?? 'unnamed')} (${attachmentLabel(att.type)}) — see previous extraction above]`,
     );
-    return `${content}\n\nATTACHMENT CONTEXT:\n${fallbackParts.join('\n')}`;
+    return `${content}\n\n${fenceUntrusted('attachment', `ATTACHMENT CONTEXT:\n${fallbackParts.join('\n')}`)}`;
   }
 
   private async *finalizeStreamSession(
@@ -2072,14 +2258,30 @@ export class FlowOrchestratorService {
    * section, as TemporalFlowService and UnifiedMemoryRetrievalService already
    * do. Only the memory lookup is caught: a missing chat provider still fails
    * the turn from the gateway dispatch with its own 503.
+   *
+   * MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
+   * before the top 5 are cut, for the perception block's reader and sight (turnMemorySight).
    */
-  private async buildSemanticMemorySection(businessId: string, query: string): Promise<string> {
+  private async buildSemanticMemorySection(
+    businessId: string,
+    query: string,
+    userId?: string,
+    server?: FlowServerContext,
+  ): Promise<string> {
+    // MEM-SEMANTIC-SIGHT review (D-203): a turn that names no member and no position (the support desk) sees only the
+    // conversation in front of it, as its perception block reads nothing: no semantic memory at all.
+    if (!userId && !server) return '';
     try {
+      // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
+      // turn whose reader may read revenue (turnMemorySight, as the perception block reads), else none: the search
+      // leaves them out before its limit.
+      const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server, 'semanticMemory');
       const relevant = await this.semanticMemory.search({
         businessId,
         query,
         limit: 5,
         minSimilarity: 0.65,
+        ...readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger),
       });
       if (relevant.length === 0) return '';
       return '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
@@ -2088,6 +2290,25 @@ export class FlowOrchestratorService {
       this.logger.warn(`Semantic memory left out of the turn: ${err instanceof Error ? err.message : String(err)}`);
       return '';
     }
+  }
+
+  /**
+   * MEM-SALIENCE-SIGHT (D-234, D-100): the thalamus's verdict for this turn's standing-context viewer (`userId`, as the
+   * business snapshot's viewerId: a turn with no member, a staff position's included, has none). Its standing context
+   * carries the salience counts and endocrine Basis lines that viewer's module scopes allow (readersModuleSight, as
+   * ModuleScopeGuard reads the membership; no viewer or a failed read: no module). The one membership read is skipped
+   * when no triage service is wired.
+   */
+  private async triageForViewer(
+    businessId: string,
+    message: string,
+    hasAttachments: boolean,
+    userId: string | undefined,
+  ): Promise<TriageVerdict | null> {
+    const triage = this.getTriage();
+    if (!triage) return null;
+    const sight = await readersModuleSight(this.prisma, businessId, userId ?? null, this.logger, 'standing');
+    return triage.triage(businessId, message, hasAttachments, sight);
   }
 
   async chat(
@@ -2112,10 +2333,16 @@ export class FlowOrchestratorService {
     // Enrich message with any uploaded document/PDF/image context so role detection
     // and the LLM prompt both see the attachment contents.
     const effectiveSessionId = sessionId || randomUUID();
-    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
+    // reaches the model as a message of its own beside the member's, never inside it.
+    const truncatedFiles: number[] = [];
+    const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
+    const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+    // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
+    const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
-    const result = await (async (): Promise<FlowResponse> => {
+    let result = await (async (): Promise<FlowResponse> => {
     // Staff the turn if roles were not explicitly provided.
     //
     // An explicit `role` argument still pins the turn to exactly that hat — a
@@ -2123,7 +2350,9 @@ export class FlowOrchestratorService {
     // behaviour precisely.
     const authority: CrewResolution = role
       ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
-      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+      // Orchestrator acceptance review (security MINOR-1): the crew, and with it the tool menu and the
+      // governance ceiling, is staffed from the member's own words, never from an attachment's text.
+      : await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext);
     const detectedRole = authority.primary;
     const crew = authority.crew;
 
@@ -2142,14 +2371,16 @@ export class FlowOrchestratorService {
     const businessName = snapshot.business.name || 'your business';
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
 
-    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    // MEM-PATTERNS-SIGHT (D-100, D-203): the behavioural patterns this turn's reader may read (turnPatternVisibility).
+    const patternVisible = await turnPatternVisibility({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     // Semantic memory search based on last user message (optional enrichment:
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
     const semanticMemorySection = lastUserMessage?.content
-      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content)
+      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -2157,17 +2388,17 @@ export class FlowOrchestratorService {
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
-    // Grade the message before spending anything on it. Zero model calls,
-    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
-    // on any failure it returns today's exact parameters.
-    const triage: TriageVerdict | null =
-      this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
+    // Grade the message before spending anything on it. Zero model calls: six
+    // regex classifiers plus in-memory reads, after one membership read for the
+    // viewer's module sight (MEM-SALIENCE-SIGHT). Never throws; on any failure
+    // it returns today's exact parameters.
+    const triage: TriageVerdict | null = await this.triageForViewer(businessId, message, Boolean(attachments?.length), userId);
 
     // The menu the model is shown, resolved once for this turn.
     const selectedTools = await this.selectToolsForRequest(
       businessId,
       crew,
-      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      `${message}\n${pageContext?.route ?? ''}`,
       envelope,
       userId,
     );
@@ -2327,7 +2558,9 @@ ${triage.standingContext}`;
       }
     }
 
-    messages.push({ role: 'user', content: enrichedMessage });
+    if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
+    messages.push({ role: 'user', content: message });
+    withUntrustedContentRuleWhereFenced(messages);
 
     try {
       const gatewayResponse = await this.aiUsage.trackAndComplete(
@@ -2385,15 +2618,47 @@ ${triage.standingContext}`;
         };
       }
 
-      const toolCalls: FlowToolCall[] = assistantMessage.tool_calls.map((tc) => {
+      // RR-TOOL-ARGS-MALFORMED-NEVER-RUN: a call whose arguments do not parse to
+      // a JSON object is refused here, before governance, the boundary,
+      // confirmation or execution; it answers the model as a tool result and
+      // the other calls of the same response run as before.
+      // `slots` keeps the model's call order: a refused call's result sits in
+      // its own position, a parsed call's position is filled once it ran.
+      const slots: Array<FlowToolResult | null> = [];
+      const toolCalls: FlowToolCall[] = [];
+      // Every call the model made, for the turn's result and the saved session:
+      // a refused call appears with no arguments and the refusal as its
+      // description, so the saved calls pair with the saved results (the next
+      // turn's history rebuild gives every tool message a tool_call to answer).
+      const announcedCalls: FlowToolCall[] = [];
+      const refusedCalls: FlowToolCall[] = [];
+      for (const tc of assistantMessage.tool_calls) {
         const tool = getToolByName(tc.function.name);
-        return {
+        const parsed = parseToolArguments(tc.function.arguments);
+        if (!parsed.ok) {
+          this.logger.warn(`Flow chat: tool call ${tc.function.name} refused, arguments were not valid JSON`);
+          slots.push(this.refusedToolResult(tc.id, tc.function.name));
+          const refused: FlowToolCall = { id: tc.id, name: tc.function.name, arguments: {}, riskLevel: tool?.riskLevel ?? 'low', description: toolArgumentsRefusal(tc.function.name) };
+          announcedCalls.push(refused);
+          refusedCalls.push(refused);
+          continue;
+        }
+        slots.push(null);
+        const call: FlowToolCall = {
           id: tc.id,
           name: tc.function.name,
-          arguments: JSON.parse(tc.function.arguments || '{}'),
+          arguments: parsed.args,
           riskLevel: tool?.riskLevel ?? 'low',
         };
-      });
+        toolCalls.push(call);
+        announcedCalls.push(call);
+      }
+      // The refusals alone, for the branches that stop before execution: nothing
+      // ran on either count, and the member and the saved session still see them,
+      // each paired with its call; the parsed calls those branches stop are not
+      // saved, as before.
+      const refusedOnly = slots.filter((r): r is FlowToolResult => r !== null);
+      const refusedTurn = refusedOnly.length ? { toolCalls: refusedCalls, toolResults: refusedOnly } : {};
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
@@ -2421,6 +2686,7 @@ ${triage.standingContext}`;
       if (blocked.length > 0) {
         return {
           reply: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
+          ...refusedTurn,
           usage,
         };
       }
@@ -2446,6 +2712,7 @@ ${triage.standingContext}`;
 
         return {
           reply: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
+          ...refusedTurn,
           usage,
         };
       }
@@ -2461,16 +2728,18 @@ ${triage.standingContext}`;
 
         return {
           reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
-          toolCalls,
+          toolCalls: announcedCalls,
+          ...(refusedOnly.length ? { toolResults: refusedOnly } : {}),
           pendingConfirmations,
           requiresConfirmation: true,
           usage,
         };
       }
 
-      const toolResults: FlowToolResult[] = await Promise.all(
+      const executedResults: FlowToolResult[] = await Promise.all(
         governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
       );
+      const toolResults = fillToolResultSlots(slots, executedResults);
 
       const followUpMessages: GatewayMessage[] = [
         ...messages,
@@ -2491,7 +2760,7 @@ ${triage.standingContext}`;
         undefined,
         'flow_chat',
         {
-          messages: followUpMessages,
+          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
           maxTokens: 500,
           temperature: 0.7,
         },
@@ -2504,7 +2773,7 @@ ${triage.standingContext}`;
 
       return {
         reply: finalReply,
-        toolCalls,
+        toolCalls: announcedCalls,
         toolResults,
         card: onboardingCard,
         usage,
@@ -2514,6 +2783,9 @@ ${triage.standingContext}`;
       throw error;
     }
     })();
+    if (attachmentNotice) {
+      result = { ...result, reply: result.reply ? `${attachmentNotice}\n\n${result.reply}` : attachmentNotice };
+    }
 
     // Persist the turn to the FlowSession so it can be resumed later.
     const userMessage: FlowMessage = {
@@ -2559,8 +2831,14 @@ ${triage.standingContext}`;
     const envelope = this.serverEnvelope(server);
     // Enrich message with uploaded document/image context.
     const effectiveSessionId = sessionId || randomUUID();
-    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
+    // reaches the model as a message of its own beside the member's, never inside it.
+    const truncatedFiles: number[] = [];
+    const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
+    const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+    // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
+    const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
     // Staff the turn if roles were not explicitly provided.
     //
@@ -2569,7 +2847,9 @@ ${triage.standingContext}`;
     // behaviour precisely.
     const authority: CrewResolution = role
       ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
-      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+      // Orchestrator acceptance review (security MINOR-1): the crew, and with it the tool menu and the
+      // governance ceiling, is staffed from the member's own words, never from an attachment's text.
+      : await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext);
     const detectedRole = authority.primary;
     const crew = authority.crew;
 
@@ -2588,18 +2868,25 @@ ${triage.standingContext}`;
       };
       return;
     }
+    // content_delta chunks are cumulative (replace semantics), so the line leads every one of them and
+    // the content saved with the turn, not only the first (round 4, correctness F1).
+    const shown = (content: string): string =>
+      attachmentNotice ? (content ? `${attachmentNotice}\n\n${content}` : attachmentNotice) : content;
+    if (attachmentNotice) yield { type: 'content_delta', content: attachmentNotice };
 
     // PR195-PORT, PR195-KEY-GATES review repair (SEC-P195KG-2): as chat(), the figures this member may read (the
     // viewer projection); a turn with no member, none.
     const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
-    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    // MEM-PATTERNS-SIGHT (D-100, D-203): the behavioural patterns this turn's reader may read (turnPatternVisibility).
+    const patternVisible = await turnPatternVisibility({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     // Semantic memory search based on current message (optional enrichment:
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const semanticMemorySection = enrichedMessage
-      ? await this.buildSemanticMemorySection(businessId, enrichedMessage)
+      ? await this.buildSemanticMemorySection(businessId, enrichedMessage, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -2607,17 +2894,17 @@ ${triage.standingContext}`;
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
-    // Grade the message before spending anything on it. Zero model calls,
-    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
-    // on any failure it returns today's exact parameters.
-    const triage: TriageVerdict | null =
-      this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
+    // Grade the message before spending anything on it. Zero model calls: six
+    // regex classifiers plus in-memory reads, after one membership read for the
+    // viewer's module sight (MEM-SALIENCE-SIGHT). Never throws; on any failure
+    // it returns today's exact parameters.
+    const triage: TriageVerdict | null = await this.triageForViewer(businessId, message, Boolean(attachments?.length), userId);
 
     // The menu the model is shown, resolved once for this turn.
     const selectedTools = await this.selectToolsForRequest(
       businessId,
       crew,
-      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      `${message}\n${pageContext?.route ?? ''}`,
       envelope,
       userId,
     );
@@ -2686,7 +2973,9 @@ ${triage.standingContext}`;
       }
     }
 
-    messages.push({ role: 'user', content: enrichedMessage });
+    if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
+    messages.push({ role: 'user', content: message });
+    withUntrustedContentRuleWhereFenced(messages);
 
     // Publish the thalamic verdict before the answer starts. Nothing branches
     // on this — it exists so the tier distribution over real traffic can be
@@ -2819,7 +3108,7 @@ ${triage.standingContext}`;
           fullContent += chunk.content;
           // Yield cumulative content so clients can render with replace
           // semantics (raw provider deltas are fragments).
-          yield { type: 'content_delta', content: fullContent };
+          yield { type: 'content_delta', content: shown(fullContent) };
         }
 
         if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
@@ -2860,7 +3149,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          fullContent,
+          shown(fullContent),
           undefined,
           undefined,
           undefined,
@@ -2870,19 +3159,42 @@ ${triage.standingContext}`;
         return;
       }
 
+      // RR-TOOL-ARGS-MALFORMED-NEVER-RUN: as on the complete path, a call whose
+      // arguments do not parse to a JSON object is refused before governance,
+      // the boundary, confirmation or execution. The assistant turn the model
+      // sees next still lists every call it made, with its raw arguments, so the
+      // refusal's tool message has a tool_call to answer.
+      const slots: Array<FlowToolResult | null> = [];
+      const rawToolCalls: NonNullable<GatewayMessage['tool_calls']> = [];
       const toolCalls: FlowToolCall[] = [];
+      // Every call the model made, for the member's plan card: a refused call is
+      // announced with no arguments and the refusal as its description, so the
+      // card shows a step that then reads "Failed: not run ...".
+      const announcedCalls: FlowToolCall[] = [];
       for (const [, acc] of toolCallAccumulator) {
+        rawToolCalls.push({ id: acc.id, type: 'function' as const, function: { name: acc.name, arguments: acc.arguments } });
         const tool = getToolByName(acc.name);
-        toolCalls.push({
+        const parsed = parseToolArguments(acc.arguments);
+        if (!parsed.ok) {
+          this.logger.warn(`Flow stream chat: tool call ${acc.name} refused, arguments were not valid JSON`);
+          slots.push(this.refusedToolResult(acc.id, acc.name));
+          announcedCalls.push({ id: acc.id, name: acc.name, arguments: {}, riskLevel: tool?.riskLevel ?? 'low', description: toolArgumentsRefusal(acc.name) });
+          continue;
+        }
+        slots.push(null);
+        const call: FlowToolCall = {
           id: acc.id,
           name: acc.name,
-          arguments: JSON.parse(acc.arguments || '{}'),
+          arguments: parsed.args,
           riskLevel: tool?.riskLevel ?? 'low',
-          description: this.describeToolCall(acc.name, JSON.parse(acc.arguments || '{}')),
-        });
+          description: this.describeToolCall(acc.name, parsed.args),
+        };
+        toolCalls.push(call);
+        announcedCalls.push(call);
       }
+      const refusedOnly = slots.filter((r): r is FlowToolResult => r !== null);
 
-      yield { type: 'tool_calls', toolCalls };
+      yield { type: 'tool_calls', toolCalls: announcedCalls };
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
@@ -2903,7 +3215,8 @@ ${triage.standingContext}`;
 
       if (blocked.length > 0) {
         const blockMessage = `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`;
-        yield { type: 'content_delta', content: blockMessage };
+        if (refusedOnly.length) yield { type: 'tool_results', toolResults: refusedOnly };
+        yield { type: 'content_delta', content: shown(blockMessage) };
         yield* this.finalizeStreamSession(
           businessId,
           effectiveSessionId,
@@ -2911,9 +3224,9 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          blockMessage,
-          toolCalls,
-          undefined,
+          shown(blockMessage),
+          announcedCalls,
+          refusedOnly.length ? refusedOnly : undefined,
           undefined,
           usage,
           userId,
@@ -2941,7 +3254,8 @@ ${triage.standingContext}`;
         ).join('\n');
 
         const formalMessage = `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`;
-        yield { type: 'content_delta', content: formalMessage };
+        if (refusedOnly.length) yield { type: 'tool_results', toolResults: refusedOnly };
+        yield { type: 'content_delta', content: shown(formalMessage) };
         yield* this.finalizeStreamSession(
           businessId,
           effectiveSessionId,
@@ -2949,9 +3263,9 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          formalMessage,
-          toolCalls,
-          undefined,
+          shown(formalMessage),
+          announcedCalls,
+          refusedOnly.length ? refusedOnly : undefined,
           undefined,
           usage,
           userId,
@@ -2968,6 +3282,7 @@ ${triage.standingContext}`;
           sessionId: effectiveSessionId,
         });
 
+        if (refusedOnly.length) yield { type: 'tool_results', toolResults: refusedOnly };
         yield {
           type: 'confirmation_required',
           pendingConfirmations,
@@ -2980,9 +3295,9 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          fullContent,
-          toolCalls,
-          undefined,
+          shown(fullContent),
+          announcedCalls,
+          refusedOnly.length ? refusedOnly : undefined,
           pendingConfirmations,
           usage,
           userId,
@@ -2990,9 +3305,10 @@ ${triage.standingContext}`;
         return;
       }
 
-      const toolResults: FlowToolResult[] = await Promise.all(
+      const executedResults: FlowToolResult[] = await Promise.all(
         governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
       );
+      const toolResults = fillToolResultSlots(slots, executedResults);
 
       yield { type: 'tool_results', toolResults };
 
@@ -3006,11 +3322,7 @@ ${triage.standingContext}`;
         {
           role: 'assistant' as const,
           content: fullContent || null,
-          tool_calls: toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
-          })),
+          tool_calls: rawToolCalls,
         },
         ...toolResults.map((result) => ({
           role: 'tool' as const,
@@ -3024,7 +3336,7 @@ ${triage.standingContext}`;
         undefined,
         'flow_chat_stream',
         {
-          messages: followUpMessages,
+          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
           maxTokens: 500,
           temperature: 0.7,
         },
@@ -3036,7 +3348,13 @@ ${triage.standingContext}`;
           // Cumulative, continuing from the pre-tool text so the client
           // can keep rendering with replace semantics.
           const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
-          yield { type: 'content_delta', content: combined };
+          yield { type: 'content_delta', content: shown(combined) };
+        }
+        // RR-STREAM-ERROR-NO-EFFECTS review SEC-B: as the first stream, a
+        // follow-up that ended in an error is shown as one and not saved as the answer.
+        if (chunk.type === 'error') {
+          yield { type: 'error', error: chunk.error };
+          return;
         }
       }
 
@@ -3047,8 +3365,8 @@ ${triage.standingContext}`;
         message,
         enrichedMessage,
         attachments,
-        followUpContent,
-        toolCalls,
+        shown(followUpContent),
+        announcedCalls,
         toolResults,
         undefined,
         usage,
@@ -3058,6 +3376,28 @@ ${triage.standingContext}`;
       this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
       yield { type: 'error', error: (error as Error).message };
     }
+  }
+
+  /**
+   * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: the tool result of a call refused for
+   * malformed arguments. It is shaped like any failed FlowToolResult (so the
+   * turn's results, the saved session and the follow-up messages carry it), it
+   * names the tool only, and `notExecuted` says that nothing ran.
+   */
+  private refusedToolResult(toolCallId: string, toolName: string): FlowToolResult {
+    const tool = getToolByName(toolName);
+    return {
+      toolCallId,
+      name: toolName,
+      result: null,
+      changedEntities: [],
+      followOnSuggestions: [],
+      family: tool?.family ?? 'crud',
+      riskTier: tool?.riskTier ?? 1,
+      success: false,
+      error: toolArgumentsRefusal(toolName),
+      notExecuted: true,
+    };
   }
 
   /**
@@ -3954,9 +4294,10 @@ ${triage.standingContext}`;
     // that passes nothing arrives there undeclared and is refused.
     action?: KeyDispatchAction,
   ): Promise<any> {
-    // Bridged MCP tools route to the allowlisted remote server.
+    // Bridged MCP tools route to the allowlisted remote server, for this business only
+    // (RR-MCP-TENANT-BOUND): a server not bound to it refuses before connecting.
     if (isMcpToolName(toolName)) {
-      return this.getMcp().callTool(toolName, args);
+      return this.getMcp().callTool(businessId, toolName, args);
     }
     switch (toolName) {
       case 'update_business_blueprint': {
@@ -7524,6 +7865,14 @@ ${triage.standingContext}`;
         // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
         // VOID -> SENT transition. Refused before any mail.
         if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
+        // FU-PAY-LINK-STATUS-GATE (D-248): KEY does not email an invoice no pay link may be
+        // issued for. (When every link is revoked or expired, automatedInvoiceUrl answers null and
+        // the email goes without a button by design, V1-46b SEC-V46B-1/2; a transient conflict is
+        // FU-KEY-INVOICE-EMAIL-PAY-LINK's.)
+        // An invoice no pay link may be issued for (PENDING, FAILED, FULLY_CREDITED, any status
+        // added later) is refused here, before any mail, link or status change, as the operator's
+        // send-email refuses it. A DRAFT is admitted: this send issues it. PAID is left as it was.
+        if (invoice.status !== 'PAID') CommerceService.assertPayLinkStatus(invoice.status, true);
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
         // ACTUALLY SEND IT.
         //

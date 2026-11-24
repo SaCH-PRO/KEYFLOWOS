@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, NotFoundException, Param, Patch, Post, Query, Req, Res,
+  Body, Controller, Delete, ForbiddenException, Get, Header, HttpException, Inject, NotFoundException, Param, Patch, Post, Query, Req, Res,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -12,7 +12,7 @@ import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-sco
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { ReceivablesService } from './receivables.service';
-import { LedgerBalanceService } from './ledger-balance.service';
+import { LedgerBalanceService, isDateOnly, looksDateOnly } from './ledger-balance.service';
 import { FinanceOverviewService } from './finance-overview.service';
 import { FinanceAccountsService, type CreateAccountInput, type UpdateAccountInput } from './finance-accounts.service';
 import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './finance-coa.service';
@@ -244,10 +244,19 @@ export class FinanceController {
     @Query('pageSize') pageSize?: string,
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
+    // V1-66 (SWP-FIN-LEDGER, BUG-029): a date-only `to` (YYYY-MM-DD) goes to
+    // the service as the day it names, which covers the whole of it in the
+    // business's timezone; it was turned into midnight UTC here, so the
+    // service could not tell it from a timestamp and dropped the day. A
+    // date-only value that is not on the calendar (2026-02-31) is refused.
+    // Anything else is a timestamp, as before (`<=`).
+    const toDay = looksDateOnly(to) ? to : undefined;
+    if (toDay !== undefined && !isDateOnly(toDay)) throw new BadRequestException('Invalid to date');
     return this.ledgerBalance.getGeneralLedger(businessId, {
       accountId,
       from: from ? (() => { const d = new Date(from); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid from date'); return d; })() : undefined,
-      to: to ? (() => { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); return d; })() : undefined,
+      to: to && toDay === undefined ? (() => { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); return d; })() : undefined,
+      toDay,
       page: page ? (() => { const n = parseInt(page, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid page'); return n; })() : undefined,
       pageSize: pageSize ? (() => { const n = parseInt(pageSize, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid pageSize'); return n; })() : undefined,
     });
@@ -425,12 +434,23 @@ export class FinanceController {
     return { items };
   }
 
+  // FU-FINANCE-INTEL-DOORS (owner ruling D-258): these doors checked membership only, so a member with no revenue
+  // scope re-ran the money detectors and closed the business's money action items (and the revenue actions and command
+  // items mirrored from them). The scan needs revenue read, as the list and the insight it feeds do; resolve and
+  // dismiss need revenue write. ModuleScopeGuard refuses below that with 403 before the handler, so a refused call
+  // writes nothing; ensureAccess stays (D-46). An item id this business does not hold is 404 (the service throws a
+  // plain Error, which answered 500). The scheduler's scan (FinanceIntelligenceScheduler) runs with no member and is
+  // unchanged. test/finance-intel-doors.integration.test.ts proves it on a real database.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Post('intelligence/scan')
   async runIntelScan(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.intel.scan(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('intelligence/actions/:id/resolve')
   async resolveIntelAction(
     @Param('businessId') businessId: string,
@@ -439,9 +459,11 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.intel.resolve(businessId, id, req.user.id, body?.resolution ?? null);
+    return this.intelItemNotFoundAs404(() => this.intel.resolve(businessId, id, req.user.id, body?.resolution ?? null));
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('intelligence/actions/:id/dismiss')
   async dismissIntelAction(
     @Param('businessId') businessId: string,
@@ -449,7 +471,19 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.intel.dismiss(businessId, id, req.user.id);
+    return this.intelItemNotFoundAs404(() => this.intel.dismiss(businessId, id, req.user.id));
+  }
+
+  /** FinanceIntelligenceService.resolve and dismiss throw a plain Error for an id the business does not hold: a 404. */
+  private async intelItemNotFoundAs404<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (e) {
+      if (e instanceof Error && !(e instanceof HttpException) && e.message === 'Finance action item not found') {
+        throw new NotFoundException('Finance action item not found');
+      }
+      throw e;
+    }
   }
 
   @UseGuards(ModuleScopeGuard)

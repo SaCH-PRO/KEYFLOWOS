@@ -24,7 +24,8 @@
     "backfill:owner-memberships": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-owner-memberships.ts",
     "usage:v1-modules": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/v1-module-usage-count.ts",
     "cleanup:memory-copies": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/cleanup-stale-memory-copies.ts",
-    "backfill:phone-keys": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-phone-keys.ts"
+    "backfill:phone-keys": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-phone-keys.ts",
+    "encrypt:bank-tokens": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/encrypt-bank-connection-tokens.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

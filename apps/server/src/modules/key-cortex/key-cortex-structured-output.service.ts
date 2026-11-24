@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TaskCategory } from '../ai/model-gateway.service';
 import { CortexQuery } from './key-cortex.types';
+import { classifyActionIntent } from './action-intent';
 
 /**
  * KeyCortexStructuredOutputService
@@ -16,12 +17,7 @@ export class KeyCortexStructuredOutputService {
   classifyTaskCategory(query: CortexQuery): TaskCategory {
     const text = query.text.toLowerCase();
 
-    if (
-      query.enableActions &&
-      /\b(create|add|schedule|send|update|delete|run|execute|make|book|invoice|task|email|reminder|workflow)\b/.test(
-        text,
-      )
-    ) {
+    if (query.enableActions && classifyActionIntent(text).isAction) {
       return 'tool-calling';
     }
 

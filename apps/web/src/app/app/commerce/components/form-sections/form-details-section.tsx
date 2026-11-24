@@ -15,6 +15,8 @@ interface FormDetailsSectionProps {
   contactId: string;
   onContactChange: (id: string) => void;
   contacts: Contact[];
+  /** SWP-QUOTE-COMPOSER-CONTACT: said under the client field ("Choose a client ..."). */
+  contactError?: string | null;
   dateValue: string;
   onDateChange: (value: string) => void;
   dateLabel: string;
@@ -30,6 +32,7 @@ export function FormDetailsSection({
   contactId,
   onContactChange,
   contacts,
+  contactError = null,
   dateValue,
   onDateChange,
   dateLabel,
@@ -46,8 +49,9 @@ export function FormDetailsSection({
               value={contactId}
               onChange={onContactChange}
               contacts={contacts}
-              label={docType === "invoice" ? "Client (optional)" : "Client"}
-              required={docType === "quote"}
+              label="Client"
+              required
+              error={contactError}
             />
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground flex items-center gap-1">

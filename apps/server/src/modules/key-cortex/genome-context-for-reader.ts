@@ -11,30 +11,93 @@
  * Everything else (stage, readiness, the other modules' rows and scores) is unchanged. A revenue
  * reader gets the genome as loaded. The inputs are never changed (the context may be the cached one).
  */
-import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal, isMoneyLabel } from '../business-genome/key-genome/genome-finance-scope';
 import type { GenomeEnrichedContext, GenomeRecommendation } from './key-cortex-reasoning.types';
+
+/** The genome signals a genome context serves (the newest NEW signals). */
+export const GENOME_SIGNALS_SERVED = 20;
+/** D-235 round 8: the newest NEW signals read once, from which a reader without revenue read is projected. */
+export const GENOME_SIGNAL_POOL = 100;
+/** The ranked recommendations a genome context serves (the business's top ten). */
+export const GENOME_RECOMMENDATIONS_SERVED = 10;
+/** D-235 round 9: the ranked recommendations read once, from which a reader without revenue read is projected. */
+export const GENOME_RECOMMENDATION_POOL = 50;
+
+/**
+ * FU-KEY-GENOME-READS-RESIDUAL (D-235, D-233 "no inference via a score, grade or categorical indicator"): executive
+ * readiness is recomputed as the mean of the DNA dimensions the reader may see (it averages, and the bridge can set it
+ * to, the finance score); 0 when none is visible.
+ */
+export function readinessFromVisibleDna(visible: Record<string, unknown>): number {
+  const values = Object.values(visible).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  return values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
+}
+
+/** The autonomy map without its money modules (finance, revenue, sales ... by name). */
+export function autonomyMapForReader(map: Record<string, boolean> | undefined): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const [module, allowed] of Object.entries(map ?? {})) if (!isMoneyLabel(module)) out[module] = allowed;
+  return out;
+}
 
 export function genomeContextForReader(context: GenomeEnrichedContext, readsRevenue: boolean): GenomeEnrichedContext {
   if (readsRevenue) return context;
+  const dnaScores = dnaScoresForReader(context.dnaScores, false) as Record<string, number>;
+  // D-235: the genome stage is a categorical indicator of the whole genome, money dimensions included: withheld.
+  // Round 8: the signal pool is read to project the signals and is never handed on.
+  const { genomeStage: _stage, signalPool, recommendationPool, ...rest } = context;
   return {
-    ...context,
-    dnaScores: dnaScoresForReader(context.dnaScores, false) as Record<string, number>,
-    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type })),
-    recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
+    ...rest,
+    executiveReadiness: readinessFromVisibleDna(dnaScores),
+    autonomyMap: autonomyMapForReader(context.autonomyMap),
+    dnaScores,
+    // Round 8 (security MINOR-1): projected from the pool (the newest signals), then limited to what a context serves,
+    // so how many are handed does not tell how many of the newest twenty were finance or sales.
+    signals: (signalPool ?? context.signals ?? [])
+      // Codex P1 on #228 (+ review MAJOR-2): withhold signals classified as finance on the full stored row (field,
+      // evidence, proposedValue, sourceEntityType) as well as by labels and message text; strip the internal flag.
+      .filter((s) => s.isFinance !== true && !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type, message: s.message }))
+      .slice(0, GENOME_SIGNALS_SERVED)
+      .map(({ isFinance: _f, ...sig }) => sig),
+    // Round 9 (correctness MINOR-1): projected from the ranked pool the cached context carries, then limited, so the
+    // headroom costs no ranking per turn.
+    recommendations: genomeRecommendationsForReader(recommendationPool ?? context.recommendations ?? [], false).slice(0, GENOME_RECOMMENDATIONS_SERVED),
     opportunities: [],
   };
 }
 
 export function genomeRecommendationsForReader<T extends Pick<GenomeRecommendation, 'category'>>(rows: T[], readsRevenue: boolean): T[] {
   if (readsRevenue) return rows;
-  // The ranking score weighs the financial value (GenomeRecommendationRanker): withheld (security review MINOR-7).
+  // The ranking weighs the financial value (GenomeRecommendationRanker): its score, reason and the financial viability
+  // are withheld (security review MINOR-7; D-235), and the rows are re-ordered by their own impact and confidence, so the
+  // order itself is not the money-weighted rank.
+  const impactOf = (v: unknown) => (typeof v === 'number' ? v : v === 'high' ? 3 : v === 'medium' ? 2 : v === 'low' ? 1 : 0);
   return rows
     .filter((r) => !isFinanceRecommendation({ domain: r.category, title: (r as { title?: string }).title }))
     .map((r) => {
-      if (!('genomeScore' in r)) return r;
-      const { genomeScore: _withheld, ...rest } = r as T & { genomeScore?: number };
-      return rest as T;
-    });
+      const { genomeScore: _s, rankScore: _r, rankReason: _rr, financialViability: _f, ...rest } = r as T & Record<string, unknown>;
+      return rest as unknown as T;
+    })
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const x = a.r as unknown as { impact?: unknown; confidence?: unknown };
+      const y = b.r as unknown as { impact?: unknown; confidence?: unknown };
+      return impactOf(y.impact) - impactOf(x.impact) || (Number(y.confidence) || 0) - (Number(x.confidence) || 0) || a.i - b.i;
+    })
+    .map(({ r }) => r);
+}
+
+/**
+ * FU-KEY-GENOME-READS-RESIDUAL round 4 (D-235; security MINOR-1): ranked recommendations projected for the reader. A
+ * reader without revenue read (or no reader: fails closed) is read with headroom before the limit is taken, so how many of
+ * the business's top rows are finance or sales cannot be read from how many the reader is handed.
+ */
+export async function rankedRecommendationsForReader<T extends Pick<GenomeRecommendation, 'category'>>(
+  read: (limit: number) => Promise<T[]>,
+  readsRevenue = false,
+  limit = 5,
+): Promise<T[]> {
+  return genomeRecommendationsForReader(await read(readsRevenue ? limit : 50), readsRevenue).slice(0, limit);
 }
 
 /** Proactive suggestions carry the recommendation's domain, or the signal's module, as their category. */

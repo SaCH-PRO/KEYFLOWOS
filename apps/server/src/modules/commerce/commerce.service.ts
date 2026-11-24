@@ -4774,6 +4774,9 @@ export class CommerceService {
     return { invoiceId, entries };
   }
 
+  /** The statuses a reminder may be sent for (fail closed: every other status is refused). */
+  private static readonly REMINDABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+
   /**
    * Sends a payment reminder for the given invoice via Gmail (if connected)
    * and persists the canonical `invoice.payment_reminder_sent` ContactEvent
@@ -4802,8 +4805,15 @@ export class CommerceService {
       include: { contact: true, items: true, payments: true, business: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
-      throw new BadRequestException(`Cannot send reminder for ${invoice.status} invoice`);
+    // FU-SEND-REMINDER-SERVER-GATE: only an invoice the customer has been sent and still owes is
+    // reminded (the web's canRemind set; D-256 keeps reminder lists apart from owed figures). Any
+    // other status, including one added later, is refused here, before a pay link is looked up,
+    // rotated or minted, an email is sent, or an event or timeline entry is written. The answer
+    // names the status only, never the invoice's contents.
+    if (!CommerceService.REMINDABLE_INVOICE_STATUSES.has(invoice.status)) {
+      throw new ConflictException(
+        `A reminder can only be sent for a SENT, OVERDUE or PARTIALLY_PAID invoice; this invoice is ${invoice.status}`,
+      );
     }
 
     // Always provide a pay CTA in the reminder. Reuse the active link if one
@@ -4820,7 +4830,7 @@ export class CommerceService {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
       } catch (err: any) {
-        // Reminders are only sent for non-PAID/non-VOID invoices, so the
+        // Reminders are only sent for SENT/OVERDUE/PARTIALLY_PAID invoices, so the
         // "paid or voided" refusal shouldn't normally fire — but if a
         // payment landed between the status check above and link creation
         // we degrade to a CTA-less reminder rather than 500. Anything else
@@ -5639,7 +5649,9 @@ export class CommerceService {
    * invoice's live pay link, minted when it has none (createPaymentLink). A
    * PAID or VOID invoice cannot get a new link, so the most recent one it was
    * given is handed out again (findAnyPaymentLink), or null when it never had
-   * one. Any other refusal (unknown invoice, another tenant's) is thrown.
+   * one. Any other refusal (unknown invoice, another tenant's, and since
+   * FU-PAY-LINK-STATUS-GATE the 409 for a status no pay link may be issued
+   * for: assertPayLinkStatus) is thrown.
    *
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the single
    * place a customer-facing invoice URL is built. The operator's invoice
@@ -5654,7 +5666,15 @@ export class CommerceService {
    */
   async publicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
     try {
-      const link = await this.createPaymentLink(invoiceId, businessId);
+      // FU-PAY-LINK-STATUS-GATE: a DRAFT is admitted (issuing) for the callers
+      // that hand this link out as the invoice is issued (send-email, KEY's
+      // commerce_send_invoice, the public booking create). The others (resend
+      // receipt, the automated overdue, due-soon, payment-failed and recovery
+      // emails) reach it as before, so one of them run for a DRAFT still gets
+      // a link, as on main (not narrowed here). Any status the token pay page
+      // does not take money for (PENDING, FAILED, FULLY_CREDITED) is a 409
+      // thrown here.
+      const link = await this.issuePaymentLink(invoiceId, businessId, undefined, true);
       return `${appUrl()}/public/invoice/${link.token}`;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -5726,6 +5746,12 @@ export class CommerceService {
       select: { status: true },
     });
     const mintable = !!invoice && invoice.status !== 'PAID' && invoice.status !== 'VOID';
+    // FU-PAY-LINK-STATUS-GATE: an invoice in a status the token pay page does
+    // not take money for (PENDING, FAILED, FULLY_CREDITED, any status added
+    // later) is refused before a link row is
+    // read, written or rotated and before the message is sent. A DRAFT is
+    // admitted: this send issues it (the controller then moves it to SENT).
+    if (mintable) CommerceService.assertPayLinkStatus(invoice.status, true);
     const live = mintable
       ? await this.prisma.client.paymentLink.findFirst({
           where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
@@ -5848,6 +5874,26 @@ export class CommerceService {
    * that token is a pre-V1-48 cuid, which is rotated (reissueLink, ST-V48-1).
    */
   async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {
+    return this.issuePaymentLink(invoiceId, businessId, expiresInDays, false);
+  }
+
+  /**
+   * FU-PAY-LINK-STATUS-GATE (D-256, D-248): a pay link is minted, or a live one
+   * handed out again (and rotated or given a new expiry), only for an invoice
+   * in INTENT_PAYABLE_STATUSES, the statuses the token pay page shows and takes
+   * money for. This is the share list, not the owed set: D-256 counts PENDING
+   * as owed in every owed figure, and keeps share lists apart, so a PENDING
+   * invoice gets no link here (the pay page would not open it either). `issuing` also admits a DRAFT, for the callers
+   * that hand the link to the customer as the invoice is issued
+   * (publicInvoiceUrl: the operator's send-email, which then moves it to SENT,
+   * KEY's commerce_send_invoice, the public booking create). POST
+   * .../payment-link is not one of them. Every other status, including one
+   * added later, is refused here before a link row is read, written or
+   * rotated; the 409 names the status only. PAID and VOID keep their own
+   * refusal and text, which three callers match on (R0-D3). Another tenant's
+   * id is the 404 of an unknown one, whatever its status.
+   */
+  private async issuePaymentLink(invoiceId: string, businessId: string, expiresInDays: number | undefined, issuing: boolean) {
     const expiresAt = CommerceService.paymentLinkExpiry(expiresInDays);
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
@@ -5858,6 +5904,7 @@ export class CommerceService {
       // swallow this refusal match on the message text, which is unchanged.
       throw new ConflictException('Cannot create payment link for a paid or voided invoice');
     }
+    CommerceService.assertPayLinkStatus(invoice.status, issuing);
 
     const existing = await this.prisma.client.paymentLink.findFirst({
       where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
@@ -6029,6 +6076,23 @@ export class CommerceService {
    * not shown, so it answers the 404.
    */
   private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
+
+  /**
+   * FU-PAY-LINK-STATUS-GATE: the pay-link gate (issuePaymentLink,
+   * sendWithPublicInvoiceUrl). A link may be issued for the statuses above, and,
+   * when `issuing` (the invoice is handed to the customer as it is issued), a
+   * DRAFT. PAID and VOID never reach this gate: issuePaymentLink refuses them
+   * first with their own text, sendWithPublicInvoiceUrl hands them to
+   * publicInvoiceUrl (the most recent link, or none), and KEY's send passes
+   * PAID over it as before. Public for KEY's commerce_send_invoice (flow-orchestrator),
+   * which refuses through it before its email, as send-email does (D-248).
+   */
+  static assertPayLinkStatus(status: string, issuing: boolean): void {
+    if (CommerceService.INTENT_PAYABLE_STATUSES.has(status) || (issuing && status === 'DRAFT')) return;
+    throw new ConflictException(
+      `A pay link can only be issued for an invoice in ${[...CommerceService.INTENT_PAYABLE_STATUSES].join(', ')}; this invoice is ${status}`,
+    );
+  }
 
   /**
    * A customer's anonymous "I will pay by <method>" from the public pay page.

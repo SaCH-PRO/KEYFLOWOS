@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "2b2d32861c50a47667b8229d00c1005dbfaabfe0",
-  "main_commit_date": "2026-11-22T19:26:53+00:00",
+  "main_sha": "173481cdefd518199556c53bc1c6d1af4cc4f9e2",
+  "main_commit_date": "2026-11-24T11:13:46+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 210,
-  "points": 350.5,
+  "packets": 366,
+  "points": 536.5,
   "by_status": {
    "done": {
-    "packets": 62,
-    "points": 93.5,
-    "pct_by_points": 26.7
+    "packets": 99,
+    "points": 146.5,
+    "pct_by_points": 27.3
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 148,
-    "points": 257,
-    "pct_by_points": 73.3
+    "packets": 267,
+    "points": 390,
+    "pct_by_points": 72.7
    }
   },
   "by_step": {
@@ -66,48 +66,68 @@
     "total": 7
    },
    "3": {
-    "done": 44,
+    "done": 61,
     "in-progress": 0,
-    "todo": 26,
-    "total": 70
+    "todo": 88,
+    "total": 149
    },
    "4": {
-    "done": 1,
+    "done": 7,
     "in-progress": 0,
-    "todo": 38,
-    "total": 39
+    "todo": 46,
+    "total": 53
    },
    "5": {
-    "done": 0,
+    "done": 12,
     "in-progress": 0,
-    "todo": 27,
-    "total": 27
+    "todo": 59,
+    "total": 71
    },
    "6": {
-    "done": 1,
+    "done": 3,
     "in-progress": 0,
-    "todo": 30,
+    "todo": 28,
     "total": 31
    },
    "7": {
     "done": 0,
     "in-progress": 0,
-    "todo": 16,
-    "total": 16
+    "todo": 34,
+    "total": 34
    },
    "8": {
     "done": 0,
     "in-progress": 0,
-    "todo": 4,
-    "total": 4
+    "todo": 5,
+    "total": 5
+   }
+  },
+  "by_track": {
+   "none": {
+    "done": 87,
+    "in-progress": 0,
+    "todo": 0,
+    "total": 87
+   },
+   "launch": {
+    "done": 12,
+    "in-progress": 0,
+    "todo": 215,
+    "total": 227
+   },
+   "follow-on": {
+    "done": 0,
+    "in-progress": 0,
+    "todo": 52,
+    "total": 52
    }
   },
   "by_derivation": {
-   "prior-status-file": 156,
+   "prior-status-file": 144,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 8,
-   "compacted-commit": 7,
-   "no-evidence": 11
+   "code-commit-subject": 9,
+   "compacted-commit": 43,
+   "no-evidence": 142
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -117,17 +137,14 @@
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
    "FU-KEY-MEMORY-MONEY-SIGHT",
-   "FU-WA-ESCAPE-RACE"
+   "FU-WA-ESCAPE-RACE",
+   "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 30
+  "todo_with_dependencies_met": 123,
+  "todo_with_dependencies_met_launch": 100
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "NAV-A1",
-   "MOUNT-QUOTES",
-   "SWP-INV-MATH",
-   "SWP-INV-FORM-UX",
-   "SWP-QUOTE-COMPOSER-CONTACT",
    "SWP-CONTACT-QUICKADD",
    "SWP-INV-LIST",
    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
@@ -151,19 +168,15 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 51,
+   "weight": 45,
    "chain": [
-    "NAV-A1",
-    "MOUNT-QUOTES",
-    "SWP-INV-MATH",
-    "SWP-INV-FORM-UX",
-    "SWP-QUOTE-COMPOSER-CONTACT",
-    "SWP-CONTACT-QUICKADD",
-    "SWP-INV-LIST",
-    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
-    "SWP-REMOVED-MEMBER-NOTICE",
-    "SWP-INV-DETAIL",
-    "SWP-INV-REFUND-UI",
+    "W11-KEY-TRANSFER-INTEGER",
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "W11-OWNER-HELPER-REST",
+    "TOF-KEY-SELF-MODEL",
+    "TOF-KNOWLEDGE-UPLOAD",
+    "KEY-TOOL-ALLOWLIST",
+    "DECIMALS-SERVER",
     "CLAIM-LOOP",
     "READY-TO-SEND",
     "TODAY-AGGREGATE",
@@ -183,13 +196,14 @@
  },
  "ready": [
   {
-   "id": "NAV-A1",
-   "step": 3,
-   "priority": "P0",
-   "size": "L",
+   "id": "SWP-CONTACT-QUICKADD",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
    "lane": "web",
+   "track": "launch",
    "on_critical_path": true,
-   "unblocks": 81
+   "unblocks": 49
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -197,8 +211,9 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 51
+   "unblocks": 58
   },
   {
    "id": "SWP-STORE-LISTING-SERVER",
@@ -206,26 +221,39 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 49
+   "unblocks": 51
   },
   {
-   "id": "SWP-INV-MONEY-TOTALS",
+   "id": "MIGRATION-SET-A",
    "step": 4,
    "priority": "P0",
    "size": "M",
-   "lane": "both",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 48
+   "unblocks": 44
   },
   {
-   "id": "W11-RUNWAY-LEDGER-CASH",
-   "step": 5,
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 33
+  },
+  {
+   "id": "NAV-A3",
+   "step": 4,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
+   "lane": "web",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 26
+   "unblocks": 33
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -233,8 +261,29 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 24
+   "unblocks": 28
+  },
+  {
+   "id": "W11-RUNWAY-BURN-CURRENCY",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 26
+  },
+  {
+   "id": "SWP-CONTACT-DETAIL",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 22
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -242,15 +291,27 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
-   "id": "SWP-FIN-LEDGER",
+   "id": "NAV-A2",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 14
+  },
+  {
+   "id": "SWP-CENSUS-OPEN-WRITES",
    "step": 6,
    "priority": "P1",
-   "size": "M",
-   "lane": "both",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 11
   },
@@ -260,8 +321,9 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 10
   },
   {
    "id": "SWP-CENSUS-GENOME",
@@ -269,17 +331,9 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 9
-  },
-  {
-   "id": "SWP-COA-UNIQUE-CODE",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 10
   },
   {
    "id": "SWP-CENSUS-KEY-B",
@@ -287,6 +341,17 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "MEM-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
   },
@@ -296,8 +361,29 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 8
+  },
+  {
+   "id": "RR-OWNER-RULINGS-RECORD",
+   "step": 3,
+   "priority": "P2",
+   "size": "XS",
+   "lane": "docs",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
+  },
+  {
+   "id": "RR-TOOL-EFFECT-CLASS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 6
   },
   {
    "id": "S0-SEC-LANE-DEPLOY",
@@ -305,8 +391,39 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 4
+   "unblocks": 5
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
   },
   {
    "id": "S0-DEPENDABOT-FREEZE",
@@ -314,35 +431,169 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 4
+   "unblocks": 5
   },
   {
-   "id": "FU-KEY-GENOME-READS-RESIDUAL",
+   "id": "FU-PROPOSAL-MONEY-TAG",
    "step": 3,
-   "priority": "P0",
-   "size": "M",
+   "priority": "P1",
+   "size": "L",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-ADMIN-LOGOUT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-UNKNOWN-COST-NOT-ZERO",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-ANTHROPIC-TOOL-PARITY",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-DB-CRYPTO-KEY-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 1
   },
   {
-   "id": "FU-PROPOSAL-REVENUE-SIGHT",
+   "id": "RR-MODEL-LIFECYCLE-GUARD",
    "step": 3,
-   "priority": "P0",
-   "size": "M",
+   "priority": "P1",
+   "size": "S",
    "lane": "server",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 1
   },
   {
-   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
+   "id": "FU-ARCH-MAP-REFRESH",
    "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 1
+  },
+  {
+   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-CONNECTOR-STACK-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-SECURITY-SIGNAL-COUNTERS",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-STATUS-PATCH-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -350,6 +601,37 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -359,6 +641,27 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACTID-WRITER-VALIDATION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONVERSION-REPS-REVENUE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -368,6 +671,37 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-DOC-FETCH-BODY-CAP",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-HEALTH-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -377,6 +711,27 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-OVERDUE-SENT-ONLY",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -386,6 +741,67 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PRESENCE-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TIMELINE-CALLERS-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNTRUSTED-INBOUND-FENCE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-EXPIRED-NOT-SERVED",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-WEBHOOK-INGRESS-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -395,6 +811,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -404,6 +821,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -413,15 +831,107 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
   {
-   "id": "FU-ARCH-MAP-REFRESH",
-   "step": 3,
+   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
+   "step": 5,
    "priority": "P2",
    "size": "S",
-   "lane": "docs",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CASE-STUDY-REVENUE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CASH-LABEL-SANITISER",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-COA-SEEDER-AND-INPUT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACTS-AUDIT-FLAKE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-LEDGER-ZONED-FROM",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-NMS-SERVER-METADATA",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -431,6 +941,47 @@
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-REMINDER-HONESTY",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-RESEARCH-CORPUS-YAML",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TEST-FLAKES-2026-11-23",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -440,6 +991,187 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION-2",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-CONSOLIDATION-CHECKPOINT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-TEMPORAL-EMBED-DEDUP",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "OPS-CONSOLE-READONLY",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUSINESS-EVENT-REDACT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CORTEX-TYPED-RESULT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GATE-LEDGER-MONOTONIC",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HEALTH-TIGHTENS-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-JOB-TENANT-CONTEXT",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-SAFETY-POLICY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-LLM-ADMISSION-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-RESPONSE-FORMAT-HONEST",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-RETENTION-EXPIRED-EXPORTS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -449,6 +1181,1249 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-AI-CONTRACT-ZOD-FIRST",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-APPROVAL-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUNDLE-PROOF-PROFILE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUNDLE-RULING-CONFLICTS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CRON-OCCURRENCE-LOCK",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-DEAD-EVENT-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-DIRECT-PROVIDER-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-ERROR-CAPSULE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-FORWARDREF-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GATE-LEDGER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GOAL-WRITER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOOK-PACKET-SCOPE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOTSPOT-SCANNER",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-INDEX-COVERAGE-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-INTEGRITY-WATCH",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-CORTEX-SIZE-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-PROMPT-CANARY",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SLO-AVAILABILITY-LEDGER",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-REVIEW-CYCLES",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-STALL-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-UNUSED-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-WEB-CLIENT-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  }
+ ],
+ "ready_launch": [
+  {
+   "id": "SWP-CONTACT-QUICKADD",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": true,
+   "unblocks": 49
+  },
+  {
+   "id": "W11-KEY-TRANSFER-INTEGER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 58
+  },
+  {
+   "id": "SWP-STORE-LISTING-SERVER",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 51
+  },
+  {
+   "id": "MIGRATION-SET-A",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 44
+  },
+  {
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 33
+  },
+  {
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 33
+  },
+  {
+   "id": "W11-GENOME-RECS-DOMAIN",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 28
+  },
+  {
+   "id": "W11-RUNWAY-BURN-CURRENCY",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 26
+  },
+  {
+   "id": "SWP-CONTACT-DETAIL",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 22
+  },
+  {
+   "id": "W11-SHIP-STOCK-DECREMENT",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 22
+  },
+  {
+   "id": "NAV-A2",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 14
+  },
+  {
+   "id": "SWP-CENSUS-OPEN-WRITES",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 11
+  },
+  {
+   "id": "SWEEP-RERUN-S2",
+   "step": 2,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "SWP-CENSUS-GENOME",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "SWP-CENSUS-KEY-B",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "MEM-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 8
+  },
+  {
+   "id": "TOF-STALE-GATES-PKT",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 8
+  },
+  {
+   "id": "RR-OWNER-RULINGS-RECORD",
+   "step": 3,
+   "priority": "P2",
+   "size": "XS",
+   "lane": "docs",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
+   "id": "RR-TOOL-EFFECT-CLASS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 6
+  },
+  {
+   "id": "S0-SEC-LANE-DEPLOY",
+   "step": 0,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "S0-DEPENDABOT-FREEZE",
+   "step": 0,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "FU-PROPOSAL-MONEY-TAG",
+   "step": 3,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-ADMIN-LOGOUT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-UNKNOWN-COST-NOT-ZERO",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-ANTHROPIC-TOOL-PARITY",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-DB-CRYPTO-KEY-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "FU-ARCH-MAP-REFRESH",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-CONNECTOR-STACK-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-SECURITY-SIGNAL-COUNTERS",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-STATUS-PATCH-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "FU-GENOME-SURFACES-REVENUE",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACT-AUDIT-RESIDUAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACTID-WRITER-VALIDATION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONVERSION-REPS-REVENUE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-DOC-FETCH-BODY-CAP",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-HEALTH-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-OVERDUE-SENT-ONLY",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-MERGE-CONTACTS-UNIQUE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PRESENCE-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TIMELINE-CALLERS-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNTRUSTED-INBOUND-FENCE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-EXPIRED-NOT-SERVED",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-WEBHOOK-INGRESS-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W1F-ORDER-TRANSITIONS",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W1F-STORE-PAYPAL",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W1F-STORE-STRIPE-R0",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CASE-STUDY-REVENUE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CASH-LABEL-SANITISER",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-COA-SEEDER-AND-INPUT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACTS-AUDIT-FLAKE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-LEDGER-ZONED-FROM",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-NMS-SERVER-METADATA",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-OVERLAY-LAYER-TABLE",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-REMINDER-HONESTY",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-RESEARCH-CORPUS-YAML",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TEST-FLAKES-2026-11-23",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "OPS-CONSOLE-READONLY",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUSINESS-EVENT-REDACT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CORTEX-TYPED-RESULT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GATE-LEDGER-MONOTONIC",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-JOB-TENANT-CONTEXT",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-SAFETY-POLICY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-RETENTION-EXPIRED-EXPORTS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-APPROVAL-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CRON-OCCURRENCE-LOCK",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-DIRECT-PROVIDER-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GATE-LEDGER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GOAL-WRITER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOOK-PACKET-SCOPE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-INDEX-COVERAGE-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SLO-AVAILABILITY-LEDGER",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-STALL-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-UNUSED-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   }
@@ -460,6 +2435,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -474,6 +2450,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -488,6 +2465,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -502,6 +2480,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "docs",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -518,6 +2497,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -534,6 +2514,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -550,6 +2531,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -566,6 +2548,7 @@
    "priority": "P3",
    "size": "M",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -582,6 +2565,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -598,6 +2582,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -614,6 +2599,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -630,6 +2616,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -646,6 +2633,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -662,6 +2650,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -678,6 +2667,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -694,6 +2684,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -710,6 +2701,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "gate",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -726,6 +2718,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "gate",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -742,6 +2735,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -759,6 +2753,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -778,6 +2773,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -794,6 +2790,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -810,6 +2807,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -828,6 +2826,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -847,6 +2846,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -866,6 +2866,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -882,6 +2883,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -898,6 +2900,7 @@
    "priority": "P2",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -916,6 +2919,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -932,6 +2936,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -948,6 +2953,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -967,6 +2973,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -983,6 +2990,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -999,6 +3007,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1015,6 +3024,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1031,6 +3041,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1047,6 +3058,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "both",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -1065,15 +3077,18 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "53b0450a"
+   ],
    "depends_on": [
     "SWP-SEC-AUDIT-TRUTH"
    ],
    "title": "Chart of Accounts refuses a duplicate account code",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-PROVIDER-OUTAGE-503",
@@ -1081,6 +3096,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1097,6 +3113,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1113,6 +3130,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1129,6 +3147,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1145,6 +3164,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1162,6 +3182,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1179,6 +3200,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1196,6 +3218,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1212,6 +3235,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1228,6 +3252,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1244,6 +3269,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "both",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -1262,6 +3288,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -1281,16 +3308,19 @@
    "priority": "P0",
    "size": "L",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "49f74ae2"
+   ],
    "depends_on": [
     "BIZ-SETTINGS-WEB",
     "MARKETING-REDIRECT-GATE"
    ],
    "title": "Hub navigation: seven hubs by business type, bottom bar, disclosure modes removed, plain labels, the redirect table, 'Customers' heading",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "WA-HELPER",
@@ -1298,6 +3328,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -1315,6 +3346,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1324,7 +3356,7 @@
     "SWP-LAYERS"
    ],
    "title": "KEY chat: Send and Deep think send; the drawer loads its session list once; onboarding opens at the manual form",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -1332,6 +3364,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1349,6 +3382,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1365,6 +3399,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1416,33 +3451,39 @@
    "priority": "P0",
    "size": "L",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ce4e35a5"
+   ],
    "depends_on": [
     "NAV-A1",
     "WA-HELPER",
     "FAILURE-KIT"
    ],
    "title": "Sales > Quotes mounts quotes-panel.tsx: edit a draft, WhatsApp and Copy link, Send carries the link, Convert on accepted quotes keeps notes, bulk bar never deletes",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-INV-MATH",
    "step": 4,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "799fb9b1"
+   ],
    "depends_on": [
     "MOUNT-QUOTES"
    ],
    "title": "Invoice and quote forms: the preview equals the saved total under the server's tax order; clearing the tax rate removes the tax",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-INV-FORM-UX",
@@ -1450,15 +3491,18 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "52b0383a"
+   ],
    "depends_on": [
     "SWP-INV-MATH"
    ],
    "title": "Invoice forms: line totals visible, client required with a plain message, not-found edit page, no dead template picker",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-QUOTE-COMPOSER-CONTACT",
@@ -1466,16 +3510,19 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "7bd2f445"
+   ],
    "depends_on": [
     "SWP-INV-FORM-UX",
     "FAILURE-KIT"
    ],
    "title": "Quote composer: missing client is said; a quick-added contact shows as chosen; a duplicate phone is explained",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-CONTACT-QUICKADD",
@@ -1483,6 +3530,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1493,14 +3541,15 @@
     "FIX-CONTACT-PARAMS"
    ],
    "title": "Contacts quick add: refusals are shown and the form is kept; Company is sent; no invented 'User' last name",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-INV-LIST",
    "step": 4,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1518,6 +3567,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1534,6 +3584,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1550,6 +3601,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1567,6 +3619,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1583,6 +3636,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1600,6 +3654,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1609,7 +3664,7 @@
     "FAILURE-KIT"
    ],
    "title": "Real index pages for Money and Settings, with Settings > Getting paid",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -1617,6 +3672,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1634,6 +3690,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1650,6 +3707,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1666,6 +3724,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1682,6 +3741,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1690,7 +3750,7 @@
     "NAV-A1"
    ],
    "title": "Breadcrumbs from the route registry, My account, store tab deep links and the Launch Pad storefront tile",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "CATALOG-1",
@@ -1698,6 +3758,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1715,6 +3776,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1733,6 +3795,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1749,6 +3812,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1766,15 +3830,18 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "f87f4716"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "Money totals count deposits and part payments: commerce stats, Executive Summary outstanding, Collections health",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-INV-PUBLIC-LINK",
@@ -1782,15 +3849,18 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "a24a0abc"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Invoice links: no customer link for a draft; a voided link says voided; the customer page shows tax, discount and the currency code",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "MIGRATION-SET-A",
@@ -1798,6 +3868,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1807,7 +3878,7 @@
     "S1-RULINGS-RECORD"
    ],
    "title": "The v1 hold migration set, authored once and proven on a fresh database: part quantities, Business VAT number, tier pricing tables",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "DECIMALS-SERVER",
@@ -1815,6 +3886,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1834,6 +3906,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -1852,6 +3925,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1868,6 +3942,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1881,9 +3956,10 @@
   {
    "id": "SWP-SERVICE-DEPOSIT",
    "step": 4,
-   "priority": "P2",
+   "priority": "P0",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1900,6 +3976,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1916,6 +3993,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1932,6 +4010,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1948,6 +4027,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1965,6 +4045,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1979,6 +4060,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -1993,6 +4075,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2017,8 +4100,6 @@
     "EXPENSES-HUB-3",
     "SEND-TO-ACCOUNTANT",
     "CATALOG-1",
-    "SWP-STORE-FRAME",
-    "SWP-STORE-OPS-WEB",
     "SWP-INV-MONEY-TOTALS",
     "SWP-INV-PUBLIC-LINK",
     "DECIMALS-SERVER",
@@ -2026,7 +4107,6 @@
     "SWP-STORE-LISTING-SERVER",
     "SWP-STORE-OVERSELL",
     "SWP-SERVICE-DEPOSIT",
-    "SALES-ORDERS-TAB",
     "NAV-A2",
     "NAV-A3",
     "SWP-CENSUS-KEY-A",
@@ -2044,15 +4124,18 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "95b0fda9"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "FIN_CASHFLOW_RISK and the 'Protect cash runway' money move read the ledger cash position in the business currency and name other-currency cash (D-107)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-CASH-READERS-LEDGER",
@@ -2060,15 +4143,18 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6778bfb9"
+   ],
    "depends_on": [
     "W11-RUNWAY-LEDGER-CASH"
    ],
    "title": "Cashflow forecast and health score read the ledger cash position, not the currentBalance snapshot",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -2076,6 +4162,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2084,7 +4171,7 @@
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "Runway burn counts business-currency expenses; money-moves burn window stops at now",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "TOF-PAYROLL-DISCARD",
@@ -2092,6 +4179,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2108,6 +4196,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2126,6 +4215,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2142,6 +4232,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2161,6 +4252,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2178,6 +4270,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2194,9 +4287,10 @@
   {
    "id": "READY-TO-SEND",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2214,6 +4308,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2230,6 +4325,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2246,6 +4342,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2266,6 +4363,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2286,6 +4384,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2296,7 +4395,7 @@
     "NAV-A1"
    ],
    "title": "Contact pages: labels instead of codes, an honest delete dialog, plain timeline events; side-panel tabs retired",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -2304,6 +4403,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2320,6 +4420,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2338,6 +4439,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2354,6 +4456,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2371,6 +4474,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2388,6 +4492,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2404,6 +4509,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2420,6 +4526,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2436,6 +4543,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2455,6 +4563,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2478,9 +4587,7 @@
     "SWP-TEAM-WEB",
     "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
-    "W11-WEB-INVENTORY-REFUSALS",
     "SWP-CALENDAR-TRUTH",
-    "W11-WEB-ACTION-DETAIL-WRAP",
     "SWP-SHELL-MINOR",
     "BIZ-SWITCHER",
     "TOF-PAYROLL-DISCARD",
@@ -2492,19 +4599,22 @@
   {
    "id": "SWP-QUOTE-PUBLIC-PAGE",
    "step": 6,
-   "priority": "P1",
+   "priority": "P0",
    "size": "S",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "cf29e249"
+   ],
    "depends_on": [
     "SWP-INV-PUBLIC-LINK",
     "MOUNT-QUOTES"
    ],
    "title": "Public quote page shows the business, subtotal, tax and discount",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "VAT-BASICS",
@@ -2512,6 +4622,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2532,6 +4643,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2551,6 +4663,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2568,6 +4681,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2584,12 +4698,12 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "SWP-STORE-PUBLIC-POLISH",
     "TODAY-4BLOCK"
    ],
    "title": "Remove the developer harness and fake-data pages customers and crawlers can reach, and the KF Store drawer",
@@ -2601,6 +4715,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -2619,6 +4734,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2635,6 +4751,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2652,6 +4769,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2668,6 +4786,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2685,6 +4804,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2701,6 +4821,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2718,6 +4839,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2735,6 +4857,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2753,6 +4876,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2771,6 +4895,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2787,15 +4912,18 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "3d3d91ec"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "General Ledger: the end date is inclusive; the page sends pageSize, formats dates and money, picks accounts by name; Accounts opens its tab",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-OPEN-WRITES",
@@ -2803,6 +4931,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2811,7 +4940,7 @@
     "SWP-FIN-LEDGER"
    ],
    "title": "Chart-of-accounts writes under Money write (D-146, coawrite) and the census batch plan",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-CALLS-LIST-PAGING",
@@ -2819,6 +4948,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2835,6 +4965,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2851,6 +4982,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2867,6 +4999,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2883,6 +5016,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2901,6 +5035,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2920,6 +5055,7 @@
    "priority": "P0",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2936,6 +5072,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2955,6 +5092,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2971,6 +5109,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -2990,6 +5129,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3001,25 +5141,19 @@
     "VAT-BASICS",
     "CUSTOMER-PAGE-HONESTY",
     "W11-STOREFRONT-PAYPAL-LIST",
-    "SWP-STORE-PUBLIC-POLISH",
     "HARNESS-REMOVAL",
     "W11-INV-SET-MOVEMENT",
     "W11-SHIP-STOCK-DECREMENT",
     "W11-STOREFRONT-ROUTE-DECREMENTED",
-    "W11-STOREFRONT-FULFIL-STEPS",
     "W11-PLANTED-STOCK-CENSUS",
     "SWP-INV-SKU-COUNT",
-    "QUICK-SALE-SERVER",
-    "QUICK-SALE-WEB",
     "PLAN-TABLE",
     "SWP-PUBLIC-SITE-MINOR",
     "SWP-FIN-LEDGER",
     "SWP-CENSUS-OPEN-WRITES",
     "SWP-READ-SCOPE-CENSUS",
-    "W11-CALLS-LIST-PAGING",
     "W11-QUERY-DTO-COERCION",
     "SWP-QUERY-CORS-HEADERS",
-    "W11-ORDER-METADATA-WRITERS",
     "TOF-TIER-PRICING-WEB",
     "SWP-CENSUS-V1-A",
     "SWP-CENSUS-V1-B",
@@ -3035,6 +5169,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3054,6 +5189,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3071,6 +5207,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3092,6 +5229,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3108,6 +5246,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3126,6 +5265,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3146,6 +5286,7 @@
    "priority": "P2",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3163,6 +5304,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3182,6 +5324,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3198,6 +5341,7 @@
    "priority": "P3",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3221,6 +5365,7 @@
    "priority": "P3",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3238,6 +5383,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3255,6 +5401,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3271,6 +5418,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3290,6 +5438,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3298,12 +5447,9 @@
     "NAV-B-HIDE",
     "HIDE-DEV-WEBHOOKS",
     "NAV-B-LINKS",
-    "W11-TRANSIENT-CONFLICT",
-    "W11-LOAD-SENSITIVE-TESTS",
     "W11-PAGING-TOTAL-ORDER-A",
     "W11-PAGING-TOTAL-ORDER-B",
     "W11-PAGING-TOTAL-ORDER-C",
-    "W11-RELEASE0-INDEX-STALE",
     "NAV-B-LEGACY-SERVER",
     "NAV-B-HIDE-2",
     "KEY-TOOL-DOMAIN-HIDE",
@@ -3320,6 +5466,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3328,9 +5475,13 @@
     "S0-SEC-LANE-DEPLOY",
     "S0-DEPENDABOT-FREEZE",
     "TOF-CI-PYTHON-HARVESTER",
-    "SWEEP-RERUN-S7"
+    "SWEEP-RERUN-S7",
+    "WEDGE-WA-INBOUND-CAPTURE",
+    "WEDGE-HIDE-STORE",
+    "SEC-KEY-CUSTOM-LOGIC",
+    "FU-OUTBOUND-ATTACHMENT-URL"
    ],
-   "title": "Gate part 1: journeys A-L green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
+   "title": "Gate part 1: the launch journeys (A-F, H-J; D-263) green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
    "deps_met": false
   },
   {
@@ -3339,6 +5490,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3355,6 +5507,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3372,12 +5525,14 @@
    "priority": "P0",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "GATE-STAGING-RUN"
+    "GATE-STAGING-RUN",
+    "GATE-PILOT-10"
    ],
    "title": "Gate part 4: owner-test protocol with five Trinidad and Tobago owners on their own phones, unassisted",
    "deps_met": false
@@ -3388,6 +5543,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3404,6 +5560,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3420,6 +5577,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3436,6 +5594,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3452,6 +5611,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3468,6 +5628,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3485,6 +5646,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3501,6 +5663,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3517,6 +5680,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3533,6 +5697,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3549,6 +5714,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3565,6 +5731,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3581,6 +5748,7 @@
    "priority": "P2",
    "size": "XS",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3597,6 +5765,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3611,6 +5780,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3627,6 +5797,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3643,6 +5814,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3659,6 +5831,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -3677,6 +5850,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3693,6 +5867,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3709,6 +5884,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3725,6 +5901,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3741,6 +5918,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3757,6 +5935,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3773,6 +5952,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -3791,6 +5971,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -3809,6 +5990,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "track": "follow-on",
    "status": "todo",
    "derived_from": "prior-status-file",
    "uncertain": false,
@@ -3825,6 +6007,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "both",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3842,6 +6025,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "prior-status-file+wave-2b-commit",
    "uncertain": false,
@@ -3858,6 +6042,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -3876,6 +6061,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": null,
    "status": "done",
    "derived_from": "code-commit-subject",
    "uncertain": true,
@@ -3894,6 +6080,7 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -3912,6 +6099,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
+   "track": null,
    "status": "done",
    "derived_from": "compacted-commit",
    "uncertain": false,
@@ -3930,15 +6118,18 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "8e775e6d"
+   ],
    "depends_on": [
     "FU-GENOME-REVENUE-CLASSIFIER"
    ],
    "title": "Every remaining KEY genome read resolves its reader before it reaches a prompt, stream or answer",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "OPS-CONSOLE-READONLY",
@@ -3946,6 +6137,7 @@
    "priority": "P2",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -3954,7 +6146,7 @@
     "FU-KEY-GENOME-READS-RESIDUAL"
    ],
    "title": "The owner's read-only engineering console in the platform admin area",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -3962,6 +6154,7 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -3978,15 +6171,18 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "track": null,
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e6a039ff"
+   ],
    "depends_on": [
     "FU-GENOME-REVENUE-CLASSIFIER"
    ],
    "title": "KEY proposal records reach a reader without revenue read only when the proposal itself is non-financial",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
@@ -3994,6 +6190,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -4008,6 +6205,7 @@
    "priority": "P2",
    "size": "S",
    "lane": "docs",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -4022,6 +6220,7 @@
    "priority": "P1",
    "size": "L",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -4030,7 +6229,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "KEY proposal writers tag money at creation, so proposal visibility stops depending on wording",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-BOOKING-PAGE-PAYMENT-METHOD",
@@ -4038,6 +6237,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "web",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -4055,15 +6255,18 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6ddce04c"
+   ],
    "depends_on": [
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "Contract document fetches pass the outbound-address guard (no SSRF through contract_extract_clauses)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
@@ -4071,6 +6274,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -4087,6 +6291,7 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -4095,7 +6300,2600 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "The marketplace order writer records a payment row for a PAID invoice, and rowless PAID invoices are backfilled",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Every server owed figure counts PENDING invoices (D-256)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Every web owed figure counts PENDING invoices (D-256)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-SEND-REMINDER-SERVER-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "d533d598"
+   ],
+   "depends_on": [],
+   "title": "The server refuses an invoice reminder unless the invoice is SENT, OVERDUE or PARTIALLY_PAID",
+   "deps_met": null
+  },
+  {
+   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Invoice list rows serve a credit-aware remaining amount, so web owed figures can count PARTIALLY_CREDITED",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CASH-LABEL-SANITISER",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CASH-READERS-LEDGER"
+   ],
+   "title": "One code-only currency label sanitiser for every structured other-currency cash list",
+   "deps_met": true
+  },
+  {
+   "id": "FU-DOC-FETCH-BODY-CAP",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
+   ],
+   "title": "Contract document fetches cap the body size, decompressed",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CONTACTS-AUDIT-FLAKE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "contacts-audit-actor ST-R3/CR-1 waits for every async team-activity write before counting",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every KEY memory read and write path, with its tenant predicate and reader projection; a spec fails on an unregistered path",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-TEMPORAL-SCOPE",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "aa0e3249"
+   ],
+   "depends_on": [],
+   "title": "Temporal-flow memory updates and tags only touch the caller's business; the unscoped semantic delete is scoped",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-EXPIRED-NOT-SERVED",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Unified retrieval stops serving expired memories, and a confidence-0 row no longer scores like an unscored row",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-DOC-EXTRACTION-SIGHT",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "2922d351"
+   ],
+   "depends_on": [
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "title": "Document extractions in AI memory reach prompts and GET /ai/memory only for readers allowed to see that document",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-SEMANTIC-SIGHT",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "ad0e241d"
+   ],
+   "depends_on": [
+    "MEM-DOC-EXTRACTION-SIGHT",
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "title": "The flow chat semantic-memory section and agent memory search pass every hit through the reader projection",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-SALIENCE-SIGHT",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "6d788425"
+   ],
+   "depends_on": [],
+   "title": "The salience feed in every chat prompt omits money-derived signals for readers without revenue read",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-CLASS-COLUMNS",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "Memory rows and embedding copies record data class and module scope at write, from provenance",
    "deps_met": false
+  },
+  {
+   "id": "MEM-CLASS-BACKFILL",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CLASS-COLUMNS"
+   ],
+   "title": "Classify legacy memory rows: dry-run report by default, apply on owner authority",
+   "deps_met": false
+  },
+  {
+   "id": "MEM-CLASS-READ",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CLASS-COLUMNS",
+    "MEM-SEMANTIC-SIGHT",
+    "MEM-SALIENCE-SIGHT",
+    "FU-KEY-GENOME-READS-RESIDUAL",
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "title": "One reader projection decides every memory read by data class; derived items inherit their sources' class",
+   "deps_met": false
+  },
+  {
+   "id": "MEM-TEMPORAL-EMBED-DEDUP",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-TEMPORAL-SCOPE",
+    "FU-MEMORY-COPIES-REWRITE"
+   ],
+   "title": "One semantic copy per temporal summary; stale duplicates removed by a dry-run-first command",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-HONEST-RETRIEVAL",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CLASS-READ"
+   ],
+   "title": "Memory retrieval reports channel failures distinctly from 'nothing found', and KEY says 'not recorded'",
+   "deps_met": false
+  },
+  {
+   "id": "MEM-CONSOLIDATION-CHECKPOINT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Consolidation keeps a durable per-business nightly checkpoint, so restarts and replicas do not repeat it",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-EVAL-SUITE",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "The memory leak suite and the KEY memory task suite, with recorded baselines",
+   "deps_met": false
+  },
+  {
+   "id": "FU-FINANCE-INTEL-DOORS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "60e9b4a0"
+   ],
+   "depends_on": [],
+   "title": "Finance intelligence scan, resolve and dismiss require revenue scope (D-258)",
+   "deps_met": null
+  },
+  {
+   "id": "FU-HEALTH-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CASH-READERS-LEDGER"
+   ],
+   "title": "Health withholds money figures from readers without revenue read (D-259)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-KEY-OVERDUE-SENT-ONLY",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "KEY's overdue list and reminder drafts exclude never-sent invoices (D-260)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-RESEARCH-CORPUS-YAML",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The research ledger RESEARCH-CORPUS.yaml parses, and a test keeps it parsing",
+   "deps_met": true
+  },
+  {
+   "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "88350ee5"
+   ],
+   "depends_on": [],
+   "title": "Site analytics withholds paid revenue from readers without revenue read",
+   "deps_met": null
+  },
+  {
+   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "cba3c200"
+   ],
+   "depends_on": [],
+   "title": "The temporal-flow timeline withholds KEY Inbox events from readers without operations read",
+   "deps_met": null
+  },
+  {
+   "id": "FU-KEY-ACTION-GENOME-PROJECTION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "b4b6bcf0"
+   ],
+   "depends_on": [
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "title": "KEY action proposals bridged from FINANCIAL genome recommendations go through the revenue projection",
+   "deps_met": null
+  },
+  {
+   "id": "FU-CONVERSION-REPS-REVENUE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Conversion sales-reps figures need revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PRESENCE-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Presence overview revenue and leads contact details are scoped",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CASE-STUDY-REVENUE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Case-study metrics withhold recent revenue without revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PAY-LINK-STATUS-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "ea7e2ac5"
+   ],
+   "depends_on": [
+    "FU-SEND-REMINDER-SERVER-GATE"
+   ],
+   "title": "Public pay links are minted only for invoices someone owes",
+   "deps_met": null
+  },
+  {
+   "id": "FU-REMINDER-HONESTY",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-SEND-REMINDER-SERVER-GATE"
+   ],
+   "title": "Reminders record the real recipient, re-check status at send, and the web never claims a send that failed",
+   "deps_met": true
+  },
+  {
+   "id": "FU-LEDGER-ZONED-FROM",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-FIN-LEDGER"
+   ],
+   "title": "General ledger date-only `from` starts at the business-zone day and dates show in the business zone",
+   "deps_met": true
+  },
+  {
+   "id": "FU-COA-SEEDER-AND-INPUT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-COA-UNIQUE-CODE"
+   ],
+   "title": "Chart-of-accounts seeder respects the code rule and update input is validated",
+   "deps_met": true
+  },
+  {
+   "id": "RR-OWNER-RULINGS-RECORD",
+   "step": 3,
+   "priority": "P2",
+   "size": "XS",
+   "lane": "docs",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S1-RULINGS-RECORD"
+   ],
+   "title": "Record the owner's answers to the research-recommendation owner questions that hold packets (OQ-5, OQ-13, OQ-19, OQ-30) and the two RR migration approvals",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-SAFETY-POLICY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-REDACTION-BY-CONTENT"
+   ],
+   "title": "KEY cortex input-safety check becomes an explicit, versioned policy: every rule class is evaluated, each finding class maps to an action, and a missing or throwing checker withholds tools instead of passing the query",
+   "deps_met": true
+  },
+  {
+   "id": "RR-UNTRUSTED-CONTENT-FENCE",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "5490f971"
+   ],
+   "depends_on": [],
+   "title": "Document extractions and MCP tool output enter KEY's prompts inside a fenced untrusted-data block that cannot be closed from inside and carries no authority",
+   "deps_met": null
+  },
+  {
+   "id": "RR-STREAM-ERROR-NO-EFFECTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "9f7fcfc7"
+   ],
+   "depends_on": [],
+   "title": "A model stream that failed part-way never splices a fallback answer onto it and never runs the tool calls it collected",
+   "deps_met": null
+  },
+  {
+   "id": "RR-REDACTION-BY-CONTENT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "be1451f8"
+   ],
+   "depends_on": [],
+   "title": "Redaction detects card numbers and secret-shaped tokens by value, not only by field name",
+   "deps_met": null
+  },
+  {
+   "id": "RR-KEY-PROMPT-CANARY",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A per-turn canary marker in KEY's system prompt: a tool call whose arguments carry it is refused, and a reply that echoes it is recorded",
+   "deps_met": true
+  },
+  {
+   "id": "RR-MODEL-LIFECYCLE-GUARD",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A model lifecycle catalog the owner maintains: every routed model id must be in it, and a model marked retired is never dispatched to",
+   "deps_met": true
+  },
+  {
+   "id": "RR-GATEWAY-TYPED-FAILURES",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "ddb74b30"
+   ],
+   "depends_on": [],
+   "title": "Model gateway classifies provider failures: a rate limit, a caller abort or a bad request does not open the provider circuit",
+   "deps_met": null
+  },
+  {
+   "id": "RR-LLM-ADMISSION-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-GATEWAY-TYPED-FAILURES"
+   ],
+   "title": "Per-business admission control on model calls: a bounded number in flight per business, shared across replicas, with a typed capacity refusal",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CORTEX-BUS-BACKPRESSURE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "KEY cortex event bus bounds its in-flight ledger writes and reports saturation instead of starting unbounded concurrent writes",
+   "deps_met": false
+  },
+  {
+   "id": "RR-UNKNOWN-COST-NOT-ZERO",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "One model price table; an unpriced model's cost is marked unpriced, never written as $0",
+   "deps_met": true
+  },
+  {
+   "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNKNOWN-COST-NOT-ZERO"
+   ],
+   "title": "Ollama and OpenRouter become two gateway resources with their own identity, health, circuit and cost, not one 'opensource' provider",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MODEL-SELECTION-ONE-SEAM",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-MODEL-LIFECYCLE-GUARD"
+   ],
+   "title": "One model-selection seam: delete the dead cortex provider-selection map and ratchet model ids outside the gateway",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DIRECT-PROVIDER-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of model-provider calls that bypass the gateway: a shrink-only spec fails on a new direct SDK or provider URL",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ANTHROPIC-TOOL-PARITY",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Anthropic path keeps tool semantics: toolChoice 'none' honoured, assistant tool calls sent as tool_use and results as tool_result blocks",
+   "deps_met": true
+  },
+  {
+   "id": "RR-PROMPT-CACHE-PREFIX",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNKNOWN-COST-NOT-ZERO",
+    "RR-ANTHROPIC-TOOL-PARITY"
+   ],
+   "title": "Provider prompt caching: Anthropic system prefix marked cacheable, cached input tokens read from usage and priced",
+   "deps_met": false
+  },
+  {
+   "id": "RR-RESPONSE-FORMAT-HONEST",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "GatewayRequest.responseFormat is honoured: provider-native JSON mode where supported, prompted fallback otherwise, and the strategy used is recorded",
+   "deps_met": true
+  },
+  {
+   "id": "RR-AI-CONTRACT-ZOD-FIRST",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "First executable AI contract: intent_parse becomes one Zod schema deriving its type, its validator and the parse_intent tool schema",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CORTEX-TYPED-RESULT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "KEY cortex stops inventing a 70% confidence when its markdown answer has no Confidence section, and records whether the answer was parsed",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-GATEWAY-TYPED-FAILURES"
+   ],
+   "title": "Gateway contract violations are typed and costed, never a silent provider failure or a silent pass on empty output",
+   "deps_met": true
+  },
+  {
+   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "KEY tool calls with unparseable arguments never run a tool: that call gets a visible refusal and the rest of the turn proceeds",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STRICT-TOOL-SCHEMAS",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-KEY-TRANSFER-INTEGER",
+    "RR-ANTHROPIC-TOOL-PARITY",
+    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN"
+   ],
+   "title": "KEY tool calls: advertised schemas are closed (no undeclared arguments) and strict where the provider supports it, after a census of the callers that send extra keys",
+   "deps_met": false
+  },
+  {
+   "id": "RR-KEY-RUN-BUDGET",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-WRITES-SEQUENTIAL"
+   ],
+   "title": "A typed per-turn run budget for KEY: a cap on tool calls executed per model response, and pinned worst-case model attempts per turn",
+   "deps_met": false
+  },
+  {
+   "id": "RR-TOOL-EFFECT-CLASS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Every FLOW_TOOLS entry declares an effect class: READ only when provably read-only, unknown tools never READ (census spec)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-TOOL-EFFECT-METADATA",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS"
+   ],
+   "title": "FLOW_TOOLS declare idempotency, reversibility and contract version, and WRITE is refined into INTERNAL_WRITE, EXTERNAL_EFFECT, MONEY or DESTRUCTIVE (census spec)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-TOOL-WRITES-SEQUENTIAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS"
+   ],
+   "title": "Flow chat runs the writes of one model turn one at a time in model order; only reads run in parallel",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DISPATCH-NO-BLIND-RETRY",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS",
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "Plan queue never re-runs a write after a generic error: the step is recorded OUTCOME_UNKNOWN for a person to check",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DISPATCH-ATOMIC-CLAIM",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-DISPATCH-NO-BLIND-RETRY"
+   ],
+   "title": "Plan queue takes an atomic durable claim on the idempotency key before running a step (no find-then-execute)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MCP-TENANT-BOUND",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "5729d3c6"
+   ],
+   "depends_on": [],
+   "title": "MCP bridge is tenant-bound or off: a bridged call carries the business and runs only for a business the server config names",
+   "deps_met": null
+  },
+  {
+   "id": "RR-CONNECTOR-STACK-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census ratchet of the two connector stacks (ConnectorRegistry and KeyConnector): every importer is listed with its v1 journey, a new one fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CONNECTOR-CONFORMANCE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-CONNECTOR-STACK-CENSUS",
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Connector conformance harness: a platform env key or a stored row is not 'connected'; failed smoke tests write no status; unimplemented sync is never success",
+   "deps_met": false
+  },
+  {
+   "id": "RR-WEBHOOK-INGRESS-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Inbound webhook census (verification, replay, tenant source) and the per-business social webhook bound to the business's own page",
+   "deps_met": true
+  },
+  {
+   "id": "RR-INTENT-PARSER-ONE-TOOL-LIST",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "KEY-TOOL-ALLOWLIST",
+    "KEY-TOOL-DOMAIN-HIDE"
+   ],
+   "title": "IntentParser offers the model the same per-business v1 tool set as chat, derived from FLOW_TOOLS, not a hand-written list",
+   "deps_met": false
+  },
+  {
+   "id": "RR-LEGACY-TOOLS-CLASSIFY",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "KEY-TOOL-ALLOWLIST"
+   ],
+   "title": "Classify the 14 legacy KeyToolRegistry tools against FLOW_TOOLS in a checked-in equivalence table; route the SAME/ALIAS ones canonically",
+   "deps_met": false
+  },
+  {
+   "id": "RR-LEGACY-FALLBACK-REMOVE",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-LEGACY-TOOLS-CLASSIFY"
+   ],
+   "title": "Remove KeyCommand's legacy-registry fallback and KeyToolRegistryService once every legacy tool is canonical or retired",
+   "deps_met": false
+  },
+  {
+   "id": "RR-GOAL-WRITER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Goal writer census: every writer of AiGoal and BusinessGoal listed with its provenance source; a new writer fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-HEALTH-TIGHTENS-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Pure health-to-control step: degraded or unreadable health only tightens a KEY action's control requirement, adopted at the action boundary",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-SAFE-MODE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS",
+    "KEY-CRONS-FLAGS"
+   ],
+   "title": "KEY_SAFE_MODE: a partial, operator-set safe mode where KEY reads and answers but runs no write and no autonomous action",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-UNDERSTANDING-SERVER",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PROPOSAL-RESULT-READER-SCOPE",
+    "FU-PROPOSAL-MONEY-TAG"
+   ],
+   "title": "Server ActionUnderstanding projection on every KEY proposal: phase, authority, outcome verified only from outcome evidence, reversibility",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-UNDERSTANDING-WEB",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ACTION-UNDERSTANDING-SERVER",
+    "TODAY-4BLOCK"
+   ],
+   "title": "Web renders KEY proposals from the server's ActionUnderstanding: real block reason, 'done' vs 'verified', confirm vs approve",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-BOUNDARY-NEXT-CAPABILITY",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ACTION-UNDERSTANDING-SERVER"
+   ],
+   "title": "Adopt a second capability (commerce_send_invoice) into the action boundary so it leaves a fingerprint-bound outcome-evidence receipt",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MIGRATION-UNDO-TABLE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Isolated migration: the key_undoable_actions table for durable KEY undo records, proven on a fresh database",
+   "deps_met": false
+  },
+  {
+   "id": "RR-UNDO-DURABLE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-MIGRATION-UNDO-TABLE"
+   ],
+   "title": "KEY undo records are durable (database, business-scoped, atomic claim) instead of a 5-minute in-process Map",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "One action-intent classifier for KEY: the six divergent action-verb regexes become one exported function, so 'cancel', 'refund', 'pay' and 'remove' open the actions layer on the Cortex path as they do on Flow",
+   "deps_met": true
+  },
+  {
+   "id": "RR-TRIAGE-RISK-FLOOR",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ACTION-INTENT-ONE-CLASSIFIER",
+    "MEM-SALIENCE-SIGHT"
+   ],
+   "title": "Cognitive triage takes an optional risk context that can only raise the effort tier; a money or destructive request gets the deliberate budget on the tool path and never grants authority",
+   "deps_met": false
+  },
+  {
+   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Remove KEY's unreachable self-tuning path that applies model-chosen changes to AI preferences directly, and pin that no service writes AI preferences or tuning memory from a model response",
+   "deps_met": true
+  },
+  {
+   "id": "RR-LEARNING-OUTCOME-SEMANTICS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "A tool's execution result is recorded as execution, not as the user's acceptance, and confidence calibration counts only real user responses",
+   "deps_met": false
+  },
+  {
+   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "KEY's eval harness cannot pass vacuously: a suite proves it fails on its target defect, NOT_RUN and INDETERMINATE are distinct from PASS, and an empty suite or empty run is not green",
+   "deps_met": true
+  },
+  {
+   "id": "RR-EVAL-RUN-LINEAGE",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-EVAL-HARNESS-NO-VACUOUS"
+   ],
+   "title": "Every eval run records the suite version, a definition hash and the commit it ran on, and a suite whose assertions change without a version bump fails a ratchet",
+   "deps_met": false
+  },
+  {
+   "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-UNIT-MOCK-ISOLATION"
+   ],
+   "title": "A scripted fake model and a trajectory recorder for KEY's Flow turn, so tests assert which tools were offered, what the model proposed, the authority decision and the effect, with no network",
+   "deps_met": true
+  },
+  {
+   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every entry that starts a KEY cognitive turn or offers tools to a model, with its runtime, who may reach it and its authority path; a spec fails on an unregistered entry",
+   "deps_met": true
+  },
+  {
+   "id": "RR-APPROVAL-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every writer of KEY proposals, AI approval items, approval requests and Flow-bound confirmations, with what each approval gates and who may clear it; a spec fails on an unregistered writer",
+   "deps_met": true
+  },
+  {
+   "id": "RR-REFLECTION-HONEST",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "KEY's reflection maintenance stops reporting work it did not do, and the in-process dream journal is bounded and labelled unpersisted",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MIGRATION-CASH-TARGET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Isolated migration: Business.cashRunwayTargetMonths (nullable Float), proven on a fresh database",
+   "deps_met": false
+  },
+  {
+   "id": "RR-CASH-TARGET",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-MIGRATION-CASH-TARGET",
+    "W11-RUNWAY-LEDGER-CASH"
+   ],
+   "title": "Owner-set cash runway target: the 'Protect cash runway' money move fires against the business's own target instead of a hard-coded three months, revenue-scoped and suggestion-only",
+   "deps_met": false
+  },
+  {
+   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "AI trace export leaves Langfuse's legacy /api/public/ingestion for OTLP/HTTP traces; exporter failures are counted and visible; business id is no longer sent as the user id",
+   "deps_met": true
+  },
+  {
+   "id": "RR-AI-TRACE-ATTEMPTS-CORRELATION",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-LANGFUSE-INGESTION-CUTOVER"
+   ],
+   "title": "The model gateway traces every attempt, including the failed and fallen-back ones, under one trace id per gateway call, with the caller's correlation id when it has one",
+   "deps_met": false
+  },
+  {
+   "id": "RR-SLO-AVAILABILITY-LEDGER",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Written availability objectives for the two probed endpoints, and the uptime monitor reports 30-day availability and remaining error budget against them",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ERROR-CAPSULE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Every recorded server failure carries a small reproduction capsule: release sha, replica, last correlation id and failure class",
+   "deps_met": true
+  },
+  {
+   "id": "RR-SECURITY-SIGNAL-COUNTERS",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Runtime counters for security signals (bearer verification failures, cross-business refusals, webhook signature failures), visible to the platform super-admin",
+   "deps_met": true
+  },
+  {
+   "id": "RR-INTEGRITY-WATCH",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Read-only integrity check for impossible cross-business states between a row and its parent, served on demand to the platform super-admin",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CRON-OCCURRENCE-LOCK",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A scheduled job occurrence is claimed once across replicas and restarts; a census fails on any new @Cron that is neither claimed nor registered as idempotent",
+   "deps_met": true
+  },
+  {
+   "id": "RR-JOB-TENANT-CONTEXT",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Per-business background work runs inside a tenant context so the Prisma tenant extension scopes it; a census lists every background entry point's tenancy mode",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STATUS-PATCH-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every generic update route that can write a lifecycle status, each registered as transition-checked, decision-refused or free label; a new unregistered one fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CHANGE-ORDER-APPROVE-COMMAND",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-STATUS-PATCH-CENSUS"
+   ],
+   "title": "Change orders are approved and rejected through commands that record the real approver; PATCH can no longer set a decision status or a client-chosen approvedBy",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DEAD-EVENT-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The event-wiring ratchet covers the other direction: no new event may be emitted with nothing listening, bridged or registered as intentionally publish-only",
+   "deps_met": true
+  },
+  {
+   "id": "RR-AUTHORITY-SHADOW-PARITY",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SECURITY-SIGNAL-COUNTERS"
+   ],
+   "title": "Evidence for the effective-authority cutover: a base-envelope parity matrix against the legacy guard on Postgres, and shadow mismatches counted, not only warn-logged",
+   "deps_met": false
+  },
+  {
+   "id": "RR-FORWARDREF-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "forwardRef ratchet: the count of forwardRef module/provider cycles in server source may fall, never rise, and no new file may introduce one",
+   "deps_met": true
+  },
+  {
+   "id": "RR-WEB-CLIENT-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "lib/client.ts ratchet: no new web file may import the monolithic client; the importer list may only shrink",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-CORTEX-SIZE-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "key-cortex size ratchet: its source file count and largest-file line counts may fall, never rise",
+   "deps_met": true
+  },
+  {
+   "id": "RR-UNUSED-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of Prisma models no code reads or writes; the list may shrink, and a new model with no reader or writer fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ARCH-SCAN-CI",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-ARCH-MAP-REFRESH"
+   ],
+   "title": "CI runs the deterministic architecture scanners on each PR and reports the map diff (report-only; blocking needs an owner ruling)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-BANK-TOKEN-ENCRYPT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "617995c9"
+   ],
+   "depends_on": [],
+   "title": "BankConnection.accessToken is encrypted at rest like every other provider token column, and the secret-column census can no longer miss an *AccessToken column",
+   "deps_met": null
+  },
+  {
+   "id": "RR-DB-CRYPTO-KEY-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Read-only census of which key every enc:v1: value was encrypted under, so the production key guard can be landed on evidence",
+   "deps_met": true
+  },
+  {
+   "id": "RR-DB-CRYPTO-PROD-GUARD",
+   "step": 3,
+   "priority": "P1",
+   "size": "XS",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-DB-CRYPTO-KEY-CENSUS",
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "packages/db token encryption refuses the in-repo fallback key in production (lands only on the owner's evidence)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-BUSINESS-EVENT-REDACT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "BusinessEventService.emit/emitBatch and ContactAuditService redact secret-named fields at the write, as the interceptor already does",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ERASURE-BUSINESS-EVENTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "47d6fbb6"
+   ],
+   "depends_on": [],
+   "title": "The GDPR forget purge also scrubs the person's data from business_events (D-25)",
+   "deps_met": null
+  },
+  {
+   "id": "RR-ADMIN-LOGOUT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Platform admin sign-out exists, and no sign-out leaves the admin bearer behind (it outranks every user token)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ADMIN-SHELL-SERVER-GATE",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ADMIN-LOGOUT"
+   ],
+   "title": "/admin pages are refused at the edge without an unexpired admin session cookie (the API stays the authority)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-SESSION-STORAGE-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ADMIN-LOGOUT"
+   ],
+   "title": "Census of every browser-readable place the web app stores a credential; a spec fails on a new one",
+   "deps_met": false
+  },
+  {
+   "id": "RR-RETENTION-EXPIRED-EXPORTS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Expired or consumed contact export bundles are deleted from storage on the privacy scheduler, not kept forever",
+   "deps_met": true
+  },
+  {
+   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Diagnostics reports whether the object-storage bucket is public and whether default encryption is on, before any upload header changes",
+   "deps_met": true
+  },
+  {
+   "id": "RR-SCRIPT-SPECS-IN-CI",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": null,
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "cbb61d04"
+   ],
+   "depends_on": [],
+   "title": "Every scripts/** node:test spec runs in a workflow, or is exempt with a reason (the agent-memory tests run nowhere today)",
+   "deps_met": null
+  },
+  {
+   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "One 'CI verdict' job that is red when any gating CI job failed, was skipped or was cancelled",
+   "deps_met": true
+  },
+  {
+   "id": "RR-GATE-LEDGER-MONOTONIC",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "CI compares every registered shrink-only ledger and floor ratchet between base and head and goes red when one moves the wrong way",
+   "deps_met": true
+  },
+  {
+   "id": "RR-GATE-LEDGER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "Every file that declares a shrink-only ledger or ratchet is registered in ledger-sizes.mjs, or exempt with a reason",
+   "deps_met": true
+  },
+  {
+   "id": "RR-BUNDLE-RULING-CONFLICTS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "The context bundle reports rulings that supersede, refine or widen the rulings a packet cites",
+   "deps_met": true
+  },
+  {
+   "id": "RR-BUNDLE-PROOF-PROFILE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "The context bundle attaches the matching research proof profile (fastest falsification, adversarial cases) by recorded rules, or says none matched",
+   "deps_met": true
+  },
+  {
+   "id": "RR-HOTSPOT-SCANNER",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "Offline git-history hotspots (churn, fix density, co-change) computed per packet write set and shown in the bundle",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STATUS-REVIEW-CYCLES",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "V1-STATUS counts the review-repair and post-merge fix commits each packet needed, as far as main shows them",
+   "deps_met": true
+  },
+  {
+   "id": "RR-HOOK-PACKET-SCOPE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "Edits outside a packet's write set are flagged at edit time on pkt/V1-* branches, and a scope report lists them for the merge check",
+   "deps_met": true
+  },
+  {
+   "id": "RR-INDEX-COVERAGE-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census: every tenant model has an index led by businessId, or is acknowledged in a shrink-only list (first slice of the access-path audit)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ERASE-BUSINESS-TWO-STEP",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Whole-business GDPR erasure needs a second, deliberate act and leaves a durable record (form set by the owner's answer)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-STATUS-STALL-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "V1-STATUS reports packets that have been ready for longer than a budget without landing (stall signal from main alone)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PROVIDER-OUTAGE-CONNECT"
+   ],
+   "title": "Google Suite and Microsoft OAuth use PKCE (S256), with the verifier derived from the signed state so no new store is needed",
+   "deps_met": true
+  },
+  {
+   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ERASURE-BUSINESS-EVENTS"
+   ],
+   "title": "A soft-deleted or forget-pending contact is neither exported nor emailed",
+   "deps_met": true
+  },
+  {
+   "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-PRIVACY-DELETED-CONTACT-GATES"
+   ],
+   "title": "Cancelling a forget request restores only what the forget request deleted",
+   "deps_met": false
+  },
+  {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Server tests run with decorator metadata, so DTO validation is exercised the way production runs it",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TIMELINE-CALLERS-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-TEMPORAL-FLOW-INBOX-SCOPE"
+   ],
+   "title": "Every member-facing reader of the temporal-flow timeline applies the reader's module filter",
+   "deps_met": true
+  },
+  {
+   "id": "FU-UNTRUSTED-INBOUND-FENCE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNTRUSTED-CONTENT-FENCE"
+   ],
+   "title": "Customer messages (email, WhatsApp, CRM) reach KEY's prompts only inside the untrusted-content fence",
+   "deps_met": true
+  },
+  {
+   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-SITE-ANALYTICS-REVENUE-SCOPE"
+   ],
+   "title": "Store order lists and order detail withhold money fields from readers without revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNTRUSTED-CONTENT-FENCE"
+   ],
+   "title": "Chat attachments are saved apart from the member's own text and replayed as their own fenced message",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-PATTERNS-SIGHT",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "41786d46"
+   ],
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT"
+   ],
+   "title": "Flow-chat behavioural patterns never state money to readers without revenue read, and never to the support desk",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-UNIFIED-SEMANTIC-SIGHT",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "808719e8"
+   ],
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT"
+   ],
+   "title": "Unified memory retrieval's semantic load applies the reader projection (cortex chat, buildMemoryContext)",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-TEMPORAL-MEMORY-ROUTES-SIGHT",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "a2e9f3f0"
+   ],
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT",
+    "FU-TEMPORAL-FLOW-INBOX-SCOPE"
+   ],
+   "title": "Temporal-flow memory routes, KEY recall/search_memories and analyze's memory insights apply the reader projection",
+   "deps_met": null
+  },
+  {
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-STREAM-ERROR-NO-EFFECTS"
+   ],
+   "title": "A failed flow follow-up stream still saves the tool turn that already ran",
+   "deps_met": true
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-STREAM-ERROR-NO-EFFECTS"
+   ],
+   "title": "OpenAI-compatible stream adapters treat a close without a finish reason as a failure",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CONTACTID-WRITER-VALIDATION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ERASURE-BUSINESS-EVENTS"
+   ],
+   "title": "Writers that store a caller-chosen contactId validate it against a live contact of the business",
+   "deps_met": true
+  },
+  {
+   "id": "FU-NMS-SERVER-METADATA",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "title": "A server spec reads the compiled controllers' module scopes for every NAV-A1 cited route",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TEST-FLAKES-2026-11-23",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Three load-sensitive or random-collision tests become deterministic",
+   "deps_met": true
+  },
+  {
+   "id": "FU-NAV-A1-CODEX-224",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "625864c3"
+   ],
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "title": "Nav treats unknown sells as unknown; an uncertain settings write fences older answers",
+   "deps_met": null
+  },
+  {
+   "id": "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "title": "KEY execute accepts the structured module+action call its handler documents",
+   "deps_met": false
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION-2",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Seeded order-dependent unit failures under vitest.unit.config.ts are isolated",
+   "deps_met": true
+  },
+  {
+   "id": "FU-BARE-400-AUDIT",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "title": "HTTP negative tests that assert a bare 400 still prove the check they target",
+   "deps_met": false
+  },
+  {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-NAV-A1-CODEX-224"
+   ],
+   "title": "The manual setup step's settings PATCH goes through the write sequence",
+   "deps_met": true
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "title": "Invoice panel offers pay-link copy and WhatsApp share only for payable invoices",
+   "deps_met": true
+  },
+  {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "title": "KEY's send-invoice refuses a PAID or deleted invoice before emailing",
+   "deps_met": true
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "WA-E164-SERVER",
+    "WA-HELPER",
+    "MOUNT-QUOTES"
+   ],
+   "title": "New from WhatsApp: paste a customer's WhatsApp message and number; KEYFLOWOS finds or creates the customer by E.164, keeps the message on their timeline, and opens New quote or New booking for them",
+   "deps_met": true
+  },
+  {
+   "id": "WEDGE-HIDE-STORE",
+   "step": 7,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-LEGACY-SERVER"
+   ],
+   "title": "Store checkout, Sales > Orders and Quick sale are offered at launch only to a business that already sells online; everyone else gets the booking page and invoices",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-PILOT-10",
+   "step": 8,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-SEC-LANE-DEPLOY",
+    "GATE-JOURNEY-RUN"
+   ],
+   "title": "Ten real Trinidad and Tobago businesses run on the launch build for two weeks; the owner decides go or no-go on what they measure",
+   "deps_met": false
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Tenant KEY's execute_custom_logic never runs model-written code on the API host: local child-process execution and the silent fallback to it are removed",
+   "deps_met": true
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
+   ],
+   "title": "No client-supplied URL reaches the document model: chat attachments and contract term extraction read only the business's own uploaded or Drive objects",
+   "deps_met": true
   }
  ]
 }

@@ -756,7 +756,9 @@ describe('ModelGatewayService', () => {
     });
 
     it('opens circuit after 3 consecutive failures', async () => {
-      const callOpenAiSpy = vi.fn().mockRejectedValue(new Error('rate limit exceeded'));
+      // A 503 drives the failures: a rate limit no longer opens the circuit
+      // (RR-GATEWAY-TYPED-FAILURES; pinned in gateway-typed-failures.spec.ts).
+      const callOpenAiSpy = vi.fn().mockRejectedValue(new Error('OpenAI API error (503): The server is overloaded'));
       (service as any).callOpenAi = callOpenAiSpy;
       // The fallbacks fail too, in process. Left real, the anthropic fallback sent
       // a POST to api.anthropic.com with the test key in some test orders; the

@@ -10,8 +10,10 @@ import { UndoService } from './undo.service';
 import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
+import { readerSearchOptions } from './semantic-memory-sight';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
+import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -23,6 +25,11 @@ function triggerWriter(req: AuthenticatedRequest): string {
   if (!id) throw new UnauthorizedException('Authentication required');
   return id;
 }
+
+/** MEM-SEMANTIC-SIGHT: the most hits GET .../agent/memory/search answers (as a reader's timeline read, MAX_READER_LIMIT). */
+const MAX_SEARCH_LIMIT = 500;
+/** MEM-SEMANTIC-SIGHT: the longest query GET .../agent/memory/search embeds. */
+const MAX_SEARCH_QUERY = 500;
 
 @Controller('ai')
 export class AgentController {
@@ -324,25 +331,50 @@ export class AgentController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * MEM-SEMANTIC-SIGHT: the backfill copies every AiMemory row of the business (document extractions included) into the
+   * semantic store, through the embedding provider, on the business's AI credits: a business-wide AI setting, so it
+   * needs settings admin (owners and admins by role defaults), as the connectors' backfills and PUT .../ai/preferences
+   * do. It ran for any member.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/agent/memory/backfill')
   async backfillSemanticMemory(@Param('businessId') businessId: string) {
     const count = await this.semanticMemory.backfillFromAiMemory(businessId);
     return { backfilled: count };
   }
 
+  /**
+   * MEM-SEMANTIC-SIGHT (D-234, D-257): the caller's hits only, by each hit's source (semanticHitsVisibleTo): the reader
+   * is the caller, with their membership's module sight (readersModuleSight: a SUPER_ADMIN who is no member has none).
+   * Withheld hits are dropped before the limit is cut. The limit is at most MAX_SEARCH_LIMIT (default 5).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/memory/search')
   async searchSemanticMemory(
     @Param('businessId') businessId: string,
     @Query('q') query: string,
     @Query('limit') limit?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     if (!query) return { results: [] };
+    // MEM-SEMANTIC-SIGHT acceptance review: a bounded query (every search costs an embedding of it), and one string (a
+    // repeated or bracketed q parses to an array, whose length counts its items).
+    if (typeof query !== 'string') throw new BadRequestException('q must be one string');
+    if (query.length > MAX_SEARCH_QUERY) throw new BadRequestException(`q must be at most ${MAX_SEARCH_QUERY} characters`);
+    // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
+    // member with revenue read (readersModuleSight, the rule KEY's prompts read them by); the search leaves them out
+    // before its limit for anyone else. MEM-SEMANTIC-SIGHT: and every other hit only as its source allows
+    // (readerSearchOptions), filtered before the limit; the limit is at most MAX_SEARCH_LIMIT.
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'memorySearch');
+    const asked = limit ? parseInt(limit, 10) : 5;
     const results = await this.semanticMemory.search({
       businessId,
       query,
-      limit: limit ? parseInt(limit, 10) : 5,
+      limit: Number.isFinite(asked) ? Math.min(Math.max(asked, 0), MAX_SEARCH_LIMIT) : 5,
+      ...readerSearchOptions(this.prisma, businessId, { reader, sight }),
     });
     return { results };
   }

@@ -1131,6 +1131,110 @@
       "prefix": "v64g_",
       "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
+    },
+    {
+      "prefix": "v64e_",
+      "owner": "apps/server/test/money-totals-partial-payments.integration.test.ts",
+      "packet": "V1-64 (SWP-INV-MONEY-TOTALS)"
+    },
+    {
+      "prefix": "v99h_",
+      "owner": "apps/server/test/contract-fetch-outbound-guard.integration.test.ts",
+      "packet": "V1-99 (FU-CONTRACT-FETCH-OUTBOUND-GUARD, D-246)"
+    },
+    {
+      "prefix": "v66g_",
+      "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
+      "packet": "V1-66 (SWP-FIN-LEDGER)"
+    },
+    {
+      "prefix": "v63h_",
+      "owner": "apps/server/test/coa-unique-code.integration.test.ts",
+      "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
+    },
+    {
+      "prefix": "v57r_",
+      "owner": "apps/server/test/send-reminder-status-gate.integration.test.ts",
+      "packet": "V1-57 (FU-SEND-REMINDER-SERVER-GATE)"
+    },
+    {
+      "prefix": "v86s_",
+      "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts"
+    },
+    {
+      "prefix": "v71t_",
+      "owner": "apps/server/test/temporal-memory-scope.integration.test.ts",
+      "packet": "V1-71 (MEM-TEMPORAL-SCOPE)"
+    },
+    {
+      "prefix": "v71x_",
+      "owner": "apps/server/test/finance-intel-doors.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-INTEL-DOORS)"
+    },
+    {
+      "prefix": "v57p_",
+      "owner": "apps/server/test/pay-link-status-gate.integration.test.ts",
+      "packet": "V1-57 (FU-PAY-LINK-STATUS-GATE)"
+    },
+    {
+      "prefix": "v72w_",
+      "owner": "apps/server/test/contact-privacy-business-events.integration.test.ts",
+      "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
+    },
+    {
+      "prefix": "v72v_",
+      "owner": "apps/server/test/business-event-redaction.integration.test.ts",
+      "packet": "V1-72 (RR-BUSINESS-EVENT-REDACT)"
+    },
+    {
+      "prefix": "v71w_",
+      "owner": "apps/server/test/temporal-flow-inbox-scope.integration.test.ts",
+      "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE)"
+    },
+    {
+      "prefix": "v71s_",
+      "owner": "apps/server/test/memory-doc-extraction-sight.integration.test.ts",
+      "packet": "V1-71 (MEM-DOC-EXTRACTION-SIGHT)"
+    },
+    {
+      "prefix": "v71u_",
+      "owner": "apps/server/test/memory-semantic-sight.integration.test.ts",
+      "packet": "V1-71 (MEM-SEMANTIC-SIGHT)"
+    },
+    {
+      "prefix": "v71z_",
+      "owner": "apps/server/test/temporal-flow-upsert-race.integration.test.ts",
+      "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE, Codex P1 #226)"
+    },
+    {
+      "prefix": "v73k_",
+      "owner": "apps/server/test/key-action-genome-projection.integration.test.ts",
+      "packet": "V1-73 (FU-KEY-ACTION-GENOME-PROJECTION)"
+    },
+    {
+      "prefix": "v72s_",
+      "owner": "apps/server/test/bank-token-encryption.integration.test.ts",
+      "packet": "V1-72 (RR-BANK-TOKEN-ENCRYPT)"
+    },
+    {
+      "prefix": "v74u_",
+      "owner": "apps/server/test/memory-unified-semantic-sight.integration.test.ts",
+      "packet": "V1-74 (MEM-UNIFIED-SEMANTIC-SIGHT)"
+    },
+    {
+      "prefix": "v71v_",
+      "owner": "apps/server/test/memory-patterns-sight.integration.test.ts",
+      "packet": "V1-71 (MEM-PATTERNS-SIGHT)"
+    },
+    {
+      "prefix": "v77o_",
+      "owner": "apps/server/test/attachment-object-tenancy.integration.test.ts",
+      "packet": "V1-77 (FU-ATTACHMENT-OBJECT-TENANCY)"
+    },
+    {
+      "prefix": "v75r_",
+      "owner": "apps/server/test/memory-temporal-routes-sight.integration.test.ts",
+      "packet": "V1-75 (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT)"
     }
   ],
   "pendingRenames": [],

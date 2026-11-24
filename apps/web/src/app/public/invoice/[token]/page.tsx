@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { CheckCircle, Loader2, Mail, Phone, FileText, AlertCircle, Receipt } from "lucide-react";
 import { getPayLinkStatus, getPublicInvoiceByToken, type PayLinkStatus, type PublicInvoicePayload } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
+import { statusLabel as sharedStatusLabel } from "@/lib/status-labels";
 
 /**
  * V1-49-PUBLIC-RECEIPT: the server's receipt projection for this link
@@ -27,12 +28,51 @@ interface PublicReceipt {
 
 type ReceiptState = { loading: boolean; data: PublicReceipt | null; error: string | null } | null;
 
+/**
+ * SWP-INV-PUBLIC-LINK: the stored figures the total is made of, a sibling of the invoice block in the token
+ * payload (the invoice block keeps its eleven keys). Rendered as given. Absent from an older server.
+ */
+interface PublicInvoiceTotals {
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+  currency: string;
+}
+
+/** SWP-INV-PUBLIC-LINK (BUG-091): every amount carries the currency code ("TTD 1,066.00"), never a bare "$". */
 function formatCurrency(amount: number, currency: string) {
   try {
-    return new Intl.NumberFormat("en-TT", { style: "currency", currency }).format(amount);
+    return new Intl.NumberFormat("en-TT", { style: "currency", currency, currencyDisplay: "code" })
+      .format(amount)
+      .replace(/\u00a0/g, " ");
   } catch {
     return `${currency} ${amount.toFixed(2)}`;
   }
+}
+
+/**
+ * SWP-INV-PUBLIC-LINK (BUG-091): the status in words, never the enum: the shared words of lib/status-labels
+ * (Part-paid, Part-credited...), with the customer's own words for the three states a customer acts on.
+ */
+const CUSTOMER_STATUS_WORDS: Record<string, string> = {
+  SENT: "Awaiting payment",
+  PENDING: "Payment pending",
+  FAILED: "Payment failed",
+};
+
+function statusLabel(status: string): string {
+  return CUSTOMER_STATUS_WORDS[status] ?? sharedStatusLabel(status, "invoice");
+}
+
+/**
+ * The breakdown is shown only when it is the whole story: subtotal + tax - discount is the total to the cent. A
+ * legacy row with no stored tax, or a fee the breakdown has no row for (shipping, a setup fee), shows the Total only.
+ */
+function breakdownAddsUp(totals: PublicInvoiceTotals, total: number): boolean {
+  const cents = (n: number) => Math.round(Number(n) * 100);
+  return cents(totals.subtotal) + cents(totals.taxAmount) - cents(totals.discountAmount) === cents(total);
 }
 
 function formatDate(value?: string | null) {
@@ -111,9 +151,13 @@ export default function PublicInvoicePage() {
       <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4">
         <Card className="max-w-md w-full p-8 text-center bg-card/80 border-border/50">
           <AlertCircle className="w-10 h-10 text-amber-400 mx-auto mb-4" />
-          <h1 className="text-xl font-semibold mb-2">This invoice link is unavailable</h1>
+          <h1 className="text-xl font-semibold mb-2">
+            {reason === "voided" ? "This invoice has been voided" : "This invoice link is unavailable"}
+          </h1>
           <p className="text-sm text-slate-400">
-            {reason === "invalid_or_expired"
+            {reason === "voided"
+              ? "The sender cancelled this invoice, so nothing is owed on it. Please contact them if you have questions."
+              : reason === "invalid_or_expired"
               ? "The link has expired or is invalid. Please request a new one from the sender."
               : state.error ?? "We couldn't find this invoice. Please double-check the link."}
           </p>
@@ -127,6 +171,8 @@ export default function PublicInvoicePage() {
   // given. Without a balance block (an older server) the page shows the
   // total as due and no paid figure, rather than inventing one.
   const balance = state.payload.balance ?? null;
+  const servedTotals = (state.payload as typeof state.payload & { totals?: PublicInvoiceTotals | null }).totals ?? null;
+  const totals = servedTotals && breakdownAddsUp(servedTotals, Number(invoice.total)) ? servedTotals : null;
   const amountDue = balance ? Number(balance.amountDue) : Number(invoice.total);
   const business = invoice.business;
   const accent = business?.primaryColor || "#F97316";
@@ -176,7 +222,7 @@ export default function PublicInvoicePage() {
               <p className="text-sm font-semibold truncate">{business?.name ?? "Business"}</p>
             </div>
           </div>
-          <Badge tone={isPaid || isSettledCredit ? "success" : isVoid ? "danger" : "info"}>{invoice.status}</Badge>
+          <Badge tone={isPaid || isSettledCredit ? "success" : isVoid ? "danger" : "info"}>{statusLabel(invoice.status)}</Badge>
         </motion.div>
 
         <Card className="p-6 bg-card/80 border-border/50 space-y-5">
@@ -219,14 +265,39 @@ export default function PublicInvoicePage() {
             </div>
           )}
 
-          {balance && (
+          {(balance || totals) && (
             <dl className="rounded-xl border border-border/40 divide-y divide-border/30 text-sm">
+              {totals && (
+                <div className="flex items-center justify-between px-4 py-2">
+                  <dt className="text-slate-400">Subtotal</dt>
+                  <dd className="font-medium" data-testid="public-invoice-subtotal">
+                    {formatCurrency(Number(totals.subtotal), invoice.currency)}
+                  </dd>
+                </div>
+              )}
+              {totals && Number(totals.discountAmount) > 0 && (
+                <div className="flex items-center justify-between px-4 py-2">
+                  <dt className="text-slate-400">Discount</dt>
+                  <dd className="font-medium" data-testid="public-invoice-discount">
+                    -{formatCurrency(Number(totals.discountAmount), invoice.currency)}
+                  </dd>
+                </div>
+              )}
+              {totals && Number(totals.taxAmount) > 0 && (
+                <div className="flex items-center justify-between px-4 py-2">
+                  <dt className="text-slate-400">{Number(totals.taxRate) > 0 ? `Tax (${Number(totals.taxRate)}%)` : "Tax"}</dt>
+                  <dd className="font-medium" data-testid="public-invoice-tax">
+                    {formatCurrency(Number(totals.taxAmount), invoice.currency)}
+                  </dd>
+                </div>
+              )}
               <div className="flex items-center justify-between px-4 py-2">
                 <dt className="text-slate-400">Total</dt>
                 <dd className="font-medium" data-testid="public-invoice-total">
                   {formatCurrency(Number(invoice.total), invoice.currency)}
                 </dd>
               </div>
+              {balance && (<>
               <div className="flex items-center justify-between px-4 py-2">
                 <dt className="text-slate-400">Paid</dt>
                 <dd className="font-medium text-emerald-300" data-testid="public-invoice-paid">
@@ -255,6 +326,7 @@ export default function PublicInvoicePage() {
                   </dd>
                 </div>
               )}
+              </>)}
             </dl>
           )}
 
