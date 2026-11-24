@@ -142,10 +142,17 @@ jobs:
         if: fromJSON(steps.event.outputs.json).actionable == true
         uses: actions/github-script@v7
         env:
+          # D-272.4 (P2): #80 wake-event posting is switched off while keeping
+          # the agent-control modules, workflow structure, and specs intact.
+          AUTOPILOT_POST_WAKE_EVENTS: 'false'
           EVENT_JSON: ${{ steps.event.outputs.json }}
           DECISION_JSON: ${{ steps.decide.outputs.json }}
         with:
           script: |
+            if (process.env.AUTOPILOT_POST_WAKE_EVENTS === 'false') {
+              core.info('autopilot #80 wake-event posting disabled (D-272.4)');
+              return;
+            }
             const event = JSON.parse(process.env.EVENT_JSON);
             const decision = JSON.parse(process.env.DECISION_JSON);
 

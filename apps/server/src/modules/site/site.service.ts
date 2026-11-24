@@ -167,16 +167,19 @@ export class SiteService {
     const completedOrdersCount = storefrontEvents.filter((e) => e.type === 'checkout_complete').length;
 
     // Public projections (V1-23, M36): never the whole Service or Product row.
-    const [services, products, shippingZones] = await Promise.all([
+    // SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public services
+    // exclude product listing rows (sourceProductId = null); public products
+    // include only active products with a live listing Service for this store.
+    const [services, listings, shippingZones] = await Promise.all([
       this.prisma.client.service.findMany({
-        where: { businessId: business.id, deletedAt: null },
+        where: { businessId: business.id, deletedAt: null, sourceProductId: null },
         orderBy: { createdAt: 'desc' },
         select: PUBLIC_SERVICE_SELECT,
       }),
-      this.prisma.client.product.findMany({
-        where: { businessId: business.id, deletedAt: null, isActive: true },
-        orderBy: { createdAt: 'desc' },
-        select: PUBLIC_PRODUCT_SELECT,
+      this.prisma.client.service.findMany({
+        where: { businessId: business.id, deletedAt: null, sourceProductId: { not: null } },
+        select: { sourceProductId: true },
+        distinct: ['sourceProductId'],
       }),
       this.prisma.client.shippingZone.findMany({
         where: { businessId: business.id, isActive: true },
@@ -194,6 +197,17 @@ export class SiteService {
         },
       }),
     ]);
+
+    const listedProductIds = listings
+      .map((l) => l.sourceProductId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const products = listedProductIds.length > 0
+      ? await this.prisma.client.product.findMany({
+          where: { businessId: business.id, deletedAt: null, isActive: true, id: { in: listedProductIds } },
+          orderBy: { createdAt: 'desc' },
+          select: PUBLIC_PRODUCT_SELECT,
+        })
+      : [];
 
     const { metaData: _meta, ...publicBusiness } = business;
 

@@ -18,6 +18,11 @@ describe('CatalogService — listPublicProducts stock projection', () => {
   }) {
     const prismaMock = {
       client: {
+        service: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue(opts.products.map((p) => ({ sourceProductId: p.id }))),
+        },
         product: {
           findMany: vi.fn().mockResolvedValue(opts.products),
         },

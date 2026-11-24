@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { Invoice, Contact, Product } from "@/lib/client";
+import { canShareInvoicePayLink } from "@/lib/commerce-status";
 import { formatAmount, getDaysUntilDue, formatRelativeDate } from "../../utils/commerce-utils";
 import { getStatusBadge, BILLING_SORT_OPTIONS, BillingSortKey, INVOICE_STATUS_FILTERS } from "../../components/commerce-types";
 import { useCommerceSearch } from "../../hooks/use-commerce-search";
@@ -271,7 +272,9 @@ export function InvoiceList({
                           >
                             <MenuItem icon={Eye} label="View details" onClick={() => router.push(`/app/commerce/invoices/${inv.id}`)} />
                             <MenuItem icon={Files} label="Duplicate" onClick={() => { setOpenMenuId(null); onDuplicate(inv); }} />
-                            <MenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => { setOpenMenuId(null); onShareWhatsApp(inv); }} />
+                            {canShareInvoicePayLink(inv.status) && (
+                              <MenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => { setOpenMenuId(null); onShareWhatsApp(inv); }} />
+                            )}
                             {gmailStatus?.connected && (
                               <MenuItem icon={Mail} label="Send via email" onClick={() => { setOpenMenuId(null); /* open send email */ }} />
                             )}

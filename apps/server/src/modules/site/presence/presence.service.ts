@@ -657,21 +657,33 @@ export class PresenceService {
     if (!published || published.unpublishedAt) return null;
     // Catalog snapshot for schema.org Service / Product JSON-LD on the public
     // presence page. Capped + minimal projection to keep the public payload
-    // small.
-    const [services, products] = await Promise.all([
+    // small. SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): standalone
+    // services only (sourceProductId: null) and only active products with a
+    // live listing Service row in this business.
+    const [services, liveListings] = await Promise.all([
       this.prisma.client.service.findMany({
-        where: { businessId: business.id, deletedAt: null },
+        where: { businessId: business.id, deletedAt: null, sourceProductId: null },
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: { id: true, name: true, description: true, price: true, duration: true },
       }).catch(() => [] as Array<{ id: string; name: string; description: string | null; price: number; duration: number }>),
-      this.prisma.client.product.findMany({
-        where: { businessId: business.id, deletedAt: null, isActive: true },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: { id: true, name: true, description: true, price: true, currency: true, imageUrl: true, sku: true },
-      }).catch(() => [] as Array<{ id: string; name: string; description: string | null; price: number | null; currency: string | null; imageUrl: string | null; sku: string | null }>),
+      this.prisma.client.service.findMany({
+        where: { businessId: business.id, deletedAt: null, sourceProductId: { not: null } },
+        select: { sourceProductId: true },
+        distinct: ['sourceProductId'],
+      }).catch(() => [] as Array<{ sourceProductId: string | null }>),
     ]);
+    const listedProductIds = liveListings
+      .map((l) => l.sourceProductId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const products = listedProductIds.length === 0
+      ? []
+      : await this.prisma.client.product.findMany({
+          where: { businessId: business.id, deletedAt: null, isActive: true, id: { in: listedProductIds } },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { id: true, name: true, description: true, price: true, currency: true, imageUrl: true, sku: true },
+        }).catch(() => [] as Array<{ id: string; name: string; description: string | null; price: number | null; currency: string | null; imageUrl: string | null; sku: string | null }>);
 
     // Resolve the active plan tier so the public renderer can decide whether
     // to show the Powered-by KeyFlow badge (free tier only). Direct Prisma

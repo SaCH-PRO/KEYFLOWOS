@@ -232,6 +232,7 @@ async function cleanup() {
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -533,6 +534,9 @@ beforeAll(async () => {
   await db.product.create({
     data: { id: ID.prodUsd, businessId: ID.bizUsd, name: 'V33A USD Widget', price: UNIT_PRICE, currency: 'USD', category: 'PRODUCT', isActive: true },
   });
+  await db.service.create({
+    data: { id: `${ID.prodUsd}_listing`, businessId: ID.bizUsd, name: 'V33A USD Widget', duration: 30, price: UNIT_PRICE, sourceProductId: ID.prodUsd },
+  });
   await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizA);
   await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizB);
   for (const [id, businessId] of [[ID.contactA, ID.bizA], [ID.contactB, ID.bizB]] as const) {
@@ -543,6 +547,9 @@ beforeAll(async () => {
   for (const [id, businessId] of [[ID.prodA, ID.bizA], [ID.prodB, ID.bizB]] as const) {
     await db.product.create({
       data: { id, businessId, name: 'V33A Widget', price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true },
+    });
+    await db.service.create({
+      data: { id: `${id}_listing`, businessId, name: 'V33A Widget', duration: 30, price: UNIT_PRICE, sourceProductId: id },
     });
   }
 }, 60_000);

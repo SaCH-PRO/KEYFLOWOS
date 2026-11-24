@@ -45,3 +45,21 @@ export function isInvoiceOpen(status: string): boolean {
 export function isQuotePending(status: string): boolean {
   return status === QuoteStatus.SENT;
 }
+
+/**
+ * FU-WEB-PAYLINK-STATUS-BUTTONS (D-256, D-248): invoice statuses for which the
+ * server will issue or share a customer payment link
+ * (`CommerceService.INTENT_PAYABLE_STATUSES`). Non-payable states (DRAFT,
+ * PENDING, PAID, VOID, FAILED, FULLY_CREDITED) are refused by the server, so
+ * the UI must hide "Copy payment link" and "Share via WhatsApp" for them.
+ */
+export const PAYLINK_SHAREABLE_STATUSES: ReadonlySet<string> = new Set([
+  "SENT",
+  "OVERDUE",
+  "PARTIALLY_PAID",
+  "PARTIALLY_CREDITED",
+]);
+
+export function canShareInvoicePayLink(status: string | null | undefined): boolean {
+  return typeof status === "string" && PAYLINK_SHAREABLE_STATUSES.has(status);
+}

@@ -57,6 +57,7 @@ import {
   PaymentRecord,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
+import { canShareInvoicePayLink } from "@/lib/commerce-status";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -407,15 +408,16 @@ export default function InvoicesPanel({
     return data?.token ? `${origin}/public/invoice/${data.token}` : null;
   }
 
-  async function copyPaymentLink(invoiceId: string) {
+  async function copyPaymentLink(inv: Invoice) {
+    if (!canShareInvoicePayLink(inv.status)) return;
     try {
-      const link = await buildPublicInvoiceUrl(invoiceId);
+      const link = await buildPublicInvoiceUrl(inv.id);
       if (!link) {
         setInvoiceError("Could not create a payment link for this invoice");
         return;
       }
       await navigator.clipboard.writeText(link);
-      setCopiedLink(invoiceId);
+      setCopiedLink(inv.id);
       setTimeout(() => setCopiedLink(null), 2000);
       toast.success("Payment link copied");
     } catch {
@@ -424,6 +426,7 @@ export default function InvoicesPanel({
   }
 
   async function shareViaWhatsApp(inv: Invoice) {
+    if (!canShareInvoicePayLink(inv.status)) return;
     const country = ownBusinessCountry();
     // The customer's number, read by id alongside the link (not from the loaded list).
     const number = readWhatsAppShareNumber(businessId, inv.contactId, country);
@@ -1112,7 +1115,9 @@ export default function InvoicesPanel({
                         }}
                       />
                       <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateInvoice(inv)} />
-                      <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareViaWhatsApp(inv)} />
+                      {canShareInvoicePayLink(inv.status) && (
+                        <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareViaWhatsApp(inv)} />
+                      )}
                       <OverflowMenuItem
                         icon={Mail}
                         label="Send via email"
@@ -1215,8 +1220,16 @@ export default function InvoicesPanel({
               })
             : undefined
         }
-        onCopyPaymentLink={() => mobileSheetFor && copyPaymentLink(mobileSheetFor.id)}
-        onShareWhatsApp={mobileSheetFor ? () => shareViaWhatsApp(mobileSheetFor) : undefined}
+        onCopyPaymentLink={
+          mobileSheetFor && canShareInvoicePayLink(mobileSheetFor.status)
+            ? () => copyPaymentLink(mobileSheetFor)
+            : undefined
+        }
+        onShareWhatsApp={
+          mobileSheetFor && canShareInvoicePayLink(mobileSheetFor.status)
+            ? () => shareViaWhatsApp(mobileSheetFor)
+            : undefined
+        }
         onRecordPayment={mobileSheetFor ? () => openPaymentModal(mobileSheetFor) : undefined}
         onSendReminder={
           mobileSheetFor
@@ -1269,16 +1282,20 @@ export default function InvoicesPanel({
               <>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-0.5">
-                    <button onClick={() => copyPaymentLink(selectedInvoice.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors" title={copiedLink === selectedInvoice.id ? "Copied!" : "Copy payment link"}>
-                      <Link className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : "text-slate-400"}`} />
-                    </button>
+                    {canShareInvoicePayLink(selectedInvoice.status) && (
+                      <button onClick={() => copyPaymentLink(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors" title={copiedLink === selectedInvoice.id ? "Copied!" : "Copy payment link"}>
+                        <Link className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : "text-slate-400"}`} />
+                      </button>
+                    )}
                     <button onClick={() => duplicateInvoice(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate invoice">
                       <Files className="w-4 h-4 text-slate-400" />
                     </button>
                     <div className="w-px h-4 bg-border/30 mx-0.5" />
-                    <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
-                      <MessageCircle className="w-4 h-4 text-emerald-400" />
-                    </button>
+                    {canShareInvoicePayLink(selectedInvoice.status) && (
+                      <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
+                        <MessageCircle className="w-4 h-4 text-emerald-400" />
+                      </button>
+                    )}
                     <button
                       onClick={() => openComposer({
                         to: selectedInvoice.contact?.email || "",
