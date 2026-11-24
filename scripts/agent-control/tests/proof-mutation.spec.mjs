@@ -25,6 +25,16 @@
  *   PM-10  control          (confirmation review finding 2) a commit that no checkout can make pristine (a CRLF file
  *                           committed under `* text=auto`, which shows modified even freshly checked out): the control
  *                           fails at stage 'reset' and its proof never runs
+ *
+ * C1 repair review (42d8df6d): the runner's own git calls must never reach outside its worktree.
+ *   PM-11  RED-AT-42d8df6d  a proof that points the worktree's .git at the main repository: the reset does not follow
+ *                           it (the main checkout's branch and staged changes are untouched) and the next control runs
+ *                           on a fresh worktree
+ *   PM-12  RED-AT-42d8df6d  a run leaves the repository's config exactly as it was (`sparse-checkout disable` wrote
+ *                           `extensions.worktreeConfig` into it)
+ *   PM-13  control          a skip-worktree flag on a path git quotes (non-ASCII) does not survive into the next control
+ *   PM-14  RED-AT-42d8df6d  removing a worktree whose files cannot be deleted (EBUSY on Windows) is reported, never
+ *                           thrown: the run still ends with its summary
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,6 +66,7 @@ function fixtureRepo() {
   git(dir, 'config', 'core.autocrlf', 'false');
   fs.writeFileSync(path.join(dir, 'claim.txt'), 'good\n');
   fs.writeFileSync(path.join(dir, '.gitignore'), '*.log\n');
+  fs.writeFileSync(path.join(dir, '\u00e9t\u00e9.txt'), 'summer\n');
   // The proof: logs where it ran (KF_PM_LOG, outside the repository), then passes only on a pristine exact tree whose
   // claim is good. Run as `node check.mjs litter` it also leaves every kind of debris behind it (an argument, not an
 // environment variable, so the command is the same under cmd.exe on the Windows runner).
@@ -86,6 +97,15 @@ function fixtureRepo() {
       // A worktree the proof broke outright (finding 3): git cannot work in it any more.
       "if (process.argv[2] === 'corrupt') {",
       "  fs.writeFileSync('.git', 'gitdir: /nonexistent/broken\\n');",
+      "}",
+      // A worktree whose .git now points at the main repository (C1 repair review finding 1).
+      "if (process.argv[2] === 'redirect') {",
+      "  fs.writeFileSync('.git', 'gitdir: ' + process.env.KF_PM_MAIN_GITDIR + '\\n');",
+      "}",
+      // A flag on a path git C-quotes in `ls-files -v` (finding 3).
+      "if (process.argv[2] === 'skipname') {",
+      "  execSync('git update-index --skip-worktree -- \u00e9t\u00e9.txt');",
+      "  fs.writeFileSync('\u00e9t\u00e9.txt', 'changed');",
       "}",
       'process.exit(ok ? 0 : 1);',
       '',
@@ -245,4 +265,65 @@ test('PM-10 control: a commit no checkout can make pristine fails its control at
   assert.equal(fs.existsSync(marker), false, 'the proof did not run on a tree that is not the commit');
   const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
   assert.equal(listed.length, 1, 'no worktree left behind');
+});
+
+/** The main checkout's state the runner must never touch: its branch, HEAD, staged changes and config. */
+function mainState(dir) {
+  return {
+    branch: git(dir, 'symbolic-ref', '-q', 'HEAD'),
+    head: git(dir, 'rev-parse', 'HEAD'),
+    staged: git(dir, 'diff', '--cached', '--name-only'),
+    config: fs.readFileSync(path.join(dir, '.git', 'config'), 'utf8'),
+  };
+}
+
+test("PM-11 RED-AT-42d8df6d: a worktree whose .git points at the main repository is not reset through it", () => {
+  const { dir, ref } = fixtureRepo();
+  // The main checkout has moved on (a newer commit) and holds a staged change; the run is at the older commit.
+  fs.writeFileSync(path.join(dir, 'later.txt'), 'later\n');
+  git(dir, 'add', 'later.txt');
+  git(dir, 'commit', '-qm', 'later');
+  fs.writeFileSync(path.join(dir, 'staged.txt'), 'staged\n');
+  git(dir, 'add', 'staged.txt');
+  const before = mainState(dir);
+  const results = withEnv({ KF_PM_MAIN_GITDIR: path.join(dir, '.git') }, () =>
+    afterFirst(control('redirect', { proof_command: 'node check.mjs redirect' }), ref, dir, ref),
+  );
+  assert.deepEqual(mainState(dir), before, 'the main checkout is untouched');
+  for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test("PM-12 RED-AT-42d8df6d: a run leaves the repository's config exactly as it was", () => {
+  const { dir, ref } = fixtureRepo();
+  const before = fs.readFileSync(path.join(dir, '.git', 'config'), 'utf8');
+  const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [control('a'), control('b')] }, { repoRoot: dir, ref }),
+  );
+  assert.equal(summary.live, 2, JSON.stringify(summary.results));
+  assert.equal(fs.readFileSync(path.join(dir, '.git', 'config'), 'utf8'), before);
+});
+
+test('PM-13 control: a skip-worktree flag on a path git quotes does not survive into the next control', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('skipname', { proof_command: 'node check.mjs skipname' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-14 RED-AT-42d8df6d: a worktree that cannot be deleted is reported, never thrown', () => {
+  assert.equal(typeof runner.removeWorktree, 'function', 'removeWorktree is exported');
+  const { dir } = fixtureRepo();
+  // Not a worktree git knows, so `git worktree remove` fails and the runner deletes it itself; the delete throws
+  // as fs.rmSync does on Windows for a file another process holds open.
+  const stuck = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-stuck-'));
+  made.push(stuck);
+  const busy = () => {
+    throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+  };
+  let outcome;
+  assert.doesNotThrow(() => {
+    outcome = runner.removeWorktree(dir, stuck, busy);
+  });
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.detail, /EBUSY/);
 });
