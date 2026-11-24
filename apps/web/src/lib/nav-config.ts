@@ -76,8 +76,8 @@ import { NAV_ROUTE_LABELS } from "./semantic-routes";
  * app more than once (see the disclosure spec in lib/__tests__).
  *
  * Every href is the final URL (nav-reachability.spec.ts): never a next.config redirect source and never a page that
- * only forwards. /app/money and /app/settings only forward today, so the Money and Settings hubs name
- * /app/financial-flow and /app/settings/business until NAV-A2 makes both real indexes.
+ * only forwards. /app/money and /app/settings are real indexes since NAV-A2 (they only forwarded before), so the Money
+ * and Settings hubs name them.
  *
  * NAV-B-HIDE hides the screens v1 does not promise (D-152); until then they stay reachable under More.
  */
@@ -231,9 +231,11 @@ export const hubNav: HubNavItem[] = [
     ],
   },
   {
-    id: "money", label: "Money", href: "/app/financial-flow", icon: Banknote, module: "revenue",
-    alsoActiveOn: ["/app/money", "/app/finance"],
+    id: "money", label: "Money", href: "/app/money", icon: Banknote, module: "revenue",
+    alsoActiveOn: ["/app/financial-flow", "/app/finance"],
     items: [
+      // NAV-A2: the Money index's Overview (journey H); the hub's own page is now the index.
+      { label: "Overview", href: "/app/financial-flow", icon: LayoutDashboard },
       { label: "Payments", href: "/app/payments", icon: CreditCard },
       { label: "Expenses", href: "/app/money/expenses", icon: Receipt, module: "expenses" },
       // Purchasing is money leaving on a promise. Every procurement route needs operations (D-40).
@@ -271,10 +273,12 @@ export const hubNav: HubNavItem[] = [
     ],
   },
   {
-    id: "settings", label: "Settings", href: "/app/settings/business", icon: Settings, module: "settings",
+    id: "settings", label: "Settings", href: "/app/settings", icon: Settings, module: "settings",
     alsoActiveOn: ["/app/settings", "/app/profile", "/app/genome", "/app/structure", "/app/key-connect", "/app/templates", "/app/trash"],
     items: [
       { label: "Business profile", href: "/app/profile", icon: BrainCircuit },
+      // NAV-A2 (journey F; D-105, D-138): the payments page.
+      { label: "Getting paid", href: "/app/settings/business", icon: Wallet },
       { label: "Business Genome", href: "/app/genome", icon: Dna },
       { label: "Plan & billing", href: "/app/settings/billing", icon: CreditCard },
       { label: "Team", href: "/app/settings/team", icon: Users, module: "team" },
