@@ -136,7 +136,8 @@ describe("SWP-INV-MATH: the preview total is the total the server saves", () => 
     await waitFor(() => expect(totalDue()).toContain("TTD 1,066.00"));
     fireEvent.change(taxInput(), { target: { value: "" } });
     await waitFor(() => expect(totalDue()).toContain("TTD 936.00"));
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    // The page offers Save Changes at the top and the bottom; either saves.
+    fireEvent.click(screen.getAllByRole("button", { name: /save changes/i })[0]!);
     await waitFor(() => expect(server.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
     const body = server.calls.find((c) => c.method === "PATCH")!.body!;
     expect(body).toHaveProperty("taxRate", 0);
