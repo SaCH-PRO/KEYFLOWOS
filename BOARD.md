@@ -47,11 +47,11 @@
 
 | Row | Item | Owner | Status | Waits on | Next step |
 | --- | --- | --- | --- | --- | --- |
-| P1 | SEC-KEY-CUSTOM-LOGIC (P0, D-272.4): tenant KEY's `execute_custom_logic` runs JS in a child process on the API host | antigravity | in-review | — | Fix @ `df416ac0` (6/6 232/232, tsc 0); Security CONFIRMED; closing 2 Correctness test-seam items before full server suite + R0 |
-| P2 | Switch off the agent-control autopilot's #80 posting (D-272.4) | antigravity | todo | — | Find the posting workflow and step; turn off its posting (the smallest change); keep the modules and specs green |
+| P1 | SEC-KEY-CUSTOM-LOGIC (P0, D-272.4): tenant KEY's `execute_custom_logic` runs JS in a child process on the API host | antigravity | in-review | — | R2 @ `d136d090` CONFIRMED by both Security & Correctness (0 findings); running full server suite + R0 exit gate now |
+| P2 | Switch off the agent-control autopilot's #80 posting (D-272.4) | antigravity | returned | — | Returned #80 (7122760762) @ `8c536bbf` (RED `8021448d`, 644/644 agent-control specs + DAG OK, both reviews CONFIRMED) |
 | P3 | FU-VITEST-DECORATOR-METADATA (Q20, D-272.2) | antigravity | blocked | the owner sees the diff | Show the before/after of the two expectations. If it is a tightening, AMEND per D-272.2; else hold |
 | P4 | FU-OUTBOUND-ATTACHMENT-URL (D-272.3) | antigravity | returned | — | Returned #80 (7121498630) @ `41e1a419` (RED `597b953b`, 7/7 84/84, tsc 0, both confirmation reviews CONFIRMED); ready for wave compaction |
-| P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | in-review | — | 2/3 returned: `AI-APPROVALS` (#80 7121845152 @ `a0c650a6`) & `STRATEGIC-SIGHT` (#80 7122456412 @ `b474ec39`); `DNA-WRITES` R4 fix in final verification |
+| P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | in-review | — | 2/3 returned (`AI-APPROVALS` @ `a0c650a6`, `STRATEGIC-SIGHT` @ `b474ec39`); `DNA-WRITES` R5 @ `d2203f82` in final confirmation review |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | todo | P5 | CLAIM; CHECKLISTS B |
 | P7 | SWP-CONTACT-QUICKADD (critical path, after SWP-QUOTE-COMPOSER-CONTACT) | claude | todo | — | CLAIM, stacked on d690bc41; CHECKLISTS B |
 | P8 | SWP-INV-LIST (critical path) | claude | todo | P7 | CLAIM; CHECKLISTS B |
@@ -64,4 +64,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the antigravity lane (M1 merged @ 142e5f9e; P5 2/3 returned — STRATEGIC-SIGHT @ b474ec39; DNA-WRITES R4 + P1 polishing).
+Last updated: 2026-11-24 by the antigravity lane (M1 merged @ 142e5f9e; P2 returned @ 8c536bbf; P1 confirmed @ d136d090 proving full suite+R0; P5 2/3 returned, DNA-WRITES R5 confirming).
