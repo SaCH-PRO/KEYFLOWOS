@@ -77,11 +77,11 @@
 | P26 | FU-NAV-A3-CODEX-235 (Codex P2s on #235: a slug taken for an id in breadcrumbs; the settings tab strip shown to every member) `pkt/V1-FU-NAV-A3-CODEX-235` @ 7ef3b70c **RETURNed** (#80 7137156301); both reviews ACCEPT | claude | returned | — | In M8 (PR #236) |
 | P27 | FU-CONTACT-DELETE-LEAVE `pkt/V1-FU-CONTACT-DELETE-LEAVE` @ 6f2cf8df **RETURNed** (#80 7140922048): each single delete keeps its own timer, toast and state; both reviews ACCEPT; C7 live green | claude | returned | — | Next Claude wave |
 | P28 | FU-CONTACT-PAGES-RAW-STATUS (web, M: raw stored statuses on the contact route pages) | claude (proposed #80 7136931971) | todo | M8 | Pre-flight (A3), claim |
-| P29 | FU-C4-FOCUS-OPEN `pkt/V1-FU-C4-FOCUS-OPEN` @ 4b40a2a7: a focus-view card opens the customer page; C4 list step live green (the next step, Cmd/K, is P32) | claude | in-review | — | Two reviews running; RETURN |
+| P29 | FU-C4-FOCUS-OPEN `pkt/V1-FU-C4-FOCUS-OPEN` @ cdf2ac66 **RETURNed** (#80 7142275052): focus cards, the queue's view and call/task actions open the customer page (task -> Tasks); both reviews ACCEPT; C4 list step live green, R0 live green (Cmd/K step is P32) | claude | returned | — | Next Claude wave |
 | P30 | FU-NOTIFICATIONS-PREFS-GUARD (server, S, P1: customer-preferences and customer-log have no module guard) | antigravity | claimed | — | Claimed #80 (7142239879) `pkt/V1-FU-NOTIFICATIONS-PREFS-GUARD` on `10e3c97e`; inspecting controller & writing RED tests now |
 | P31 | FU-CONTACT-PANEL-PRUNE (web, S: the side panel still reads health, journey, conversation context and cross-journey for the retired tabs; acceptance CDC-5 and Codex P2 on #236) | claude | todo | M8 | The read removal does not wait on owner question 32 (only re-homing the panels does): pre-flight, claim after M8 |
-| P32 | FU-C4-CMDK-SEARCH (web, S: journey C4 Cmd/Ctrl+K step: desktop palette not opening, phone results not naming the customer; pre-existing, reached once P29 fixed the list step) | claude | todo | P29 | Root-cause first, then RED |
+| P32 | FU-C4-CMDK-SEARCH (web, S: journey C4 Cmd/Ctrl+K step: desktop palette not opening, phone results not naming the customer; pre-existing, reached once P29 fixed the list step) | claude | todo | — | Root-cause first (two causes filed), then RED |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 ~18:55 UTC by the claude lane (M8 #236 green and held for the M7a order; P27 returned; P29 in review; P32 added).
+Last updated: 2026-11-24 ~19:50 UTC by the claude lane (P29 returned; M7a merged, M8 #236: merging main into wave 3p for CI at the new head).
