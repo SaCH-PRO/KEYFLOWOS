@@ -328,8 +328,9 @@ export default function ContactsPage() {
       />
       <ConfirmDialog
         open={confirmState.open}
-        title="Delete Contact"
-        message="Are you sure you want to delete this contact? This cannot be undone."
+        // It confirms the bulk delete (use-contact-actions.ts handleBulkDelete), a soft delete (BUG-128).
+        title="Delete Contacts"
+        message="Delete the selected contacts? They move to Trash, where you can restore them."
         confirmLabel="Delete"
         variant="danger"
         onConfirm={handleConfirmAction}

@@ -576,7 +576,8 @@ function DatabaseBulkBarInner({
         <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 kf-card p-6 shadow-2xl">
           <h3 className="text-lg font-semibold mb-2" id="db-bulk-delete-title">Delete {selectedCount} contact{selectedCount !== 1 ? "s" : ""}?</h3>
           <p className="text-sm text-muted-foreground mb-4" id="db-bulk-delete-desc">
-            This action cannot be undone. Type <span className="font-mono font-bold text-[hsl(var(--kf-error))]">DELETE</span> to confirm.
+            {/* BUG-128: a bulk delete is a soft delete (crm.service.ts bulkDeleteContacts sets deletedAt). */}
+            {selectedCount !== 1 ? "They move" : "It moves"} to Trash, where you can restore {selectedCount !== 1 ? "them" : "it"}. Type <span className="font-mono font-bold text-[hsl(var(--kf-error))]">DELETE</span> to confirm.
           </p>
           <input
             type="text"
