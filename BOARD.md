@@ -42,6 +42,7 @@
 | M2 | Rulings, **PR #230** | `wave/v1-rulings-3n` @ d03252e1 | claude | **merged** (05f04f2c) | — | Done. The plan of record on main now carries the wedge re-cut and D-263..D-272 |
 | M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 6bb8b430 | claude | **merged** (f6764f4c) | — | Done: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT are on main |
 | M4 | Wave 3j split | `wave/3j-second-lane` (16 packets; fails 25/50; duplicates RR-REDACTION-BY-CONTENT with #228) | antigravity | todo | — | Split into parts within 25 commits / 50 files without the duplicate; prove each; PR; merge in turn |
+| M5 | Wave 3n | `wave/v1-wave-3n` @ bfcf4d4c, cut from main f6764f4c: SWP-CONTACT-QUICKADD, SWP-INV-LIST, two commits each; tree == stack top 388925d9; divergence OK (4 commits) | claude | in-review | — | Wave-head proof running (CHECKLISTS C); then the PR; merge after M4 or as the owner orders (the D-272 order covers M1-M4) |
 
 ## Packets and tasks
 
@@ -66,4 +67,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (M3 merged @ f6764f4c; next: P16 PR #231 with main merged in, then wave 3n with P7 and P8; M4 is Antigravity's).
+Last updated: 2026-11-24 by the claude lane (M3 merged @ f6764f4c; P16 PR #231 confirming at 03349463; wave 3n cut @ bfcf4d4c, proof running).
