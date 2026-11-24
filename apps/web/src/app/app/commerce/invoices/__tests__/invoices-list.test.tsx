@@ -40,7 +40,7 @@ vi.mock("@/lib/workspace", async (importOriginal) => {
     ...actual,
     refreshWorkspace: async () => BIZ,
     getStoredBusinessId: () => BIZ,
-    getCachedBusiness: () => ({ id: BIZ, name: "Island Events", currency: "USD", country: "TT" }),
+    getCachedBusiness: () => cachedBusiness,
   };
 });
 
@@ -48,6 +48,8 @@ import InvoicesHubPage from "../page";
 import { createInvoice } from "@/lib/client";
 
 const BIZ = "biz_inv_list";
+/** The workspace's cached business (vi.mock reads it per call; a test may make it another business's). */
+let cachedBusiness: { id: string; name: string; currency: string; country: string } = { id: "biz_inv_list", name: "Island Events", currency: "USD", country: "TT" };
 const DAY = 24 * 60 * 60 * 1000;
 
 type Row = Record<string, unknown>;
@@ -101,6 +103,7 @@ let posts: { path: string; body: Record<string, unknown> }[];
 let windowOpen: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  cachedBusiness = { id: BIZ, name: "Island Events", currency: "USD", country: "TT" };
   rows = [];
   posts = [];
   push.mockClear();
@@ -249,6 +252,44 @@ describe("SWP-INV-LIST: the Invoices list", () => {
     expect(text).toMatch(/200\.00/);
     expect(text).toMatch(/INV-0040/);
     expect(text).toMatch(/\/public\/invoice\/tok_inv_list_fixture/);
+  });
+
+  it("RED-BEFORE (review MINOR-3): Remind names the balance net of a refund, and is not offered when nothing is due or on a sent row", async () => {
+    const pay = (id: string, invoiceId: string, amount: number, status = "SUCCESSFUL") => ({ id, amount, currency: "USD", status, provider: "MANUAL", providerPaymentId: `m_${id}`, createdAt: new Date().toISOString(), businessId: BIZ, invoiceId });
+    rows = [
+      // 300 total, 150 paid, 50 of it refunded: 200 still due.
+      row({ id: "inv_ref", invoiceNumber: "INV-0050", status: "PARTIALLY_PAID", total: 300, subtotal: 300, payments: [pay("p1", "inv_ref", 150), pay("p2", "inv_ref", -50, "REFUNDED")] }),
+      // Part-paid on the books but nothing left to pay: no reminder.
+      row({ id: "inv_cov", invoiceNumber: "INV-0051", status: "PARTIALLY_PAID", total: 300, subtotal: 300, payments: [pay("p3", "inv_cov", 300)] }),
+      row({ id: "inv_sent", invoiceNumber: "INV-0052", status: "SENT" }),
+    ];
+    render(<InvoicesHubPage />);
+    await openRowMenu("INV-0051");
+    await screen.findByText("Record balance");
+    expect(screen.queryByText("Remind"), "nothing due: no reminder").toBeNull();
+    await openRowMenu("INV-0052");
+    await screen.findByText("Duplicate");
+    expect(screen.queryByText("Remind"), "a sent row has no part-paid reminder").toBeNull();
+    await openRowMenu("INV-0050");
+    fireEvent.click(await screen.findByText("Remind"));
+    await waitFor(() => expect(windowOpen).toHaveBeenCalledTimes(1));
+    const text = new URL(String(windowOpen.mock.calls[0]![0])).searchParams.get("text") ?? "";
+    expect(text).toMatch(/200\.00/);
+  });
+
+  it("RED-BEFORE (review MINOR-1): a cached business that is not the one on screen does not set the cards' currency", async () => {
+    cachedBusiness = { id: "biz_other", name: "Other", currency: "USD", country: "TT" };
+    rows = [row({ id: "inv_ttd", invoiceNumber: "INV-0060", currency: "TTD", total: 100, subtotal: 100 })];
+    render(<InvoicesHubPage />);
+    const unpaid = await card("Unpaid");
+    // The other business's USD is not used: the page keeps its own default, so this TTD invoice is counted, in TTD.
+    expect(unpaid.textContent).toMatch(/TTD\s*100\.00/);
+  });
+
+  it("CONTROL (review MAJOR-2): a row with a discount type the form does not know still lists (read as none)", async () => {
+    rows = [row({ id: "inv_legacy", invoiceNumber: "INV-0070", discountType: "PERCENTAGE", discountValue: 10 })];
+    render(<InvoicesHubPage />);
+    expect((await screen.findAllByText("INV-0070")).length).toBeGreaterThan(0);
   });
 
   it("CONTROL: a part-paid row's Record balance opens the invoice's record-payment step", async () => {
