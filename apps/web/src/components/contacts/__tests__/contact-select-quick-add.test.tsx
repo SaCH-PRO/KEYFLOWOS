@@ -114,7 +114,8 @@ describe("SWP-QUOTE-COMPOSER-CONTACT: the client field", () => {
     await openQuickAdd();
     fireEvent.click(screen.getByRole("button", { name: /add & select/i }));
     expect(await screen.findByText(DUPLICATE)).toBeInTheDocument();
-    expect(toastMock).toHaveBeenCalled();
+    // The FAILURE-KIT refusal toast: the server's reason, under the one refusal id.
+    expect(toastMock.error).toHaveBeenCalledWith(DUPLICATE, expect.objectContaining({ id: "kf-refusal" }));
     expect((screen.getByPlaceholderText("Phone") as HTMLInputElement).value).toBe("+18687771234");
     expect((screen.getByPlaceholderText("First name *") as HTMLInputElement).value).toBe("Kezia");
     expect(onPick).not.toHaveBeenCalled();
