@@ -122,7 +122,6 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/projects":                       'deliberately-unlinked',
   "/app/projects/plans/[planId]":        'detail-route-of:/app/work/projects',
   "/app/settings/conversion":            'todo-connect',
-  "/app/settings/profile":               'deliberately-unlinked',
   "/app/workflows":                      'deliberately-unlinked',
 };
 

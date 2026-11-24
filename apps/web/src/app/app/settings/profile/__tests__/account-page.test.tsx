@@ -105,10 +105,11 @@ describe("NAV-A3: /app/settings/profile is the member's own account", () => {
     expect(Object.keys(patch.body as object).sort()).toEqual(["firstName", "lastName", "name", "phone"]);
   });
 
-  it("RED-BEFORE (BUG-118): a read that fails says so; it is not shown as an empty account", async () => {
+  it("RED-BEFORE (BUG-118): a read that fails says so; it is not shown as an empty account", { timeout: 10_000 }, async () => {
     serve({ status: 503, body: { message: "Service Unavailable" } });
     await renderAccountPage();
-    expect(await screen.findByRole("alert")).toBeTruthy();
+    // A plain 503 is retried (lib/fetch-with-retry.ts: three retries, about 2 s) before the read gives up.
+    expect(await screen.findByRole("alert", {}, { timeout: 6_000 })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
   });
 });

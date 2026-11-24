@@ -61,7 +61,6 @@ function navItems(): Array<{ label: string; href: string }> {
  * name the same destination differently.
  */
 const INTENTIONAL_ALIASES: Record<string, string> = {
-  '/app/profile': 'Build section labels it "Business Profile"; ME hub labels it "Profile"',
 };
 describe('every nav item goes somewhere real', () => {
   const items = navItems();

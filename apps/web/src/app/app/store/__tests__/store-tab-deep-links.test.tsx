@@ -35,12 +35,12 @@ vi.mock("../hooks/use-store-data", () => ({
   }),
 }));
 vi.mock("../components/store-header-actions", () => ({ StoreHeaderActions: () => null }));
-for (const [file, name] of [
-  ["overview-mode", "OverviewMode"], ["design-mode", "DesignMode"], ["merchandising-mode", "MerchandisingMode"],
-  ["catalog-mode", "CatalogMode"], ["operations-mode", "OperationsMode"], ["launch-mode", "LaunchMode"],
-] as const) {
-  vi.doMock(`../components/${file}`, () => ({ [name]: () => <div data-testid={`body-${file}`} /> }));
-}
+vi.mock("../components/overview-mode", () => ({ OverviewMode: () => <div data-testid="body-overview-mode" /> }));
+vi.mock("../components/design-mode", () => ({ DesignMode: () => <div data-testid="body-design-mode" /> }));
+vi.mock("../components/merchandising-mode", () => ({ MerchandisingMode: () => <div data-testid="body-merchandising-mode" /> }));
+vi.mock("../components/catalog-mode", () => ({ CatalogMode: () => <div data-testid="body-catalog-mode" /> }));
+vi.mock("../components/operations-mode", () => ({ OperationsMode: () => <div data-testid="body-operations-mode" /> }));
+vi.mock("../components/launch-mode", () => ({ LaunchMode: () => <div data-testid="body-launch-mode" /> }));
 
 async function openStore(search: string) {
   nav.search = search;

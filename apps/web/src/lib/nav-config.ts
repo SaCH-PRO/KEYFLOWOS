@@ -405,7 +405,8 @@ export const moreNav: NavItem[] = [
 // ============================================================================
 
 export const meNav: NavItem[] = [
-  { label: "Profile", href: "/app/profile", icon: User },
+  // NAV-A3 (BUG-118): the member's own account; the business's page is Settings > Business profile (/app/profile).
+  { label: "My account", href: "/app/settings/profile", icon: User },
   // /app/notifications forwards here.
   { label: "Notifications", href: "/app/settings/notifications", icon: Bell },
 ];

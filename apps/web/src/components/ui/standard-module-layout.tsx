@@ -4,7 +4,6 @@ import React, { useMemo } from "react";
 import { motion } from "framer-motion";
 import { WorkspaceShell, type WorkspaceTab } from "./workspace-shell";
 import { SectionCard } from "./section-card";
-import { OriginAwareBreadcrumbs } from "./origin-aware-breadcrumbs";
 import { getWorkspaceRelatedActions, type WorkspaceId } from "@/lib/semantic-routes";
 import type { LucideIcon } from "lucide-react";
 
@@ -55,13 +54,13 @@ export interface StandardModuleLayoutProps {
   /** Enable swipe between tabs on mobile */
   enableSwipe?: boolean;
 
-  /** Show breadcrumbs */
-  showBreadcrumbs?: boolean;
-
   className?: string;
   children: React.ReactNode;
 }
 
+/**
+ * NAV-A3 (BUG-123): the app layout draws the one breadcrumb trail for every /app page, so this layout draws none.
+ */
 export function StandardModuleLayout({
   workspace,
   icon,
@@ -78,7 +77,6 @@ export function StandardModuleLayout({
   metricStrip,
   banners,
   enableSwipe,
-  showBreadcrumbs = true,
   className = "",
   children,
 }: StandardModuleLayoutProps) {
@@ -88,17 +86,6 @@ export function StandardModuleLayout({
 
   return (
     <div className={`space-y-0 ${className}`}>
-      {showBreadcrumbs && (
-        <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          className="mb-2"
-        >
-          <OriginAwareBreadcrumbs />
-        </motion.div>
-      )}
-
       <WorkspaceShell
         icon={icon}
         title={title}

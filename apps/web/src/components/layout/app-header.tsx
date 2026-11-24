@@ -388,14 +388,15 @@ export function AppHeader({
                   <p className="text-xs font-medium text-foreground truncate">{displayName || "User"}</p>
                   <p className="text-[10px] text-muted-foreground truncate mt-0.5">{getCachedUser()?.email}</p>
                 </div>
+                {/* NAV-A3 (BUG-118): the member's own account, not the business's profile (/app/profile). */}
                 <Link
-                  href="/app/profile"
+                  href="/app/settings/profile"
                   onClick={() => setUserMenuOpen(false)}
                   className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors min-h-[44px]"
                   role="menuitem"
                 >
                   <User className="w-3.5 h-3.5 text-muted-foreground" />
-                  My Profile
+                  My account
                 </Link>
                 <Link
                   href="/app/profile?tab=pricing"

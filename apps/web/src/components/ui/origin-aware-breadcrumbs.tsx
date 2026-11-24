@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import { useNavigationContext } from "@/lib/navigation-context";
+import { isAppPage } from "@/lib/app-page-routes";
 import {
   getLabel,
   getAlias,
@@ -21,8 +22,21 @@ import {
  * See src/lib/semantic-routes.ts for the canonical definitions.
  * ──────────────────────────────────────────────────────────────── */
 
-function isUuid(s: string) {
-  return /^[0-9a-f-]{20,}$/i.test(s);
+/**
+ * NAV-A3 (BUG-123): a database id is never a crumb. Ids are uuids or cuids ("cmwujpiuf00n57dx4navng6ud": letters past
+ * "f", so a hex-only check missed them); a route segment is a word or a slug, which has no digits.
+ */
+function isId(s: string) {
+  if (/^[0-9a-f-]{20,}$/i.test(s)) return true;
+  return s.length >= 16 && /^[a-z0-9_-]+$/i.test(s) && /\d/.test(s) && /[a-z]/i.test(s);
+}
+
+/** NAV-A3 (BUG-123): a segment the registry does not name reads as words ("data-quality" -> "Data quality"). */
+function labelFor(segment: string) {
+  const label = getLabel(segment);
+  if (label !== segment) return label;
+  const words = segment.replace(/[-_]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /* ─── Flow Connector between crumbs ─── */
@@ -67,41 +81,11 @@ export function OriginAwareBreadcrumbs() {
 
   const topModule = crumbs[0];
   const configSurface = isConfigSurface(topModule);
-  const detailSurface =
-    crumbs.length > 1 && isDetailSurface(topModule) && crumbs.some(isUuid);
+  const detailSurface = crumbs.length > 1 && isDetailSurface(topModule) && crumbs.some(isId);
 
   const origin = isHydrated ? getOriginContext() : null;
   const showOriginContext =
     (configSurface || detailSurface) && origin && origin.route !== pathname;
-
-  /* ── Build intermediate hrefs with alias resolution ── */
-  const crumbMeta = crumbs.map((segment, idx) => {
-    if (isUuid(segment)) return null;
-
-    const rawHref = "/app/" + crumbs.slice(0, idx + 1).join("/");
-    const aliasedHref = getAlias(rawHref) ?? rawHref;
-    const hasAlias = aliasedHref !== rawHref;
-
-    // Determine if this segment should be a link:
-    // 1. Last crumb is always plain text
-    // 2. UUID-preceding crumb is plain text
-    // 3. Segments in NO_LINK_SEGMENTS are plain text (they're detail tabs)
-    // 4. Segments with aliases are links (they redirect to a real page)
-    const isLast =
-      idx === crumbs.length - 1 ||
-      (idx === crumbs.length - 2 && isUuid(crumbs[crumbs.length - 1]));
-
-    const isNoLink = isNoLinkSegment(segment);
-    const isLinkable = !isLast && !isNoLink;
-
-    return {
-      segment,
-      href: isLinkable ? aliasedHref : undefined,
-      label: getLabel(segment),
-      isLast,
-      hasAlias,
-    };
-  });
 
   /* ── Active tab label (if any) ── */
   const tabParam = searchParams.get("tab");
@@ -117,6 +101,79 @@ export function OriginAwareBreadcrumbs() {
       }
     }
   }
+  const viewLabel = viewParam ? viewParam.charAt(0).toUpperCase() + viewParam.slice(1) : null;
+
+  /*
+   * ── The trail, built as a list first (NAV-A3) ──
+   * A crumb is a link only when its path opens a page (BUG-067: lib/app-page-routes.ts); otherwise it is plain text.
+   * Ids are never crumbs, and a segment the registry does not name reads as words (BUG-123). A label already on the
+   * trail is not repeated (BUG-123: /app/money/expenses read "Money > Money > Expenses").
+   */
+  type Crumb = { key: string; label: string; href?: string; current?: boolean; suffix?: string | null; underline?: boolean };
+  const linkIfPage = (href: string | undefined) => (href && isAppPage(href) ? href : undefined);
+  let lastIdx = -1;
+  crumbs.forEach((seg, i) => { if (!isId(seg)) lastIdx = i; });
+
+  const built: Crumb[] = [];
+  crumbs.forEach((segment, idx) => {
+    if (isId(segment)) return;
+    const rawHref = "/app/" + crumbs.slice(0, idx + 1).join("/");
+    const href = getAlias(rawHref) ?? rawHref;
+    const label = labelFor(segment);
+    const isLast = idx === lastIdx;
+
+    getParentOverride(segment)?.forEach((parent, pIdx) => {
+      built.push({ key: `parent-${segment}-${pIdx}`, label: parent.label, href: linkIfPage(parent.href) });
+    });
+
+    // For /app/commerce and /app/expenses with tabs, render tab + view as separate crumbs
+    if ((segment === "commerce" || segment === "expenses") && tabParam && tabLabel) {
+      built.push({ key: segment + idx, label, href: linkIfPage(href) ?? linkIfPage(`/app/${segment}`) });
+      const tabBase = `/app/${segment}`;
+      built.push({ key: `tab-${tabParam}`, label: tabLabel, href: isAppPage(tabBase) ? `${tabBase}?tab=${tabParam}` : undefined });
+      if (viewLabel) built.push({ key: `view-${viewParam}`, label: viewLabel, current: true });
+      return;
+    }
+
+    if (isLast) {
+      // Books tabs on reports page show "Books" instead of "Reports › Books · PnL"
+      const books = !!tabParam?.startsWith("books-") && segment === "reports";
+      built.push({
+        key: segment + idx,
+        label: books ? "Books" : label,
+        current: true,
+        suffix: books ? null : tabLabel,
+        underline: detailSurface,
+      });
+      return;
+    }
+    built.push({ key: segment + idx, label, href: isNoLinkSegment(segment) ? undefined : linkIfPage(href) });
+  });
+
+  // No doubles: a label already on the trail (Home included) is dropped; the current crumb always stays.
+  const trail: Crumb[] = [];
+  const seen = new Set<string>(["Home"]);
+  for (const c of built) {
+    if (seen.has(c.label)) {
+      if (!c.current) continue;
+      const earlier = trail.findIndex((t) => t.label === c.label);
+      if (earlier >= 0) trail.splice(earlier, 1);
+    }
+    seen.add(c.label);
+    trail.push(c);
+  }
+
+  const underlineBar = (
+    <motion.span
+      initial={{ scaleX: 0 }}
+      animate={{ scaleX: 1 }}
+      className="absolute -bottom-0.5 left-0 right-0 h-[2px] rounded-full origin-left"
+      style={{
+        background:
+          "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+      }}
+    />
+  );
 
   return (
     <nav
@@ -163,168 +220,40 @@ export function OriginAwareBreadcrumbs() {
         </Link>
       </motion.span>
 
-      {crumbMeta.flatMap((meta, idx) => {
-        if (!meta) return [];
-        const { segment, href, label, isLast } = meta;
-
-        const parentOverride = getParentOverride(segment);
-        const items: React.ReactNode[] = [];
-
-        if (parentOverride) {
-          parentOverride.forEach((parent, pIdx) => {
-            items.push(
-              <motion.span
-                key={`parent-${segment}-${pIdx}`}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{
-                  delay: idx * 0.04 + 0.05,
-                  type: "spring",
-                  stiffness: 400,
-                  damping: 25,
-                }}
-                className="flex items-center gap-0.5"
-              >
-                <FlowConnector />
-                <Link href={parent.href} className="hover:text-foreground transition-colors">
-                  {parent.label}
-                </Link>
-              </motion.span>
-            );
-          });
-        }
-
-        // For /app/commerce and /app/expenses with tabs, render tab + view as separate crumbs
-        const isTabbedPage = (segment === "commerce" || segment === "expenses") && tabParam && tabLabel;
-        const viewLabel = viewParam ? viewParam.charAt(0).toUpperCase() + viewParam.slice(1) : null;
-
-        if (isTabbedPage) {
-          // Module crumb (linkable)
-          items.push(
-            <motion.span
-              key={segment + idx}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{
-                delay: idx * 0.04 + 0.05,
-                type: "spring",
-                stiffness: 400,
-                damping: 25,
-              }}
-              className="flex items-center gap-0.5"
-            >
-              <FlowConnector />
-              <Link href={href ?? `/app/${segment}`} className="hover:text-foreground transition-colors">
-                {label}
-              </Link>
-            </motion.span>
-          );
-          // Tab crumb (linkable, not last if view exists)
-          items.push(
-            <motion.span
-              key={`tab-${tabParam}`}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{
-                delay: idx * 0.04 + 0.08,
-                type: "spring",
-                stiffness: 400,
-                damping: 25,
-              }}
-              className="flex items-center gap-0.5"
-            >
-              <FlowConnector />
-              <Link href={`/app/${segment}?tab=${tabParam}`} className="hover:text-foreground transition-colors">
-                {tabLabel}
-              </Link>
-            </motion.span>
-          );
-          // View crumb (last, plain text)
-          if (viewLabel) {
-            items.push(
-              <motion.span
-                key={`view-${viewParam}`}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{
-                  delay: idx * 0.04 + 0.11,
-                  type: "spring",
-                  stiffness: 400,
-                  damping: 25,
-                }}
-                className="flex items-center gap-0.5"
-              >
-                <FlowConnector />
-                <span className="text-foreground font-medium relative">
-                  {viewLabel}
-                  <motion.span
-                    initial={{ scaleX: 0 }}
-                    animate={{ scaleX: 1 }}
-                    className="absolute -bottom-0.5 left-0 right-0 h-[2px] rounded-full origin-left"
-                    style={{
-                      background:
-                        "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                    }}
-                  />
+      {trail.map((crumb, idx) => (
+        <motion.span
+          key={crumb.key}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{
+            delay: idx * 0.04 + 0.05,
+            type: "spring",
+            stiffness: 400,
+            damping: 25,
+          }}
+          className="flex items-center gap-0.5"
+        >
+          <FlowConnector />
+          {crumb.current ? (
+            <span className="text-foreground font-medium relative" aria-current="page">
+              {crumb.label}
+              {crumb.suffix && (
+                <span className="text-muted-foreground font-normal">
+                  {" "}
+                  › {crumb.suffix}
                 </span>
-              </motion.span>
-            );
-          }
-        } else {
-          items.push(
-            <motion.span
-              key={segment + idx}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{
-                delay: idx * 0.04 + 0.05,
-                type: "spring",
-                stiffness: 400,
-                damping: 25,
-              }}
-              className="flex items-center gap-0.5"
-            >
-              <FlowConnector />
-              {isLast ? (
-                <span className="text-foreground font-medium relative">
-                  {/* Books tabs on reports page show "Books" instead of "Reports › Books · PnL" */}
-                  {tabParam?.startsWith("books-") && segment === "reports" ? "Books" : label}
-                  {tabLabel && !(tabParam?.startsWith("books-") && segment === "reports") && (
-                    <span className="text-muted-foreground font-normal">
-                      {" "}
-                      › {tabLabel}
-                    </span>
-                  )}
-                  {detailSurface &&
-                    idx ===
-                      crumbs.length - (isUuid(crumbs[crumbs.length - 1]) ? 2 : 1) && (
-                      <motion.span
-                        initial={{ scaleX: 0 }}
-                        animate={{ scaleX: 1 }}
-                        className="absolute -bottom-0.5 left-0 right-0 h-[2px] rounded-full origin-left"
-                        style={{
-                          background:
-                            "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                        }}
-                      />
-                    )}
-                </span>
-              ) : href ? (
-                <Link
-                  href={href}
-                  className="hover:text-foreground transition-colors"
-                >
-                  {label}
-                </Link>
-              ) : (
-                <span className="text-muted-foreground/60">{label}</span>
               )}
-            </motion.span>
-          );
-        }
-
-        return items;
-      })}
+              {crumb.underline && underlineBar}
+            </span>
+          ) : crumb.href ? (
+            <Link href={crumb.href} className="hover:text-foreground transition-colors">
+              {crumb.label}
+            </Link>
+          ) : (
+            <span className="text-muted-foreground/60">{crumb.label}</span>
+          )}
+        </motion.span>
+      ))}
     </nav>
   );
 }

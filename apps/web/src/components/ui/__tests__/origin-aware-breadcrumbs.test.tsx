@@ -29,9 +29,12 @@ vi.mock("@/lib/navigation-context", () => ({ useNavigationContext: () => ({ getO
 
 import { OriginAwareBreadcrumbs } from "../origin-aware-breadcrumbs";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
+import { APP_PAGE_ROUTES, isAppPage } from "@/lib/app-page-routes";
 
 /* ── The oracle: every page.tsx under src/app/app, as a matcher ── */
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../app/app");
+/** Each page's route as the page files spell it ("/app/crm/contacts/[contactId]"). */
+const ROUTES_ON_DISK: string[] = [];
 function pagePatterns(): RegExp[] {
   const out: RegExp[] = [];
   const walk = (dir: string, segs: string[]) => {
@@ -49,6 +52,7 @@ function pagePatterns(): RegExp[] {
           else re += "/" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         }
         out.push(new RegExp(re + "$"));
+        ROUTES_ON_DISK.push(["/app", ...segs.filter((x) => !/^\(.*\)$/.test(x))].join("/"));
       }
     }
   };
@@ -163,5 +167,21 @@ describe("NAV-A3: no doubles", () => {
       </UnifiedPageShell>,
     );
     expect(screen.queryAllByRole("navigation", { name: "Breadcrumb" })).toHaveLength(0);
+  });
+});
+
+describe("NAV-A3: lib/app-page-routes.ts is the app's page list", () => {
+  it("lists exactly the page files under src/app/app (add or remove the routes this prints)", () => {
+    const disk = new Set(ROUTES_ON_DISK);
+    const listed = new Set(APP_PAGE_ROUTES);
+    expect({ missing: [...disk].filter((r) => !listed.has(r)).sort(), extra: [...listed].filter((r) => !disk.has(r)).sort() }).toEqual({ missing: [], extra: [] });
+  });
+
+  it("matches static pages and [segment] pages, and nothing else", () => {
+    expect(isAppPage("/app/schedule/calendar")).toBe(true);
+    expect(isAppPage("/app/schedule")).toBe(false);
+    expect(isAppPage("/app/crm/contacts/cmwujpiuf00n57dx4navng6ud/overview?x=1")).toBe(true);
+    expect(isAppPage("/app/crm/contacts/a/b/c")).toBe(false);
+    expect(isAppPage("/app/does-not-exist")).toBe(false);
   });
 });
