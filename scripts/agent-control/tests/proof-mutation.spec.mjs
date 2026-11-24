@@ -35,6 +35,19 @@
  *   PM-13  control          a skip-worktree flag on a path git quotes (non-ASCII) does not survive into the next control
  *   PM-14  RED-AT-42d8df6d  removing a worktree whose files cannot be deleted (EBUSY on Windows) is reported, never
  *                           thrown: the run still ends with its summary
+ *
+ * C1 second repair review (da70c68e): a reused worktree must be indistinguishable from a fresh one, git dir included.
+ *   PM-15  RED-AT-da70c68e  a proof that attaches HEAD to the main checkout's branch: the reset does not move that
+ *                           branch, and the next control runs on a detached HEAD at the commit
+ *   PM-16  RED-AT-da70c68e  per-worktree git state a proof leaves (a refs/worktree ref, a bisect) does not survive
+ *   PM-17  RED-AT-da70c68e  under core.autocrlf (windows-latest's default) a file a proof rewrote with LF and staged is
+ *                           checked out again with CRLF, as a fresh worktree has it
+ *   PM-18  RED-AT-da70c68e  a proof that times out leaving a process that keeps writing: the next control runs where
+ *                           that process cannot reach
+ *   PM-19  RED-AT-da70c68e  a proof that locks the worktree: no worktree is left behind (also RED on main 054cac4b,
+ *                           which left the locked worktree too)
+ * PM-05 now resets a worktree the runner made (addWorktree), as the runner does: resetToPristine takes the worktree
+ * record ({ dir, gitDir, ... }) and no longer accepts a bare directory.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,7 +60,13 @@ import * as runner from '../proof-mutation.mjs';
 /** Every throwaway directory a test made, removed when the file's tests are done. */
 const made = [];
 process.on('exit', () => {
-  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of made) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // A process a proof left (PM-18) may still hold a file on Windows; the directory is under the temp dir.
+    }
+  }
 });
 
 const git = (cwd, ...args) => {
@@ -74,12 +93,19 @@ function fixtureRepo() {
     path.join(dir, 'check.mjs'),
     [
       "import fs from 'node:fs';",
-      "import { execSync } from 'node:child_process';",
+      "import { execSync, execFileSync, spawn } from 'node:child_process';",
       "const top = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();",
       "if (process.env.KF_PM_LOG) fs.appendFileSync(process.env.KF_PM_LOG, top + '\\n');",
       "const head = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();",
       "const dirty = execSync('git status --porcelain --ignored', { encoding: 'utf8' }).trim();",
-      "const ok = fs.readFileSync('claim.txt', 'utf8').includes('good') && head === process.env.KF_PM_REF && dirty === '';",
+      // A fresh worktree is detached, has no per-worktree ref or bisect, and (under autocrlf) CRLF files.
+      "let detached = true;",
+      "try { execSync('git symbolic-ref -q HEAD', { stdio: 'ignore' }); detached = false; } catch {}",
+      "let marked = true;",
+      "try { execSync('git rev-parse -q --verify refs/worktree/mark', { stdio: 'ignore' }); } catch { marked = false; }",
+      "const bisecting = fs.existsSync(execSync('git rev-parse --git-path BISECT_LOG', { encoding: 'utf8' }).trim());",
+      "const eolOk = !process.env.KF_PM_EXPECT_CRLF || fs.readFileSync('claim.txt', 'utf8').includes('\\r\\n');",
+      "const ok = fs.readFileSync('claim.txt', 'utf8').includes('good') && head === process.env.KF_PM_REF && dirty === '' && detached && !marked && !bisecting && eolOk;",
       "if (process.argv[2] === 'litter') {",
       "  fs.writeFileSync('stray.txt', 'untracked');",
       "  fs.writeFileSync('noise.log', 'ignored');",
@@ -101,6 +127,27 @@ function fixtureRepo() {
       // A worktree whose .git now points at the main repository (C1 repair review finding 1).
       "if (process.argv[2] === 'redirect') {",
       "  fs.writeFileSync('.git', 'gitdir: ' + process.env.KF_PM_MAIN_GITDIR + '\\n');",
+      "}",
+      // Second repair review: HEAD attached to a branch (F1), per-worktree state (F2), an LF rewrite staged under
+      // autocrlf (F3), a process left writing after a timeout (F4), a locked worktree (F6).
+      "if (process.argv[2] === 'attach') {",
+      "  execSync('git symbolic-ref HEAD refs/heads/' + process.env.KF_PM_BRANCH);",
+      "}",
+      "if (process.argv[2] === 'perworktree') {",
+      "  execSync('git update-ref refs/worktree/mark HEAD');",
+      "  execSync('git bisect start', { stdio: 'ignore' });",
+      "}",
+      "if (process.argv[2] === 'lf') {",
+      "  fs.writeFileSync('claim.txt', 'good\\n');",
+      "  execSync('git add claim.txt');",
+      "}",
+      "if (process.argv[2] === 'hang') {",
+      "  const writer = \"const fs = require('fs'); const end = Date.now() + 4000; const t = setInterval(() => { try { fs.writeFileSync('late.txt', 'late'); } catch {} if (Date.now() > end) clearInterval(t); }, 50);\";",
+      "  spawn(process.execPath, ['-e', writer], { stdio: 'ignore' }).unref();",
+      "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);",
+      "}",
+      "if (process.argv[2] === 'lock') {",
+      "  execFileSync('git', ['worktree', 'lock', process.cwd()]);",
       "}",
       // A flag on a path git C-quotes in `ls-files -v` (finding 3).
       "if (process.argv[2] === 'skipname') {",
@@ -197,11 +244,17 @@ test('PM-04 control: no worktree is left behind', () => {
 test('PM-05 RED-BEFORE: a tree that cannot be reset to the ref is reported, and its control fails without running', () => {
   assert.equal(typeof runner.resetToPristine, 'function', 'resetToPristine is exported');
   const { dir, ref } = fixtureRepo();
-  // A pristine reset of the repository itself succeeds; a reset to a ref that does not exist does not.
-  assert.deepEqual(runner.resetToPristine(dir, ref), { ok: true });
-  const bad = runner.resetToPristine(dir, '0000000000000000000000000000000000000000');
-  assert.equal(bad.ok, false);
-  assert.ok(bad.detail.length > 0);
+  // A pristine reset of a worktree the runner made succeeds; a reset to a ref that does not exist does not.
+  const worktree = runner.addWorktree(dir, ref);
+  assert.ok(worktree.dir, worktree.detail);
+  try {
+    assert.deepEqual(runner.resetToPristine(worktree, ref), { ok: true });
+    const bad = runner.resetToPristine(worktree, '0000000000000000000000000000000000000000');
+    assert.equal(bad.ok, false);
+    assert.ok(bad.detail.length > 0);
+  } finally {
+    runner.removeWorktree(dir, worktree.dir);
+  }
 });
 
 /** Runs [first, plain, plain] at `ref` and returns the two plain controls' results. */
@@ -326,4 +379,53 @@ test('PM-14 RED-AT-42d8df6d: a worktree that cannot be deleted is reported, neve
   });
   assert.equal(outcome.ok, false);
   assert.match(outcome.detail, /EBUSY/);
+});
+
+/** The main checkout's branch name. */
+const branchOf = (dir) => git(dir, 'symbolic-ref', '--short', 'HEAD');
+
+test('PM-15 RED-AT-da70c68e: a proof that attaches HEAD to the main branch does not get that branch reset', () => {
+  const { dir, ref } = fixtureRepo();
+  fs.writeFileSync(path.join(dir, 'later.txt'), 'later\n');
+  git(dir, 'add', 'later.txt');
+  git(dir, 'commit', '-qm', 'later');
+  const before = mainState(dir);
+  const results = withEnv({ KF_PM_BRANCH: branchOf(dir) }, () =>
+    afterFirst(control('attach', { proof_command: 'node check.mjs attach' }), ref, dir, ref),
+  );
+  assert.deepEqual(mainState(dir), before, 'the main branch did not move');
+  for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test('PM-16 RED-AT-da70c68e: per-worktree git state (a refs/worktree ref, a bisect) does not survive', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('perworktree', { proof_command: 'node check.mjs perworktree' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-17 RED-AT-da70c68e: under autocrlf, an LF rewrite a proof staged is checked out again with CRLF', () => {
+  const { dir, ref } = fixtureRepo();
+  git(dir, 'config', 'core.autocrlf', 'true');
+  const results = withEnv({ KF_PM_EXPECT_CRLF: '1' }, () =>
+    afterFirst(control('lf', { proof_command: 'node check.mjs lf' }), ref, dir, ref),
+  );
+  for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test('PM-18 RED-AT-da70c68e: a proof that times out leaving a writer behind does not reach the next control', () => {
+  const { dir, ref } = fixtureRepo();
+  const hang = control('hang', { proof_command: 'node check.mjs hang', timeout_ms: 400 });
+  const [second, third] = afterFirst(hang, ref, dir, ref);
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(third.ok, true, JSON.stringify(third));
+});
+
+test('PM-19 RED-AT-da70c68e and main: a proof that locks the worktree leaves no worktree behind', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('lock', { proof_command: 'node check.mjs lock' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+  const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  assert.equal(listed.length, 1, 'no worktree left behind, locked or not: ' + listed.join(' | '));
 });
