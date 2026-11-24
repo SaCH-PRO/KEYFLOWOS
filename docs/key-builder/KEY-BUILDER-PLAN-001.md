@@ -197,3 +197,43 @@ builds its own packets.
 - The M2 VM's size and the exact monthly cap. These are set when M2 starts (D-270).
 - Whether v1 packet work resumes in parallel with the Builder KEY packets, or waits for M1. The recommendation is to
   wait for M0, then let Builder KEY run v1 packets. That is its purpose and its proof.
+
+## 8. How long it takes (estimate, 2026-11-24)
+
+The estimate rests on packets measured in this programme, end to end: claim, tests first, two reviews, the fix round,
+proof and RETURN.
+
+| Packet | Size | Time | Included |
+| --- | --- | --- | --- |
+| SWP-INV-MATH | M | about 3 h | live browser runs |
+| SWP-INV-PUBLIC-LINK | M | about 3 h | the full server suite and Release 0 |
+| MOUNT-QUOTES | L | about 8 h | live browser debugging |
+
+Working rate: S about 2 h, M 3 to 5 h, L 6 to 10 h. That allows for the extra design judgement new tooling needs.
+Under usage limits, one orchestrator account gets about 8 to 10 productive agent-hours a day, with up to three
+workers in parallel.
+
+| Phase | Agent-hours | Critical path | Calendar, if the owner answers within a day | Owner inputs |
+| --- | --- | --- | --- | --- |
+| Q4 (merge the proven stack) and Phase S | about 15 | SEC-KEY-CUSTOM-LOGIC (L) | 1 to 2 days, parallel with KB-001 | Q1 to Q6 answered |
+| M0 (KB-001 to KB-008, plus the M0 run) | 40 to 50 | KB-001, KB-006, KB-005, KB-007, KB-008, then the run: about 34 h | **1 to 1.5 weeks** | An Anthropic API key with a spend limit |
+| M1 (KB-009 to KB-012, plus a wave of three) | about 30. From here Builder KEY builds its own packets | KB-009, KB-010, then the wave | about 1 week (total about 2.5 weeks) | Gemini and OpenAI API keys |
+| M2 (KB-013 to KB-017) | about 30, plus **one week of soak** (its done-when) | KB-013, KB-014, KB-015 | about 2 weeks (total about 4.5 weeks) | The VM, and creating the GitHub App (about 30 minutes in GitHub settings) |
+| M3 (KB-018, KB-019) | about 12, with a full proof (product code) | KB-018, KB-019 | about 1 week (total about 5.5 weeks) | Approving the admin page |
+| M4 (KB-020) | about 6 | - | a few days (total about **6 weeks**, range 5 to 8) | Ruling on the first proposals |
+
+What moves the dates:
+- **Usage limits.** The seven-day model limit and the shared five-hour window cost about two hours a hit. API keys
+  from M0 on remove most of this.
+- **Owner turnaround** on keys, the App and the VM.
+- **KB-005's checks.** False positives cost fix rounds.
+- **KB-001.** Docker has no daemon in these cloud sessions (checked 2026-11-24), so M0's environment scripts the
+  native setup that already works here (Postgres, Redis, Playwright aliases). Containers come with the M2 VM.
+
+API spend, at the C §13 figures:
+- **Per packet:** about $30 to $50 (worker plus reviews).
+- **M1 to M4 on API keys:** about 20 packets, so roughly $600 to $1,000.
+- **Phase S and M0:** these are built by hand-run sessions, as now.
+
+Useful value arrives at **M0, in about 1.5 weeks**: from then on Builder KEY can build v1 packets with only the
+owner's merge go.
