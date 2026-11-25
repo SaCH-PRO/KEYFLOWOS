@@ -1511,7 +1511,7 @@ export class StoreOrderService {
               firstName: 'Walk-in',
               lastName: 'customer',
               displayName: 'Walk-in customer',
-              status: 'CUSTOMER',
+              status: 'CLIENT',
               source: 'quick_sale_walkin',
               sourceDetail: 'Quick counter sale',
               visibility: 'TEAM',

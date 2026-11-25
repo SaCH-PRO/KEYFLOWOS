@@ -199,13 +199,15 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
   },
   settings: {
     read: [],
-    write: [],
+    // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write
+    write: ['update_business_blueprint'],
     admin: [],
-    deny: ['update_business_blueprint', 'commerce_create_invoice', 'structure_get_org_tree'],
+    deny: ['commerce_create_invoice', 'structure_get_org_tree'],
   },
   ai: {
     read: [],
-    write: [],
+    // SWP-CENSUS-GENOME (P84): KeyflowCommandController.createNote requires ai write
+    write: ['keyflow_create_note'],
     admin: [],
     deny: ['goals_create', 'execute_custom_logic', 'commerce_create_invoice'],
   },
@@ -463,7 +465,8 @@ describe('through the real AiOversightService.evaluate (the review repros)', () 
   });
 
   it.each([
-    [{ settings: 'admin' }, 'update_business_blueprint'],
+    [{ settings: 'read' }, 'update_business_blueprint'],
+    [{ settings: 'admin' }, 'commerce_create_invoice'],
     [{ ai: 'admin', analytics: 'admin', connect: 'admin', automations: 'admin', storefront: 'admin' }, 'commerce_create_invoice'],
     [{ crm: 'none' }, 'crm_create_contact'],
     [{ team: 'admin' }, 'payroll_list_rates'],
