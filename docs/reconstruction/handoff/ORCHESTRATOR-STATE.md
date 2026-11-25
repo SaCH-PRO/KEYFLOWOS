@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~02:15 UTC by the acting orchestrator (second-lane account, Claude Code), after the MOVED note, the RETURNs of SWP-REMOVED-MEMBER-NOTICE and FU-ME-NOTIFICATIONS-SCOPE, and the M11 wave branch cut. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~03:40 UTC by the acting orchestrator (second-lane account, Claude Code), after M11 (PR #240) merged as 293d7f39. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -80,43 +80,44 @@ in BUILD-MAP-001: Antigravity to record it with M10.
 - **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
   its Release 0 suite's setup only; assertions unchanged.
 
-## 0. Next session starts here (2026-11-25 ~02:15 UTC)
+## 0. Next session starts here (2026-11-25 ~03:40 UTC)
 
-Done this session (all on #80): MOVED note 7149104297 (the repository is `KEYFLOWOS/KEYFLOWOS`; Antigravity moved its
-remotes and returned P38); RETURN SWP-REMOVED-MEMBER-NOTICE 7149268781 (board P48, head `3cc0b301`, both reviews
-CONFIRMED at 21defe66 and 3cc0b301); CLAIM 7149276915 and RETURN 7149640533 for P40 FU-ME-NOTIFICATIONS-SCOPE (head
-`23cc809a`, browser RED at base / green at head, both reviews CONFIRMED). GitHub: the REST API works from the cloud
-session (`gh api repos/KEYFLOWOS/KEYFLOWOS/...`); GraphQL (`gh issue view`, `gh pr view`) is refused, so use REST.
+**M11 merged** (PR #240, merge commit `293d7f39`, head pinned `89100f86`): P27, P29, P32, P35, SWP-REMOVED-MEMBER-NOTICE
+(P48), P40 and the docs batch. CI's mocked e2e job caught one real defect at the first head (`414add8d`): the
+R0-06 spec `e2e/onboarding-loop-regression.spec.ts` pins the text of use-genome-gate.ts's redirects, which
+SWP-REMOVED-MEMBER-NOTICE had changed; fixed on the packet (`1352e62d`, both reviewers CONFIRMED) without touching
+the spec. Lesson for every web packet that edits a file a static spec reads: run `E2E_NO_SERVER=1 npx playwright
+test e2e/onboarding-loop-regression.spec.ts e2e/auth-helpers.spec.ts e2e/public-flows.spec.ts --project=chromium`
+(the mocked CI job's specs) before the RETURN.
+
+GitHub from a cloud session: REST works (`gh api repos/KEYFLOWOS/KEYFLOWOS/...`); GraphQL (`gh issue view`, `gh pr
+view`) is refused. Subagents spawned here cannot spawn reviewers; the orchestrator runs each worker's two reviews.
 
 Next, in order:
-1. **M11** (Claude, wave 3q): branch `wave/v1-wave-m11`, cut from main `eec1e880`, 14 compacted commits so far (P27,
-   P29, P32, P35, P48, P40) plus the docs commit from `wave/v1-docs-p19`. It waits for **M10 (PR #239, Antigravity)**
-   to merge. Then: merge main in, check divergence (25 commits / 50 files), wave-head proof (server tsc, build, suite,
-   R0; web typegen, tsc, vitest, lint), live journeys J8, C4 (list and Cmd/K), C6, C7, the removed-member sweep and
-   release0-live, open the PR, two confirmation reviews at the head, merge under D-239 (or enqueue, D-278, once the
-   owner switches the merge queue on).
-2. Then the Claude lane's next packets on the board: P37 web half (stack on `61e50c0f`), P42 FU-C4-TODAY-LINK
-   (pre-flight), P41 FU-CONTACT-TIMELINE-CHANNELS (server half returned at `7a575847`), P39 FU-CI-WINDOWS-INPUT-GATE
-   + C2, the web halves of SWP-INV-DETAIL (stack on P48 `3cc0b301` and Antigravity's `1974321a`) and
-   WEDGE-WA-INBOUND-CAPTURE, P28, P31, P34, P18a, P17(a-c).
+1. **The next Claude wave**: P37 FU-BULK-DELETE-UNDO web half (`pkt/V1-FU-BULK-DELETE-UNDO-WEB` @ `3e0ef2ad`, with
+   Antigravity's server half `61e50c0f`, which is not merged yet: carry it, or wait for Antigravity's wave), plus
+   the docs branch (`wave/v1-docs-p19`). Before the RETURN-to-wave step, run the mocked CI specs above.
+2. **P39 FU-CI-WINDOWS-INPUT-GATE** (`8743e437`) is stacked on Antigravity's **P38** (`b5a3c63a`): proposed on #80
+   that they ride one wave, P38 then P39. Only that PR's CI proves the Windows legs.
+3. Claude packets on the board: the web halves of SWP-INV-DETAIL (on P48 + Antigravity's `1974321a`) and
+   WEDGE-WA-INBOUND-CAPTURE (server `7a575847`), P41 FU-CONTACT-TIMELINE-CHANNELS, P34 FU-KEY-CTRLJ-OWNERS (live
+   check first), P28, P31, P18a, P17(a-c). P42 is moot (folded into TODAY-4BLOCK).
+4. The owner question batch (section 4, questions 1-38).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `eec1e880` (2026-11-25): M9 PR #238 (Antigravity) after M8 PR #236. Production runs `f5d58ef7` (16 Nov),
-far behind main: the owner redeploys (D-266). The second-lane account acts as orchestrator and posts on #80;
-Antigravity works in tandem (split on #80 7142635342 / 7143076311; COORDINATION 2 7144774208 / 7145311083):
-Antigravity takes server packets and server halves, Claude takes web packets and stacks the web halves. Who holds
-which row: `BOARD.md` on `coord/board`. Merge order: M10 (PR #239, Antigravity) > M11 (Claude, wave 3q).
+Main is at `293d7f39` (2026-11-25 ~03:35 UTC): M11 PR #240 after M10 PR #239 (`45d302ef`, Antigravity). Production
+runs `f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). Lanes as agreed on #80 (Antigravity server
+and server halves, Claude web and web halves); the board (`coord/board`) has one owner per row.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **M10 (Antigravity)** | PR #239 `wave/v1-wave-m10` @ e6d7bce9: P6b FU-PENDING-OWED-WEB, P3 FU-VITEST-DECORATOR-METADATA | Open; two confirmations CONFIRMED; CI running at 02:00 UTC | Antigravity merges (D-239) |
-| **M11 (Claude, wave 3q)** | `wave/v1-wave-m11` from main eec1e880: P27 (6f2cf8df), P29 (cdf2ac66), P32 (d9a436f0), P35 (2c3ef7ab), P48 SWP-REMOVED-MEMBER-NOTICE (3cc0b301), P40 FU-ME-NOTIFICATIONS-SCOPE (23cc809a), plus the docs commit | Compacted; no file overlap with M10; 42 files | After M10 merges: main in, divergence check, wave-head proof, live J8/C4/C6/C7/sweeps/release0-live, PR, confirmations, merge |
-| **Claude lane, next** | - | P37 web half on `61e50c0f`; P42 FU-C4-TODAY-LINK (pre-flight); P41 FU-CONTACT-TIMELINE-CHANNELS (server half `7a575847`); P39 FU-CI-WINDOWS-INPUT-GATE + C2; SWP-INV-DETAIL web half (on P48 and `1974321a`); WEDGE-WA-INBOUND-CAPTURE web half; P34 FU-KEY-CTRLJ-OWNERS (live check first); P28, P31, P18a, P17(a-c) | Claim atomically (CHECKLISTS B1), pre-flight first (A3) |
-| **Antigravity lane** | see #80 and the board | Returned since M9: P38 FU-CI-MERGE-QUEUE (b5a3c63a), P47 W11-GENOME-RECS-DOMAIN, P49 W11-RUNWAY-BURN-CURRENCY (d22e334a); claimed P50 W11-SHIP-STOCK-DECREMENT. Earlier returns: P43, P37 server, P44, P45 server, P46 server | Their next wave after M10 |
-| **Owner** | - | Repository moved (D-278) | Switch the merge queue on for `main` once P38 merges; the next question batch (section 4) |
-| `wave/v1-docs-p19` (Claude lane) | this branch | Plan rows for P36-P42 and three follow-ups; rulings D-274..D-279; docs name KEYFLOWOS/KEYFLOWOS; this file | Ships as one compacted commit in M11 |
-| First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
+| **P37 web half (Claude)** | `pkt/V1-FU-BULK-DELETE-UNDO-WEB` @ 3e0ef2ad | Returned (#80 7150677995), both reviews and confirmations CONFIRMED; browser RED at base, green at head | Next Claude wave, with the server half |
+| **P39 (Claude)** | `pkt/V1-FU-CI-WINDOWS-INPUT-GATE` @ 8743e437 (on P38 b5a3c63a) | Returned (#80 7150759326); reviews by four cloud sessions tagged `p39-review` | A wave with P38 |
+| **Antigravity lane** | see #80 and the board | Returned: P38, P47, P49, P50 and the earlier server halves (P37, P43-P46); claimed P51 | Their next wave; COR-P37-3 (CRM caches after restore) and `deletedIds` asked of them (#80 7150334442) |
+| **Owner** | - | - | Switch the merge queue on for `main` once P38 merges (D-278); the question batch; production redeploy (D-266) |
+| `wave/v1-docs-p19` (Claude lane) | merged main 293d7f39 | Review minors fixed (c91c5bc2), follow-up rows FU-UNDO-TOAST-SIGNOUT and FU-FOCUS-QUEUE-PENDING-DELETE, this file | Next Claude wave |
+| First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Not re-verified since | Re-verify each head before it enters a wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -216,13 +217,17 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     member's own). Move the push opt-in under My account in a follow-up? (Default: ship as ruled; follow-up proposed.)
 37. Three follow-ups from today's reviews are in the plan as `follow-on` for you to assign or drop:
     FU-NOTIFICATIONS-PAGE-REFUSED, FU-STUDIO-PAGE-SCOPE, FU-E2E-MOCKED-SESSION-TOKEN. (Default: Claude lane after M11.)
+38. An earlier session's pre-flight (A3) narrowed FU-OVERLAY-LAYER-TABLE's definition of done from "no z-index literal
+    outside the table" to "no position:fixed z-index literal >= 30" without a ruling (found by M11's security
+    confirmation). Keep the narrowing? (Default: keep, it is layering only; say if the full guard is wanted.) Two more
+    follow-ups are in the plan as `follow-on`: FU-UNDO-TOAST-SIGNOUT, FU-FOCUS-QUEUE-PENDING-DELETE.
 
 ## 5. How to work here (learned the hard way)
 
 The procedures themselves are in `docs/development/agent-memory/WAVE-RUNBOOK.md`. Kept here: what is specific to
 this machine and this week.
 
-- Node 22.23.4 at `/opt/node-22.23.4/bin`. Load env for DB tests: `set -a; . /home/user/KEYFLOWOS/.env; set +a`.
+- Node 22.23.4 at `/opt/node-22.23.4/bin` where it exists; this week's container has only `/opt/node22` (22.23.5). Load env for DB tests: `set -a; . /home/user/KEYFLOWOS/.env; set +a`.
 - One local Postgres and Redis: never run two DB suites at once, never edit a worktree while its suite runs. After a
   worker restart, `service postgresql start; service redis-server start`. An ECONNREFUSED run is not a result.
 - Proof at a head: `rm -f dist/.tsbuildinfo; pnpm build; pnpm vitest run; pnpm proof:release0 -- --skip-build` in
