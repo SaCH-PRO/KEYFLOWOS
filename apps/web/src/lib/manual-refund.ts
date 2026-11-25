@@ -28,6 +28,28 @@ export function isManualPayment(p: { status: string; amount: number | string; pr
   return slot.test(p.providerPaymentId) || /^manual_\d+_[0-9a-z]{1,6}$/.test(p.providerPaymentId);
 }
 
+/**
+ * SWP-INV-REFUND-UI repair round 1b: the server's bookkeeping refund door (markPaymentRefunded) is open to gateway
+ * payments as well (commerce-refund.integration RF-10/RF-12): it records a refund made outside KeyFlow and calls no
+ * provider. WiPay has no refund API, so for a WiPay payment it is the only way to record its refund. A WiPay payment
+ * is one whose provider is exactly 'wipay': only the WiPay door writes that (D-55 stores a gateway name a member types
+ * as 'manual'); 'WiPay' or any other spelling is not one, and is not offered (fail closed).
+ */
+export function isOutOfBandRefundable(p: { status: string; amount: number | string; provider: string }): boolean {
+  return p.status === "SUCCESSFUL" && Number(p.amount) > 0 && p.provider === "wipay";
+}
+
+/**
+ * The gateways with a refund API whose payments are refunded through it (Money > Money in's "Issue refund", the
+ * payments-ops refund door), never recorded here: provider exactly 'stripe' or 'paypal'.
+ */
+export function isGatewayRefundable(p: { status: string; amount: number | string; provider: string }): boolean {
+  return p.status === "SUCCESSFUL" && Number(p.amount) > 0 && (p.provider === "stripe" || p.provider === "paypal");
+}
+
+/** Where a gateway payment is refunded: Money > Money in, its Refunds tab. */
+export const GATEWAY_REFUND_HREF = "/app/payments?tab=refunds";
+
 // ---------------------------------------------------------------------------
 // Exact-decimal money (mirror of apps/server/src/modules/commerce/money.ts toCents / sumMoney / subtractMoney)
 // ---------------------------------------------------------------------------
@@ -124,4 +146,15 @@ export function manualRefundQuestion(input: { refund: string; paid: string; whol
 }
 
 /** What the refund dialog says while it reads the payment's latest figures. */
+/**
+ * The question for a WiPay payment's refund (repair round 1b): the member refunded the customer in WiPay, outside
+ * KeyFlow, and this records it in the books.
+ */
+export function outOfBandRefundQuestion(input: { refund: string; paid: string; whole: boolean; on: string }): string {
+  const what = input.whole
+    ? `Record that you refunded the ${input.paid} paid through WiPay on ${input.on} outside KeyFlow?`
+    : `Record that you refunded ${input.refund} of the ${input.paid} paid through WiPay on ${input.on} (all that is left of it) outside KeyFlow?`;
+  return `${what} WiPay refunds are not made through KeyFlow: refund the customer in WiPay first. This only records the refund in the books, and the invoice is owed that much again.`;
+}
+
 export const MANUAL_REFUND_CHECKING = "Reading this payment's latest figures…";

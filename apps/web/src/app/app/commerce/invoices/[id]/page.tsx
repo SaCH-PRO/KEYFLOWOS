@@ -47,7 +47,16 @@ import {
   PaymentRecord,
   InvoiceTimelineEntry,
 } from "@/lib/client";
-import { isManualPayment, manualRefundableAmount, manualRefundQuestion, MANUAL_REFUND_CHECKING } from "@/lib/manual-refund";
+import {
+  isManualPayment,
+  isOutOfBandRefundable,
+  isGatewayRefundable,
+  GATEWAY_REFUND_HREF,
+  manualRefundableAmount,
+  manualRefundQuestion,
+  outOfBandRefundQuestion,
+  MANUAL_REFUND_CHECKING,
+} from "@/lib/manual-refund";
 import { apiDelete, providerUnavailableOf } from "@/lib/api";
 import { canMarkInvoicePaid, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
@@ -423,7 +432,7 @@ export default function InvoiceDetailPage() {
     }
     setPayments(list.data.payments);
     const current = list.data.payments.find((row) => row.id === p.id);
-    const amount = current && isManualPayment(current) ? manualRefundableAmount(current, list.data.payments, list.data.paidAmount) : 0;
+    const amount = current && (isManualPayment(current) || isOutOfBandRefundable(current)) ? manualRefundableAmount(current, list.data.payments, list.data.paidAmount) : 0;
     if (!current || !(amount > 0)) {
       setRefundTarget(null);
       setRefundError("Nothing is left to refund on this payment.");
@@ -667,10 +676,17 @@ export default function InvoiceDetailPage() {
                         </div>
                       ) : listedPayments.map(p => {
                         const pendingExtracted = isPendingExtractedPayment(p);
-                        // SWP-INV-REFUND-UI: a payment recorded by hand, refunded whole while something of it is left.
+                        // SWP-INV-REFUND-UI: a payment recorded by hand is refunded here (Refund); a WiPay payment,
+                        // whose gateway has no refund API, has its refund made outside KeyFlow recorded here (Record
+                        // refund, the same bookkeeping door, repair round 1b); a Stripe or PayPal payment is refunded
+                        // through its gateway in Money in (a link); any other payment is offered neither (fail closed).
+                        // Each whole, while something of it is left.
                         const manual = isManualPayment(p);
-                        const refundable = manual ? manualRefundableAmount(p, payments, paidAmount) : 0;
-                        const refunded = manual && manualRefundableAmount(p, payments, Infinity) <= 0;
+                        const outOfBand = !manual && isOutOfBandRefundable(p);
+                        const viaGateway = !manual && isGatewayRefundable(p);
+                        const known = manual || outOfBand || viaGateway;
+                        const refundable = manual || outOfBand ? manualRefundableAmount(p, payments, paidAmount) : 0;
+                        const refunded = known && manualRefundableAmount(p, payments, Infinity) <= 0;
                         return (
                         <div key={p.id} data-testid="invoice-payment-row" data-payment-id={p.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/60">
                           <div className="flex items-center gap-3">
@@ -702,8 +718,13 @@ export default function InvoiceDetailPage() {
                                 className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg border border-border text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
                               >
                                 <RotateCcw className="w-3 h-3" />
-                                Refund
+                                {outOfBand ? "Record refund" : "Refund"}
                               </button>
+                            )}
+                            {viaGateway && !refunded && (
+                              <Link href={GATEWAY_REFUND_HREF} className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors">
+                                Refund in Money in
+                              </Link>
                             )}
                             <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${p.status === "SUCCESSFUL" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{p.status}</span>
                           </div>
@@ -847,15 +868,20 @@ export default function InvoiceDetailPage() {
       {/* SWP-INV-REFUND-UI (D-169): the whole payment, no amount field. */}
       <ConfirmDialog
         open={refundTarget !== null}
-        title="Refund this payment?"
-        message={refundTarget?.amount != null ? manualRefundQuestion({
+        title={refundTarget && isOutOfBandRefundable(refundTarget.payment) ? "Record a refund made outside KeyFlow?" : "Refund this payment?"}
+        message={refundTarget?.amount != null && isOutOfBandRefundable(refundTarget.payment) ? outOfBandRefundQuestion({
+          refund: formatAmount(refundTarget.amount, invoice.currency),
+          paid: formatAmount(Number(refundTarget.payment.amount), invoice.currency),
+          whole: Math.round(refundTarget.amount * 100) === Math.round(Number(refundTarget.payment.amount) * 100),
+          on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
+        }) : refundTarget?.amount != null ? manualRefundQuestion({
           refund: formatAmount(refundTarget.amount, invoice.currency),
           paid: formatAmount(Number(refundTarget.payment.amount), invoice.currency),
           whole: Math.round(refundTarget.amount * 100) === Math.round(Number(refundTarget.payment.amount) * 100),
           method: refundTarget.payment.method ?? refundTarget.payment.provider,
           on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
         }) : MANUAL_REFUND_CHECKING}
-        confirmLabel={refundTarget?.amount != null ? `Refund ${formatAmount(refundTarget.amount, invoice.currency)}` : "Refund"}
+        confirmLabel={`${refundTarget && isOutOfBandRefundable(refundTarget.payment) ? "Record refund" : "Refund"}${refundTarget?.amount != null ? ` ${formatAmount(refundTarget.amount, invoice.currency)}` : ""}`}
         variant="danger"
         busy={refunding || refundTarget?.amount == null}
         onCancel={() => { if (!refundingRef.current) { refundLookupRef.current++; setRefundTarget(null); } }}
