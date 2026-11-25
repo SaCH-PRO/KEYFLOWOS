@@ -44,6 +44,10 @@ import type { BusinessMetaTx } from '../prisma/business-meta';
  *     row in the default warehouse;
  *   - the fulfil cancel (cancelOrderFulfilment): the (product, warehouse) row
  *     each reserved route took from (lockStockRowPairsInOrder);
+ *   - the fulfil ship (FulfillmentRoutingService.shipOrderFulfilment): the
+ *     (product, warehouse) row each tracked RESERVED or PICKING_PACKING
+ *     LOCAL_STOCK route took from (lockStockRowPairsInOrder), under the
+ *     order's routing claim (W11-SHIP-STOCK-DECREMENT, F-26);
  *   - a purchase order received (advancePurchaseOrderStatus RECEIVED): each
  *     line's (product, warehouse) row;
  *   - a transfer (MarketplaceService.transferInventory): its from row and its
@@ -53,12 +57,11 @@ import type { BusinessMetaTx } from '../prisma/business-meta';
  *     which their updateMany writes.
  *
  * Writers of one row in a transaction of their own (adjustInventory,
- * upsertInventory, the ship decrement) hold one stock row and wait for no
- * other. Not covered: a row that does not exist yet. A receipt or a transfer
- * creates the (product, warehouse) row it adds to when there is none, after
- * its locking statement; two of them creating the same two new rows in
- * opposite orders wait for each other's insert (the unique key), as before
- * this order existed.
+ * upsertInventory) hold one stock row and wait for no other. Not covered: a row
+ * that does not exist yet. A receipt or a transfer creates the (product,
+ * warehouse) row it adds to when there is none, after its locking statement;
+ * two of them creating the same two new rows in opposite orders wait for each
+ * other's insert (the unique key), as before this order existed.
  *
  * Postgres locks the rows of SELECT ... ORDER BY ... FOR UPDATE as the sorted
  * rows are returned (the LockRows step runs above the sort), so the locks are
@@ -103,7 +106,8 @@ export interface StockRowKey {
  * W10-Z4-ROUTE-FIX review (Z4RV-CR-1): locks (FOR UPDATE) the business's
  * inventory_stocks rows of exactly these (product, warehouse) pairs, in id
  * order, on the caller's transaction; for a transaction that writes only
- * these rows (the fulfil cancel, a purchase order received, a transfer).
+ * these rows (the fulfil cancel, the fulfil ship, a purchase order received,
+ * a transfer).
  * Returns the ids locked, in that order (none for no pairs). A pair with no
  * row locks nothing; a row created after the statement is not locked.
  */
