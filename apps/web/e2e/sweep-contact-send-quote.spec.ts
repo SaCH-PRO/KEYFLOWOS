@@ -1,5 +1,5 @@
 import type { APIRequestContext, Page } from "@playwright/test";
-import { test, expect, API_URL, type Tenant } from "./journeys/journey-helpers";
+import { test, expect, API_URL, memberOf, signedInContext, type Tenant } from "./journeys/journey-helpers";
 
 /**
  * FU-CONTACT-SEND-QUOTE-DOOR, the browser half (D-283; journeys C and D). The jsdom half is
@@ -21,6 +21,10 @@ import { test, expect, API_URL, type Tenant } from "./journeys/journey-helpers";
  *
  * 375, 768, 1024 and 1440 are run. RED at the packet's base (main 977a265c, claim c067bf97): Send Quote pushed
  * ?tab=billing&segment=quotes&contactId=, which the commerce page rewrites to ?tab=snapshot, and no sheet opens.
+ *
+ * Repair round 1 (review SEC-SQD-1): a member with revenue read (crm write) is not offered Send Quote in a card's
+ * Quick actions, as the WhatsApp sheet offers New quote only to one who may write quotes; the card's other actions stay.
+ * RED at the base, where every member is offered it.
  *
  * Live only (E2E_LIVE=1, a production build, a real API and database: the journey harness's own fixtures, README in
  * e2e/journeys); without E2E_LIVE every case is skipped. Run it in the "chromium" project:
@@ -74,6 +78,22 @@ for (const width of [375, 768, 1024, 1440]) {
       await page.getByRole("menuitem", { name: /^send quote$/i }).click();
 
       await expectNewQuoteFor(page, c);
+    });
+
+    test(`a member with revenue read is not offered Send Quote (${width})`, async ({ browser, request, owner }) => {
+      test.setTimeout(3 * 60_000);
+      const c = await seedCustomer(request, owner);
+      const member = await memberOf(request, owner, "quote reader", { role: "STAFF", scopes: { crm: "write", revenue: "read" } });
+      const context = await signedInContext(browser, member, { viewport: { width, height: width < 768 ? 812 : 900 } });
+      const memberPage = await context.newPage();
+      await memberPage.goto("/app/crm/contacts?view=list");
+      const card = memberPage.locator(`div[role="option"][aria-label^="${c.first} ${c.last} - "]`);
+      await expect(card).toBeVisible({ timeout: 30_000 });
+      await card.hover();
+      await card.getByTitle("Quick actions").click();
+      await expect(memberPage.getByRole("menuitem", { name: /^book appointment$/i })).toBeVisible();
+      // The member's access is read by the screen; once it is answered the door is not offered.
+      await expect(memberPage.getByRole("menuitem", { name: /^send quote$/i })).toHaveCount(0, { timeout: 15_000 });
     });
 
     test(`Next action > Send Quote opens New Quote for that customer (${width})`, async ({ page, request, owner }) => {
