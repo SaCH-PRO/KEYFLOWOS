@@ -228,7 +228,7 @@ export class CommerceIntegrationService {
         );
         return;
       }
-      if (stored.type === STOREFRONT_ORDER_TYPE) {
+      if (stored.type === STOREFRONT_ORDER_TYPE || stored.type === 'QUICK_SALE') {
         // Settled means completeCheckout's invoice for THIS order exists in
         // this business (and is the one the event names, when it names one).
         const settled = await this.prisma.client.invoice.findFirst({
@@ -324,7 +324,7 @@ export class CommerceIntegrationService {
         }
         return;
       }
-      if (orderType === STOREFRONT_ORDER_TYPE) return;
+      if (orderType === STOREFRONT_ORDER_TYPE || orderType === 'QUICK_SALE') return;
 
       const numbers: string[] = order.orderNumber ? [`INV-${order.orderNumber}`, `INV-ORD-${order.orderNumber}`] : [];
       const existing = await this.prisma.client.invoice.findFirst({

@@ -10,12 +10,13 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { ConstitutionVersionService } from './constitution-version.service';
 import { GenerateConstitutionVersionDto } from './dto/generate-constitution-version.dto';
 
 @Controller('business-genome/businesses/:businessId/constitution')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class ConstitutionVersionController {
   constructor(
     @Inject(ConstitutionVersionService) private readonly constitution: ConstitutionVersionService,
@@ -43,6 +44,7 @@ export class ConstitutionVersionController {
     return this.constitution.getVersion(businessId, Number(version));
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('generate')
   @UseGuards(GenomeGateGuard)
   generate(
@@ -58,6 +60,7 @@ export class ConstitutionVersionController {
     return this.constitution.staleness(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('versions/:version/archive')
   archive(
     @Param('businessId') businessId: string,

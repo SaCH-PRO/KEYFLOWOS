@@ -1334,7 +1334,7 @@ const UNMAPPED: Record<string, string> = {
   helpdesk: 'helpdesk.controller declares no module scope',
   // inventory: granted since PR195-BOOKS-DOORS (inventory_advance_purchase_order, expenses write) and
   // SWEEP-P0-SCOPES (inventory_adjust_stock, inventory_transfer_stock: storefront write)
-  keyflow: 'keyflow-command.controller declares no module scope',
+  // keyflow: granted since SWP-CENSUS-GENOME (P84) gated KeyflowCommandController.createNote (ai write)
   marketing: 'email-marketing.controller declares no module scope',
   marketplace: 'reads Prisma directly; no service call',
   people: 'StructureService.listPeople backs no route; TaskAssignmentService routes are unscoped',
@@ -1354,14 +1354,13 @@ const UNMAPPED: Record<string, string> = {
   suppliers: 'supplier.controller declares no module scope',
   sync: 'seo.controller declares no module scope',
   time: 'time-entry.controller declares no module scope (the legacy `projects`/`time` keys still grant time_*)',
-  update: 'update_status_with_confirmation needs crm AND revenue, so neither alone grants it; update_business_blueprint is unscoped',
+  // update: granted since SWP-CENSUS-GENOME (P84) gated BlueprintController.update (settings write); update_status_with_confirmation stays in UNGRANTED
 };
 
 /** The governed tools in UNMAPPED families (rule 4: GOVERNED_UNGRANTED). */
 const UNMAPPED_GOVERNED: Record<string, string[]> = {
-  execute: ['bookings', 'content', 'crm', 'expenses', 'operations', 'projects', 'revenue', 'storefront', 'team'],
+  execute: ['ai', 'bookings', 'content', 'crm', 'expenses', 'operations', 'projects', 'revenue', 'settings', 'storefront', 'team'],
   send: ['crm'],
-  update: ['crm', 'revenue'],
 };
 
 /**
@@ -1410,6 +1409,8 @@ const UNGRANTED: Record<string, string> = {
   // SWEEP-P0-SCOPES: the projects family grants tools now; these two read Prisma directly
   projects_list: 'reads Prisma directly; no service call',
   projects_list_tasks: 'reads Prisma directly; no service call',
+  // SWP-CENSUS-GENOME (P84): update family now grants update_business_blueprint (settings write); update_status_with_confirmation stays split across crm and revenue
+  update_status_with_confirmation: 'update_status_with_confirmation needs crm AND revenue (split across two modules), so neither alone grants it',
 };
 
 /** Why the derivation leaves a tool ungranted, in the words UNGRANTED uses. */
@@ -1633,8 +1634,13 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         inventory_adjust_stock: 'write',
         inventory_transfer_stock: 'write',
       },
-      settings: {},
-      ai: {},
+      // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write; KeyflowCommandController.createNote requires ai write
+      settings: {
+        update_business_blueprint: 'write',
+      },
+      ai: {
+        keyflow_create_note: 'write',
+      },
       team: {
         structure_create_delegation_rule: 'write',
         structure_get_org_tree: 'read',

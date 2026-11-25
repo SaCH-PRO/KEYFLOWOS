@@ -87,6 +87,7 @@ import { KeyCortexVoiceService } from './key-cortex-voice.service';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexActionsService, isUsableAutonomyVerdict } from './key-cortex-actions.service';
 import { KeyCortexContextService, snapshotForViewer } from './key-cortex-context.service';
+import { v2ContextForReader } from './genome-read-projections';
 import { KeyCortexCapabilityRegistryService } from './key-cortex-capability-registry.service';
 import { randomUUID } from 'crypto';
 
@@ -2522,7 +2523,10 @@ export class KeyCortexController {
 
       // Otherwise, parse natural language into structured commands
       const capabilities = this.connector.getAllCapabilities();
-      const context = await this.contextV2.getFullContext(dto.businessId);
+      const context = v2ContextForReader(
+        (await this.contextV2.getFullContext(dto.businessId)) as unknown as Record<string, unknown>,
+        viewerReadsRevenue(member),
+      );
 
       const parsedIntents = await this.command.parseIntent(dto.command, {
         businessId: dto.businessId,
@@ -3085,7 +3089,10 @@ export class KeyCortexController {
       for (const cmd of dto.commands) {
         if (cmd.type === 'natural') {
           const capabilities = this.connector.getAllCapabilities();
-          const context = await this.contextV2.getFullContext(dto.businessId);
+          const context = v2ContextForReader(
+            (await this.contextV2.getFullContext(dto.businessId)) as unknown as Record<string, unknown>,
+            viewerReadsRevenue(member),
+          );
           const parsed = await this.command.parseIntent(cmd.command, {
             businessId: dto.businessId,
             userId: actorId,
