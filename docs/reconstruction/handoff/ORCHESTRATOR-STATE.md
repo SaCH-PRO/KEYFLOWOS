@@ -1,6 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~06:50 UTC by the acting orchestrator (second-lane account, Claude Code), after M13 (PR #243) merged as 08170696. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~12:45 UTC by the acting orchestrator (second-lane account, Claude Code), after P41 returned
+(`f3d07174`) and owner rulings D-284/D-285. Main is still `08170696`. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -69,45 +70,50 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-Every ruling to D-272 is on main (PR #230). **D-274 to D-279 are now rows in BUILD-MAP-001 on `wave/v1-docs-p19`
-(`46023215`) and reach main with M11.** Summaries: D-274 speed up with no compromise (WORKFLOW-IMPROVEMENTS.md);
-D-275 GitGuardian and password-less CI Postgres (done, M9); D-276 the Me menu's Notifications for settings readers
-(FU-ME-NOTIFICATIONS-SCOPE, returned); D-277 the contact Timeline with a channel filter, and D-277b bulk delete with
-Undo; D-278 the organization and merge queue (repository moved 2026-11-25; FU-CI-MERGE-QUEUE returned by
-Antigravity; the owner switches the queue on); D-279 the Windows proof gated by its inputs and sharded.
-D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is referred to on the board but is not yet a row
-in BUILD-MAP-001: Antigravity to record it with M10.
+Every ruling to D-272 is on main (PR #230). **D-274 to D-285 are rows in BUILD-MAP-001 on `wave/v1-docs-p19`** and
+reach main with the next Claude wave (M16). Since the last checkpoint:
+- D-280 pasted WhatsApp text stays out of KEY's automatic prompts (Antigravity's P60, in M15);
+- D-281 FU-REQUIRE-AUTH-REMOUNT on launch;
+- D-282 push opt-in on My account for every member;
+- D-283 the six parked follow-ups go to the Claude lane after P41;
+- D-284 the contact Timeline pages back through the whole history at launch (P66 FU-TIMELINE-EVENTS-PAGING, server,
+  offered to Antigravity; P67 FU-TIMELINE-LOAD-OLDER, web, Claude);
+- D-285 form submissions stay under All on the Timeline.
+D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is referred to on the board but is not yet a row.
 - **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
   its Release 0 suite's setup only; assertions unchanged.
+- **The merge queue is on for main** (D-278, ruleset 28066634): lanes ENQUEUE, never merge directly.
 
-## 0. Next session starts here (2026-11-25 ~06:50 UTC)
+## 0. Next session starts here (2026-11-25 ~12:45 UTC)
 
-Main is `08170696`: M11 (Claude, `293d7f39`), M12 (Antigravity, `8dbcb03c`), M14 (Antigravity, PR #242, `5ff26e5b`),
-then **M13** (Claude, PR #243, head pinned `cbb3282c`): P37 FU-BULK-DELETE-UNDO web half, P39 FU-CI-WINDOWS-INPUT-GATE
-+ C2, P54 SWP-INV-DETAIL web half, docs. **P39 is live**: the Windows worker proof now gates by its inputs and runs in 4
-shards (first run: 323/323 controls, every leg 3-5 min, against 19 min after C1 and 60 before).
+Main is `08170696` (M13). **Antigravity's M15** (PR #244: P58 OWNER-ALERTS-SERVER, P60 FU-WA-INBOUND-KEY-EXCLUDE,
+P59 TOF-PAYROLL-DISCARD; server only) goes through the merge queue first. **Claude's M16 follows once M15 is on main**
+(agreed on #80 7160484400 / 7160838996): P55 (merge main into its branch first, then re-confirm the delta), P41, P61
+and, if returned by then, P62.
 
-**Held: P55 WEDGE-WA-INBOUND-CAPTURE web half** (`pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB` @ `36a29edd`, RETURNed #80
-7154900640, both reviews CONFIRMED after two repair rounds). It joins the first Claude wave after Antigravity's server
-fix for **SEC-WAW-1** is on main (KEY's hourly intuition scan reads every ContactNote body, so pasted third-party
-WhatsApp text would reach an LLM prompt; #80 7153059391, 7153185403; proposed FU-WA-INBOUND-KEY-EXCLUDE). When it joins:
-merge main into its branch first (the server half is on main via M12), then compact.
+Claude lane state:
+- **P41 FU-CONTACT-TIMELINE-CHANNELS: RETURNED** @ `f3d07174` (#80 7162385058); both lenses CONFIRMED after two repair
+  rounds.
+- **P61 FU-REQUIRE-AUTH-REMOUNT: repair round 1** (worker on `wt-remount`, live ports 3101/5300/5310). Security
+  ACCEPTED `0d629dc7` with minors; correctness REJECTED it (MAJOR-1: a same-user token rotation, about hourly, tore the
+  shell down). Orchestrator decision, meeting both lenses: a same-user rotation (same JWT `sub`) keeps the shell and
+  re-verifies in the background; a different `sub`, a missing session, an admin-bearer change, a 401 or a
+  different /identity/me user id tears down. Also: no entrance transform (base look); pins for mutants M7, M12, M14,
+  M15. The `page-transition.tsx` departure was accepted by both lenses. Then both confirmations.
+- **P62 FU-PUSH-OPTIN-MY-ACCOUNT: building** (`wt-push`, live ports 3201/5400), claimed `2ddddb40`. Antigravity
+  confirmed P58 leaves the subscribe routes and payload unchanged, so it does not wait for M15.
+- Next: the six D-283 follow-ups (FU-CONTACT-SEND-QUOTE-DOOR covers the broken quote door P61 found), then P67 after
+  P66.
+- An hourly scheduled check of #80 runs in the orchestrator session (owner asked for tandem work, 2026-11-25).
 
 Lessons this session (for every lane):
-- A web packet that edits a file a static spec reads must run CI's mocked e2e specs **as CI runs them** (a mocked
-  production build, `NEXT_PUBLIC_API_BASE_URL=http://api.test.local`, `E2E_WEB_COMMAND=standalone`) before its RETURN:
-  M11's first head failed R0-06 that way.
-- A wave whose packets were cut before their server halves (or P38) reached main: merge main into each packet branch
-  first (keep main's copy of files main now owns), then compact; check every 3-way result.
-- Never merge into a worktree while a run uses it (it voids the run); never run the server suite while other heavy
-  jobs run (a 5 s DB test timed out at load 8).
-- Proofs need a real install from the head's lockfile (M10 added @swc/core); symlinked node_modules from an older
-  install prove nothing for the server suite.
-- GitHub from a cloud session: REST works, GraphQL is refused. Subagents spawned here cannot spawn reviewers; the
-  orchestrator runs each worker's two reviews (one worker used cloud sessions instead: tag `p39-review`).
-
-Next (Claude lane): P55 once SEC-WAW-1 lands; P41 FU-CONTACT-TIMELINE-CHANNELS (its server half is on main); P34
-FU-KEY-CTRLJ-OWNERS (live check first); P28, P31, P18a, P17(a-c); the follow-ups the owner assigns (section 4).
+- Check the board's last row number before adding rows: P64/P65 were briefly double-numbered (fixed to P66/P67).
+- A fix to a remount can expose a second remount (PageTransition's AnimatePresence mode="wait" mounted the
+  destination twice); prove a one-shot URL door live, not only in jsdom.
+- Before the plan JSON changes: commit it, then `status.mjs --ref HEAD`, then amend (status reads the ref, not the
+  working tree).
+- Earlier: run CI's mocked e2e as CI runs them; merge main into stale packet branches before compacting; never merge
+  into a worktree a run uses; real installs from the head's lockfile; REST, not GraphQL; the orchestrator runs reviews.
 
 ## 3. Work in flight (what git on main cannot show)
 
@@ -116,10 +122,14 @@ Main is at `08170696`. Production runs `f5d58ef7` (16 Nov), far behind main: the
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **P55 (Claude)** | `pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB` @ 36a29edd | Returned, held for SEC-WAW-1 | Next Claude wave after the server fix |
-| **Antigravity lane** | see #80 and the board | Asked: FU-WA-INBOUND-KEY-EXCLUDE (SEC-WAW-1), `deletedIds` on bulk delete, FU-INVOICE-REMAINING-CREDITS | Their next wave |
-| **Owner** | - | - | Merge queue switch (D-278) now that P38 is on main; the question batch; production redeploy (D-266) |
-| `wave/v1-docs-p19` (Claude lane) | merged main 08170696 | This file, V1-STATUS, the C2 measurement | Next Claude wave |
+| **P55 (Claude)** | `pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB` @ 36a29edd | Returned, held for P60 (in M15) | Merge main after M15, re-confirm delta, M16 |
+| **P41 (Claude)** | `pkt/V1-FU-CONTACT-TIMELINE-CHANNELS` @ f3d07174 | Returned, both CONFIRMED | M16 |
+| **P61 (Claude)** | `pkt/V1-FU-REQUIRE-AUTH-REMOUNT` @ 0d629dc7 (+ repair) | Repair round 1 | Two confirmations, RETURN, M16 |
+| **P62 (Claude)** | `pkt/V1-FU-PUSH-OPTIN-MY-ACCOUNT` @ 2ddddb40 (claim) | Building | Two reviews, RETURN |
+| **Antigravity M15** | PR #244 @ 7eaa38fd | Wave reviews and CI | Enqueue (merge queue) |
+| **Antigravity** | P64 W11-CALLS-LIST-PAGING returned @ 2c09dd29; P65 FU-INVOICE-REMAINING-CREDITS building | - | Their next wave; P66 offered |
+| **Owner** | - | - | Production redeploy (D-266); the question batch (section 4) |
+| `wave/v1-docs-p19` (Claude lane) | this file, V1-STATUS, D-284/D-285 | - | M16 |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Not re-verified since | Re-verify each head before it enters a wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -229,6 +239,14 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     proof says so; CI keeps its own pin. Accept? (Default: yes, disclosed.) Also: put FU-REQUIRE-AUTH-REMOUNT (the shell
     remounts on every navigation) on the launch track? (Recommended: yes.) And SEC-WAW-1: inbound WhatsApp text stays
     out of KEY's automatic prompts unless the owner asks (default: excluded).
+
+**Ruled 2026-11-25 (D-284, D-285):** Timeline paging at launch; form submissions under All.
+40. The contact Timeline never shows an ordinary note's text: `note.created` carries only `{ noteId }` (P41 worker,
+    2026-11-25). Carry the body on the event, or read notes on the Timeline? (Default: not in v1; the Notes tab shows
+    the text.)
+41. P61's security review found an existing race (not in P61's diff): `lib/workspace.ts` refreshAccessToken writes the
+    new token even if the user signed out while the refresh was in flight, which can leave a token on the device.
+    Proposed follow-up FU-REFRESH-AFTER-SIGNOUT (web, S). (Default: follow-on unless you put it on launch.)
 
 ## 5. How to work here (learned the hard way)
 
