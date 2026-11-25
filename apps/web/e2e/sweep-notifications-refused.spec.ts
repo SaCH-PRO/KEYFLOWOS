@@ -14,7 +14,8 @@ import type { Page } from "@playwright/test";
  *          no switch, and nothing scrolls sideways (RED at the base: a blank tab and "No customer notifications sent
  *          yet").
  *   NRS-02 a settings reader (STAFF with settings read) and NRS-03 the owner: the six switches and the log, no
- *          no-access state, nothing scrolls sideways.
+ *          no-access state, nothing scrolls sideways. Repair round 1: each switch and its knob have a real size (RED
+ *          on main: the h-5.5 and h-4.5 classes are not Tailwind 3 classes, so the switches render 0px tall).
  *
  * Each at 375, 768, 1024 and 1440. Live: a real API, Postgres and Redis (E2E_LIVE=1, the journey harness's tenants,
  * members and watch; e2e/journeys/README.md and docs/development/agent-memory/LIVE-PROOF-RUNBOOK.md section 3). It is
@@ -34,6 +35,24 @@ async function open(page: Page, width: number, height: number): Promise<void> {
 async function noSidewaysScroll(page: Page, what: string): Promise<void> {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow, `${what}: the page does not scroll sideways`).toBeLessThanOrEqual(0);
+}
+
+/** Each switch, and the knob inside it, is drawn with a real size (a unit test cannot see Tailwind's CSS). */
+async function switchesHaveSize(page: Page, what: string): Promise<void> {
+  const sizes = await page.getByRole("switch").evaluateAll((els) =>
+    els.map((el) => {
+      const box = el.getBoundingClientRect();
+      const knob = el.querySelector("span")?.getBoundingClientRect();
+      return { name: el.getAttribute("aria-label"), h: box.height, w: box.width, knobH: knob?.height ?? 0, knobW: knob?.width ?? 0 };
+    }),
+  );
+  expect(sizes, `${what}: six switches`).toHaveLength(6);
+  for (const s of sizes) {
+    expect(s.h, `${what}: ${s.name} has a height`).toBeGreaterThanOrEqual(20);
+    expect(s.w, `${what}: ${s.name} has a width`).toBeGreaterThanOrEqual(36);
+    expect(s.knobH, `${what}: ${s.name}'s knob has a height`).toBeGreaterThan(0);
+    expect(s.knobW, `${what}: ${s.name}'s knob has a width`).toBeGreaterThan(0);
+  }
 }
 
 const noAccess = (page: Page) => page.locator('[data-state="no-access"]').filter({ visible: true });
@@ -82,6 +101,8 @@ test.describe("D-283: Settings > Notifications says no access on a refused read,
           await expect(page.getByRole("switch")).toHaveCount(6);
           await expect(noAccess(page)).toHaveCount(0);
           await expect(logTab(page)).toHaveText(/^log \(\d+\)$/i);
+          await switchesHaveSize(page, `${who} at ${width}`);
+          await page.screenshot({ path: info.outputPath(`${who.replace(" ", "-")}-preferences-${width}.png`), fullPage: true });
           await noSidewaysScroll(page, `${who} preferences at ${width}`);
           await logTab(page).click();
           await expect(noAccess(page)).toHaveCount(0);
