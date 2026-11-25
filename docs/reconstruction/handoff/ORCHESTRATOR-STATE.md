@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 ~11:30 UTC by the acting orchestrator (second-lane account, Claude Code), after PR #229 (M3) merged as f6764f4c. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~02:15 UTC by the acting orchestrator (second-lane account, Claude Code), after the MOVED note, the RETURNs of SWP-REMOVED-MEMBER-NOTICE and FU-ME-NOTIFICATIONS-SCOPE, and the M11 wave branch cut. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -18,6 +18,10 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 1. Standing instructions from the owner
 
+- **D-274 (2026-11-24): speed up with no compromise, record every operating decision, and do R&D on the best
+  strategies.** The adopted rules (full waves, early wave PRs, plan pre-flight, root fixes, live-run hygiene), the
+  owner proposals (a GitHub organization plus the merge queue; a path-scoped Windows proof) and the research in
+  progress are in `docs/development/agent-memory/WORKFLOW-IMPROVEMENTS.md`. Every lane reads it at session start.
 - **D-271 (2026-11-24): v1 is the priority. D-268's pause is lifted, and packet work resumes in the D-263 wedge
   order.**
   - The KEY Builder design and plan (D-268 to D-270) are parked until v1 is completed. They stay on branch
@@ -65,30 +69,54 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-None: every ruling to D-272 is on main (PR #230, merged 2026-11-24 as 05f04f2c). Rulings given after it go here until
-the next rulings commit.
+Every ruling to D-272 is on main (PR #230). **D-274 to D-279 are now rows in BUILD-MAP-001 on `wave/v1-docs-p19`
+(`46023215`) and reach main with M11.** Summaries: D-274 speed up with no compromise (WORKFLOW-IMPROVEMENTS.md);
+D-275 GitGuardian and password-less CI Postgres (done, M9); D-276 the Me menu's Notifications for settings readers
+(FU-ME-NOTIFICATIONS-SCOPE, returned); D-277 the contact Timeline with a channel filter, and D-277b bulk delete with
+Undo; D-278 the organization and merge queue (repository moved 2026-11-25; FU-CI-MERGE-QUEUE returned by
+Antigravity; the owner switches the queue on); D-279 the Windows proof gated by its inputs and sharded.
+D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is referred to on the board but is not yet a row
+in BUILD-MAP-001: Antigravity to record it with M10.
+- **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
+  its Release 0 suite's setup only; assertions unchanged.
+
+## 0. Next session starts here (2026-11-25 ~02:15 UTC)
+
+Done this session (all on #80): MOVED note 7149104297 (the repository is `KEYFLOWOS/KEYFLOWOS`; Antigravity moved its
+remotes and returned P38); RETURN SWP-REMOVED-MEMBER-NOTICE 7149268781 (board P48, head `3cc0b301`, both reviews
+CONFIRMED at 21defe66 and 3cc0b301); CLAIM 7149276915 and RETURN 7149640533 for P40 FU-ME-NOTIFICATIONS-SCOPE (head
+`23cc809a`, browser RED at base / green at head, both reviews CONFIRMED). GitHub: the REST API works from the cloud
+session (`gh api repos/KEYFLOWOS/KEYFLOWOS/...`); GraphQL (`gh issue view`, `gh pr view`) is refused, so use REST.
+
+Next, in order:
+1. **M11** (Claude, wave 3q): branch `wave/v1-wave-m11`, cut from main `eec1e880`, 14 compacted commits so far (P27,
+   P29, P32, P35, P48, P40) plus the docs commit from `wave/v1-docs-p19`. It waits for **M10 (PR #239, Antigravity)**
+   to merge. Then: merge main in, check divergence (25 commits / 50 files), wave-head proof (server tsc, build, suite,
+   R0; web typegen, tsc, vitest, lint), live journeys J8, C4 (list and Cmd/K), C6, C7, the removed-member sweep and
+   release0-live, open the PR, two confirmation reviews at the head, merge under D-239 (or enqueue, D-278, once the
+   owner switches the merge queue on).
+2. Then the Claude lane's next packets on the board: P37 web half (stack on `61e50c0f`), P42 FU-C4-TODAY-LINK
+   (pre-flight), P41 FU-CONTACT-TIMELINE-CHANNELS (server half returned at `7a575847`), P39 FU-CI-WINDOWS-INPUT-GATE
+   + C2, the web halves of SWP-INV-DETAIL (stack on P48 `3cc0b301` and Antigravity's `1974321a`) and
+   WEDGE-WA-INBOUND-CAPTURE, P28, P31, P34, P18a, P17(a-c).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `f6764f4c` (PR #229, wave 3m, money first, merged 2026-11-24 by the Claude lane under D-272; before it PR #230 as 05f04f2c and PR #228 as 142e5f9e). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
-redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
-orchestrator and posts on #80. It runs on Opus (section 1).
+Main is at `eec1e880` (2026-11-25): M9 PR #238 (Antigravity) after M8 PR #236. Production runs `f5d58ef7` (16 Nov),
+far behind main: the owner redeploys (D-266). The second-lane account acts as orchestrator and posts on #80;
+Antigravity works in tandem (split on #80 7142635342 / 7143076311; COORDINATION 2 7144774208 / 7145311083):
+Antigravity takes server packets and server halves, Claude takes web packets and stacks the web halves. Who holds
+which row: `BOARD.md` on `coord/board`. Merge order: M10 (PR #239, Antigravity) > M11 (Claude, wave 3q).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Rulings and wedge re-cut (M2) | PR #230 | **Merged** as 05f04f2c (#80 7125117999). The reviewers' remaining minors are board row P16 | P16: a follow-up docs PR (Claude lane) |
-| Wave 3j (second lane) (M4) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven at a1e6a649 (#80 7117144941); fails the 25/50 divergence gate and duplicates RR-REDACTION-BY-CONTENT with #228 | Antigravity splits it after M3 (board M4) |
-| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | On main (wave 3m, f6764f4c) |
-| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | On main (wave 3m, f6764f4c) |
-| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | On main (wave 3m, f6764f4c) |
-| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | On main (wave 3m, f6764f4c) |
-| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | On main (wave 3m, f6764f4c) |
-| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | On main (wave 3m, f6764f4c) |
-| **Wave 3m (money-first; M3)** | PR #229 | **Merged** as f6764f4c (#80 7129816643): MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT | - |
-| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators, `claude` and `antigravity`. Each claims atomically (CHECKLISTS B1) plus a CLAIM on #80 | Who owns what next: `BOARD.md` on `coord/board`, one owner per row. Claude: M2, M3, then P7, P8 and the P16 docs follow-up. Antigravity: SEC-KEY-CUSTOM-LOGIC, the autopilot switch-off, FU-VITEST-DECORATOR-METADATA's before/after, the first-lane WIP, FU-PENDING-OWED-SERVER and -WEB, and M4 |
-| Next v1 packets | `pkt/V1-SWP-CONTACT-QUICKADD` @ d859ba0f, `pkt/V1-SWP-INV-LIST` @ 388925d9 | Both RETURNed (#80 7127632516, 7129398775): reviews and confirmations closed; live sweeps and journeys C1, C3, D8, E3, E11 green at their heads | Wave 3n: compact both onto main, wave-head proof (CHECKLISTS C), PR, merge. Then the board's next rows (P9 to P13, P17, P18) |
+| **M10 (Antigravity)** | PR #239 `wave/v1-wave-m10` @ e6d7bce9: P6b FU-PENDING-OWED-WEB, P3 FU-VITEST-DECORATOR-METADATA | Open; two confirmations CONFIRMED; CI running at 02:00 UTC | Antigravity merges (D-239) |
+| **M11 (Claude, wave 3q)** | `wave/v1-wave-m11` from main eec1e880: P27 (6f2cf8df), P29 (cdf2ac66), P32 (d9a436f0), P35 (2c3ef7ab), P48 SWP-REMOVED-MEMBER-NOTICE (3cc0b301), P40 FU-ME-NOTIFICATIONS-SCOPE (23cc809a), plus the docs commit | Compacted; no file overlap with M10; 42 files | After M10 merges: main in, divergence check, wave-head proof, live J8/C4/C6/C7/sweeps/release0-live, PR, confirmations, merge |
+| **Claude lane, next** | - | P37 web half on `61e50c0f`; P42 FU-C4-TODAY-LINK (pre-flight); P41 FU-CONTACT-TIMELINE-CHANNELS (server half `7a575847`); P39 FU-CI-WINDOWS-INPUT-GATE + C2; SWP-INV-DETAIL web half (on P48 and `1974321a`); WEDGE-WA-INBOUND-CAPTURE web half; P34 FU-KEY-CTRLJ-OWNERS (live check first); P28, P31, P18a, P17(a-c) | Claim atomically (CHECKLISTS B1), pre-flight first (A3) |
+| **Antigravity lane** | see #80 and the board | Returned since M9: P38 FU-CI-MERGE-QUEUE (b5a3c63a), P47 W11-GENOME-RECS-DOMAIN, P49 W11-RUNWAY-BURN-CURRENCY (d22e334a); claimed P50 W11-SHIP-STOCK-DECREMENT. Earlier returns: P43, P37 server, P44, P45 server, P46 server | Their next wave after M10 |
+| **Owner** | - | Repository moved (D-278) | Switch the merge queue on for `main` once P38 merges; the next question batch (section 4) |
+| `wave/v1-docs-p19` (Claude lane) | this branch | Plan rows for P36-P42 and three follow-ups; rulings D-274..D-279; docs name KEYFLOWOS/KEYFLOWOS; this file | Ships as one compacted commit in M11 |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
-| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Question 20 ruled by D-272.2: the AMEND only if the before/after shows a tightening | Antigravity shows the before/after (board P3) |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -181,6 +209,13 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     moves: the plan's `wedge.correction_2026_11_24`). Under the same rule's tiebreak MEM-HONEST-RETRIEVAL,
     MEM-TEMPORAL-EMBED-DEDUP, MEM-CONSOLIDATION-CHECKPOINT and RR-UNDO-DURABLE stay on follow-on; say if any should
     be on launch. (Default: as applied.)
+Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2).
+
+36. FU-ME-NOTIFICATIONS-SCOPE (D-276) leaves a settings-none member (front desk) with no menu path to the
+    Notifications page's Push tab, the only place to turn on push for their own device (the push routes are every
+    member's own). Move the push opt-in under My account in a follow-up? (Default: ship as ruled; follow-up proposed.)
+37. Three follow-ups from today's reviews are in the plan as `follow-on` for you to assign or drop:
+    FU-NOTIFICATIONS-PAGE-REFUSED, FU-STUDIO-PAGE-SCOPE, FU-E2E-MOCKED-SESSION-TOKEN. (Default: Claude lane after M11.)
 
 ## 5. How to work here (learned the hard way)
 

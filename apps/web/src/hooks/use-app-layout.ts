@@ -25,7 +25,7 @@ import type { AppNotification } from "@/lib/notifications";
 import type { ResolvedFeatureFlag } from "@/lib/nav-config";
 import {
   moreNav,
-  meNav,
+  meNavFor,
   isNavItemActive,
   isHubActive,
   hubsFor,
@@ -179,6 +179,8 @@ export function useAppLayout(): AppLayoutState {
 
   const visibleHubs = useMemo(() => hubsFor(sells, moduleLevels), [sells, moduleLevels]);
   const bottomBarHubs = useMemo(() => bottomBarFor(sells, moduleLevels), [sells, moduleLevels]);
+  // FU-ME-NOTIFICATIONS-SCOPE (D-276): the Me menu offers Notifications only to settings readers.
+  const meNav = useMemo(() => meNavFor(moduleLevels), [moduleLevels]);
 
   const { visibleOperateSections, visibleBuildSections } = useMemo(() => {
     const { hubSections, moreSections } = menuSectionsFor(sells, moduleLevels);

@@ -137,6 +137,12 @@ ALL of these hold, checked immediately before the merge:
 3. Head sha, mergeability and the scope ledger (which packets, which files) are re-verified.
 4. Merge commit (not squash, not rebase), with the expected head sha pinned.
 
+**Once the merge queue is on (D-278).** The repository is `KEYFLOWOS/KEYFLOWOS` (an organization, 2026-11-25), and
+FU-CI-MERGE-QUEUE gives every required workflow a `merge_group` trigger. When the owner switches the queue on for
+`main`, D-239 reads: the orchestrator *enqueues* a wave once conditions 2 and 3 hold and the head's own checks pass,
+and the queue merges it when CI passes on the combined head. Until the owner switches it on, the four conditions
+above apply unchanged.
+
 Not covered, ever: a production deploy, a staging change, bypassing a gate or branch rule, merging a packet branch
 outside a proven wave PR. Review threads that need the owner stay open for the owner. D-239, D-240 and D-241 are
 rows in `BUILD-MAP-001.md` on main: read the rows themselves before relying on this summary.

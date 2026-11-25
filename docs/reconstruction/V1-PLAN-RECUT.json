@@ -56,7 +56,7 @@
     "seclane",
     "gate"
    ],
-   "scope": "Owner-run, under the seclane ruling. main after step 0 carries #208 (794 files) and PR195's payroll ledger, safe-to-spend and journal UI, and SWEEP-P0 is based on 0c22ea76 inside #208, so deploying main would ship product changes. Instead: (1) the owner reads production's deployed SHA (deploy-drift) and posts it to #80; (2) once SWEEP-P0's review repair is cleared by ChatGPT REVIEW (an external gate, not a packet), the agent cuts sec/v1-hold-1 from that SHA and cherry-picks SWEEP-P0's fix commits with the test commits they need (9b7d9e8f, 76b9b4d3, 6f4935f1 and their tests; re-resolved at admission), resolving conflicts against the older base without bringing #208 or PR195 code along; a hunk that needs #208/PR195 code (for example PR195's expenses gate on the purchase-order routes) is adapted, or the gap is written in the runbook as not covered by the hold deploy; (3) runs the full server and web suites, tsc, the 46 manifests and proof:release0 on sec/v1-hold-1; (4) ChatGPT reviews the ref; (5) DEPLOY_RUNBOOK.md records the ref's SHA, its base SHA, the cherry-picked commits, the deploy.sh invocation and the post-deploy probes; the owner runs deploy.sh. No agent touches production. Later security fixes ride the same mechanism as sec/v1-hold-2, -3, each cut from the last deployed sec ref: W11-KEY-CHAT-SESSION-BIND (a cross-tenant leak live in production), W11-MEMORY-PROMOTE-SCOPE, W11-FLOW-PERCEPTION-SCOPE, W11-CHECKOUT-PAIR-SCOPE, W11-STORE-OWN-PAYMENT-KEYS, the SWP-CENSUS-* batches and any secret read SWP-READ-SCOPE-CENSUS stops the line for. Fallback, only with the owner's explicit written acceptance under seclane: deploy main after step 0 and record in the runbook that the deploy carries #208 and PR195. The runbook record is merged to main after #208 lands (#208 rewrites DEPLOY_RUNBOOK.md); the sec ref and the deploy itself do not wait for step 0. WAVE-1 NOTE: Runbook additions from wave 1: (a) memorycleanup ruling (recommended): right after the deploy, run the one-shot MemoryConsolidationService withdrawal once per business from the server image (no model calls, re-runnable; command in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json W11-MEMORY-PROMOTE-SCOPE open_issues). (b) stockcheck ruling (recommended): run the W11-PLANTED-STOCK-CENSUS dry run before the deploy and list affected businesses, since cash/manual completions of tracked products whose pair a planted row holds are refused until repaired. (c) A store's own Stripe endpoint must point at POST /payments/stripe/webhook (the legacy /webhooks/stripe has no store-secret fallback).",
+   "scope": "Owner-run, under the seclane ruling. main after step 0 carries #208 (794 files) and PR195's payroll ledger, safe-to-spend and journal UI, and SWEEP-P0 is based on 0c22ea76 inside #208, so deploying main would ship product changes. Instead: (1) the owner reads production's deployed SHA (deploy-drift) and posts it to #80; (2) once SWEEP-P0's review repair is cleared by ChatGPT REVIEW (an external gate, not a packet), the agent cuts sec/v1-hold-1 from that SHA and cherry-picks SWEEP-P0's fix commits with the test commits they need (9b7d9e8f, 76b9b4d3, 6f4935f1 and their tests; re-resolved at admission), resolving conflicts against the older base without bringing #208 or PR195 code along; a hunk that needs #208/PR195 code (for example PR195's expenses gate on the purchase-order routes) is adapted, or the gap is written in the runbook as not covered by the hold deploy; (3) runs the full server and web suites, tsc, the 46 manifests and proof:release0 on sec/v1-hold-1; (4) ChatGPT reviews the ref; (5) DEPLOY_RUNBOOK.md records the ref's SHA, its base SHA, the cherry-picked commits, the deploy.sh invocation and the post-deploy probes; the owner runs deploy.sh. No agent touches production. Later security fixes ride the same mechanism as sec/v1-hold-2, -3, each cut from the last deployed sec ref: W11-KEY-CHAT-SESSION-BIND (a cross-tenant leak live in production), W11-MEMORY-PROMOTE-SCOPE, W11-FLOW-PERCEPTION-SCOPE, W11-CHECKOUT-PAIR-SCOPE, W11-STORE-OWN-PAYMENT-KEYS, the SWP-CENSUS-* batches and any secret read SWP-READ-SCOPE-CENSUS stops the line for. Fallback, only with the owner's explicit written acceptance under seclane: deploy main after step 0 and record in the runbook that the deploy carries #208 and PR195. The runbook record is merged to main after #208 lands (#208 rewrites DEPLOY_RUNBOOK.md); the sec ref and the deploy itself do not wait for step 0. WAVE-1 NOTE: Runbook additions from wave 1: (a) memorycleanup ruling (recommended): right after the deploy, run the one-shot MemoryConsolidationService withdrawal once per business from the server image (no model calls, re-runnable; command in (a lost scratch file, wave1-v1-result.json; work from this text) W11-MEMORY-PROMOTE-SCOPE open_issues). (b) stockcheck ruling (recommended): run the W11-PLANTED-STOCK-CENSUS dry run before the deploy and list affected businesses, since cash/manual completions of tracked products whose pair a planted row holds are refused until repaired. (c) A store's own Stripe endpoint must point at POST /payments/stripe/webhook (the legacy /webhooks/stripe has no store-secret fallback).",
    "definition_of_done": "sec/v1-hold-1 holds only security commits on top of production's deployed SHA (git log and diff --stat recorded in DEPLOY_RUNBOOK.md); full server and web suites green, tsc 0/0 and proof:release0 MET on that ref; ChatGPT REVIEW cleared; the owner reports the deploy.sh run, deploy-drift shows production at sec/v1-hold-1, and the four probes refuse a staff member (403 on webhooks list, api-key create, project create, stock set). If the owner chose the fallback instead, his written acceptance that the deploy carries #208 and PR195 is linked in the runbook.",
    "journeys": [
     "J"
@@ -1805,6 +1805,7 @@
     "apps/web/src/hooks/use-key-enabled.ts",
     "apps/web/src/components/layout/app-header.tsx",
     "apps/web/src/app/app/settings/ai/page.tsx",
+    "apps/web/src/app/app/settings/page.tsx",
     "apps/server/test/helpers/fixture-prefixes.json"
    ],
    "decisions": [
@@ -1812,7 +1813,7 @@
     "hubs"
    ],
    "scope": "Kept scope (Command Center awareness panel 401 on every load; KEY drawer opens by itself for a new owner) plus the KEY off switch in the web. No web code reads the server's KEY_DISABLED today (keyDisabled() at env.ts:305 is server-only and apps/web/src has no flag or response field for it). Server: GET /identity/me (identity.controller.ts ~827, authenticated, already read by the web shell at client.ts ~3234) gains keyDisabled: boolean from keyDisabled(). Web: useKeyEnabled() (hooks/use-key-enabled.ts) reads it through apiGet without editing lib/client.ts (web-sales owns that file); under KEY_DISABLED the header 'Ask KEY' button (app-header.tsx), Cmd/Ctrl+J (key-agent.tsx ~108), the drawer, the in-form paste boxes (KEY-PASTE-BOX) and Settings > KEY (settings/ai/page.tsx) do not render. No new route. Fixture prefix (pre-allocated in the plan's prefix table so parallel lanes add disjoint registry entries): v63n_ for identity-me-key-disabled.integration.test.ts. Register each as {prefix, owner, packet: 'V1-63 (SWP-KEY-SHELL-SMOKE)'} in fixture-prefixes.json.",
-   "definition_of_done": "Tests first. RED: identity-me-key-disabled (real DB) expects keyDisabled true under KEY_DISABLED=1 and false without it (field absent today); key-shell-smoke expects no header button, no Cmd+J opening and no Settings > KEY under keyDisabled, and no 401 from the awareness panel. GREEN on Postgres and in the web suite; the /identity/me response shape is checked against identity-boundary.json (route list) and release0-journey.json (status-only reads), both unchanged; journey K 'KEY-off' and journey A steps green under KEY_DISABLED.",
+   "definition_of_done": "Tests first. RED: identity-me-key-disabled (real DB) expects keyDisabled true under KEY_DISABLED=1 and false without it (field absent today); key-shell-smoke expects no header button, no Cmd+J opening and no Settings > KEY under keyDisabled (neither the settings/ai page nor its entry on the Settings index, settings/page.tsx, which NAV-A2 added: journey K1's key-disabled step 'Settings > KEY is not offered'), and no 401 from the awareness panel. GREEN on Postgres and in the web suite; the /identity/me response shape is checked against identity-boundary.json (route list) and release0-journey.json (status-only reads), both unchanged; journey K 'KEY-off' and journey A steps green under KEY_DISABLED.",
    "journeys": [
     "A",
     "K"
@@ -2214,11 +2215,16 @@
    ],
    "files": [
     "apps/web/src/lib/workspace.ts",
-    "apps/web/src/lib/__tests__/workspace-removed-member.test.ts"
+    "apps/web/src/hooks/use-genome-gate.ts",
+    "apps/web/src/components/layout/removed-business-notice.tsx (new)",
+    "apps/web/src/app/app/layout.tsx",
+    "apps/web/src/lib/__tests__/workspace-removed-member.test.ts (new)",
+    "apps/web/src/components/layout/__tests__/removed-business-notice.test.tsx (new)",
+    "apps/web/e2e/sweep-removed-member.spec.ts (new)"
    ],
    "decisions": [],
-   "scope": "Unchanged from the sweep-fix plan: A removed member is told they were removed instead of landing silently in an empty workspace. After removal, lib/workspace.ts falls back to the member's own business and the /app layout re-selects it (brief toast, then an empty workspace with onboarding, which looks like data loss). On a 403 not-a-member for the stored business: forget it and show a persistent 'You no longer have access to <name>' notice with the remaining businesses; never start onboarding for that reason.",
-   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/web/src/lib/__tests__/workspace-removed-member.test.ts (new): a 403 not-a-member for the stored id clears it and yields a removed-notice state naming the business (RED: silent fallback) + browser e2e/sweep-removed-member.spec.ts. Proof: RED->green: src/lib/__tests__/workspace-removed-member.test.ts; web suite + typecheck + eslint and the sweep repro for BUG-117 no longer reproduces; journey spec step(s) for J that cover it turn green.",
+   "scope": "Unchanged from the sweep-fix plan: A removed member is told they were removed instead of landing silently in an empty workspace. After removal, lib/workspace.ts falls back to the member's own business and the /app layout re-selects it (brief toast, then an empty workspace with onboarding, which looks like data loss). On a 403 not-a-member for the stored business: forget it and show a persistent 'You no longer have access to <name>' notice with the remaining businesses; never start onboarding for that reason. Pre-flight (D-274 A3, 2026-11-25, on main 892bb0dd + W11-WEB-OWNER-MEMBERSHIP-REFUSAL @ 2c3ef7ab): two mechanisms, both outside the original write set. (1) workspace.ts resolveBusinessSelection: when the stored business is not in the authoritative membership list, it silently picks the first listed business (or, with an empty list, bootstraps; W11-WEB-OWNER-MEMBERSHIP-REFUSAL forgets the id there). The lost business's name is only in the business cache at that moment. (2) hooks/use-genome-gate.ts sends a member whose remaining business has not finished onboarding (journey J8: the staff member's own first-sign-in business) to /app/onboarding. Fix: workspace.ts records a removed-business notice {id, name from the cache when it is that business} when an authoritative list no longer holds the stored id, and announces it; the app shell (app/app/layout.tsx) shows a lasting, dismissible notice 'You no longer have access to <name>' with the businesses the member still has; while the notice is pending the Genome gate does not redirect to onboarding. Not a 403 interceptor: the authoritative membership list is the trigger (a 403 from one screen can be a scope refusal, D-46). Also covers the W11-WEB-OWNER-MEMBERSHIP-REFUSAL review's MINOR-3 (a refused owner landing on onboarding unexplained).",
+   "definition_of_done": "RED first: workspace-removed-member.test.ts (a stored business missing from a non-empty membership list yields a removed notice naming it, and the remaining business is selected; an empty list after the forget also yields the notice; a member who switched away themselves gets no notice; an unavailable list never does) and removed-business-notice.test.tsx (the shell shows the notice naming the business and the remaining businesses; dismissing clears it; the Genome gate does not redirect to /app/onboarding while it is pending); browser: e2e/sweep-removed-member.spec.ts and journey J8 'the member is told they no longer have access' RED at the base, green at the head (live, E2E_LIVE). Web suite, typecheck and eslint green; R0 still MET at the wave head.",
    "journeys": [
     "J"
    ],
@@ -3780,15 +3786,16 @@
     "labels",
     "demo"
    ],
-   "scope": "Replaces SWP-COMMAND-CENTER-CONSISTENCY (069). /app/command-center (label 'Today') renders four blocks from TODAY-AGGREGATE: Needs you with inline Approve/Run/Reject and bank-transfer Confirm/Not yet; Today's list each one tap from its action (WhatsApp for reminders via WA-HELPER); Pulse equal to Money > Overview; Get set up with the sample preview (DEMO-PREVIEW) and the install step. Removed: mission-control hero, health strip, genome cards and readiness grid, the genome banner component. Day one shows no percentage, risk count, red badge or 'you owe 0'. Phone layout first; 3G load time tracked. BUG-010 web half: use-onboarding.ts (~155) router.replace ignores ?step and sends a finished owner to /app/command-center; with this packet every Get set up step opens its real page (from TODAY-AGGREGATE's hrefs) and ?step on a completed onboarding opens that step's settings page instead of bouncing. ORCHESTRATOR NOTE (FCP-COR-1): a customer named on Today links to /app/crm/contacts/:id (journey C4).",
-   "definition_of_done": "RED: today-blocks test expects four blocks and no 'Hull integrity' text on a fresh business. GREEN: unit tests; command-actions-ops-scope.test.tsx (WOS-C01) and approved-actions-mount.test.tsx (D-72) pass unchanged; journey I spec green at both widths and under KEY_DISABLED. Under KEY_DISABLED (keyDisabled from /identity/me) no KEY UI renders on this surface (test). BUG-010: each Get set up step and each old ?step=products|hours|storefront link opens its page (web test with the real hook), and the sweep repro no longer bounces to Today. Journey D: an accepted quote shows in Needs you with Convert (journey D step 'the owner sees the acceptance on Today').",
+   "scope": "Replaces SWP-COMMAND-CENTER-CONSISTENCY (069). /app/command-center (label 'Today') renders four blocks from TODAY-AGGREGATE: Needs you with inline Approve/Run/Reject and bank-transfer Confirm/Not yet; Today's list each one tap from its action (WhatsApp for reminders via WA-HELPER); Pulse equal to Money > Overview; Get set up with the sample preview (DEMO-PREVIEW) and the install step. Removed: mission-control hero, health strip, genome cards and readiness grid, the genome banner component. Day one shows no percentage, risk count, red badge or 'you owe 0'. Phone layout first; 3G load time tracked. BUG-010 web half: use-onboarding.ts (~155) router.replace ignores ?step and sends a finished owner to /app/command-center; with this packet every Get set up step opens its real page (from TODAY-AGGREGATE's hrefs) and ?step on a completed onboarding opens that step's settings page instead of bouncing. ORCHESTRATOR NOTE (FCP-COR-1): a customer named on Today links to /app/crm/contacts/:id (journey C4). Absorbs FU-C4-TODAY-LINK (pre-flight 2026-11-25): journey C4 stops at 'from Today' because today's /app/command-center does not link the customer of the invoice due today; this packet replaces that page, so the link is built here (the FCP-COR-1 note above), not on the page being replaced.",
+   "definition_of_done": "RED: today-blocks test expects four blocks and no 'Hull integrity' text on a fresh business. GREEN: unit tests; command-actions-ops-scope.test.tsx (WOS-C01) and approved-actions-mount.test.tsx (D-72) pass unchanged; journey I spec green at both widths and under KEY_DISABLED. Under KEY_DISABLED (keyDisabled from /identity/me) no KEY UI renders on this surface (test). BUG-010: each Get set up step and each old ?step=products|hours|storefront link opens its page (web test with the real hook), and the sweep repro no longer bounces to Today. Journey D: an accepted quote shows in Needs you with Convert (journey D step 'the owner sees the acceptance on Today'). Journey C4's 'from Today' step (c-customer.spec.ts: the invoice due today links its customer to /app/crm/contacts/<id>) is green live.",
    "journeys": [
     "A",
     "I"
    ],
    "absorbs": [
     "SWP-COMMAND-CENTER-CONSISTENCY",
-    "SWP-CONCIERGE-TRUTH (BUG-010 web half and verification)"
+    "SWP-CONCIERGE-TRUTH (BUG-010 web half and verification)",
+    "FU-C4-TODAY-LINK"
    ],
    "r0_impact": "KEEP (closedBy evidence): release0-index.json cites command-center/__tests__/command-actions-ops-scope.test.tsx '[WOS-C01] RED-BEFORE: a member without operations ...' (~1474-1483), and approved-actions-mount.test.tsx pins D-72; both pass unchanged. Conditional AMEND: if the components WOS-C01 mounts move, re-pointing the test's import (never its assertions) uses the authority S1-RULINGS-RECORD requests in advance.",
    "track": "launch",
@@ -3861,11 +3868,18 @@
     "apps/web/src/components/contacts/contact-custom-fields.tsx",
     "apps/web/src/app/app/crm/contacts/[contactId]/timeline/page.tsx",
     "apps/web/src/app/app/trash/page.tsx",
-    "apps/web/e2e/sweep-contact-detail.spec.ts"
+    "apps/web/e2e/sweep-contact-detail.spec.ts",
+    "apps/web/src/components/contacts/contact-detail-tabs.tsx",
+    "apps/web/src/components/contacts/contact-detail-stats.tsx",
+    "apps/web/src/app/app/crm/pipeline/bulk-action-bar.tsx",
+    "apps/web/src/app/app/crm/pipeline/database-bulk-bar.tsx",
+    "apps/web/src/app/app/crm/pipeline/contacts-database.tsx",
+    "apps/web/src/lib/__tests__/link-targets.spec.ts",
+    "apps/web/src/components/contacts/__tests__/contact-money-withheld.test.tsx"
    ],
    "decisions": [],
-   "scope": "Shrunk: BUG-038 moved to FIX-CONTACT-PARAMS (step 3); BUG-062 is fixed by removal: this packet retires the list side-panel's tabs (the panel keeps the 'Contact details' region, a summary, 'Open' and Edit). Remaining: dropdown custom fields show labels (127), delete dialog mentions Undo/Trash (128), timeline shows plain events via status-labels.ts (129). BUG-062 fixed by removal: the list side panel's tabs are retired (one detail route); DoD check: /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip. ORCHESTRATOR NOTE (2026-11-16, FIX-CONTACT-PARAMS FCP-COR-1): also make the Cmd/Ctrl+K customer result open the customer's page (command-palette.tsx), so journey C step C4 passes; the journey locator stays as written.",
-   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/web/src/app/app/crm/contacts/__tests__/contact-detail-route.test.tsx (new): redirect to /<id>/overview for Promise params (RED: undefined); Tasks then Deals select those tabs (RED); + server-page-params census (RED names the page) + browser e2e/sweep-contact-detail.spec.ts. Proof: RED->green: src/app/app/crm/contacts src/__tests__/server-page-params.census.test.ts; web suite + typecheck + eslint and the sweep repro for BUG-127, BUG-128, BUG-129 no longer reproduces; journey spec step(s) for C that cover it turn green. /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip.",
+   "scope": "Shrunk: BUG-038 moved to FIX-CONTACT-PARAMS (step 3); BUG-062 is fixed by removal: this packet retires the list side-panel's tabs (the panel keeps the 'Contact details' region, a summary, 'Open' and Edit). Remaining: dropdown custom fields show labels (127), delete dialog mentions Undo/Trash (128), timeline shows plain events via status-labels.ts (129). BUG-062 fixed by removal: the list side panel's tabs are retired (one detail route); DoD check: /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip. The Cmd/Ctrl+K customer result already opens the customer's page (command-palette.tsx:85). The tab strip lives in contact-detail-tabs.tsx (mounted at contact-detail.tsx:417) with its *-tab-panel.tsx files: keep timeline-tab-panel.tsx or move the tests that read it (link-targets.spec.ts:295,370, contact-money-withheld.test.tsx, timeline-tab-panel.journey-cta.test.tsx). (Pre-flight 2026-11-24, D-274 A3.)",
+   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: BUG-127 a DROPDOWN custom field shows its option label (contact-custom-fields.tsx); BUG-128 every contact delete dialog (contact-detail.tsx:469, bulk-action-bar.tsx, database-bulk-bar.tsx, contacts-database.tsx) says the contact moves to Trash with Undo (bulk delete is a soft delete too, crm.service.ts:1965); BUG-129 the timeline page and contact-detail-stats.tsx (:600,605) show eventLabel() (lib/status-labels.ts:142) instead of raw event codes; BUG-062 /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit and no tab strip; browser e2e/sweep-contact-detail.spec.ts; journey spec step(s) for C that cover it turn green. The overview redirect and Cmd/Ctrl+K cases are already green (FIX-CONTACT-PARAMS: contact-detail-route.test.tsx:314,320). (Pre-flight 2026-11-24, D-274 A3.) /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip.",
    "journeys": [
     "C"
    ],
@@ -6186,7 +6200,7 @@
     "keychatsetup"
    ],
    "r0_impact": "AMEND (owner ruling keychatsetup): setup-only change to 7 required cases of key-cortex.controller.spec.ts (manifest key-cortex-actor-binding.json); no assertion, title or manifest change.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70a_ (register it with packet \"V1-70 (W1F-KEYCHAT-OWNSESSION)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. Apply the held, tested patch /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/sec-w11kcsb-1-held.patch as a tests-first commit (RED 5/69 at head) and then the controller fix: KeyCortexController.ownSession/ownSessionId decide ownership via KeyCortexSessionService.findSession (no write), then read through conversation.getSession. The Release 0 change is setup-only on 7 required cases of key-cortex.controller.spec.ts (session-service stand-ins gain findSession; the first describe passes a session service); no assertion, case title or manifest entry changes. Only if the owner's keychatsetup ruling is option 0; otherwise skip and record.",
+   "scope": "Tests first. Source: wave 1 review residuals and the ruling this packet names (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text). Fixture prefix v70a_ (register it with packet \"V1-70 (W1F-KEYCHAT-OWNSESSION)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. Rebuild the held patch (sec-w11kcsb-1-held.patch: it lived in a first-account scratch directory that is gone and was never committed; pre-flight 2026-11-24) as a tests-first commit (RED 5/69 at head) and then the controller fix: KeyCortexController.ownSession/ownSessionId decide ownership via KeyCortexSessionService.findSession (no write), then read through conversation.getSession. The Release 0 change is setup-only on 7 required cases of key-cortex.controller.spec.ts (session-service stand-ins gain findSession; the first describe passes a session service); no assertion, case title or manifest entry changes. Only if the owner's keychatsetup ruling is option 0; otherwise skip and record.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass."
   },
   {
@@ -6210,7 +6224,7 @@
    ],
    "decisions": [],
    "r0_impact": "KEEP: no required Release 0 case changes; proof:release0 MET.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70b_ (register it with packet \"V1-70 (W1F-MEMORY-COPIES)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. Close the W11-MEMORY-PROMOTE-SCOPE residuals: (1) AiMemoryService.remove and removeCategory, unified-memory-writer remove, proactive-suggestion deleteMany and resolveConflicts all leave ai_memory_embeddings copies (SemanticMemoryService.deleteForSource has no caller): every delete path removes its copies, and a member's search and memory block never serve a deleted value. (2) The backfill race: SemanticMemoryService.backfillFromAiMemory re-checks the source row (or takes a lock) so a copy read before a withdrawal is not written after it. (3) promoteFacts cuts recommendations on a code-point boundary (an emoji split by the 500-unit cut makes Prisma throw and stops run() before withdrawMemberPromotions), and withdraw runs before promote.",
+   "scope": "Tests first. Source: wave 1 review residuals and the ruling this packet names (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text). Fixture prefix v70b_ (register it with packet \"V1-70 (W1F-MEMORY-COPIES)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. Close the W11-MEMORY-PROMOTE-SCOPE residuals: (1) AiMemoryService.remove and removeCategory, unified-memory-writer remove, proactive-suggestion deleteMany and resolveConflicts all leave ai_memory_embeddings copies (SemanticMemoryService.deleteForSource has no caller): every delete path removes its copies, and a member's search and memory block never serve a deleted value. (2) The backfill race: SemanticMemoryService.backfillFromAiMemory re-checks the source row (or takes a lock) so a copy read before a withdrawal is not written after it. (3) promoteFacts cuts recommendations on a code-point boundary (an emoji split by the 500-unit cut makes Prisma throw and stops run() before withdrawMemberPromotions), and withdraw runs before promote.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass."
   },
   {
@@ -6237,7 +6251,7 @@
     "bridgememory"
    ],
    "r0_impact": "KEEP: no required Release 0 case changes; proof:release0 MET.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70c_ (register it with packet \"V1-70 (W1F-PERCEPTION-MODULE-SCOPE)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. SEC-W11FPS-3: the perception block ignores module scopes (D-71/D-146, D-57). Project business_events and cognitive_events by the reader's module levels: money events (expense.*, payment.*, invoice.*, revenue_action.*, budget.*) never reach a member whose expenses/revenue scope is none. The customer-facing support desk (Chatwoot) perceives per the supportdesk ruling (recommended: only the conversation in front of it, no business events). The staff WhatsApp/SMS bridge's verified holder (server.positionHolderUserId) becomes the perception reader for their own history only, per the bridgememory ruling (recommended yes); it still grants no tool authority (D-73/D-88). Keep GOVERNANCE_DECISION proposals business-wide.",
+   "scope": "Tests first. Source: wave 1 review residuals and the ruling this packet names (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text). Fixture prefix v70c_ (register it with packet \"V1-70 (W1F-PERCEPTION-MODULE-SCOPE)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. SEC-W11FPS-3: the perception block ignores module scopes (D-71/D-146, D-57). Project business_events and cognitive_events by the reader's module levels: money events (expense.*, payment.*, invoice.*, revenue_action.*, budget.*) never reach a member whose expenses/revenue scope is none. The customer-facing support desk (Chatwoot) perceives per the supportdesk ruling (recommended: only the conversation in front of it, no business events). The staff WhatsApp/SMS bridge's verified holder (server.positionHolderUserId) becomes the perception reader for their own history only, per the bridgememory ruling (recommended yes); it still grants no tool authority (D-73/D-88). Keep GOVERNANCE_DECISION proposals business-wide.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass."
   },
   {
@@ -6262,7 +6276,7 @@
     "orderstatus"
    ],
    "r0_impact": "KEEP: no required Release 0 case changes; proof:release0 MET.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70d_ (register it with packet \"V1-70 (W1F-ORDER-TRANSITIONS)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. SEC-W11OCR-2 and the reverse race: per the orderstatus ruling (recommended option 0), a PATCH status that moves a SHIPPED or DELIVERED order backwards is refused on /marketplace and /site, and PATCH shipped, PATCH /site SHIPPED and fulfil 'ship' take the routing claim or compare-and-set on the status they read, so a ship cannot write over a committed cancel. MarketplaceService.fulfillOrder 'cancel' gets the same compare-and-set and the case-insensitive status read as the status-edit cancels (an open order stored as 'processing' or 'on_hold' can be cancelled through it), and fulfil 'ship' reads routes inside the claim so a concurrent cancel cannot release reservations twice. Record (do not change) the 'on_hold' vocabulary question.",
+   "scope": "Tests first. Source: wave 1 review residuals (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text and the ruling it names). Fixture prefix v70d_ (register it with packet \"V1-70 (W1F-ORDER-TRANSITIONS)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. SEC-W11OCR-2 and the reverse race: per the orderstatus ruling (recommended option 0), a PATCH status that moves a SHIPPED or DELIVERED order backwards is refused on /marketplace and /site, and PATCH shipped, PATCH /site SHIPPED and fulfil 'ship' take the routing claim or compare-and-set on the status they read, so a ship cannot write over a committed cancel. MarketplaceService.fulfillOrder 'cancel' gets the same compare-and-set and the case-insensitive status read as the status-edit cancels (an open order stored as 'processing' or 'on_hold' can be cancelled through it), and fulfil 'ship' reads routes inside the claim so a concurrent cancel cannot release reservations twice. Record (do not change) the 'on_hold' vocabulary question.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass.",
    "track": "launch",
    "track_reason": "safety fix on a surface v1 shows",
@@ -6293,7 +6307,7 @@
     "paidnostock"
    ],
    "r0_impact": "KEEP: no required Release 0 case changes; proof:release0 MET.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70e_ (register it with packet \"V1-70 (W1F-SETTLE-NO-STOCK)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. Per the paidnostock ruling (recommended option 0): a card or PayPal settlement for an order whose own stock is genuinely missing or insufficient records the payment, keeps the order, and notifies the business to restock or refund (CPS-COR-2 class; the offline cash/manual completion keeps its refusal). After such a settlement, routing does not also send the seller_low_stock email for the same line (one alert). Scope commerce-intelligence.service.ts:235-252 and marketplace.service.ts:438 inventoryStocks reads with ownStockRows (business filter). Locate the real settlement file before editing; the file list is indicative.",
+   "scope": "Tests first. Source: wave 1 review residuals (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text and the ruling it names). Fixture prefix v70e_ (register it with packet \"V1-70 (W1F-SETTLE-NO-STOCK)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. Per the paidnostock ruling (recommended option 0): a card or PayPal settlement for an order whose own stock is genuinely missing or insufficient records the payment, keeps the order, and notifies the business to restock or refund (CPS-COR-2 class; the offline cash/manual completion keeps its refusal). After such a settlement, routing does not also send the seller_low_stock email for the same line (one alert). Scope commerce-intelligence.service.ts:235-252 and marketplace.service.ts:438 inventoryStocks reads with ownStockRows (business filter). Locate the real settlement file before editing; the file list is indicative.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass.",
    "track": "launch",
    "track_reason": "safety fix on a surface v1 shows",
@@ -6322,7 +6336,7 @@
     "storestripe"
    ],
    "r0_impact": "AMEND (owner ruling storestripe): MP-06d and the storefront parts of MP-06g/MP-06h (mark-paid-convergence.json) assert the platform signature does not settle a store order.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70f_ (register it with packet \"V1-70 (W1F-STORE-STRIPE-R0)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. SEC-W11OPK-3 remaining half, per the storestripe ruling (recommended option 0, D-138): a storefront Stripe order settles only with an event signed by the store's own account; STRIPE_WEBHOOK_SECRET never settles a store order, through POST /payments/stripe/webhook or the legacy POST /webhooks/stripe. Flip OPK-10(b). Update Release 0 MP-06d (and the storefront parts of MP-06g/MP-06h) accordingly. Also: createStorePayment sets payment_intent_data metadata (order id) so charge.refunded events from the store's own account map to their order instead of a 400.",
+   "scope": "Tests first. Source: wave 1 review residuals (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text and the ruling it names). Fixture prefix v70f_ (register it with packet \"V1-70 (W1F-STORE-STRIPE-R0)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. SEC-W11OPK-3 remaining half, per the storestripe ruling (recommended option 0, D-138): a storefront Stripe order settles only with an event signed by the store's own account; STRIPE_WEBHOOK_SECRET never settles a store order, through POST /payments/stripe/webhook or the legacy POST /webhooks/stripe. Flip OPK-10(b). Update Release 0 MP-06d (and the storefront parts of MP-06g/MP-06h) accordingly. Also: createStorePayment sets payment_intent_data metadata (order id) so charge.refunded events from the store's own account map to their order instead of a 400.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass.",
    "track": "launch",
    "track_reason": "safety fix on a surface v1 shows",
@@ -6336,21 +6350,24 @@
    "bugs": [],
    "journeys": [],
    "step": 5,
-   "lane": "web",
+   "lane": "both",
    "size": "S",
    "priority": "P1",
    "depends_on": [
     "W11-STORE-OWN-PAYMENT-KEYS"
    ],
    "files": [
-    "apps/server/src/modules/storefront/storefront-payments.ts",
-    "apps/web/src/app/app/settings/payments"
+    "apps/server/src/modules/payments/storefront-checkout-methods.ts",
+    "apps/server/src/core/security/sanitize-business.ts",
+    "apps/server/test/storefront-own-payment-keys.integration.test.ts",
+    "apps/web/src/app/app/settings/business/payments-tab.tsx",
+    "apps/web/src/app/app/settings/business/payments-tab.spec.tsx"
    ],
    "decisions": [
     "storepaypal"
    ],
    "r0_impact": "KEEP: no required Release 0 case changes; proof:release0 MET.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70g_ (register it with packet \"V1-70 (W1F-STORE-PAYPAL)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. OPK-COR-2 per the storepaypal ruling (recommended option 0): the storefront PayPal set counts metaData.paypalWebhookId with the client id and secret, so PayPal is offered on the store only when it can settle; Settings > Payments gains a PayPal webhook ID field (masked after save, settings admin only). Server test plus a web component test. Locate the real files first; the list is indicative.",
+   "scope": "Tests first. Source: wave 1 review residuals and the storepaypal ruling (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text and the ruling). Extend test/storefront-own-payment-keys.integration.test.ts (registered prefix v61b_) rather than adding a suite. OPK-COR-2 per the storepaypal ruling (recommended option 0): the storefront PayPal set counts metaData.paypalWebhookId with the client id and secret, so PayPal is offered on the store only when it can settle; Settings > Getting paid (settings/business/payments-tab.tsx; there is no /app/settings/payments route) gains a PayPal webhook ID field (masked after save, settings admin only). Server test plus a web component test. Locate the real files first; the list is indicative. The rule is storePaypalCredentials (modules/payments/storefront-checkout-methods.ts:94; storePaypalWebhookId exists at :116), which also gates bookings.service.ts:2005, store-order.service.ts:491 and payments.service.ts:121/1137/3674: prove each caller. 'Masked after save' needs core/security/sanitize-business.ts:60 and payments-tab.tsx:32; payment-secrets-write-only.integration.test.ts is Release 0 bound (whatsapp-config-authority.json:24, allowAdditionalCases), so add cases, never edit bound ones. (Pre-flight 2026-11-24, D-274 A3.)",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass.",
    "track": "launch",
    "track_reason": "safety fix on a surface v1 shows",
@@ -6376,7 +6393,7 @@
    ],
    "decisions": [],
    "r0_impact": "KEEP: no required Release 0 case changes; proof:release0 MET.",
-   "scope": "Tests first. Source: wave 1 review residuals in /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/wave1-v1-result.json (read the packet's open_issues there in full before starting). Fixture prefix v70h_ (register it with packet \"V1-70 (W1F-KEY-EVIDENCE-WRITE)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. UCS-COR-3 latent defect: KeyCortexEvidenceService.createEvidence writes claim, claimType, proof, proofHash, confidence, source, relatedModule and others into evidence, which has none of those columns; against the real client it throws PrismaClientValidationError. KeyCortexConsciousnessService.processConsciously step 11 awaits metacognition.trackCapability, which awaits it, so a deliberative KEY answer can throw. Reproduce through processConsciously on a real database first; fix by writing only real columns (no schema change) or by making capability tracking non-fatal with a logged warning. No new tables.",
+   "scope": "Tests first. Source: wave 1 review residuals and the ruling this packet names (the scratch file once cited here, wave1-v1-result.json, is lost; work from this text). Fixture prefix v70h_ (register it with packet \"V1-70 (W1F-KEY-EVIDENCE-WRITE)\"; the registry spec requires v<NN><a-z>_ with a matching V1-NN), or the registered prefix of a suite you extend. UCS-COR-3 latent defect: KeyCortexEvidenceService.createEvidence writes claim, claimType, proof, proofHash, confidence, source, relatedModule and others into evidence, which has none of those columns; against the real client it throws PrismaClientValidationError. KeyCortexConsciousnessService.processConsciously step 11 awaits metacognition.trackCapability, which awaits it, so a deliberative KEY answer can throw. Reproduce through processConsciously on a real database first; fix by writing only real columns (no schema change) or by making capability tracking non-fatal with a logged warning. No new tables.",
    "definition_of_done": "Every finding reproduced RED then green on a real database through the HTTP routes or the real service graph; mutation-checked; job-role specs, fixture-prefix registry, public-surface, server and web tsc, run-manifests and proof:release0 at the exact head all pass."
   },
   {
@@ -6789,14 +6806,19 @@
    ],
    "step": 3,
    "lane": "web",
-   "size": "M",
+   "size": "L",
    "priority": "P2",
    "depends_on": [
     "SWP-LAYERS"
    ],
    "files": [
-    "apps/web/src/app/globals.css (layer table)",
-    "page components with z-40 backdrops and floating buttons, z-[100]/z-[101] modals (genome-chat-float, jarvis-voice, page-help-button, KeyFlowProperties, contact modals)"
+    "apps/web/src/app/globals.css",
+    "apps/web/src/components/__tests__/overlay-stacking.test.tsx",
+    "apps/web/e2e/sweep-overlays.spec.ts",
+    "apps/web/src/app/app/genome/components/genome-chat-float.tsx",
+    "apps/web/src/app/app/keyflow-command/components/jarvis-voice.tsx",
+    "apps/web/src/components/contacts/contact-scan-button.tsx",
+    "apps/web/src/app/app/crm/pipeline/pipeline-toolbar.tsx"
    ],
    "decisions": [
     "D-212",
@@ -6804,8 +6826,8 @@
     "D-221"
    ],
    "r0_impact": "KEEP",
-   "scope": "Move the page-level z-index literals SWP-LAYERS left onto its layer table so the header's menus sit above page floating buttons and page dialogs still cover the header. Measure live at 320, 375, 768, 1024 and 1440.",
-   "definition_of_done": "Web vitest/e2e sweep-overlays: no header menu is covered by a page floating button; page dialogs cover the header; no z-index literal outside the table in apps/web/src (a static guard spec).",
+   "scope": "Move the page-level z-index literals SWP-LAYERS left onto its layer table so the header's menus sit above page floating buttons and page dialogs still cover the header. Measure live at 320, 375, 768, 1024 and 1440. Size: 312 z-index literals in 181 files today, 160 of them on fixed overlays in 115 files; build it alone, after the open waves. page-help-button.tsx and KeyFlowProperties are not mounted (delete or skip them); jarvis-voice.tsx is mounted by app/key/page.tsx:66. (Pre-flight 2026-11-24, D-274 A3.)",
+   "definition_of_done": "Web vitest/e2e sweep-overlays: no header menu is covered by a page floating button; page dialogs cover the header; no position:fixed z-index literal >= 30 outside the layer table in apps/web/src (a static guard spec; local z-0..z-20 stacking is exempt). overlay-stacking.test.tsx:395-430 asserts today's z-40, z-[70] and z-[90] literals: move those expectations onto the table. (Pre-flight 2026-11-24, D-274 A3.)",
    "track": "launch",
    "track_reason": "serves journey A, F",
    "track_ruling": "D-263"
@@ -12450,14 +12472,15 @@
     "FU-NAV-A1-CODEX-224"
    ],
    "files": [
-    "apps/web/src/**/manual-setup-step.tsx",
-    "apps/web/src/lib/business-settings.ts"
+    "apps/web/src/app/app/onboarding/components/manual-setup-step.tsx",
+    "apps/web/src/lib/business-settings.ts",
+    "apps/web/src/lib/__tests__/business-settings.test.ts"
    ],
    "decisions": [
     "D-150"
    ],
    "r0_impact": "KEEP",
-   "scope": "From the FU-NAV-A1-CODEX-224 security review: manual-setup-step.tsx records its PATCH answer through noteBusinessSettings with no write sequence, so the newest-write fence does not cover it.",
+   "scope": "From the FU-NAV-A1-CODEX-224 security review: manual-setup-step.tsx records its PATCH answer through noteBusinessSettings with no write sequence, so the newest-write fence does not cover it. manual-setup-step.tsx:219,224 calls noteBusinessSettings without nextWrite (business-settings.ts:325,365); its PATCH door is lib/api/onboarding-concierge.ts:216; extend business-settings.test.ts and onboarding/__tests__/manual-setup-currency.test.tsx. (Pre-flight 2026-11-24, D-274 A3.)",
    "definition_of_done": "RED: an older sequenced write's late answer overwrites the manual step's newer PATCH. GREEN: the manual step's write is sequenced and fenced like the others; web suites green.",
    "fixture_prefix": null,
    "track": "launch",
@@ -12700,6 +12723,561 @@
    "track": "launch",
    "track_reason": "KEY stays reachable from the header: a safety fix (D-272.3)",
    "track_ruling": "D-272"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey F",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-NAV-A3-CODEX-235",
+   "title": "A slug with a digit is a crumb; the settings tab strip follows the member's modules",
+   "journeys": [
+    "F"
+   ],
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "NAV-A3"
+   ],
+   "files": [
+    "apps/web/src/components/ui/origin-aware-breadcrumbs.tsx",
+    "apps/web/src/app/app/settings/layout.tsx",
+    "apps/web/src/app/app/settings/__tests__/settings-layout-access.test.tsx (new)",
+    "apps/web/src/components/ui/__tests__/origin-aware-breadcrumbs.test.tsx"
+   ],
+   "scope": "Two Codex P2 findings on PR #235 (wave 3o), verified real: (a) origin-aware-breadcrumbs isId took the KEY FLOWS role slug l1_l2_customer_support_agent for an id, so /app/key-flows/<role> lost its crumb; (b) NAV-A3 made My account (/app/settings/profile) every member's, and that page's settings layout drew every business settings tab for everyone. Stacked on wave 3o (A8). Built by the Claude lane, claim 531bb341.",
+   "definition_of_done": "RED: the role page's last crumb reads 'Key flows'; a member with no settings, team or operations access sees all 19 settings tabs on My account. GREEN: ids are uuids, 20+ hex or 16+ letters and digits only; the tab strip follows useMemberModuleLevels/canOpenModule (settings, Team: team, AI: operations; unknown hides nothing). Web tsc, unit, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "title": "The contact route's pages show statuses in plain words",
+   "journeys": [
+    "C"
+   ],
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/[contactId]/bookings/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/money/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/quotes-invoices/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/recommendations/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/tasks/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/contact-header.tsx",
+    "apps/web/e2e/journeys/c-customer.spec.ts (C6 must be able to fail at the base, A7/A9)",
+    "apps/web/src/app/app/crm/contacts/[contactId]/__tests__/*-plain-status.test.tsx (new)"
+   ],
+   "scope": "From the SWP-CONTACT-DETAIL acceptance review (CDC-4): stored statuses are printed raw on the pages journey C6 walks (bookings/page.tsx:78, money/page.tsx:174/197/220, quotes-invoices/page.tsx:122/166, recommendations :268, tasks :219, contact-header.tsx:119). C6's seed (one note) does not reach them; a customer with an invoice or booking does. Use statusLabel(code, domain) from lib/status-labels.ts. Corrections: also contact-header.tsx:130 (the status menu options) and :85 (the 'Status updated to' toast); money/page.tsx:174 prints an event code (invoice.paid) beside its label, so it takes eventLabel or goes, not statusLabel; statusLabel's only domain is 'invoice' (PARTIAL), the rest use the global map. Decide whether note/event `source` and ai-insights' bestChannel/trend count. C6's detectors (two-word dotted codes and UPPER_SNAKE) cannot see single-word codes (LEAD, SENT, HIGH) or lower-case event codes: as written, 'C6 extended with an invoice and a booking' passes at the base too; seed PARTIALLY_PAID and NO_SHOW and add a whole-word status detector. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED per page (jsdom): a seeded PARTIALLY_PAID, NO_SHOW, HIGH or LEAD shows its code; GREEN: its plain word. Browser: C6 extended (seeded part payment and no-show, whole-word detector) red at the base, green at the head on phone and desktop; tsc, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-CONTACT-DELETE-LEAVE",
+   "title": "A contact delete is not lost when the owner leaves during its Undo window",
+   "journeys": [
+    "C"
+   ],
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-actions.ts",
+    "apps/web/src/app/app/crm/pipeline/hooks/__tests__/use-contact-actions.delete-leave.test.tsx (new)"
+   ],
+   "scope": "From the SWP-CONTACT-DETAIL acceptance review: a single delete shows 'Contact deleted' with Undo and sends the DELETE after 5.5 s; the timer is cleared on unmount, so leaving the page in that window silently cancels the delete (the customer comes back). Send the pending delete on unmount (or on navigation) instead of dropping it; Undo still cancels it. Same function, same root (A4): a second single delete within 5.5 s clears the first one's timer (line ~355), so the first DELETE is dropped too; and the first toast's Undo then clears the second delete's timer, restoring the first customer and silently cancelling the second. Fix: pending deletes in a map by id (timer and toast id each); on unmount flush every pending DELETE and dismiss its toast; Undo cancels only its own. A hard reload or tab close is out of scope (would need keepalive/pagehide). (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED (fake timers): delete then unmount within 5.5 s sends no DELETE; delete A then B sends only B; delete A, delete B, Undo A cancels B. GREEN: each DELETE is sent exactly once (on time or on unmount, toast dismissed); Undo before leaving sends none. Journey C7 stays green; web tsc, unit, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-CONTACT-PANEL-PRUNE",
+   "title": "The list side panel stops loading what it no longer shows",
+   "journeys": [
+    "C"
+   ],
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-detail.ts",
+    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts",
+    "apps/web/src/app/app/crm/pipeline/pipeline-detail-panel.tsx",
+    "apps/web/src/components/contacts/contact-detail.tsx",
+    "apps/web/src/app/app/crm/pipeline/hooks/__tests__/use-contact-detail-reads.test.tsx (new)"
+   ],
+   "scope": "SWP-CONTACT-DETAIL retired the side panel's tabs (BUG-062); the panel still fetches health metrics, journey, conversation context and cross-journey for every selection (use-contact-detail.ts:72-75) and ContactDetail still accepts the tab-only props; audit, conversations, deals, network, notes and tasks *-tab-panel.tsx are unmounted. Drop the fetches and props; delete or re-home the panels per the owner's answer to the open question on the retired tabs' features. Read removal first (does not wait on the owner question; Codex P2 on #236): use-contact-detail.ts:72-75 (and the refresh at 173-182) plus pass-through in use-contacts-pipeline.ts (159-162, 182, 191-192, 241-243), pipeline-detail-panel.tsx and ContactDetail's dead props; keep insightSnapshot, revenueSummary, aiInsight and the auto-select (release0-live relies on it). Panel deletion later covers all seven *-tab-panel.tsx (timeline-tab-panel included) and checks architecture/*.json. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED: selecting a contact sends GET health-metrics, journey, conversation-context and cross-journey. GREEN: none sent; the detail, revenue and insight reads and the auto-select remain; release0-live green; tsc, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-C4-FOCUS-OPEN",
+   "title": "A customer clicked on the Customers page opens their page (focus view)",
+   "journeys": [
+    "C"
+   ],
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/page.tsx",
+    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts (openContactPage; handleDoAction's call/task/default cases)",
+    "apps/web/src/app/app/crm/pipeline/__tests__/focus-view-open.test.tsx (new)"
+   ],
+   "scope": "Journey C4's 'from the Customers list' step fails at main and at wave 3p alike: /app/crm/contacts opens in the focus view (the default, pipeline-tab-content.tsx:99-110), whose cards and NextActionQueue 'view' call handleViewEngageContact (contacts/page.tsx:133), which selects the contact and switches a tab but opens nothing (the side panel and its Open link render only in the list view). Fix at that one function: navigate to /app/crm/contacts/<id>. Not a link in ContactCard (shared with the list view, whose row click release0-live relies on). Declared widening if taken: handleDoAction's call/task/default cases (use-contacts-pipeline.ts:96-110) toast 'Opening <name>' and open nothing either. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED: journey C4 'from the Customers list' fails at the base (URL stays /app/crm/contacts); unit: a focus card click, a next-action queue view and a focus-view call action do not navigate, and opening from the focus view records no recent. GREEN: each opens /app/crm/contacts/<id> and records the customer as recent; C4's 'from the Customers list' step green on phone and desktop (full C4 green belongs to FU-C4-CMDK-SEARCH: the next step, Cmd/K, is a separate pre-existing defect); release0-live and release0-journey unchanged; tsc, lint green. (Amended by the acceptance review, 2026-11-24.)"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey F",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-NOTIFICATIONS-PREFS-GUARD",
+   "title": "Only members with settings access read or change the customer-email settings",
+   "journeys": [
+    "F"
+   ],
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/notifications/notifications.controller.ts",
+    "apps/server/test/notifications-prefs-guard.integration.test.ts (new)"
+   ],
+   "scope": "From the FU-NAV-A3-CODEX-235 acceptance review: GET and PATCH /notifications/businesses/:b/customer-preferences (and GET customer-log, the customer email log) have AuthGuard and BusinessGuard only, so any member of a business, whatever their modules, can read and change its customer-email settings and read the log. Add the settings module guard (read for GET, write for PATCH) as the other settings endpoints have it. Owner question attached: meNav offers /app/settings/notifications to every member while the settings index gates it on settings.",
+   "definition_of_done": "RED (real DB): a STAFF member with settings none gets 200 on PATCH customer-preferences. GREEN: 403 for settings none, 200 for settings write; owner unchanged; Release 0 still MET."
+  },
+  {
+   "id": "FU-C4-CMDK-SEARCH",
+   "title": "Cmd/Ctrl+K finds a customer and opens their page (journey C4)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "files": [
+    "apps/web/src/components/command-palette.tsx",
+    "apps/web/src/components/key/key-agent.tsx",
+    "apps/web/src/hooks/use-keyboard-shortcuts.ts",
+    "apps/web/src/components/__tests__/command-palette-c4.test.tsx (new)"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "scope": "Found live by FU-C4-FOCUS-OPEN (2026-11-24): once C4's 'from the Customers list' step passes, its next step 'from Cmd/Ctrl+K' fails on both widths, a step no earlier run reached. Desktop: after Escape then Ctrl+K on /app/command-center, no visible input with a 'search' placeholder appears (the palette is mounted by KeyAgent, components/key/key-agent.tsx, whose window keydown toggles it). Phone: a search input is found and filled with the customer's last name, the API answers GET /api/flows/businesses/:b/search 200 in 12 ms, but no option or link names the customer. Root cause to establish first (palette not opening on desktop; results not labelled or not returned on phone); the unit cases in contact-detail-route.test.tsx (FIX-CONTACT-PARAMS) cover the result's href only. Root causes found by the FU-C4-FOCUS-OPEN acceptance review (to confirm with REDs): (1) the palette lists results as plain <button>s (command-palette.tsx ~411-431), no listbox/option roles and no links, so the step's option/link locator can never match (phone failure); give them the combobox pattern (role=listbox / role=option, fitting the arrow-key selection) or <Link>s. (2) Ctrl+K has two owners in one keypress: the shortcut table (hooks/use-keyboard-shortcuts.ts ~31-38, via AppLayoutInner) dispatches kf:open-key {mode:'palette'} (KeyAgent sets it open) and KeyAgent's own keydown toggles it, so depending on registration order the palette opens and closes at once (desktop failure); give Ctrl+K one owner. C4's later steps ('from Today', 'from the invoice') have never run: expect more.",
+   "definition_of_done": "RED: journey C4 'from Cmd/Ctrl+K' fails at the base (as recorded). GREEN: on phone and desktop, Ctrl/Cmd+K opens the palette, the customer's last name lists them, and the result opens /app/crm/contacts/<id>; C4 green end to end; web unit test for whatever the root cause was; tsc, lint green."
+  },
+  {
+   "id": "FU-KEY-CTRLJ-OWNERS",
+   "title": "Cmd/Ctrl+J, KEY's drawer, has one owner",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-C4-CMDK-SEARCH"
+   ],
+   "files": [
+    "apps/web/src/hooks/use-keyboard-shortcuts.ts",
+    "apps/web/src/components/key/key-agent.tsx",
+    "apps/web/src/components/__tests__/command-palette-open.test.tsx (extend) or a new key-shortcut test"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "serves journey K (KEY opens only from the header or Cmd/Ctrl+J)",
+   "track_ruling": "D-263",
+   "scope": "Found by FU-C4-CMDK-SEARCH (2026-11-24; its acceptance review MINOR-4). Cmd/Ctrl+J has the two owners Cmd/Ctrl+K had: the layout's useKeyboardShortcuts (hooks/use-keyboard-shortcuts.ts, the 'j' meta entry) dispatches kf:open-key {mode:'chat'}, which KeyAgent answers by opening its drawer, and KeyAgent's own keydown (components/key/key-agent.tsx ~103-110) toggles the drawer. In the app the layout's listener is added first (KeyAgent mounts after the Business Genome check), so one keypress can open the drawer and shut it again; in jsdom with the gate deferred (command-palette-open.test.tsx harness) Ctrl+J does not open KEY's drawer. Confirm live first (journey K opens KEY from the header button before trying Ctrl+J). Fix as FU-C4-CMDK-SEARCH did for K: ownedBy KeyAgent on the 'j' entry (preventDefault kept). CAUTION: the KEY_DISABLED smoke check (e2e/journeys journey-helpers keyUiFindings, smoke.spec.ts, k-key.spec.ts) counts a Ctrl+J that opens KEY's drawer, and nothing in the web hides KEY under KEY_DISABLED; that check may be passing today only because Ctrl+J is broken. Settle with the owner, or in the same packet, how KEY is hidden under KEY_DISABLED before Ctrl+J is fixed; never weaken the smoke check.",
+   "definition_of_done": "RED: in the app shell with the Genome gate deferred, Ctrl+J opens KEY's drawer and it stays open (fails at the base); live: journey K's Ctrl+J door. GREEN: one owner for Cmd/Ctrl+J, Ctrl+J toggles the drawer, preventDefault kept where KeyAgent is not mounted, Cmd/Ctrl+K unchanged; the KEY_DISABLED variant's smoke check still finds no KEY UI (by KEY being hidden there, not by Ctrl+J being broken); web suite and tsc green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-CONTACTS-OPEN-DOORS",
+   "title": "Every remaining door to a customer opens their page",
+   "journeys": [
+    "C"
+   ],
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/pipeline-tab-content.tsx",
+    "apps/web/src/app/app/crm/pipeline/database-table.tsx",
+    "apps/web/src/components/contacts/contact-detail-info.tsx",
+    "apps/web/src/app/app/crm/deals/deals-board-view.tsx",
+    "apps/web/src/app/app/crm/deals/deals-list-view.tsx",
+    "apps/web/src/app/app/crm/accounts/[accountId]/page.tsx",
+    "apps/web/src/components/contacts/contact-card.tsx"
+   ],
+   "scope": "From the FU-C4-FOCUS-OPEN reviews: the favorites strip (pipeline-tab-content.tsx ~396) and the table view's row click (database-table.tsx ~329) select a customer outside the list view and show nothing; 'referred by' (contact-detail-info.tsx ~178), deals board/list (~217, ~163) and accounts (~124) link to /app/crm/contacts?contactId= or /app/crm?contactId=, which nothing reads (the list opens with no one selected); a focus card cannot be opened from the keyboard (contact-card.tsx root, role=option with no tabIndex or key handler). Route each to openContactPage / /app/crm/contacts/<id>.",
+   "definition_of_done": "RED per door (unit): it does not reach /app/crm/contacts/<id>; GREEN: it does (keyboard: Enter/Space on a focus card); journey C unchanged; tsc, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey F",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-SEARCH-MONEY-SCOPE",
+   "title": "Cmd/K search shows no money figure to a member without revenue read",
+   "journeys": [
+    "F"
+   ],
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/flow/flow.controller.ts",
+    "apps/server/test/flow-search-money-scope.integration.test.ts (new)"
+   ],
+   "scope": "From the FU-C4-FOCUS-OPEN acceptance review (read only): GET /api/flows/businesses/:b/search (flow.controller.ts ~99-137) has AuthGuard and BusinessGuard only and returns invoice totals, so a member without revenue read sees invoice amounts through Cmd/K (D-100). Strip money fields (or invoice results) for members without revenue read, as the other money readers do.",
+   "definition_of_done": "RED (real DB): a member with revenue none gets invoice totals from the search. GREEN: no money figure (shape kept); owner unchanged; Release 0 MET."
+  },
+  {
+   "id": "FU-CI-PG-NO-PASSWORD",
+   "title": "CI's throwaway Postgres containers run password-less",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    ".github/workflows/ci-cd.yml",
+    "scripts/ci/ci-pg-no-password.spec.mjs (new)"
+   ],
+   "decisions": [
+    "D-275"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "every later wave's GitGuardian check (owner ruling)",
+   "track_ruling": "D-275",
+   "scope": "Owner ruling D-275 (2026-11-24, #80 7143988551): CI's Postgres service containers use POSTGRES_HOST_AUTH_METHOD: trust instead of POSTGRES_PASSWORD, and DATABASE_URL drops the password. Remove a false-positive literal; never suppress the detector. Production auth unchanged. Antigravity lane (P36); merged in M9 (eec1e880).",
+   "definition_of_done": "RED: a workflow guard over .github/workflows/*.yml finds no POSTGRES_PASSWORD and no passworded DATABASE_URL/DIRECT_URL; GitGuardian passes on the next wave."
+  },
+  {
+   "id": "FU-BULK-DELETE-UNDO",
+   "title": "A bulk delete of customers is sent at once and Undo restores exactly those ids from Trash in one call",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/trash/trash.controller.ts (bulk-restore)",
+    "apps/server/test/trash-bulk-restore.integration.test.ts (new)",
+    "apps/web (the contacts list's bulk delete and its toast)"
+   ],
+   "decisions": [
+    "D-277"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "journey C (customers) under owner ruling D-277b",
+   "track_ruling": "D-277",
+   "scope": "Owner ruling D-277b (2026-11-24, #80 7144117000): a bulk delete is sent at once, then a toast offers Undo, which restores exactly those customers from Trash in one call; no delayed send, so leaving the page never drops it. Server half (Antigravity, P37, returned at 61e50c0f): POST /api/businesses/:businessId/trash/:model/bulk-restore. Web half (Claude), stacked on the server head.",
+   "definition_of_done": "Server: RED real-DB suite for bulk restore (tenant-bound, only the named ids, only soft-deleted rows). Web: RED that a bulk delete sends at once and Undo calls bulk-restore with exactly those ids; live sweep RED at the base, green at the head."
+  },
+  {
+   "id": "FU-CI-MERGE-QUEUE",
+   "title": "The required workflows run on merge_group, for GitHub's merge queue",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    ".github/workflows/*.yml (merge_group)",
+    "scripts/ci/merge-queue.spec.mjs (new)",
+    "docs (repository references, D-239 wording)"
+   ],
+   "decisions": [
+    "D-278"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "merge throughput under owner ruling D-278",
+   "track_ruling": "D-278",
+   "scope": "Owner ruling D-278 (2026-11-24): after M8 the repository moves into a free GitHub organization (done 2026-11-25: KEYFLOWOS/KEYFLOWOS) for the merge queue. The required workflows gain merge_group; the owner switches the queue on in settings. D-239 then reads: enqueue once both reviews accept and the head checks pass; the queue merges when CI passes on the combined head. Workflow half: Antigravity (P38, returned at b5a3c63a). Docs repository references and the D-239 wording: Claude, on the docs branch.",
+   "definition_of_done": "RED contract spec over the required workflows (merge_group present, event SHAs used for scans); docs name KEYFLOWOS/KEYFLOWOS."
+  },
+  {
+   "id": "FU-CI-WINDOWS-INPUT-GATE",
+   "title": "The Windows worker proof always reports, runs in full only when its inputs changed, and is sharded (C2)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    ".github/workflows/agent-control-worker-proof.yml"
+   ],
+   "decisions": [
+    "D-279"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "CI time under owner ruling D-279",
+   "track_ruling": "D-279",
+   "scope": "Owner ruling D-279 (2026-11-24): the job always runs and reports, so admission keeps its required check. It diffs the PR against its merge base; if no proof input changed (scripts/agent-control/**, its workflow file, the package manifests and lockfile, the Node pin) it reports success naming the diff it checked; otherwise it runs in full, sharded (C2). It also runs in full nightly on main. Claude lane (C1 was Claude's).",
+   "definition_of_done": "RED: a contract spec shows the job skips the full run with no input change and runs it on each listed input; the job name and required-check status are unchanged; the nightly schedule runs it in full."
+  },
+  {
+   "id": "FU-ME-NOTIFICATIONS-SCOPE",
+   "title": "The Me menu offers Notifications only to settings readers",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "J5"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-NOTIFICATIONS-PREFS-GUARD"
+   ],
+   "files": [
+    "apps/web/src/lib/nav-config.ts",
+    "apps/web/src/hooks/use-app-layout.ts",
+    "apps/web/src/hooks/__tests__/use-app-layout-me-notifications.test.ts (new)",
+    "apps/web/src/lib/__tests__/nav-member-scope.spec.ts (NMS-18 covers the Me entries)",
+    "apps/web/e2e/sweep-me-notifications.spec.ts (new)"
+   ],
+   "decisions": [
+    "D-276"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "journey J5 (a member's menu shows only what they may open) under owner ruling D-276",
+   "track_ruling": "D-276",
+   "scope": "Owner ruling D-276 (2026-11-24): the Me menu shows Notifications (the business's customer emails and their log) only to members whose settings access is read or higher, as the Settings index does. Unknown access hides nothing; the server decides (P30). A member's own alerts stay in the header bell. Pre-flight (2026-11-25): the only unfiltered entry point was meNav (the desktop rail's Me drawer); the Settings index, the settings tab strip and the header bell were already right.",
+   "definition_of_done": "RED: MNS-01 (a settings-none member is offered Notifications) and NMS-18 (the Me entries' modules against the server's guards). Browser: sweep-me-notifications MNB-01 RED at the base at 768/1024/1440, green at the head."
+  },
+  {
+   "id": "FU-CONTACT-TIMELINE-CHANNELS",
+   "title": "The contact Timeline gets a channel filter, where pasted WhatsApp messages land",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "WEDGE-WA-INBOUND-CAPTURE"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/[id] (Timeline)"
+   ],
+   "decisions": [
+    "D-277"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "the D-263 wedge (WhatsApp) under owner ruling D-277",
+   "track_ruling": "D-277",
+   "scope": "Owner ruling D-277 (2026-11-24): the conversation thread moves into the contact's Timeline with a channel filter (WhatsApp, email, SMS, calls, notes); that is where WEDGE-WA-INBOUND-CAPTURE's pasted WhatsApp messages land (ContactEvent communication.whatsapp plus a plain-text ContactNote, per the server half at 7a575847). Deals, per-contact Audit and Network go for v1 (FU-CONTACT-PANEL-PRUNE deletes the dead panel files). Claude lane, after the server half.",
+   "definition_of_done": "RED: the Timeline filters by channel; a pasted WhatsApp message shows under WhatsApp and under All; live sweep RED at the base, green at the head."
+  },
+  {
+   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
+   "title": "The customer notifications page says 'no access' on a refused read, not 'nothing sent'",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [
+    "FU-ME-NOTIFICATIONS-SCOPE"
+   ],
+   "files": [
+    "apps/web/src/app/app/settings/notifications/page.tsx"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found by FU-ME-NOTIFICATIONS-SCOPE's security review (MINOR-2), outside its write set",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "A settings-none member who reaches /app/settings/notifications by URL or a bookmark gets a blank Preferences tab and 'No customer notifications sent yet' on the Log tab: the page drops the 403 from customer-preferences and customer-log (page.tsx ~118-124, ~320-323). It should say they have no access (FAILURE-KIT's NoAccessState). No data leaks.",
+   "definition_of_done": "RED: a refused read shows the no-access state on both tabs, never the empty-log text."
+  },
+  {
+   "id": "FU-STUDIO-PAGE-SCOPE",
+   "title": "The orphan /studio setup page offers settings entries only to settings readers, or is removed",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/app/studio/page.tsx"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found by FU-ME-NOTIFICATIONS-SCOPE's security review (MINOR-1)",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "/studio lists Notifications, Webhooks and Payment Gateways with no module filter (page.tsx ~132-137). Nothing links to it; a member reaches it only by typing the URL, and the server refuses the reads. Either filter its entries the way HubIndex does or remove the page.",
+   "definition_of_done": "RED: a settings-none member sees no settings entries on /studio (or the route is gone and nothing links to it)."
+  },
+  {
+   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
+   "title": "The mocked e2e helpers store a session the edge middleware accepts",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [],
+   "files": [
+    "apps/web/e2e/helpers/workspace.ts"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found while proving FU-ME-NOTIFICATIONS-SCOPE in a browser",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "seedWorkspace stores kf_token = 'test-token-e2e', which is not three parts, so apps/web/src/middleware.ts isTokenExpiredOrInvalid sends every /app/* request to /auth/login before the page loads. Mocked specs that rely on seedWorkspace alone (connect-*, calendar-event-drawer, inventory-xlsx-import, ...) cannot reach the app. CI's e2e-mocked step runs only onboarding-loop-regression, auth-helpers and public-flows, so CI does not show it. Fix: store an unsigned JWT-shaped token (as sweep-me-notifications.spec.ts does), then check each seedWorkspace spec.",
+   "definition_of_done": "RED: a mocked spec using only seedWorkspace reaches /app/crm/contacts (fails at the base: lands on /auth/login)."
   }
  ],
  "moot": [
@@ -13862,7 +14440,8 @@
   "PR195-JOURNAL-SCOPE's local head moved to b3335bb7 (review repair tests first, SEC-P195KG-1..5 and CRR-P195KG-1..2) after the draft; its fix commit is not yet on the branch. The admission DoD now requires it; confirm the head PR #208 and both packet branches will be admitted at.",
   "Wave-11b fixture prefixes are stale: SWEEP-P0 registered v99c_, v99f_, v99i_, v99j_, v99k_ and v99w_, which six wave-11b packets were assigned, and the x01*_ heads fail the registry's NEW_PREFIX rule. The plan supersedes them with the pre-allocated v6<step><letter>_ table; ChatGPT should confirm the 'V1-6<step> (<packet>)' packet labels the registry's NN check expects.",
   "Rejected or narrowed from the critique: none rejected. Item 8 took the Money > Overview Discard option (KEY keeps no payroll write tool). Item 10's per-business list is a live server read (NAV-B-LEGACY-SERVER), not an owner-written metaData key seeded from the count, because seeding it would need a production write the plan may not make. Item 12's hidden-module batch uses one class-level decorator per controller rather than a global guard, because a global guard runs before AuthGuard and BusinessGuard. Item 22's kf_auto_convert_quote is recorded as a deviation rather than moved, because it only chooses between two client dialogs. Item 28 takes the recorded-exception option (link construction only).",
-  "decisions.py now holds 37 rulings (five 'Team permissions' rulings were added after the draft): S1-RULINGS-RECORD records all 37 and the five are mapped to S0-LAND-INFLIGHT, SWP-TEAM-WEB, NAV-A1, HIDE-DEV-WEBHOOKS, NAV-B-HIDE-2 and the census batches."
+  "decisions.py now holds 37 rulings (five 'Team permissions' rulings were added after the draft): S1-RULINGS-RECORD records all 37 and the five are mapped to S0-LAND-INFLIGHT, SWP-TEAM-WEB, NAV-A1, HIDE-DEV-WEBHOOKS, NAV-B-HIDE-2 and the census batches.",
+  "SWP-CONTACT-DETAIL retired the list side panel's tabs (BUG-062, fixed by removal). The full contact route has Timeline, Notes and Tasks, but no page for the panel's Conversations thread, Deals list, per-contact Audit log or Network graph, nor the rich timeline's health metrics, journey milestones, cross-journey CTAs, conversation context and suggested message. Re-home them as full-route pages in a follow-up, or let them go? (Default: let them go for v1; keep the files until FU-CONTACT-PANEL-PRUNE.) Also: bulk contact delete has no Undo (its dialog now says Trash only, which is true); add one? (Default: no, Trash restores.)"
  ],
  "fixture_prefix_table": [
   {

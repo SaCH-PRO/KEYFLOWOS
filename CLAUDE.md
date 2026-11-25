@@ -26,14 +26,14 @@ GitHub issue #80 — KEYFLOWOS Agent Control Room — ChatGPT ↔ Claude Code.
 
 Read:
 ```bash
-gh issue view 80 --repo SaCH-PRO/KEYFLOWOS --comments
+gh issue view 80 --repo KEYFLOWOS/KEYFLOWOS --comments
 # if that is refused in your environment, read recent comments with:
-gh api 'repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100&since=<ISO date>'
+gh api 'repos/KEYFLOWOS/KEYFLOWOS/issues/80/comments?per_page=100&since=<ISO date>'
 ```
 
 Reply:
 ```bash
-gh issue comment 80 --repo SaCH-PRO/KEYFLOWOS --body-file <message-file>
+gh issue comment 80 --repo KEYFLOWOS/KEYFLOWOS --body-file <message-file>
 ```
 
 If GitHub CLI cannot read/write issue #80, stop before implementation and report the control-channel failure to the human operator.

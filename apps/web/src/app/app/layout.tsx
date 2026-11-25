@@ -20,6 +20,7 @@ import { DesktopSidebar } from "@/components/layout/desktop-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
 import { MobileBottomNavV2 } from "@/components/layout/mobile-bottom-nav-v2";
+import { RemovedBusinessNotice } from "@/components/layout/removed-business-notice";
 import { useAppLayout } from "@/hooks/use-app-layout";
 import { useGenomeGate } from "@/hooks/use-genome-gate";
 import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -104,6 +105,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             userMenuRef={layout.userMenuRef}
             handleLogout={layout.handleLogout}
           />
+          {/* SWP-REMOVED-MEMBER-NOTICE: a member who lost access to a business is told so, by name, until they dismiss it. */}
+          <RemovedBusinessNotice />
           <div className="px-3 md:px-6 pt-1">
             <OriginAwareBreadcrumbs />
           </div>
