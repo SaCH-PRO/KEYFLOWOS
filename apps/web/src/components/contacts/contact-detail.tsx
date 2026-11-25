@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
-import { useRouter, usePathname } from "next/navigation";
-import { MessageSquare, Sparkles, ChevronUp } from "lucide-react";
+import { MessageSquare, Sparkles, ChevronUp, ArrowUpRight } from "lucide-react";
 import { toast } from "sonner";
 import type { CrossJourneyResponse } from "@/lib/client";
 import { apiPost, apiGet } from "@/lib/api";
@@ -11,7 +11,6 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
 import { ContactDetailStats, MomentumPrimaryCTA } from "./contact-detail-stats";
 import { ContactDetailInfo } from "./contact-detail-info";
-import { ContactDetailTabs } from "./contact-detail-tabs";
 import { AiContactSummaryPanel } from "./ai-contact-summary";
 import { AiLeadScorePanel } from "./ai-lead-score";
 import { AiPrepBriefPanel } from "./ai-prep-brief";
@@ -98,6 +97,7 @@ export type DetailQuickAction = "create-invoice" | "book-appointment" | "send-qu
 interface ContactDetailProps {
   contact: ContactDetailData | null;
   events?: ContactEvent[];
+  // The props below through `invoices` fed the side panel's tabs (retired, BUG-062): accepted, no longer drawn.
   notes?: ContactNote[];
   tasks?: ContactTask[];
   loading?: boolean;
@@ -136,31 +136,30 @@ interface ContactDetailProps {
   businessId?: string | null;
 }
 
+/** What the panel's confirm dialog asks: each action brings its own words. */
+interface ConfirmRequest {
+  open: boolean;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  action: () => void;
+}
+
+const NO_CONFIRM: ConfirmRequest = { open: false, title: "", message: "", confirmLabel: "", action: () => {} };
+
 export function ContactDetail({
   contact,
   events = [],
-  notes = [],
-  tasks = [],
   loading,
   isPinned,
   onTogglePin,
   onClose,
-  onAddNote,
   onAddTask,
-  onCompleteTask,
-  onDeleteNote,
-  onDeleteTask,
-  onUpdateNote,
-  onUpdateTask,
   onUpdateStatus,
   onEdit,
   onDelete,
   onQuickAction,
   onLogEvent: _onLogEvent,
-  healthMetrics,
-  journeyMilestones,
-  crossJourney,
-  conversationContext,
   aiInsight,
   aiInsightLoading,
   onGenerateAiInsight,
@@ -168,43 +167,14 @@ export function ContactDetail({
   insightLoading,
   onRecomputeInsight,
   revenueSummary,
-  onRefreshConversationContext,
   relatedContacts,
   onSelectRelatedContact,
-  invoices,
   bookings,
   customFieldValues,
   businessId,
 }: ContactDetailProps) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const getUrlTab = () => {
-    if (typeof window === "undefined") return null;
-    return new URLSearchParams(window.location.search).get("tab");
-  };
-  const [activeTab, setActiveTabState] = useState<string>(
-    getUrlTab() ?? "timeline"
-  );
-
-  useEffect(() => {
-    const urlTab = getUrlTab();
-    if (urlTab && urlTab !== activeTab) {
-      setActiveTabState(urlTab);
-    }
-  }, [activeTab]);
-
-  const setActiveTab = useCallback((tab: string) => {
-    setActiveTabState(tab);
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      params.set("tab", tab);
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-    }
-  }, [router, pathname]);
-  const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
-    open: false,
-    action: () => {},
-  });
+  // Each action says what it does (BUG-128): a delete goes to Trash, a GDPR forget erases for good.
+  const [confirmState, setConfirmState] = useState<ConfirmRequest>(NO_CONFIRM);
   if (loading) {
     return (
       <div className="kf-card p-5 space-y-4 h-full">
@@ -233,11 +203,6 @@ export function ContactDetail({
           <div className="h-8 w-full rounded-xl bg-white/5 animate-pulse" />
           <div className="h-8 w-full rounded-xl bg-white/5 animate-pulse" />
         </div>
-        <div className="flex gap-2 border-b border-border/30 pb-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-8 w-20 rounded-lg bg-white/5 animate-pulse" />
-          ))}
-        </div>
         <div className="space-y-3 flex-1">
           {Array.from({ length: 2 }).map((_, i) => (
             <div key={i} className="rounded-xl bg-white/[0.02] p-3 space-y-2">
@@ -265,6 +230,10 @@ export function ContactDetail({
     if (!onDelete) return;
     setConfirmState({
       open: true,
+      title: "Delete client?",
+      // A single delete is a soft delete, offered for Undo first (use-contact-actions.ts handleDeleteContact).
+      message: "The client moves to Trash. You can undo right after, or restore them from Trash later.",
+      confirmLabel: "Delete",
       action: () => {
         onDelete();
       },
@@ -295,6 +264,11 @@ export function ContactDetail({
     if (!businessId) { toast.error("No active workspace"); return; }
     setConfirmState({
       open: true,
+      title: "Forget this client?",
+      // contact-privacy.service.ts: the contact is removed now and its personal data purged when the business's
+      // grace period ends (an operator can cancel the request until then, through the API: reviews CDC-2, m1).
+      message: "The client is removed now. Their personal data is erased for good when the grace period ends.",
+      confirmLabel: "Forget",
       action: async () => {
         const t = toast.loading("Submitting forget request…");
         try {
@@ -308,26 +282,6 @@ export function ContactDetail({
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Forget failed", { id: t });
         }
-      },
-    });
-  };
-
-  const handleDeleteNote = async (noteId: string) => {
-    if (!onDeleteNote) return;
-    setConfirmState({
-      open: true,
-      action: async () => {
-        await onDeleteNote(noteId);
-      },
-    });
-  };
-
-  const handleDeleteTask = async (taskId: string) => {
-    if (!onDeleteTask) return;
-    setConfirmState({
-      open: true,
-      action: async () => {
-        await onDeleteTask(taskId);
       },
     });
   };
@@ -354,6 +308,15 @@ export function ContactDetail({
           onAddTask={onAddTask}
           nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
         />
+
+        {/* BUG-062: the side panel is a summary; the contact's page holds the timeline, notes, tasks and money. */}
+        <Link
+          href={`/app/crm/contacts/${encodeURIComponent(contact.id)}/overview`}
+          className="inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-[32px] py-1.5 text-xs font-medium text-[hsl(var(--kf-accent2))] hover:underline"
+        >
+          <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
+          Open {`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "client"}&apos;s page
+        </Link>
 
         <MomentumPrimaryCTA
           contactId={contact.id}
@@ -392,11 +355,10 @@ export function ContactDetail({
         )}
 
         <div className="grid gap-3 sm:gap-4 lg:grid-cols-12">
-          <div className="lg:col-span-4 space-y-3 sm:space-y-4 min-w-0">
+          <div className="lg:col-span-8 space-y-3 sm:space-y-4 min-w-0">
             <ContactDetailStats
               contact={contact}
               events={events}
-              onSetActiveTab={setActiveTab}
               onQuickAction={onQuickAction}
               businessId={businessId}
             />
@@ -413,36 +375,7 @@ export function ContactDetail({
             />
           </div>
 
-          <div className="lg:col-span-5 min-w-0 flex flex-col">
-            <ContactDetailTabs
-              contact={contact}
-              businessId={businessId}
-              events={events}
-              notes={notes}
-              tasks={tasks}
-              activeTab={activeTab}
-              onSetActiveTab={setActiveTab}
-              onAddNote={onAddNote}
-              onAddTask={onAddTask}
-              onCompleteTask={onCompleteTask}
-              onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
-              onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
-              onUpdateNote={onUpdateNote}
-              onUpdateTask={onUpdateTask}
-              healthMetrics={healthMetrics}
-              journeyMilestones={journeyMilestones}
-              crossJourney={crossJourney}
-              conversationContext={conversationContext}
-              aiInsight={aiInsight}
-              aiInsightLoading={aiInsightLoading}
-              onGenerateAiInsight={onGenerateAiInsight}
-              onRefreshConversationContext={onRefreshConversationContext}
-              invoices={invoices}
-              bookings={bookings}
-            />
-          </div>
-
-          <div className="lg:col-span-3 space-y-2 min-w-0">
+          <div className="lg:col-span-4 space-y-2 min-w-0">
             <div className="flex items-center gap-2 px-1 py-1 border-t border-border/30 pt-3 lg:border-t-0 lg:pt-1">
               <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Intelligence</span>
@@ -468,15 +401,15 @@ export function ContactDetail({
 
       <ConfirmDialog
         open={confirmState.open}
-        title="Confirm Delete"
-        message="Are you sure? This action cannot be undone."
-        confirmLabel="Delete"
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel={confirmState.confirmLabel}
         variant="danger"
         onConfirm={() => {
           confirmState.action();
-          setConfirmState({ open: false, action: () => {} });
+          setConfirmState(NO_CONFIRM);
         }}
-        onCancel={() => setConfirmState({ open: false, action: () => {} })}
+        onCancel={() => setConfirmState(NO_CONFIRM)}
       />
     </>
   );

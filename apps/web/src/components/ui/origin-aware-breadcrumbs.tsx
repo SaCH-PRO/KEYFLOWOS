@@ -23,12 +23,15 @@ import {
  * ──────────────────────────────────────────────────────────────── */
 
 /**
- * NAV-A3 (BUG-123): a database id is never a crumb. Ids are uuids or cuids ("cmwujpiuf00n57dx4navng6ud": letters past
- * "f", so a hex-only check missed them); a route segment is a word or a slug, which has no digits.
+ * NAV-A3 (BUG-123): a database id is never a crumb. Ids are uuids, or cuids and cuid2s ("cmwujpiuf00n57dx4navng6ud":
+ * letters past "f", so a hex-only check missed them), which are letters and digits only. A route segment is a word or
+ * a slug: one with a "_" or "-" is never an id, digits or not (FU-NAV-A3-CODEX-235: the KEY FLOWS role slug
+ * "l1_l2_customer_support_agent" lost its crumb).
  */
 function isId(s: string) {
-  if (/^[0-9a-f-]{20,}$/i.test(s)) return true;
-  return s.length >= 16 && /^[a-z0-9_-]+$/i.test(s) && /\d/.test(s) && /[a-z]/i.test(s);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+  if (/^[0-9a-f]{20,}$/i.test(s)) return true;
+  return s.length >= 16 && /^[a-z0-9]+$/i.test(s) && /\d/.test(s) && /[a-z]/i.test(s);
 }
 
 /** Pages whose crumb is not their segment's registry label (NAV-A3 NIT-7: the account page is not "Profile"). */
