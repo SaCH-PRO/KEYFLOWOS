@@ -26,7 +26,12 @@ vi.mock("@/lib/workspace", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/workspace")>()),
   getStoredBusinessId: () => ws.businessId,
 }));
-vi.mock("@/lib/removed-business-notice", () => ({ getRemovedBusinessNotice: () => ws.notice }));
+vi.mock("@/lib/removed-business-notice", () => ({
+  BUSINESS_REMOVED_EVENT: "kf:business-removed",
+  getRemovedBusinessNotice: () => ws.notice,
+  raiseRemovedBusinessNotice: () => {},
+  dismissRemovedBusinessNotice: () => { ws.notice = null; },
+}));
 
 const api = vi.hoisted(() => ({ fetchOnboardingState: vi.fn() }));
 vi.mock("@/lib/api/onboarding-concierge", () => ({ fetchOnboardingState: api.fetchOnboardingState }));
