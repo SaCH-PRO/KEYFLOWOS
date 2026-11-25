@@ -3786,15 +3786,16 @@
     "labels",
     "demo"
    ],
-   "scope": "Replaces SWP-COMMAND-CENTER-CONSISTENCY (069). /app/command-center (label 'Today') renders four blocks from TODAY-AGGREGATE: Needs you with inline Approve/Run/Reject and bank-transfer Confirm/Not yet; Today's list each one tap from its action (WhatsApp for reminders via WA-HELPER); Pulse equal to Money > Overview; Get set up with the sample preview (DEMO-PREVIEW) and the install step. Removed: mission-control hero, health strip, genome cards and readiness grid, the genome banner component. Day one shows no percentage, risk count, red badge or 'you owe 0'. Phone layout first; 3G load time tracked. BUG-010 web half: use-onboarding.ts (~155) router.replace ignores ?step and sends a finished owner to /app/command-center; with this packet every Get set up step opens its real page (from TODAY-AGGREGATE's hrefs) and ?step on a completed onboarding opens that step's settings page instead of bouncing. ORCHESTRATOR NOTE (FCP-COR-1): a customer named on Today links to /app/crm/contacts/:id (journey C4).",
-   "definition_of_done": "RED: today-blocks test expects four blocks and no 'Hull integrity' text on a fresh business. GREEN: unit tests; command-actions-ops-scope.test.tsx (WOS-C01) and approved-actions-mount.test.tsx (D-72) pass unchanged; journey I spec green at both widths and under KEY_DISABLED. Under KEY_DISABLED (keyDisabled from /identity/me) no KEY UI renders on this surface (test). BUG-010: each Get set up step and each old ?step=products|hours|storefront link opens its page (web test with the real hook), and the sweep repro no longer bounces to Today. Journey D: an accepted quote shows in Needs you with Convert (journey D step 'the owner sees the acceptance on Today').",
+   "scope": "Replaces SWP-COMMAND-CENTER-CONSISTENCY (069). /app/command-center (label 'Today') renders four blocks from TODAY-AGGREGATE: Needs you with inline Approve/Run/Reject and bank-transfer Confirm/Not yet; Today's list each one tap from its action (WhatsApp for reminders via WA-HELPER); Pulse equal to Money > Overview; Get set up with the sample preview (DEMO-PREVIEW) and the install step. Removed: mission-control hero, health strip, genome cards and readiness grid, the genome banner component. Day one shows no percentage, risk count, red badge or 'you owe 0'. Phone layout first; 3G load time tracked. BUG-010 web half: use-onboarding.ts (~155) router.replace ignores ?step and sends a finished owner to /app/command-center; with this packet every Get set up step opens its real page (from TODAY-AGGREGATE's hrefs) and ?step on a completed onboarding opens that step's settings page instead of bouncing. ORCHESTRATOR NOTE (FCP-COR-1): a customer named on Today links to /app/crm/contacts/:id (journey C4). Absorbs FU-C4-TODAY-LINK (pre-flight 2026-11-25): journey C4 stops at 'from Today' because today's /app/command-center does not link the customer of the invoice due today; this packet replaces that page, so the link is built here (the FCP-COR-1 note above), not on the page being replaced.",
+   "definition_of_done": "RED: today-blocks test expects four blocks and no 'Hull integrity' text on a fresh business. GREEN: unit tests; command-actions-ops-scope.test.tsx (WOS-C01) and approved-actions-mount.test.tsx (D-72) pass unchanged; journey I spec green at both widths and under KEY_DISABLED. Under KEY_DISABLED (keyDisabled from /identity/me) no KEY UI renders on this surface (test). BUG-010: each Get set up step and each old ?step=products|hours|storefront link opens its page (web test with the real hook), and the sweep repro no longer bounces to Today. Journey D: an accepted quote shows in Needs you with Convert (journey D step 'the owner sees the acceptance on Today'). Journey C4's 'from Today' step (c-customer.spec.ts: the invoice due today links its customer to /app/crm/contacts/<id>) is green live.",
    "journeys": [
     "A",
     "I"
    ],
    "absorbs": [
     "SWP-COMMAND-CENTER-CONSISTENCY",
-    "SWP-CONCIERGE-TRUTH (BUG-010 web half and verification)"
+    "SWP-CONCIERGE-TRUTH (BUG-010 web half and verification)",
+    "FU-C4-TODAY-LINK"
    ],
    "r0_impact": "KEEP (closedBy evidence): release0-index.json cites command-center/__tests__/command-actions-ops-scope.test.tsx '[WOS-C01] RED-BEFORE: a member without operations ...' (~1474-1483), and approved-actions-mount.test.tsx pins D-72; both pass unchanged. Conditional AMEND: if the components WOS-C01 mounts move, re-pointing the test's import (never its assertions) uses the authority S1-RULINGS-RECORD requests in advance.",
    "track": "launch",
@@ -13203,35 +13204,6 @@
    "track_ruling": "D-277",
    "scope": "Owner ruling D-277 (2026-11-24): the conversation thread moves into the contact's Timeline with a channel filter (WhatsApp, email, SMS, calls, notes); that is where WEDGE-WA-INBOUND-CAPTURE's pasted WhatsApp messages land (ContactEvent communication.whatsapp plus a plain-text ContactNote, per the server half at 7a575847). Deals, per-contact Audit and Network go for v1 (FU-CONTACT-PANEL-PRUNE deletes the dead panel files). Claude lane, after the server half.",
    "definition_of_done": "RED: the Timeline filters by channel; a pasted WhatsApp message shows under WhatsApp and under All; live sweep RED at the base, green at the head."
-  },
-  {
-   "id": "FU-C4-TODAY-LINK",
-   "title": "Today links the customer of the invoice due today (journey C4 'from Today')",
-   "kind": "new",
-   "absorbs": [],
-   "bugs": [],
-   "journeys": [
-    "C4"
-   ],
-   "step": 5,
-   "lane": "web",
-   "size": "S",
-   "priority": "P1",
-   "depends_on": [],
-   "files": [
-    "apps/web/src/app/app/command-center (Today)",
-    "possibly apps/server/src/modules/business-command-center (the aggregate's contact id)"
-   ],
-   "decisions": [
-    "D-263"
-   ],
-   "r0_impact": "KEEP",
-   "fixture_prefix": null,
-   "track": "launch",
-   "track_reason": "journey C4",
-   "track_ruling": "D-263",
-   "scope": "Found live (2026-11-24) once FU-C4-FOCUS-OPEN and FU-C4-CMDK-SEARCH were together: journey C4 stops at 'from Today' because Today does not link the customer of the invoice due today. Root cause unknown: the Today aggregate may leave out the contact id (server half to Antigravity) or the web may show the name without a link. Pre-flight first.",
-   "definition_of_done": "RED: journey C4's 'from Today' step; a unit test on whichever half drops the link; live C4 green."
   },
   {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
