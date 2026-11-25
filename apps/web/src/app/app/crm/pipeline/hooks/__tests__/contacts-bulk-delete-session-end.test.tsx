@@ -16,6 +16,12 @@
  *   BSE-08 pin (the undo-time guard, SEC-P37W-1; orchestrator ruling with CONF-P37-1's supersession): a toast that
  *          survives a session change by some other path (another person's token written straight into storage, no
  *          dismiss) still cannot restore: its Undo says "earlier session" and sends nothing
+ *   BSE-09 a partial delete with no ids named ({deleted: 2}), answered after sign-out: no toast; {deleted: 2, deletedIds: null}
+ *   BSE-10 a delete of none ({deleted: 0}), answered after another person's token was stored: no toast;
+ *          {deleted: 0, deletedIds: []}
+ *   BSE-11 an answer that does not say how many ({}), answered after sign-out: no toast; {deleted: null, deletedIds: null}
+ *   BSE-12 a delete sent with no session at all, answered with no session: no toast (no one to tell)
+ * (BSE-09..12: review COR-UTS-4, round 3: every quiet branch is exercised, not only the full delete.)
  *
  * The real deleteContactsWithUndo and failure kit run; the HTTP client is gated; sonner is replaced by spies.
  */
@@ -183,6 +189,45 @@ describe("FU-UNDO-TOAST-SIGNOUT SEC-UTS-1: a bulk delete answered after its sess
       expect.objectContaining({ description: "The contacts are still in Trash." }),
     );
     expect(onRestored).not.toHaveBeenCalled();
+  });
+
+  it("BSE-09 a partial delete with no ids named, answered after sign-out, raises no toast", async () => {
+    const answer = gate<unknown>();
+    client.bulkDeleteContacts.mockReturnValue(answer.promise);
+    const done = deleteContactsWithUndo({ businessId: BIZ, ids: IDS });
+    clearStoredBusinessId();
+    clearToastCalls();
+    answer.release({ data: { deleted: 2 }, error: null, status: 200 });
+    expect(await done).toEqual({ deleted: 2, deletedIds: null });
+    expect(toastCalls(), "no 'Deleted 2 of 3 contacts' on the sign-in page").toEqual([]);
+  });
+
+  it("BSE-10 a delete of none, answered after another person's token was stored, raises no toast", async () => {
+    const answer = gate<unknown>();
+    client.bulkDeleteContacts.mockReturnValue(answer.promise);
+    const done = deleteContactsWithUndo({ businessId: BIZ, ids: IDS });
+    window.localStorage.setItem("kf_token", tokenFor("user-b"));
+    answer.release({ data: { deleted: 0 }, error: null, status: 200 });
+    expect(await done).toEqual({ deleted: 0, deletedIds: [] });
+    expect(toastCalls(), "no 'None of the 3 selected contacts were deleted' to the other person").toEqual([]);
+  });
+
+  it("BSE-11 an answer that does not say how many, answered after sign-out, raises no toast", async () => {
+    const answer = gate<unknown>();
+    client.bulkDeleteContacts.mockReturnValue(answer.promise);
+    const done = deleteContactsWithUndo({ businessId: BIZ, ids: IDS });
+    clearStoredBusinessId();
+    clearToastCalls();
+    answer.release({ data: {}, error: null, status: 200 });
+    expect(await done).toEqual({ deleted: null, deletedIds: null });
+    expect(toastCalls(), "no 'the answer did not say how many' on the sign-in page").toEqual([]);
+  });
+
+  it("BSE-12 a delete sent with no session, answered with no session, raises no toast", async () => {
+    window.localStorage.removeItem("kf_token");
+    client.bulkDeleteContacts.mockResolvedValue(DELETED_ALL);
+    await deleteContactsWithUndo({ businessId: BIZ, ids: IDS });
+    expect(toastCalls(), "no one is signed in to be told").toEqual([]);
   });
 
   it("BSE-07 control: a same-user rotation while both are on their way changes nothing", async () => {
