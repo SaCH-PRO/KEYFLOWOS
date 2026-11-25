@@ -2002,6 +2002,8 @@ export class MarketplaceService {
     const steps: Array<Record<string, unknown>> = [];
     const now = new Date().toISOString();
 
+    const isStorefront = (order.type ?? '').toUpperCase() === 'STOREFRONT';
+    const isPaid = String(order.paymentStatus ?? '').toUpperCase() === 'PAID';
     let newStatus = order.status;
     const updateData: Record<string, unknown> = {};
 
@@ -2010,8 +2012,10 @@ export class MarketplaceService {
         if (!canTransitionOrder(order.status, 'awaiting_payment')) {
           throw new BadRequestException(`Cannot confirm order from ${order.status} status`);
         }
-        newStatus = 'awaiting_payment';
-        steps.push({ status: 'awaiting_payment', timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
+        // W11-STOREFRONT-FULFIL-STEPS (Journey G, option A): STOREFRONT orders advance in their own vocabulary
+        // (PENDING -> CONFIRMED -> PROCESSING); CONFIRMED normalizes to awaiting_payment. STANDARD orders unchanged.
+        newStatus = isStorefront ? 'CONFIRMED' : 'awaiting_payment';
+        steps.push({ status: newStatus, timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
         break;
       }
 
@@ -2095,10 +2099,15 @@ export class MarketplaceService {
 
       case 'process': {
         const target = 'picking_packing';
-        if (!canTransitionOrder(order.status, target)) {
+        // W11-STOREFRONT-FULFIL-STEPS (Journey G, option A): a STOREFRONT order paid through the D-112 door stays
+        // stored CONFIRMED with paymentStatus PAID (ROUTING_ADVANCES_FROM keeps it out of marketplace statuses).
+        // Admit it here and store 'PROCESSING' (which normalizes to picking_packing so 'ship' keeps working);
+        // unpaid CONFIRMED storefront orders stay refused 400, and STANDARD orders are unchanged.
+        const paidConfirmedStorefront = isStorefront && order.status === 'CONFIRMED' && isPaid;
+        if (!canTransitionOrder(order.status, target) && !paidConfirmedStorefront) {
           throw new BadRequestException(`Cannot process order in ${order.status} status`);
         }
-        newStatus = target;
+        newStatus = isStorefront ? 'PROCESSING' : target;
         steps.push({ status: target, timestamp: now, note: data?.note });
         await this.fulfillmentRoutingService.createPickPackTasks(businessId, orderId, order.items);
         break;
@@ -2117,56 +2126,9 @@ export class MarketplaceService {
           trackingUrl: data?.trackingUrl,
           note: data?.note,
         });
-
-        let shipmentId: string | undefined;
-
-        if (data?.carrier || data?.trackingNumber) {
-          const shipment = await this.prisma.client.shipment.create({
-            data: {
-              businessId,
-              orderId,
-              carrier: data.carrier,
-              trackingNumber: data.trackingNumber,
-              status: 'IN_TRANSIT',
-              shippedAt: new Date(),
-              estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : undefined,
-              destinationAddress: order.shippingAddress ?? undefined,
-            },
-          });
-          shipmentId = shipment.id;
-        }
-
-        const localRoutes = await this.prisma.client.fulfillmentRoute.findMany({
-          where: { businessId, orderId, strategy: 'LOCAL_STOCK', status: 'RESERVED' },
-        });
-        for (const route of localRoutes) {
-          await this.fulfillmentRoutingService.decrementInventoryOnShip(businessId, route.id);
-          await this.prisma.client.fulfillmentRoute.update({
-            where: { id: route.id },
-            data: {
-              status: 'SHIPPED',
-              shipmentId: shipmentId,
-            },
-          });
-        }
-
-        if (shipmentId) {
-          await this.prisma.client.fulfillmentRoute.updateMany({
-            where: {
-              businessId,
-              orderId,
-              status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] },
-              shipmentId: null,
-            },
-            data: { status: 'SHIPPED', shipmentId },
-          });
-        } else {
-          await this.prisma.client.fulfillmentRoute.updateMany({
-            where: { businessId, orderId, status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] } },
-            data: { status: 'SHIPPED' },
-          });
-        }
-
+        // W11-SHIP-STOCK-DECREMENT (F-26; D-136): shipment creation, tracked stock decrements,
+        // SALE/SHIP StockMovement audit rows, and route transitions run inside the transaction
+        // below under the order's routing claim (FulfillmentRoutingService.shipOrderFulfilment).
         break;
       }
 
@@ -2284,15 +2246,40 @@ export class MarketplaceService {
     // committed with no claim, so an order being routed kept the RESERVED routes and reserved stock its router then
     // committed, with 'routed' written over the cancel. A cancel now waits for the router, and the order's status is
     // checked again under the claim (400 when it can no longer be cancelled).
-    const updated = await this.prisma.client.$transaction(async (tx) => {
-      if (action === 'cancel') await this.fulfillmentRoutingService.cancelOrderFulfilment(tx, businessId, orderId);
-      await appendOrderTimeline(tx, businessId, orderId, steps);
-      return tx.marketplaceOrder.update({
-        where: { id: orderId },
-        data: updateData,
-        include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
-      });
-    }, action === 'cancel' ? ROUTING_CLAIM_TX_OPTIONS : undefined);
+    // W11-SHIP-STOCK-DECREMENT (F-26; D-136): a ship likewise runs under the order's routing claim in this transaction
+    // (shipOrderFulfilment), locking its tracked stock rows in the global order and decrementing processed or reserved
+    // LOCAL_STOCK routes once before the timeline step and shipped status commit.
+    let decrementedStockIds: string[] = [];
+    const updated = await this.prisma.client.$transaction(
+      async (tx) => {
+        if (action === 'cancel') {
+          await this.fulfillmentRoutingService.cancelOrderFulfilment(tx, businessId, orderId);
+        } else if (action === 'ship') {
+          decrementedStockIds = await this.fulfillmentRoutingService.shipOrderFulfilment(
+            tx,
+            businessId,
+            orderId,
+            data,
+            actorId,
+          );
+        }
+        await appendOrderTimeline(tx, businessId, orderId, steps);
+        return tx.marketplaceOrder.update({
+          where: { id: orderId },
+          data: updateData,
+          include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+        });
+      },
+      action === 'cancel' || action === 'ship' ? ROUTING_CLAIM_TX_OPTIONS : undefined,
+    );
+
+    if (action === 'ship') {
+      for (const stockId of decrementedStockIds) {
+        await this.fulfillmentRoutingService
+          .checkAndAlertReorderThreshold(businessId, stockId)
+          .catch((err) => this.logger.error(`Failed to check reorder threshold for stock ${stockId}: ${(err as Error).message}`));
+      }
+    }
 
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
       refundAmount: action === 'refund' ? expenseRefundAmount : undefined,
@@ -2300,9 +2287,15 @@ export class MarketplaceService {
     // W11-SHIPPING-EXPENSE-ONCE (D-126): the 'ship', after its transaction has committed.
     if (action === 'ship') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
-    this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
-      this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
-    );
+    // W11-STOREFRONT-FULFIL-STEPS review (SEC-P57-1): 'confirm' previously wrote 'awaiting_payment' (unmapped in
+    // notificationMap) and neither STANDARD confirm nor PATCH /site/.../status 'CONFIRMED' mails the customer. Skip
+    // fulfillment mail on 'confirm' so an unpaid storefront confirm does not send order_confirmed or consume the
+    // customer's one-time referral invite marker before payment.
+    if (action !== 'confirm') {
+      this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
+        this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
+      );
+    }
 
     return updated;
   }
@@ -2673,6 +2666,8 @@ export class MarketplaceService {
       cancelled: 'order_cancelled',
       refunded: 'order_refunded',
     };
+
+    if (status === 'CONFIRMED' && String(order.paymentStatus ?? '').toUpperCase() !== 'PAID') return;
 
     const type = notificationMap[status];
     if (!type) return;

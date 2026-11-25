@@ -5,10 +5,10 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { CashPositionService, otherCurrencyCash, type CashPosition, type OtherCurrencyCash } from './cash-position.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
-import { D13_CURRENCIES } from './posting.service';
+import { D13_CURRENCIES, normalizeCurrency } from './posting.service';
 import { ReceivablesService } from './receivables.service';
 import { CASH_NET_PAYMENT_WHERE } from '../commerce/invoice-workflow.service';
-import { roundMoney } from '../commerce/money';
+import { roundMoney, sumMoney } from '../commerce/money';
 import { REVENUE_ACTION_SCAN_LIMIT, servedRevenueActions } from '../commerce/revenue-action.controller';
 import { visibilityClause } from '../crm/crm-permissions.helper';
 import type { TimelineViewer } from '../timeline/timeline-visibility';
@@ -167,11 +167,19 @@ export const LOW_RUNWAY_LISTED_CURRENCY_LIMIT = 5;
  * counted: USD 625.00." The figures are in their own currency, never converted. Letting the line
  * wrap is a web follow-up outside this packet.
  */
-export function lowRunwayDetail(runwayMonths: number, cashCurrency: string, other: OtherCurrencyCash[]): string {
+export function lowRunwayDetail(
+  runwayMonths: number,
+  cashCurrency: string,
+  other: OtherCurrencyCash[],
+  otherExpenses: OtherCurrencyCash[] = [],
+): string {
   const runway = `~${runwayMonths.toFixed(1)} months at current burn`;
   // CR-W10LR-1: the figures first, so a one-line (truncated) reader still shows them.
-  const note = notCountedCashNote(cashCurrency, other);
-  return note ? `${runway} ${note}` : runway;
+  const parts = [
+    notCountedCashNote(cashCurrency, other),
+    notCountedExpenseNote(cashCurrency, otherExpenses),
+  ].filter(Boolean);
+  return parts.length > 0 ? `${runway} ${parts.join(' ')}` : runway;
 }
 
 /**
@@ -207,6 +215,24 @@ function cashOnlyLabel(cashCurrency: string): string {
   return code ? `${code} cash` : 'business-currency cash';
 }
 
+function burnOnlyLabel(businessCurrency: string): string {
+  const code = namedCashCurrency(businessCurrency);
+  return code ? `${code} burn` : 'business-currency burn';
+}
+
+function formatNotCountedParts(other: OtherCurrencyCash[]): string[] {
+  const { listed, unlisted, unlabelled } = namedOtherCurrencyCash(other);
+  const parts: string[] = [];
+  if (listed.length > 0) parts.push(listed.map((o) => `${o.currency} ${o.amount.toFixed(2)}`).join(', '));
+  if (unlisted > 0) parts.push(`${unlisted} more ${unlisted === 1 ? 'currency' : 'currencies'} (not listed)`);
+  if (unlabelled > 0) {
+    parts.push(unlabelled === 1
+      ? '1 amount held under a label that is not a currency code (label not shown)'
+      : `${unlabelled} amounts held under labels that are not currency codes (labels not shown)`);
+  }
+  return parts;
+}
+
 /**
  * W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107): what a runway alarm computed from
  * business-currency cash says of the cash held in other currencies, "(TTD cash only). Not counted:
@@ -217,16 +243,70 @@ function cashOnlyLabel(cashCurrency: string): string {
  */
 export function notCountedCashNote(cashCurrency: string, other: OtherCurrencyCash[]): string {
   if (other.length === 0) return '';
-  const { listed, unlisted, unlabelled } = namedOtherCurrencyCash(other);
-  const parts: string[] = [];
-  if (listed.length > 0) parts.push(listed.map((o) => `${o.currency} ${o.amount.toFixed(2)}`).join(', '));
-  if (unlisted > 0) parts.push(`${unlisted} more ${unlisted === 1 ? 'currency' : 'currencies'} (not listed)`);
-  if (unlabelled > 0) {
-    parts.push(unlabelled === 1
-      ? '1 amount held under a label that is not a currency code (label not shown)'
-      : `${unlabelled} amounts held under labels that are not currency codes (labels not shown)`);
+  return `(${cashOnlyLabel(cashCurrency)} only). Not counted: ${formatNotCountedParts(other).join('; ')}.`;
+}
+
+/**
+ * W11-RUNWAY-BURN-CURRENCY (owner ruling D-135): split grouped expense sums into the business
+ * currency (matched via normalizeCurrency, so legacy lower-case rows match) and unconverted
+ * other-currency totals. Three-letter codes are merged case-insensitively and sorted in code
+ * order; non-code labels remain unlabelled entries so SEC-W10LR-1 counts them without echoing.
+ */
+export function splitExpensesByCurrency(
+  rows: ReadonlyArray<{ currency: string | null | undefined; _sum: { amount: number | null } }>,
+  businessCurrency: string,
+): { businessTotal: number; otherExpenses: OtherCurrencyCash[] } {
+  const target = normalizeCurrency(businessCurrency) || 'TTD';
+  const businessParts: number[] = [];
+  const codedParts = new Map<string, number[]>();
+  const unlabelled: OtherCurrencyCash[] = [];
+
+  for (const row of rows) {
+    const rawAmount = Number(row._sum.amount ?? 0);
+    if (!Number.isFinite(rawAmount) || rawAmount === 0) continue;
+    const raw = typeof row.currency === 'string' ? row.currency : '';
+    const norm = normalizeCurrency(raw);
+    if (norm === target) {
+      businessParts.push(rawAmount);
+    } else if (LOW_RUNWAY_CURRENCY_CODE.test(norm)) {
+      const bucket = codedParts.get(norm);
+      if (bucket) bucket.push(rawAmount);
+      else codedParts.set(norm, [rawAmount]);
+    } else {
+      const rounded = roundMoney(rawAmount);
+      if (rounded !== 0) unlabelled.push({ currency: raw, amount: rounded });
+    }
   }
-  return `(${cashOnlyLabel(cashCurrency)} only). Not counted: ${parts.join('; ')}.`;
+
+  const sortedCoded: OtherCurrencyCash[] = [...codedParts.entries()]
+    .map(([currency, parts]) => ({ currency, amount: sumMoney(parts) }))
+    .filter(({ amount }) => amount !== 0)
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+
+  return {
+    businessTotal: sumMoney(businessParts),
+    otherExpenses: [...sortedCoded, ...unlabelled],
+  };
+}
+
+/**
+ * W11-RUNWAY-BURN-CURRENCY (owner ruling D-135): what a runway alarm computed from
+ * business-currency expenses says of expenses in other currencies, "(TTD burn only). Expenses not
+ * counted: USD 12000.00.", under SEC-W10LR-1's rules; empty when there are none.
+ */
+export function notCountedExpenseNote(businessCurrency: string, other: OtherCurrencyCash[]): string {
+  if (other.length === 0) return '';
+  return `(${burnOnlyLabel(businessCurrency)} only). Expenses not counted: ${formatNotCountedParts(other).join('; ')}.`;
+}
+
+/**
+ * W11-RUNWAY-BURN-CURRENCY (D-135 / D-107): the note for a copy of a runway alarm served outside
+ * revenue read (the command-spine mirror, read under operations read). States that other-currency
+ * expenses exist without leaking any figure or label.
+ */
+export function otherCurrencyExpensesWithheldNote(businessCurrency: string, other: OtherCurrencyCash[]): string {
+  if (other.length === 0) return '';
+  return `(${burnOnlyLabel(businessCurrency)} only). Expenses in other currencies are not counted (amounts not shown here).`;
 }
 
 /**
@@ -419,9 +499,11 @@ export class FinanceOverviewService {
         where: { businessId, systemKey: 'TAX_PAYABLE' },
         select: { id: true },
       }),
-      this.prisma.client.expense.aggregate({
+      this.prisma.client.expense.groupBy({
+        by: ['currency'],
         where: {
           businessId,
+          deletedAt: null,
           date: { gte: sixMonthsAgo, lt: monthStart },
         },
         _sum: { amount: true },
@@ -481,8 +563,11 @@ export class FinanceOverviewService {
     const expensesThisMonth = Number(monthExpenses._sum.amount ?? 0);
     const netProfitThisMonth = revenueThisMonth - expensesThisMonth;
 
-    // Cash runway = cashBalance / (avg monthly burn over last 6 months).
-    const sixMonthBurn = Number(lastSixExpenses._sum.amount ?? 0);
+    // Cash runway = cashBalance / (avg monthly business-currency burn over last 6 months, D-135).
+    const { businessTotal: sixMonthBurn, otherExpenses } = splitExpensesByCurrency(
+      lastSixExpenses,
+      cashPosition.currency,
+    );
     const avgMonthlyBurn = sixMonthBurn > 0 ? sixMonthBurn / 6 : 0;
     const cashRunwayMonths = avgMonthlyBurn > 0 ? cashBalance / avgMonthlyBurn : null;
 
@@ -537,8 +622,9 @@ export class FinanceOverviewService {
         priority: 2,
       })),
     ];
-    // W10-LOW-RUNWAY (D-107, CP-18): computed from business-currency cash; the text lists the cash
-    // held in every other currency, unconverted (lowRunwayDetail): only three-letter codes, at most
+    // W10-LOW-RUNWAY (D-107, CP-18) + W11-RUNWAY-BURN-CURRENCY (D-135, CP-24): computed from
+    // business-currency cash and business-currency burn; the text lists other-currency cash and
+    // other-currency expenses unconverted (lowRunwayDetail): only three-letter codes, at most
     // five, the rest counted, never a label echoed (review SEC-W10LR-1, CP-19).
     if (cashRunwayMonths != null && cashRunwayMonths < 2) {
       specs.push({
@@ -546,7 +632,7 @@ export class FinanceOverviewService {
         relatedType: 'business',
         relatedId: businessId,
         title: 'Low cash runway',
-        detail: lowRunwayDetail(cashRunwayMonths, cashPosition.currency, otherCash),
+        detail: lowRunwayDetail(cashRunwayMonths, cashPosition.currency, otherCash, otherExpenses),
         amountAtRisk: cashBalance,
         priority: 1,
       });

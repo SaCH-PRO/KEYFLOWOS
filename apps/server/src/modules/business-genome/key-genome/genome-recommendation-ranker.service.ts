@@ -205,6 +205,7 @@ export class GenomeRecommendationRankerService {
         ? options.sources
         : ['READINESS_GAP', 'SIGNAL', 'WEAK_SECTION'],
       maxRecommendations: options.limit ?? 10,
+      ...(options.allowFinance !== undefined ? { allowFinance: options.allowFinance } : {}),
     });
 
     return this.rankRecommendations(businessId, {
