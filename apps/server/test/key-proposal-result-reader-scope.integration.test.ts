@@ -479,4 +479,290 @@ describe('W11-PROPOSAL-RESULT-READER-SCOPE (SEC-SR-2; real Postgres)', () => {
     const finForOwner = await proposals.viewForReader(ID.biz, finProp, { id: ID.owner, role: 'USER' });
     expect((finForOwner as any).executionResult?.recommendations?.[0]?.id).toBe(ID.recFin);
   });
+
+  it('PRS-07 (R1 D-140): an OWNER with an explicit permissionScopes map (or JSON array []) is bound by it and cannot read denied executionResult', async () => {
+    const scopedOwnerId = `${P}owner_scoped`;
+    const arrayOwnerId = `${P}owner_array`;
+    await db.user.createMany({
+      data: [
+        { id: scopedOwnerId, email: `${P}owner_scoped@test.local`, role: 'USER' },
+        { id: arrayOwnerId, email: `${P}owner_array@test.local`, role: 'USER' },
+      ],
+    });
+    await db.membership.createMany({
+      data: [
+        {
+          id: `${scopedOwnerId}_m`,
+          userId: scopedOwnerId,
+          businessId: ID.biz,
+          role: 'OWNER',
+          permissionScopes: { revenue: 'none', crm: 'none', operations: 'read' },
+        },
+        {
+          id: `${arrayOwnerId}_m`,
+          userId: arrayOwnerId,
+          businessId: ID.biz,
+          role: 'OWNER',
+          permissionScopes: [],
+        },
+      ],
+    });
+
+    for (const uid of [scopedOwnerId, arrayOwnerId]) {
+      const crmRes = await getOne(uid, ID.propCrmExec).expect(200);
+      expect(crmRes.body.executionResult).toBeNull();
+      const finRefRes = await getOne(uid, ID.propFinRefById).expect(200);
+      expect(finRefRes.body.executionResult).toBeNull();
+    }
+  });
+
+  it('PRS-08 (R1 D-234): a non-financial-labeled GenomeSignal whose money lives only in sourceEntityType/evidence/proposedValue, referenced via snake_case or singular object, is withheld from revenue:none', async () => {
+    const stealthSigId = `${P}sig_stealth_fin`;
+    const stealthPropId = `${P}prop_stealth_fin`;
+    await db.genomeSignal.create({
+      data: {
+        id: stealthSigId,
+        businessId: ID.biz,
+        sourceModule: 'operations',
+        sourceEntityType: 'INVOICE',
+        signalType: 'RISK_PATTERN',
+        section: 'OPERATIONS',
+        domain: 'operations',
+        field: 'CHECK_STATUS',
+        reason: 'Follow-up required on item.',
+        evidence: { note: 'Unpaid balance of 4500 overdue' },
+        confidence: 0.9,
+        status: 'NEW',
+      },
+    });
+    const now = new Date();
+    await db.keyActionProposal.create({
+      data: {
+        id: stealthPropId,
+        businessId: ID.biz,
+        userId: ID.owner,
+        sourceType: 'KEY_CHAT',
+        title: 'Inspect operations item',
+        actionType: 'OPEN_GENOME',
+        module: 'operations',
+        riskLevel: 'LOW',
+        status: 'EXECUTED',
+        approvedBy: ID.owner,
+        approvedAt: now,
+        executedBy: ID.owner,
+        executedAt: now,
+        executionResult: {
+          signal_id: stealthSigId,
+          signal: { id: stealthSigId },
+          ok: true,
+        },
+      },
+    });
+
+    const revNoneRes = await getOne(ID.staffRevNone, stealthPropId).expect(200);
+    expect(revNoneRes.body.executionResult).toBeNull();
+    expect(JSON.stringify(revNoneRes.body)).not.toContain(stealthSigId);
+
+    const revReadRes = await getOne(ID.staffRevRead, stealthPropId).expect(200);
+    expect(revReadRes.body.executionResult).toEqual({
+      signal_id: stealthSigId,
+      signal: { id: stealthSigId },
+      ok: true,
+    });
+  });
+
+  it('PRS-09 (R1 tool/module fail-closed matrix): twinned tools, FLOW underscore tools, owner-only tools, unknown modules, and revoked self-runs enforce canonical authority', async () => {
+    const staffStoreOnly = `${P}staff_store_only`;
+    await db.user.create({ data: { id: staffStoreOnly, email: `${P}store_only@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: {
+        id: `${staffStoreOnly}_m`,
+        userId: staffStoreOnly,
+        businessId: ID.biz,
+        role: 'STAFF',
+        permissionScopes: { storefront: 'read', ai: 'read', bookings: 'read', crm: 'none', operations: 'none', revenue: 'read' },
+      },
+    });
+
+    const now = new Date();
+    const ids = {
+      portal: `${P}prop_twin_portal`,
+      inbox: `${P}prop_twin_inbox`,
+      flowBookings: `${P}prop_flow_bookings`,
+      ownerDb: `${P}prop_owner_db`,
+      unknownMod: `${P}prop_unknown_mod`,
+      revokedSelf: `${P}prop_revoked_self`,
+    };
+    await db.keyActionProposal.createMany({
+      data: [
+        // Twinned storelink.create_portal_access (ownerOnly via portal_grant_access) with weaker module 'storefront'.
+        {
+          id: ids.portal,
+          businessId: ID.biz,
+          userId: ID.owner,
+          sourceType: 'KEY_CHAT',
+          title: 'Provision portal access',
+          actionType: 'EXECUTE_TOOL',
+          toolName: 'storelink.create_portal_access',
+          module: 'storefront',
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.owner,
+          executedAt: now,
+          executionResult: { portalToken: 'secret-token-1' },
+        },
+        // Twinned key_inbox.list_threads (operations:read) with module: null.
+        {
+          id: ids.inbox,
+          businessId: ID.biz,
+          userId: ID.owner,
+          sourceType: 'KEY_CHAT',
+          title: 'List inbox threads',
+          actionType: 'EXECUTE_TOOL',
+          toolName: 'key_inbox.list_threads',
+          module: null,
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.owner,
+          executedAt: now,
+          executionResult: { threads: ['t1'] },
+        },
+        // FLOW underscore tool bookings_list_services (bookings:read) with module: null.
+        {
+          id: ids.flowBookings,
+          businessId: ID.biz,
+          userId: ID.owner,
+          sourceType: 'KEY_CHAT',
+          title: 'List available services',
+          actionType: 'EXECUTE_TOOL',
+          toolName: 'bookings_list_services',
+          module: null,
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.owner,
+          executedAt: now,
+          executionResult: { services: ['Haircut'] },
+        },
+        // Unmapped owner-only tool cortex.query_database with weaker module 'ai'.
+        {
+          id: ids.ownerDb,
+          businessId: ID.biz,
+          userId: ID.owner,
+          sourceType: 'KEY_CHAT',
+          title: 'Inspect workspace records',
+          actionType: 'EXECUTE_TOOL',
+          toolName: 'cortex.query_database',
+          module: 'ai',
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.owner,
+          executedAt: now,
+          executionResult: { rows: ['internal-row'] },
+        },
+        // Unrecognized non-empty module fails closed even for executedBy.
+        {
+          id: ids.unknownMod,
+          businessId: ID.biz,
+          userId: ID.staffRevNone,
+          sourceType: 'KEY_CHAT',
+          title: 'Open custom workspace item',
+          actionType: 'OPEN',
+          toolName: null,
+          module: 'unknown_mod',
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.staffRevNone,
+          executedAt: now,
+          executionResult: { secret: 'unknown-mod-data' },
+        },
+        // Revoked scope on self-executed CRM proposal: staffCrmNone was executedBy, now crm:none.
+        {
+          id: ids.revokedSelf,
+          businessId: ID.biz,
+          userId: ID.staffCrmNone,
+          sourceType: 'KEY_CHAT',
+          title: 'Follow up with client',
+          actionType: 'CREATE_TASK',
+          toolName: null,
+          module: 'crm',
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.staffCrmNone,
+          executedAt: now,
+          executionResult: { contactName: 'Revoked Contact' },
+        },
+      ],
+    });
+
+    // storelink.create_portal_access: withheld from storefront:read/crm:none/revenue:read, readable by unscoped owner.
+    expect((await getOne(staffStoreOnly, ids.portal).expect(200)).body.executionResult).toBeNull();
+    expect((await getOne(ID.owner, ids.portal).expect(200)).body.executionResult).toEqual({ portalToken: 'secret-token-1' });
+
+    // key_inbox.list_threads: operations:read (staffRevNone) reads; operations:none (staffStoreOnly) withheld.
+    expect((await getOne(ID.staffRevNone, ids.inbox).expect(200)).body.executionResult).toEqual({ threads: ['t1'] });
+    expect((await getOne(staffStoreOnly, ids.inbox).expect(200)).body.executionResult).toBeNull();
+
+    // bookings_list_services (FLOW underscore tool, module: null): bookings:read (staffStoreOnly) reads; bookings:none (staffRevRead) withheld.
+    expect((await getOne(staffStoreOnly, ids.flowBookings).expect(200)).body.executionResult).toEqual({ services: ['Haircut'] });
+    expect((await getOne(ID.staffRevRead, ids.flowBookings).expect(200)).body.executionResult).toBeNull();
+
+    // cortex.query_database: withheld from ai:read/revenue:read staff, readable by unscoped owner.
+    expect((await getOne(staffStoreOnly, ids.ownerDb).expect(200)).body.executionResult).toBeNull();
+    expect((await getOne(ID.owner, ids.ownerDb).expect(200)).body.executionResult).toEqual({ rows: ['internal-row'] });
+
+    // unknown_mod: withheld even from executedBy (staffRevNone), readable by unscoped owner.
+    expect((await getOne(ID.staffRevNone, ids.unknownMod).expect(200)).body.executionResult).toBeNull();
+    expect((await getOne(ID.owner, ids.unknownMod).expect(200)).body.executionResult).toEqual({ secret: 'unknown-mod-data' });
+
+    // revoked self-run CRM proposal: withheld from staffCrmNone even though executedBy === staffCrmNone.
+    expect((await getOne(ID.staffCrmNone, ids.revokedSelf).expect(200)).body.executionResult).toBeNull();
+  });
+
+  it('PRS-10 (R1 extractGenomeRefs & multi-scope): cross-tenant/missing genome ID, deeply nested result, and revenue:read+settings:none on propFinGenome all withhold executionResult', async () => {
+    const now = new Date();
+    const missingRefPropId = `${P}prop_missing_ref`;
+    const deepPropId = `${P}prop_deep_nested`;
+    let deep: Record<string, unknown> = { leaf: 'hidden' };
+    for (let i = 0; i < 12; i++) deep = { nested: deep };
+
+    await db.keyActionProposal.createMany({
+      data: [
+        {
+          id: missingRefPropId,
+          businessId: ID.biz,
+          userId: ID.owner,
+          sourceType: 'KEY_CHAT',
+          title: 'Sync external item',
+          actionType: 'OPEN_GENOME',
+          module: 'operations',
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.owner,
+          executedAt: now,
+          executionResult: { signalId: 'other_tenant_sig_999' },
+        },
+        {
+          id: deepPropId,
+          businessId: ID.biz,
+          userId: ID.owner,
+          sourceType: 'KEY_CHAT',
+          title: 'Inspect deep tree',
+          actionType: 'OPEN_GENOME',
+          module: 'operations',
+          riskLevel: 'LOW',
+          status: 'EXECUTED',
+          executedBy: ID.owner,
+          executedAt: now,
+          executionResult: deep,
+        },
+      ],
+    });
+
+    // Missing/cross-tenant signalId fails closed for revenue:none.
+    expect((await getOne(ID.staffRevNone, missingRefPropId).expect(200)).body.executionResult).toBeNull();
+    // Deeply nested (>8 levels) fails closed for revenue:none.
+    expect((await getOne(ID.staffRevNone, deepPropId).expect(200)).body.executionResult).toBeNull();
+    // revenue:read + settings:none (staffCrmNone) reading propFinGenome (key_genome.list_signals) gets executionResult: null.
+    expect((await getOne(ID.staffCrmNone, ID.propFinGenome).expect(200)).body.executionResult).toBeNull();
+  });
 });
