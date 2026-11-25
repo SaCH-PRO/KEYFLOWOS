@@ -333,11 +333,14 @@ async function cleanup() {
     `DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM command_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM finance_action_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM recurring_expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM recurring_journal_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM accounting_periods WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -2440,4 +2443,292 @@ describe('W11-RUNWAY-BURN-CURRENCY (D-135): runway burn counts business-currency
       await db.financialTransaction.deleteMany({ where: { businessId: bizO, id: `${P}o_topup` } });
     }
   }, 60_000);
+});
+
+describe('SWP-FIN-CASH-SOURCES (V1-65, P72, BUG-023, BUG-110): future-dated entries excluded from cash position, Run now posts today, and advisor cash-flow forecast reads ledger cash', () => {
+  const ownerP = `${P}owner_p72`;
+  const bizFut = `${P}biz_p72_fut`;
+  const bizRun = `${P}biz_p72_run`;
+  const bizAdv = `${P}biz_p72_adv`;
+
+  let coaSeeder: any;
+  let posting: any;
+
+  async function seedBiz(bizId: string, name: string, slug: string) {
+    await db.business.create({ data: { id: bizId, name, slug, ownerId: ownerP, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${bizId}_m`, businessId: bizId, userId: ownerP, role: 'OWNER' } });
+    await coaSeeder.ensureDefaults(bizId);
+  }
+
+  async function coaId(bizId: string, systemKey: string): Promise<string> {
+    const row = await db.chartOfAccount.findFirstOrThrow({ where: { businessId: bizId, systemKey }, select: { id: true } });
+    return row.id;
+  }
+
+  async function balanceSheetCash(bizId: string, asOf: Date): Promise<number> {
+    const { LedgerBalancesService } = await import('../src/modules/finance/ledger-balances.service');
+    const { LedgerReportingService } = await import('../src/modules/reports/ledger-reporting.service');
+    const balances = new LedgerBalancesService(financePrisma);
+    const reporting = new LedgerReportingService(financePrisma, balances);
+    const sheet = await reporting.getBalanceSheet(bizId, asOf);
+    const cashIds = new Set(
+      (await db.chartOfAccount.findMany({
+        where: { businessId: bizId, systemKey: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+        select: { id: true },
+      })).map((a: any) => a.id),
+    );
+    const total = sheet.assets
+      .filter((line: any) => cashIds.has(line.accountId))
+      .reduce((sum: number, line: any) => sum + Number(line.balance), 0);
+    return Math.round(total * 100) / 100;
+  }
+
+  beforeAll(async () => {
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    const { AccountingPeriodService } = await import('../src/modules/finance/accounting-period.service');
+    const { PostingService } = await import('../src/modules/finance/posting.service');
+    coaSeeder = new ChartOfAccountsSeederService(financePrisma);
+    const periods = new AccountingPeriodService(financePrisma);
+    posting = new PostingService(financePrisma, periods);
+
+    await db.user.create({ data: { id: ownerP, email: `${P}owner_p72@test.local`, role: 'USER' } });
+    await seedBiz(bizFut, 'V34A P72 Future', `${P}p72_fut`);
+    await seedBiz(bizRun, 'V34A P72 RunNow', `${P}p72_run`);
+    await seedBiz(bizAdv, 'V34A P72 Advisor', `${P}p72_adv`);
+  });
+
+  it('CP-32 RED-BEFORE (BUG-023): a booked ledger entry dated tomorrow is excluded from cashBalance (CashPosition, Overview, SafeToSpend) and matches the Balance Sheet', async () => {
+    const cashAcc = await coaId(bizFut, 'CASH');
+    const eqAcc = await coaId(bizFut, 'OWNER_EQUITY');
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    await posting.post({
+      businessId: bizFut,
+      type: 'ADJUSTMENT',
+      date: now,
+      amount: 500,
+      currency: 'TTD',
+      description: 'Today cash deposit',
+      sourceType: 'Manual',
+      sourceId: `${P}fut_today`,
+      kind: 'p72_today',
+      entries: [
+        { accountId: cashAcc, debit: 500, credit: 0 },
+        { accountId: eqAcc, debit: 0, credit: 500 },
+      ],
+    });
+    await posting.post({
+      businessId: bizFut,
+      type: 'ADJUSTMENT',
+      date: tomorrow,
+      amount: 900,
+      currency: 'TTD',
+      description: 'Tomorrow scheduled deposit',
+      sourceType: 'Manual',
+      sourceId: `${P}fut_tomorrow`,
+      kind: 'p72_tomorrow',
+      entries: [
+        { accountId: cashAcc, debit: 900, credit: 0 },
+        { accountId: eqAcc, debit: 0, credit: 900 },
+      ],
+    });
+
+    const pos = await cashPositionService.getCashPosition(bizFut);
+    expect(pos.cashBalance).toBe(500);
+    expect(await balanceSheetCash(bizFut, new Date())).toBe(500);
+
+    const ov = await overviewRoute(bizFut, ownerP);
+    expect(ov.status).toBe(200);
+    expect(ov.body.cashBalance).toBe(500);
+
+    const sts = await safeToSpendRoute(bizFut, ownerP);
+    expect(sts.status).toBe(200);
+    expect(sts.body.cashBalance).toBe(500);
+  });
+
+  it('CP-33 RED-BEFORE (BUG-110): Run now on a future-scheduled monthly rent recurring journal and recurring expense posts dated today so cashBalance equals the Balance Sheet immediately', async () => {
+    const { RecurringJournalEntryService } = await import('../src/modules/finance/recurring-journal-entry.service');
+    const { RecurringExpenseService } = await import('../src/modules/expenses/recurring-expense.service');
+    const { ExpensesService } = await import('../src/modules/expenses/expenses.service');
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+
+    const cashAcc = await coaId(bizRun, 'CASH');
+    const eqAcc = await coaId(bizRun, 'OWNER_EQUITY');
+    const rentAcc = await coaId(bizRun, 'EXPENSE_RENT').catch(() => coaId(bizRun, 'EXPENSE_GENERAL'));
+
+    const beforeNow = new Date();
+    await posting.post({
+      businessId: bizRun,
+      type: 'ADJUSTMENT',
+      date: beforeNow,
+      amount: 2000,
+      currency: 'TTD',
+      description: 'Starting cash',
+      sourceType: 'Manual',
+      sourceId: `${P}run_start`,
+      kind: 'p72_run_start',
+      entries: [
+        { accountId: cashAcc, debit: 2000, credit: 0 },
+        { accountId: eqAcc, debit: 0, credit: 2000 },
+      ],
+    });
+
+    const fifteenDaysAhead = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+    const recJournal = await db.recurringJournalEntry.create({
+      data: {
+        id: `${P}rec_je_rent`,
+        businessId: bizRun,
+        name: 'Monthly Studio Rent Journal',
+        frequency: 'MONTHLY',
+        nextRunDate: fifteenDaysAhead,
+        isActive: true,
+        entries: [
+          { accountId: rentAcc, debit: 600, credit: 0, memo: 'Monthly rent' },
+          { accountId: cashAcc, debit: 0, credit: 600, memo: 'Cash paid' },
+        ],
+      },
+    });
+
+    const recJournalSvc = new RecurringJournalEntryService(financePrisma, posting);
+    await recJournalSvc.runOnce(bizRun, recJournal.id);
+
+    const postedJeTx = await db.financialTransaction.findFirstOrThrow({
+      where: { businessId: bizRun, sourceType: 'RecurringJournalEntry', sourceId: recJournal.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const afterJournalRun = new Date();
+    expect(postedJeTx.date.getTime(), 'Run now recurring journal must post dated today, not future nextRunDate').toBeLessThanOrEqual(afterJournalRun.getTime());
+    expect((await cashPositionService.getCashPosition(bizRun)).cashBalance).toBe(1400);
+    expect(await balanceSheetCash(bizRun, afterJournalRun)).toBe(1400);
+
+    // Recurring expense Run now on a future-scheduled template also posts dated today.
+    const expensePosting = new ExpensePostingService(financePrisma, posting, coaSeeder);
+    const eventsStub = { emit: () => true } as any;
+    const timelineStub = { recordEvent: async () => null } as any;
+    const expensesSvc = new ExpensesService(financePrisma, eventsStub, expensePosting, timelineStub, posting);
+    const recExpSvc = new RecurringExpenseService(financePrisma, expensesSvc);
+
+    const recExp = await db.recurringExpense.create({
+      data: {
+        id: `${P}rec_exp_net`,
+        businessId: bizRun,
+        description: 'Monthly Fibre Internet',
+        amount: 150,
+        currency: 'TTD',
+        frequency: 'MONTHLY',
+        nextRunDate: fifteenDaysAhead,
+        createsBill: false,
+        isActive: true,
+      },
+    });
+    await recExpSvc.runOnce(recExp.id, bizRun);
+
+    const afterExpRun = new Date();
+    const createdExp = await db.expense.findFirstOrThrow({
+      where: { businessId: bizRun, recurringExpenseId: recExp.id },
+    });
+    expect(createdExp.date.getTime(), 'Run now recurring expense must date the expense today').toBeLessThanOrEqual(afterExpRun.getTime());
+    expect((await cashPositionService.getCashPosition(bizRun)).cashBalance).toBe(1250);
+    expect(await balanceSheetCash(bizRun, afterExpRun)).toBe(1250);
+  });
+
+  it('CP-34 RED-BEFORE: AiAdvisorService.predictCashFlow reads ledger cash (part payment counts, future entry excluded, other currency unconverted per D-135 & SEC-W10LR-1)', async () => {
+    const { AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service');
+    const cashAcc = await coaId(bizAdv, 'CASH');
+    const eqAcc = await coaId(bizAdv, 'OWNER_EQUITY');
+    const arAcc = await coaId(bizAdv, 'ACCOUNTS_RECEIVABLE');
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    // 300 TTD starting cash + 150 TTD part payment on a PARTIALLY_PAID invoice (NOT status='PAID') + 550 USD cash + 700 TTD future entry.
+    await posting.post({
+      businessId: bizAdv,
+      type: 'ADJUSTMENT',
+      date: now,
+      amount: 300,
+      currency: 'TTD',
+      description: 'Starting cash',
+      sourceType: 'Manual',
+      sourceId: `${P}adv_start`,
+      kind: 'p72_adv_start',
+      entries: [
+        { accountId: cashAcc, debit: 300, credit: 0 },
+        { accountId: eqAcc, debit: 0, credit: 300 },
+      ],
+    });
+    await posting.post({
+      businessId: bizAdv,
+      type: 'INCOME',
+      date: now,
+      amount: 150,
+      currency: 'TTD',
+      description: 'Partial payment on open invoice',
+      sourceType: 'Payment',
+      sourceId: `${P}adv_part_pay`,
+      kind: 'p72_adv_part_pay',
+      entries: [
+        { accountId: cashAcc, debit: 150, credit: 0 },
+        { accountId: arAcc, debit: 0, credit: 150 },
+      ],
+    });
+    await posting.post({
+      businessId: bizAdv,
+      type: 'ADJUSTMENT',
+      date: now,
+      amount: 550,
+      currency: 'USD',
+      description: 'USD cash account',
+      sourceType: 'Manual',
+      sourceId: `${P}adv_usd`,
+      kind: 'p72_adv_usd',
+      entries: [
+        { accountId: cashAcc, debit: 550, credit: 0 },
+        { accountId: eqAcc, debit: 0, credit: 550 },
+      ],
+    });
+    await posting.post({
+      businessId: bizAdv,
+      type: 'ADJUSTMENT',
+      date: tomorrow,
+      amount: 700,
+      currency: 'TTD',
+      description: 'Tomorrow cash entry',
+      sourceType: 'Manual',
+      sourceId: `${P}adv_fut`,
+      kind: 'p72_adv_fut',
+      entries: [
+        { accountId: cashAcc, debit: 700, credit: 0 },
+        { accountId: eqAcc, debit: 0, credit: 700 },
+      ],
+    });
+    await db.contact.create({
+      data: { id: `${P}adv_contact`, businessId: bizAdv, firstName: 'Adv', lastName: 'Client', email: `${P}adv@test.local` },
+    });
+    await db.invoice.create({
+      data: {
+        id: `${P}adv_inv_partial`,
+        businessId: bizAdv,
+        contactId: `${P}adv_contact`,
+        invoiceNumber: `${P}INV-PART`,
+        status: 'PARTIALLY_PAID',
+        subtotal: 400,
+        total: 400,
+        currency: 'TTD',
+        dueDate: tomorrow,
+      },
+    });
+
+    const advisor = new AiAdvisorService(
+      financePrisma,
+      {} as any,
+      {} as any,
+      {} as any,
+      cashPositionService,
+    );
+    const forecast: any = await advisor.predictCashFlow(bizAdv, 30);
+    expect(forecast.currentBalance, 'must equal ledger TTD cash (300 + 150 part payment), never 0, never 1000 (USD added), never 1150 (future entry)').toBe(450);
+    expect(forecast.currency).toBe('TTD');
+    expect(forecast.otherCurrencyCash).toEqual([{ currency: 'USD', amount: 550 }]);
+  });
 });
