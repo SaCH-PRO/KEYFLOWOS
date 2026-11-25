@@ -461,7 +461,16 @@ const fallbackInvoices: Invoice[] = DEMO_MODE_ENABLED
     ]
   : [];
 
-async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
+/**
+ * `opts.onStatus` (FU-TIMELINE-LOAD-OLDER, review COR-TLO-3) is told the HTTP status of the answer the result is read
+ * from, for a caller that must tell a refusal (a 4xx) from a failure worth retrying; the result itself is unchanged.
+ */
+async function apiGet<T>(
+  path: string,
+  schema?: z.ZodSchema<T>,
+  fallback?: T,
+  opts?: { signal?: AbortSignal; onStatus?: (status: number) => void },
+): Promise<ApiResult<T>> {
   // R0-15d: a read that names no business is not sent (see selectedBusinessId).
   if (namesNoBusiness(path)) return { data: fallback ?? null, error: NO_BUSINESS_SELECTED };
   // W10-WEB-CLIENT-MISSING-ID (FOLLOW3-D11): nor is a read that names a missing
@@ -492,6 +501,7 @@ async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, op
         res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
       }
     }
+    opts?.onStatus?.(res.status);
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
       let message: string = res.statusText;
@@ -965,27 +975,47 @@ export async function fetchContactEvents(
  * { events, nextCursor, hasMore }: `limit` events strictly older than `cursor` (opaque: the nextCursor of the page
  * before; none for the newest page). nextCursor is null on the last page. The server withholds money events from a
  * member without revenue read on every page (D-100).
+ *
+ * Review SEC-TLO-1 / COR-TLO-4: the answer is checked whole, and one that is not such a page (an array, {}, an event
+ * missing a field or whose createdAt is no date) is a failed read, never a page: apiGet would hand an answer that
+ * fails its schema through as data. Such a failure carries no server words (error ""), so it reads "Couldn't load
+ * ...". The answer carries the HTTP status, so the page can tell a refused cursor (a 4xx) from a
+ * failure worth retrying (apiGet's onStatus; this file's apiGet, not lib/api.ts's, which retries a 5xx three times).
  */
 export const CONTACT_EVENTS_PAGE_SIZE = 20;
 
+const pageEventSchema = eventSchema.extend({
+  createdAt: z.string().refine((value) => !Number.isNaN(Date.parse(value)), "createdAt is not a date"),
+});
 const contactEventsPageSchema = z.object({
-  events: z.array(eventSchema),
+  events: z.array(pageEventSchema),
   nextCursor: z.string().nullable(),
   hasMore: z.boolean(),
 });
 export type ContactEventsPage = z.infer<typeof contactEventsPageSchema>;
+export type ContactEventsPageResult = { data: ContactEventsPage | null; error: string | null; status?: number };
 
 export async function fetchContactEventsPage(
   contactId: string,
   options: { cursor?: string | null; limit?: number } = {},
   businessId: string = selectedBusinessId(),
-): Promise<ApiResult<ContactEventsPage>> {
+): Promise<ContactEventsPageResult> {
   const query = new URLSearchParams({ paged: "true", limit: String(options.limit ?? CONTACT_EVENTS_PAGE_SIZE) });
   if (options.cursor) query.set("cursor", options.cursor);
-  return apiGet(
+  let status: number | undefined;
+  const res = await apiGet<unknown>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events?${query.toString()}`,
-    contactEventsPageSchema,
+    undefined,
+    undefined,
+    { onStatus: (s) => (status = s) },
   );
+  if (res.error !== null && res.error !== undefined) return { data: null, error: res.error, status };
+  const parsed = contactEventsPageSchema.safeParse(res.data);
+  if (!parsed.success) {
+    console.warn("[fetchContactEventsPage] the events read answered something that is not a page:", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", "));
+    return { data: null, error: "", status };
+  }
+  return { data: parsed.data, error: null, status };
 }
 
 export async function fetchContactNotes(

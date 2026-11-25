@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactEventsPage, type ContactEventsPage } from "@/lib/client";
+import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 import { readState } from "@/lib/failure-kit";
 import { eventLabel, plainLabel, statusLabel } from "@/lib/status-labels";
 import { Card } from "@keyflow/ui";
@@ -103,9 +104,38 @@ function mergePage(loaded: readonly ContactEvent[], page: readonly ContactEvent[
   return [...byId.values()].sort(newestFirst);
 }
 
-/** A page as the paged read answers it ({ events, nextCursor, hasMore }); anything else is not a page. */
-function isPage(data: unknown): data is ContactEventsPage {
-  return !!data && typeof data === "object" && Array.isArray((data as ContactEventsPage).events);
+/**
+ * COR-TLO-3: an older read the server refused for what it asked (a 4xx: an invalid or expired cursor, no access, the
+ * customer gone) fails again with the same cursor, so it is not offered again: the page asks for a reload from the
+ * newest page instead. A timeout, a rate limit (408, 429), a 5xx or a network failure may pass on a second try.
+ */
+function refusedForGood(status: number | undefined): boolean {
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * SEC-TLO-2: the selected business, followed while the page is open: a switch in this tab (selectBusiness announces
+ * BUSINESS_CHANGED_EVENT) or in another (`storage` on the business key). The events read names the business, so a
+ * switch starts the Timeline over: what was loaded, and its cursor, belonged to the old one.
+ */
+/** The localStorage key workspace.ts keeps the selected business under (its BUSINESS_ID_KEY, not exported). */
+const BUSINESS_ID_KEY = "kf_business_id";
+
+function useSelectedBusiness(): string | null {
+  const [business, setBusiness] = useState<string | null>(() => getStoredBusinessId());
+  useEffect(() => {
+    const onChange = () => setBusiness(getStoredBusinessId());
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === BUSINESS_ID_KEY) onChange();
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+  return business;
 }
 
 /** The cursor of the next older page, or null when this page is the oldest. */
@@ -131,6 +161,7 @@ function timeAgo(d: string) {
 
 export default function ContactTimelinePage() {
   const { contactId } = useParams();
+  const business = useSelectedBusiness();
   const [events, setEvents] = useState<ContactEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ChannelFilter>("all");
@@ -142,8 +173,10 @@ export default function ContactTimelinePage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | null>(null);
-  // Which load an answer belongs to: a Retry or another customer starts a new one, and an older page read for the old
-  // one is dropped. olderInFlight holds one older read at a time, even for two clicks before the button disables.
+  // COR-TLO-3: the older read was refused for good (refusedForGood); Load older gives way to Reload timeline.
+  const [olderRefused, setOlderRefused] = useState(false);
+  // Which load an answer belongs to: a Retry, a reload, another customer or another business starts a new one, and a
+  // first or older page read for the old one is dropped. olderInFlight holds one older read at a time, even for two clicks before the button disables.
   const generation = useRef(0);
   const olderInFlight = useRef(false);
 
@@ -151,16 +184,21 @@ export default function ContactTimelinePage() {
     const gen = ++generation.current;
     olderInFlight.current = false;
     const load = async () => {
+      // SEC-TLO-3: nothing of the previous load (another customer's or business's events, or its cursor) outlives it.
+      setEvents([]);
+      setNextCursor(null);
+      setOlderRefused(false);
       setLoading(true);
       setLoadingOlder(false);
       setOlderError(null);
       const res = await fetchContactEventsPage(contactId as string);
       if (gen !== generation.current) return;
+      // SEC-TLO-1: an answer that is not a page comes back as a failure without words ("Couldn't load the timeline.").
       const state = readState(res, { what: "the timeline" });
-      if (state.kind !== "ok" || !isPage(res.data)) {
+      if (state.kind !== "ok" || !res.data) {
         setEvents([]);
         setNextCursor(null);
-        // No access is not fixed by trying again; a failed load may be. An answer that is not a page is a failed load.
+        // No access is not fixed by trying again; a failed load may be.
         setLoadError(state.kind !== "ok" ? { message: state.message, retry: state.kind === "failed" } : { message: "Couldn't load the timeline.", retry: true });
       } else {
         setEvents(mergePage([], res.data.events));
@@ -170,10 +208,10 @@ export default function ContactTimelinePage() {
       setLoading(false);
     };
     load();
-  }, [contactId, attempt]);
+  }, [contactId, attempt, business]);
 
   const loadOlder = useCallback(async () => {
-    if (!nextCursor || olderInFlight.current) return;
+    if (!nextCursor || olderInFlight.current || olderRefused) return;
     olderInFlight.current = true;
     const gen = generation.current;
     setLoadingOlder(true);
@@ -183,15 +221,22 @@ export default function ContactTimelinePage() {
     olderInFlight.current = false;
     setLoadingOlder(false);
     const state = readState(res, { what: "older timeline events" });
-    if (state.kind !== "ok" || !isPage(res.data)) {
-      // What is loaded stays; the cursor stays, so Load older tries the same page again.
-      setOlderError(state.kind !== "ok" ? state.message : "Couldn't load older timeline events.");
+    if (state.kind !== "ok" || !res.data) {
+      const message = state.kind !== "ok" ? state.message : "Couldn't load older timeline events.";
+      // What is loaded stays. A refusal for good (COR-TLO-3) is not retried with the same cursor; any other failure
+      // keeps the cursor, so Load older tries the same page again.
+      if (refusedForGood(res.status)) {
+        setOlderRefused(true);
+        setOlderError(`${message.replace(/\.$/, "")}. Reload the timeline to start again from the newest events.`);
+      } else {
+        setOlderError(message);
+      }
       return;
     }
     const page = res.data;
     setEvents((loaded) => mergePage(loaded, page.events));
     setNextCursor(cursorAfter(page));
-  }, [contactId, nextCursor]);
+  }, [contactId, nextCursor, olderRefused]);
 
   // D-277: one item per pasted WhatsApp message; the filter and its counts work on what the events read served only.
   // D-284: over every page loaded, so a pasted message whose note and WhatsApp event are on two pages is one item.
@@ -366,7 +411,19 @@ export default function ContactTimelinePage() {
         </div>
       )}
 
-      {more && (
+      {more && olderRefused && (
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="min-h-9 rounded-md border px-4 py-1.5 text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Reload timeline
+          </button>
+        </div>
+      )}
+
+      {more && !olderRefused && (
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
