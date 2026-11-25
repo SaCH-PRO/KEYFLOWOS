@@ -30,7 +30,6 @@ import { CommerceIntegrationService } from '../marketplace/commerce-integration.
 import {
   ORDER_STATUS_CHANGED_DURING_CANCEL,
   ROUTING_CLAIM_TX_OPTIONS,
-  claimOrderRouting,
   releaseOrderFulfilmentForCancel,
   statusEditMayCancel,
 } from '../marketplace/fulfillment-routing.service';
@@ -93,7 +92,7 @@ export interface QuickSaleCheckoutInput {
   }>;
   receiptToken: string;
   idempotency: { slot: string; requestHash: string } | null;
-  onCommitted: (result: QuickSaleCommittedResult) => void;
+  onCommitted: (result: QuickSaleCommittedResult, replayed?: boolean) => void;
 }
 
 /**
@@ -1095,6 +1094,11 @@ export class StoreOrderService {
       where: { id: orderId, businessId },
     });
     if (!existing) throw new NotFoundException('Order not found');
+    if ((existing.type ?? '').toUpperCase() === 'QUICK_SALE') {
+      throw new BadRequestException(
+        'A quick sale is already completed at checkout and cannot change fulfilment status; refund it through the refund door instead',
+      );
+    }
 
     const order =
       normalized === 'CANCELLED'
@@ -1522,6 +1526,36 @@ export class StoreOrderService {
       // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): lock every stock row in global order before writes.
       await lockStockRowsInOrder(tx, targetBusinessId, decrementedStockProducts);
 
+      // CONC-QS-2: if a concurrent retry with the same Idempotency-Key waited on the
+      // walk-in/stock locks while the winner committed, short-circuit before creating
+      // any order/invoice/payment/ledger rows and return the winner's committed summary.
+      if (qs?.idempotency) {
+        const existingSlot = await tx.idempotencyKey.findUnique({
+          where: {
+            businessId_idempotencyKey: { businessId: targetBusinessId, idempotencyKey: qs.idempotency.slot },
+          },
+        });
+        if (existingSlot) {
+          if (existingSlot.requestHash !== qs.idempotency.requestHash) {
+            throw new ConflictException(
+              'This Idempotency-Key was already used for a different quick sale; use a new key',
+            );
+          }
+          const saved = existingSlot.response as unknown as QuickSaleCommittedResult | null;
+          if (saved?.order?.id && saved?.invoice?.id && saved?.payment?.id && saved?.receiptToken) {
+            return {
+              replayed: true as const,
+              updatedOrder: saved.order,
+              invoice: null,
+              resolvedContactId: saved.invoice.contactId,
+              decrementedProductIds: [] as string[],
+              stockHeldElsewhere: [] as StockHeldElsewhereLine[],
+              quickSaleSummary: saved,
+            };
+          }
+        }
+      }
+
       let activeOrder = existingOrder;
       if (qs) {
         activeOrder = await tx.marketplaceOrder.create({
@@ -1564,7 +1598,6 @@ export class StoreOrderService {
           },
           include: { items: true },
         });
-        await claimOrderRouting(tx as any, targetBusinessId, activeOrder.id);
       }
 
       // The order's status as of this transaction (SEC-V33-5): read under a
@@ -1591,6 +1624,7 @@ export class StoreOrderService {
           invoiceNumber,
           status: 'DRAFT',
           subtotal: targetSubtotal,
+          ...(qs ? { taxRate: qs.taxRate } : {}),
           taxAmount: targetTaxAmount,
           discountAmount: targetDiscountAmount,
           total: targetTotal,
@@ -1819,11 +1853,22 @@ export class StoreOrderService {
         }
       }
 
-      return { updatedOrder, invoice, resolvedContactId: resolvedContactId!, decrementedProductIds, stockHeldElsewhere, quickSaleSummary };
-    });
+      return {
+        replayed: false as const,
+        updatedOrder,
+        invoice,
+        resolvedContactId: resolvedContactId!,
+        decrementedProductIds,
+        stockHeldElsewhere,
+        quickSaleSummary,
+      };
+    }, qs ? ROUTING_CLAIM_TX_OPTIONS : undefined);
 
     if (qs && result.quickSaleSummary) {
-      qs.onCommitted(result.quickSaleSummary);
+      qs.onCommitted(result.quickSaleSummary, result.replayed);
+    }
+    if (result.replayed) {
+      return result.updatedOrder;
     }
 
     // Tx committed — now safe to flush buffered invoice events and
@@ -2079,8 +2124,9 @@ export class StoreOrderService {
       throw new ConflictException('Nothing was paid on this order, so there is nothing to refund; cancel it instead');
     }
 
+    const orderType = (order.type ?? '').toUpperCase();
     const onCheckoutInvoice =
-      (order.type ?? '').toUpperCase() === 'STOREFRONT' || (await this.hasCheckoutInvoice(businessId, order.orderNumber));
+      orderType === 'STOREFRONT' || orderType === 'QUICK_SALE' || (await this.hasCheckoutInvoice(businessId, order.orderNumber));
     const invoiceId = onCheckoutInvoice ? await this.refundCheckoutPayments(order, actorId) : undefined;
 
     const { count } = await this.prisma.client.marketplaceOrder.updateMany({

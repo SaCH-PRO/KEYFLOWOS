@@ -82,6 +82,8 @@ let db: any;
 let app: INestApplication;
 let redis: IORedis;
 let subscriptionsService: any;
+let marketplaceService: any;
+let storeOrderService: any;
 const emittedEvents: Array<{ name: string; payload: any }> = [];
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -153,6 +155,8 @@ async function cleanupDynamicRows() {
       /* best-effort cleanup */
     }
   }
+  await db.business.update({ where: { id: ID.bizRace }, data: { defaultTaxRate: 0 } });
+  await db.product.update({ where: { id: ID.prodRace }, data: { price: 60 } });
   await db.inventoryStock.update({ where: { id: ID.stock1 }, data: { quantity: 10, reserved: 0, costPerUnit: 50 } });
   await db.inventoryStock.update({ where: { id: ID.stock2 }, data: { quantity: 5, reserved: 0, costPerUnit: 30 } });
   await db.inventoryStock.update({ where: { id: ID.stockRace }, data: { quantity: 10, reserved: 0, costPerUnit: 20 } });
@@ -292,6 +296,8 @@ beforeAll(async () => {
   }).compile();
 
   subscriptionsService = moduleRef.get(SubscriptionsService);
+  marketplaceService = moduleRef.get(MarketplaceService);
+  storeOrderService = moduleRef.get(StoreOrderService);
   const coaSeeder = moduleRef.get(ChartOfAccountsSeederService);
 
   app = moduleRef.createNestApplication({ logger: false });
@@ -705,5 +711,131 @@ describe('P83 — QUICK-SALE-SERVER (POST /marketplace/businesses/:businessId/qu
     const staffOk = await postQuickSale(ID.bizA, body, ID.staffWriteA);
     expect(staffOk.status).toBe(201);
     expect(staffOk.body.payment.status).toBe('SUCCESSFUL');
+  });
+
+  it('[QS-07] SEC-QS-1: Idempotency-Key binds to actorId and checks named contact CRM visibility BEFORE replay', async () => {
+    const idemKey = `${P}priv-idem-1`;
+    const privBody = {
+      items: [{ productId: ID.prod2, quantity: 1 }],
+      paymentMethod: 'cash',
+      contactId: ID.contactPrivateOwnerA,
+    };
+
+    // Owner creates quick sale for their own PRIVATE contact
+    const first = await postQuickSale(ID.bizA, privBody, ID.ownerA, { 'Idempotency-Key': idemKey });
+    expect(first.status).toBe(201);
+    expect(first.body.replayed).toBe(false);
+    expect(first.body.invoice.contactId).toBe(ID.contactPrivateOwnerA);
+
+    // Another member (staffWriteA) sending the SAME Idempotency-Key + SAME payload
+    // must get 404 (contact visibility check runs BEFORE readReplay; never 201 PII leak or 409 oracle)
+    const staffSame = await postQuickSale(ID.bizA, privBody, ID.staffWriteA, { 'Idempotency-Key': idemKey });
+    expect(staffSame.status).toBe(404);
+
+    // Even if staffWriteA sends a non-private payload with ownerA's Idempotency-Key,
+    // requestHash includes actorId -> 409 conflict, never replays ownerA's private receipt
+    const staffOther = await postQuickSale(
+      ID.bizA,
+      { items: [{ productId: ID.prod2, quantity: 1 }], paymentMethod: 'cash' },
+      ID.staffWriteA,
+      { 'Idempotency-Key': idemKey },
+    );
+    expect(staffOther.status).toBe(409);
+
+    // Owner replaying with the same key still succeeds cleanly
+    const ownerReplay = await postQuickSale(ID.bizA, privBody, ID.ownerA, { 'Idempotency-Key': idemKey });
+    expect(ownerReplay.status).toBe(201);
+    expect(ownerReplay.body.replayed).toBe(true);
+    expect(ownerReplay.body.order.id).toBe(first.body.order.id);
+    expect(ownerReplay.body.receiptToken).toBe(first.body.receiptToken);
+  });
+
+  it('[QS-08] CONC-QS-2: concurrent identical Idempotency-Key retries on last unit of stock both return 201 with identical IDs and zero INSUFFICIENT_STOCK errors', async () => {
+    await db.inventoryStock.update({ where: { id: ID.stock2 }, data: { quantity: 1, reserved: 0 } });
+    const idemKey = `${P}last-unit-idem`;
+    const body = { items: [{ productId: ID.prod2, quantity: 1 }], paymentMethod: 'cash' };
+
+    const [r1, r2] = await Promise.all([
+      postQuickSale(ID.bizA, body, ID.ownerA, { 'Idempotency-Key': idemKey }),
+      postQuickSale(ID.bizA, body, ID.ownerA, { 'Idempotency-Key': idemKey }),
+    ]);
+
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+    expect(r1.body.order.id).toBe(r2.body.order.id);
+    expect(r1.body.invoice.id).toBe(r2.body.invoice.id);
+    expect(r1.body.payment.id).toBe(r2.body.payment.id);
+    expect(r1.body.receiptToken).toBe(r2.body.receiptToken);
+    expect([r1.body.replayed, r2.body.replayed].sort()).toEqual([false, true]);
+
+    expect((await db.inventoryStock.findUnique({ where: { id: ID.stock2 } })).quantity).toBe(0);
+    expect(await db.marketplaceOrder.count({ where: { businessId: ID.bizA } })).toBe(1);
+    expect(await db.payment.count({ where: { businessId: ID.bizA } })).toBe(1);
+  });
+
+  it('[QS-09] FIN-QS-4: QUICK_SALE order refuses post-checkout status edits and non-refund fulfillOrder actions across HTTP and service doors', async () => {
+    const created = await postQuickSale(
+      ID.bizRace,
+      { items: [{ productId: ID.prodRace, quantity: 1 }], paymentMethod: 'cash' },
+      ID.ownerA,
+    );
+    expect(created.status).toBe(201);
+    const qsOrderId: string = created.body.order.id;
+
+    // HTTP PATCH /marketplace/businesses/:businessId/orders/:orderId/status -> 400
+    for (const status of ['placed', 'cancelled', 'processing']) {
+      const res = await request(app.getHttpServer())
+        .patch(`/marketplace/businesses/${ID.bizRace}/orders/${qsOrderId}/status`)
+        .set(HEADER, ID.ownerA)
+        .send({ status });
+      expect(res.status).toBe(400);
+    }
+
+    // StoreOrderService.updateOrderStatus -> rejects BadRequestException
+    await expect(storeOrderService.updateOrderStatus(qsOrderId, 'CANCELLED', ID.bizRace)).rejects.toThrow(/quick sale/i);
+    await expect(storeOrderService.updateOrderStatus(qsOrderId, 'PENDING', ID.bizRace)).rejects.toThrow(/quick sale/i);
+
+    // MarketplaceService.fulfillOrder non-refund actions -> rejects BadRequestException
+    await expect(
+      marketplaceService.fulfillOrder(ID.bizRace, qsOrderId, { action: 'cancel' }, ID.ownerA),
+    ).rejects.toThrow(/quick sale/i);
+    await expect(
+      marketplaceService.fulfillOrder(ID.bizRace, qsOrderId, { action: 'process' }, ID.ownerA),
+    ).rejects.toThrow(/quick sale/i);
+
+    // Order remains COMPLETED / PAID untouched
+    const order = await db.marketplaceOrder.findUnique({ where: { id: qsOrderId } });
+    expect(order.status).toBe('COMPLETED');
+    expect(order.paymentStatus).toBe('PAID');
+  });
+
+  it('[QS-10] COR-QS-1 & COR-QS-2: persists invoice.taxRate, uses D-13 integer-cents rounding (10.04 @ 12.5% -> 1.26 tax / 11.30 total), and refuses quantity > 1_000_000', async () => {
+    await db.business.update({ where: { id: ID.bizRace }, data: { defaultTaxRate: 12.5 } });
+    await db.product.update({ where: { id: ID.prodRace }, data: { price: 10.04 } });
+
+    const res = await postQuickSale(
+      ID.bizRace,
+      { items: [{ productId: ID.prodRace, quantity: 1 }], paymentMethod: 'cash' },
+      ID.ownerA,
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.order.subtotal).toBe(10.04);
+    expect(res.body.order.taxAmount).toBe(1.26);
+    expect(res.body.order.total).toBe(11.3);
+
+    const invoice = await db.invoice.findUnique({ where: { id: res.body.invoice.id } });
+    expect(invoice).not.toBeNull();
+    expect(invoice.taxRate).toBe(12.5);
+    expect(invoice.subtotal).toBe(10.04);
+    expect(invoice.taxAmount).toBe(1.26);
+    expect(invoice.total).toBe(11.3);
+
+    // Quantity cap (> 1_000_000) refused 400
+    const hugeQty = await postQuickSale(
+      ID.bizRace,
+      { items: [{ productId: ID.prodRace, quantity: 1_000_001 }], paymentMethod: 'cash' },
+      ID.ownerA,
+    );
+    expect(hugeQty.status).toBe(400);
   });
 });
