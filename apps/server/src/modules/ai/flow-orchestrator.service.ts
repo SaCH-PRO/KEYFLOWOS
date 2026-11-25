@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
+import { EXCLUDE_WHATSAPP_INBOUND_SOURCE } from '../crm/whatsapp-inbound-exclusion';
 import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
@@ -5650,8 +5651,17 @@ ${triage.standingContext}`;
         });
         if (!contact) throw new Error('Contact not found');
 
+        // D-280 (SEC-WAW-1): exclude pasted WhatsApp notes on automatic/background
+        // surfaces (e.g. PRO_AUTO_MONITOR) or any run without a live authenticated
+        // human principal; explicit owner-initiated chat stays allowed.
+        const isOwnerInitiatedInteractive =
+          Boolean(action?.principalUserId) && action?.surface !== 'PRO_AUTO_MONITOR';
         const recentNotes = await this.prisma.client.contactNote.findMany({
-          where: { contactId: args.contactId, businessId },
+          where: {
+            contactId: args.contactId,
+            businessId,
+            ...(isOwnerInitiatedInteractive ? {} : { AND: [EXCLUDE_WHATSAPP_INBOUND_SOURCE] }),
+          },
           orderBy: { createdAt: 'desc' },
           take: 3,
           select: { body: true, createdAt: true },

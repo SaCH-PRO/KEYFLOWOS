@@ -38,6 +38,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { createHash, randomUUID as uuidv4 } from 'node:crypto';
 import { BusinessEventType } from '@prisma/client';
 import { keyCronsDisabled } from '../../core/config/env';
+import { EXCLUDE_WHATSAPP_INBOUND_SOURCE } from '../crm/whatsapp-inbound-exclusion';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -1030,9 +1031,12 @@ export class KeyCortexIntuitionService {
 
     // Contact notes — what the team wrote about customers in their own words,
     // which is the richest linguistic signal of the three.
+    // D-280 (SEC-WAW-1): exclude pasted WhatsApp messages (source='whatsapp_inbound')
+    // from every automatic KEY corpus using a NULL-safe predicate so legacy team
+    // notes with source IS NULL remain included.
     const notes = await this.prisma.client.contactNote
       .findMany({
-        where: { businessId, createdAt: { gte: since } },
+        where: { businessId, createdAt: { gte: since }, AND: [EXCLUDE_WHATSAPP_INBOUND_SOURCE] },
         select: { body: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
         take: CORPUS_PER_SOURCE_LIMIT,

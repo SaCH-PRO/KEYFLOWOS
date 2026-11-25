@@ -6,6 +6,7 @@ import { AiMemoryService } from './ai-memory.service';
 import { AiUsageService } from './ai-usage.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
+import { EXCLUDE_WHATSAPP_INBOUND_CONTACT_EVENTS } from '../crm/whatsapp-inbound-exclusion';
 
 export interface DetectedPattern {
   id: string;
@@ -155,13 +156,18 @@ export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
 
   private async fetchRecentContactEvents(businessId: string) {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // D-280 (SEC-WAW-1): exclude pasted WhatsApp events from the automatic pattern scan
+    // and never select the unused `data` payload column.
     return this.prisma.client.contactEvent.findMany({
-      where: { businessId, createdAt: { gte: since } },
+      where: {
+        businessId,
+        createdAt: { gte: since },
+        ...EXCLUDE_WHATSAPP_INBOUND_CONTACT_EVENTS,
+      },
       select: {
         id: true,
         type: true,
         contactId: true,
-        data: true,
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
