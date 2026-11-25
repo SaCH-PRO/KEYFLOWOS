@@ -1112,45 +1112,185 @@ export class FulfillmentRoutingService {
     });
   }
 
-  async decrementInventoryOnShip(businessId: string, routeId: string): Promise<void> {
-    const route = await this.prisma.client.fulfillmentRoute.findFirst({
+  /**
+   * W11-SHIP-STOCK-DECREMENT (F-26; owner ruling D-136): the fulfil 'ship'
+   * action's fulfilment, shipment, route, stock decrement, and audit movement
+   * writes, on the ship's own transaction (run with ROUTING_CLAIM_TX_OPTIONS),
+   * which then appends the timeline step and writes the order's shipped status
+   * (MarketplaceService.fulfillOrder).
+   *
+   * Replaces the standalone decrementInventoryOnShip(businessId, routeId),
+   * which ran outside any transaction or lock and was only invoked for
+   * LOCAL_STOCK routes still RESERVED — missing routes already moved to
+   * PICKING_PACKING by 'process', losing concurrent routing reservations, and
+   * letting concurrent 'ship' calls both succeed and double-decrement.
+   *
+   * Order of operations inside `tx`:
+   *   1. claimOrderRouting(tx, businessId, orderId) — serializes with routing,
+   *      concurrent ships, and cancels on this order;
+   *   2. re-read the order's status, shippingAddress, and items under the claim
+   *      and refuse 400 unless canTransitionOrder(status, 'shipped');
+   *   3. create the Shipment when carrier or trackingNumber is given;
+   *   4. read the order's LOCAL_STOCK routes in RESERVED or PICKING_PACKING;
+   *   5. lock the (productId, warehouseId) inventory_stocks rows of the tracked
+   *      ones in the global order (lockStockRowPairsInOrder), skipping routes
+   *      that are noReservationRequired, untracked, virtual, or lack a
+   *      warehouseId or order item;
+   *   6. for each LOCAL_STOCK route, compare-and-set RESERVED/PICKING_PACKING
+   *      to SHIPPED (with shipmentId when created); only when count === 1 and
+   *      the route is tracked, read the locked stock row, clamp quantity and
+   *      reserved at 0, update it, write a SALE/SHIP StockMovement audit row
+   *      naming the acting member, and collect the stock id for post-commit
+   *      reorder alerting;
+   *   7. move remaining PICKING_PACKING, PO_RAISED, and PREORDER_ACCEPTED
+   *      routes (e.g. MANUAL, DROPSHIP, PREORDER) to SHIPPED.
+   *
+   * Returns the deduplicated ids of stock rows decremented so the caller runs
+   * checkAndAlertReorderThreshold after the transaction commits.
+   */
+  async shipOrderFulfilment(
+    tx: RoutingTx,
+    businessId: string,
+    orderId: string,
+    data?: { carrier?: string; trackingNumber?: string; estimatedDelivery?: string | Date },
+    actorId: string | null = null,
+  ): Promise<string[]> {
+    await claimOrderRouting(tx, businessId, orderId);
+
+    const order = await tx.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: {
+        status: true,
+        shippingAddress: true,
+        items: { select: { id: true, productId: true, quantity: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (!canTransitionOrder(order.status, 'shipped')) {
+      throw new BadRequestException(`Cannot ship order in ${order.status} status`);
+    }
+
+    let shipmentId: string | undefined;
+    if (data?.carrier || data?.trackingNumber) {
+      const shipment = await tx.shipment.create({
+        data: {
+          businessId,
+          orderId,
+          carrier: data.carrier,
+          trackingNumber: data.trackingNumber,
+          status: 'IN_TRANSIT',
+          shippedAt: new Date(),
+          estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : undefined,
+          destinationAddress: order.shippingAddress ?? undefined,
+        },
+      });
+      shipmentId = shipment.id;
+    }
+
+    const itemsById = new Map(order.items.map((item) => [item.id, item]));
+    const localRoutes = await tx.fulfillmentRoute.findMany({
       where: {
-        id: routeId,
         businessId,
+        orderId,
         strategy: 'LOCAL_STOCK',
         status: { in: ['RESERVED', 'PICKING_PACKING'] },
       },
-      include: { order: { include: { items: true } } },
     });
 
-    if (!route) return;
-
-    const routeMeta = (route.metadata ?? {}) as RouteMetadata;
-    if (routeMeta.noReservationRequired || routeMeta.inventoryMode === 'untracked' || routeMeta.inventoryMode === 'virtual') {
-      this.logger.log(`Skipping inventory decrement for ${routeMeta.inventoryMode ?? 'untracked'} route ${routeId}`);
-      return;
-    }
-
-    if (!route.warehouseId) return;
-
-    const orderItem = (route.order.items as OrderItemShape[]).find((i) => i.id === route.orderItemId);
-    if (!orderItem) return;
-
-    const stock = await this.prisma.client.inventoryStock.findFirst({
-      where: { productId: orderItem.productId, warehouseId: route.warehouseId },
+    const routeEntries = localRoutes.map((route) => {
+      const routeMeta = (route.metadata ?? {}) as RouteMetadata;
+      const item = route.orderItemId ? itemsById.get(route.orderItemId) : undefined;
+      const untracked =
+        routeMeta.noReservationRequired ||
+        routeMeta.inventoryMode === 'untracked' ||
+        routeMeta.inventoryMode === 'virtual';
+      const tracked = Boolean(!untracked && route.warehouseId && item && item.quantity > 0);
+      return { route, routeMeta, item, tracked };
     });
 
-    if (stock) {
-      const newQuantity = Math.max(0, stock.quantity - orderItem.quantity);
-      const newReserved = Math.max(0, stock.reserved - orderItem.quantity);
+    await lockStockRowPairsInOrder(
+      tx,
+      businessId,
+      routeEntries.flatMap(({ route, item, tracked }) =>
+        tracked && route.warehouseId && item ? [{ productId: item.productId, warehouseId: route.warehouseId }] : [],
+      ),
+    );
 
-      await this.prisma.client.inventoryStock.update({
+    const decrementedStockIds = new Set<string>();
+    for (const { route, routeMeta, item, tracked } of routeEntries) {
+      const transitioned = await tx.fulfillmentRoute.updateMany({
+        where: {
+          id: route.id,
+          businessId,
+          status: { in: ['RESERVED', 'PICKING_PACKING'] },
+        },
+        data: {
+          status: 'SHIPPED',
+          ...(shipmentId ? { shipmentId } : {}),
+        },
+      });
+      if (transitioned.count !== 1) continue;
+
+      if (!tracked || !route.warehouseId || !item) {
+        if (routeMeta.noReservationRequired || routeMeta.inventoryMode === 'untracked' || routeMeta.inventoryMode === 'virtual') {
+          this.logger.log(`Skipping inventory decrement for ${routeMeta.inventoryMode ?? 'untracked'} route ${route.id}`);
+        }
+        continue;
+      }
+
+      const stock = await tx.inventoryStock.findFirst({
+        where: { businessId, productId: item.productId, warehouseId: route.warehouseId },
+      });
+      if (!stock) continue;
+
+      const newQuantity = Math.max(0, stock.quantity - item.quantity);
+      const newReserved = Math.max(0, stock.reserved - item.quantity);
+
+      await tx.inventoryStock.update({
         where: { id: stock.id },
         data: { quantity: newQuantity, reserved: newReserved },
       });
 
-      await this.checkAndAlertReorderThreshold(businessId, stock.id);
+      const quantityDelta = newQuantity - stock.quantity;
+      if (quantityDelta !== 0) {
+        await tx.stockMovement.create({
+          data: {
+            businessId,
+            warehouseId: route.warehouseId,
+            productId: item.productId,
+            type: 'SALE',
+            quantityChange: quantityDelta,
+            reasonCode: 'SHIP',
+            referenceId: orderId,
+            createdBy: actorId ?? null,
+          },
+        });
+      }
+
+      decrementedStockIds.add(stock.id);
     }
+
+    if (shipmentId) {
+      await tx.fulfillmentRoute.updateMany({
+        where: {
+          businessId,
+          orderId,
+          status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] },
+          shipmentId: null,
+        },
+        data: { status: 'SHIPPED', shipmentId },
+      });
+    }
+    await tx.fulfillmentRoute.updateMany({
+      where: {
+        businessId,
+        orderId,
+        status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] },
+      },
+      data: { status: 'SHIPPED' },
+    });
+
+    return [...decrementedStockIds];
   }
 
   /**

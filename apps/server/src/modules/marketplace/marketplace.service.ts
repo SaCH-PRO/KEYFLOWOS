@@ -2117,56 +2117,9 @@ export class MarketplaceService {
           trackingUrl: data?.trackingUrl,
           note: data?.note,
         });
-
-        let shipmentId: string | undefined;
-
-        if (data?.carrier || data?.trackingNumber) {
-          const shipment = await this.prisma.client.shipment.create({
-            data: {
-              businessId,
-              orderId,
-              carrier: data.carrier,
-              trackingNumber: data.trackingNumber,
-              status: 'IN_TRANSIT',
-              shippedAt: new Date(),
-              estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : undefined,
-              destinationAddress: order.shippingAddress ?? undefined,
-            },
-          });
-          shipmentId = shipment.id;
-        }
-
-        const localRoutes = await this.prisma.client.fulfillmentRoute.findMany({
-          where: { businessId, orderId, strategy: 'LOCAL_STOCK', status: 'RESERVED' },
-        });
-        for (const route of localRoutes) {
-          await this.fulfillmentRoutingService.decrementInventoryOnShip(businessId, route.id);
-          await this.prisma.client.fulfillmentRoute.update({
-            where: { id: route.id },
-            data: {
-              status: 'SHIPPED',
-              shipmentId: shipmentId,
-            },
-          });
-        }
-
-        if (shipmentId) {
-          await this.prisma.client.fulfillmentRoute.updateMany({
-            where: {
-              businessId,
-              orderId,
-              status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] },
-              shipmentId: null,
-            },
-            data: { status: 'SHIPPED', shipmentId },
-          });
-        } else {
-          await this.prisma.client.fulfillmentRoute.updateMany({
-            where: { businessId, orderId, status: { in: ['PICKING_PACKING', 'PO_RAISED', 'PREORDER_ACCEPTED'] } },
-            data: { status: 'SHIPPED' },
-          });
-        }
-
+        // W11-SHIP-STOCK-DECREMENT (F-26; D-136): shipment creation, tracked stock decrements,
+        // SALE/SHIP StockMovement audit rows, and route transitions run inside the transaction
+        // below under the order's routing claim (FulfillmentRoutingService.shipOrderFulfilment).
         break;
       }
 
@@ -2284,15 +2237,40 @@ export class MarketplaceService {
     // committed with no claim, so an order being routed kept the RESERVED routes and reserved stock its router then
     // committed, with 'routed' written over the cancel. A cancel now waits for the router, and the order's status is
     // checked again under the claim (400 when it can no longer be cancelled).
-    const updated = await this.prisma.client.$transaction(async (tx) => {
-      if (action === 'cancel') await this.fulfillmentRoutingService.cancelOrderFulfilment(tx, businessId, orderId);
-      await appendOrderTimeline(tx, businessId, orderId, steps);
-      return tx.marketplaceOrder.update({
-        where: { id: orderId },
-        data: updateData,
-        include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
-      });
-    }, action === 'cancel' ? ROUTING_CLAIM_TX_OPTIONS : undefined);
+    // W11-SHIP-STOCK-DECREMENT (F-26; D-136): a ship likewise runs under the order's routing claim in this transaction
+    // (shipOrderFulfilment), locking its tracked stock rows in the global order and decrementing processed or reserved
+    // LOCAL_STOCK routes once before the timeline step and shipped status commit.
+    let decrementedStockIds: string[] = [];
+    const updated = await this.prisma.client.$transaction(
+      async (tx) => {
+        if (action === 'cancel') {
+          await this.fulfillmentRoutingService.cancelOrderFulfilment(tx, businessId, orderId);
+        } else if (action === 'ship') {
+          decrementedStockIds = await this.fulfillmentRoutingService.shipOrderFulfilment(
+            tx,
+            businessId,
+            orderId,
+            data,
+            actorId,
+          );
+        }
+        await appendOrderTimeline(tx, businessId, orderId, steps);
+        return tx.marketplaceOrder.update({
+          where: { id: orderId },
+          data: updateData,
+          include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+        });
+      },
+      action === 'cancel' || action === 'ship' ? ROUTING_CLAIM_TX_OPTIONS : undefined,
+    );
+
+    if (action === 'ship') {
+      for (const stockId of decrementedStockIds) {
+        await this.fulfillmentRoutingService
+          .checkAndAlertReorderThreshold(businessId, stockId)
+          .catch((err) => this.logger.error(`Failed to check reorder threshold for stock ${stockId}: ${(err as Error).message}`));
+      }
+    }
 
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
       refundAmount: action === 'refund' ? expenseRefundAmount : undefined,
