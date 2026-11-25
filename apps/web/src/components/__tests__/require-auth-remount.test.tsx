@@ -21,7 +21,9 @@
  *     T1  a sign-in in another tab (the storage event for kf_token) is verified at once, and the shell is not shown
  *         for the new token before that verification answers;
  *     T2  a sign-out in another tab sends this tab to sign-in at once, with `from` the page it is on;
- *     T3  a change of the admin bearer in another tab (getAuthHeaders sends kf_admin_token first) is verified too.
+ *     T3  a change of the admin bearer in another tab (getAuthHeaders sends kf_admin_token first) is verified too;
+ *     T4  a token that changes while /identity/me answers (rotated in this tab) is verified before the shell shows;
+ *     T5  another tab's sign-out while the first verification is on its way sends to sign-in at once.
  *   Controls (the auth boundary as it was; each passes before and after the fix)
  *     C1  no token: sent to /auth/login?from=<path>, no /identity/me call, the page never rendered;
  *     C2  a definitive 401 (no refresh possible): the session is cleared (clearStoredBusinessId, with the
@@ -231,7 +233,7 @@ describe("FU-REQUIRE-AUTH-REMOUNT: a page change does not tear down or re-verify
   });
 });
 
-describe("FU-REQUIRE-AUTH-REMOUNT: the stored token changing in another tab is verified at once", () => {
+describe("FU-REQUIRE-AUTH-REMOUNT: a change of the stored session is verified at once", () => {
   it("T1 another tab's sign-in: verified with the new bearer, and the shell is not shown for it until that answers", async () => {
     meAnswerFor = (bearer) => (bearer === "token-b" ? "hang" : "ok");
     await renderVerified();
@@ -267,6 +269,36 @@ describe("FU-REQUIRE-AUTH-REMOUNT: the stored token changing in another tab is v
     await settle();
     expect(meCalls(), "verified again, with the admin bearer").toEqual(["token-a", "admin-1"]);
     expect(screen.queryByTestId("shell")).not.toBeNull();
+  });
+
+  it("T4 a token that changes while /identity/me answers is verified before the shell shows", async () => {
+    meAnswerFor = (bearer) => (bearer === "token-a" ? "hang" : "ok");
+    render(<App />);
+    await settle();
+    // Rotated in this tab while the first answer is on its way (refreshAccessToken raises no storage event).
+    window.localStorage.setItem("kf_token", "token-c");
+    await act(async () => {
+      hanging.forEach((resolve) => resolve(jsonResponse(200, { id: "user-a" })));
+    });
+    await settle();
+    expect(meCalls(), "the token now stored is verified too").toEqual(["token-a", "token-c"]);
+    expect(screen.queryByTestId("shell")).not.toBeNull();
+  });
+
+  it("T5 another tab's sign-out while the first verification is on its way: sent to sign-in at once", async () => {
+    meAnswerFor = () => "hang";
+    render(<App />);
+    await settle();
+    window.localStorage.removeItem("kf_token");
+    storageChange("kf_token", "token-a", null);
+    await settle();
+    expect(nav.router.replace).toHaveBeenCalledWith(`/auth/login?from=${encodeURIComponent("/app/crm/contacts")}`);
+    // The first answer arriving late changes nothing.
+    await act(async () => {
+      hanging.forEach((resolve) => resolve(jsonResponse(200, { id: "user-a" })));
+    });
+    await settle();
+    expect(screen.queryByTestId("shell"), "no protected content once signed out").toBeNull();
   });
 });
 
