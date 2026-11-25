@@ -702,7 +702,16 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
     }
     expect(ownedRes.body.needsYou.items.some((i: any) => i.sourceId === privateClaimId || i.sourceId === ID.claimIntent)).toBe(false);
     expect(ownedRes.body.today.invoices.some((i: any) => i.id === privateInvoiceId || i.id === ID.invOverdue)).toBe(false);
-    expect(ownedRes.body.today.reminders.some((r: any) => r.contactId === privateContactId || r.contactId === ID.contactMaria)).toBe(false);
+    expect(
+      ownedRes.body.today.reminders.some(
+        (r: any) =>
+          r.contactId === privateContactId ||
+          r.contactId === ID.contactMaria ||
+          r.id === privateInvoiceId ||
+          r.id === privateBookingId ||
+          r.id === ID.invOverdue,
+      ),
+    ).toBe(false);
   });
 
   it('[TD-07] R1 security (D-74 / D-57 / D-96 / D-234): STAFF sees no unassigned approvals, no other-member or financial plan steps, and storefront-only STAFF sees total: null on paid orders', async () => {
@@ -810,10 +819,9 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
     expect(ownerRes.body.needsYou.totalCount).toBeGreaterThan(5);
     expect(ownerRes.body.needsYou.hasMore).toBe(true);
     const keyProposalItem = ownerRes.body.needsYou.items.find((i: any) => i.kind === 'KEY_PROPOSAL');
-    if (keyProposalItem) {
-      expect(keyProposalItem.actions[0].endpoint).toContain(
-        `/key-autonomy/businesses/${ID.bizA}/actions/proposals/${keyProposalItem.sourceId}/`,
-      );
-    }
+    expect(keyProposalItem).toBeDefined();
+    expect(keyProposalItem.actions[0].endpoint).toContain(
+      `/key-autonomy/businesses/${ID.bizA}/actions/proposals/${keyProposalItem.sourceId}/`,
+    );
   });
 });

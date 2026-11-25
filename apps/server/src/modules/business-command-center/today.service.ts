@@ -1017,9 +1017,9 @@ export class TodayService {
 
     const filtered: TodayReminderItem[] = [];
     for (const item of result.items) {
-      if (item.contactId && canOpenContact) {
+      if (canOpenContact) {
         const mustRestrict = access.crmBookRestricted || item.kind === 'invoice';
-        if (mustRestrict && !canOpenContact(item.contactId)) {
+        if (mustRestrict && (!item.contactId || !canOpenContact(item.contactId))) {
           continue;
         }
       }
