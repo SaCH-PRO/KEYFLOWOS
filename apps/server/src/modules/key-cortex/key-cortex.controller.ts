@@ -141,7 +141,6 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import {
   CANONICAL_MODULES,
-  DEFAULT_APPROVAL_TIERS,
   defaultScopesForRole,
   LEVEL_RANK,
   MAX_APPROVAL_TIER,
