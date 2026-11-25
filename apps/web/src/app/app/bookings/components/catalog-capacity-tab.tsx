@@ -29,6 +29,7 @@ import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import { fetchStaffAvailability, setStaffAvailability, updateService, getBusinessById, updateBusiness } from "@/lib/client";
 import { getCachedBusiness } from "@/lib/workspace";
+import { percentOf, roundMoney } from "@/lib/finance/document-amounts";
 import { toast } from "sonner";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -535,9 +536,16 @@ export function depositProblem(price: number, type: DepositType, raw: string, cu
   return null;
 }
 
-/** What a booking of this service is asked to pay up front, in the business currency. */
-function depositAmount(price: number, type: DepositType, value: number): number {
-  return type === "PERCENT" ? (price * value) / 100 : value;
+/**
+ * What a booking of this service is billed up front, in the business currency: CommerceService.computeServiceDeposit,
+ * the server's own rule. PERCENT is percentOf (money.ts: the exact decimal, rounded once to cents half away from
+ * zero, so 4.10 at 15% is 0.62, not the float form's 0.61); FIXED is the value, at most the price. Every amount this
+ * tab shows for a deposit (the card and the editor's preview) is this one.
+ */
+export function depositAmount(price: number, type: DepositType, value: number): number {
+  if (!Number.isFinite(price) || !Number.isFinite(value) || value <= 0) return 0;
+  if (type === "PERCENT") return percentOf(price, Math.min(value, 100));
+  return roundMoney(Math.min(value, price));
 }
 
 function depositSummary(price: number, d: StoredDeposit, currency: string): string {

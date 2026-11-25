@@ -69,6 +69,20 @@ function percentOfCents(cents: number, rate: number): number {
   return centsNumber(scaleRounded(BigInt(cents) * r.m, r.e - 2));
 }
 
+/**
+ * `rate` percent of an amount, exact, rounded once to cents half away from zero: the server's percentOf (money.ts),
+ * which CommerceService.computeServiceDeposit bills a PERCENT deposit with. percentOf(4.1, 15) === 0.62 (the float
+ * product 4.1 * 15 / 100 reads 0.61).
+ */
+export function percentOf(amount: number, rate: number): number {
+  return fromCents(percentOfCents(toCents(amount), rate));
+}
+
+/** An amount rounded to cents half away from zero on its decimal value: the server's roundMoney (money.ts). */
+export function roundMoney(amount: number): number {
+  return fromCents(toCents(amount));
+}
+
 /** A document line: quantity x unitPrice as exact decimals, rounded to cents (3 x 1.115 = 3.35, 7 x 0.145 = 1.02). */
 export function lineAmount(quantity: number, unitPrice: number): number {
   if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice)) return Number.NaN;
