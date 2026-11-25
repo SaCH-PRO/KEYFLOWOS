@@ -36,7 +36,7 @@ vi.mock("@/hooks/use-module-events", () => ({ useModuleEmit: () => vi.fn(), useM
 vi.mock("@/lib/resume-task-registry", () => ({ registerInterruptedTask: () => "task_pow", markTaskCompleted: vi.fn() }));
 vi.mock("@/lib/navigation-context", () => ({ useNavigationContext: () => ({ getOriginContext: () => null }) }));
 vi.mock("@/components/email/compose-context", () => ({ useCompose: () => ({ open: vi.fn() }) }));
-vi.mock("@/lib/workspace", () => ({ refreshWorkspace: async () => "biz_pow", getStoredBusinessId: () => "biz_pow" }));
+vi.mock("@/lib/workspace", () => ({ refreshWorkspace: async () => "biz_pow", getStoredBusinessId: () => "biz_pow", getCachedBusiness: () => null }));
 vi.mock("@/lib/api", () => ({ apiDelete: vi.fn(async () => ({ data: null, error: null })) }));
 vi.mock("@/lib/client", () => ({
   fetchInvoices: (...args: unknown[]) => fetchInvoices(...args),
