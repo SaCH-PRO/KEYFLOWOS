@@ -89,7 +89,7 @@ Main is `977a265c` (M16 merged 18:15). V1-STATUS: 170 of 395 done, 44.4% of poin
 The throughput plan is on #80 7172896636. Server lane (Antigravity), in order:
 1. TOF-KEY-SELF-MODEL, which starts the chain TOF-KEY-SELF-MODEL → TOF-KNOWLEDGE-UPLOAD → KEY-TOOL-ALLOWLIST → DECIMALS-SERVER → CLAIM-LOOP web.
 2. DEMO-PREVIEW.
-3. FU-REFUND-GATEWAY-REFUSE (S-1).
+3. FU-REFUND-GATEWAY-REFUSE (S-1): **held for the owner** (question 51). Antigravity found that Release 0 RF-10/RF-12 and D-121 use this door on purpose (#80 7172026342).
 4. The server halves of EXPENSES-HUB-1 and VAT-BASICS.
 5. The census and RR packets.
 6. FU-TEST-FLAKES.
@@ -132,7 +132,13 @@ Plus docs.
 - **CATALOG-1 web half**, P0, L. Branch `pkt/V1-CATALOG-1-WEB`, claim `67741f84`. Building. The worker may propose a split.
 
 **Queue after those:**
-- **Free now:** P67 FU-TIMELINE-LOAD-OLDER, FU-CONTACT-SEND-QUOTE-DOOR, FU-UNDO-TOAST-SIGNOUT, FU-E2E-MOCKED-SESSION-TOKEN, SWP-CRM-WEB-POLISH, RR-OWNER-RULINGS-RECORD (docs).
+- **In cloud sessions (claimed 19:55 UTC on main `977a265c`, #80 7172995787):**
+  - P67 FU-TIMELINE-LOAD-OLDER: claim `ecf7a0e1`, session_01TnVBvEKF6S66iYNwT5nAqe.
+  - FU-CONTACT-SEND-QUOTE-DOOR: claim `c067bf97`, session_01TnVBvEZbY4vXtvn1Rwe3fk.
+  - FU-UNDO-TOAST-SIGNOUT: claim `0022c0bf`, session_01TnVBvDxNUYEcwZ9waPUH4z.
+  - Each worker posts "PACKET REPORT (pre-review)" on #80. Then the orchestrator runs two reviews and posts RETURN.
+  - If a session is gone, resume from its pkt branch: every commit is pushed.
+- **Free now:** FU-E2E-MOCKED-SESSION-TOKEN, SWP-CRM-WEB-POLISH, RR-OWNER-RULINGS-RECORD (docs).
 - **After M18:** OWNER-ALERTS-WEB and FU-NOTIFICATIONS-PAGE-REFUSED.
 - **After the server lane:** SWP-KEY-SHELL-SMOKE web (after P89), EXPENSES-HUB-1 web, CLAIM-LOOP web (after DECIMALS-SERVER), TODAY-4BLOCK.
 
@@ -195,9 +201,9 @@ Main is at `977a265c`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | **M18 (Claude)** | `wave/v1-wave-m18` (rebuild from the six pkt heads in section 0) | Proof mostly green; base run of journeys B/F/H on main in progress | PR, wave confirmations, enqueue |
 | **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 58423afe (+ repair) | Repair round 1 | Two confirmations, RETURN |
 | **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Two reviews |
-| **Claude cloud sessions** | see #80 claims (each posts its own CLAIM) | Building web packets in parallel | The orchestrator reviews and waves them |
-| **Antigravity** | P82, P83, P89 and the throughput plan (#80 7172896636) | Building | Their next wave |
-| **Owner** | - | - | Section 4 questions 40-50, plus S-1 priority; production redeploy (D-266) |
+| **Claude cloud sessions** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` (ecf7a0e1), `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` (c067bf97), `pkt/V1-FU-UNDO-TOAST-SIGNOUT` (0022c0bf) | Building (#80 7172995787) | Wait for each PACKET REPORT, then two reviews, RETURN, next Claude wave |
+| **Antigravity** | M23 (P82-P84) in the merge queue; M25 gathering P87, P88, P89, P91, P92; P90 blocked (question 52) | Building | Their next wave |
+| **Owner** | - | - | Section 4 questions 40-52 (51 = refund door S-1, 52 = P90 Release 0 contradiction, P0); production redeploy (D-266) |
 | `wave/v1-docs-p19` | main 977a265c merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -326,6 +332,22 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 
 49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
+
+51. **Bookkeeping refunds on gateway payments (S-1, server, money).** `POST /commerce/businesses/:b/payments/:p/refund` (markPaymentRefunded) checks no provider. A member with revenue write can mark a Stripe payment refunded: the invoice reopens and the posting reverses while Stripe keeps the money. `StoreOrderService.refundCheckoutPayments` does the same for storefront orders. But Release 0 RF-10/RF-12 and D-121 use this door on purpose, for out-of-band provider refunds (WiPay has no refund API; PayPal pairs the webhook). Options:
+    - (a) refuse gateway rows with 409, keeping an explicit "refunded outside KEYFLOWOS" mode for providers without a refund API, and supersede RF-10/RF-12;
+    - (b) keep as is.
+
+    Also: should storefront refunds of gateway orders go through the gateway refund? (Default: hold, as today; #80 7171899154, 7172026342.)
+52. **P90 SWP-CENSUS-V1-B (P0) Release 0 contradiction.** 10 of the 46 open write rows are pinned by Release 0 cases in which a STAFF member on role defaults writes them:
+    - presence saveDraft and publish: D11-S02/S04/S05/S09/S13/S14/S15;
+    - onboarding concierge chat, dismiss, snooze and resume: D11-C07/C09;
+    - connector test, smoke, sync and inbox-config: R0-CMF6-K04/K05/M02, V94D-F02.
+
+    Options:
+    - **Option A:** gate all 46 and supersede those cases (the test actors get the scope, or expect 403).
+    - **Option B:** mark the 10 exempt-ruled in the census and gate the other 36.
+
+    (No default for Release 0 evidence: Antigravity holds P90 until you rule; #80 7172637493.)
 
 ## 5. How to work here (learned the hard way)
 
