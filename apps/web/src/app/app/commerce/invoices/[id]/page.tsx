@@ -54,6 +54,7 @@ import {
   GATEWAY_REFUND_HREF,
   manualRefundableAmount,
   manualRefundQuestion,
+  moneyOf,
   outOfBandRefundQuestion,
   MANUAL_REFUND_CHECKING,
 } from "@/lib/manual-refund";
@@ -871,13 +872,13 @@ export default function InvoiceDetailPage() {
         title={refundTarget && isOutOfBandRefundable(refundTarget.payment) ? "Record a refund made outside KeyFlow?" : "Refund this payment?"}
         message={refundTarget?.amount != null && isOutOfBandRefundable(refundTarget.payment) ? outOfBandRefundQuestion({
           refund: formatAmount(refundTarget.amount, invoice.currency),
-          paid: formatAmount(Number(refundTarget.payment.amount), invoice.currency),
-          whole: Math.round(refundTarget.amount * 100) === Math.round(Number(refundTarget.payment.amount) * 100),
+          paid: formatAmount(moneyOf(refundTarget.payment.amount), invoice.currency),
+          whole: moneyOf(refundTarget.amount) === moneyOf(refundTarget.payment.amount),
           on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
         }) : refundTarget?.amount != null ? manualRefundQuestion({
           refund: formatAmount(refundTarget.amount, invoice.currency),
-          paid: formatAmount(Number(refundTarget.payment.amount), invoice.currency),
-          whole: Math.round(refundTarget.amount * 100) === Math.round(Number(refundTarget.payment.amount) * 100),
+          paid: formatAmount(moneyOf(refundTarget.payment.amount), invoice.currency),
+          whole: moneyOf(refundTarget.amount) === moneyOf(refundTarget.payment.amount),
           method: refundTarget.payment.method ?? refundTarget.payment.provider,
           on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
         }) : MANUAL_REFUND_CHECKING}

@@ -25,7 +25,7 @@ import {
   type PaymentsTransaction,
   type PaymentsLink,
 } from "@/lib/client";
-import { isManualPayment, manualRefundableAmount, manualRefundQuestion, MANUAL_REFUND_CHECKING } from "@/lib/manual-refund";
+import { isManualPayment, manualRefundableAmount, manualRefundQuestion, moneyOf, MANUAL_REFUND_CHECKING } from "@/lib/manual-refund";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type TabKey = "transactions" | "links" | "refunds";
@@ -354,8 +354,8 @@ export default function PaymentsPage() {
         title="Refund this payment?"
         message={refundTarget?.amount != null ? manualRefundQuestion({
           refund: formatCurrency(refundTarget.amount, refundTarget.payment.currency),
-          paid: formatCurrency(Number(refundTarget.payment.amount), refundTarget.payment.currency),
-          whole: Math.round(refundTarget.amount * 100) === Math.round(Number(refundTarget.payment.amount) * 100),
+          paid: formatCurrency(moneyOf(refundTarget.payment.amount), refundTarget.payment.currency),
+          whole: moneyOf(refundTarget.amount) === moneyOf(refundTarget.payment.amount),
           method: refundTarget.payment.method ?? refundTarget.payment.provider,
           on: `${new Date(refundTarget.payment.createdAt).toLocaleDateString()}${refundTarget.payment.invoice?.invoiceNumber ? ` for invoice ${refundTarget.payment.invoice.invoiceNumber}` : ""}`,
         }) : MANUAL_REFUND_CHECKING}

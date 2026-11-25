@@ -13,7 +13,9 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * refund here is right for: SUCCESSFUL money in whose providerPaymentId is one of the slots CommerceService.recordPayment
  * builds itself (the Record Payment form, KEY, the evidence and claim confirms, mark-paid; never a client value):
  * manual_<invoiceId>_key_<32 hex> and manual_<invoiceId>_ref_<32 hex> (manualProviderPaymentId),
- * manual_<invoiceId>_markpaid_<32 hex> (markInvoicePaid) and manual_<epoch ms>_<base36> (no key, no reference). The
+ * manual_<invoiceId>_markpaid_<32 hex> (markInvoicePaid) and manual_<epoch ms>_<base36> (no key, no reference), and
+ * the mark-paid row markInvoicePaid wrote before R0-PL-04, manual_<invoiceId>_<13-digit epoch ms> (repair round 2:
+ * a storefront row carries its order's id there, never the invoice's; a pay-link intent is PENDING). The
  * server reads the same prefix as hand-recorded (payments.service.ts MANUAL_PAYMENT_ID_PREFIX).
  *
  * Fail closed: the provider is not read at all. On a hand-recorded row it is the method text the member typed ("Cash",
@@ -25,7 +27,8 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export function isManualPayment(p: { status: string; amount: number | string; providerPaymentId: string; invoiceId: string }): boolean {
   if (p.status !== "SUCCESSFUL" || !(Number(p.amount) > 0) || typeof p.providerPaymentId !== "string") return false;
   const slot = new RegExp(`^manual_${escapeRegExp(p.invoiceId)}_(key|ref|markpaid)_[0-9a-f]{32}$`);
-  return slot.test(p.providerPaymentId) || /^manual_\d+_[0-9a-z]{1,6}$/.test(p.providerPaymentId);
+  const legacyMarkPaid = new RegExp(`^manual_${escapeRegExp(p.invoiceId)}_\\d{13}$`);
+  return slot.test(p.providerPaymentId) || legacyMarkPaid.test(p.providerPaymentId) || /^manual_\d+_[0-9a-z]{1,6}$/.test(p.providerPaymentId);
 }
 
 /**
@@ -89,6 +92,14 @@ function toCents(amount: number): number {
   return Number(scaleRounded(m, e + 2));
 }
 
+/**
+ * An amount as the server stores and refunds it: whole cents, half away from zero on its exact decimal value (a
+ * legacy 1.005 is 1.01; float arithmetic reads it as 1.00). For the dialog's figures and its "whole" test.
+ */
+export function moneyOf(amount: number | string): number {
+  return toCents(Number(amount)) / 100;
+}
+
 /** The sum of money values in whole cents, added as exact decimals and rounded once (the server's sumMoney). */
 function sumCents(amounts: number[]): number {
   if (amounts.length === 0) return 0;
@@ -141,7 +152,7 @@ export function manualRefundableAmount(
  */
 export function manualRefundQuestion(input: { refund: string; paid: string; whole: boolean; method?: string | null; on: string }): string {
   const paidBy = `paid${input.method ? ` by ${input.method}` : ""} on ${input.on}`;
-  const what = input.whole ? `Refund the ${input.paid} ${paidBy}?` : `Refund ${input.refund} of the ${input.paid} ${paidBy} (all that is left of it)?`;
+  const what = input.whole ? `Refund the ${input.refund} ${paidBy}?` : `Refund ${input.refund} of the ${input.paid} ${paidBy} (all that is left of it)?`;
   return `${what} The invoice is owed that much again. KeyFlow records the refund: give the money back to the customer yourself.`;
 }
 
@@ -152,7 +163,7 @@ export function manualRefundQuestion(input: { refund: string; paid: string; whol
  */
 export function outOfBandRefundQuestion(input: { refund: string; paid: string; whole: boolean; on: string }): string {
   const what = input.whole
-    ? `Record that you refunded the ${input.paid} paid through WiPay on ${input.on} outside KeyFlow?`
+    ? `Record that you refunded the ${input.refund} paid through WiPay on ${input.on} outside KeyFlow?`
     : `Record that you refunded ${input.refund} of the ${input.paid} paid through WiPay on ${input.on} (all that is left of it) outside KeyFlow?`;
   return `${what} WiPay refunds are not made through KeyFlow: refund the customer in WiPay first. This only records the refund in the books, and the invoice is owed that much again.`;
 }
