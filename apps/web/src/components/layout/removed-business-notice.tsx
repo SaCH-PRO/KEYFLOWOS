@@ -50,7 +50,7 @@ export function RemovedBusinessNotice() {
           {notice.name ? <>You no longer have access to {notice.name}.</> : <>You no longer have access to a business you were working in.</>}
         </p>
         <p className="text-muted-foreground mt-0.5">
-          {notice.name ?? "Its"} owner removed you from the team. Ask them if you think this is a mistake.
+          Your access to it was removed or changed. Ask its owner if you think this is a mistake.
         </p>
         {remaining.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-2">

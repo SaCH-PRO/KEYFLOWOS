@@ -11,24 +11,40 @@
 const REMOVED_NOTICE_KEY = "kf_removed_business";
 export const BUSINESS_REMOVED_EVENT = "kf:business-removed";
 export type RemovedBusinessNotice = { id: string; name: string | null };
+/** As stored: with the person it was raised for, so it is never shown to anyone else (security review MAJOR-1). */
+type StoredNotice = RemovedBusinessNotice & { userId: string | null };
 
-export function getRemovedBusinessNotice(): RemovedBusinessNotice | null {
+function readStored(): StoredNotice | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(REMOVED_NOTICE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Partial<RemovedBusinessNotice>) : null;
+    const parsed = raw ? (JSON.parse(raw) as Partial<StoredNotice>) : null;
     return parsed && typeof parsed.id === "string"
-      ? { id: parsed.id, name: typeof parsed.name === "string" ? parsed.name : null }
+      ? {
+          id: parsed.id,
+          name: typeof parsed.name === "string" ? parsed.name : null,
+          userId: typeof parsed.userId === "string" ? parsed.userId : null,
+        }
       : null;
   } catch {
     return null;
   }
 }
 
-/** Store the notice and announce it to the shell. */
-export function raiseRemovedBusinessNotice(notice: RemovedBusinessNotice) {
+export function getRemovedBusinessNotice(): RemovedBusinessNotice | null {
+  const stored = readStored();
+  return stored ? { id: stored.id, name: stored.name } : null;
+}
+
+/** Whom the pending notice was raised for (null: none pending, or raised without a known user). */
+export function getRemovedBusinessNoticeUserId(): string | null {
+  return readStored()?.userId ?? null;
+}
+
+/** Store the notice for this person and announce it to the shell. */
+export function raiseRemovedBusinessNotice(notice: RemovedBusinessNotice, userId: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(REMOVED_NOTICE_KEY, JSON.stringify(notice));
+  window.localStorage.setItem(REMOVED_NOTICE_KEY, JSON.stringify({ ...notice, userId }));
   window.dispatchEvent(new CustomEvent(BUSINESS_REMOVED_EVENT, { detail: notice }));
 }
 

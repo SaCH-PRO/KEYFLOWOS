@@ -8,6 +8,7 @@ import { getApiBase } from "./api-base";
 import {
   dismissRemovedBusinessNotice,
   getRemovedBusinessNotice,
+  getRemovedBusinessNoticeUserId,
   raiseRemovedBusinessNotice,
 } from "./removed-business-notice";
 
@@ -308,6 +309,9 @@ export function purgeOnboardingTranscripts() {
 /** Remove the admin session from localStorage and the cookies. Never throws. */
 export function clearAdminSession() {
   if (typeof window === "undefined") return;
+  // Every sign-in and sign-out runs this first: a removed-business notice belongs to the session that raised it,
+  // never to the next person on the device (SWP-REMOVED-MEMBER-NOTICE, security review MAJOR-1).
+  dismissRemovedBusinessNotice();
   for (const key of ADMIN_SESSION_KEYS) {
     window.localStorage.removeItem(key);
     if (typeof document !== "undefined") {
@@ -363,7 +367,7 @@ function noteRemovedBusiness(stored: string, signedIn: CachedUser | null) {
   const before = getCachedUser();
   if (!signedIn || !before || before.id !== signedIn.id) return;
   const cached = getCachedBusiness();
-  raiseRemovedBusinessNotice({ id: stored, name: cached?.id === stored && cached.name ? cached.name : null });
+  raiseRemovedBusinessNotice({ id: stored, name: cached?.id === stored && cached.name ? cached.name : null }, signedIn.id);
 }
 
 export function clearStoredBusinessId() {
@@ -505,21 +509,35 @@ async function resolveBusinessSelection(
   if (generation !== selectionGeneration || getStoredBusinessId() !== stored) return onSuperseded();
   const user = me && typeof me === "object" && typeof (me as CachedUser).id === "string" ? (me as CachedUser) : null;
 
+  // SWP-REMOVED-MEMBER-NOTICE (security review MINOR-1): the stored business and its cache were left by another person
+  // (the cached user is not the signed-in one): they are not this person's to keep, to name or to lose. Forget them,
+  // and any notice, before anything below reads them or overwrites the cached user.
+  let current = stored;
+  const before = getCachedUser();
+  if (user && before && before.id !== user.id) {
+    forgetStoredBusiness();
+    dismissRemovedBusinessNotice();
+    current = null;
+  }
+  // A notice is only ever the person's it was raised for (security review MAJOR-1).
+  const noticeFor = getRemovedBusinessNoticeUserId();
+  if (user && noticeFor && noticeFor !== user.id) dismissRemovedBusinessNotice();
+
   if (businesses === null) {
     if (user) setCachedUser(user);
-    return stored;
+    return current;
   }
   // The list is authoritative: a stored business it no longer holds was lost (removed by an owner), not chosen away.
-  if (stored && !businesses.some((b) => b.id === stored)) noteRemovedBusiness(stored, user);
+  if (current && !businesses.some((b) => b.id === current)) noteRemovedBusiness(current, user);
   // Access given back (re-invited): the notice no longer holds.
   const pending = getRemovedBusinessNotice();
   if (pending && businesses.some((b) => b.id === pending.id)) dismissRemovedBusinessNotice();
-  if (businesses.length === 0) return bootstrapFirstBusiness(generation, stored, onSuperseded);
+  if (businesses.length === 0) return bootstrapFirstBusiness(generation, current, onSuperseded);
 
   const chosen =
     preferred.map((id) => businesses.find((b) => b.id === id)).find((b) => b !== undefined) ??
     businesses[0];
-  if (chosen.id !== stored) setStoredBusinessId(chosen.id);
+  if (chosen.id !== current) setStoredBusinessId(chosen.id);
   setCachedBusiness(chosen);
   if (user) setCachedUser(user);
   return chosen.id;

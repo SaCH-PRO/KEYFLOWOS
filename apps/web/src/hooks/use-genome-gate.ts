@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { getRemovedBusinessNotice } from "@/lib/removed-business-notice";
+import { BUSINESS_REMOVED_EVENT, getRemovedBusinessNotice } from "@/lib/removed-business-notice";
 import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
 
 const ALLOWED_PATHS = [
@@ -61,6 +61,14 @@ export function useGenomeGate(): GenomeGateState {
     genomeIntegrity: null,
     genesisCompleted: null,
   }));
+  // SWP-REMOVED-MEMBER-NOTICE (security review MINOR-3): re-check when the removed-business notice is raised or
+  // dismissed, so the gate applies again as soon as the member dismisses it.
+  const [noticeVersion, setNoticeVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setNoticeVersion((v) => v + 1);
+    window.addEventListener(BUSINESS_REMOVED_EVENT, bump);
+    return () => window.removeEventListener(BUSINESS_REMOVED_EVENT, bump);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +138,7 @@ export function useGenomeGate(): GenomeGateState {
     return () => {
       cancelled = true;
     };
-  }, [pathname, searchParams, router]);
+  }, [pathname, searchParams, router, noticeVersion]);
 
   return state;
 }
