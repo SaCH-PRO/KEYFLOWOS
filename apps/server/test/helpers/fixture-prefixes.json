@@ -823,6 +823,11 @@
       "packet": "V1-95 (W9-IDENTITY-BACKFILL-SCRIPT)"
     },
     {
+      "prefix": "v95c_",
+      "owner": "apps/server/test/invoice-remaining-credits.integration.test.ts",
+      "packet": "V1-95 (FU-INVOICE-REMAINING-CREDITS, P65)"
+    },
+    {
       "prefix": "v95p_",
       "owner": "apps/server/test/contact-custom-field-names-tenant.integration.test.ts",
       "packet": "V1-95 (W9-CUSTOM-FIELDS-TENANT)"
