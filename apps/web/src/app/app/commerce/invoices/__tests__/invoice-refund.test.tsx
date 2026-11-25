@@ -23,6 +23,16 @@
  *   - a refusal is shown in the server's own words where the member is looking, never as a refund: a 403 also
  *     withdraws Refund; a 409 reads the payments again.
  *
+ * Repair round 1 (the two reviews' minors; RED-R1 cases fail at 58423afe):
+ *   - a payment is offered Refund only when the server's hand-recording door wrote it (its providerPaymentId is one of
+ *     recordPayment's manual_ slots), whatever its provider says: a gateway row, a row of an unknown provider, a
+ *     gateway name in another casing and a storefront order's row are not (fail closed);
+ *   - Refund reads the invoice and its payments again and names the amount from that read (a stale cap is not used);
+ *   - the amount is summed as the server sums it (exact decimals, rounded once), so a legacy sub-cent refund counts;
+ *   - the dialog says what was paid and what will be refunded ("Refund TTD 60.00 of the TTD 100.00 paid by Cash on");
+ *   - test gaps closed (CONTROL at 58423afe): an unlinked same-provider refund is subtracted where the cap does not hide
+ *     it, and a refund linked by provider and reference is that payment's.
+ *
  * The page is mounted as the route renders it; its data doors (@/lib/client), the workspace, the router and the
  * composer are stubbed with server-shaped answers.
  */
@@ -71,6 +81,9 @@ const TTD = (n: number) => formatAmount(n, "TTD");
 
 type Row = PaymentRecord & { reference?: string | null; method?: string | null };
 
+/** 32 hex characters standing for the server's sha256 slice. */
+const hex32 = (id: string) => Array.from(id, (c) => c.charCodeAt(0).toString(16)).join("").padEnd(32, "0").slice(0, 32);
+
 function pay(id: string, amount: number, over: Partial<Row> = {}): Row {
   return {
     id,
@@ -79,7 +92,8 @@ function pay(id: string, amount: number, over: Partial<Row> = {}): Row {
     currency: "TTD",
     provider: "Cash",
     method: "Cash",
-    providerPaymentId: `manual_${INV}_${id}`,
+    // recordPayment's keyed slot (CommerceService.manualProviderPaymentId): what the Record Payment form writes.
+    providerPaymentId: `manual_${INV}_key_${hex32(id)}`,
     reference: null,
     createdAt: "2026-11-20T10:00:00.000Z",
     businessId: BIZ,
@@ -90,7 +104,7 @@ function pay(id: string, amount: number, over: Partial<Row> = {}): Row {
 
 /** The refund row the server writes for `of`: negative, REFUNDED, linked by reference (D-14). */
 function refundRow(id: string, of: Row, amount = Number(of.amount)): Row {
-  return pay(id, -amount, { status: "REFUNDED", provider: of.provider, method: of.method, providerPaymentId: `manual_refund_${of.id}_${id}`, reference: of.providerPaymentId });
+  return pay(id, -amount, { status: "REFUNDED", provider: of.provider, method: of.method, providerPaymentId: `manual_refund_${of.id}_${hex32(id).slice(0, 16)}`, reference: of.providerPaymentId });
 }
 
 const CASH = pay("pay_cash", 100);
@@ -154,6 +168,16 @@ function pressRefund(id: string) {
   fireEvent.click(button!);
 }
 
+/** The dialog's confirm, once it names `amount` and can be pressed. */
+async function confirmFor(amount: number): Promise<HTMLElement> {
+  let confirm: HTMLElement | null = null;
+  await waitFor(() => {
+    confirm = within(dialog()!).getByRole("button", { name: `Refund ${TTD(amount)}` });
+    expect(confirm).not.toBeDisabled();
+  });
+  return confirm!;
+}
+
 beforeEach(() => {
   for (const fn of [getInvoice, getInvoiceTimeline, listInvoicePayments, refundPayment]) fn.mockReset();
   for (const fn of [toast.success, toast.error, toast.info, toast.warning]) vi.mocked(fn).mockReset();
@@ -169,7 +193,7 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
   it("RED-BEFORE: a payment recorded by hand offers Refund; a gateway payment, a refund row and a pending scan do not", async () => {
     const bank = pay("pay_bank", 50, { provider: "Bank Transfer", method: "Bank Transfer" });
     const stripe = pay("pay_stripe", 40, { provider: "stripe", method: "card", providerPaymentId: "pi_123" });
-    const pending = pay("pay_scan", 30, { status: "PENDING", provider: "extracted", method: "Bank Transfer" });
+    const pending = pay("pay_scan", 30, { status: "PENDING", provider: "extracted", method: "Bank Transfer", providerPaymentId: `extracted_${hex32("scan")}` });
     const rows = [CASH, bank, stripe, pending];
     await openPayments(invoice("PARTIALLY_PAID", rows, 190, 110), rows);
 
@@ -179,18 +203,37 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
     expect(refundButton("pay_scan"), "a pending scan is not money yet").toBeNull();
   });
 
+  it("RED-R1 (fail closed): only a row the hand-recording door wrote offers Refund, whatever its provider says", async () => {
+    const markPaid = pay("pay_markpaid", 20, { provider: "manual", method: "MANUAL", providerPaymentId: `manual_${INV}_markpaid_${hex32("mp")}` });
+    const unkeyed = pay("pay_unkeyed", 10, { provider: "Other", method: "Other", providerPaymentId: "manual_1764000000000_k3x9q2" });
+    const byRef = pay("pay_byref", 10, { provider: "PAYPAL", method: "PAYPAL", providerPaymentId: `manual_${INV}_ref_${hex32("rf")}` });
+    const paypal = pay("pay_paypal", 10, { provider: "paypal", method: "paypal", providerPaymentId: "8AB12345CD678901E" });
+    const wipay = pay("pay_wipay", 10, { provider: "wipay", method: "card", providerPaymentId: "wipay_txn_77" });
+    const casing = pay("pay_casing", 10, { provider: "Stripe", method: "card", providerPaymentId: "pi_999" });
+    const unknown = pay("pay_unknown", 10, { provider: "fygaro", method: "card", providerPaymentId: "fyg_abc123" });
+    const manualNamed = pay("pay_named", 10, { provider: "manual", method: "MANUAL", providerPaymentId: "ch_3abc" });
+    const store = pay("pay_store", 10, { provider: "manual", method: "manual", providerPaymentId: "manual_cmorder123_1764000000000" });
+    const rows = [CASH, markPaid, unkeyed, byRef, paypal, wipay, casing, unknown, manualNamed, store];
+    await openPayments(invoice("PARTIALLY_PAID", rows, 200, 100), rows);
+
+    for (const id of ["pay_cash", "pay_markpaid", "pay_unkeyed", "pay_byref"]) expect(refundButton(id), `${id} was recorded by hand`).not.toBeNull();
+    for (const id of ["pay_paypal", "pay_wipay", "pay_casing", "pay_unknown", "pay_named", "pay_store"]) {
+      expect(refundButton(id), `${id} was not written by the hand-recording door`).toBeNull();
+    }
+  });
+
   it("RED-BEFORE: Refund asks first, naming the whole payment; nothing is sent until it is confirmed, and Cancel sends nothing", async () => {
     await openPayments(invoice("PARTIALLY_PAID", [CASH], 100, 200), [CASH]);
 
     pressRefund("pay_cash");
-    const asked = dialog();
-    expect(asked, "a confirm dialog opens").not.toBeNull();
-    expect(asked!.textContent).toContain(TTD(100));
-    expect(within(asked!).queryByRole("spinbutton"), "no amount field: the whole payment (D-169)").toBeNull();
-    expect(within(asked!).queryByRole("textbox", { name: /amount/i })).toBeNull();
+    await confirmFor(100);
+    const asked = dialog()!;
+    expect(asked.textContent).toContain(`Refund the ${TTD(100)} paid by Cash on`);
+    expect(within(asked).queryByRole("spinbutton"), "no amount field: the whole payment (D-169)").toBeNull();
+    expect(within(asked).queryByRole("textbox", { name: /amount/i })).toBeNull();
     expect(refundPayment).not.toHaveBeenCalled();
 
-    fireEvent.click(within(asked!).getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(within(asked).getByRole("button", { name: /^cancel$/i }));
     expect(dialog()).toBeNull();
     expect(refundPayment).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
@@ -201,13 +244,13 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
     const refunded = refundRow("pay_refund", CASH);
     let answer: (v: unknown) => void = () => {};
     refundPayment.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+
+    pressRefund("pay_cash");
+    const confirm = await confirmFor(100);
     const reads = getInvoice.mock.calls.length;
     const listReads = listInvoicePayments.mock.calls.length;
     getInvoice.mockResolvedValue({ data: invoice("SENT", [CASH, refunded], 0, 300), error: null });
     listInvoicePayments.mockResolvedValue(listed([refunded, CASH], 0, 300));
-
-    pressRefund("pay_cash");
-    const confirm = within(dialog()!).getByRole("button", { name: /^refund/i });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     expect(refundPayment, "one POST, however often it is pressed while in flight").toHaveBeenCalledTimes(1);
@@ -233,7 +276,7 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
     refundPayment.mockResolvedValue({ data: null, error: refusal, status: 403 });
 
     pressRefund("pay_cash");
-    fireEvent.click(within(dialog()!).getByRole("button", { name: /^refund/i }));
+    fireEvent.click(await confirmFor(100));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(refusal));
     expect(toast.success).not.toHaveBeenCalled();
@@ -245,10 +288,11 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
     const refusal = "Payment is already refunded";
     await openPayments(invoice("PARTIALLY_PAID", [CASH], 100, 200), [CASH]);
     refundPayment.mockResolvedValue({ data: null, error: refusal, status: 409 });
-    const listReads = listInvoicePayments.mock.calls.length;
 
     pressRefund("pay_cash");
-    fireEvent.click(within(dialog()!).getByRole("button", { name: /^refund/i }));
+    const confirm = await confirmFor(100);
+    const listReads = listInvoicePayments.mock.calls.length;
+    fireEvent.click(confirm);
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(refusal));
     expect(toast.success).not.toHaveBeenCalled();
@@ -268,9 +312,70 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
     expect(refundButton("pay_done"), "a refund row is not refunded").toBeNull();
 
     pressRefund("pay_cash");
-    const text = dialog()!.textContent ?? "";
-    expect(text, "the refund is capped at what the invoice received net (the server's cap)").toContain(TTD(40));
-    expect(text).not.toContain(TTD(100));
+    await confirmFor(40);
+    expect(within(dialog()!).queryByRole("button", { name: `Refund ${TTD(100)}` }), "the refund is capped at what the invoice received net (the server's cap)").toBeNull();
+  });
+
+  it("RED-R1 (fresh amount): Refund reads the invoice and its payments again and names the amount from that read, not the stale one", async () => {
+    await openPayments(invoice("PARTIALLY_PAID", [CASH], 100, 200), [CASH]);
+    // Meanwhile another member refunded part of it (60) through the partial door: 40 is left.
+    const part = refundRow("pay_part", CASH, 60);
+    const reads = getInvoice.mock.calls.length;
+    const listReads = listInvoicePayments.mock.calls.length;
+    getInvoice.mockResolvedValue({ data: invoice("PARTIALLY_PAID", [CASH, part], 40, 260), error: null });
+    listInvoicePayments.mockResolvedValue(listed([part, CASH], 40, 260));
+
+    pressRefund("pay_cash");
+    await confirmFor(40);
+    expect(getInvoice.mock.calls.length, "the invoice is read again").toBeGreaterThan(reads);
+    expect(listInvoicePayments.mock.calls.length, "its payments are read again").toBeGreaterThan(listReads);
+    expect(within(dialog()!).queryByRole("button", { name: `Refund ${TTD(100)}` }), "never the stale amount").toBeNull();
+  });
+
+  it("RED-R1 (wording): a partly refunded payment's dialog says what was paid and what will be refunded", async () => {
+    const part = refundRow("pay_part", CASH, 40);
+    await openPayments(invoice("PARTIALLY_PAID", [CASH, part], 60, 240), [part, CASH]);
+
+    pressRefund("pay_cash");
+    await confirmFor(60);
+    expect(dialog()!.textContent).toContain(`Refund ${TTD(60)} of the ${TTD(100)} paid by Cash on`);
+    expect(dialog()!.textContent).not.toMatch(/TTD 60\.00 paid/);
+  });
+
+  it("RED-R1 (rounding parity): legacy sub-cent refund rows are summed exactly and rounded once, as the server sums them", async () => {
+    const other = pay("pay_other", 50);
+    // Two legacy rows of -0.004 linked to the cash payment: the server sums 0.008 and rounds once to 0.01.
+    const legacyA = refundRow("pay_legacy_a", CASH, 0.004);
+    const legacyB = refundRow("pay_legacy_b", CASH, 0.004);
+    const rows = [CASH, other, legacyA, legacyB];
+    await openPayments(invoice("PARTIALLY_PAID", rows, 149.99, 150.01), rows);
+
+    pressRefund("pay_cash");
+    await confirmFor(99.99);
+  });
+
+  it("CONTROL-R1 (test gap): an unlinked same-provider refund is subtracted where the cap does not hide it", async () => {
+    const big = pay("pay_big", 150);
+    const unlinked = pay("pay_unlinked", -60, { status: "REFUNDED", providerPaymentId: "manual_refund_unlinked", reference: null });
+    const rows = [CASH, big, unlinked];
+    await openPayments(invoice("PARTIALLY_PAID", rows, 190, 110), rows);
+
+    pressRefund("pay_cash");
+    await confirmFor(40);
+  });
+
+  it("CONTROL-R1 (test gap): a refund linked by its provider and the payment's own reference is that payment's", async () => {
+    const withRef = pay("pay_ref", 100, { reference: "R-7" });
+    const other = pay("pay_other", 150);
+    // The provider's refund names the payment's reference, not its providerPaymentId.
+    const linked = pay("pay_ref_refund", -100, { status: "REFUNDED", providerPaymentId: "manual_refund_byref", reference: "R-7" });
+    const rows = [withRef, other, linked];
+    await openPayments(invoice("PARTIALLY_PAID", rows, 150, 150), rows);
+
+    expect(refundButton("pay_ref"), "nothing is left of it").toBeNull();
+    expect(within(rowOf("pay_ref")).getByText(/^refunded$/i)).toBeInTheDocument();
+    pressRefund("pay_other");
+    await confirmFor(150);
   });
 
   it("CONTROL: a payment recorded on a paid invoice is listed with its amount in the invoice's currency", async () => {
