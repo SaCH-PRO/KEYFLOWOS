@@ -24,6 +24,8 @@
  *                    never "Communication whatsapp" or "Sms sent"
  *   TCH-10  RED      a pasted message's note whose WhatsApp event is not in the page is WhatsApp, not a note
  *   TCH-11  RED      a stored code in any case reads its channel (Note.Created is a note, Communication.Call a call)
+ *   TCH-12  pin      a copied message and a campaign read their data.channel, else WhatsApp and email (mutation pin)
+ *   TCH-13  pin      only a pasted message's own note (source whatsapp_inbound) folds into it (mutation pin)
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -293,5 +295,32 @@ describe("D-277: the Timeline has a channel filter", () => {
     choose("Calls");
     expect(screen.getByText("Left a voicemail")).toBeInTheDocument();
     expect(screen.queryByText("Prefers mornings")).not.toBeInTheDocument();
+  });
+
+  it("TCH-12 pin: a copied message and a campaign read their data.channel, else WhatsApp and email", async () => {
+    served = [
+      { id: "ev_copy", contactId: C, type: "message.copied", createdAt: at(1), data: { body: "Copied for WhatsApp" } },
+      { id: "ev_copy_sms", contactId: C, type: "message.copied", createdAt: at(2), data: { channel: "SMS", body: "Copied for SMS" } },
+      { id: "ev_open", contactId: C, type: "campaign.opened", createdAt: at(3), data: { title: "Spring news" } },
+    ];
+    await renderTimeline();
+    expect([countOf("WhatsApp"), countOf("SMS"), countOf("Email")]).toEqual([1, 1, 1]);
+    choose("WhatsApp");
+    expect(screen.getByText("Copied for WhatsApp")).toBeInTheDocument();
+    choose("SMS");
+    expect(screen.getByText("Copied for SMS")).toBeInTheDocument();
+    choose("Email");
+    expect(screen.getByText("Spring news")).toBeInTheDocument();
+  });
+
+  it("TCH-13 pin: only a pasted message's own note folds; an ordinary note a WhatsApp event names stays a note", async () => {
+    served = [
+      { ...NOTE, data: { noteId: "n_shared" } },
+      { ...PASTED[1], data: { ...PASTED[1].data, noteId: "n_shared" } },
+    ];
+    await renderTimeline();
+    expect(countOf("All")).toBe(2);
+    expect(countOf("Notes")).toBe(1);
+    expect(countOf("WhatsApp")).toBe(1);
   });
 });
