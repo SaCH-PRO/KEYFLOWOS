@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGu
 import { CatalogService } from './catalog.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { CreateProductDto } from '../commerce/dto/create-product.dto';
 import { BulkProductsDto } from '../commerce/dto/bulk-products.dto';
@@ -43,19 +44,22 @@ export class CatalogController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/products')
   createProduct(@Param('businessId') businessId: string, @Body() body: CreateProductDto) {
     return this.catalog.createProduct({ ...body, businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/products/bulk')
   bulkUpdateProducts(@Param('businessId') businessId: string, @Body() body: BulkProductsDto) {
     return this.catalog.bulkUpdateProducts(businessId, body.ids, body.action);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/products/:productId')
   updateProduct(
     @Param('businessId') businessId: string,
@@ -65,7 +69,8 @@ export class CatalogController {
     return this.catalog.updateProduct({ ...body, businessId, productId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/products/:productId')
   deleteProduct(@Param('businessId') businessId: string, @Param('productId') productId: string) {
     return this.catalog.deleteProduct(businessId, productId);
@@ -79,13 +84,15 @@ export class CatalogController {
     return this.catalog.listServices(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/services')
   createService(@Param('businessId') businessId: string, @Body() body: CreateCatalogServiceDto) {
     return this.catalog.createService({ ...body, businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Patch('businesses/:businessId/services/:serviceId')
   updateService(
     @Param('businessId') businessId: string,
@@ -95,13 +102,15 @@ export class CatalogController {
     return this.catalog.updateService({ ...body, businessId, serviceId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Delete('businesses/:businessId/services/:serviceId')
   deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
     return this.catalog.deleteService(businessId, serviceId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/services/batch')
   batchServices(@Param('businessId') businessId: string, @Body() body: BatchCatalogServicesDto) {
     return this.catalog.batchServices(businessId, body);

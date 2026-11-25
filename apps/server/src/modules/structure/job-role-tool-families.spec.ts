@@ -1313,10 +1313,10 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
  * either has a granted tool or is listed here, so a new family has to be placed on purpose.
  */
 const UNMAPPED: Record<string, string> = {
-  apply: 'CatalogService.updateProduct is also exposed unscoped by catalog.controller',
+  // apply: granted since SWP-CENSUS-V1-A (P87) gated CatalogController.updateProduct (revenue write)
   approval: 'approval.controller declares no module scope',
   automations: 'FlowService.createAutomation/updateAutomation back no route; playbook routes (automation.controller) are unscoped',
-  bookings: 'bookings.controller declares no module scope (the legacy `bookings` key still grants bookings_*)',
+  // bookings: granted since SWP-CENSUS-V1-A (P87) gated BookingsController write routes (bookings write)
   comms: 'CommunicationsService.sendBroadcast backs no route',
   community: 'reads Prisma directly; no service call',
   content: 'content-ops.controller declares no module scope (the legacy `content` key still grants content_*)',
@@ -1369,11 +1369,15 @@ const UNMAPPED_GOVERNED: Record<string, string[]> = {
  * granted exactly these (SEC-V21b-02: payroll_set_rate, payroll_generate_run, ...).
  */
 const UNGRANTED: Record<string, string> = {
+  // SWP-CENSUS-V1-A (P87): bookings family now grants its write tools (bookings write); reads stay ungranted and offerSlot is ambient-bound
+  bookings_list_bookings: 'reads Prisma directly; no service call',
+  bookings_list_services: 'reads Prisma directly; no service call',
+  bookings_list_waitlist: 'BookingWaitlistService.listWaitlist is reached by bookings.controller GET, which is unscoped',
+  bookings_offer_waitlist_slot: 'BookingWaitlistService.offerSlot finds the waitlist entry by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; bookings:write is only a floor)',
   calendar_check_conflicts: 'reads Prisma directly; no service call (baseline read for every position)',
   commerce_send_invoice:
     "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), with a pay link from CommerceService.automatedInvoiceUrl, which backs no route (V1-46b), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
-  commerce_create_product: 'CatalogService.createProduct is reached by catalog.controller, which is unscoped',
-  commerce_update_product: 'CatalogService.updateProduct is reached by catalog.controller and trash restore, both unscoped',
+  // commerce_create_product / commerce_update_product: granted (revenue write) since SWP-CENSUS-V1-A (P87) gated CatalogController product writes
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
   // finance_auto_match_bank: granted (revenue write) since PR195-BOOKS-DOORS (SEC-P195JS-1) gated the statement
   // import and the auto-match, the member routes to BankMatchingService.autoMatch
@@ -1507,6 +1511,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     // call updated the request by its bare id, rule 2b) until FOLLOW3-D15 bound ProcurementService's writes
     // to the business: they are operations write in the table below
     expect(derived.governedUngranted).toEqual([
+      'bookings_offer_waitlist_slot',
       'commerce_send_invoice',
       'execute_custom_logic',
       'send_message_with_approval',
@@ -1552,14 +1557,18 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         tag_contact: 'write',
       },
       revenue: {
+        // SWP-CENSUS-V1-A (P87): CatalogController product writes require revenue write
+        apply_storefront_recommendation: 'write',
         commerce_convert_quote: 'write',
         commerce_create_invoice: 'write',
+        commerce_create_product: 'write',
         commerce_create_quote: 'write',
         commerce_delete_invoice: 'write',
         commerce_list_invoices: 'read',
         commerce_mark_invoice_paid: 'write',
         // commerce_send_invoice: GOVERNED_UNGRANTED (review 7 DRV5-2)
         commerce_update_invoice: 'write',
+        commerce_update_product: 'write',
         // the report routes require revenue:read (owner ruling D-57, V1-81 FOLLOW3-A7 item 9)
         finance_balance_sheet: 'read',
         finance_cashflow: 'read',
@@ -1597,6 +1606,13 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         reports_generate: 'read',
       },
       bookings: {
+        // SWP-CENSUS-V1-A (P87): BookingsController write routes require bookings write
+        bookings_add_to_waitlist: 'write',
+        bookings_cancel_booking: 'write',
+        bookings_cancel_waitlist_entry: 'write',
+        bookings_create_booking: 'write',
+        bookings_mark_no_show: 'write',
+        bookings_reschedule_booking: 'write',
         calendar_create_event: 'write',
         calendar_list_events: 'read',
       },
@@ -2060,7 +2076,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       expect(writes.filter((t) => HOLDER_AWARE.includes(t))).toEqual(HOLDER_AWARE);
       // W9-KEY-OBLIGATIONS-CALLS (D-88): and the holder-aware call-log tools, asserted below too
       expect(writes.filter((t) => CALL_LOG_HOLDER_AWARE.includes(t))).toEqual(CALL_LOG_HOLDER_AWARE);
-      expect(withheld).toEqual(['crm_delete_contact', 'crm_update_contact', 'tag_contact']);
+      expect(withheld).toEqual(['bookings_create_booking', 'crm_delete_contact', 'crm_update_contact', 'tag_contact']);
       expect([...ROW].sort()).toEqual(withheld);
     });
 
@@ -2619,9 +2635,9 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     it('TENANT_UNBOUND_TOOLS is exactly the ungoverned tools with an AMBIENT-BOUND call: no key reaches them, the legacy families and the baseline included', () => {
       const ungoverned = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) === 0).sort();
       const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0).sort();
-      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: the three procurement transitions were, from
-      // D-40 (R0-13g) until FOLLOW3-D15 bound ProcurementService's writes to the business; none is now
-      expect(governed).toEqual([]);
+      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: bookings_offer_waitlist_slot moved here when
+      // SWP-CENSUS-V1-A (P87) gated BookingsController.offerWaitlistSlot (bookings:write) while offerSlot still looks up entryId bare
+      expect(governed).toEqual(['bookings_offer_waitlist_slot']);
       for (const t of governed) {
         expect(derived.governedUngranted, t).toContain(t);
         expect(Object.keys(GOVERNED_UNGRANTED), t).toContain(t);

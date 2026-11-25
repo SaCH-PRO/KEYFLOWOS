@@ -32,6 +32,14 @@ class CalendarPrismaMock {
           return Promise.resolve(null);
         }),
       },
+      membership: {
+        findUnique: vi.fn(({ where }: any) => {
+          if (where?.userId_businessId?.businessId === 'biz_1') {
+            return Promise.resolve({ role: 'OWNER', permissionScopes: null });
+          }
+          return Promise.resolve(null);
+        }),
+      },
       booking: {
         findMany: vi.fn(() => Promise.resolve([])),
         findFirst: vi.fn(() => Promise.resolve(null)),

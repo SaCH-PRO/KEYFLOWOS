@@ -420,10 +420,10 @@ beforeAll(async () => {
   await db.availability.create({ data: { id: `${P}av_b_mon`, staffId: ID.staffBAvail, dayOfWeek: 1, startTime: '09:00', endTime: '10:00' } });
   await db.orgUnit.create({ data: { id: ID.orgA, businessId: ID.bizA, name: `${P}A-branch` } });
   await db.orgUnit.create({ data: { id: ID.orgB, businessId: ID.bizB, name: `${P}B-secret-branch` } });
-  // A STAFF member of A whose CRM view is "my book" only.
+  // A STAFF member of A whose CRM view is "my book" only (bookings: 'write' so ST-4 exercises CRM contact visibility after SWP-CENSUS-V1-A gates POST bookings on bookings:write).
   await db.user.create({ data: { id: ID.staffUser, email: `${P}staffUser@test.local`, role: 'USER' } });
   await db.membership.create({
-    data: { id: `${P}m_staffUser`, userId: ID.staffUser, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read', crm_view: 'owned' } },
+    data: { id: `${P}m_staffUser`, userId: ID.staffUser, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read', crm_view: 'owned', bookings: 'write' } },
   });
   await db.contact.create({
     data: {
