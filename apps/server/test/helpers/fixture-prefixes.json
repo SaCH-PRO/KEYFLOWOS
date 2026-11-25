@@ -1322,6 +1322,11 @@
       "packet": "V1-65 (SWP-FIN-OVERVIEW-TRUTH)"
     },
     {
+      "prefix": "v65d_",
+      "owner": "apps/server/test/payment-claim-loop.integration.test.ts",
+      "packet": "V1-65 (CLAIM-LOOP)"
+    },
+    {
       "prefix": "v65e_",
       "owner": "apps/server/test/ready-to-send.integration.test.ts",
       "packet": "V1-65 (READY-TO-SEND)"
