@@ -244,3 +244,168 @@ export interface BusinessCommandCenterSnapshot {
   executiveModes: CommandCenterExecutiveMode[];
   recommendedActions: CommandCenterAction[];
 }
+
+// ========== TODAY-AGGREGATE (V1-65, P79) ==========
+
+export type TodayNeedsYouKind =
+  | 'CLAIM'
+  | 'ACCEPTED_QUOTE'
+  | 'KEY_PROPOSAL'
+  | 'APPROVAL_REQUEST'
+  | 'PLAN_STEP';
+
+export interface TodayNeedsYouAction {
+  label: string;
+  actionType: 'APPROVE' | 'EXECUTE' | 'REJECT' | 'CONFIRM' | 'DISMISS' | 'CONVERT' | 'OPEN';
+  href?: string;
+  method?: 'GET' | 'POST';
+  endpoint?: string;
+}
+
+export interface TodayNeedsYouItem {
+  id: string;
+  kind: TodayNeedsYouKind;
+  sourceId: string;
+  title: string;
+  summary: string;
+  contactId: string | null;
+  customerName: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  createdAt: string;
+  href: string;
+  actions: TodayNeedsYouAction[];
+}
+
+export interface TodayNeedsYouBlock {
+  items: TodayNeedsYouItem[];
+  totalCount: number;
+}
+
+export interface TodayBookingItem {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  serviceName: string | null;
+  customerName: string | null;
+  contactId: string | null;
+}
+
+export interface TodayInvoiceItem {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  dueDate: string | null;
+  remaining: number;
+  total: number;
+  currency: string;
+  customerName: string | null;
+  contactId: string | null;
+  isOverdue: boolean;
+}
+
+export interface TodayAcceptedQuoteItem {
+  id: string;
+  quoteNumber: string;
+  total: number;
+  currency: string;
+  acceptedAt: string | null;
+  customerName: string | null;
+  contactId: string | null;
+}
+
+export interface TodayTaskItem {
+  id: string;
+  title: string;
+  dueDate: string | null;
+  priority: string;
+  contactId: string | null;
+  customerName: string | null;
+}
+
+export interface TodayOrderItem {
+  id: string;
+  orderNumber: string;
+  status: string;
+  total: number;
+  currency: string;
+  customerName: string | null;
+  createdAt: string;
+}
+
+export interface TodayReminderItem {
+  kind: 'invoice' | 'booking';
+  id: string;
+  contactId: string | null;
+  customerName: string;
+  whatsappUrl: string | null;
+  messageText: string;
+  dueAt: string;
+  reference: string;
+  amountDue?: number;
+  currency?: string;
+  serviceName?: string;
+}
+
+export interface TodayOperationalBlock {
+  bookings: TodayBookingItem[];
+  invoices: TodayInvoiceItem[];
+  acceptedQuotes: TodayAcceptedQuoteItem[];
+  tasks: TodayTaskItem[];
+  orders: TodayOrderItem[];
+  reminders: TodayReminderItem[];
+  counts: {
+    bookings: number;
+    invoices: number;
+    acceptedQuotes: number;
+    tasks: number;
+    orders: number;
+    reminders: number;
+    total: number;
+  };
+}
+
+export type TodayPulseStatus = 'OK' | 'RESTRICTED';
+
+export interface TodayPulse {
+  cash: number;
+  cashBasis: 'ledger';
+  cashCurrency: string;
+  otherCurrencyCash: Array<{ currency: string; amount: number }>;
+  owedToYou: number;
+  owedCount: number;
+  overdueAmount: number;
+  overdueCount: number;
+  youOwe: number;
+  youOweCount: number;
+  monthRevenue: number;
+  monthExpenses: number;
+  monthProfit: number;
+  safeToSpend: number;
+  currency: string;
+}
+
+export interface TodaySetupStep {
+  key: 'catalog' | 'hours' | 'payments' | 'share_link';
+  label: string;
+  done: boolean;
+  href: string;
+}
+
+export interface TodayGetSetUpBlock {
+  complete: boolean;
+  steps: TodaySetupStep[];
+}
+
+export interface TodayAggregateResponse {
+  businessId: string;
+  generatedAt: string;
+  timezone: string;
+  needsYou: TodayNeedsYouBlock;
+  today: TodayOperationalBlock;
+  pulseStatus: TodayPulseStatus;
+  pulse: TodayPulse | null;
+  getSetUp: TodayGetSetUpBlock;
+}
+

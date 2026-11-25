@@ -6403,6 +6403,7 @@ export class CommerceService {
         invoice: {
           select: {
             id: true,
+            contactId: true,
             invoiceNumber: true,
             status: true,
             total: true,
@@ -6433,6 +6434,7 @@ export class CommerceService {
       declaredAmount: number;
       remaining: number;
       currency: string;
+      contactId: string | null;
       customerName: string | null;
       reference: string | null;
       createdAt: string;
@@ -6466,6 +6468,7 @@ export class CommerceService {
         declaredAmount,
         remaining,
         currency: row.currency || inv.currency || 'TTD',
+        contactId: inv.contactId ?? null,
         customerName,
         reference: row.reference ?? null,
         createdAt: row.createdAt.toISOString(),

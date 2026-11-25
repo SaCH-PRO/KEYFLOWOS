@@ -112,6 +112,7 @@ beforeAll(async () => {
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
   const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const { CashPositionService } = await import('../src/modules/finance/cash-position.service');
+  const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { FinancialAccountSeederService } = await import('../src/modules/finance/financial-account-seeder.service');
   const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
   const { FinanceOverviewService } = await import('../src/modules/finance/finance-overview.service');
@@ -120,9 +121,10 @@ beforeAll(async () => {
   const { KeyActionProposalService } = await import('../src/modules/key-autonomy/key-action-proposal.service');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
   const { OnboardingConciergeService } = await import('../src/modules/onboarding-concierge/onboarding-concierge.service');
+  const { DemoDataSeederService } = await import('../src/modules/onboarding-concierge/demo-data-seeder.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { CatalogService } = await import('../src/modules/catalog/catalog.service');
-  const { ModelGatewayService } = await import('../src/modules/ai/model-gateway.service');
   const { TodayService } = await import('../src/modules/business-command-center/today.service');
   const { TodayController } = await import('../src/modules/business-command-center/today.controller');
 
@@ -132,6 +134,8 @@ beforeAll(async () => {
     get: async () => null,
     set: async () => undefined,
     del: async () => undefined,
+    getJson: async () => null,
+    setJson: async () => undefined,
   };
 
   const moduleRef = await Test.createTestingModule({
@@ -143,6 +147,7 @@ beforeAll(async () => {
       BusinessGuard,
       ModuleScopeGuard,
       CashPositionService,
+      ChartOfAccountsSeederService,
       FinancialAccountSeederService,
       ReceivablesService,
       FinanceOverviewService,
@@ -202,7 +207,8 @@ beforeAll(async () => {
       { provide: EventEmitter2, useValue: { emit: () => true } },
       { provide: BlueprintService, useValue: { getBlueprint: async () => null } },
       { provide: CatalogService, useValue: {} },
-      { provide: ModelGatewayService, useValue: {} },
+      { provide: AiUsageService, useValue: {} },
+      { provide: DemoDataSeederService, useValue: {} },
       OnboardingConciergeService,
       TodayService,
     ],
@@ -306,7 +312,7 @@ beforeAll(async () => {
 
   // Ledger cash account in bizA (TTD 5000 opening balance)
   await db.chartOfAccount.create({
-    data: { id: ID.coaCash, businessId: ID.bizA, code: '1010', name: 'Main Bank', type: 'ASSET', subType: 'BANK' },
+    data: { id: ID.coaCash, businessId: ID.bizA, code: '1010', name: 'Main Bank', type: 'ASSET', subtype: 'BANK' },
   });
   await db.financialAccount.create({
     data: {
@@ -317,7 +323,7 @@ beforeAll(async () => {
       currency: 'TTD',
       openingBalance: 5000,
       currentBalance: 5000,
-      accountId: ID.coaCash,
+      chartOfAccountId: ID.coaCash,
     },
   });
 
@@ -378,7 +384,7 @@ beforeAll(async () => {
       status: 'PENDING',
       provider: 'bank_transfer',
       method: 'bank_transfer',
-      providerPaymentId: `manual_${ID.invOverdue}_intent_abc123`,
+      providerPaymentId: `manual_${ID.invOverdue}_intent_${P}abc123`,
       reference: `Intent: ${P}INV-001`,
     },
   });
@@ -432,13 +438,15 @@ beforeAll(async () => {
       data: {
         id: propId,
         businessId: ID.bizA,
+        sourceType: 'PROACTIVE',
+        actionType: 'EXECUTE_TOOL',
         title: `Proposal ${idx + 1}`,
         description: `Pending KEY action ${idx + 1}`,
         toolName: 'commerce_send_invoice',
         module: 'commerce',
         status: 'PENDING',
-        riskTier: 2,
-        proposedParams: {},
+        riskLevel: 'MEDIUM',
+        payload: {},
       },
     });
   }
@@ -451,11 +459,9 @@ afterAll(async () => {
 
 describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read', () => {
   it('[TD-01] RED-BEFORE (owner): returns four blocks, Pulse equals Money > Overview + SafeToSpend, max 5 Needs you items with full totalCount, and customer contactId links', async () => {
-    const [res, overview, sts] = await Promise.all([
-      getToday(ID.bizA, ID.ownerA).expect(200),
-      financeOverviewSvc.getOverview(ID.bizA),
-      safeToSpendSvc.calculate(ID.bizA),
-    ]);
+    const res = await getToday(ID.bizA, ID.ownerA).expect(200);
+    const overview = await financeOverviewSvc.getOverview(ID.bizA);
+    const sts = await safeToSpendSvc.calculate(ID.bizA);
 
     const body = res.body;
     expect(body.businessId).toBe(ID.bizA);
