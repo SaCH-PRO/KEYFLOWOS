@@ -27,7 +27,7 @@
  * The real lib/api transport and failure kit; only fetch and the router are stubbed. Error bodies are the ones the
  * production GlobalHttpExceptionFilter answers.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { render, screen, fireEvent, waitFor, within, cleanup } from "@testing-library/react";
 
 const nav = vi.hoisted(() => ({ push: vi.fn() }));
@@ -89,7 +89,7 @@ function sentBody(i = 0): Record<string, unknown> {
 }
 
 const onClose = vi.fn();
-let assign: ReturnType<typeof vi.fn>;
+let assign: MockInstance<(href: string) => void>;
 
 /** The door the sheet opened: a full page load, never a client navigation (see WAW-05). */
 function opened(href: string) {
@@ -134,7 +134,7 @@ beforeEach(() => {
   // (Absent before the doors became full page loads: the door cases then fail on their own assertion, not here.)
   assign = newFromWhatsAppNavigation
     ? vi.spyOn(newFromWhatsAppNavigation, "assign").mockImplementation(() => {})
-    : vi.fn();
+    : vi.fn<(href: string) => void>();
 });
 afterEach(() => {
   cleanup();
