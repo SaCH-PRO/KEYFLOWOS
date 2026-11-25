@@ -838,6 +838,11 @@
       "packet": "V1-95 (FU-TIMELINE-EVENTS-PAGING, D-284)"
     },
     {
+      "prefix": "v95f_",
+      "owner": "apps/server/test/push-endpoint-allowlist.integration.test.ts",
+      "packet": "V1-95 (FU-PUSH-ENDPOINT-ALLOWLIST, P71 / MIN-4)"
+    },
+    {
       "prefix": "v95p_",
       "owner": "apps/server/test/contact-custom-field-names-tenant.integration.test.ts",
       "packet": "V1-95 (W9-CUSTOM-FIELDS-TENANT)"
