@@ -36,7 +36,6 @@ import { PostingService } from '../src/modules/finance/posting.service';
 import { AccountingPeriodService } from '../src/modules/finance/accounting-period.service';
 import { ExpensePostingService } from '../src/modules/finance/expense-posting.service';
 import { ExpensesService } from '../src/modules/expenses/expenses.service';
-import { AccountantExportService } from '../src/modules/finance/accountant-export.service';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 const P = 'v65a_';
@@ -70,7 +69,6 @@ describe('V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021, BUG-112) — server half', () 
   let overview: FinanceOverviewService;
   let expenses: ExpensesService;
   let coaSeeder: ChartOfAccountsSeederService;
-  let accountantExport: AccountantExportService;
 
   beforeAll(async () => {
     await cleanup();
@@ -109,7 +107,6 @@ describe('V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021, BUG-112) — server half', () 
 
     overview = new FinanceOverviewService(prismaStub, null, null, null, cashPosition);
     expenses = new ExpensesService(prismaStub, eventsStub, expensePosting, timelineStub, posting);
-    accountantExport = new AccountantExportService(prismaStub);
   });
 
   afterAll(async () => {
@@ -140,6 +137,13 @@ describe('V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021, BUG-112) — server half', () 
     });
     expect(bill.status).toBe('BILL');
 
+    // Load overview while the bill is still open so synthetic BILL_DUE /
+    // expense actions are persisted, then void the bill and verify both the
+    // totals AND the previously synthesized actions clear on reload.
+    const beforeVoid = await overview.getOverview(ID.bizVoid);
+    expect(beforeVoid.billsDue).toBe(640.25);
+    expect(beforeVoid.actions.some((a) => a.type === 'BILL_DUE' && a.title.includes('Mistaken supplier bill'))).toBe(true);
+
     await expenses.voidExpense({
       businessId: ID.bizVoid,
       expenseId: bill.id,
@@ -165,16 +169,36 @@ describe('V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021, BUG-112) — server half', () 
     expect(result.revenueThisMonth).toBe(0);
     expect(result.netProfitThisMonth).toBe(-200);
 
-    // Compare against the real ledger P&L for this month (voidExpense reversed the 640.25 ledger posting).
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
-    const pnl = await accountantExport.buildProfitAndLoss(ID.bizVoid, monthStart, monthEnd);
-    expect(result.netProfitThisMonth).toBe(pnl.netProfit);
+    // Compare against the independent ledger P&L for this month (voidExpense reversed the 640.25 ledger posting).
+    const pnlAccounts = await db.chartOfAccount.findMany({
+      where: { businessId: ID.bizVoid, isActive: true, type: { in: ['INCOME', 'EXPENSE', 'COGS'] } },
+      select: { id: true, type: true },
+    });
+    const pnlEntries = await db.ledgerEntry.findMany({
+      where: {
+        accountId: { in: pnlAccounts.map((a) => a.id) },
+        transaction: { businessId: ID.bizVoid },
+      },
+      select: { accountId: true, debit: true, credit: true },
+    });
+    const typeById = new Map(pnlAccounts.map((a) => [a.id, a.type]));
+    let ledgerIncome = 0;
+    let ledgerExpenses = 0;
+    for (const e of pnlEntries) {
+      if (typeById.get(e.accountId) === 'INCOME') {
+        ledgerIncome += Number(e.credit) - Number(e.debit);
+      } else {
+        ledgerExpenses += Number(e.debit) - Number(e.credit);
+      }
+    }
+    const ledgerNetProfit = Math.round((ledgerIncome - ledgerExpenses) * 100) / 100;
+    expect(result.netProfitThisMonth).toBe(ledgerNetProfit);
 
-    // Neither voided bill should surface as an uncategorised or missing-receipt action.
-    const voidActionIds = result.actions.map((a) => a.detail ?? '').join(' | ');
-    expect(voidActionIds).not.toContain('MistakeVendor');
-    expect(voidActionIds).not.toContain('LegacyVendor');
+    // Neither voided bill should surface as BILL_DUE, uncategorised, or missing-receipt actions.
+    const voidActionText = result.actions.map((a) => `${a.title} ${a.detail ?? ''}`).join(' | ');
+    expect(voidActionText).not.toContain('MistakeVendor');
+    expect(voidActionText).not.toContain('Mistaken supplier bill');
+    expect(voidActionText).not.toContain('LegacyVendor');
     expect(result.billsDue).toBe(0);
     expect(result.billsDueCount).toBe(0);
   });
@@ -233,7 +257,7 @@ describe('V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021, BUG-112) — server half', () 
     expect(billDueActions.some((a) => a.title.includes('Packaging Invoice #99'))).toBe(true);
     expect(billDueActions.some((a) => a.title.includes('Monthly Studio Rent'))).toBe(false);
 
-    // Mark the open bill PAID -> billsDue drops to 0.
+    // Mark the open bill PAID -> billsDue and the stale BILL_DUE action both clear.
     await db.expense.update({
       where: { id: openBill.id },
       data: { status: 'PAID', paidAt: now },
@@ -241,6 +265,7 @@ describe('V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021, BUG-112) — server half', () 
     const afterPaid = await overview.getOverview(ID.bizBills);
     expect(afterPaid.billsDue).toBe(0);
     expect(afterPaid.billsDueCount).toBe(0);
+    expect(afterPaid.actions.some((a) => a.type === 'BILL_DUE')).toBe(false);
   });
 
   it('[FOT-03] RED-BEFORE: a legacy status=VOID expense in the prior 6-month window does not inflate burn / depress cashRunwayMonths', async () => {
