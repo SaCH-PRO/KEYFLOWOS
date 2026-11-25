@@ -388,6 +388,17 @@ const CREATE_IDEMPOTENCY_KEY_MAX = 255;
 const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set(['stripe', 'paypal', 'wipay']);
 
 /**
+ * FU-REFUND-GATEWAY-REFUSE (P96, owner ruling A2 on #80): gateway providers
+ * that expose an API refund path (`POST /payments/businesses/:businessId/refunds`,
+ * PaymentsOpsController). The manual bookkeeping route
+ * (`POST /commerce/businesses/:businessId/payments/:paymentId/refund`) refuses
+ * these with 409 Conflict unless an internal D-121 order-refund door passes
+ * `allowApiGatewayBookkeeping: true`. WiPay has no refund API and remains
+ * eligible for manual bookkeeping refunds.
+ */
+const API_REFUNDABLE_GATEWAY_PROVIDERS: ReadonlySet<string> = new Set(['stripe', 'paypal']);
+
+/**
  * The create's claim, or null when it carries no key (absent or blank, as the
  * base: every call creates). `material` is every field the caller sent, in a
  * fixed shape (absent is null), so its JSON is the same for the same request.
@@ -4540,6 +4551,7 @@ export class CommerceService {
     actorId?: string | null,
     amount?: number,
     once?: { providerPaymentId: string; refusal: string; reported?: string },
+    options?: { allowApiGatewayBookkeeping?: boolean },
   ) {
     if (amount !== undefined && !(Number.isFinite(amount) && toCents(amount) > 0 && fromCents(toCents(amount)) === amount)) {
       throw new BadRequestException('A refund amount is a number above 0 in whole cents');
@@ -4551,6 +4563,11 @@ export class CommerceService {
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
+    const preInvoice = await this.prisma.client.invoice.findFirst({
+      where: { id: payment.invoiceId, businessId },
+      select: { id: true },
+    });
+    if (!preInvoice) throw new NotFoundException('Invoice not found');
     const refusal = (row: { status: string; amount: number }) =>
       new ConflictException(
         row.status !== 'REFUNDED'
@@ -4559,7 +4576,17 @@ export class CommerceService {
             ? 'A refund cannot itself be refunded'
             : 'Payment is already refunded',
       );
+    const gatewayRefusal = (row: { provider: string | null | undefined }) => {
+      if (options?.allowApiGatewayBookkeeping) return null;
+      const normalized = (row.provider ?? '').trim().toLowerCase();
+      if (!API_REFUNDABLE_GATEWAY_PROVIDERS.has(normalized)) return null;
+      return new ConflictException(
+        `This payment was settled through ${normalized}; use the gateway refund endpoint (POST /payments/businesses/${businessId}/refunds) so the customer is refunded at the provider.`,
+      );
+    };
     if (payment.status !== 'SUCCESSFUL') throw refusal(payment);
+    const preGatewayErr = gatewayRefusal(payment);
+    if (preGatewayErr) throw preGatewayErr;
     // FIN2 — write the refund row + reverse the original posting in one tx so
     // the refund and the offsetting ledger entries commit together.
     //
@@ -4572,10 +4599,22 @@ export class CommerceService {
       const txClient = tx as unknown as Prisma.TransactionClient;
       // Serialized with payments and other refunds of this invoice
       // (R0-PL-03): the reads below see every refund committed before ours.
-      await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      if (!locked || locked.businessId !== businessId) {
+        throw new NotFoundException('Invoice not found');
+      }
       const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
       if (!current) throw new NotFoundException('Payment not found');
+      if (current.invoiceId !== payment.invoiceId) {
+        const curInv = await tx.invoice.findFirst({
+          where: { id: current.invoiceId, businessId },
+          select: { id: true },
+        });
+        if (!curInv) throw new NotFoundException('Invoice not found');
+      }
       if (current.status !== 'SUCCESSFUL') throw refusal(current);
+      const lockedGatewayErr = gatewayRefusal(current);
+      if (lockedGatewayErr) throw lockedGatewayErr;
       // W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, D-121): this refund, already recorded (read under the lock), is
       // not recorded again; it is the more specific answer than what is left, so it is given first.
       if (once && (await tx.payment.findFirst({ where: { providerPaymentId: once.providerPaymentId, businessId }, select: { id: true } }))) {

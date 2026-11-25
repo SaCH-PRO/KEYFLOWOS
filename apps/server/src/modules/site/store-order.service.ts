@@ -2263,7 +2263,15 @@ export class StoreOrderService {
     if (!this.commerce) throw new ServiceUnavailableException('Refunds are unavailable');
     for (const payment of payments) {
       try {
-        await this.commerce.markPaymentRefunded(payment.id, order.businessId, `Storefront order ${order.orderNumber} refunded`, actorId);
+        await this.commerce.markPaymentRefunded(
+          payment.id,
+          order.businessId,
+          `Storefront order ${order.orderNumber} refunded`,
+          actorId,
+          undefined,
+          undefined,
+          { allowApiGatewayBookkeeping: true },
+        );
       } catch (err) {
         // 409: nothing is left of this payment to refund; an earlier refund holds it.
         if (!(err instanceof ConflictException)) throw err;
