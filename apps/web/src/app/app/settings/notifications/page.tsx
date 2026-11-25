@@ -178,19 +178,25 @@ export default function NotificationsSettingsPage() {
       // and show them, except a switch whose own PATCH is still in flight. A refused re-read (access revoked) says no
       // access; only when the re-read fails otherwise, and no load has read the server since the click, is this one
       // switch put back.
+      // A switch saving when the re-read is sent, or still saving when it answers, keeps what its own answer sets: the
+      // re-read may have been read before that switch's PATCH was committed.
+      const savingAtReread = new Set(pending.current);
       const fresh = await apiGet<NotificationPreferences>(path);
       const freshState = readState(fresh, { what: "the customer notification settings" });
       if (freshState.kind === "ok" && fresh.data) {
         const server = fresh.data;
-        const stillSaving = [...pending.current].filter((other) => other !== key);
+        const stillSaving = [...new Set([...savingAtReread, ...pending.current])].filter((other) => other !== key);
         setPreferences((current) => {
           const next = { ...server };
           if (current) for (const other of stillSaving) next[other] = current[other];
           return next;
         });
       } else if (freshState.kind === "no-access") {
+        // Both reads need settings read: the log goes too.
         setPrefsRead(freshState);
         setPreferences(null);
+        setLogRead(readState(fresh, { what: "the customer notification log" }));
+        setLog([]);
       } else if (loadGen.current === loadAtClick) {
         setPreferences((current) => (current ? { ...current, [key]: before } : current));
       }
