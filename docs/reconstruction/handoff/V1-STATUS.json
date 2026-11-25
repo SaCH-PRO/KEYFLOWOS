@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "0817069673a6fc15fd8dd4c9e4bd92a5fca4b12a",
-  "main_commit_date": "2026-11-25T02:48:11-04:00",
+  "main_sha": "991e93cfabac19f9097f0a7b12454bbf9b512c0e",
+  "main_commit_date": "2026-11-25T11:48:34+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 391,
-  "points": 564.5,
+  "packets": 395,
+  "points": 568.5,
   "by_status": {
    "done": {
     "packets": 152,
     "points": 220.5,
-    "pct_by_points": 39.1
+    "pct_by_points": 38.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 239,
-    "points": 344,
-    "pct_by_points": 60.9
+    "packets": 243,
+    "points": 348,
+    "pct_by_points": 61.2
    }
   },
   "by_step": {
@@ -80,8 +80,8 @@
    "5": {
     "done": 29,
     "in-progress": 0,
-    "todo": 58,
-    "total": 87
+    "todo": 62,
+    "total": 91
    },
    "6": {
     "done": 7,
@@ -112,14 +112,14 @@
    "launch": {
     "done": 65,
     "in-progress": 0,
-    "todo": 178,
-    "total": 243
+    "todo": 189,
+    "total": 254
    },
    "follow-on": {
     "done": 0,
     "in-progress": 0,
-    "todo": 61,
-    "total": 61
+    "todo": 54,
+    "total": 54
    }
   },
   "by_derivation": {
@@ -127,7 +127,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 45,
    "compacted-commit": 60,
-   "no-evidence": 138
+   "no-evidence": 142
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -176,8 +176,8 @@
    "FU-NOTIFICATIONS-PREFS-GUARD",
    "FU-CI-PG-NO-PASSWORD"
   ],
-  "todo_with_dependencies_met": 127,
-  "todo_with_dependencies_met_launch": 91
+  "todo_with_dependencies_met": 124,
+  "todo_with_dependencies_met_launch": 95
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -313,6 +313,16 @@
    "unblocks": 16
   },
   {
+   "id": "FU-WA-INBOUND-KEY-EXCLUDE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 13
+  },
+  {
    "id": "EXPENSES-HUB-1",
    "step": 4,
    "priority": "P1",
@@ -383,6 +393,16 @@
    "unblocks": 8
   },
   {
+   "id": "FU-CONTACT-TIMELINE-CHANNELS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
    "id": "RR-OWNER-RULINGS-RECORD",
    "step": 3,
    "priority": "P2",
@@ -441,6 +461,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 2
+  },
+  {
+   "id": "FU-TIMELINE-EVENTS-PAGING",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
   },
   {
    "id": "RR-DB-CRYPTO-KEY-CENSUS",
@@ -563,16 +593,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACT-TIMELINE-CHANNELS",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CONTACTID-WRITER-VALIDATION",
    "step": 5,
    "priority": "P1",
@@ -683,12 +703,22 @@
    "unblocks": 0
   },
   {
+   "id": "FU-PUSH-OPTIN-MY-ACCOUNT",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-REQUIRE-AUTH-REMOUNT",
    "step": 6,
    "priority": "P1",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -843,16 +873,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
-   "step": 6,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -959,16 +979,6 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-SIDESHEET-MOBILE-OFFSET",
-   "step": 6,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1143,47 +1153,7 @@
    "unblocks": 0
   },
   {
-   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-STUDIO-PAGE-SCOPE",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-UNDO-TOAST-SIGNOUT",
    "step": 6,
    "priority": "P3",
    "size": "S",
@@ -1585,6 +1555,16 @@
    "unblocks": 16
   },
   {
+   "id": "FU-WA-INBOUND-KEY-EXCLUDE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 13
+  },
+  {
    "id": "EXPENSES-HUB-1",
    "step": 4,
    "priority": "P1",
@@ -1655,6 +1635,16 @@
    "unblocks": 8
   },
   {
+   "id": "FU-CONTACT-TIMELINE-CHANNELS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
    "id": "RR-OWNER-RULINGS-RECORD",
    "step": 3,
    "priority": "P2",
@@ -1713,6 +1703,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 2
+  },
+  {
+   "id": "FU-TIMELINE-EVENTS-PAGING",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
   },
   {
    "id": "RR-DB-CRYPTO-KEY-CENSUS",
@@ -1816,16 +1816,6 @@
   },
   {
    "id": "FU-CONTACT-PAGES-RAW-STATUS",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONTACT-TIMELINE-CHANNELS",
    "step": 5,
    "priority": "P1",
    "size": "M",
@@ -1940,6 +1930,26 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PUSH-OPTIN-MY-ACCOUNT",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-REQUIRE-AUTH-REMOUNT",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -8885,9 +8895,10 @@
     "5dd5e44e"
    ],
    "depends_on": [
+    "FU-WA-INBOUND-KEY-EXCLUDE",
+    "MOUNT-QUOTES",
     "WA-E164-SERVER",
-    "WA-HELPER",
-    "MOUNT-QUOTES"
+    "WA-HELPER"
    ],
    "title": "New from WhatsApp: paste a customer's WhatsApp message and number; KEYFLOWOS finds or creates the customer by E.164, keeps the message on their timeline, and opens New quote or New booking for them",
    "deps_met": null
@@ -9249,16 +9260,17 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
    "evidence": [],
    "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS",
     "FU-ME-NOTIFICATIONS-SCOPE"
    ],
    "title": "The customer notifications page says 'no access' on a refused read, not 'nothing sent'",
-   "deps_met": true
+   "deps_met": false
   },
   {
    "id": "FU-STUDIO-PAGE-SCOPE",
@@ -9266,14 +9278,16 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
    "evidence": [],
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "title": "The orphan /studio setup page offers settings entries only to settings readers, or is removed",
-   "deps_met": true
+   "deps_met": false
   },
   {
    "id": "FU-E2E-MOCKED-SESSION-TOKEN",
@@ -9281,14 +9295,16 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
    "evidence": [],
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "title": "The mocked e2e helpers store a session the edge middleware accepts",
-   "deps_met": true
+   "deps_met": false
   },
   {
    "id": "FU-UNDO-TOAST-SIGNOUT",
@@ -9296,16 +9312,17 @@
    "priority": "P3",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "FU-BULK-DELETE-UNDO"
+    "FU-BULK-DELETE-UNDO",
+    "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "Undo toasts are dismissed when the session ends",
-   "deps_met": true
+   "deps_met": false
   },
   {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
@@ -9331,7 +9348,7 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
@@ -9346,14 +9363,16 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
    "evidence": [],
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "title": "The shared SideSheet opens in place on phones",
-   "deps_met": true
+   "deps_met": false
   },
   {
    "id": "FU-CONTACT-SEND-QUOTE-DOOR",
@@ -9361,14 +9380,16 @@
    "priority": "P2",
    "size": "S",
    "lane": "web",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
    "evidence": [],
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "title": "The contact's Send quote opens New quote for that customer",
-   "deps_met": true
+   "deps_met": false
   },
   {
    "id": "FU-INVOICE-REMAINING-CREDITS",
@@ -9384,6 +9405,69 @@
    "depends_on": [],
    "title": "The operator invoice detail's remaining balance nets applied credit notes and is 0 on VOID",
    "deps_met": true
+  },
+  {
+   "id": "FU-WA-INBOUND-KEY-EXCLUDE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Pasted WhatsApp text never reaches KEY's automatic prompts",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PUSH-OPTIN-MY-ACCOUNT",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Every member turns on push for their own device from My account",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TIMELINE-EVENTS-PAGING",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The contact events read pages back through a customer's whole history",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TIMELINE-LOAD-OLDER",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-TIMELINE-EVENTS-PAGING",
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
+   "title": "The contact Timeline loads older events",
+   "deps_met": false
   }
  ]
 }

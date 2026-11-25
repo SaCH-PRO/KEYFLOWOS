@@ -13528,6 +13528,70 @@
    "track_ruling": "D-282",
    "scope": "D-282. After D-276 (FU-ME-NOTIFICATIONS-SCOPE) the Push tab of Settings > Notifications is reachable only by settings readers, and it was the only place a member turned on push for their own device; the push routes are every member's own (push-notification.controller.ts: BusinessGuard only). Put the push opt-in on My account (/app/settings/profile) for every member; keep the business's customer-email settings where they are.",
    "definition_of_done": "RED: a member with settings none can turn push on and off for their device from My account; the business's customer-email settings stay settings-only."
+  },
+  {
+   "id": "FU-TIMELINE-EVENTS-PAGING",
+   "title": "The contact events read pages back through a customer's whole history",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/crm/crm.controller.ts",
+    "apps/server/src/modules/crm/crm-timeline.service.ts"
+   ],
+   "decisions": [
+    "D-284",
+    "D-277",
+    "D-100"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "owner ruling D-284",
+   "track_ruling": "D-284",
+   "scope": "D-284. D-277 makes the contact Timeline the customer's conversation thread, but GET /crm/businesses/:b/contacts/:c/events serves only the newest 20 visible events: the controller passes no limit and listContactEvents defaults to 20 (crm-timeline.service.ts ~254), with no cursor. A pasted WhatsApp message costs two events, so about ten pastes fill it (COR-TCH-1, FU-CONTACT-TIMELINE-CHANNELS correctness review, 2026-11-25). Accept a bounded limit (default 20, max 200, as the retired conversation read allowed) and an opaque cursor; return the next cursor. Member scope unchanged: money events stay withheld per D-100 on every page, and neither the cursor nor the page size reveals how many were withheld.",
+   "definition_of_done": "RED (real DB): 45 visible events read in pages of 20 return all 45 once each, in order, then no cursor; a member without revenue read paging the same contact never receives a money event and cannot infer the withheld count from page sizes or cursors; limit above the maximum is refused or clamped; the default call is unchanged."
+  },
+  {
+   "id": "FU-TIMELINE-LOAD-OLDER",
+   "title": "The contact Timeline loads older events",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-TIMELINE-EVENTS-PAGING",
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/[contactId]/timeline/page.tsx",
+    "apps/web/src/lib/client.ts"
+   ],
+   "decisions": [
+    "D-284",
+    "D-277"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "owner ruling D-284",
+   "track_ruling": "D-284",
+   "scope": "D-284. Once FU-TIMELINE-EVENTS-PAGING is on main, the Timeline (FU-CONTACT-TIMELINE-CHANNELS) offers 'Load older' while the read returns a cursor, folds pasted notes across pages, and keeps its counts and empty texts honest about what is loaded.",
+   "definition_of_done": "RED: a customer with 45 events shows the newest 20, then all 45 after loading older; channel counts cover what is loaded and say so; a pasted message whose note and WhatsApp event fall on different pages shows once."
   }
  ],
  "moot": [
