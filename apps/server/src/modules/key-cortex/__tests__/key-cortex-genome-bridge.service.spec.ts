@@ -180,6 +180,11 @@ describe('KeyCortexGenomeBridgeService', () => {
         stage: 'growth',
         executiveReadiness: 55,
       });
+      mockPrisma.client.genomeRecommendation.findMany = vi.fn().mockResolvedValue([
+        { id: 'rec_fin', domain: 'FINANCIAL', title: 'Reduce burn', diagnosis: 'A RISK_ALERT signal was detected in finance', recommendation: 'Cut costs', confidence: 0.85, riskLevel: 'MEDIUM' },
+        { id: 'rec_diag_fin', domain: 'OPERATIONAL_MODEL', title: 'Review process', diagnosis: 'A RISK_ALERT signal was detected in finance (margin compression)', recommendation: 'Check margins', confidence: 0.82, riskLevel: 'MEDIUM' },
+        { id: 'rec_ops', domain: 'OPERATIONAL_MODEL', title: 'Document SOP', diagnosis: 'A MISSING_FACT signal was detected in operations', recommendation: 'Write checklist', confidence: 0.8, riskLevel: 'LOW' },
+      ]);
       mockSignalService.listSignals.mockResolvedValue([
         { id: 'sig_fin', sourceModule: 'finance', section: 'FINANCIAL', domain: 'finance', signalType: 'RISK_ALERT', reason: 'Cash runway low', confidence: 0.9, createdAt: '2026-01-01' },
         { id: 'sig_ops', sourceModule: 'operations', section: 'OPERATIONAL_MODEL', domain: 'operations', signalType: 'MISSING_FACT', reason: 'SOP gap', confidence: 0.85, createdAt: '2026-01-01' },
@@ -208,6 +213,7 @@ describe('KeyCortexGenomeBridgeService', () => {
 
       expect(intel.crossDomainInsights).toBeNull();
       expect(mockCrossDomain.getLatestCrossDomainSnapshot).not.toHaveBeenCalled();
+      expect(mockRanker.rankRecommendations).not.toHaveBeenCalled();
       expect(intel.opportunities).toEqual([]);
       expect(mockOpportunityDetector.detectOpportunities).not.toHaveBeenCalled();
       expect(intel.dnaScores).toEqual({ operations: 80, marketing: 70 });
@@ -219,6 +225,7 @@ describe('KeyCortexGenomeBridgeService', () => {
       expect(intel.signals.map((s: any) => s.id)).toEqual(['sig_ops']);
       expect(intel.recommendations.map((r: any) => r.id)).toEqual(['rec_ops']);
       expect(intel.recommendations[0]).not.toHaveProperty('rankScore');
+      expect(intel.recommendations[0]).not.toHaveProperty('genomeScore');
       expect(intel.recommendations[0]).not.toHaveProperty('financialViability');
     });
   });
