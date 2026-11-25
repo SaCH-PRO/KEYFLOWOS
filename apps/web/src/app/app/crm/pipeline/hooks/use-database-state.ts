@@ -227,15 +227,20 @@ interface UseDatabaseStateOptions {
   businessId: string;
   contacts: LocalContact[];
   onRefresh: () => void;
+  /**
+   * The search the table opens with (the customers screen's own search, BUG-080), so its first read already carries
+   * it: no unfiltered read, rows or count while the debounce catches up (review COR-CWP-1).
+   */
+  initialSearch?: string;
 }
 
-export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabaseStateOptions) {
+export function useDatabaseState({ businessId, contacts, onRefresh, initialSearch = "" }: UseDatabaseStateOptions) {
   const isMobile = useMediaQuery("(max-width: 639px)");
   const isMobilePrev = useRef(isMobile);
 
   const [showLists, setShowLists] = useState(false);
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [search, setSearch] = useState(() => initialSearch.trim().toLowerCase());
   const [sortField, setSortField] = useState<SortField>("firstName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -893,7 +898,9 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setRelationshipHealthFilter(new Set(view.config.relationshipHealthFilter ?? []));
     setFavoriteFilter(!!view.config.favoriteFilter);
     setIncludeArchived(!!view.config.includeArchived);
-    setSearchInput(view.config.search);
+    // A view stored in an older or tampered format can lack a search: it then searches for nothing, never for
+    // undefined, which the debounce's trim() would throw on (review SEC-CWP-1).
+    setSearchInput(typeof view.config.search === "string" ? view.config.search : "");
     setSortField(view.config.sortField);
     setSortDir(view.config.sortDir);
     setPageSize(view.config.pageSize);
