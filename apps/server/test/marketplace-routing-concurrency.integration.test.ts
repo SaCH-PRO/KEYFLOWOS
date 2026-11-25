@@ -4270,3 +4270,183 @@ describe('W11-SHIP-STOCK-DECREMENT (F-26; D-136)', () => {
     }
   }, 20_000);
 });
+
+describe('W11-STOREFRONT-ROUTE-DECREMENTED (F-36, D-136): routing does not reserve storefront lines already decremented at checkout (real database)', () => {
+  async function paidStandardOrderOf(productId: string, quantity: number) {
+    orderSeq += 1;
+    const total = PRICE * quantity;
+    const order = await db.marketplaceOrder.create({
+      data: {
+        businessId: ID.biz,
+        orderNumber: `${P}ord_${orderSeq}_${Date.now()}`,
+        type: 'STANDARD',
+        status: 'paid',
+        paymentStatus: 'PAID',
+        paymentMethod: 'CASH',
+        customerName: 'Vee Router',
+        customerEmail: CUSTOMER_EMAIL,
+        subtotal: total,
+        total,
+        currency: 'TTD',
+        metadata: { statusTimeline: [{ status: 'paid', timestamp: '2026-11-12T10:00:00.000Z', note: 'Order placed' }] },
+      },
+    });
+    await db.marketplaceOrderItem.create({
+      data: {
+        orderId: order.id,
+        productId,
+        name: 'V18R Tracked B',
+        quantity,
+        unitPrice: PRICE,
+        total,
+      },
+    });
+    return order;
+  }
+
+  beforeEach(async () => {
+    await setStock(ID.stockA, IN_STOCK);
+    await setStock(ID.stockB, IN_STOCK);
+    seen = [];
+  });
+
+  it('RC-65 (W11-STOREFRONT-ROUTE-DECREMENTED; packet case RC-29; F-36, D-136) storefront checkout of tracked B×3 settled by provider, then listener routes it: B ends at 7/0 with one LOCAL_STOCK:RESERVED route in default warehouse carrying stockDecrementedAtCheckout & noReservationRequired; after storefront PATCH SHIPPED, DELIVERED and COMPLETED, B stays 7/0', async () => {
+    const off = listenerOnTheBus();
+    try {
+      const placed = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: [{ productId: ID.productB, quantity: 3 }],
+        customerInfo: { name: 'Vee Storefront', email: CUSTOMER_EMAIL },
+        paymentMethod: 'CASH',
+      });
+      expect(placed.type).toBe('STOREFRONT');
+      await storeOrders.updatePaymentStatus(placed.id, 'PAID', `${P}rc65_provider_ref`, 'PAYPAL');
+      await drain();
+
+      expect(announcedFor(placed.id), 'routed by listener').toEqual(['fulfillment_routed:1']);
+      expect(await statusOf(placed.id)).toBe('CONFIRMED/PAID');
+      expect(await stockOf(ID.stockB), 'checkout took 3, routing reserved 0').toBe(`${IN_STOCK - 3}/0`);
+
+      const routes = await db.fulfillmentRoute.findMany({
+        where: { businessId: ID.biz, orderId: placed.id },
+      });
+      expect(routes.length).toBe(1);
+      expect(routes[0]).toMatchObject({
+        strategy: 'LOCAL_STOCK',
+        status: 'RESERVED',
+        sourceType: 'WAREHOUSE',
+        warehouseId: ID.warehouse,
+        notes: 'Stock taken at checkout — no reservation',
+        metadata: {
+          inventoryMode: 'tracked',
+          noReservationRequired: true,
+          stockDecrementedAtCheckout: true,
+        },
+      });
+
+      for (const nextStatus of ['SHIPPED', 'DELIVERED', 'COMPLETED'] as const) {
+        const ans = await statusAnswer(siteStatusByRoute(placed.id, nextStatus));
+        expect(ans, nextStatus).toBe(`${nextStatus}/PAID`);
+        expect(await stockOf(ID.stockB), `after ${nextStatus}`).toBe(`${IN_STOCK - 3}/0`);
+      }
+    } finally {
+      off();
+      await drain();
+    }
+  }, 30_000);
+
+  it('RC-66 (W11-STOREFRONT-ROUTE-DECREMENTED; packet case RC-30 control; F-36, D-136) a STANDARD order created paid with tracked B×2 (no checkout sale movement) still reserves 2', async () => {
+    const order = await paidStandardOrderOf(ID.productB, 2);
+    expect(order.type).toBe('STANDARD');
+    await routing.routeOrder(ID.biz, order.id);
+
+    expect(await stockOf(ID.stockB)).toBe(`${IN_STOCK}/2`);
+    const routes = await db.fulfillmentRoute.findMany({
+      where: { businessId: ID.biz, orderId: order.id },
+    });
+    expect(routes.length).toBe(1);
+    expect(routes[0].strategy).toBe('LOCAL_STOCK');
+    expect(routes[0].status).toBe('RESERVED');
+    expect((routes[0].metadata as Record<string, unknown> | null)?.stockDecrementedAtCheckout).toBeFalsy();
+  }, 20_000);
+
+  it('RC-67 (W11-STOREFRONT-ROUTE-DECREMENTED; packet case RC-31; F-36, D-136) a storefront line whose listing is DROPSHIP but whose tracked product was decremented at checkout raises no PurchaseOrder and routes LOCAL_STOCK:RESERVED with stockDecrementedAtCheckout', async () => {
+    const listing = await db.marketplaceListing.create({
+      data: {
+        id: `${P}rc67_listing`,
+        businessId: ID.biz,
+        productId: ID.productB,
+        fulfillmentStrategy: 'DROPSHIP',
+        supplierName: 'V18R RC67 Supplier',
+        isActive: true,
+      },
+    });
+    const off = listenerOnTheBus();
+    try {
+      const placed = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: [{ productId: ID.productB, quantity: 3 }],
+        customerInfo: { name: 'Vee Dropship Storefront', email: CUSTOMER_EMAIL },
+        paymentMethod: 'CASH',
+      });
+      await storeOrders.updatePaymentStatus(placed.id, 'PAID', `${P}rc67_provider_ref`, 'PAYPAL');
+      await drain();
+
+      expect(await stockOf(ID.stockB), 'checkout took 3, routing reserved 0').toBe(`${IN_STOCK - 3}/0`);
+      const pos = await db.purchaseOrder.findMany({
+        where: { businessId: ID.biz, fulfillmentRoutes: { some: { orderId: placed.id } } },
+      });
+      expect(pos.length, 'no supplier PurchaseOrder raised').toBe(0);
+
+      const routes = await db.fulfillmentRoute.findMany({
+        where: { businessId: ID.biz, orderId: placed.id },
+      });
+      expect(routes.length).toBe(1);
+      expect(routes[0]).toMatchObject({
+        strategy: 'LOCAL_STOCK',
+        status: 'RESERVED',
+        sourceType: 'WAREHOUSE',
+        warehouseId: ID.warehouse,
+        listingId: listing.id,
+        notes: 'Stock taken at checkout — no reservation',
+        metadata: {
+          inventoryMode: 'tracked',
+          noReservationRequired: true,
+          stockDecrementedAtCheckout: true,
+        },
+      });
+    } finally {
+      off();
+      await drain();
+      await db.marketplaceListing.deleteMany({ where: { id: listing.id } });
+    }
+  }, 30_000);
+
+  it('RC-68 (W11-STOREFRONT-ROUTE-DECREMENTED; packet case RC-32; F-36, D-136) cancelling a routed checkout-decremented storefront order via PATCH CANCELLED leaves reserved untouched (0 when alone, and does not steal a sibling STANDARD order reservation)', async () => {
+    const off = listenerOnTheBus();
+    try {
+      const placed = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: [{ productId: ID.productB, quantity: 3 }],
+        customerInfo: { name: 'Vee Cancel Storefront', email: CUSTOMER_EMAIL },
+        paymentMethod: 'CASH',
+      });
+      await storeOrders.updatePaymentStatus(placed.id, 'PAID', `${P}rc68_provider_ref`, 'PAYPAL');
+      await drain();
+      expect(await stockOf(ID.stockB)).toBe(`${IN_STOCK - 3}/0`);
+
+      // Route a sibling STANDARD order reserving 2 units on B -> 7/2.
+      const sibling = await paidStandardOrderOf(ID.productB, 2);
+      await routing.routeOrder(ID.biz, sibling.id);
+      expect(await stockOf(ID.stockB)).toBe(`${IN_STOCK - 3}/2`);
+
+      // Cancel the storefront order: its route cancels, and B stays 7/2 (sibling reservation untouched!).
+      expect(await statusAnswer(siteStatusByRoute(placed.id, 'CANCELLED'))).toBe('CANCELLED/PAID');
+      expect(await routesOf(placed.id)).toEqual(['LOCAL_STOCK:CANCELLED']);
+      expect(await stockOf(ID.stockB)).toBe(`${IN_STOCK - 3}/2`);
+    } finally {
+      off();
+      await drain();
+    }
+  }, 30_000);
+});

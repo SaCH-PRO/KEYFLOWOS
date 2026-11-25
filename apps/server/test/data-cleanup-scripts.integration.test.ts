@@ -259,6 +259,13 @@ let app: any;
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM fulfillment_routes WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM stock_movements WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM inventory_stocks WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_order_items WHERE id LIKE ${sqlLikePrefix(P)} OR order_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_orders WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM warehouses WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_custom_field_values WHERE id LIKE ${sqlLikePrefix(P)} OR contact_id LIKE ${sqlLikePrefix(P)} OR definition_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM custom_field_definitions WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
@@ -894,5 +901,194 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     expect(ownerOfC.readsOwnerWithheld, 'the recorded owner holding OWNER').toBe(true);
     const adminOfC = await resolveTimelineViewer(prisma, ID.bizC, ID.admin);
     expect(adminOfC.readsOwnerWithheld, 'an ADMIN').toBe(false);
+  });
+});
+
+describe('W11-STOREFRONT-ROUTE-DECREMENTED (D-137): release-storefront-decremented-reservations operator script', () => {
+  const D137 = {
+    whA: `${P}d137_whA`,
+    whB: `${P}d137_whB`,
+    prodA: `${P}d137_prodA`,
+    prodB: `${P}d137_prodB`,
+    stockA: `${P}d137_stockA`,
+    stockB: `${P}d137_stockB`,
+    // A: legacy checkout-decremented storefront order still holding a RESERVED route (qty 3)
+    ordLegacyA: `${P}d137_ordLegacyA`,
+    itemLegacyA: `${P}d137_itemLegacyA`,
+    routeLegacyA: `${P}d137_routeLegacyA`,
+    movLegacyA: `${P}d137_movLegacyA`,
+    // A: sibling STANDARD order legitimately reserving qty 2 on the SAME stock row (no 'sale' movement)
+    ordStdA: `${P}d137_ordStdA`,
+    itemStdA: `${P}d137_itemStdA`,
+    routeStdA: `${P}d137_routeStdA`,
+    // A: already-fixed F-36 storefront order (noReservationRequired: true) — must NOT be touched
+    ordAlreadyFixedA: `${P}d137_ordFixedA`,
+    itemAlreadyFixedA: `${P}d137_itemFixedA`,
+    routeAlreadyFixedA: `${P}d137_routeFixedA`,
+    movAlreadyFixedA: `${P}d137_movFixedA`,
+    // A: already-CANCELLED legacy storefront order — must NOT be touched
+    ordCancelledA: `${P}d137_ordCancelA`,
+    itemCancelledA: `${P}d137_itemCancelA`,
+    routeCancelledA: `${P}d137_routeCancelA`,
+    movCancelledA: `${P}d137_movCancelA`,
+    // B: legacy checkout-decremented storefront order still holding a PICKING_PACKING route (qty 4)
+    ordLegacyB: `${P}d137_ordLegacyB`,
+    itemLegacyB: `${P}d137_itemLegacyB`,
+    routeLegacyB: `${P}d137_routeLegacyB`,
+    movLegacyB: `${P}d137_movLegacyB`,
+  };
+
+  async function seedD137Fixtures() {
+    await db.warehouse.createMany({
+      data: [
+        { id: D137.whA, businessId: ID.bizA, name: 'v96o D137 Wh A' },
+        { id: D137.whB, businessId: ID.bizB, name: 'v96o D137 Wh B' },
+      ],
+    });
+    await db.product.createMany({
+      data: [
+        { id: D137.prodA, businessId: ID.bizA, name: 'v96o D137 Tracked A', price: 20, inventoryMode: 'tracked' },
+        { id: D137.prodB, businessId: ID.bizB, name: 'v96o D137 Tracked B', price: 30, inventoryMode: 'tracked' },
+      ],
+    });
+    // stockA: qty 7, reserved 5 (3 from legacy storefront + 2 from legitimate STANDARD order)
+    // stockB: qty 6, reserved 4 (4 from legacy storefront in PICKING_PACKING)
+    await db.inventoryStock.createMany({
+      data: [
+        { id: D137.stockA, businessId: ID.bizA, productId: D137.prodA, warehouseId: D137.whA, quantity: 7, reserved: 5 },
+        { id: D137.stockB, businessId: ID.bizB, productId: D137.prodB, warehouseId: D137.whB, quantity: 6, reserved: 4 },
+      ],
+    });
+
+    await db.marketplaceOrder.createMany({
+      data: [
+        { id: D137.ordLegacyA, businessId: ID.bizA, orderNumber: `${P}ORD-D137-A1`, type: 'STOREFRONT', status: 'CONFIRMED', paymentStatus: 'PAID', customerName: 'D137 Buyer A', customerEmail: 'd137-a@test.local', subtotal: 60, total: 60 },
+        { id: D137.ordStdA, businessId: ID.bizA, orderNumber: `${P}ORD-D137-STD1`, type: 'STANDARD', status: 'routed', paymentStatus: 'PAID', customerName: 'D137 Std A', customerEmail: 'd137-std@test.local', subtotal: 40, total: 40 },
+        { id: D137.ordAlreadyFixedA, businessId: ID.bizA, orderNumber: `${P}ORD-D137-FIX1`, type: 'STOREFRONT', status: 'CONFIRMED', paymentStatus: 'PAID', customerName: 'D137 Fixed A', customerEmail: 'd137-fix@test.local', subtotal: 20, total: 20 },
+        { id: D137.ordCancelledA, businessId: ID.bizA, orderNumber: `${P}ORD-D137-CAN1`, type: 'STOREFRONT', status: 'CANCELLED', paymentStatus: 'PAID', customerName: 'D137 Can A', customerEmail: 'd137-can@test.local', subtotal: 20, total: 20 },
+        { id: D137.ordLegacyB, businessId: ID.bizB, orderNumber: `${P}ORD-D137-B1`, type: 'STOREFRONT', status: 'PROCESSING', paymentStatus: 'PAID', customerName: 'D137 Buyer B', customerEmail: 'd137-b@test.local', subtotal: 120, total: 120 },
+      ],
+    });
+    await db.marketplaceOrderItem.createMany({
+      data: [
+        { id: D137.itemLegacyA, orderId: D137.ordLegacyA, productId: D137.prodA, name: 'v96o D137 Tracked A', quantity: 3, unitPrice: 20, total: 60 },
+        { id: D137.itemStdA, orderId: D137.ordStdA, productId: D137.prodA, name: 'v96o D137 Tracked A', quantity: 2, unitPrice: 20, total: 40 },
+        { id: D137.itemAlreadyFixedA, orderId: D137.ordAlreadyFixedA, productId: D137.prodA, name: 'v96o D137 Tracked A', quantity: 1, unitPrice: 20, total: 20 },
+        { id: D137.itemCancelledA, orderId: D137.ordCancelledA, productId: D137.prodA, name: 'v96o D137 Tracked A', quantity: 1, unitPrice: 20, total: 20 },
+        { id: D137.itemLegacyB, orderId: D137.ordLegacyB, productId: D137.prodB, name: 'v96o D137 Tracked B', quantity: 4, unitPrice: 30, total: 120 },
+      ],
+    });
+    await db.stockMovement.createMany({
+      data: [
+        { id: D137.movLegacyA, businessId: ID.bizA, warehouseId: D137.whA, productId: D137.prodA, quantityChange: -3, type: 'sale', referenceId: `${P}ORD-D137-A1` },
+        { id: D137.movAlreadyFixedA, businessId: ID.bizA, warehouseId: D137.whA, productId: D137.prodA, quantityChange: -1, type: 'sale', referenceId: `${P}ORD-D137-FIX1` },
+        { id: D137.movCancelledA, businessId: ID.bizA, warehouseId: D137.whA, productId: D137.prodA, quantityChange: -1, type: 'sale', referenceId: `${P}ORD-D137-CAN1` },
+        { id: D137.movLegacyB, businessId: ID.bizB, warehouseId: D137.whB, productId: D137.prodB, quantityChange: -4, type: 'sale', referenceId: `${P}ORD-D137-B1` },
+      ],
+    });
+    await db.fulfillmentRoute.createMany({
+      data: [
+        { id: D137.routeLegacyA, businessId: ID.bizA, orderId: D137.ordLegacyA, orderItemId: D137.itemLegacyA, strategy: 'LOCAL_STOCK', status: 'RESERVED', sourceType: 'WAREHOUSE', warehouseId: D137.whA, metadata: { inventoryMode: 'tracked' } },
+        { id: D137.routeStdA, businessId: ID.bizA, orderId: D137.ordStdA, orderItemId: D137.itemStdA, strategy: 'LOCAL_STOCK', status: 'RESERVED', sourceType: 'WAREHOUSE', warehouseId: D137.whA, metadata: { inventoryMode: 'tracked' } },
+        { id: D137.routeAlreadyFixedA, businessId: ID.bizA, orderId: D137.ordAlreadyFixedA, orderItemId: D137.itemAlreadyFixedA, strategy: 'LOCAL_STOCK', status: 'RESERVED', sourceType: 'WAREHOUSE', warehouseId: D137.whA, metadata: { inventoryMode: 'tracked', noReservationRequired: true, stockDecrementedAtCheckout: true } },
+        { id: D137.routeCancelledA, businessId: ID.bizA, orderId: D137.ordCancelledA, orderItemId: D137.itemCancelledA, strategy: 'LOCAL_STOCK', status: 'CANCELLED', sourceType: 'WAREHOUSE', warehouseId: D137.whA, metadata: { inventoryMode: 'tracked' } },
+        { id: D137.routeLegacyB, businessId: ID.bizB, orderId: D137.ordLegacyB, orderItemId: D137.itemLegacyB, strategy: 'LOCAL_STOCK', status: 'PICKING_PACKING', sourceType: 'WAREHOUSE', warehouseId: D137.whB, metadata: { inventoryMode: 'tracked' } },
+      ],
+    });
+  }
+
+  async function runD137(argv: string[]) {
+    const mod = await import('../scripts/release-storefront-decremented-reservations');
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const code = await mod.main(argv, {
+      db,
+      log: (...a: unknown[]) => lines.push(a.map(String).join(' ')),
+      error: (...a: unknown[]) => errors.push(a.map(String).join(' ')),
+    });
+    return { code, out: lines.join('\n'), err: errors.join('\n') };
+  }
+
+  beforeAll(async () => {
+    await seedD137Fixtures();
+  });
+
+  it('[DCS-D137-01] dry run (default) prints counts only without leaking ids and writes nothing; bad arguments exit 2', async () => {
+    const bad = await runD137(['--bogus']);
+    expect(bad.code).toBe(2);
+
+    const dry = await runD137([`--business=${ID.bizA}`, `--business=${ID.bizB}`]);
+    expect(dry.code, dry.err).toBe(0);
+    expect(dry.out).toMatch(/DRY RUN/i);
+    expect(dry.out).toMatch(/routes_affected\s+2\b/);
+    expect(dry.out).toMatch(/units_to_release\s+7\b/);
+    expect(dry.out).toMatch(/stock_rows_affected\s+2\b/);
+    expect(dry.out).toMatch(/businesses_affected\s+2\b/);
+
+    // Counts only: never prints business, order, route, or product ids.
+    for (const forbidden of [ID.bizA, ID.bizB, D137.ordLegacyA, D137.routeLegacyA, D137.prodA, `${P}ORD-D137-A1`]) {
+      expect(dry.out).not.toContain(forbidden);
+    }
+
+    // Nothing modified in DB.
+    const [sA, sB, rA] = await Promise.all([
+      db.inventoryStock.findUnique({ where: { id: D137.stockA } }),
+      db.inventoryStock.findUnique({ where: { id: D137.stockB } }),
+      db.fulfillmentRoute.findUnique({ where: { id: D137.routeLegacyA } }),
+    ]);
+    expect(sA?.reserved).toBe(5);
+    expect(sB?.reserved).toBe(4);
+    expect((rA?.metadata as Record<string, unknown> | null)?.noReservationRequired).toBeFalsy();
+  });
+
+  it('[DCS-D137-02] --apply --business=<bizA> releases exactly bizA checkout-decremented reservations, preserves STANDARD sibling reservation and leaves bizB untouched', async () => {
+    const res = await runD137(['--apply', `--business=${ID.bizA}`]);
+    expect(res.code, res.err).toBe(0);
+    expect(res.out).toMatch(/routes_updated\s+1\b/);
+    expect(res.out).toMatch(/units_released\s+3\b/);
+
+    const [sA, sB, rLegacyA, rStdA] = await Promise.all([
+      db.inventoryStock.findUnique({ where: { id: D137.stockA } }),
+      db.inventoryStock.findUnique({ where: { id: D137.stockB } }),
+      db.fulfillmentRoute.findUnique({ where: { id: D137.routeLegacyA } }),
+      db.fulfillmentRoute.findUnique({ where: { id: D137.routeStdA } }),
+    ]);
+    // 5 - 3 = 2 (the sibling STANDARD reservation stays intact).
+    expect(sA?.quantity).toBe(7);
+    expect(sA?.reserved).toBe(2);
+    // bizB untouched.
+    expect(sB?.reserved).toBe(4);
+    // Legacy route marked noReservationRequired + stockDecrementedAtCheckout, status kept RESERVED.
+    expect(rLegacyA?.status).toBe('RESERVED');
+    expect(rLegacyA?.metadata).toMatchObject({
+      inventoryMode: 'tracked',
+      noReservationRequired: true,
+      stockDecrementedAtCheckout: true,
+    });
+    // STANDARD route untouched.
+    expect((rStdA?.metadata as Record<string, unknown> | null)?.noReservationRequired).toBeFalsy();
+  });
+
+  it('[DCS-D137-03] re-running --apply on bizA is idempotent (0 affected, 0 released) and bizB --apply releases its 4 units cleanly', async () => {
+    const rerun = await runD137(['--apply', `--business=${ID.bizA}`]);
+    expect(rerun.code, rerun.err).toBe(0);
+    expect(rerun.out).toMatch(/routes_affected\s+0\b/);
+    expect(rerun.out).toMatch(/units_released\s+0\b/);
+    expect((await db.inventoryStock.findUnique({ where: { id: D137.stockA } }))?.reserved).toBe(2);
+
+    const applyB = await runD137(['--apply', `--business=${ID.bizB}`]);
+    expect(applyB.code, applyB.err).toBe(0);
+    expect(applyB.out).toMatch(/routes_updated\s+1\b/);
+    expect(applyB.out).toMatch(/units_released\s+4\b/);
+    const sB = await db.inventoryStock.findUnique({ where: { id: D137.stockB } });
+    expect(sB?.quantity).toBe(6);
+    expect(sB?.reserved).toBe(0);
+    const rB = await db.fulfillmentRoute.findUnique({ where: { id: D137.routeLegacyB } });
+    expect(rB?.status).toBe('PICKING_PACKING');
+    expect(rB?.metadata).toMatchObject({
+      inventoryMode: 'tracked',
+      noReservationRequired: true,
+      stockDecrementedAtCheckout: true,
+    });
   });
 });
