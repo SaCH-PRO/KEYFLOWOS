@@ -28,8 +28,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *                       cached user; the leftover business is forgotten
  *   RMN-11  pin         MINOR-2: access given back (the business is in the list again) clears the notice
  * Correctness review round:
- *   RMN-12  pin         a member who switched business themselves (selectBusiness drops the cached user) and is then
- *                       removed from the business they switched away from gets no notice: it is not the one stored
+ *   RMN-12  pin         with no cached user to confirm the person (a switch via selectBusiness drops it, and the
+ *                       removal lands before the shell re-resolves), no notice is raised: the same-person guard fails
+ *                       quiet rather than name a business to someone it cannot confirm (correctness MINOR-2/3)
  */
 
 const { bootstrapIdentity } = vi.hoisted(() => ({ bootstrapIdentity: vi.fn() }));
@@ -207,14 +208,15 @@ describe("SWP-REMOVED-MEMBER-NOTICE: a removed member is told, by name", () => {
     expect(ws.getRemovedBusinessNotice(), "re-invited: the notice no longer holds").toBeNull();
   });
 
-  it("RMN-12 pin: a member who switched away themselves gets no notice for the business they left", async () => {
+  it("RMN-12 pin: with no cached user to confirm the person, no notice is raised", async () => {
     workingIn(OWNERS);
-    serve({ businesses: [OWN, OWNERS] });
     const ws = await import("../workspace");
+    // The member switches to their own business (selectBusiness drops the cached user) and is removed from it before
+    // the shell re-resolves.
     ws.selectBusiness(OWN.id);
-    // Removed from the business they had already switched away from.
-    serve({ businesses: [OWN] });
-    await expect(ws.refreshWorkspace()).resolves.toBe(OWN.id);
+    expect(window.localStorage.getItem("kf_user_cache")).toBeNull();
+    serve({ businesses: [OWNERS] });
+    await expect(ws.refreshWorkspace()).resolves.toBe(OWNERS.id);
     expect(ws.getRemovedBusinessNotice()).toBeNull();
   });
 });
