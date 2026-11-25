@@ -23,6 +23,7 @@ import {
 import { Button } from "@keyflow/ui";
 import { ProductForm } from "../components/commerce-types";
 import Image from "next/image";
+import Link from "next/link";
 
 const CATEGORY_CARDS: {
   value: "SERVICE" | "PRODUCT" | "PACKAGE";
@@ -691,21 +692,23 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                         </label>
                         <select
                           id="product-form-inventory-mode"
-                          value={productForm.inventoryMode ?? "tracked"}
+                          value={productForm.inventoryMode ?? ""}
                           onChange={(e) =>
                             setProductForm((f) => ({
                               ...f,
-                              inventoryMode: e.target.value as "tracked" | "untracked" | "virtual",
+                              inventoryMode: (e.target.value || undefined) as "tracked" | "untracked" | "virtual" | undefined,
                             }))
                           }
                           className={inputClass}
                         >
+                          {/* CATALOG-1 round 3: a product stored with no mode says so (it is not "Tracked / Hide"). */}
+                          {!productForm.inventoryMode && <option value="">Not set</option>}
                           <option value="tracked">Tracked (count stock)</option>
                           <option value="untracked">Untracked (always available)</option>
                           <option value="virtual">Virtual / digital</option>
                         </select>
                       </div>
-                      {(productForm.inventoryMode ?? "tracked") === "tracked" && (
+                      {productForm.inventoryMode === "tracked" && (
                         <div>
                           <label htmlFor="product-form-out-of-stock" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
                             When out of stock
@@ -726,6 +729,12 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                             <option value="allow_backorder">Allow backorder</option>
                           </select>
                         </div>
+                      )}
+                      {!editingProductId && productForm.inventoryMode === "tracked" && (productForm.outOfStockBehavior ?? "hide") === "hide" && (
+                        <p className="col-span-2 text-[10px] text-amber-400/90">
+                          Starts with 0 in stock: hidden from your store until you add stock in{" "}
+                          <Link href="/app/inventory" className="underline underline-offset-2">Inventory</Link>.
+                        </p>
                       )}
                     </div>
                   )}

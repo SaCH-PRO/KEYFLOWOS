@@ -25,7 +25,7 @@ import {
   StoreGraph,
   StoreReadinessResult,
 } from "@/lib/client";
-import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { refreshWorkspace, getStoredBusinessId, BUSINESS_CHANGED_EVENT } from "@/lib/workspace";
 import { apiGet } from "@/lib/api";
 import { onProductsChanged, hasProductChangedSinceLastFetch, markProductsFetched } from "@/lib/product-sync";
 import { toast } from "sonner";
@@ -130,8 +130,45 @@ export function useStoreData() {
 
   const backfillRan = useRef(false);
 
+  /**
+   * CATALOG-1 round 3 (SEC-CAT-7, D-100): Your page follows the business selection (kf:business-changed, and the
+   * storage event for another tab), as useMemberModuleLevels does. It kept the business it mounted with, so after a
+   * switch the stock read went out for the old business under the new business's level. On a switch everything of
+   * the previous business is dropped and the new one loads; an answer for the previous business is not applied.
+   */
+  const currentBusiness = useRef<string | null>(null);
+  useEffect(() => {
+    currentBusiness.current = businessId;
+  }, [businessId]);
+  useEffect(() => {
+    const follow = () => {
+      const next = getStoredBusinessId();
+      if (!next || next === currentBusiness.current) return;
+      currentBusiness.current = next;
+      backfillRan.current = false;
+      setStockRead(null);
+      setServices([]);
+      setStaff([]);
+      setCommerceProducts([]);
+      setBusinessData(null);
+      setStoreGraph(null);
+      setDriftedItems([]);
+      setReadiness(null);
+      setOverviewAnalytics(null);
+      setBusinessId(next);
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, follow);
+    window.addEventListener("storage", follow);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, follow);
+      window.removeEventListener("storage", follow);
+    };
+  }, []);
+
   const loadData = useCallback(async (showLoader = false) => {
     if (!businessId) return;
+    // An answer for a business no longer selected (a reload in flight across a switch) is dropped.
+    const stale = () => currentBusiness.current !== null && currentBusiness.current !== businessId;
     if (showLoader) setLoading(true);
     setLoadError(null);
     try {
@@ -147,6 +184,7 @@ export function useStoreData() {
         fetchAllProducts(businessId).catch(() => ({ data: null, error: null })),
         fetchStoreGraph(businessId).catch(() => ({ data: null, error: null })),
       ]);
+      if (stale()) return;
       const loadedServices = servicesRes.data ?? [];
       const productsResExt = productsRes as { data?: Product[] | null; error?: string | null };
       const loadedProducts = productsResExt?.data ?? [];
@@ -189,6 +227,7 @@ export function useStoreData() {
         apiGet<Record<string, { enabled?: boolean }>>(`/marketplace/businesses/${businessId}/delivery-config`).catch(() => ({ data: null })),
         fetchStoreReadiness(businessId).catch(() => ({ data: null, error: null })),
       ]);
+      if (stale()) return;
       setLoadGeneration((g) => g + 1);
       if (configRes.data) setStorefrontConfig(configRes.data);
       if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
@@ -202,7 +241,7 @@ export function useStoreData() {
       setLoadError("Failed to load store data. Please refresh the page.");
       toast.error("Failed to load store data");
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   }, [businessId]);
 
@@ -213,11 +252,13 @@ export function useStoreData() {
   // The stock, read again with every load, and only when the member may read prices (SEC-CAT-7).
   useEffect(() => {
     if (!businessId || !canReadStock) return;
+    // The level read is the selected business's: read the stock only for that same business.
+    if (getStoredBusinessId() !== businessId) return;
     let live = true;
     void apiGet<Array<{ productId?: string; quantity?: number; reserved?: number }>>(`/marketplace/businesses/${businessId}/inventory`)
       .catch(() => ({ data: null }))
       .then((res) => {
-        if (!live) return;
+        if (!live || currentBusiness.current !== businessId) return;
         if (!Array.isArray(res.data)) { setStockRead(null); return; }
         const stock: StockByProduct = new Map();
         for (const r of res.data) {

@@ -63,7 +63,11 @@ function ProductsPageInner() {
   const actions = useProducts(businessId, setProducts, { currency, defaultCategory: "PRODUCT" });
   const { closeProductForm } = actions;
 
+  // The business this page shows now; a reload asked for another (a bulk change answered after a switch) is ignored.
+  const currentId = useRef<string | null>(null);
+
   const load = useCallback(async (id: string) => {
+    if (currentId.current && currentId.current !== id) return;
     const token = ++loadToken.current;
     setLoading(true);
     setLoadError(null);
@@ -94,6 +98,7 @@ function ProductsPageInner() {
       setLoading(false);
       return;
     }
+    currentId.current = id;
     setBusinessId(id);
     await load(id);
   }, [load]);
@@ -112,6 +117,8 @@ function ProductsPageInner() {
       setCurrency(null);
       setCurrencyError(null);
       setBusinessId(null);
+      // Until start() settles on it, the newly selected business is the current one (an old reload stays ignored).
+      currentId.current = getStoredBusinessId();
       actionHandled.current = true;
       void start();
     };

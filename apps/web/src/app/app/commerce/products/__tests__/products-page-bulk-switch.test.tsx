@@ -57,10 +57,6 @@ async function rowEl(name: string): Promise<HTMLElement> {
   return found!;
 }
 
-async function openRowAction(name: string, action: RegExp) {
-  fireEvent.click(within(await rowEl(name)).getByRole("button", { name: /more actions/i }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: action }));
-}
 
 beforeEach(() => {
   ws.businessId = USD_BIZ;

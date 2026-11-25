@@ -66,10 +66,11 @@ function buildProductPayload(form: ProductForm, mode: "create" | "update" = "cre
   const imageUrl = form.imageUrl.trim();
   // COR-CAT-6: an edit that clears a field clears it on the server (null), not "leave as is" (undefined).
   const cleared = mode === "update" ? null : undefined;
-  // Round 2 (4): a new product is created with the inventory settings the form shows for a product (Tracked, out of
-  // stock: Hide from storefront) even when the owner did not touch them; stored null read as untracked. An edit
-  // sends only what the form holds, so a stored null mode stays null unless the owner picks one.
-  const shownMode = mode === "create" && form.category === "PRODUCT" ? (form.inventoryMode || "tracked") : (form.inventoryMode || undefined);
+  // Round 3 (COR-CAT-R2-1): a new product is created with what the form shows; its default is Untracked, so it is
+  // shown on the store with no stock (Tracked with no stock and "hide" was hidden, with nothing saying why). The
+  // out-of-stock behaviour goes with Tracked only. An edit sends only what the form holds, so a stored null mode
+  // stays null unless the owner picks one.
+  const shownMode = mode === "create" && form.category === "PRODUCT" ? (form.inventoryMode || "untracked") : (form.inventoryMode || undefined);
   const shownBehavior = mode === "create" && form.category === "PRODUCT"
     ? (shownMode === "tracked" ? (form.outOfStockBehavior || "hide") : undefined)
     : (form.outOfStockBehavior || undefined);
@@ -107,7 +108,11 @@ export function useProducts(
 ) {
   const currency = options.currency ?? undefined;
   const defaultCategory = options.defaultCategory ?? DEFAULT_PRODUCT_FORM.category;
-  const blankForm = useCallback((): ProductForm => ({ ...DEFAULT_PRODUCT_FORM, category: defaultCategory }), [defaultCategory]);
+  // A new PRODUCT starts Untracked (round 3), shown in the form and sent as shown.
+  const blankForm = useCallback(
+    (): ProductForm => ({ ...DEFAULT_PRODUCT_FORM, category: defaultCategory, ...(defaultCategory === "PRODUCT" ? { inventoryMode: "untracked" as const } : {}) }),
+    [defaultCategory],
+  );
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState<ProductForm>({ ...DEFAULT_PRODUCT_FORM });
