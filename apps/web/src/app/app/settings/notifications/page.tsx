@@ -18,6 +18,8 @@ import Link from "next/link";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
+import { NoAccessState } from "@/components/ui/no-access-state";
+import { readState, type ReadState } from "@/lib/failure-kit";
 import { toast } from "sonner";
 
 interface NotificationPreferences {
@@ -107,6 +109,11 @@ export default function NotificationsSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"preferences" | "log">("preferences");
+  // FU-NOTIFICATIONS-PAGE-REFUSED (D-283): each read judged by FAILURE-KIT's readState, so a settings-none member's
+  // refused read is said as no access (never a blank tab or "No customer notifications sent yet"), and any other
+  // failure (a 5xx, a network error, BusinessGuard's 403) as a failed load.
+  const [prefsRead, setPrefsRead] = useState<ReadState>({ kind: "ok" });
+  const [logRead, setLogRead] = useState<ReadState>({ kind: "ok" });
 
   const loadData = useCallback(async () => {
     const businessId = getStoredBusinessId();
@@ -116,8 +123,12 @@ export default function NotificationsSettingsPage() {
       apiGet<NotificationPreferences>(`/notifications/businesses/${businessId}/customer-preferences`),
       apiGet<NotificationLogEntry[]>(`/notifications/businesses/${businessId}/customer-log?limit=100`),
     ]);
-    if (prefsRes.data) setPreferences(prefsRes.data);
-    if (logRes.data) setLog(logRes.data);
+    const prefsState = readState(prefsRes, { what: "the customer notification settings" });
+    const logState = readState(logRes, { what: "the customer notification log" });
+    setPrefsRead(prefsState);
+    setLogRead(logState);
+    setPreferences(prefsState.kind === "ok" ? prefsRes.data : null);
+    setLog(logState.kind === "ok" && Array.isArray(logRes.data) ? logRes.data : []);
     setLoading(false);
   }, []);
 
@@ -197,7 +208,7 @@ export default function NotificationsSettingsPage() {
                 : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
-            {tab === "preferences" ? "Preferences" : `Log (${log.length})`}
+            {tab === "preferences" ? "Preferences" : logRead.kind === "ok" ? `Log (${log.length})` : "Log"}
           </button>
         ))}
       </div>
@@ -212,7 +223,10 @@ export default function NotificationsSettingsPage() {
         .
       </p>
 
-      {activeTab === "preferences" && preferences && (
+      {activeTab === "preferences" && <ReadProblem state={prefsRead} onRetry={loadData} />}
+      {activeTab === "log" && <ReadProblem state={logRead} onRetry={loadData} />}
+
+      {activeTab === "preferences" && prefsRead.kind === "ok" && preferences && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -298,7 +312,7 @@ export default function NotificationsSettingsPage() {
         </motion.div>
       )}
 
-      {activeTab === "log" && (
+      {activeTab === "log" && logRead.kind === "ok" && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -410,6 +424,25 @@ export default function NotificationsSettingsPage() {
           )}
         </motion.div>
       )}
+    </div>
+  );
+}
+
+/** A read that did not give the tab its data: no access (FAILURE-KIT's NoAccessState), or a failed load with Retry. */
+function ReadProblem({ state, onRetry }: { state: ReadState; onRetry: () => void }) {
+  if (state.kind === "ok") return null;
+  if (state.kind === "no-access") return <NoAccessState message={state.message} />;
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+      <span className="min-w-0 flex-1 break-words">{state.message}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Retry
+      </button>
     </div>
   );
 }
