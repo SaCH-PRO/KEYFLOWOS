@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { BusinessGenesisService } from './business-genesis.service';
@@ -21,13 +22,14 @@ import {
 } from './dto';
 
 @Controller('business-genesis/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class BusinessGenesisController {
   constructor(
     @Inject(BusinessGenesisService) private readonly genesis: BusinessGenesisService,
     @Inject(GenesisMarketStrategyService) private readonly marketStrategy: GenesisMarketStrategyService,
   ) {}
 
+  @RequireModuleScope('settings', 'write')
   @Post('analyze-idea')
   async analyzeIdea(
     @Param('businessId') businessId: string,
@@ -67,12 +69,14 @@ export class BusinessGenesisController {
     return this.genesis.getReadinessScore(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('generate-roadmap')
   @UseGuards(GenomeGateGuard)
   async generateRoadmap(@Param('businessId') businessId: string) {
     return this.genesis.generateRoadmap(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('generate-document-pack')
   @UseGuards(GenomeGateGuard)
   async generateDocumentPack(@Param('businessId') businessId: string) {
@@ -84,12 +88,14 @@ export class BusinessGenesisController {
     return this.genesis.getDocumentPack(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('generate-risk-register')
   @UseGuards(GenomeGateGuard)
   async generateRiskRegister(@Param('businessId') businessId: string) {
     return this.genesis.generateRiskRegister(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('generate-market-strategy')
   @UseGuards(GenomeGateGuard)
   async generateMarketStrategy(@Param('businessId') businessId: string) {

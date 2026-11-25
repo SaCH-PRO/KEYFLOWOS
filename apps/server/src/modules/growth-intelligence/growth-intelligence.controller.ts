@@ -1,12 +1,13 @@
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CustomerJourneyService, type JourneyStage } from './customer-journey.service';
 import { AttributionService, type AttributionDimension, type AttributionModel } from './attribution.service';
 import { GrowthIntelligenceService } from './growth-intelligence.service';
 
 @Controller('growth-intelligence')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class GrowthIntelligenceController {
   constructor(
     @Inject(GrowthIntelligenceService) private readonly growth: GrowthIntelligenceService,
@@ -38,6 +39,7 @@ export class GrowthIntelligenceController {
     return { found: true, journey };
   }
 
+  @RequireModuleScope('analytics', 'write')
   @Post('businesses/:businessId/journeys/backfill')
   backfill(@Param('businessId') businessId: string) {
     return this.journeys.backfillBusiness(businessId);
@@ -56,6 +58,7 @@ export class GrowthIntelligenceController {
     });
   }
 
+  @RequireModuleScope('analytics', 'write')
   @Post('businesses/:businessId/attribution/recompute')
   recomputeAttribution(@Param('businessId') businessId: string, @Body() body: { periodStart?: string; periodEnd?: string }) {
     return this.attribution.compute({
@@ -70,11 +73,13 @@ export class GrowthIntelligenceController {
     return this.growth.listInsights(businessId, { status });
   }
 
+  @RequireModuleScope('analytics', 'write')
   @Post('businesses/:businessId/insights/regenerate')
   regenerate(@Param('businessId') businessId: string) {
     return this.growth.generateInsights(businessId);
   }
 
+  @RequireModuleScope('analytics', 'write')
   @Post('businesses/:businessId/insights/:insightId/status')
   updateInsight(
     @Param('businessId') businessId: string,

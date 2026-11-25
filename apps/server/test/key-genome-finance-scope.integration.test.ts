@@ -424,9 +424,9 @@ beforeAll(async () => {
   });
   for (const [user, role, permissionScopes] of [
     [ID.owner, 'OWNER', undefined],
-    [ID.staffNone, 'STAFF', { revenue: 'none', crm: 'read' }],
-    [ID.staffRead, 'STAFF', { revenue: 'read' }],
-    [ID.staffWrite, 'STAFF', { revenue: 'write' }],
+    [ID.staffNone, 'STAFF', { revenue: 'none', crm: 'read', settings: 'write' }],
+    [ID.staffRead, 'STAFF', { revenue: 'read', settings: 'write' }],
+    [ID.staffWrite, 'STAFF', { revenue: 'write', settings: 'write' }],
   ] as const) {
     await db.membership.create({
       data: { id: `${user}_m`, userId: user, businessId: ID.biz, role, ...(permissionScopes ? { permissionScopes } : {}) },
@@ -596,6 +596,7 @@ describe('W11-GENOME-FINANCE-SCOPE (D-128): the other key-genome routes are unch
     );
     const read = { module: 'revenue', minLevel: 'read' };
     const write = { module: 'revenue', minLevel: 'write' };
+    const settingsWrite = { module: 'settings', minLevel: 'write' };
     expect(scoped).toEqual({
       // D-100 / D-128: the finance figures.
       listFinanceMetrics: read,
@@ -636,6 +637,43 @@ describe('W11-GENOME-FINANCE-SCOPE (D-128): the other key-genome routes are unch
       updateOutcomeObservation: read,
       closeObservationWindow: write,
       memorySummary: read,
+      // SWP-CENSUS-GENOME (P84, Journey J): the 35 non-finance write handlers require settings:write
+      // (finance signals/recommendations additionally enforce D-128 revenue:write inside handlers).
+      accept: settingsWrite,
+      acceptRecommendation: settingsWrite,
+      applyRecommendation: settingsWrite,
+      cancelExperiment: settingsWrite,
+      completeExperiment: settingsWrite,
+      computeDepartment: settingsWrite,
+      computeDepartments: settingsWrite,
+      computeMarketingGrowthSnapshot: settingsWrite,
+      computeOperationsSnapshot: settingsWrite,
+      createContentStrategy: settingsWrite,
+      createExperiment: settingsWrite,
+      createGrowthChannel: settingsWrite,
+      deleteContentStrategy: settingsWrite,
+      deleteDeliveryCapability: settingsWrite,
+      deleteGrowthChannel: settingsWrite,
+      deleteOperationalProcess: settingsWrite,
+      dismissRecommendation: settingsWrite,
+      escalateRecommendation: settingsWrite,
+      generateMarketingGrowthRecommendations: settingsWrite,
+      generateMarketingGrowthSignals: settingsWrite,
+      generateOperationsRecommendations: settingsWrite,
+      generateOperationsSignals: settingsWrite,
+      generateRecommendations: settingsWrite,
+      ignoreRecommendation: settingsWrite,
+      merge: settingsWrite,
+      reject: settingsWrite,
+      review: settingsWrite,
+      seedDepartments: settingsWrite,
+      setOutcomeLearningWindow: settingsWrite,
+      startExperiment: settingsWrite,
+      trackRecommendationOutcome: settingsWrite,
+      updateContentStrategy: settingsWrite,
+      updateGrowthChannel: settingsWrite,
+      upsertDeliveryCapability: settingsWrite,
+      upsertOperationalProcess: settingsWrite,
     });
   });
 });
