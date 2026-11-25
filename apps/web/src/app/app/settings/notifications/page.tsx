@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Bell,
@@ -103,6 +103,25 @@ const TYPE_LABELS: Record<string, string> = {
   payment_receipt: "Receipt",
 };
 
+/** A read that did not give the tab its data: no access (FAILURE-KIT's NoAccessState), or a failed load with Retry. */
+function ReadProblem({ state, onRetry }: { state: ReadState; onRetry: () => void }) {
+  if (state.kind === "ok") return null;
+  if (state.kind === "no-access") return <NoAccessState message={state.message} />;
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+      <span className="min-w-0 flex-1 break-words">{state.message}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export default function NotificationsSettingsPage() {
   const [preferences, setPreferences] = useState<NotificationPreferences | null>(null);
   const [log, setLog] = useState<NotificationLogEntry[]>([]);
@@ -114,10 +133,13 @@ export default function NotificationsSettingsPage() {
   // failure (a 5xx, a network error, BusinessGuard's 403) as a failed load.
   const [prefsRead, setPrefsRead] = useState<ReadState>({ kind: "ok" });
   const [logRead, setLogRead] = useState<ReadState>({ kind: "ok" });
+  // Counts the loads started, so a toggle's failure knows whether a load (a Retry) has read the server since its click.
+  const loadGen = useRef(0);
 
   const loadData = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
+    loadGen.current += 1;
     setLoading(true);
     const [prefsRes, logRes] = await Promise.all([
       apiGet<NotificationPreferences>(`/notifications/businesses/${businessId}/customer-preferences`),
@@ -140,17 +162,27 @@ export default function NotificationsSettingsPage() {
   const togglePreference = async (key: keyof NotificationPreferences) => {
     if (!preferences) return;
     setSaving(key);
-    const newValue = !preferences[key];
-    const updated = { ...preferences, [key]: newValue };
-    setPreferences(updated);
+    const before = preferences[key];
+    const newValue = !before;
+    const loadAtClick = loadGen.current;
+    setPreferences({ ...preferences, [key]: newValue });
     const businessId = getStoredBusinessId();
     if (!businessId) { setSaving(null); return; }
-    const res = await apiPatch(`/notifications/businesses/${businessId}/customer-preferences`, { [key]: newValue });
+    const path = `/notifications/businesses/${businessId}/customer-preferences`;
+    const res = await apiPatch<NotificationPreferences>(path, { [key]: newValue });
     if (res.error) {
-      // Put back only this switch, on whatever the page holds now (a Retry may have reloaded it meanwhile).
-      setPreferences((current) => (current ? { ...current, [key]: !newValue } : current));
+      // The answer comes from the server (a Retry may have reloaded the page since the click): re-read the preferences.
+      // Only when that fails too, and no load has read the server since the click, is this one switch put back.
+      const fresh = await apiGet<NotificationPreferences>(path);
+      if (readState(fresh, { what: "the customer notification settings" }).kind === "ok" && fresh.data) {
+        setPreferences(fresh.data);
+      } else if (loadGen.current === loadAtClick) {
+        setPreferences((current) => (current ? { ...current, [key]: before } : current));
+      }
       toast.error("Failed to update notification preference");
     } else {
+      // The PATCH answers the whole preferences as the server now holds them.
+      if (res.data) setPreferences(res.data);
       toast.success("Notification preference updated");
     }
     setSaving(null);
@@ -280,10 +312,11 @@ export default function NotificationsSettingsPage() {
                       <p className="kf-text-caption text-muted-foreground">{type.description}</p>
                     </div>
                   </div>
+                  {/* h-6 w-11 / h-5 w-5: the old h-5.5 and h-4.5 are not Tailwind 3 classes and rendered the switch 0px tall. */}
                   <button
                     onClick={() => togglePreference(type.key)}
                     disabled={saving === type.key}
-                    className="relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0"
+                    className="relative h-6 w-11 rounded-full transition-colors duration-200 flex-shrink-0"
                     style={{
                       background: enabled
                         ? "hsl(var(--kf-success))"
@@ -294,9 +327,9 @@ export default function NotificationsSettingsPage() {
                     aria-checked={enabled}
                   >
                     <span
-                      className="absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition-transform duration-200"
+                      className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200"
                       style={{
-                        transform: enabled ? "translateX(19px)" : "translateX(2px)",
+                        transform: enabled ? "translateX(22px)" : "translateX(2px)",
                       }}
                     />
                     {saving === type.key && (
@@ -425,25 +458,6 @@ export default function NotificationsSettingsPage() {
           )}
         </motion.div>
       )}
-    </div>
-  );
-}
-
-/** A read that did not give the tab its data: no access (FAILURE-KIT's NoAccessState), or a failed load with Retry. */
-function ReadProblem({ state, onRetry }: { state: ReadState; onRetry: () => void }) {
-  if (state.kind === "ok") return null;
-  if (state.kind === "no-access") return <NoAccessState message={state.message} />;
-  return (
-    <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
-      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-      <span className="min-w-0 flex-1 break-words">{state.message}</span>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        Retry
-      </button>
     </div>
   );
 }
