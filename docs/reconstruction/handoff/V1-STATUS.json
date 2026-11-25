@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "eec1e8800e601dfa2f69684f255b6b214ae2919d",
-  "main_commit_date": "2026-11-24T20:31:59-04:00",
+  "main_sha": "45d302ef6568255419f004fe84134a513d67ba1f",
+  "main_commit_date": "2026-11-24T22:11:41-04:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 536.5,
   "by_status": {
    "done": {
-    "packets": 127,
-    "points": 186.5,
-    "pct_by_points": 34.8
+    "packets": 128,
+    "points": 188.5,
+    "pct_by_points": 35.1
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 239,
-    "points": 350,
-    "pct_by_points": 65.2
+    "packets": 238,
+    "points": 348,
+    "pct_by_points": 64.9
    }
   },
   "by_step": {
@@ -78,9 +78,9 @@
     "total": 53
    },
    "5": {
-    "done": 16,
+    "done": 17,
     "in-progress": 0,
-    "todo": 55,
+    "todo": 54,
     "total": 71
    },
    "6": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 40,
+    "done": 41,
     "in-progress": 0,
-    "todo": 187,
+    "todo": 186,
     "total": 227
    },
    "follow-on": {
@@ -125,9 +125,9 @@
   "by_derivation": {
    "prior-status-file": 134,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 30,
+   "code-commit-subject": 31,
    "compacted-commit": 50,
-   "no-evidence": 124
+   "no-evidence": 123
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -144,6 +144,7 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT",
    "FU-PENDING-OWED-SERVER",
+   "FU-PENDING-OWED-WEB",
    "FU-RESEARCH-CORPUS-YAML",
    "RR-UNKNOWN-COST-NOT-ZERO",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
@@ -161,8 +162,8 @@
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL"
   ],
-  "todo_with_dependencies_met": 115,
-  "todo_with_dependencies_met_launch": 88
+  "todo_with_dependencies_met": 114,
+  "todo_with_dependencies_met_launch": 87
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -549,16 +550,6 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-WEB",
-   "step": 5,
-   "priority": "P0",
-   "size": "M",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1691,16 +1682,6 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-WEB",
-   "step": 5,
-   "priority": "P0",
-   "size": "M",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -6167,15 +6148,19 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "d645c31f",
+    "357c4f8b",
+    "0a595a17"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Every web owed figure counts PENDING invoices (D-256)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-SEND-REMINDER-SERVER-GATE",

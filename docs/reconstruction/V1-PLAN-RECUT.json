@@ -13278,6 +13278,66 @@
    "track_ruling": "orchestrator proposal 2026-11-25",
    "scope": "seedWorkspace stores kf_token = 'test-token-e2e', which is not three parts, so apps/web/src/middleware.ts isTokenExpiredOrInvalid sends every /app/* request to /auth/login before the page loads. Mocked specs that rely on seedWorkspace alone (connect-*, calendar-event-drawer, inventory-xlsx-import, ...) cannot reach the app. CI's e2e-mocked step runs only onboarding-loop-regression, auth-helpers and public-flows, so CI does not show it. Fix: store an unsigned JWT-shaped token (as sweep-me-notifications.spec.ts does), then check each seedWorkspace spec.",
    "definition_of_done": "RED: a mocked spec using only seedWorkspace reaches /app/crm/contacts (fails at the base: lands on /auth/login)."
+  },
+  {
+   "id": "FU-UNDO-TOAST-SIGNOUT",
+   "title": "Undo toasts are dismissed when the session ends",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [
+    "FU-BULK-DELETE-UNDO"
+   ],
+   "files": [
+    "apps/web/src/hooks/use-app-layout.ts (handleLogout)",
+    "apps/web/src/components/require-auth.tsx",
+    "apps/web/src/lib/workspace.ts"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found by a review on 2026-11-25",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "From FU-BULK-DELETE-UNDO's security confirmation: the bulk-delete Undo toast lives in the app-wide Toaster and outlives a sign-out (sign-out navigates in place). Since be3d7a44 it can no longer act for another person, but its text ('Deleted N contacts') can stay visible to the next person in the tab. Dismiss session-bound toasts on sign-out and on sign-in.",
+   "definition_of_done": "RED: a pending Undo toast is dismissed when the member signs out (and when another person signs in in the tab)."
+  },
+  {
+   "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
+   "title": "The focus queue does not offer a customer whose delete is pending",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [
+    "FU-CONTACT-DELETE-LEAVE",
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts",
+    "apps/web/src/hooks/use-flow-intelligence.ts (or its consumer)"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found by a review on 2026-11-25",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "From M11's correctness confirmation: the owner deletes customer X, then within the 5 s Undo window clicks X in the next-action queue or focus view (its own state, not updated when the list hides X). FU-C4-FOCUS-OPEN now navigates to /app/crm/contacts/X, so leaving the page sends X's delete at once (FU-CONTACT-DELETE-LEAVE's rule) while X's page loads and trackRecent records it. Hide pending-delete ids from the queue and focus view, as the list does.",
+   "definition_of_done": "RED: with a single delete pending, the queue and focus view do not offer that customer; Undo brings it back."
   }
  ],
  "moot": [
