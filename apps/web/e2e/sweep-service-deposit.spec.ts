@@ -17,7 +17,9 @@ import { test, expect, API_URL, settle, coveringElement, type Tenant } from "./j
  *   3. a FIXED deposit above the price is refused: on the page before anything is sent (naming USD 120.00), and,
  *      when the page's price is stale (lowered to 80 behind it), by the server, whose message the page shows; the
  *      stored deposit is unchanged;
- *   4. the deposit is turned off; after a reload the card says No deposit and the API stores false / null / null.
+ *   4. the deposit is turned off; after a reload the card says No deposit and the API stores false / null / null;
+ *   5. with the price at 4.10, a 15% deposit is previewed and, after a reload, shown as USD 0.62: what the server
+ *      bills (percentOf, exact cents half away from zero), not the float form's 0.61.
  * Every control is pressed as a person would: scrolled into view as far as the page allows, and only if nothing (the
  * phone's Mobile navigation bar, the KEY bubble) covers it there (journey-helpers coveringElement, F9's rule).
  *
@@ -214,6 +216,37 @@ for (const width of WIDTHS) {
         await expect(button, "the card after a reload").toContainText("No deposit", { timeout: 30_000 });
         await press(button, "the card's deposit control");
         await expect(editorOf(page, name).getByLabel("Require a deposit")).not.toBeChecked();
+      });
+
+      await test.step("a percent deposit whose cents round up is shown as the server bills it: 4.10 at 15% is 0.62", async () => {
+        // computeServiceDeposit bills percentOf(4.10, 15) = 0.615 rounded half away from zero = 0.62; the float form
+        // (4.1 * 15 / 100, rounded by toLocaleString) showed 0.61.
+        await api(request, owner, "PATCH", `/catalog/businesses/${owner.businessId}/services/${service.id}`, { price: 4.1 });
+        await page.reload();
+        await settle(page, 1_000);
+        const button = depositButton(page, name);
+        await expect(button, "the card after the price change").toContainText("No deposit", { timeout: 30_000 });
+        await press(button, "the card's deposit control");
+        const editor = editorOf(page, name);
+        await press(editor.getByLabel("Require a deposit"), "Require a deposit");
+        await editor.getByLabel("Deposit percent").fill("15");
+        await expect(editor.getByTestId("deposit-preview")).toContainText("USD 0.62 of USD 4.10");
+        const res = await savePatch(page, service.id, () => press(editor.getByRole("button", { name: "Save deposit" }), "Save deposit"));
+        expect(res.status(), await res.text()).toBe(200);
+        await expect(editor).toBeHidden();
+
+        const stored = await storedService(request, owner, service.id);
+        expect({ price: Number(stored.price), depositRequired: stored.depositRequired, depositType: stored.depositType, depositValue: Number(stored.depositValue) }).toEqual({
+          price: 4.1,
+          depositRequired: true,
+          depositType: "PERCENT",
+          depositValue: 15,
+        });
+
+        await page.reload();
+        await settle(page, 1_000);
+        await expect(depositButton(page, name), "the card after a reload").toContainText("15%", { timeout: 30_000 });
+        await expect(depositButton(page, name)).toContainText("USD 0.62");
       });
     });
   });
