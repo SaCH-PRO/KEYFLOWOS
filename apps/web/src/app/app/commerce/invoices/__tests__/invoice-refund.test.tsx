@@ -134,9 +134,9 @@ function summary(): { paid: string; remaining: string } {
   return { paid: line("Paid"), remaining: line("Remaining") };
 }
 
-/** Mounts the page on `first` with `rows` served for its Payments tab, and opens the tab. */
+/** Mounts the page on `first` (also what a read again answers, unless a case says otherwise) with `rows` served for its Payments tab, and opens the tab. */
 async function openPayments(first: Invoice, rows: Row[]) {
-  getInvoice.mockResolvedValueOnce({ data: first, error: null });
+  getInvoice.mockResolvedValue({ data: first, error: null });
   listInvoicePayments.mockResolvedValue(listed(rows, Number(first.paidAmount), Number(first.remaining)));
   render(<InvoiceDetailPage />);
   await waitFor(() => expect(screen.getByText("Payment Summary")).toBeInTheDocument());

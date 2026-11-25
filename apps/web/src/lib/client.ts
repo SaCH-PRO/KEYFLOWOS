@@ -416,6 +416,9 @@ export type PaymentRecord = {
   invoiceId: string;
   evidenceUrl?: string | null;
   evidenceMimeType?: string | null;
+  /** SWP-INV-REFUND-UI: the rows carry these (a refund row's reference is its original's providerPaymentId, D-14). */
+  method?: string | null;
+  reference?: string | null;
 };
 
 export type Invoice = {
@@ -6155,9 +6158,28 @@ export async function fetchBusinessPayments(businessId: string, filters: Payment
     `/commerce/businesses/${encodeURIComponent(businessId)}/payments${qs ? `?${qs}` : ""}`,
   );
 }
-export async function refundPayment(businessId: string, paymentId: string, reason?: string): Promise<ApiResult<BusinessPayment>> {
-  return apiPost<BusinessPayment>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${paymentId}/refund`, body: { reason } });
+/**
+ * SWP-INV-REFUND-UI (BUG-049, D-169): what POST .../payments/:paymentId/refund answers: the refund row it wrote (a
+ * separate negative REFUNDED row, D-14; its amount is what was refunded), the payment it refunds and the invoice's
+ * status after the reconcile.
+ */
+export interface ManualPaymentRefund extends BusinessPayment {
+  refundOfPaymentId: string;
+  invoiceStatus: string;
+  balance?: unknown;
 }
+/**
+ * Refunds what is left of a SUCCESSFUL payment, whole (D-169: the route takes no amount). Local bookkeeping only: no
+ * provider is called. 403 without revenue write access; 409 when nothing is left of it. `error` carries the server's
+ * message and `status` the code.
+ */
+export async function refundPayment(businessId: string, paymentId: string, reason?: string) {
+  return apiPost<ManualPaymentRefund>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${encodeURIComponent(paymentId)}/refund`,
+    body: { reason },
+  });
+}
+
 export async function retryPayment(businessId: string, paymentId: string): Promise<ApiResult<BusinessPayment>> {
   return apiPost<BusinessPayment>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${paymentId}/retry`, body: {} });
 }
