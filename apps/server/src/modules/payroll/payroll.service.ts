@@ -45,6 +45,17 @@ export interface MarkRunPaidInput {
   initiatedBy?: string | null;
 }
 
+/**
+ * V1-65 (TOF-PAYROLL-DISCARD, D-144): discard an unposted DRAFT run, or an
+ * unposted legacy DRAFT/APPROVED run in a non-business currency, to VOID.
+ * `actorId` is always set by the server from the signed-in member, never read
+ * from a request body.
+ */
+export interface DiscardRunInput {
+  reason?: unknown;
+  actorId?: string | null;
+}
+
 /** The currency a business with none recorded keeps (the column default; CashPositionService reads it so too). */
 const DEFAULT_BUSINESS_CURRENCY = 'TTD';
 
@@ -375,6 +386,176 @@ export class PayrollService {
     });
     invalidateBusinessFinancialSnapshotCache(businessId);
     return paid;
+  }
+
+  /**
+   * V1-65 (TOF-PAYROLL-DISCARD, D-144): discard an unposted DRAFT run, or an
+   * unposted legacy DRAFT/APPROVED run whose currency (or any item's currency)
+   * is not the business currency (D-13), transitioning it atomically to VOID
+   * with the server-verified member and reason recorded on both the run notes
+   * and an Activity audit row.
+   *
+   * PAID runs, any run with a ledger posting (FinancialTransaction keyed to
+   * PayrollRun), same-currency APPROVED runs, and already-VOID runs are
+   * refused with 409 Conflict. Non-members (including a platform SUPER_ADMIN
+   * without a Membership of this business, D-46/D-104) and calls with no
+   * member actor (D-73) are refused with 403 Forbidden before anything is read
+   * or written.
+   */
+  async discardRun(businessId: string, runId: string, input: DiscardRunInput = {}) {
+    const actorId = typeof input.actorId === 'string' ? input.actorId.trim() : '';
+    if (!actorId || actorId === KEY_SYSTEM_ACTOR_ID) {
+      throw new ForbiddenException(
+        'Discarding a payroll run requires a signed-in member of this business (D-73)',
+      );
+    }
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actorId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) {
+      throw new ForbiddenException(
+        'Not a member of this business: payroll runs may only be discarded by a business member (D-46)',
+      );
+    }
+    const user = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+    if (user?.role !== 'SUPER_ADMIN') {
+      const level = memberModuleLevel(membership, 'operations');
+      if (rankOf(level) < LEVEL_RANK.write) {
+        throw new ForbiddenException(
+          `Insufficient permissions: discarding a payroll run requires operations write access (you have ${level})`,
+        );
+      }
+    }
+
+    const reason = this.sanitizeDiscardReason(input.reason);
+    const discardedAt = new Date();
+
+    const discarded = await this.prisma.client.$transaction(async (tx) => {
+      const run = await tx.payrollRun.findFirst({
+        where: { id: runId, businessId },
+        include: { items: { select: { currency: true } } },
+      });
+      if (!run) throw new NotFoundException('Payroll run not found');
+
+      if (run.status === 'VOID') {
+        throw new ConflictException(`Payroll run ${runId} is already VOID`);
+      }
+      if (run.status === 'PAID') {
+        throw new ConflictException(`Paid payroll run ${runId} cannot be discarded`);
+      }
+
+      const existingPosting = await this.findPayrollPosting(tx as unknown as Prisma.TransactionClient, businessId, run.id);
+      if (existingPosting) {
+        throw new ConflictException(`Posted payroll run ${runId} cannot be discarded`);
+      }
+
+      const businessCurrency = await this.businessCurrency(tx as unknown as Prisma.TransactionClient, businessId);
+      const codes = new Set(
+        [run.currency, ...run.items.map((i) => i.currency)].map((code) => normalizeCurrency(code) || businessCurrency),
+      );
+      const foreignCurrencies = [...codes].filter((code) => code !== businessCurrency).sort();
+      const hasForeignCurrency = foreignCurrencies.length > 0;
+
+      if (run.status !== 'DRAFT' && !(run.status === 'APPROVED' && hasForeignCurrency)) {
+        throw new ConflictException(
+          `Payroll run ${runId} is ${run.status} in ${businessCurrency}; only DRAFT runs or unposted runs in a non-business currency can be discarded (D-144)`,
+        );
+      }
+
+      const stamp = `[VOIDED by ${actorId} at ${discardedAt.toISOString()}: ${reason}]`;
+      const updatedNotes = run.notes && run.notes.trim() ? `${run.notes.trim()}\n${stamp}` : stamp;
+
+      const claim = await tx.payrollRun.updateMany({
+        where: { id: runId, businessId, status: run.status },
+        data: { status: 'VOID', notes: updatedNotes },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException(`Payroll run ${runId} changed status concurrently; it was not discarded`);
+      }
+
+      // Re-check postings after acquiring the row lock on payroll_runs so a concurrent
+      // ledger posting cannot commit alongside VOID.
+      const concurrentPosting = await this.findPayrollPosting(tx as unknown as Prisma.TransactionClient, businessId, run.id);
+      if (concurrentPosting) {
+        throw new ConflictException(`Posted payroll run ${runId} cannot be discarded`);
+      }
+
+      const periodLabel = `${new Date(run.periodStart).toISOString().slice(0, 10)} to ${new Date(run.periodEnd).toISOString().slice(0, 10)}`;
+      await tx.activity.create({
+        data: {
+          businessId,
+          module: 'operations',
+          action: 'discarded',
+          entityType: 'payroll_run',
+          entityId: run.id,
+          type: 'payroll_run.discarded',
+          category: 'SYSTEM',
+          actorType: 'USER',
+          actorId,
+          title: `Discarded payroll run (${periodLabel})`,
+          detail: reason,
+          data: {
+            previousStatus: run.status,
+            currency: run.currency,
+            foreignCurrencies,
+            totalGross: Number(run.totalGross),
+            actorId,
+            reason,
+            discardedAt: discardedAt.toISOString(),
+          },
+        },
+      });
+
+      const updated = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
+      return {
+        ...(updated ?? { ...run, status: 'VOID', notes: updatedNotes }),
+        totalGross: Number((updated ?? run).totalGross),
+        discardedById: actorId,
+        discardReason: reason,
+        discardedAt: discardedAt.toISOString(),
+      };
+    });
+
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return discarded;
+  }
+
+  private sanitizeDiscardReason(raw: unknown): string {
+    if (raw === undefined || raw === null) return 'Discarded by operator';
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('reason must be a string');
+    }
+    if (raw.length > 2000) {
+      throw new BadRequestException('reason must be 500 characters or fewer');
+    }
+    let cleaned = '';
+    for (let i = 0; i < raw.length; i += 1) {
+      const code = raw.charCodeAt(i);
+      cleaned += code < 32 || code === 127 ? ' ' : raw[i];
+    }
+    const normalized = cleaned.replace(/\s+/g, ' ').trim();
+    if (normalized.length > 500) {
+      throw new BadRequestException('reason must be 500 characters or fewer');
+    }
+    return normalized || 'Discarded by operator';
+  }
+
+  private async findPayrollPosting(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    runId: string,
+  ): Promise<{ id: string } | null> {
+    return tx.financialTransaction.findFirst({
+      where: {
+        businessId,
+        OR: [
+          { sourceType: 'PayrollRun', sourceId: runId },
+          { externalRef: { startsWith: `PayrollRun:${runId}:` } },
+        ],
+      },
+      select: { id: true },
+    });
   }
 
   /**
