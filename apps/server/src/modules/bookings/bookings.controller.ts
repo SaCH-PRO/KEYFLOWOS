@@ -371,7 +371,16 @@ export class BookingsController {
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; duration: number; price: number; description?: string | null; sourceProductId?: string | null },
+    @Body() body: {
+      name: string;
+      duration: number;
+      price: number;
+      description?: string | null;
+      sourceProductId?: string | null;
+      depositRequired?: boolean;
+      depositType?: string | null;
+      depositValue?: number | null;
+    },
   ) {
     assertServiceCreateBody(body);
     return this.catalog.createService({
@@ -381,6 +390,9 @@ export class BookingsController {
       price: body.price,
       description: body.description ?? null,
       sourceProductId: body.sourceProductId ?? null,
+      ...(body.depositRequired !== undefined ? { depositRequired: body.depositRequired } : {}),
+      ...(body.depositType !== undefined ? { depositType: body.depositType } : {}),
+      ...(body.depositValue !== undefined ? { depositValue: body.depositValue } : {}),
     });
   }
 
@@ -390,7 +402,17 @@ export class BookingsController {
   async updateService(
     @Param('businessId') businessId: string,
     @Param('serviceId') serviceId: string,
-    @Body() body: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number; leadTimeMins?: number },
+    @Body() body: {
+      name?: string;
+      duration?: number;
+      price?: number;
+      description?: string;
+      bufferMins?: number;
+      leadTimeMins?: number;
+      depositRequired?: boolean;
+      depositType?: string | null;
+      depositValue?: number | null;
+    },
   ) {
     return this.catalog.updateService({ ...body, businessId, serviceId });
   }

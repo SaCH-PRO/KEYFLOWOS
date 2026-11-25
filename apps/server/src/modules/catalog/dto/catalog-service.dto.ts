@@ -1,4 +1,4 @@
-import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 export class CreateCatalogServiceDto {
   @IsString()
@@ -26,6 +26,20 @@ export class CreateCatalogServiceDto {
   @IsString()
   @IsOptional()
   sourceProductId?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  depositRequired?: boolean;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsIn(['PERCENT', 'FIXED'])
+  depositType?: 'PERCENT' | 'FIXED' | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsNumber()
+  depositValue?: number | null;
 }
 
 export class UpdateCatalogServiceDto {
@@ -56,6 +70,20 @@ export class UpdateCatalogServiceDto {
   @IsString()
   @IsOptional()
   sourceProductId?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  depositRequired?: boolean;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsIn(['PERCENT', 'FIXED'])
+  depositType?: 'PERCENT' | 'FIXED' | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsNumber()
+  depositValue?: number | null;
 }
 
 export class BatchCatalogServicesDto {
