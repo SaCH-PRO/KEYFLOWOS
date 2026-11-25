@@ -272,7 +272,13 @@ export const ProductFormModal = React.memo(function ProductFormModal({
       setFieldErrors({});
       setTouched(new Set());
       dragY.set(0);
-      const timer = setTimeout(() => nameRef.current?.focus(), 100);
+      // Name is focused once the form is up, unless the user is already in one of its fields (focus stealing
+      // sent typing meant for Price into Name).
+      const timer = setTimeout(() => {
+        const name = nameRef.current;
+        const dialog = name?.closest('[role="dialog"]');
+        if (name && !(dialog && document.activeElement && dialog.contains(document.activeElement))) name.focus();
+      }, 100);
       return () => clearTimeout(timer);
     }
   }, [open, dragY]);

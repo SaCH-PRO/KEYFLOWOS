@@ -5,7 +5,7 @@
  * kept. The form focuses Name only when focus is not already inside the form.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ProductFormModal } from "../product-form-modal";
 import type { ProductForm } from "../../components/commerce-types";
@@ -19,7 +19,7 @@ function Harness() {
   const [form, setForm] = useState<ProductForm>({
     name: "Pepper sauce", description: "", price: "45", category: "PRODUCT", duration: "", imageUrl: "", sku: "", isActive: true,
   });
-  const preview = useRef<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   return (
     <ProductFormModal
       open
@@ -27,8 +27,8 @@ function Harness() {
       productForm={form}
       setProductForm={setForm}
       formError={null}
-      imagePreview={preview.current}
-      setImagePreview={(v) => { preview.current = v; }}
+      imagePreview={preview}
+      setImagePreview={setPreview}
       onClose={() => {}}
       onSave={() => {}}
       onRemoveImage={() => {}}
