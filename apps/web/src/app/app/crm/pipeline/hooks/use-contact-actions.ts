@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
 import type { QuickActionType } from "@/components/contacts";
 import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
-import type { ModuleLevels } from "@/lib/nav-config";
+import { memberModuleLevelsOf, type ModuleLevels } from "@/lib/nav-config";
+import { apiGet } from "@/lib/api";
 import {
   addContactNote,
   addContactTask,
@@ -39,6 +40,31 @@ export function offersQuote(levels: ModuleLevels): boolean {
   if (!levels) return true;
   const revenue = levels.revenue;
   return revenue === undefined || revenue === "write" || revenue === "admin";
+}
+
+/**
+ * Whether the Customers screen offers Send Quote (offersQuote), for the member's level on the business the screen is
+ * bound to: `businessId` is the screen's own (useContactsPipeline), read from my-access for that business only. Not
+ * useMemberModuleLevels, which follows the live selection: after another tab selects another business that would ask
+ * my-access for a business this screen does not work on (W9-CUSTOM-FIELDS-TENANT, SEC-R015c-1: the screen names only
+ * its own business). Unknown until answered, and on a failed read: hides nothing.
+ */
+export function useOffersQuote(businessId: string | null): boolean {
+  const [answered, setAnswered] = useState<{ businessId: string; levels: ModuleLevels } | null>(null);
+  useEffect(() => {
+    if (!businessId) return;
+    let disposed = false;
+    void apiGet(`/identity/businesses/${encodeURIComponent(businessId)}/my-access`)
+      .then((res) => (res.error ? null : memberModuleLevelsOf(res.data)))
+      .catch(() => null)
+      .then((levels) => {
+        if (!disposed) setAnswered({ businessId, levels });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [businessId]);
+  return offersQuote(answered !== null && answered.businessId === businessId ? answered.levels : null);
 }
 
 interface UseContactActionsParams {

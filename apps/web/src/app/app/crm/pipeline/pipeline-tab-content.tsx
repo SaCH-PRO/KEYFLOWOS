@@ -20,8 +20,7 @@ import { AutopilotActions } from "@/components/contacts";
 import type { NextAction } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
 import { useOpenComposer } from "@/hooks/use-open-composer";
-import { useMemberModuleLevels } from "@/hooks/use-app-layout";
-import { offersQuote } from "./hooks/use-contact-actions";
+import { useOffersQuote } from "./hooks/use-contact-actions";
 import { BulkActionBar } from "./bulk-action-bar";
 import { PipelineToolbar } from "./pipeline-toolbar";
 import type { ViewMode } from "./pipeline-toolbar";
@@ -164,8 +163,9 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     handleToggleSelectMode,
   } = state;
 
-  // SEC-SQD-1: the cards' Send Quote follows the member's revenue level (unknown hides nothing).
-  const offerQuote = offersQuote(useMemberModuleLevels());
+  // SEC-SQD-1: the cards' Send Quote follows the member's revenue level on this screen's business (unknown hides
+  // nothing).
+  const offerQuote = useOffersQuote(businessId);
 
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [showImport, setShowImport] = useState(false);
