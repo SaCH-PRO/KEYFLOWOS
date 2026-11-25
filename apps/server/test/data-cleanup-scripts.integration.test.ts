@@ -1091,4 +1091,85 @@ describe('W11-STOREFRONT-ROUTE-DECREMENTED (D-137): release-storefront-decrement
       stockDecrementedAtCheckout: true,
     });
   });
+
+  it('[DCS-D137-04] (R1 SEC-P56-3 / COR-P56-1) handles JSON null, SQL NULL, and non-boolean metadata safely without 22P02 or array corruption and stays idempotent', async () => {
+    const whC = `${P}d137_whC`;
+    const prodC = `${P}d137_prodC`;
+    const stockC = `${P}d137_stockC`;
+    const ordJsonNull = `${P}d137_ordJsonNull`;
+    const ordSqlNull = `${P}d137_ordSqlNull`;
+    const ordDirty = `${P}d137_ordDirty`;
+    const itemJsonNull = `${P}d137_itemJsonNull`;
+    const itemSqlNull = `${P}d137_itemSqlNull`;
+    const itemDirty = `${P}d137_itemDirty`;
+    const routeJsonNull = `${P}d137_routeJsonNull`;
+    const routeSqlNull = `${P}d137_routeSqlNull`;
+    const routeDirty = `${P}d137_routeDirty`;
+
+    await db.warehouse.create({ data: { id: whC, businessId: ID.bizC, name: 'v96o D137 Wh C' } });
+    await db.product.create({ data: { id: prodC, businessId: ID.bizC, name: 'v96o D137 Tracked C', price: 15, inventoryMode: 'tracked' } });
+    await db.inventoryStock.create({ data: { id: stockC, businessId: ID.bizC, productId: prodC, warehouseId: whC, quantity: 10, reserved: 7 } });
+
+    await db.marketplaceOrder.createMany({
+      data: [
+        { id: ordJsonNull, businessId: ID.bizC, orderNumber: `${P}ORD-D137-C1`, type: 'STOREFRONT', status: 'CONFIRMED', paymentStatus: 'PAID', customerName: 'C1', customerEmail: 'c1@test.local', subtotal: 30, total: 30 },
+        { id: ordSqlNull, businessId: ID.bizC, orderNumber: `${P}ORD-D137-C2`, type: 'STOREFRONT', status: 'CONFIRMED', paymentStatus: 'PAID', customerName: 'C2', customerEmail: 'c2@test.local', subtotal: 15, total: 15 },
+        { id: ordDirty, businessId: ID.bizC, orderNumber: `${P}ORD-D137-C3`, type: 'STOREFRONT', status: 'CONFIRMED', paymentStatus: 'PAID', customerName: 'C3', customerEmail: 'c3@test.local', subtotal: 30, total: 30 },
+      ],
+    });
+    await db.marketplaceOrderItem.createMany({
+      data: [
+        { id: itemJsonNull, orderId: ordJsonNull, productId: prodC, name: 'v96o D137 Tracked C', quantity: 2, unitPrice: 15, total: 30 },
+        { id: itemSqlNull, orderId: ordSqlNull, productId: prodC, name: 'v96o D137 Tracked C', quantity: 1, unitPrice: 15, total: 15 },
+        { id: itemDirty, orderId: ordDirty, productId: prodC, name: 'v96o D137 Tracked C', quantity: 2, unitPrice: 15, total: 30 },
+      ],
+    });
+    await db.stockMovement.createMany({
+      data: [
+        { id: `${P}d137_movC1`, businessId: ID.bizC, warehouseId: whC, productId: prodC, quantityChange: -2, type: 'sale', referenceId: `${P}ORD-D137-C1` },
+        { id: `${P}d137_movC2`, businessId: ID.bizC, warehouseId: whC, productId: prodC, quantityChange: -1, type: 'sale', referenceId: `${P}ORD-D137-C2` },
+        { id: `${P}d137_movC3`, businessId: ID.bizC, warehouseId: whC, productId: prodC, quantityChange: -2, type: 'sale', referenceId: `${P}ORD-D137-C3` },
+      ],
+    });
+    await db.fulfillmentRoute.createMany({
+      data: [
+        { id: routeJsonNull, businessId: ID.bizC, orderId: ordJsonNull, orderItemId: itemJsonNull, strategy: 'LOCAL_STOCK', status: 'RESERVED', sourceType: 'WAREHOUSE', warehouseId: whC },
+        { id: routeSqlNull, businessId: ID.bizC, orderId: ordSqlNull, orderItemId: itemSqlNull, strategy: 'LOCAL_STOCK', status: 'RESERVED', sourceType: 'WAREHOUSE', warehouseId: whC },
+        { id: routeDirty, businessId: ID.bizC, orderId: ordDirty, orderItemId: itemDirty, strategy: 'LOCAL_STOCK', status: 'RESERVED', sourceType: 'WAREHOUSE', warehouseId: whC, metadata: { noReservationRequired: 'maybe', inventoryMode: 'tracked' } },
+      ],
+    });
+    // Explicitly seed JSONB 'null'::jsonb and SQL NULL on the two null-metadata routes.
+    await db.$executeRawUnsafe(`UPDATE fulfillment_routes SET metadata = 'null'::jsonb WHERE id = $1`, routeJsonNull);
+    await db.$executeRawUnsafe(`UPDATE fulfillment_routes SET metadata = NULL WHERE id = $1`, routeSqlNull);
+
+    // Dry run must succeed without 22P02 and count all 3 routes (5 units).
+    const dry = await runD137([`--business=${ID.bizC}`]);
+    expect(dry.code, dry.err).toBe(0);
+    expect(dry.out).toMatch(/routes_affected\s+3\b/);
+    expect(dry.out).toMatch(/units_to_release\s+5\b/);
+
+    // Apply releases 5 units (leaving 2 reserved) and writes plain JSON object metadata (never an array).
+    const applied = await runD137(['--apply', `--business=${ID.bizC}`]);
+    expect(applied.code, applied.err).toBe(0);
+    expect(applied.out).toMatch(/routes_updated\s+3\b/);
+    expect(applied.out).toMatch(/units_released\s+5\b/);
+
+    expect((await db.inventoryStock.findUnique({ where: { id: stockC } }))?.reserved).toBe(2);
+    for (const rid of [routeJsonNull, routeSqlNull, routeDirty]) {
+      const r = await db.fulfillmentRoute.findUnique({ where: { id: rid } });
+      expect(Array.isArray(r?.metadata), `${rid} metadata must be an object, not an array`).toBe(false);
+      expect(r?.metadata).toMatchObject({
+        inventoryMode: 'tracked',
+        noReservationRequired: true,
+        stockDecrementedAtCheckout: true,
+      });
+    }
+
+    // Re-run is strictly idempotent: 0 routes affected, 0 units released, reserved stays 2.
+    const rerun = await runD137(['--apply', `--business=${ID.bizC}`]);
+    expect(rerun.code, rerun.err).toBe(0);
+    expect(rerun.out).toMatch(/routes_affected\s+0\b/);
+    expect(rerun.out).toMatch(/units_released\s+0\b/);
+    expect((await db.inventoryStock.findUnique({ where: { id: stockC } }))?.reserved).toBe(2);
+  });
 });

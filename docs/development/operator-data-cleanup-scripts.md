@@ -527,20 +527,24 @@ pnpm cleanup:storefront-reservations --apply             # release stuck reserva
 
 **What `--apply` does (one atomic transaction).**
 
-1. Locks candidate `inventory_stocks` rows in global
-   `(business_id, product_id, warehouse_id)` order (matching
-   `core/inventory/stock-lock-order.ts`) so concurrent routing, ship, or cancel
-   transactions never deadlock.
-2. Marks matching active `LOCAL_STOCK` routes (`status IN ('RESERVED', 'PICKING_PACKING')`,
+1. Acquires each candidate order's routing advisory lock
+   (`pg_advisory_xact_lock(hashtext('marketplace-order-routing:' || business_id || ':' || order_id))`)
+   in ascending lock-key order (matching `claimOrderRouting`), so concurrent
+   routing, ship, or cancel transactions serialize cleanly without double-releasing.
+2. Under those held routing claims, re-reads the exact eligible route IDs and
+   locks their `inventory_stocks` rows in global `ORDER BY id ASC` order
+   (matching `core/inventory/stock-lock-order.ts`) so concurrent multi-row
+   inventory writers never deadlock.
+3. Marks strictly those claimed active `LOCAL_STOCK` routes (`status IN ('RESERVED', 'PICKING_PACKING')`,
    non-null `warehouse_id`, positive item quantity, neither `noReservationRequired`
    nor `stockDecrementedAtCheckout`, not `untracked`/`virtual`, with an existing
    checkout `type = 'sale'` negative movement for the same business, order number,
-   and product) by merging `noReservationRequired: true`,
-   `stockDecrementedAtCheckout: true`, `inventoryMode: 'tracked'`, and
-   `d137ReservationReleasedAt` into `fulfillment_routes.metadata` (keeping the
-   route's existing status).
-3. Decrements `inventory_stocks.reserved = GREATEST(0, reserved - qty)` for the
-   routes transitioned in step 2.
+   and product) by normalizing SQL `NULL` / JSON `null` / non-object metadata to
+   `{}` and merging `noReservationRequired: true`, `stockDecrementedAtCheckout: true`,
+   `inventoryMode: 'tracked'`, and `d137ReservationReleasedAt` into
+   `fulfillment_routes.metadata` (keeping the route's existing status).
+4. Decrements `inventory_stocks.reserved = GREATEST(0, reserved - qty)` on the
+   locked stock rows for the routes transitioned in step 3.
 
 **Output & safety.** Prints counts only (`routes_affected`, `units_to_release`,
 `stock_rows_affected`, `businesses_affected`, and on `--apply`: `routes_updated`,
