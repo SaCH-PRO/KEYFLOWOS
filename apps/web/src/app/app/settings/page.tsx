@@ -20,7 +20,7 @@ const ENTRIES: HubIndexEntry[] = [
   { name: "Plan & billing", href: "/app/settings/billing", description: "Your plan, usage and invoices", icon: CreditCard, module: "settings" },
   // As the nav's Settings > AI entry: its reads need operations.
   { name: "KEY", href: "/app/settings/ai", description: "What KEY may do for you", icon: Bot, module: "operations" },
-  { name: "My account", href: "/app/settings/profile", description: "Your own name, photo and phone", icon: UserRound },
+  { name: "My account", href: "/app/settings/profile", description: "Your own name, photo, phone and push notifications", icon: UserRound },
 ];
 
 export default function SettingsIndexPage() {

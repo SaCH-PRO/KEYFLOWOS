@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useId, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Briefcase,
@@ -21,12 +21,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  Wallet,
 } from "lucide-react";
 import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import { fetchStaffAvailability, setStaffAvailability, updateService, getBusinessById, updateBusiness } from "@/lib/client";
+import { getCachedBusiness } from "@/lib/workspace";
+import { percentOf, roundMoney } from "@/lib/finance/document-amounts";
 import { toast } from "sonner";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -46,6 +49,14 @@ interface CatalogCapacityTabProps {
   businessId?: string | null;
   businessHoursSet?: boolean;
   onBusinessHoursSaved?: () => void;
+  /** The business currency (Business.currency): every amount on this tab is written in it. */
+  currency?: string | null;
+  /** The deposit tip's door (/app/bookings?tab=catalog&serviceId=<id>): open this service's deposit editor. */
+  focusServiceId?: string | null;
+  /** Called once the door's service has been opened, or found missing, so the page forgets it. */
+  onFocusServiceHandled?: () => void;
+  /** A service this tab saved, as the server stored it. */
+  onServiceUpdated?: (service: Service) => void;
 }
 
 
@@ -490,6 +501,271 @@ function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead
   );
 }
 
+/**
+ * SWP-SERVICE-DEPOSIT (BUG-048; D-26, D-59, D-80): a service's deposit, as the server stores it
+ * (Service.depositRequired, depositType PERCENT | FIXED, depositValue). The server's rule
+ * (CatalogService.normalizeServiceDeposit): a required deposit is PERCENT from 1 to 100, or FIXED above 0 and at most
+ * the price; anything else is a 400; depositRequired false clears type and value. The editor checks the same rule
+ * before it sends, so an impossible deposit is never sent, but the server's answer is final: its 400 (the price may
+ * have changed on another screen since this one loaded) is shown as it was said, and nothing is reported saved.
+ */
+export type DepositType = "PERCENT" | "FIXED";
+
+interface StoredDeposit {
+  required: boolean;
+  type: DepositType | null;
+  value: number | null;
+}
+
+function storedDepositOf(service: Pick<Service, "depositRequired" | "depositType" | "depositValue">): StoredDeposit {
+  const type = service.depositType === "PERCENT" || service.depositType === "FIXED" ? service.depositType : null;
+  const value = typeof service.depositValue === "number" && Number.isFinite(service.depositValue) ? service.depositValue : null;
+  return { required: service.depositRequired === true, type, value };
+}
+
+/**
+ * Why the server would refuse this deposit (catalog.service.ts normalizeServiceDeposit), or null when it would store
+ * it. One check is the page's own: a FIXED deposit must be whole cents (the server does not check that yet).
+ */
+export function depositProblem(price: number, type: DepositType, raw: string, currency: string): string | null {
+  const text = raw.trim();
+  const value = text === "" ? Number.NaN : Number(text);
+  if (!Number.isFinite(value)) return "Enter the deposit.";
+  if (type === "PERCENT") {
+    return value < 1 || value > 100 ? "A percentage deposit must be between 1 and 100." : null;
+  }
+  if (value <= 0) return "A fixed deposit must be more than 0.";
+  // SEC-3: money is whole cents. A fraction of a cent (10.005, 1e-3) would be stored as typed and shown rounded.
+  if (roundMoney(value) !== value) return "A fixed deposit can have at most two decimal places (whole cents).";
+  if (value > price) return `A fixed deposit must be at most the price (${formatAmount(price, currency)}).`;
+  return null;
+}
+
+/**
+ * What a booking of this service is billed up front, in the business currency: CommerceService.computeServiceDeposit,
+ * the server's own rule. PERCENT is percentOf (money.ts: the exact decimal, rounded once to cents half away from
+ * zero, so 4.10 at 15% is 0.62, not the float form's 0.61); FIXED is the value, at most the price. Every amount this
+ * tab shows for a deposit (the card and the editor's preview) is this one.
+ */
+export function depositAmount(price: number, type: DepositType, value: number): number {
+  if (!Number.isFinite(price) || !Number.isFinite(value) || value <= 0) return 0;
+  if (type === "PERCENT") return percentOf(price, Math.min(value, 100));
+  return roundMoney(Math.min(value, price));
+}
+
+function depositSummary(price: number, d: StoredDeposit, currency: string): string {
+  if (!d.required) return "No deposit";
+  if (!d.type || d.value === null) return "Deposit not set";
+  const amount = formatAmount(depositAmount(price, d.type, d.value), currency);
+  return d.type === "PERCENT" ? `Deposit ${d.value}% · ${amount}` : `Deposit ${amount}`;
+}
+
+function ServiceDepositEditor({
+  service,
+  businessId,
+  currency,
+  open,
+  reveal,
+  onOpenChange,
+  onSaved,
+}: {
+  service: Service;
+  businessId?: string;
+  currency: string;
+  open: boolean;
+  /** Scroll the editor into view when it opens (the tip's door). */
+  reveal: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved?: (service: Service) => void;
+}) {
+  const ids = useId();
+  const groupRef = useRef<HTMLDivElement | null>(null);
+  const [stored, setStored] = useState<StoredDeposit>(() => storedDepositOf(service));
+  const [required, setRequired] = useState(stored.required);
+  const [type, setType] = useState<DepositType>(stored.type ?? "PERCENT");
+  const [valueText, setValueText] = useState(stored.value === null ? "" : String(stored.value));
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  // A newer read of the service (the page reloaded its list) is what is stored (adjusted while rendering, not in an
+  // effect: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
+  const readKey = `${service.depositRequired}|${service.depositType}|${service.depositValue}`;
+  const [lastReadKey, setLastReadKey] = useState(readKey);
+  if (readKey !== lastReadKey) {
+    setLastReadKey(readKey);
+    setStored(storedDepositOf(service));
+  }
+
+  // Each opening starts from what is stored.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setRequired(stored.required);
+      setType(stored.type ?? "PERCENT");
+      setValueText(stored.value === null ? "" : String(stored.value));
+      setRefusal(null);
+    }
+  }
+
+  useEffect(() => {
+    if (open && reveal) groupRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [open, reveal]);
+
+  const problem = required ? depositProblem(service.price, type, valueText, currency) : null;
+
+  const handleSave = async () => {
+    if (!businessId || saving || problem) return;
+    const payload: { depositRequired: boolean; depositType?: DepositType; depositValue?: number } = required
+      ? { depositRequired: true, depositType: type, depositValue: Number(valueText.trim()) }
+      : { depositRequired: false };
+    setSaving(true);
+    setRefusal(null);
+    try {
+      const res = await updateService(service.id, payload, businessId);
+      if (res.error) {
+        setRefusal(res.error);
+        toast.error(res.error);
+        return;
+      }
+      const row = (res.data ?? null) as Partial<Service> | null;
+      const next = storedDepositOf({
+        depositRequired: row?.depositRequired ?? payload.depositRequired,
+        depositType: row && "depositType" in row ? row.depositType : (payload.depositType ?? null),
+        depositValue: row && "depositValue" in row ? row.depositValue : (payload.depositValue ?? null),
+      });
+      setStored(next);
+      onOpenChange(false);
+      toast.success(next.required ? "Deposit saved" : "Deposit turned off");
+      onSaved?.({
+        ...service,
+        price: typeof row?.price === "number" ? row.price : service.price,
+        depositRequired: next.required,
+        depositType: next.type,
+        depositValue: next.value,
+      });
+    } catch {
+      const text = "Could not save the deposit. Please try again.";
+      setRefusal(text);
+      toast.error(text);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        aria-label={`Deposit for ${service.name}`}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-[10px] min-h-[32px] transition-colors hover:text-foreground"
+        style={{ color: stored.required ? "hsl(var(--kf-accent1))" : "hsl(var(--muted-foreground))" }}
+      >
+        <Wallet className="w-3 h-3 shrink-0" />
+        <span className="truncate">{depositSummary(service.price, stored, currency)}</span>
+      </button>
+
+      {open && (
+        <div
+          ref={groupRef}
+          role="group"
+          aria-label={`Deposit settings for ${service.name}`}
+          className="mt-1 pt-1.5 border-t border-border/20 space-y-2"
+        >
+          <label className="flex items-center gap-2 text-[11px] font-medium min-h-[36px] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={required}
+              onChange={(e) => { setRequired(e.target.checked); setRefusal(null); }}
+              className="w-4 h-4 shrink-0"
+            />
+            Require a deposit
+          </label>
+
+          {required && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="min-w-0">
+                <label htmlFor={`${ids}-type`} className="text-[9px] text-muted-foreground mb-0.5 block">Deposit type</label>
+                <select
+                  id={`${ids}-type`}
+                  value={type}
+                  onChange={(e) => { setType(e.target.value as DepositType); setRefusal(null); }}
+                  className="kf-input w-full text-xs px-2 py-1 min-h-[36px]"
+                >
+                  <option value="PERCENT">Percent of price (%)</option>
+                  <option value="FIXED">Fixed amount ({currency})</option>
+                </select>
+              </div>
+              <div className="min-w-0">
+                <label htmlFor={`${ids}-value`} className="text-[9px] text-muted-foreground mb-0.5 block">
+                  {type === "PERCENT" ? "Deposit percent" : `Deposit amount (${currency})`}
+                </label>
+                <input
+                  id={`${ids}-value`}
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min={type === "PERCENT" ? 1 : 0}
+                  max={type === "PERCENT" ? 100 : service.price}
+                  value={valueText}
+                  onChange={(e) => { setValueText(e.target.value); setRefusal(null); }}
+                  aria-invalid={problem ? true : undefined}
+                  aria-describedby={problem ? `${ids}-problem` : undefined}
+                  className="kf-input w-full text-xs px-2 py-1 min-h-[36px]"
+                />
+              </div>
+            </div>
+          )}
+
+          {required && problem && (
+            <p id={`${ids}-problem`} data-testid="deposit-problem" className="text-[10px]" style={{ color: "hsl(var(--kf-warning))" }}>
+              {problem}
+            </p>
+          )}
+          {required && !problem && (
+            <p data-testid="deposit-preview" className="text-[10px] text-muted-foreground">
+              Customers pay {formatAmount(depositAmount(service.price, type, Number(valueText.trim())), currency)} of{" "}
+              {formatAmount(service.price, currency)} when they book.
+            </p>
+          )}
+          {refusal && (
+            <p
+              role="alert"
+              className="flex items-center gap-1.5 text-[11px] rounded-lg px-2.5 py-1.5"
+              style={{ background: "hsl(var(--kf-error) / 0.06)", color: "hsl(var(--kf-error))" }}
+            >
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              {refusal}
+            </p>
+          )}
+
+          <div className="flex gap-1.5 justify-end">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[32px]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving || !!problem || !businessId}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[32px] disabled:opacity-50"
+              style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
+            >
+              <Save className="w-2.5 h-2.5" />
+              {saving ? "Saving..." : "Save deposit"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReminderConfig({ businessId }: { businessId?: string | null }) {
   const [reminderMins, setReminderMins] = useState(60);
   const [saved, setSaved] = useState(false);
@@ -608,8 +884,36 @@ export default function CatalogCapacityTab({
   businessId,
   businessHoursSet,
   onBusinessHoursSaved,
+  currency,
+  focusServiceId,
+  onFocusServiceHandled,
+  onServiceUpdated,
 }: CatalogCapacityTabProps) {
   const [setupTab, setSetupTab] = useState<"services" | "staff" | "availability" | "hours">("services");
+  // The business currency; before the page has read it, the workspace's cached business, then the app default.
+  const money = currency || getCachedBusiness()?.currency || "TTD";
+  const [openDepositFor, setOpenDepositFor] = useState<string | null>(null);
+  const [revealDepositFor, setRevealDepositFor] = useState<string | null>(null);
+
+  // The deposit tip's door: once the services are loaded, open the named service's deposit editor (while rendering),
+  // then tell the page it is handled, or say the service is gone (side effects, in an effect).
+  const doorService = focusServiceId && !loading && services.some((s) => s.id === focusServiceId) ? focusServiceId : null;
+  const [openedDoor, setOpenedDoor] = useState<string | null>(null);
+  if (doorService && doorService !== openedDoor) {
+    setOpenedDoor(doorService);
+    setSetupTab("services");
+    setOpenDepositFor(doorService);
+    setRevealDepositFor(doorService);
+  } else if (!focusServiceId && openedDoor) {
+    setOpenedDoor(null);
+  }
+  useEffect(() => {
+    if (!focusServiceId || loading) return;
+    if (!services.some((s) => s.id === focusServiceId)) {
+      toast.error("That service was not found. It may have been removed.");
+    }
+    onFocusServiceHandled?.();
+  }, [focusServiceId, loading, services, onFocusServiceHandled]);
 
   const serviceStats = useMemo(() => {
     const now = new Date();
@@ -653,7 +957,10 @@ export default function CatalogCapacityTab({
   ];
 
   return (
-    <div className="space-y-4">
+    // SWP-SERVICE-DEPOSIT: below md, the last card's controls (Save deposit, Buffer & lead time) sat under the floating
+    // Mobile navigation bar even fully scrolled: PageTransition's h-full box lets a tall page overflow past the scroll
+    // root's pb-28, so that padding never clears the bar. This tab keeps its own clearance until that is fixed.
+    <div className="space-y-4 pb-24 md:pb-0">
       <div className="kf-card rounded-xl p-3">
         <div className="flex items-center justify-between mb-2.5">
           <div>
@@ -789,7 +1096,7 @@ export default function CatalogCapacityTab({
                         </div>
                       </div>
                       <span className="text-xs font-bold shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>
-                        {formatAmount(service.price)}
+                        {formatAmount(service.price, money)}
                       </span>
                     </div>
 
@@ -832,6 +1139,19 @@ export default function CatalogCapacityTab({
                         </span>
                       )}
                     </div>
+
+                    <ServiceDepositEditor
+                      service={service}
+                      businessId={businessId ?? undefined}
+                      currency={money}
+                      open={openDepositFor === service.id}
+                      reveal={revealDepositFor === service.id}
+                      onOpenChange={(next) => {
+                        setOpenDepositFor(next ? service.id : null);
+                        if (!next && revealDepositFor === service.id) setRevealDepositFor(null);
+                      }}
+                      onSaved={onServiceUpdated}
+                    />
 
                     <ServiceTimingEditor
                       serviceId={service.id}

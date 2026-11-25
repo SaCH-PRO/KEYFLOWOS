@@ -400,7 +400,7 @@ export default function ReportsPage() {
               {activeTab === "executive" && <ExecutiveView report={report} />}
               {/* FIN4: legacy "pnl" tab is rendered above via BooksReportView (ledger-derived). */}
               {activeTab === "revenue" && <RevenueView report={report} businessId={businessId} />}
-              {activeTab === "cash-flow" && <CashFlowForecastView businessId={businessId} currency={report.metrics.currency} />}
+              {activeTab === "cash-flow" && <CashFlowForecastView businessId={businessId} />}
               {activeTab === "expenses" && <ExpensesView report={report} />}
               {activeTab === "clients" && <ClientsView report={report} />}
               {activeTab === "bookings" && <BookingsView report={report} />}
