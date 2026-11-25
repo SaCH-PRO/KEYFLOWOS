@@ -19,10 +19,10 @@ import { CrmFlowService } from './crm-flow.service';
 import { ContactAuditService, ContactAuditActor, type ContactAuditClient, type ContactAuditWriteOptions } from './privacy/contact-audit.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere, findSearchTags } from './contact-filters.helper';
-import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
-import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, livePhoneHolderIds } from './crm-duplicate.util';
-import { contactPhoneForStorage, phoneFlagFor, phoneKeyReadsAs, severityFor, type PhoneFlagField } from './crm-data-quality.util';
+import { contactPhoneKey, normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, livePhoneHolderIds } from './crm-duplicate.util';
+import { contactPhoneForStorage, normalizeToE164, phoneFlagFor, phoneKeyReadsAs, severityFor, type PhoneFlagField } from './crm-data-quality.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
@@ -2666,6 +2666,163 @@ export class CrmService {
     const note = await this.timeline.addNote(input);
     await this.auditContact({ businessId: input.businessId, contactId: input.contactId, action: 'note_added', entityType: 'note', entityId: (note as { id?: string })?.id ?? null, after: { body: input.body, source: input.source }, ctx: _audit });
     return note;
+  }
+
+  /**
+   * WEDGE-WA-INBOUND-CAPTURE (P46, D-263 wedge):
+   * Normalizes a pasted customer WhatsApp number under Business.country
+   * (WA-E164-SERVER), finds an existing visible contact by E.164 (or creates
+   * one), saves the message verbatim as a plain-text ContactNote, and logs a
+   * canonical `communication.whatsapp` ContactEvent (consumed by P41 timeline
+   * channel filters). Never sends any outbound message and never invokes KEY.
+   */
+  async captureInboundWhatsApp(
+    input: {
+      businessId: string;
+      phone: string;
+      message: string;
+      firstName?: string;
+      lastName?: string;
+      contactId?: string;
+      actorUserId: string;
+    },
+    audit?: AuditContext,
+  ) {
+    const trimmedMessage = input.message.trim();
+    if (!trimmedMessage) {
+      throw new BadRequestException('Message text is required');
+    }
+    if (trimmedMessage.length > 10_000) {
+      throw new BadRequestException('Message text exceeds the 10,000 character limit');
+    }
+
+    const country = await this.businessPhoneCountry(this.prisma.client, input.businessId);
+    const phoneRead = normalizeToE164(input.phone, country);
+    if (!phoneRead.ok || !phoneRead.e164) {
+      throw new BadRequestException(
+        'Phone number could not be normalised for this business country. Include the country code or check the digits.',
+      );
+    }
+    const e164 = phoneRead.e164;
+
+    const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+    let contact: Contact;
+    let created = false;
+
+    if (input.contactId) {
+      await assertContactVisible(this.prisma, input.businessId, input.contactId, input.actorUserId);
+      const found = await this.prisma.client.contact.findFirst({
+        where: contactWhereWithId(input.businessId, input.contactId),
+      });
+      if (!found) throw new NotFoundException('Contact not found');
+      contact = found;
+    } else {
+      const phoneHolders = await livePhoneHolderIds(this.prisma.client, input.businessId, e164, country);
+      const waTail = e164.replace(/\D/g, '').slice(-4);
+      const waCandidates = waTail.length === 4
+        ? await this.prisma.client.contact.findMany({
+            where: {
+              ...contactWhereBase(input.businessId),
+              whatsappNumber: { not: null, endsWith: waTail },
+            },
+            select: { id: true, whatsappNumber: true },
+            orderBy: { createdAt: 'asc' },
+            take: 200,
+          })
+        : [];
+      const waHolders = waCandidates
+        .filter((row) => phoneKeyReadsAs(contactPhoneKey(row.whatsappNumber), e164, country))
+        .map((row) => row.id);
+      const holderIds = Array.from(new Set([...phoneHolders, ...waHolders]));
+
+      if (holderIds.length > 0) {
+        const canOpen = await contactVisibilityFilter(
+          this.prisma,
+          input.businessId,
+          access,
+          input.actorUserId,
+          holderIds,
+        );
+        const visibleId = holderIds.find((id) => !canOpen || canOpen(id));
+        if (!visibleId) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'contact_phone_taken',
+            message: 'A contact with this phone number already exists in this workspace.',
+          });
+        }
+        const found = await this.prisma.client.contact.findFirst({
+          where: contactWhereWithId(input.businessId, visibleId),
+        });
+        if (!found) throw new NotFoundException('Contact not found');
+        contact = found;
+      } else {
+        const ownerId = this.reachLimitedToOwned(access) ? input.actorUserId : undefined;
+        contact = await this.createContact(
+          {
+            businessId: input.businessId,
+            firstName: input.firstName ?? null,
+            lastName: input.lastName ?? null,
+            phone: e164,
+            whatsappNumber: e164,
+            source: 'whatsapp_inbound',
+            actorUserId: input.actorUserId,
+            ...(ownerId ? { ownerId } : {}),
+          },
+          audit,
+        );
+        created = true;
+      }
+    }
+
+    const note = await this.addNote(
+      {
+        businessId: input.businessId,
+        contactId: contact.id,
+        body: trimmedMessage,
+        authorId: input.actorUserId,
+        source: 'whatsapp_inbound',
+      },
+      audit,
+    );
+
+    const event = await this.timeline.logEvent(
+      input.businessId,
+      contact.id,
+      'communication.whatsapp',
+      {
+        channel: 'whatsapp',
+        direction: 'inbound',
+        source: 'pasted_whatsapp',
+        body: trimmedMessage,
+        senderPhone: e164,
+        noteId: note.id,
+      },
+      {
+        source: 'whatsapp_inbound',
+        actorType: 'USER',
+        actorId: input.actorUserId,
+      },
+    );
+
+    return {
+      contact: {
+        id: contact.id,
+        businessId: contact.businessId,
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        displayName: contact.displayName,
+        email: contact.email,
+        phone: contact.phone,
+        whatsappNumber: contact.whatsappNumber,
+        status: contact.status,
+        source: contact.source,
+      },
+      created,
+      normalizedPhone: e164,
+      note,
+      event,
+    };
   }
 
   async addTask(input: {
