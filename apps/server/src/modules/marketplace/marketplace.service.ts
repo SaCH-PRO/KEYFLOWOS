@@ -2758,7 +2758,9 @@ export class MarketplaceService {
       this.prisma.client.product.findMany({ where: { businessId, deletedAt: null }, select: { id: true } }),
     ]);
 
-    const totalSKUs = inventory.length;
+    // SWP-INV-SKU-COUNT (BUG-107, V1-66, P77): Total SKUs counts distinct
+    // products with stock rows, not total stock rows across warehouses.
+    const totalSKUs = new Set(inventory.map((inv) => inv.productId)).size;
     const totalStockValue = inventory.reduce((sum, inv) => {
       const costPerUnit = inv.costPerUnit ?? inv.product?.costProfile?.landedCostEstimate ?? 0;
       return sum + (inv.quantity * costPerUnit);
@@ -2766,7 +2768,7 @@ export class MarketplaceService {
     const belowReorderCount = inventory.filter(inv => inv.reorderAt !== null && inv.quantity <= (inv.reorderAt ?? 0)).length;
     const outOfStockCount = inventory.filter(inv => inv.quantity <= 0).length;
     const inStockCount = inventory.filter(inv => inv.quantity > 0 && (inv.reorderAt === null || inv.quantity > (inv.reorderAt ?? 0))).length;
-    const healthScore = totalSKUs > 0 ? Math.round((inStockCount / totalSKUs) * 100) : 100;
+    const healthScore = inventory.length > 0 ? Math.round((inStockCount / inventory.length) * 100) : 100;
 
     const warehouseBreakdown = warehouses.map(wh => {
       const whInv = inventory.filter(inv => inv.warehouseId === wh.id);
