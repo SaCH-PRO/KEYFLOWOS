@@ -73,7 +73,7 @@ Append-only and authoritative. **Never loaded whole.** Search it:
 git log --oneline origin/main --grep 'pkt/V1-<ID>'            # a packet's commits on main
 git log --oneline origin/main -- <path>                       # what touched a file
 git log origin/main --format='%h %s' --grep 'D-2[0-9][0-9]'   # commits that record rulings
-gh api 'repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?since=2026-11-22T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-249")) | {id, body}'   # one ruling on #80
+gh api 'repos/KEYFLOWOS/KEYFLOWOS/issues/80/comments?since=2026-11-22T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-249")) | {id, body}'   # one ruling on #80
 ```
 
 (`gh issue view 80 --comments`, as `CLAUDE.md` gives it, was refused with HTTP 403 in the cloud sessions on
