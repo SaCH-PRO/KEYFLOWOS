@@ -16,6 +16,9 @@ import { test, expect, API_URL, memberOf, settle, signedInContext, type Tenant }
  *   4. the filter fits the width: no sideways page scroll;
  *   5. member scope (D-100): a member with crm read and no revenue read is served no payment event, and the
  *      filter shows and counts none (All is one fewer than the owner's; every channel count is the owner's).
+ *   6. review round 1 COR-TCH-1: the events read serves at most 20. A second customer has a call, then 11 pasted
+ *      messages (22 newer events): the page says it shows the latest 20 events, the counts read "(n+)", and Calls
+ *      says "No calls in the latest 20 events.", never "No calls yet." (the call is real, only older).
  *
  * Run at 375, 768, 1024 and 1440. Live only (E2E_LIVE=1, a production build, a real API and database: the journey
  * harness's own fixtures, README in e2e/journeys); without E2E_LIVE every case is skipped. Run it in the "chromium"
@@ -76,6 +79,23 @@ async function seedCustomer(request: APIRequestContext, owner: Tenant): Promise<
   return contact.id;
 }
 
+/** A customer with one logged call, then `pastes` pasted WhatsApp messages (each two events), all newer than the call. */
+async function seedBusyCustomer(request: APIRequestContext, owner: Tenant, pastes: number): Promise<string> {
+  const b = owner.businessId;
+  const last = `Busy${stamp()}`;
+  const contact = await api<{ id: string }>(request, owner, "POST", `/crm/businesses/${b}/contacts`, {
+    firstName: "Lee",
+    lastName: last,
+    email: `lee.${last.toLowerCase()}@tch.test.local`,
+  });
+  await api(request, owner, "POST", `/crm/businesses/${b}/contacts/${contact.id}/log-communication`, { channelType: "call", outcome: "answered", notes: CALL_WORDS });
+  const digits = String(1000 + Math.floor(Math.random() * 9000));
+  for (let i = 0; i < pastes; i++) {
+    await api(request, owner, "POST", `/crm/businesses/${b}/whatsapp/inbound-capture`, { phone: `+1868555${digits}`, message: `Busy message ${i}`, contactId: contact.id });
+  }
+  return contact.id;
+}
+
 function filterButton(page: Page, label: string) {
   return page.getByRole("group", { name: /filter by channel/i }).getByRole("button", { name: new RegExp(`^${label}\\b`) });
 }
@@ -84,7 +104,7 @@ function filterButton(page: Page, label: string) {
 async function countOf(page: Page, label: string): Promise<number | null> {
   const button = filterButton(page, label);
   if (!(await button.count())) return null;
-  const m = (await button.first().innerText()).match(/\((\d+)\)/);
+  const m = (await button.first().innerText()).match(/\((\d+)\+?\)/);
   return m ? Number(m[1]) : null;
 }
 
@@ -186,6 +206,23 @@ for (const width of [375, 768, 1024, 1440]) {
           All: ownerCounts.All === null ? null : ownerCounts.All - 1,
         });
         await desk.close();
+      });
+
+      await test.step("6. COR-TCH-1: a full read (20 events) says it shows the latest 20; Calls says none in those, not none ever", async () => {
+        const busyId = await seedBusyCustomer(request, owner, 11);
+        // The premise: the read serves 20 and leaves the older call out.
+        const served = await api<Array<{ type: string }>>(request, owner, "GET", `/crm/businesses/${owner.businessId}/contacts/${busyId}/events`);
+        expect(served, "the events read serves 20").toHaveLength(20);
+        expect(served.map((e) => e.type), "the call is older than the 20 served").not.toContain("communication.call");
+        await openTimeline(page, busyId);
+        await expect.soft(page.getByText(/showing the latest 20 events/i), "the page says it shows the latest 20").toHaveCount(1);
+        await expect.soft(filterButton(page, "Calls"), "Calls counts within the latest 20").toContainText("(0+)");
+        await expect.soft(filterButton(page, "WhatsApp"), "WhatsApp counts within the latest 20").toContainText("+)");
+        expect.soft(await choose(page, "Calls"), "a Calls filter").toBe(true);
+        await expect.soft(page.locator("main").getByText("No calls in the latest 20 events."), "Calls: none in the latest 20").toHaveCount(1);
+        await expect.soft(page.locator("main").getByText("No calls yet."), "never 'No calls yet.'").toHaveCount(0);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect.soft(overflow, "page wider than the viewport by").toBeLessThanOrEqual(0);
       });
     });
   });
