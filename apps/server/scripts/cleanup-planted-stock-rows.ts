@@ -136,7 +136,7 @@ export async function countPlantedStockRows(
               AND warehouse_business <> stock_business
               AND product_business <> warehouse_business
           )::int FROM planted) AS mixed_rows,
-         (SELECT COALESCE(SUM(quantity), 0)::int FROM planted) AS planted_quantity,
+         (SELECT COALESCE(SUM(quantity), 0)::bigint FROM planted) AS planted_quantity,
          (SELECT count(*) FILTER (WHERE reserved <> 0)::int FROM planted) AS reserved_rows,
          (SELECT count(*)::int FROM (
             SELECT stock_business AS b FROM planted
@@ -151,8 +151,10 @@ export async function countPlantedStockRows(
              AND NOT EXISTS (
                SELECT 1
                  FROM inventory_stocks own
+                 JOIN warehouses ow ON ow.id = own.warehouse_id
                 WHERE own.product_id = pl.product_id
                   AND own.business_id = pl.product_business
+                  AND ow.business_id = pl.product_business
              )) AS products_tracked_only_by_planted`,
       ...params,
     ) as Promise<
@@ -162,7 +164,7 @@ export async function countPlantedStockRows(
         foreign_warehouse_rows: number;
         other_business_pair_rows: number;
         mixed_rows: number;
-        planted_quantity: number;
+        planted_quantity: bigint | number | string;
         reserved_rows: number;
         businesses_affected: number;
         products_tracked_only_by_planted: number;
@@ -289,17 +291,24 @@ export async function main(
     return 0;
   }
 
+  let deleted: number;
   try {
-    const deleted = await deletePlantedStockRows(database, args.businessIds);
-    const afterCounts = await countPlantedStockRows(database, args.businessIds);
-    log(row('deleted', deleted));
-    log(row('left_reserved', afterCounts.reservedRows));
-    log('Apply complete.');
-    return 0;
+    deleted = await deletePlantedStockRows(database, args.businessIds);
   } catch (err: unknown) {
     error(`The delete failed: ${describeFailure(err)}.`);
     return 1;
   }
+  log(row('deleted', deleted));
+
+  try {
+    const afterCounts = await countPlantedStockRows(database, args.businessIds);
+    log(row('left_reserved', afterCounts.reservedRows));
+  } catch (err: unknown) {
+    error(`The post-delete recount failed: ${describeFailure(err)}.`);
+    return 1;
+  }
+  log('Apply complete.');
+  return 0;
 }
 
 if (require.main === module) {

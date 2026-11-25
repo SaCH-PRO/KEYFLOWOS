@@ -1181,21 +1181,23 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     whB2: `${P}ps_whB2`,
     whC: `${P}ps_whC`,
     prodA: `${P}ps_prodA`,
+    prodAForeignWhOnly: `${P}ps_prodAForeignWhOnly`,
     prodBUnstocked: `${P}ps_prodBUnstocked`,
     prodBTracked: `${P}ps_prodBTracked`,
     prodC: `${P}ps_prodC`,
-    // Planted rows (4 classes + 1 reserved planted row)
-    rowForeignProduct: `${P}ps_row_fprod`,       // bizA row on bizB product in bizA warehouse (reserved 0, qty 5)
-    rowForeignWarehouse: `${P}ps_row_fwh`,       // bizA row on bizA product in bizB warehouse (reserved 0, qty 7)
-    rowOtherPair: `${P}ps_row_otherpair`,        // bizA row on bizB unstocked product in bizB warehouse (reserved 0, qty 9)
-    rowMixed: `${P}ps_row_mixed`,                // bizA row on bizB product in bizC warehouse (reserved 0, qty 11)
-    rowReserved: `${P}ps_row_reserved`,          // bizA row on bizC product in bizB2 warehouse (reserved 2, qty 13) -> NEVER deleted
+    // Planted rows (4 classes + foreign_warehouse-only product + 1 reserved planted row)
+    rowForeignProduct: `${P}ps_row_fprod`,           // bizA row on bizB product in bizA warehouse (reserved 0, qty 5)
+    rowForeignWarehouse: `${P}ps_row_fwh`,           // bizA row on bizA product (also has own control) in bizB warehouse (reserved 0, qty 7)
+    rowForeignWarehouseOnly: `${P}ps_row_fwh_only`,  // bizA row on bizA unstocked product in bizB warehouse (reserved 0, qty 3) — COR-P66-1 regression
+    rowOtherPair: `${P}ps_row_otherpair`,            // bizA row on bizB unstocked product in bizB warehouse (reserved 0, qty 9)
+    rowMixed: `${P}ps_row_mixed`,                    // bizA row on bizB product in bizC warehouse (reserved 0, qty 11)
+    rowReserved: `${P}ps_row_reserved`,              // bizA row on bizC product in bizB2 warehouse (reserved 2, qty 13) -> NEVER deleted
     // Same-business control rows -> NEVER deleted
-    rowControlA: `${P}ps_row_ctlA`,              // bizA row on bizA product in bizA warehouse
-    rowControlB: `${P}ps_row_ctlB`,              // bizB row on bizB tracked product in bizB2 warehouse
+    rowControlA: `${P}ps_row_ctlA`,                  // bizA row on bizA product in bizA warehouse
+    rowControlB: `${P}ps_row_ctlB`,                  // bizB row on bizB tracked product in bizB2 warehouse
     // Planted-style stock movement -> census only, NEVER deleted
-    movPlanted: `${P}ps_mov_planted`,            // bizA movement naming bizB product in bizA warehouse
-    movControl: `${P}ps_mov_ctl`,                // bizA movement naming bizA product in bizA warehouse
+    movPlanted: `${P}ps_mov_planted`,                // bizA movement naming bizB product in bizA warehouse
+    movControl: `${P}ps_mov_ctl`,                    // bizA movement naming bizA product in bizA warehouse
   };
 
   async function runPlanted(argv: string[], customDb?: any): Promise<{ code: number; out: string; err: string }> {
@@ -1229,6 +1231,7 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     await db.product.createMany({
       data: [
         { id: PS.prodA, businessId: ID.bizA, name: 'v96o PS Prod A', price: 20, inventoryMode: null },
+        { id: PS.prodAForeignWhOnly, businessId: ID.bizA, name: 'v96o PS Prod A ForeignWhOnly', price: 25, inventoryMode: null },
         { id: PS.prodBUnstocked, businessId: ID.bizB, name: 'v96o PS Prod B Unstocked', price: 30, inventoryMode: null },
         { id: PS.prodBTracked, businessId: ID.bizB, name: 'v96o PS Prod B Tracked', price: 40, inventoryMode: null },
         { id: PS.prodC, businessId: ID.bizC, name: 'v96o PS Prod C', price: 50, inventoryMode: null },
@@ -1247,6 +1250,7 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     for (const [id, bizId, prodId, whId, qty, res] of [
       [PS.rowForeignProduct, ID.bizA, PS.prodBTracked, PS.whA, 5, 0],
       [PS.rowForeignWarehouse, ID.bizA, PS.prodA, PS.whB, 7, 0],
+      [PS.rowForeignWarehouseOnly, ID.bizA, PS.prodAForeignWhOnly, PS.whB, 3, 0],
       [PS.rowOtherPair, ID.bizA, PS.prodBUnstocked, PS.whB, 9, 0],
       [PS.rowMixed, ID.bizA, PS.prodBUnstocked, PS.whC, 11, 0],
       [PS.rowReserved, ID.bizA, PS.prodC, PS.whB2, 13, 2],
@@ -1271,20 +1275,21 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     });
   });
 
-  it('[PSC-01] RED-BEFORE: dry run prints exact counts across all 4 planted classes, leaks no id/name/prefix, and writes nothing', async () => {
+  it('[PSC-01] RED-BEFORE: dry run prints exact counts across all 4 planted classes (including foreign_warehouse-only product), leaks no id/name/prefix, and writes nothing', async () => {
     const before = await snapshotPsStocks();
     const res = await runPlanted([`--business=${ID.bizA}`, `--business=${ID.bizB}`, `--business=${ID.bizC}`]);
 
     expect(res.code, res.err).toBe(0);
-    expect(res.out).toMatch(/planted_rows\s+5\b/);
+    expect(res.out).toMatch(/planted_rows\s+6\b/);
     expect(res.out).toMatch(/foreign_product_rows\s+1\b/);
-    expect(res.out).toMatch(/foreign_warehouse_rows\s+1\b/);
+    expect(res.out).toMatch(/foreign_warehouse_rows\s+2\b/); // rowForeignWarehouse + rowForeignWarehouseOnly
     expect(res.out).toMatch(/other_business_pair_rows\s+1\b/);
     expect(res.out).toMatch(/mixed_rows\s+2\b/); // rowMixed (A on B/C) + rowReserved (A on C/B2)
-    expect(res.out).toMatch(/planted_quantity\s+45\b/); // 5 + 7 + 9 + 11 + 13
+    expect(res.out).toMatch(/planted_quantity\s+48\b/); // 5 + 7 + 3 + 9 + 11 + 13
     expect(res.out).toMatch(/reserved_rows\s+1\b/);
     expect(res.out).toMatch(/businesses_affected\s+3\b/); // A, B, C
-    expect(res.out).toMatch(/products_tracked_only_by_planted\s+2\b/); // prodBUnstocked + prodC (prodA & prodBTracked have own rows)
+    // prodAForeignWhOnly (only foreign_warehouse planted row) + prodBUnstocked + prodC (prodA & prodBTracked have own-warehouse rows)
+    expect(res.out).toMatch(/products_tracked_only_by_planted\s+3\b/);
     expect(res.out).toMatch(/movements_naming_foreign_pair\s+1\b/);
 
     // Counts only: never print any fixture prefix, id, or product/warehouse name.
@@ -1306,12 +1311,12 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     const otherOnly = await runPlanted(['--apply', `--business=${ID.bizNone}`]);
     expect(otherOnly.code, otherOnly.err).toBe(0);
     expect(otherOnly.out).toMatch(/deleted\s+0\b/);
-    expect((await snapshotPsStocks()).length).toBe(7);
+    expect((await snapshotPsStocks()).length).toBe(8);
 
     // Apply scoped to A, B, C
     const applied = await runPlanted(['--apply', `--business=${ID.bizA}`, `--business=${ID.bizB}`, `--business=${ID.bizC}`]);
     expect(applied.code, applied.err).toBe(0);
-    expect(applied.out).toMatch(/deleted\s+4\b/);
+    expect(applied.out).toMatch(/deleted\s+5\b/);
     expect(applied.out).toMatch(/left_reserved\s+1\b/);
     expect(applied.out).not.toContain(P);
 
@@ -1348,7 +1353,7 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     expect(rerun.out).toMatch(/left_reserved\s+1\b/);
   });
 
-  it('[PSC-03] RED-BEFORE: bad arguments exit 2 and DB failure exits 1 printing only error class and code', async () => {
+  it('[PSC-03] RED-BEFORE: bad arguments exit 2, DB failure exits 1 printing only error class and code, and post-delete recount failure reports accurately', async () => {
     const badFlag = await runPlanted(['--nope']);
     expect(badFlag.code).toBe(2);
 
@@ -1366,5 +1371,26 @@ describe('W11-PLANTED-STOCK-CENSUS (F-39, Z5SEC-2)', () => {
     expect(failed.err).toContain('PrismaClientKnownRequestError');
     expect(failed.err).toContain('08006');
     expect(failed.err).not.toContain('secret-value-leaked-in-db-message');
+
+    // COR-P66-3: post-delete recount failure prints deleted count and accurate recount error without saying the delete failed.
+    let queryCall = 0;
+    const recountFailDb = {
+      $queryRawUnsafe: vi.fn(async () => {
+        queryCall += 1;
+        if (queryCall <= 2) {
+          return queryCall === 1
+            ? [{ planted_rows: 1, foreign_product_rows: 1, foreign_warehouse_rows: 0, other_business_pair_rows: 0, mixed_rows: 0, planted_quantity: BigInt(5), reserved_rows: 0, businesses_affected: 2, products_tracked_only_by_planted: 1 }]
+            : [{ movements_naming_foreign_pair: 0 }];
+        }
+        throw boom;
+      }),
+      $executeRawUnsafe: vi.fn(async () => 1),
+    };
+    const recountFailed = await runPlanted(['--apply'], recountFailDb);
+    expect(recountFailed.code).toBe(1);
+    expect(recountFailed.out).toMatch(/deleted\s+1\b/);
+    expect(recountFailed.err).toContain('post-delete recount failed');
+    expect(recountFailed.err).not.toContain('The delete failed');
+    expect(recountFailed.err).not.toContain('secret-value-leaked-in-db-message');
   });
 });
