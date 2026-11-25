@@ -1,6 +1,96 @@
-import { ForbiddenException, Injectable, Inject, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Inject, Logger } from '@nestjs/common';
+import { isIP } from 'node:net';
 import * as webpush from 'web-push';
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+const MAX_PUSH_ENDPOINT_LENGTH = 2048;
+const MAX_PUSH_KEY_LENGTH = 512;
+const DNS_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * FU-PUSH-ENDPOINT-ALLOWLIST (P71 / MIN-4): exact hosts and strict subdomain
+ * suffixes for standard browser Web Push services (Chrome/Edge/Android FCM,
+ * Firefox Mozilla autopush, Safari Apple Web Push, Windows WNS).
+ */
+const ALLOWED_PUSH_EXACT_HOSTS = new Set([
+  'fcm.googleapis.com',
+  'android.googleapis.com',
+  'updates.push.services.mozilla.com',
+  'web.push.apple.com',
+]);
+
+const ALLOWED_PUSH_SUBDOMAIN_SUFFIXES = [
+  '.push.services.mozilla.com',
+  '.push.apple.com',
+  '.notify.windows.com',
+] as const;
+
+function hasWhitespaceOrControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f) return true;
+  }
+  return /\s/.test(value);
+}
+
+export function isAllowedPushEndpoint(endpoint: unknown): endpoint is string {
+  if (typeof endpoint !== 'string') return false;
+  if (endpoint.length === 0 || endpoint.length > MAX_PUSH_ENDPOINT_LENGTH) return false;
+  if (hasWhitespaceOrControlChar(endpoint)) return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
+  if (parsed.port !== '') return false;
+  if (!parsed.pathname || parsed.pathname === '/') return false;
+
+  const host = parsed.hostname.toLowerCase();
+  if (!host || host.startsWith('.') || host.endsWith('.') || host.startsWith('[') || isIP(host) !== 0) {
+    return false;
+  }
+
+  if (ALLOWED_PUSH_EXACT_HOSTS.has(host)) return true;
+
+  for (const suffix of ALLOWED_PUSH_SUBDOMAIN_SUFFIXES) {
+    if (host.endsWith(suffix)) {
+      const prefix = host.slice(0, -suffix.length);
+      if (!prefix) return false;
+      const labels = prefix.split('.');
+      if (labels.every((label) => DNS_LABEL_RE.test(label))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function assertAllowedPushEndpoint(endpoint: unknown): string {
+  if (!isAllowedPushEndpoint(endpoint)) {
+    throw new BadRequestException('Push subscription endpoint must be an HTTPS URL on a supported push service');
+  }
+  return endpoint;
+}
+
+function assertValidPushKeys(keys: unknown): { p256dh: string; auth: string } {
+  const rec = keys as { p256dh?: unknown; auth?: unknown } | null | undefined;
+  if (
+    typeof rec?.p256dh !== 'string' ||
+    typeof rec?.auth !== 'string' ||
+    rec.p256dh.trim().length === 0 ||
+    rec.auth.trim().length === 0 ||
+    rec.p256dh.length > MAX_PUSH_KEY_LENGTH ||
+    rec.auth.length > MAX_PUSH_KEY_LENGTH
+  ) {
+    throw new BadRequestException('Invalid push subscription keys');
+  }
+  return { p256dh: rec.p256dh, auth: rec.auth };
+}
 
 @Injectable()
 export class PushNotificationService {
@@ -46,16 +136,19 @@ export class PushNotificationService {
   }
 
   async subscribe(userId: string, businessId: string, subscription: webpush.PushSubscription) {
+    const endpoint = assertAllowedPushEndpoint(subscription?.endpoint);
+    const keys = assertValidPushKeys(subscription?.keys);
+
     const existing = await this.prisma.client.pushSubscription.findUnique({
-      where: { endpoint: subscription.endpoint },
+      where: { endpoint },
     });
 
     if (existing) {
       return this.prisma.client.pushSubscription.update({
         where: { id: existing.id },
         data: {
-          p256dh: subscription.keys.p256dh,
-          auth: subscription.keys.auth,
+          p256dh: keys.p256dh,
+          auth: keys.auth,
           userId,
           businessId,
         },
@@ -64,9 +157,9 @@ export class PushNotificationService {
 
     return this.prisma.client.pushSubscription.create({
       data: {
-        endpoint: subscription.endpoint,
-        p256dh: subscription.keys.p256dh,
-        auth: subscription.keys.auth,
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
         userId,
         businessId,
       },
@@ -79,7 +172,9 @@ export class PushNotificationService {
    * it); the caller's own is refreshed.
    */
   async subscribeOwn(userId: string, businessId: string, subscription: webpush.PushSubscription) {
-    const existing = await this.prisma.client.pushSubscription.findUnique({ where: { endpoint: subscription.endpoint }, select: { userId: true } });
+    const endpoint = assertAllowedPushEndpoint(subscription?.endpoint);
+    assertValidPushKeys(subscription?.keys);
+    const existing = await this.prisma.client.pushSubscription.findUnique({ where: { endpoint }, select: { userId: true } });
     if (existing && existing.userId !== userId) throw new ForbiddenException('This device is subscribed by another member');
     return this.subscribe(userId, businessId, subscription);
   }
@@ -95,10 +190,24 @@ export class PushNotificationService {
     });
   }
 
+  private dispatchPush(
+    subscription: webpush.PushSubscription,
+    serializedPayload: string,
+  ): Promise<unknown> {
+    if (!isAllowedPushEndpoint(subscription.endpoint)) {
+      this.logger.warn('Blocked outbound push to disallowed endpoint host');
+      return Promise.reject(new Error('Disallowed push subscription endpoint'));
+    }
+    return this.sendPushNotification(subscription, serializedPayload);
+  }
+
   protected sendPushNotification(
     subscription: webpush.PushSubscription,
     serializedPayload: string,
   ): Promise<unknown> {
+    if (!isAllowedPushEndpoint(subscription.endpoint)) {
+      return Promise.reject(new Error('Disallowed push subscription endpoint'));
+    }
     return webpush.sendNotification(subscription, serializedPayload);
   }
 
@@ -106,12 +215,16 @@ export class PushNotificationService {
     const subs = await this.prisma.client.pushSubscription.findMany({
       where: { userId },
     });
+    if (subs.length === 0 || !this.isConfigured()) {
+      return { sent: 0, failed: 0 };
+    }
 
+    const serialized = JSON.stringify(payload);
     const results = await Promise.allSettled(
       subs.map((sub) =>
-        this.sendPushNotification(
+        this.dispatchPush(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify(payload),
+          serialized,
         ),
       ),
     );
@@ -129,7 +242,7 @@ export class PushNotificationService {
 
     if (expiredEndpoints.length > 0) {
       await this.prisma.client.pushSubscription.deleteMany({
-        where: { endpoint: { in: expiredEndpoints } },
+        where: { userId, endpoint: { in: expiredEndpoints } },
       });
     }
 
@@ -140,12 +253,16 @@ export class PushNotificationService {
     const subs = await this.prisma.client.pushSubscription.findMany({
       where: { businessId },
     });
+    if (subs.length === 0 || !this.isConfigured()) {
+      return { sent: 0, failed: 0 };
+    }
 
+    const serialized = JSON.stringify(payload);
     const results = await Promise.allSettled(
       subs.map((sub) =>
-        this.sendPushNotification(
+        this.dispatchPush(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify(payload),
+          serialized,
         ),
       ),
     );
@@ -199,7 +316,7 @@ export class PushNotificationService {
     const serialized = JSON.stringify(payload);
     const results = await Promise.allSettled(
       subs.map((sub) =>
-        this.sendPushNotification(
+        this.dispatchPush(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           serialized,
         ),
