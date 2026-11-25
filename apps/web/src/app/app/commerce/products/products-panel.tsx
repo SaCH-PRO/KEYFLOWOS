@@ -83,7 +83,8 @@ function ProductRowActions({
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      // Escape closes the menu and goes no further (not to the app's Escape shortcut on window).
+      if (e.key === "Escape") { e.stopPropagation(); setOpen(false); }
     };
     document.addEventListener("mousedown", onPointer);
     document.addEventListener("touchstart", onPointer);

@@ -85,6 +85,19 @@ function ProductsPageInner() {
     }
   }, [businessId, currency, loading, loadError, searchParams, openAddProduct]);
 
+  // Escape cancels the Archive confirmation and goes no further (the app's Escape shortcut would leave the page).
+  useEffect(() => {
+    if (!archiveTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!archiving) setArchiveTarget(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [archiveTarget, archiving]);
+
   const confirmArchive = useCallback(async () => {
     if (!archiveTarget) return;
     setArchiving(true);

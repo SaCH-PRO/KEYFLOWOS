@@ -307,7 +307,10 @@ export const ProductFormModal = React.memo(function ProductFormModal({
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // CATALOG-1: Escape closes the form and goes no further. Without this the app's Escape shortcut
+        // (use-keyboard-shortcuts, kf:escape: back to the parent route) also ran when focus was not in a field.
         e.preventDefault();
+        e.stopImmediatePropagation();
         handleClose();
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -315,8 +318,9 @@ export const ProductFormModal = React.memo(function ProductFormModal({
         onSave();
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    // Capture: ahead of the app's window listeners, so stopping the event keeps it from them.
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [open, handleClose, onSave]);
 
   const formattedPrice = useMemo(() => {
