@@ -14,10 +14,13 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
  *   MNB-02 a member with settings read: My account and Notifications.
  *   MNB-03 my-access failing (unknown): My account and Notifications.
  *
- * The rail (with its Me drawer) shows from 768px: 768, 1024 and 1440 are run. At 375 the shell has no Me drawer and
- * no Notifications link anywhere in its menus; that is checked too, so no width the layout changes is left out.
+ * The rail (with its Me drawer) shows from 768px: 768, 1024 and 1440 are run. At 375 the shell has no rail: MNB-04
+ * checks that the closed phone shell shows no Me button and no visible Notifications link. It does not open the phone
+ * drawer, which never renders the Me entries (base and head alike), so it is a guard, not a RED case.
  *
- * Mocked (the mocked CI job): every API call is answered by page.route on api.test.local; skipped under E2E_LIVE.
+ * Mocked: every API call is answered by page.route on api.test.local; skipped under E2E_LIVE. CI's e2e-mocked step
+ * runs a fixed list of specs that does not include this one: it is the packet's browser proof, and the standing
+ * guards are MNS-01..04 and NMS-18 in Vitest.
  *   pnpm run build (NEXT_PUBLIC_API_BASE_URL=http://api.test.local), then
  *   E2E_WEB_COMMAND=standalone E2E_PORT=5100 pnpm exec playwright test e2e/sweep-me-notifications.spec.ts --project=chromium
  */
