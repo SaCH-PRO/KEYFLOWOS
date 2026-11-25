@@ -1415,6 +1415,11 @@
       "prefix": "v91s_",
       "owner": "apps/server/test/flow-search-money-scope.integration.test.ts",
       "packet": "V1-91 (FU-SEARCH-MONEY-SCOPE)"
+    },
+    {
+      "prefix": "v96g_",
+      "owner": "apps/server/test/refund-gateway-refuse.integration.test.ts",
+      "packet": "V1-96 (FU-REFUND-GATEWAY-REFUSE)"
     }
   ],
   "pendingRenames": [],
