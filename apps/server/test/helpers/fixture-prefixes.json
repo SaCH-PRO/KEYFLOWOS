@@ -1138,6 +1138,11 @@
       "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
     },
     {
+      "prefix": "v63n_",
+      "owner": "apps/server/test/identity-me-key-disabled.integration.test.ts",
+      "packet": "V1-63 (SWP-KEY-SHELL-SMOKE)"
+    },
+    {
       "prefix": "v63g_",
       "owner": "apps/server/test/security-audit-truth.integration.test.ts",
       "packet": "V1-63 (SWP-SEC-AUDIT-TRUTH)"
