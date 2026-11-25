@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "8835931259a7a456efb2a2978a392442c672b97d",
-  "main_commit_date": "2026-11-24T20:22:49+00:00",
+  "main_sha": "075c5297bffaf048b6d3911bc0d8cfacf5fccb2d",
+  "main_commit_date": "2026-11-25T00:01:14+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 548.5,
   "by_status": {
    "done": {
-    "packets": 122,
-    "points": 176.5,
-    "pct_by_points": 32.2
+    "packets": 125,
+    "points": 180.5,
+    "pct_by_points": 32.9
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 254,
-    "points": 372,
-    "pct_by_points": 67.8
+    "packets": 251,
+    "points": 368,
+    "pct_by_points": 67.1
    }
   },
   "by_step": {
@@ -78,9 +78,9 @@
     "total": 53
    },
    "5": {
-    "done": 13,
+    "done": 16,
     "in-progress": 0,
-    "todo": 68,
+    "todo": 65,
     "total": 81
    },
    "6": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 35,
+    "done": 38,
     "in-progress": 0,
-    "todo": 202,
+    "todo": 199,
     "total": 237
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 136,
+   "prior-status-file": 135,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 27,
-   "compacted-commit": 48,
-   "no-evidence": 137
+   "compacted-commit": 51,
+   "no-evidence": 135
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -158,8 +158,8 @@
    "FU-WEB-PAYLINK-STATUS-BUTTONS",
    "SEC-KEY-CUSTOM-LOGIC"
   ],
-  "todo_with_dependencies_met": 120,
-  "todo_with_dependencies_met_launch": 93
+  "todo_with_dependencies_met": 122,
+  "todo_with_dependencies_met_launch": 95
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -251,16 +251,6 @@
    "unblocks": 32
   },
   {
-   "id": "SWP-CONTACT-DETAIL",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 29
-  },
-  {
    "id": "W11-GENOME-RECS-DOMAIN",
    "step": 4,
    "priority": "P1",
@@ -309,6 +299,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 22
+  },
+  {
+   "id": "SWP-CRM-WEB-POLISH",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 21
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -429,6 +429,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 5
+  },
+  {
+   "id": "FU-C4-FOCUS-OPEN",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
   },
   {
    "id": "FU-PROPOSAL-MONEY-TAG",
@@ -591,6 +601,26 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-DELETE-LEAVE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTID-WRITER-VALIDATION",
    "step": 5,
    "priority": "P1",
@@ -686,16 +716,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-NAV-A3-CODEX-235",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -851,6 +871,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-PANEL-PRUNE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -926,16 +956,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1453,16 +1473,6 @@
    "unblocks": 32
   },
   {
-   "id": "SWP-CONTACT-DETAIL",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 29
-  },
-  {
    "id": "W11-GENOME-RECS-DOMAIN",
    "step": 4,
    "priority": "P1",
@@ -1511,6 +1521,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 22
+  },
+  {
+   "id": "SWP-CRM-WEB-POLISH",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 21
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -1631,6 +1651,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 5
+  },
+  {
+   "id": "FU-C4-FOCUS-OPEN",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
   },
   {
    "id": "FU-PROPOSAL-MONEY-TAG",
@@ -1783,6 +1813,26 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-DELETE-LEAVE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTID-WRITER-VALIDATION",
    "step": 5,
    "priority": "P1",
@@ -1878,16 +1928,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-NAV-A3-CODEX-235",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2043,6 +2083,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-PANEL-PRUNE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -2118,16 +2168,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -4314,17 +4354,19 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "143525a0"
+   ],
    "depends_on": [
     "FIX-CONTACT-PARAMS",
     "FAILURE-KIT",
     "NAV-A1"
    ],
    "title": "Contact pages: labels instead of codes, an honest delete dialog, plain timeline events; side-panel tabs retired",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -4341,7 +4383,7 @@
     "SWP-CONTACT-DETAIL"
    ],
    "title": "Contacts web: Table view honours the main search; CRM dashboard readable in dark mode with the right group label",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-TEAM-WEB",
@@ -8722,15 +8764,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ed87b33f"
+   ],
    "depends_on": [
     "FU-NAV-A1-CODEX-224"
    ],
    "title": "The manual setup step's settings PATCH goes through the write sequence",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
@@ -8863,15 +8907,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "0b9a4d65"
+   ],
    "depends_on": [
     "NAV-A3"
    ],
    "title": "A slug with a digit is a crumb; the settings tab strip follows the member's modules",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONTACT-PAGES-RAW-STATUS",
@@ -8888,7 +8934,7 @@
     "SWP-CONTACT-DETAIL"
    ],
    "title": "The contact route's pages show statuses in plain words",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CONTACT-DELETE-LEAVE",
@@ -8905,7 +8951,7 @@
     "SWP-CONTACT-DETAIL"
    ],
    "title": "A contact delete is not lost when the owner leaves during its Undo window",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CONTACT-PANEL-PRUNE",
@@ -8922,7 +8968,7 @@
     "SWP-CONTACT-DETAIL"
    ],
    "title": "The list side panel stops loading what it no longer shows",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-C4-FOCUS-OPEN",
@@ -8939,7 +8985,7 @@
     "SWP-CONTACT-DETAIL"
    ],
    "title": "A customer clicked on the Customers page opens their page (focus view)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-NOTIFICATIONS-PREFS-GUARD",
