@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~04:45 UTC by the acting orchestrator (second-lane account, Claude Code), after M12 (Antigravity) merged as 8dbcb03c and M13 was cut. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~06:50 UTC by the acting orchestrator (second-lane account, Claude Code), after M13 (PR #243) merged as 08170696. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -80,44 +80,46 @@ in BUILD-MAP-001: Antigravity to record it with M10.
 - **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
   its Release 0 suite's setup only; assertions unchanged.
 
-## 0. Next session starts here (2026-11-25 ~04:45 UTC)
+## 0. Next session starts here (2026-11-25 ~06:50 UTC)
 
-Main is `8dbcb03c`: M11 (Claude, `293d7f39`) then M12 (Antigravity, PR #241: P43, P44, P45 = SWP-INV-DETAIL server,
-P46 = WEDGE-WA-INBOUND-CAPTURE server, P52 READY-TO-SEND, P38 FU-CI-MERGE-QUEUE, P37 server, P51, P53).
+Main is `08170696`: M11 (Claude, `293d7f39`), M12 (Antigravity, `8dbcb03c`), M14 (Antigravity, PR #242, `5ff26e5b`),
+then **M13** (Claude, PR #243, head pinned `cbb3282c`): P37 FU-BULK-DELETE-UNDO web half, P39 FU-CI-WINDOWS-INPUT-GATE
++ C2, P54 SWP-INV-DETAIL web half, docs. **P39 is live**: the Windows worker proof now gates by its inputs and runs in 4
+shards (first run: 323/323 controls, every leg 3-5 min, against 19 min after C1 and 60 before).
 
-**M13 (Claude, wave 3r)** is being assembled on `wave/v1-wave-m13` from `8dbcb03c`: P37 web half
-(`pkt/V1-FU-BULK-DELETE-UNDO-WEB` @ `39364399` = reviewed `3e0ef2ad` + main merged in), P39
-(`pkt/V1-FU-CI-WINDOWS-INPUT-GATE` @ `e497786e` = reviewed `8743e437` + main), P54 SWP-INV-DETAIL web half
-(`pkt/V1-SWP-INV-DETAIL-WEB` @ `90276ed0` = reviewed `c8f9a24f` + main), and this docs branch. Each packet branch got main
-merged in first (keeping main's copy of files main now owns: the server halves, P38's ci-cd.yml), so each compacts to
-its own files only; the wave confirmations must check the 3-way results in `use-contact-actions.ts` and `client.ts`
-(P37 over M11's P27/P35). Then: wave-head proof (real install from the head's lockfile, never symlinked deps), live
-journeys E (invoice detail) and C, the mocked CI specs **as CI runs them** (a mocked production build:
-`NEXT_PUBLIC_API_BASE_URL=http://api.test.local`, `E2E_WEB_COMMAND=standalone`; `E2E_NO_SERVER=1` cannot serve
-public-flows), PR, CI, two wave confirmations, merge (D-239).
+**Held: P55 WEDGE-WA-INBOUND-CAPTURE web half** (`pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB` @ `36a29edd`, RETURNed #80
+7154900640, both reviews CONFIRMED after two repair rounds). It joins the first Claude wave after Antigravity's server
+fix for **SEC-WAW-1** is on main (KEY's hourly intuition scan reads every ContactNote body, so pasted third-party
+WhatsApp text would reach an LLM prompt; #80 7153059391, 7153185403; proposed FU-WA-INBOUND-KEY-EXCLUDE). When it joins:
+merge main into its branch first (the server half is on main via M12), then compact.
 
-**Held: P55 WEDGE-WA-INBOUND-CAPTURE web half** (`pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB`, repair round in progress at
-the time of writing). It stays out of every wave until the server-side **SEC-WAW-1** fix is on main: KEY's hourly
-intuition scan reads every ContactNote body, so pasted third-party WhatsApp text would reach an LLM prompt (#80
-7153059391, 7153185403; asked of Antigravity as FU-WA-INBOUND-KEY-EXCLUDE). Its live journey C/D step is part of the
-repair round.
+Lessons this session (for every lane):
+- A web packet that edits a file a static spec reads must run CI's mocked e2e specs **as CI runs them** (a mocked
+  production build, `NEXT_PUBLIC_API_BASE_URL=http://api.test.local`, `E2E_WEB_COMMAND=standalone`) before its RETURN:
+  M11's first head failed R0-06 that way.
+- A wave whose packets were cut before their server halves (or P38) reached main: merge main into each packet branch
+  first (keep main's copy of files main now owns), then compact; check every 3-way result.
+- Never merge into a worktree while a run uses it (it voids the run); never run the server suite while other heavy
+  jobs run (a 5 s DB test timed out at load 8).
+- Proofs need a real install from the head's lockfile (M10 added @swc/core); symlinked node_modules from an older
+  install prove nothing for the server suite.
+- GitHub from a cloud session: REST works, GraphQL is refused. Subagents spawned here cannot spawn reviewers; the
+  orchestrator runs each worker's two reviews (one worker used cloud sessions instead: tag `p39-review`).
 
-GitHub from a cloud session: REST works; GraphQL is refused. Subagents spawned here cannot spawn reviewers; the
-orchestrator runs each worker's two reviews.
+Next (Claude lane): P55 once SEC-WAW-1 lands; P41 FU-CONTACT-TIMELINE-CHANNELS (its server half is on main); P34
+FU-KEY-CTRLJ-OWNERS (live check first); P28, P31, P18a, P17(a-c); the follow-ups the owner assigns (section 4).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `293d7f39` (2026-11-25 ~03:35 UTC): M11 PR #240 after M10 PR #239 (`45d302ef`, Antigravity). Production
-runs `f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). Lanes as agreed on #80 (Antigravity server
-and server halves, Claude web and web halves); the board (`coord/board`) has one owner per row.
+Main is at `08170696`. Production runs `f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). Lanes as on #80
+(Antigravity server and server halves, Claude web and web halves); one owner per row on `coord/board`.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **P37 web half (Claude)** | `pkt/V1-FU-BULK-DELETE-UNDO-WEB` @ 3e0ef2ad | Returned (#80 7150677995), both reviews and confirmations CONFIRMED; browser RED at base, green at head | Next Claude wave, with the server half |
-| **P39 (Claude)** | `pkt/V1-FU-CI-WINDOWS-INPUT-GATE` @ 8743e437 (on P38 b5a3c63a) | Returned (#80 7150759326); reviews by four cloud sessions tagged `p39-review` | A wave with P38 |
-| **Antigravity lane** | see #80 and the board | Returned: P38, P47, P49, P50 and the earlier server halves (P37, P43-P46); claimed P51 | Their next wave; COR-P37-3 (CRM caches after restore) and `deletedIds` asked of them (#80 7150334442) |
-| **Owner** | - | - | Switch the merge queue on for `main` once P38 merges (D-278); the question batch; production redeploy (D-266) |
-| `wave/v1-docs-p19` (Claude lane) | merged main 293d7f39 | Review minors fixed (c91c5bc2), follow-up rows FU-UNDO-TOAST-SIGNOUT and FU-FOCUS-QUEUE-PENDING-DELETE, this file | Next Claude wave |
+| **P55 (Claude)** | `pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB` @ 36a29edd | Returned, held for SEC-WAW-1 | Next Claude wave after the server fix |
+| **Antigravity lane** | see #80 and the board | Asked: FU-WA-INBOUND-KEY-EXCLUDE (SEC-WAW-1), `deletedIds` on bulk delete, FU-INVOICE-REMAINING-CREDITS | Their next wave |
+| **Owner** | - | - | Merge queue switch (D-278) now that P38 is on main; the question batch; production redeploy (D-266) |
+| `wave/v1-docs-p19` (Claude lane) | merged main 08170696 | This file, V1-STATUS, the C2 measurement | Next Claude wave |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Not re-verified since | Re-verify each head before it enters a wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -222,6 +224,10 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     outside the table" to "no position:fixed z-index literal >= 30" without a ruling (found by M11's security
     confirmation). Keep the narrowing? (Default: keep, it is layering only; say if the full guard is wanted.) Two more
     follow-ups are in the plan as `follow-on`: FU-UNDO-TOAST-SIGNOUT, FU-FOCUS-QUEUE-PENDING-DELETE.
+39. The runbooks now let a local proof run on Node 22.23.5 (/opt/node22) when the pinned 22.23.4 is absent, provided the
+    proof says so; CI keeps its own pin. Accept? (Default: yes, disclosed.) Also: put FU-REQUIRE-AUTH-REMOUNT (the shell
+    remounts on every navigation) on the launch track? (Recommended: yes.) And SEC-WAW-1: inbound WhatsApp text stays
+    out of KEY's automatic prompts unless the owner asks (default: excluded).
 
 ## 5. How to work here (learned the hard way)
 

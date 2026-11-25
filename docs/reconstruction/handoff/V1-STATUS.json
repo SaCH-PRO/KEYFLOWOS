@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "8dbcb03cb92de776a201b6c1da360493d957e853",
-  "main_commit_date": "2026-11-25T00:25:22-04:00",
+  "main_sha": "0817069673a6fc15fd8dd4c9e4bd92a5fca4b12a",
+  "main_commit_date": "2026-11-25T02:48:11-04:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 385,
-  "points": 558.5,
+  "packets": 391,
+  "points": 564.5,
   "by_status": {
    "done": {
-    "packets": 145,
-    "points": 210.5,
-    "pct_by_points": 37.7
+    "packets": 152,
+    "points": 220.5,
+    "pct_by_points": 39.1
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 240,
-    "points": 348,
-    "pct_by_points": 62.3
+    "packets": 239,
+    "points": 344,
+    "pct_by_points": 60.9
    }
   },
   "by_step": {
@@ -72,22 +72,22 @@
     "total": 149
    },
    "4": {
-    "done": 20,
+    "done": 21,
     "in-progress": 0,
-    "todo": 33,
+    "todo": 32,
     "total": 53
    },
    "5": {
-    "done": 26,
+    "done": 29,
     "in-progress": 0,
-    "todo": 61,
+    "todo": 58,
     "total": 87
    },
    "6": {
-    "done": 4,
+    "done": 7,
     "in-progress": 0,
-    "todo": 30,
-    "total": 34
+    "todo": 33,
+    "total": 40
    },
    "7": {
     "done": 1,
@@ -110,24 +110,24 @@
     "total": 87
    },
    "launch": {
-    "done": 58,
+    "done": 65,
     "in-progress": 0,
-    "todo": 185,
+    "todo": 178,
     "total": 243
    },
    "follow-on": {
     "done": 0,
     "in-progress": 0,
-    "todo": 55,
-    "total": 55
+    "todo": 61,
+    "total": 61
    }
   },
   "by_derivation": {
-   "prior-status-file": 126,
+   "prior-status-file": 120,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 41,
-   "compacted-commit": 57,
-   "no-evidence": 133
+   "code-commit-subject": 45,
+   "compacted-commit": 60,
+   "no-evidence": 138
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -135,14 +135,19 @@
    "TOF-FINANCE-CANONICAL-TOOLS",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
-   "SWP-INV-DETAIL",
    "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
    "SWP-STORE-OVERSELL",
+   "W11-GENOME-RECS-DOMAIN",
    "W11-PROPOSAL-RESULT-READER-SCOPE",
    "W11-GENOME-RUNWAY",
+   "W11-RUNWAY-BURN-CURRENCY",
    "READY-TO-SEND",
+   "W11-SHIP-STOCK-DECREMENT",
+   "W11-STOREFRONT-ROUTE-DECREMENTED",
+   "W11-STOREFRONT-FULFIL-STEPS",
    "SWP-CENSUS-OPEN-WRITES",
+   "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
@@ -169,11 +174,10 @@
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL",
    "FU-NOTIFICATIONS-PREFS-GUARD",
-   "FU-CI-PG-NO-PASSWORD",
-   "FU-BULK-DELETE-UNDO"
+   "FU-CI-PG-NO-PASSWORD"
   ],
-  "todo_with_dependencies_met": 124,
-  "todo_with_dependencies_met_launch": 94
+  "todo_with_dependencies_met": 127,
+  "todo_with_dependencies_met_launch": 91
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -249,24 +253,14 @@
    "unblocks": 32
   },
   {
-   "id": "W11-GENOME-RECS-DOMAIN",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 26
-  },
-  {
-   "id": "W11-RUNWAY-BURN-CURRENCY",
+   "id": "TOF-PAYROLL-DISCARD",
    "step": 5,
    "priority": "P2",
    "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 26
+   "unblocks": 25
   },
   {
    "id": "CATALOG-1",
@@ -289,16 +283,6 @@
    "unblocks": 23
   },
   {
-   "id": "W11-SHIP-STOCK-DECREMENT",
-   "step": 6,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 22
-  },
-  {
    "id": "SWP-CRM-WEB-POLISH",
    "step": 5,
    "priority": "P3",
@@ -307,6 +291,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 21
+  },
+  {
+   "id": "W11-PLANTED-STOCK-CENSUS",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 17
   },
   {
    "id": "SWP-SERVICE-DEPOSIT",
@@ -689,6 +683,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-REQUIRE-AUTH-REMOUNT",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-SEARCH-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -769,16 +773,6 @@
    "unblocks": 0
   },
   {
-   "id": "W1F-STORE-PAYPAL",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "W1F-STORE-STRIPE-R0",
    "step": 4,
    "priority": "P1",
@@ -829,16 +823,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CI-WINDOWS-INPUT-GATE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-COA-SEEDER-AND-INPUT",
    "step": 5,
    "priority": "P2",
@@ -859,6 +843,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -875,6 +869,16 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-INVOICE-REMAINING-CREDITS",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -955,6 +959,16 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-SIDESHEET-MOBILE-OFFSET",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1139,6 +1153,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
    "step": 6,
    "priority": "P3",
@@ -1150,6 +1174,16 @@
   },
   {
    "id": "FU-STUDIO-PAGE-SCOPE",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNDO-TOAST-SIGNOUT",
    "step": 6,
    "priority": "P3",
    "size": "S",
@@ -1491,24 +1525,14 @@
    "unblocks": 32
   },
   {
-   "id": "W11-GENOME-RECS-DOMAIN",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 26
-  },
-  {
-   "id": "W11-RUNWAY-BURN-CURRENCY",
+   "id": "TOF-PAYROLL-DISCARD",
    "step": 5,
    "priority": "P2",
    "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 26
+   "unblocks": 25
   },
   {
    "id": "CATALOG-1",
@@ -1531,16 +1555,6 @@
    "unblocks": 23
   },
   {
-   "id": "W11-SHIP-STOCK-DECREMENT",
-   "step": 6,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 22
-  },
-  {
    "id": "SWP-CRM-WEB-POLISH",
    "step": 5,
    "priority": "P3",
@@ -1549,6 +1563,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 21
+  },
+  {
+   "id": "W11-PLANTED-STOCK-CENSUS",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 17
   },
   {
    "id": "SWP-SERVICE-DEPOSIT",
@@ -2001,16 +2025,6 @@
    "unblocks": 0
   },
   {
-   "id": "W1F-STORE-PAYPAL",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "W1F-STORE-STRIPE-R0",
    "step": 4,
    "priority": "P1",
@@ -2052,16 +2066,6 @@
   },
   {
    "id": "FU-CI-MERGE-QUEUE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CI-WINDOWS-INPUT-GATE",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -3590,10 +3594,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "f7ecee50"
+    "ef69c411"
    ],
    "depends_on": [
     "SWP-REMOVED-MEMBER-NOTICE",
@@ -3976,15 +3980,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "d6e19f4f"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "Genome recommendation generation creates FINANCIAL recommendations only for members with revenue write; genome bridges withhold the finance snapshot without revenue read (D-128)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-PROPOSAL-RESULT-READER-SCOPE",
@@ -4166,15 +4172,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f8307dde"
+   ],
    "depends_on": [
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "Runway burn counts business-currency expenses; money-moves burn window stops at now",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "TOF-PAYROLL-DISCARD",
@@ -4191,7 +4199,7 @@
     "W11-RUNWAY-BURN-CURRENCY"
    ],
    "title": "Discard a DRAFT payroll run, and a legacy run in a non-business currency (D-144), server side",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-FIN-OVERVIEW-TRUTH",
@@ -4742,15 +4750,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f355e1ac"
+   ],
    "depends_on": [
     "W11-INV-SET-MOVEMENT"
    ],
    "title": "Fulfil 'ship' decrements processed tracked stock once, under the routing claim, in its transaction (F-26)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-STOREFRONT-ROUTE-DECREMENTED",
@@ -4759,16 +4769,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6855af3f"
+   ],
    "depends_on": [
     "W11-SHIP-STOCK-DECREMENT",
     "USAGE-COUNT-SCRIPT"
    ],
    "title": "Routing does not reserve storefront lines whose stock the checkout already decremented (F-36)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-STOREFRONT-FULFIL-STEPS",
@@ -4777,15 +4789,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b4f9b129"
+   ],
    "depends_on": [
     "W11-STOREFRONT-ROUTE-DECREMENTED"
    ],
    "title": "Fulfil 'confirm'/'process' read a storefront order in its own vocabulary (paid CONFIRMED storefront orders cannot be processed)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-PLANTED-STOCK-CENSUS",
@@ -4803,7 +4817,7 @@
     "USAGE-COUNT-SCRIPT"
    ],
    "title": "Operator census and owner-approved cleanup of inventory_stocks rows whose business is not their product's or warehouse's business (dry run by default)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-INV-SKU-COUNT",
@@ -5673,15 +5687,17 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "c76b6af3"
+   ],
    "depends_on": [
     "W11-STORE-OWN-PAYMENT-KEYS"
    ],
    "title": "Store PayPal is offered only when it can settle (webhook id in the store's PayPal set and on Settings > Payments)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W1F-KEY-EVIDENCE-WRITE",
@@ -9150,10 +9166,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "e31c0679"
+    "391b048b"
    ],
    "depends_on": [],
    "title": "A bulk delete of customers is sent at once and Undo restores exactly those ids from Trash in one call",
@@ -9181,13 +9197,15 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "de2f4ca8"
+   ],
    "depends_on": [],
    "title": "The Windows worker proof always reports, runs in full only when its inputs changed, and is sharded (C2)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-ME-NOTIFICATIONS-SCOPE",
@@ -9270,6 +9288,101 @@
    "evidence": [],
    "depends_on": [],
    "title": "The mocked e2e helpers store a session the edge middleware accepts",
+   "deps_met": true
+  },
+  {
+   "id": "FU-UNDO-TOAST-SIGNOUT",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-BULK-DELETE-UNDO"
+   ],
+   "title": "Undo toasts are dismissed when the session ends",
+   "deps_met": true
+  },
+  {
+   "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-CONTACT-DELETE-LEAVE",
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "title": "The focus queue does not offer a customer whose delete is pending",
+   "deps_met": true
+  },
+  {
+   "id": "FU-REQUIRE-AUTH-REMOUNT",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The app shell is not torn down and re-verified on every page change",
+   "deps_met": true
+  },
+  {
+   "id": "FU-SIDESHEET-MOBILE-OFFSET",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The shared SideSheet opens in place on phones",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The contact's Send quote opens New quote for that customer",
+   "deps_met": true
+  },
+  {
+   "id": "FU-INVOICE-REMAINING-CREDITS",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The operator invoice detail's remaining balance nets applied credit notes and is 0 on VOID",
    "deps_met": true
   }
  ]
