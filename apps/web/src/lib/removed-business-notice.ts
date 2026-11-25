@@ -48,10 +48,15 @@ export function raiseRemovedBusinessNotice(notice: RemovedBusinessNotice, userId
   window.dispatchEvent(new CustomEvent(BUSINESS_REMOVED_EVENT, { detail: notice }));
 }
 
-/** The member dismissed it, signed out, or was given the business back. */
-export function dismissRemovedBusinessNotice() {
+/**
+ * The member dismissed it, or was given the business back: cleared and announced (the shell hides it, the gate
+ * re-checks). `silent` is for a session that is ending or starting (sign-out, sign-in): cleared without an
+ * announcement, so the gate does not react while the member is being sent to the sign-in page (correctness review
+ * R-MINOR-1).
+ */
+export function dismissRemovedBusinessNotice(options: { silent?: boolean } = {}) {
   if (typeof window === "undefined") return;
   if (window.localStorage.getItem(REMOVED_NOTICE_KEY) === null) return;
   window.localStorage.removeItem(REMOVED_NOTICE_KEY);
-  window.dispatchEvent(new CustomEvent(BUSINESS_REMOVED_EVENT, { detail: null }));
+  if (!options.silent) window.dispatchEvent(new CustomEvent(BUSINESS_REMOVED_EVENT, { detail: null }));
 }

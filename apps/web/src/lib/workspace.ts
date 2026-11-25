@@ -310,8 +310,9 @@ export function purgeOnboardingTranscripts() {
 export function clearAdminSession() {
   if (typeof window === "undefined") return;
   // Every sign-in and sign-out runs this first: a removed-business notice belongs to the session that raised it,
-  // never to the next person on the device (SWP-REMOVED-MEMBER-NOTICE, security review MAJOR-1).
-  dismissRemovedBusinessNotice();
+  // never to the next person on the device (SWP-REMOVED-MEMBER-NOTICE, security review MAJOR-1). Silently: the
+  // session is ending or starting, so the gate must not react to it (correctness review R-MINOR-1).
+  dismissRemovedBusinessNotice({ silent: true });
   for (const key of ADMIN_SESSION_KEYS) {
     window.localStorage.removeItem(key);
     if (typeof document !== "undefined") {
@@ -372,7 +373,7 @@ function noteRemovedBusiness(stored: string, signedIn: CachedUser | null) {
 
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
-  dismissRemovedBusinessNotice();
+  dismissRemovedBusinessNotice({ silent: true });
   purgeOnboardingTranscripts();
   // RR-ADMIN-LOGOUT: no sign-out leaves the admin bearer behind.
   clearAdminSession();
