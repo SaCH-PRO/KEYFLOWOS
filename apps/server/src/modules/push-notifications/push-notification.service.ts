@@ -25,18 +25,28 @@ const ALLOWED_PUSH_SUBDOMAIN_SUFFIXES = [
   '.notify.windows.com',
 ] as const;
 
-function hasWhitespaceOrControlChar(value: string): boolean {
+const RAW_HTTPS_AUTHORITY_RE = /^https:\/\/([a-z0-9.-]+)\//i;
+
+function hasForbiddenChar(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
     const code = value.charCodeAt(i);
-    if (code <= 0x20 || code === 0x7f) return true;
+    if (code <= 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
   }
-  return /\s/.test(value);
+  return /[\s\\]/.test(value);
 }
 
 export function isAllowedPushEndpoint(endpoint: unknown): endpoint is string {
   if (typeof endpoint !== 'string') return false;
   if (endpoint.length === 0 || endpoint.length > MAX_PUSH_ENDPOINT_LENGTH) return false;
-  if (hasWhitespaceOrControlChar(endpoint)) return false;
+  if (hasForbiddenChar(endpoint)) return false;
+
+  // Enforce raw `https://<ascii-host>/<path>` syntax so WHATWG `new URL()`
+  // and `web-push`'s legacy `url.parse()` can never diverge (blocks `https:/`,
+  // `https:`, `https:///`, backslashes, empty/non-empty userinfo `@`, explicit
+  // `:port`, and IDN/Unicode dot lookalikes in the authority).
+  const authorityMatch = RAW_HTTPS_AUTHORITY_RE.exec(endpoint);
+  if (!authorityMatch) return false;
+  const rawHost = authorityMatch[1].toLowerCase();
 
   let parsed: URL;
   try {
@@ -51,7 +61,7 @@ export function isAllowedPushEndpoint(endpoint: unknown): endpoint is string {
   if (!parsed.pathname || parsed.pathname === '/') return false;
 
   const host = parsed.hostname.toLowerCase();
-  if (!host || host.startsWith('.') || host.endsWith('.') || host.startsWith('[') || isIP(host) !== 0) {
+  if (!host || host !== rawHost || host.startsWith('.') || host.endsWith('.') || host.startsWith('[') || isIP(host) !== 0) {
     return false;
   }
 
@@ -208,7 +218,11 @@ export class PushNotificationService {
     if (!isAllowedPushEndpoint(subscription.endpoint)) {
       return Promise.reject(new Error('Disallowed push subscription endpoint'));
     }
-    return webpush.sendNotification(subscription, serializedPayload);
+    const canonicalEndpoint = new URL(subscription.endpoint).href;
+    if (!isAllowedPushEndpoint(canonicalEndpoint)) {
+      return Promise.reject(new Error('Disallowed push subscription endpoint'));
+    }
+    return webpush.sendNotification({ ...subscription, endpoint: canonicalEndpoint }, serializedPayload);
   }
 
   async sendToUser(userId: string, payload: { title: string; body: string; icon?: string; url?: string }) {
