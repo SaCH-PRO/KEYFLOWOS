@@ -411,8 +411,10 @@ export const moreNav: NavItem[] = [
 export const meNav: NavItem[] = [
   // NAV-A3 (BUG-118): the member's own account; the business's page is Settings > Business profile (/app/profile).
   { label: "My account", href: "/app/settings/profile", icon: User },
-  // /app/notifications forwards here.
-  { label: "Notifications", href: "/app/settings/notifications", icon: Bell },
+  // /app/notifications forwards here. FU-ME-NOTIFICATIONS-SCOPE (D-276): the business's customer emails and their
+  // log, read under settings (P30), so offered only to settings readers, as the Settings index offers it. A member's
+  // own alerts stay in the header bell.
+  { label: "Notifications", href: "/app/settings/notifications", icon: Bell, module: "settings" },
 ];
 
 // ============================================================================
@@ -458,6 +460,11 @@ export function entryModules(item: NavItem, hub?: { module?: NavModule }): NavMo
  */
 function hubsForSells(sells: BusinessSells | null): HubNavItem[] {
   return sells === "both" || sells === "services" ? hubNav : hubNav.filter((h) => h.id !== "schedule");
+}
+
+/** The Me menu's entries a member is shown: each only when their modules open it (unknown hides nothing; D-276). */
+export function meNavFor(levels: ModuleLevels): NavItem[] {
+  return meNav.filter((item) => canOpenModule(levels, item.module));
 }
 
 /** The hubs a member is shown, in menu order, each holding only the screens they may open. */
