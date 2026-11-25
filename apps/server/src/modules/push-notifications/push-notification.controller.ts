@@ -11,6 +11,8 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { RateLimit } from '../../core/decorators/rate-limit.decorator';
+import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { PushNotificationService } from './push-notification.service';
 
 interface PushSubscriptionInput {
@@ -34,7 +36,7 @@ const callerOf = (req: MemberRequest): string => {
  * subscribe stored the device under the user id the body named and unsubscribe removed any endpoint, so a member
  * could register their browser for the owner's pushes (the owner alerts, D-154) or remove the owner's device.
  * Now a subscription is the caller's (PushNotificationService.subscribeOwn), unsubscribe removes only the caller's
- * own, and the test push goes to the caller's own devices.
+ * own, and the test push goes to the caller's own devices in `:businessId` under a rate limit (P71 / MIN-4).
  */
 @Controller('api/businesses/:businessId/push')
 @UseGuards(BusinessGuard)
@@ -46,29 +48,52 @@ export class PushNotificationController {
   @Post('subscribe')
   async subscribe(
     @Param('businessId') businessId: string,
-    @Body() body: { userId?: string; subscription: PushSubscriptionInput },
+    @Body() body: { userId?: string; subscription?: PushSubscriptionInput },
     @Req() req: MemberRequest,
   ) {
-    if (!body.subscription?.endpoint || !body.subscription?.keys?.p256dh || !body.subscription?.keys?.auth) {
+    if (
+      typeof body?.subscription?.endpoint !== 'string' ||
+      typeof body?.subscription?.keys?.p256dh !== 'string' ||
+      typeof body?.subscription?.keys?.auth !== 'string'
+    ) {
       throw new BadRequestException('Invalid subscription payload');
     }
-    return this.push.subscribeOwn(callerOf(req), businessId, body.subscription as any);
+    return this.push.subscribeOwn(callerOf(req), businessId, {
+      endpoint: body.subscription.endpoint,
+      keys: {
+        p256dh: body.subscription.keys.p256dh,
+        auth: body.subscription.keys.auth,
+      },
+    });
   }
 
   @Post('unsubscribe')
-  async unsubscribe(@Body() body: { endpoint: string }, @Req() req: MemberRequest) {
-    if (!body.endpoint) throw new BadRequestException('Endpoint required');
+  async unsubscribe(@Body() body: { endpoint?: string }, @Req() req: MemberRequest) {
+    if (typeof body?.endpoint !== 'string' || !body.endpoint.trim()) {
+      throw new BadRequestException('Endpoint required');
+    }
     return this.push.unsubscribeOwn(callerOf(req), body.endpoint);
   }
 
   @Post('test')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(5, 60_000)
   async sendTest(
+    @Param('businessId') businessId: string,
     @Body() body: { title?: string; body?: string },
     @Req() req: MemberRequest,
   ) {
-    return this.push.sendToUser(callerOf(req), {
-      title: body.title || 'Test Notification',
-      body: body.body || 'Push notifications are working!',
+    const title =
+      typeof body?.title === 'string' && body.title.trim().length > 0
+        ? body.title.trim().slice(0, 120)
+        : 'Test Notification';
+    const message =
+      typeof body?.body === 'string' && body.body.trim().length > 0
+        ? body.body.trim().slice(0, 300)
+        : 'Push notifications are working!';
+    return this.push.sendToBusinessUsers(businessId, [callerOf(req)], {
+      title,
+      body: message,
       icon: '/icons/icon-192x192.png',
       url: '/app',
     });

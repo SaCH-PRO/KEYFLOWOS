@@ -542,7 +542,7 @@ describe('whatsappsmoke (recommended option): the WhatsApp test only reports its
 
 describe('Owner question 3 (answered by default): the push subscription routes are the member\'s own device, open to members', () => {
   const push = `/api/businesses/${ID.bizA}/push`;
-  const sub = (tag: string) => ({ endpoint: `https://203.0.113.50/push/${P}${tag}`, keys: { p256dh: `${P}p256dh_${tag}`, auth: `${P}auth_${tag}` } });
+  const sub = (tag: string) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${P}${tag}`, keys: { p256dh: `${P}p256dh_${tag}`, auth: `${P}auth_${tag}` } });
   const rowOf = (tag: string) => db.pushSubscription.findUnique({ where: { endpoint: sub(tag).endpoint }, select: { userId: true, businessId: true } });
 
   it('[SFB-PUSH-01] RED-BEFORE: a STAFF member on role defaults subscribes their device (201), and the subscription is theirs whatever userId the body names (the owner\'s pushes never reach it)', async () => {
