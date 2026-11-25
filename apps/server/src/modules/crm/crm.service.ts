@@ -2917,8 +2917,12 @@ export class CrmService {
     return this.timeline.logContactEvent(input);
   }
 
-  listContactEvents(params: { businessId: string; contactId: string; limit?: number }) {
+  listContactEvents(params: { businessId: string; contactId: string; limit?: number; viewerUserId?: string | null }) {
     return this.timeline.listContactEvents(params);
+  }
+
+  listContactEventsPage(params: Parameters<CrmTimelineService['listContactEventsPage']>[0]) {
+    return this.timeline.listContactEventsPage(params);
   }
 
   listContactNotes(params: { businessId: string; contactId: string }) {
