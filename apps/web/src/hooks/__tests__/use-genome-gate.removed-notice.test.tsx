@@ -25,8 +25,8 @@ const ws = vi.hoisted(() => ({ businessId: "biz-members-own" as string | null, n
 vi.mock("@/lib/workspace", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/workspace")>()),
   getStoredBusinessId: () => ws.businessId,
-  getRemovedBusinessNotice: () => ws.notice,
 }));
+vi.mock("@/lib/removed-business-notice", () => ({ getRemovedBusinessNotice: () => ws.notice }));
 
 const api = vi.hoisted(() => ({ fetchOnboardingState: vi.fn() }));
 vi.mock("@/lib/api/onboarding-concierge", () => ({ fetchOnboardingState: api.fetchOnboardingState }));

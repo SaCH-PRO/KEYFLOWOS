@@ -33,10 +33,15 @@ const ws = vi.hoisted(() => ({
 vi.mock("@/lib/workspace", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/workspace")>()),
   getStoredBusinessId: () => ws.businessId,
-  getRemovedBusinessNotice: () => ws.notice,
-  dismissRemovedBusinessNotice: () => { ws.dismiss(); ws.notice = null; },
   listMyBusinesses: async () => ws.businesses,
   selectBusiness: (id: string) => ws.selectBusiness(id),
+}));
+// The notice lives in its own module (lib/removed-business-notice.ts), so screens that mock @/lib/workspace are
+// unaffected by it.
+vi.mock("@/lib/removed-business-notice", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/removed-business-notice")>()),
+  getRemovedBusinessNotice: () => ws.notice,
+  dismissRemovedBusinessNotice: () => { ws.dismiss(); ws.notice = null; },
 }));
 
 import { RemovedBusinessNotice } from "@/components/layout/removed-business-notice";
