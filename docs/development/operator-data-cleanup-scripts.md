@@ -499,6 +499,58 @@ from `apps/server/src/modules/crm/crm-duplicate.util.ts`, so on the production
 box mount `src/` beside `scripts/` (as for `backfill-google-identities.ts`).
 Not run against production by the packet.
 
+## 6. Storefront checkout-decremented reservations (F-36, D-137)
+
+**What it fixes.** Before `W11-STOREFRONT-ROUTE-DECREMENTED` (F-36, owner
+rulings D-136 and D-137), `StoreOrderService.completeCheckout` decremented
+tracked stock at payment (writing `StockMovement` rows with `type = 'sale'`,
+`reference_id = order_number`, `quantity_change < 0`), and `StoreOrderRoutingListener`
+-> `FulfillmentRoutingService.routeLocalStock` then reserved the same quantity
+a second time on a `LOCAL_STOCK` route without `noReservationRequired`.
+Storefront status transitions (`SHIPPED`, `DELIVERED`, `COMPLETED`) never
+released that reservation, leaving `inventory_stocks.reserved` permanently
+inflated and available stock understated.
+
+New orders are fixed at routing time (`routeClaimedOrder` skips stock
+reservation and supplier POs for lines with a checkout `'sale'` movement and
+stamps `noReservationRequired: true` and `stockDecrementedAtCheckout: true`).
+This script repairs legacy storefront routes still holding those duplicate
+reservations.
+
+**Run from `apps/server`:**
+
+```bash
+pnpm cleanup:storefront-reservations                     # dry run (default): counts only
+pnpm cleanup:storefront-reservations --business=<id>     # dry run for one business (repeatable)
+pnpm cleanup:storefront-reservations --apply             # release stuck reservations
+```
+
+**What `--apply` does (one atomic transaction).**
+
+1. Locks candidate `inventory_stocks` rows in global
+   `(business_id, product_id, warehouse_id)` order (matching
+   `core/inventory/stock-lock-order.ts`) so concurrent routing, ship, or cancel
+   transactions never deadlock.
+2. Marks matching active `LOCAL_STOCK` routes (`status IN ('RESERVED', 'PICKING_PACKING')`,
+   non-null `warehouse_id`, positive item quantity, neither `noReservationRequired`
+   nor `stockDecrementedAtCheckout`, not `untracked`/`virtual`, with an existing
+   checkout `type = 'sale'` negative movement for the same business, order number,
+   and product) by merging `noReservationRequired: true`,
+   `stockDecrementedAtCheckout: true`, `inventoryMode: 'tracked'`, and
+   `d137ReservationReleasedAt` into `fulfillment_routes.metadata` (keeping the
+   route's existing status).
+3. Decrements `inventory_stocks.reserved = GREATEST(0, reserved - qty)` for the
+   routes transitioned in step 2.
+
+**Output & safety.** Prints counts only (`routes_affected`, `units_to_release`,
+`stock_rows_affected`, `businesses_affected`, and on `--apply`: `routes_updated`,
+`units_released`, `stock_rows_updated`). Never prints business ids, order
+numbers, route ids, product ids, or `DATABASE_URL`. Strictly idempotent on
+re-run (`routes_affected = 0`, `units_released = 0`), and prevents future
+cancels or ships of those orders from double-releasing sibling reservations.
+Exit status: `0` done, `1` database failure, `2` bad arguments. Not run against
+production by the packet.
+
 ## Proof
 
 `apps/server/test/data-cleanup-scripts.integration.test.ts` (prefix `v96o_`)

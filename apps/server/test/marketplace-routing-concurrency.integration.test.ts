@@ -2861,7 +2861,7 @@ async function routedStorefrontOrderOfA2() {
   expect(announcedFor(placed.id), 'routed by the listener').toEqual(['fulfillment_routed:1']);
   expect(await statusOf(placed.id)).toBe('CONFIRMED/PAID');
   expect(await routesOf(placed.id)).toEqual(['LOCAL_STOCK:RESERVED']);
-  expect(await stockOf(ID.stockA), 'the paid door decremented 2, routing reserved 2').toBe(`${IN_STOCK - 2}/2`);
+  expect(await stockOf(ID.stockA), 'the paid door decremented 2, routing reserved 0 (F-36 / D-136)').toBe(`${IN_STOCK - 2}/0`);
   return placed;
 }
 
@@ -3101,7 +3101,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
           answer: `400: Cannot cancel order in ${storedStatus} status`,
           row: before,
           routes: ['LOCAL_STOCK:RESERVED'],
-          stockA: `${IN_STOCK - 2}/2`,
+          stockA: `${IN_STOCK - 2}/0`,
           events: [],
         });
       }
@@ -3241,6 +3241,15 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
     try {
       await setStock(ID.stockA, IN_STOCK);
       const placed = await routedStorefrontOrderOfA2();
+      // Under F-36 (W11-STOREFRONT-ROUTE-DECREMENTED), new storefront routes carry
+      // noReservationRequired: true and take no stock lock on cancel. To keep exercising
+      // the PATCH /site CANCELLED vs SHIPPED CAS race while waiting on ID.stockA (as for a
+      // legacy pre-D-137 storefront route holding a reservation), attach a reserved route.
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { reserved: 2 } });
+      await db.fulfillmentRoute.updateMany({
+        where: { businessId: ID.biz, orderId: placed.id },
+        data: { metadata: { inventoryMode: 'tracked' } },
+      });
       seen = [];
       const siteRace = await whileTheCancelWaits(
         ID.stockA,

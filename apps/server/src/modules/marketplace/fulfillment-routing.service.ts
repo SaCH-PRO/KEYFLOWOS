@@ -514,14 +514,42 @@ export class FulfillmentRoutingService {
       );
     }
 
+    // W11-STOREFRONT-ROUTE-DECREMENTED (F-36; owner ruling D-136): a storefront checkout
+    // (StoreOrderService.completeCheckout) decrements tracked stock at payment and records
+    // StockMovement { type: 'sale', referenceId: order.orderNumber, quantityChange < 0 }.
+    // Under the claim and before taking stock row locks, identify products already taken
+    // at checkout: route them as LOCAL_STOCK:RESERVED with noReservationRequired and
+    // stockDecrementedAtCheckout (no stock lock, no reservation, no supplier PO / preorder).
+    const checkoutSaleMovements = order.orderNumber
+      ? await tx.stockMovement.findMany({
+          where: {
+            businessId,
+            referenceId: order.orderNumber,
+            type: 'sale',
+            quantityChange: { lt: 0 },
+          },
+          select: { id: true, productId: true, warehouseId: true },
+          orderBy: { id: 'asc' },
+        })
+      : [];
+    const decrementedWarehouseByProduct = new Map<string, string>();
+    for (const movement of checkoutSaleMovements) {
+      if (movement.productId && movement.warehouseId && !decrementedWarehouseByProduct.has(movement.productId)) {
+        decrementedWarehouseByProduct.set(movement.productId, movement.warehouseId);
+      }
+    }
+
     // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): every stock row any line can reserve from (each line's product, in every
     // warehouse of the business) is locked here, all at once, in the global order, before the first reservation; a
     // line reserves only from these rows. Locked line by line in line order and held to commit, two orders with the
     // same products in opposite order each held one row and waited for the other's (40P01).
+    // Products already decremented at checkout are excluded so we lock only rows this tx may write.
     const lockedStockIds = await lockStockRowsInOrder(
       tx,
       businessId,
-      (order.items as OrderItemShape[]).map((item) => item.productId),
+      (order.items as OrderItemShape[])
+        .filter((item) => !decrementedWarehouseByProduct.has(item.productId))
+        .map((item) => item.productId),
     );
 
     const routes: FulfillmentRouteShape[] = [];
@@ -536,6 +564,30 @@ export class FulfillmentRoutingService {
               where: { productId: item.productId, businessId, isActive: true },
             })
       );
+
+      const decrementedWarehouseId = decrementedWarehouseByProduct.get(item.productId);
+      if (decrementedWarehouseId !== undefined) {
+        const route = await tx.fulfillmentRoute.create({
+          data: {
+            businessId,
+            orderId,
+            orderItemId: item.id,
+            listingId: listing?.id,
+            strategy: 'LOCAL_STOCK',
+            status: 'RESERVED',
+            sourceType: 'WAREHOUSE',
+            warehouseId: decrementedWarehouseId,
+            notes: 'Stock taken at checkout — no reservation',
+            metadata: {
+              inventoryMode: 'tracked',
+              noReservationRequired: true,
+              stockDecrementedAtCheckout: true,
+            },
+          },
+        });
+        routes.push(route as unknown as FulfillmentRouteShape);
+        continue;
+      }
 
       const rawStrategy = listing?.fulfillmentStrategy ?? 'LOCAL_STOCK';
       const strategy = (rawStrategy.toUpperCase() as FulfillmentStrategy);
