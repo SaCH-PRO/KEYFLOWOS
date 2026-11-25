@@ -7,6 +7,8 @@
  *   CWP-080b  RED-BEFORE  a later change of the screen's search ("Kwame" -> "Ama") re-reads the table with it
  *   CWP-080c  RED-BEFORE  the table's own search box shows the screen's search, and typing in it changes the
  *                         screen's search (one search, not two that disagree)
+ *   CWP-080f  RED-BEFORE  a saved table view applied in the table hands its search to the screen too ("All
+ *                         Contacts" saves no search, so the screen's "Kwame" clears), so the two never disagree
  *   CWP-080d  control     without a screen search the table's own box still searches on its own (the prop is
  *                         optional: nothing else that mounts the table changes)
  *   CWP-080e  RED-BEFORE  (source guard) the customers screen passes its search to the table, both ways
@@ -140,6 +142,17 @@ describe("BUG-080: the table view honours the screen's search, and its count agr
     expect(onSearchChange).toHaveBeenLastCalledWith("Kofi");
     fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(onSearchChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("CWP-080f RED-BEFORE: a saved table view applied in the table hands its search to the screen", async () => {
+    const onSearchChange = vi.fn();
+    renderTable({ search: "Kwame", onSearchChange });
+    const box = screen.getByRole("textbox", { name: "Search contacts database" }) as HTMLInputElement;
+    await waitFor(() => expect(box.value).toBe("Kwame"));
+    fireEvent.click(screen.getByRole("button", { name: "Saved views" }));
+    fireEvent.click(screen.getByRole("button", { name: /All Contacts/ }));
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    await waitFor(() => expect(box.value).toBe(""));
   });
 
   it("CWP-080d control: with no screen search, the table's own box still searches on its own", async () => {
