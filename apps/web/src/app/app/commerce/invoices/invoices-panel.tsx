@@ -62,6 +62,7 @@ import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useCompose } from "@/components/email/compose-context";
+import { canRemindInvoice } from "@/lib/commerce-status";
 import {
   INVOICE_STATUS_FILTERS,
   InvoiceLineItem,
@@ -348,7 +349,7 @@ export default function InvoicesPanel({
   }, [invoices, selectedIds]);
 
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
+    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, PENDING: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
     for (const inv of invoices) {
       if (inv.status && counts[inv.status] !== undefined) counts[inv.status]++;
     }
@@ -884,7 +885,7 @@ export default function InvoicesPanel({
         </div>
 
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
-          <InfoBadge title="Invoice Status Filters" body="Draft: Not yet sent. Sent: Delivered to client. Partially Paid: Some amount received. Paid: Fully settled. Overdue: Past due date. Void: Cancelled." side="bottom" iconSize={11} />
+          <InfoBadge title="Invoice Status Filters" body="Draft: Not yet sent. Pending: Awaiting payment. Sent: Delivered to client. Partially Paid: Some amount received. Paid: Fully settled. Overdue: Past due date. Void: Cancelled." side="bottom" iconSize={11} />
           {INVOICE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
             const isActive = invoiceStatusFilter === f.value;
@@ -1134,7 +1135,7 @@ export default function InvoicesPanel({
                           });
                         }}
                       />
-                      {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                      {canRemindInvoice(inv.status) && (
                         <OverflowMenuItem
                           icon={Bell}
                           label="Send reminder"
@@ -1266,7 +1267,7 @@ export default function InvoicesPanel({
             discountType={selectedInvoice.discountType}
             discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
             notes={selectedInvoice.notes}
-            allInvoices={invoices.map((inv) => ({ id: inv.id, contactId: inv.contactId, status: inv.status, total: Number(inv.total), invoiceNumber: inv.invoiceNumber, dueDate: inv.dueDate }))}
+            allInvoices={invoices.map((inv) => ({ id: inv.id, contactId: inv.contactId, status: inv.status, total: inv.total, currency: inv.currency, payments: inv.payments, invoiceNumber: inv.invoiceNumber, dueDate: inv.dueDate }))}
             itemId={selectedInvoice.id}
             businessIdForTimeline={businessId}
             timelineRefreshKey={timelineRefreshTick}
@@ -1311,7 +1312,7 @@ export default function InvoicesPanel({
                     >
                       <Mail className="w-4 h-4 text-blue-400" />
                     </button>
-                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && (
+                    {canRemindInvoice(selectedInvoice.status) && (
                       <button
                         onClick={() => openComposer({
                           to: selectedInvoice.contact?.email || "",

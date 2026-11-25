@@ -49,6 +49,7 @@ import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
 import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
+import { OWED_STATUSES, canRemindInvoice, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
@@ -135,7 +136,7 @@ export default function InvoicesHubPage() {
   }, [businessId]);
 
   const statusCounts = (() => {
-    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
+    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, PENDING: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
     for (const inv of invoices) if (inv.status && counts[inv.status] !== undefined) counts[inv.status]++;
     return counts;
   })();
@@ -184,11 +185,11 @@ export default function InvoicesHubPage() {
       // SWP-INV-LIST (BUG-007): one figure per currency is never a sum of two currencies; the cards are the
       // business currency's, and an invoice in another currency is counted apart (said under the cards).
       if ((inv.currency ?? businessCurrency).toUpperCase() !== businessCurrency) { otherCurrency++; continue; }
-      const { total, remaining } = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
+      const total = safeInvoiceAmount(inv.total);
       if (inv.status === "DRAFT") { draftsCents += cents(total); draftsCount++; }
       else if (inv.status === "PAID" && inv.paidAt && new Date(inv.paidAt) >= startOfMonth) { paidMonthCents += cents(total); paidMonthCount++; }
-      else if (inv.status === "OVERDUE") { overdueCents += cents(remaining); overdueCount++; }
-      else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") { unpaidCents += cents(remaining); unpaidCount++; }
+      else if (inv.status === "OVERDUE") { overdueCents += cents(invoiceRemainingOwed(inv)); overdueCount++; }
+      else if (OWED_STATUSES.has(inv.status)) { unpaidCents += cents(invoiceRemainingOwed(inv)); unpaidCount++; }
     }
     return {
       unpaid: { total: unpaidCents / 100, count: unpaidCount },
@@ -202,6 +203,7 @@ export default function InvoicesHubPage() {
   const statusBadge = (status: string) => {
     const map: Record<string, string> = {
       DRAFT: "bg-slate-100 text-slate-700 border-slate-200",
+      PENDING: "bg-amber-50 text-amber-700 border-amber-200",
       SENT: "bg-amber-50 text-amber-700 border-amber-200",
       PAID: "bg-emerald-50 text-emerald-700 border-emerald-200",
       PARTIALLY_PAID: "bg-sky-50 text-sky-700 border-sky-200",
@@ -426,7 +428,7 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={Send} label="Send" onClick={() => handleSend(inv.id)} show={inv.status === "DRAFT"} loading={actionLoading[inv.id] === "send"} />
                                 <DropdownItem icon={DollarSign} label={inv.status === "PARTIALLY_PAID" ? "Record balance" : "Record payment"} onClick={() => router.push(`/app/commerce/invoices/${inv.id}?action=record-payment`)} show={inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID"} />
                                 <DropdownItem icon={MessageCircle} label="Remind" onClick={() => remindWhatsApp(inv)} show={inv.status === "PARTIALLY_PAID" && invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency).remaining > 0} />
-                                <DropdownItem icon={Bell} label="Send reminder" onClick={() => openComposer({ to: inv.contact?.email ?? "", subject: `Friendly reminder: invoice ${inv.invoiceNumber ?? ""}`, body: "", context: { type: "follow_up", recordNumber: inv.invoiceNumber ?? inv.id, contactName: inv.contact?.firstName ? `${inv.contact.firstName} ${inv.contact.lastName ?? ""}`.trim() : undefined }, onSent: () => toast.success("Reminder sent") })} show={!!(inv.status === "SENT" || inv.status === "OVERDUE")} />
+                                <DropdownItem icon={Bell} label="Send reminder" onClick={() => openComposer({ to: inv.contact?.email ?? "", subject: `Friendly reminder: invoice ${inv.invoiceNumber ?? ""}`, body: "", context: { type: "follow_up", recordNumber: inv.invoiceNumber ?? inv.id, contactName: inv.contact?.firstName ? `${inv.contact.firstName} ${inv.contact.lastName ?? ""}`.trim() : undefined }, onSent: () => toast.success("Reminder sent") })} show={canRemindInvoice(inv.status)} />
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
