@@ -32,6 +32,8 @@
  *                       its own value
  *   NPR-08n RED-BEFORE  (round 3 confirm review) a switch clicked after the re-read was sent and answered before it: the
  *                       older re-read does not overwrite its answer
+ *   NPR-08o guard       (mutant U2) the write landed but its answer was lost (500), no load since the click: the re-read
+ *                       (Booking Confirmation off at the server) decides the switch, not a revert to the pre-click value
  *   NPR-08l RED-BEFORE  (round 3 review) a re-read refused by ModuleScopeGuard also takes the log off the page: no row,
  *                       no "(n)" count, no access on the Log tab
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
@@ -375,6 +377,19 @@ describe("D-283 repair round 3: a switch clicked and answered while the re-read 
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
     expect(checked(/toggle invoice sent/i)).toBe("false");
     expect(checked(RECEIPT)).toBe("false");
+  });
+});
+
+describe("D-283 repair round 3: the re-read decides, not a revert", () => {
+  it("NPR-08o guard: a lost answer to a write that landed: the re-read decides the switch", async () => {
+    const server = serve(queue(() => json(200, PREFS), () => json(200, { ...PREFS, booking_confirmed: false })), () => json(200, LOG));
+    await renderPage();
+    await clickBookingOff();
+
+    server.answerPatch(fail500());
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(server.prefsGets()).toBe(2);
+    expect(checked(BOOKING)).toBe("false");
   });
 });
 
