@@ -231,6 +231,53 @@ describe("CATALOG-1 Sales > Products (/app/commerce/products)", () => {
     }
   });
 
+  // Live sweep at d2615173 (4 of 12 runs): Escape that closed the product form also reached the app's Escape
+  // shortcut (use-keyboard-shortcuts: kf:escape -> the parent route) whenever focus was not in a field, so the owner
+  // was sent from Sales > Products to the Sales overview. Escape that closes something on this page closes only it.
+  describe("Escape closes what is open on Sales > Products and goes no further (not to the app's Escape shortcut)", () => {
+    let appEscape: ReturnType<typeof vi.fn>;
+    let onWindowKey: (e: KeyboardEvent) => void;
+    beforeEach(() => {
+      appEscape = vi.fn();
+      onWindowKey = (e: KeyboardEvent) => { if (e.key === "Escape") appEscape(); };
+      window.addEventListener("keydown", onWindowKey);
+    });
+    afterEach(() => window.removeEventListener("keydown", onWindowKey));
+
+    it("the product form (focus on a button, not a field)", async () => {
+      await mountPage();
+      await waitFor(() => expect(rowOf("Pepper sauce")).toBeInTheDocument());
+      fireEvent.click(await rowAction("Pepper sauce", /^edit/i));
+      const form = await screen.findByRole("dialog");
+      const cancel = within(form).getByRole("button", { name: /^cancel$/i });
+      cancel.focus();
+      fireEvent.keyDown(cancel, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(appEscape).not.toHaveBeenCalled();
+    });
+
+    it("the Archive confirmation (Escape cancels it; nothing is archived)", async () => {
+      await mountPage();
+      await waitFor(() => expect(rowOf("Pepper sauce")).toBeInTheDocument());
+      fireEvent.click(await rowAction("Pepper sauce", /^archive/i));
+      const confirm = await screen.findByRole("alertdialog");
+      fireEvent.keyDown(within(confirm).getByRole("button", { name: /^cancel$/i }), { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      expect(appEscape).not.toHaveBeenCalled();
+      expect(api.apiDelete).not.toHaveBeenCalled();
+    });
+
+    it("a row's More actions menu", async () => {
+      await mountPage();
+      await waitFor(() => expect(rowOf("Pepper sauce")).toBeInTheDocument());
+      fireEvent.click(within(rowOf("Pepper sauce")).getByRole("button", { name: /more actions/i }));
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      expect(appEscape).not.toHaveBeenCalled();
+    });
+  });
+
   it("?action=add (the command palette's 'Add product') opens New product", async () => {
     nav.search = "action=add";
     await mountPage();
