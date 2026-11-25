@@ -52,8 +52,16 @@ import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.ser
 import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
-import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
-import { genomeFactsForReader } from '../key-cortex/genome-read-projections';
+import {
+  genomeReaderReadsRevenue,
+  isMoneyLabel,
+  proposalTextStatesMoney,
+} from '../business-genome/key-genome/genome-finance-scope';
+import {
+  blueprintForReader,
+  genomeFactsForReader,
+  genomeIntegrityForReader,
+} from '../key-cortex/genome-read-projections';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
@@ -1743,11 +1751,31 @@ export class FlowOrchestratorService {
    * BusinessBlueprint so KEY's recommendations are grounded in the operator's
    * actual identity, goals, constraints, and brand voice.
    */
+  private async readerReadsRevenue(businessId: string, userId?: string | null): Promise<boolean> {
+    if (!userId) return false;
+    try {
+      const user = await this.prisma.client.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      return await genomeReaderReadsRevenue(this.prisma, businessId, {
+        id: userId,
+        role: user?.role ?? undefined,
+      });
+    } catch {
+      return false;
+    }
+  }
+
   private async buildOnboardingDirective(
     businessId: string,
     pageContext?: FlowPageContext,
+    userId?: string | null,
   ): Promise<string> {
-    const ctx = await this.blueprint.getBlueprintContext(businessId);
+    const [ctx, readsRevenue] = await Promise.all([
+      this.blueprint.getBlueprintContext(businessId),
+      this.readerReadsRevenue(businessId, userId),
+    ]);
     const isOnboardingRoute = pageContext?.route?.startsWith('/app/onboarding') ?? false;
 
     if (!ctx || ctx.completeness >= 100) {
@@ -1763,10 +1791,14 @@ export class FlowOrchestratorService {
       return '';
     }
 
+    const completenessLine = readsRevenue
+      ? `The Business Genome is ${ctx.completeness}% complete.`
+      : 'The Business Genome is still in progress.';
+
     if (isOnboardingRoute) {
       return (
         '\n[PRIORITY DIRECTIVE — ONBOARDING MODE]\n' +
-        `The Business Genome is ${ctx.completeness}% complete. You are in the dedicated onboarding chat. ` +
+        `${completenessLine} You are in the dedicated onboarding chat. ` +
         'When the user shares ANY concrete business fact (industry, revenue model, ideal customer, goals, constraints, brand voice, budget, time commitment, etc.), ' +
         'STOP and call update_business_blueprint FIRST, BEFORE any other tool. ' +
         'If they have not shared a fact, guide them with ONE concise question and then use the present_onboarding_card tool to show the appropriate structured card ' +
@@ -1777,7 +1809,7 @@ export class FlowOrchestratorService {
 
     return (
       '\n[PRIORITY DIRECTIVE — BUSINESS GENOME CONVERSATION]\n' +
-      `The Business Genome is ${ctx.completeness}% complete. This is one continuous conversation that keeps building the genome — never restart it, never re-ask.\n` +
+      `${completenessLine} This is one continuous conversation that keeps building the genome — never restart it, never re-ask.\n` +
       'HOW TO TALK: You are a sharp, warm co-founder, not an intake form. Acknowledge what the user just said with something specific (a number, a name, why it matters), connect it to what you already know, then ask the ONE next most valuable question in natural language. No rigid field order, no interrogation cadence, no "please tell me X" boilerplate. Vary your phrasing.\n' +
       'WHAT YOU KNOW: The Business Genome facts section below lists everything you already know. NEVER ask about facts that are already there — build on them. If the user corrects an existing fact, update it.\n' +
       'WHEN THE USER SHARES ANY concrete business fact (industry, revenue model, pricing, ideal customer, goals, constraints, brand voice, budget, time commitment, team, etc.), STOP and call the update_business_blueprint tool with a patch containing that fact BEFORE doing anything else. Do NOT use commerce, CRM, marketing, or finance tools when a blueprint fact is present.\n' +
@@ -1789,11 +1821,22 @@ export class FlowOrchestratorService {
     businessId: string,
     cardType: OnboardingCardType | 'next',
     stepHint?: string,
+    userId?: string | null,
   ): Promise<OnboardingCard> {
+    const readsRevenue = await this.readerReadsRevenue(businessId, userId);
+    if (!readsRevenue && cardType === 'financials') {
+      return {
+        type: cardType,
+        title: this.onboardingCardTitle(cardType),
+        data: { restricted: true, stepHint },
+      };
+    }
+
     const concierge = this.getOnboardingConcierge();
     const genesis = this.getBusinessGenesis();
+    void genesis;
 
-    const [setupStatus, conciergeState, business, blueprintCtx, genomeIntegrity] = await Promise.all([
+    const [rawSetupStatus, conciergeState, business, rawBlueprintCtx, rawGenomeIntegrity] = await Promise.all([
       concierge.getSetupStatus(businessId),
       concierge.getConciergeState(businessId),
       this.prisma.client.business.findUnique({
@@ -1803,6 +1846,20 @@ export class FlowOrchestratorService {
       this.blueprint.getBlueprintContext(businessId).catch(() => null),
       this.blueprint.calculateGenomeIntegrity(businessId).catch(() => null),
     ]);
+
+    const blueprintCtx = rawBlueprintCtx
+      ? blueprintForReader(rawBlueprintCtx as unknown as Record<string, unknown>, readsRevenue)
+      : null;
+    const genomeIntegrity = rawGenomeIntegrity
+      ? genomeIntegrityForReader(rawGenomeIntegrity as unknown as Record<string, unknown>, readsRevenue)
+      : null;
+    const setupStatus = readsRevenue
+      ? rawSetupStatus
+      : (() => {
+          const copy = { ...(rawSetupStatus as unknown as Record<string, unknown>) };
+          delete copy.percentage;
+          return copy;
+        })();
 
     if (cardType !== 'next') {
       return {
@@ -1814,7 +1871,7 @@ export class FlowOrchestratorService {
 
     const baseData = { setupStatus, conciergeState, business, blueprintCtx, genomeIntegrity };
 
-    if (conciergeState.onboardingComplete || setupStatus.percentage === 100) {
+    if (conciergeState.onboardingComplete || rawSetupStatus.percentage === 100) {
       return {
         type: 'completion-gate',
         title: this.onboardingCardTitle('completion-gate'),
@@ -1826,7 +1883,7 @@ export class FlowOrchestratorService {
     // 1) Capture the idea so AI can extract the Business Genome snapshot.
     const hasIdea = !!business?.businessIntent?.trim();
     const hasName = !!business?.name?.trim();
-    const lowCompleteness = (blueprintCtx?.completeness ?? 0) < 25;
+    const lowCompleteness = (rawBlueprintCtx?.completeness ?? 0) < 25;
     if (!hasIdea || !hasName || lowCompleteness) {
       return {
         type: 'genesis-idea',
@@ -1845,13 +1902,13 @@ export class FlowOrchestratorService {
     }
 
     // 3) Confirm storefront, payments, and contact details.
-    if (!setupStatus.payments || !setupStatus.storefront || !setupStatus.contacts) {
+    if (!rawSetupStatus.payments || !rawSetupStatus.storefront || !rawSetupStatus.contacts) {
       return { type: 'payments-storefront-contacts', title: this.onboardingCardTitle('payments-storefront-contacts'), data: baseData };
     }
 
     // 4) Business Genome three-pillar minimum. If it isn't met yet, let the
     // user fill the missing pillars before showing the completion gate.
-    if (!genomeIntegrity?.threePillarMinimumMet) {
+    if (!rawGenomeIntegrity?.threePillarMinimumMet) {
       return {
         type: 'genome-check',
         title: this.onboardingCardTitle('genome-check'),
@@ -1902,42 +1959,48 @@ export class FlowOrchestratorService {
     const ctx = await this.blueprint.getBlueprintContext(businessId);
     if (!ctx) return '';
     // P82 (D-100 / D-233 / D-234 / D-235): fail closed on financial blueprint fields & facts.
-    let readsRevenue = false;
-    if (userId) {
-      try {
-        const user = await this.prisma.client.user.findUnique({
-          where: { id: userId },
-          select: { role: true },
-        });
-        readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, {
-          id: userId,
-          role: user?.role ?? undefined,
-        });
-      } catch {
-        readsRevenue = false;
-      }
-    }
+    const readsRevenue = await this.readerReadsRevenue(businessId, userId);
+    const isSafeText = (s: string) => readsRevenue || (!isMoneyLabel(s) && !proposalTextStatesMoney(s));
     // LLM-written blueprint patches don't always preserve array shapes —
     // never let a malformed list field kill the whole turn.
     const asStringList = (v: unknown): string | null => {
-      if (Array.isArray(v) && v.length > 0) return v.map(String).join('; ');
-      if (typeof v === 'string' && v.trim()) return v;
+      if (Array.isArray(v) && v.length > 0) {
+        const filtered = v.map(String).filter((item) => item.trim().length > 0 && isSafeText(item));
+        return filtered.length > 0 ? filtered.join('; ') : null;
+      }
+      if (typeof v === 'string' && v.trim() && isSafeText(v)) return v;
       return null;
     };
     const lines: string[] = ['', 'Business Blueprint (operating DNA):'];
     if (readsRevenue) lines.push(`- Completeness: ${ctx.completeness}%`);
-    if (ctx.summary) lines.push(`- Summary: ${ctx.summary}`);
+    if (readsRevenue) {
+      if (ctx.summary) lines.push(`- Summary: ${ctx.summary}`);
+    } else {
+      // BlueprintService.getBlueprintContext embeds `revenue: ${revenueModel}` inside `ctx.summary`;
+      // rebuild strictly from non-money identity fields when !readsRevenue.
+      const safeSummaryParts = [ctx.identity.name, ctx.identity.archetype, ctx.identity.oneLiner]
+        .filter((part): part is string => typeof part === 'string' && part.trim().length > 0 && isSafeText(part));
+      if (safeSummaryParts.length > 0) {
+        lines.push(`- Summary: ${safeSummaryParts.join(' — ')}`);
+      }
+    }
     if (ctx.identity.archetype) lines.push(`- Archetype: ${ctx.identity.archetype}`);
     if (ctx.identity.industry) lines.push(`- Industry: ${ctx.identity.industry}`);
     if (readsRevenue && ctx.operatingModel.revenueModel) lines.push(`- Revenue model: ${ctx.operatingModel.revenueModel}`);
-    if (ctx.operatingModel.deliveryMode) lines.push(`- Delivery mode: ${ctx.operatingModel.deliveryMode}`);
-    if (ctx.goals.northStar) lines.push(`- North star: ${ctx.goals.northStar}`);
+    if (ctx.operatingModel.deliveryMode && isSafeText(ctx.operatingModel.deliveryMode)) {
+      lines.push(`- Delivery mode: ${ctx.operatingModel.deliveryMode}`);
+    }
+    if (ctx.goals.northStar && isSafeText(ctx.goals.northStar)) lines.push(`- North star: ${ctx.goals.northStar}`);
     const ninetyDayGoals = asStringList(ctx.goals.ninetyDayGoals);
     if (ninetyDayGoals) lines.push(`- 90-day goals: ${ninetyDayGoals}`);
     if (readsRevenue && ctx.constraints.budgetRange) lines.push(`- Budget: ${ctx.constraints.budgetRange}`);
-    if (ctx.constraints.timeCommitment) lines.push(`- Time commitment: ${ctx.constraints.timeCommitment}`);
-    if (ctx.brand.voice) lines.push(`- Brand voice: ${ctx.brand.voice}`);
-    if (ctx.customerModel.idealCustomer) lines.push(`- Ideal customer: ${ctx.customerModel.idealCustomer}`);
+    if (ctx.constraints.timeCommitment && isSafeText(ctx.constraints.timeCommitment)) {
+      lines.push(`- Time commitment: ${ctx.constraints.timeCommitment}`);
+    }
+    if (ctx.brand.voice && isSafeText(ctx.brand.voice)) lines.push(`- Brand voice: ${ctx.brand.voice}`);
+    if (ctx.customerModel.idealCustomer && isSafeText(ctx.customerModel.idealCustomer)) {
+      lines.push(`- Ideal customer: ${ctx.customerModel.idealCustomer}`);
+    }
     if (readsRevenue && ctx.financials.avgTicket) lines.push(`- Avg ticket: ${ctx.financials.avgTicket}`);
     if (ctx.legalProfile?.recommendedEntityType) {
       lines.push(`- Recommended entity type: ${ctx.legalProfile.recommendedEntityType}`);
@@ -1956,7 +2019,7 @@ export class FlowOrchestratorService {
     if (today) {
       lines.push(`- Today's priorities: ${today}`);
     }
-    if (ctx.complianceProfile?.complianceScore !== undefined) {
+    if (readsRevenue && ctx.complianceProfile?.complianceScore !== undefined) {
       lines.push(`- Compliance score: ${ctx.complianceProfile.complianceScore}%`);
     }
 
@@ -2433,7 +2496,7 @@ export class FlowOrchestratorService {
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId, userId);
-    const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
+    const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext, userId);
 
     // ─── THALAMUS ───────────────────────────────────────────────
     // Grade the message before spending anything on it. Zero model calls: six
@@ -2939,7 +3002,7 @@ ${triage.standingContext}`;
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId, userId);
-    const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
+    const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext, userId);
 
     // ─── THALAMUS ───────────────────────────────────────────────
     // Grade the message before spending anything on it. Zero model calls: six
@@ -4375,7 +4438,12 @@ ${triage.standingContext}`;
       }
 
       case 'present_onboarding_card': {
-        return this.buildOnboardingCard(businessId, args.cardType as OnboardingCardType, args.step as string | undefined);
+        return this.buildOnboardingCard(
+          businessId,
+          args.cardType as OnboardingCardType,
+          args.step as string | undefined,
+          action?.principalUserId,
+        );
       }
 
       case 'save_onboarding_step': {
