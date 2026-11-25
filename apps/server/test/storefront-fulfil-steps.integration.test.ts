@@ -65,10 +65,16 @@ let storeOrders: any;
 let routingService: any;
 
 const inflight: Promise<unknown>[] = [];
+const emailSend = vi.fn(async (_args?: unknown) => undefined);
 
 async function settle() {
-  while (inflight.length > 0) {
-    await inflight.shift()!.catch(() => undefined);
+  for (let round = 0; round < 4; ) {
+    const hadWork = inflight.length > 0;
+    while (inflight.length > 0) {
+      await inflight.shift()!.catch(() => undefined);
+    }
+    await new Promise((r) => setImmediate(r));
+    round = hadWork || inflight.length > 0 ? 0 : round + 1;
   }
 }
 
@@ -84,8 +90,8 @@ async function cleanup() {
     `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM shipments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM shipments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
@@ -95,7 +101,7 @@ async function cleanup() {
     `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM ledger_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -248,7 +254,7 @@ beforeAll(async () => {
       { provide: PromoCodeService, useValue: stub },
       { provide: InventoryRiskService, useValue: { evaluateProduct: async () => null } },
       { provide: ExpensesService, useValue: { createExpense: async () => null } },
-      { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
+      { provide: TransactionalEmailService, useValue: { send: emailSend } },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
       { provide: CatalogService, useValue: stub },
@@ -279,10 +285,11 @@ beforeAll(async () => {
   routingService = app.get(FulfillmentRoutingService);
   vi.spyOn(app.get(MarketplaceService) as any, 'autoRouteOrder').mockImplementation(() => undefined);
 
-  // Track async event listener promises so settle() awaits routing & commerce integration cleanly.
+  // Track async event listener promises (handle* on CommerceIntegrationService and onStoreOrderPaid on
+  // StoreOrderRoutingListener) so settle() awaits routing & commerce integration cleanly.
   for (const listener of [app.get(CommerceIntegrationService), app.get(StoreOrderRoutingListener)] as Array<Record<string, any>>) {
     for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(listener))) {
-      if (!name.startsWith('handle') || typeof listener[name] !== 'function') continue;
+      if ((!name.startsWith('handle') && !name.startsWith('on')) || typeof listener[name] !== 'function') continue;
       const original = listener[name].bind(listener);
       listener[name] = (...args: unknown[]) => {
         const work = original(...args);
@@ -316,6 +323,7 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  emailSend.mockClear();
   await resetStock(INITIAL_STOCK, 0);
 });
 
@@ -347,9 +355,12 @@ describe('W11-STOREFRONT-FULFIL-STEPS (V1-66, Journey G)', () => {
     const stockBeforeProcess = await db.inventoryStock.findUniqueOrThrow({ where: { id: ID.stock } });
     expect(`${stockBeforeProcess.quantity}/${stockBeforeProcess.reserved}`).toBe(`${INITIAL_STOCK - QUANTITY}/0`);
 
+    emailSend.mockClear();
     const procRes = await fulfil(order.id, { action: 'process', note: 'Packing shelf A' });
+    await settle();
     expect(procRes.status).toBe(201);
     expect(procRes.body.status).toBe('PROCESSING');
+    expect(emailSend).not.toHaveBeenCalled();
 
     const storedAfterProcess = await db.marketplaceOrder.findUniqueOrThrow({ where: { id: order.id } });
     expect(`${storedAfterProcess.status}/${storedAfterProcess.paymentStatus}`).toBe('PROCESSING/PAID');
@@ -367,6 +378,7 @@ describe('W11-STOREFRONT-FULFIL-STEPS (V1-66, Journey G)', () => {
 
     // Now ship through the same fulfil endpoint: PROCESSING normalizes to picking_packing.
     const shipRes = await fulfil(order.id, { action: 'ship', carrier: 'DHL', trackingNumber: `${P}TRK-01` });
+    await settle();
     expect(shipRes.status).toBe(201);
     expect(shipRes.body.status).toBe('shipped');
 
@@ -431,9 +443,13 @@ describe('W11-STOREFRONT-FULFIL-STEPS (V1-66, Journey G)', () => {
     const sfBefore = await db.marketplaceOrder.findUniqueOrThrow({ where: { id: sfOrder.id } });
     expect(`${sfBefore.type}/${sfBefore.status}/${sfBefore.paymentStatus}`).toBe('STOREFRONT/PENDING/PENDING');
 
+    emailSend.mockClear();
     const sfConfirm = await fulfil(sfOrder.id, { action: 'confirm', note: 'Confirmed by staff' });
+    await settle();
     expect(sfConfirm.status).toBe(201);
     expect(sfConfirm.body.status).toBe('CONFIRMED');
+    // SEC-P57-1: confirming an unpaid PENDING storefront order must not send order_confirmed or consume referral marker.
+    expect(emailSend).not.toHaveBeenCalled();
 
     const sfAfter = await db.marketplaceOrder.findUniqueOrThrow({ where: { id: sfOrder.id } });
     expect(sfAfter.status).toBe('CONFIRMED');

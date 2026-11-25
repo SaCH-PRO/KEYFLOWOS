@@ -2287,9 +2287,15 @@ export class MarketplaceService {
     // W11-SHIPPING-EXPENSE-ONCE (D-126): the 'ship', after its transaction has committed.
     if (action === 'ship') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
-    this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
-      this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
-    );
+    // W11-STOREFRONT-FULFIL-STEPS review (SEC-P57-1): 'confirm' previously wrote 'awaiting_payment' (unmapped in
+    // notificationMap) and neither STANDARD confirm nor PATCH /site/.../status 'CONFIRMED' mails the customer. Skip
+    // fulfillment mail on 'confirm' so an unpaid storefront confirm does not send order_confirmed or consume the
+    // customer's one-time referral invite marker before payment.
+    if (action !== 'confirm') {
+      this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
+        this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
+      );
+    }
 
     return updated;
   }
@@ -2660,6 +2666,8 @@ export class MarketplaceService {
       cancelled: 'order_cancelled',
       refunded: 'order_refunded',
     };
+
+    if (status === 'CONFIRMED' && String(order.paymentStatus ?? '').toUpperCase() !== 'PAID') return;
 
     const type = notificationMap[status];
     if (!type) return;
