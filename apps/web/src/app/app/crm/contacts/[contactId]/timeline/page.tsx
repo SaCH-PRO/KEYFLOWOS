@@ -9,9 +9,12 @@ import { Clock, Mail, Phone, MessageSquare, MessageCircle, Calendar, DollarSign,
 import {
   CHANNEL_FILTERS,
   channelCounts,
+  EVENTS_READ_PAGE,
   conversationTitle,
+  emptyText,
   eventChannel,
   foldPastedNotes,
+  readIsFull,
   type ChannelFilter,
   type TimelineChannel,
 } from "./timeline-channels";
@@ -122,7 +125,16 @@ export default function ContactTimelinePage() {
   const items = useMemo(() => foldPastedNotes(events), [events]);
   const counts = useMemo(() => channelCounts(items), [items]);
   const shown = filter === "all" ? items : items.filter((ev) => eventChannel(ev) === filter);
-  const emptyText = CHANNEL_FILTERS.find((f) => f.id === filter)?.empty ?? CHANNEL_FILTERS[0].empty;
+  // COR-TCH-1: a full read may have left older events out; then everything below speaks of the latest events only.
+  const full = readIsFull(events.length);
+  const plural = items.length === 1 ? "event" : "events";
+  const header = full
+    ? filter === "all"
+      ? `Latest ${items.length} ${plural}`
+      : `${shown.length} of the latest ${items.length} ${plural}`
+    : filter === "all"
+      ? `${items.length} ${plural}`
+      : `${shown.length} of ${items.length} ${plural}`;
 
   if (loading) return <div className="p-4">Loading timeline...</div>;
 
@@ -141,10 +153,14 @@ export default function ContactTimelinePage() {
       <div className="flex items-center gap-2">
         <Clock className="h-5 w-5 text-muted-foreground" />
         <h3 className="text-lg font-semibold">Timeline</h3>
-        <span className="ml-auto text-sm text-muted-foreground">
-          {filter === "all" ? items.length : `${shown.length} of ${items.length}`} {items.length === 1 ? "event" : "events"}
-        </span>
+        <span className="ml-auto text-sm text-muted-foreground">{header}</span>
       </div>
+
+      {full && (
+        <p className="text-xs text-muted-foreground">
+          Showing the latest {EVENTS_READ_PAGE} events. Older events are not listed or counted here.
+        </p>
+      )}
 
       <div role="group" aria-label="Filter by channel" className="flex flex-wrap gap-2">
         {CHANNEL_FILTERS.map((f) => {
@@ -159,7 +175,7 @@ export default function ContactTimelinePage() {
                 on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
-              {f.label} <span className="tabular-nums opacity-80">({counts[f.id]})</span>
+              {f.label} <span className="tabular-nums opacity-80">({counts[f.id]}{full ? "+" : ""})</span>
             </button>
           );
         })}
@@ -167,7 +183,7 @@ export default function ContactTimelinePage() {
 
       {shown.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-          {items.length === 0 ? CHANNEL_FILTERS[0].empty : emptyText}
+          {emptyText(items.length === 0 ? "all" : filter, full)}
         </div>
       ) : (
         <div className="relative space-y-6 pl-4">
