@@ -172,6 +172,55 @@ describe('KeyCortexGenomeBridgeService', () => {
       expect(intel.signals).toEqual([]);
       expect(intel.opportunities).toEqual([]);
     });
+
+    it('[GRD-04] RED-BEFORE (D-128/D-100): withholds crossDomainInsights, opportunities, and finance/sales genome fields when readsRevenue is false', async () => {
+      mockPrisma.client.businessGenome.findUnique.mockResolvedValue({
+        businessId: 'biz_1',
+        dnaScores: { finance: 30, sales: 40, operations: 80, brand: 70 },
+        stage: 'growth',
+        executiveReadiness: 55,
+      });
+      mockSignalService.listSignals.mockResolvedValue([
+        { id: 'sig_fin', sourceModule: 'finance', section: 'FINANCIAL', domain: 'finance', signalType: 'RISK_ALERT', reason: 'Cash runway low', confidence: 0.9, createdAt: '2026-01-01' },
+        { id: 'sig_ops', sourceModule: 'operations', section: 'OPERATIONAL_MODEL', domain: 'operations', signalType: 'MISSING_FACT', reason: 'SOP gap', confidence: 0.85, createdAt: '2026-01-01' },
+      ]);
+      mockRanker.rankRecommendations.mockResolvedValue({
+        rankedRecommendations: [
+          { id: 'rec_fin', domain: 'FINANCIAL', title: 'Reduce burn', insight: 'Burn high', recommendation: 'Cut costs', confidence: 0.85, expectedGainScore: 70, effortLevel: 'MEDIUM', rankScore: 80, rankReason: 'High impact', riskLevel: 'MEDIUM', financialViability: 'STRONG', capacityGating: 'NO_CONSTRAINT', readinessGating: { blockingDomains: [], readyDomains: ['finance'] } },
+          { id: 'rec_ops', domain: 'OPERATIONAL_MODEL', title: 'Document SOP', insight: 'Faster delivery', recommendation: 'Write checklist', confidence: 0.8, expectedGainScore: 60, effortLevel: 'LOW', rankScore: 65, rankReason: 'Quick win', riskLevel: 'LOW', financialViability: 'STRONG', capacityGating: 'NO_CONSTRAINT', readinessGating: { blockingDomains: [], readyDomains: ['operations'] } },
+        ],
+      });
+      mockOpportunityDetector.detectOpportunities.mockResolvedValue({
+        prioritizedOpportunities: [
+          { id: 'opp_1', label: 'Reinvest cash', affectedDomains: ['finance'], potentialImpact: 'HIGH', confidence: 0.8, estimatedValueScore: 90, suggestedAction: 'Invest', requiredConditions: [], evidence: [] },
+        ],
+      });
+      mockCrossDomain.getLatestCrossDomainSnapshot.mockResolvedValue({
+        overallHealthScore: 72,
+        overallRiskLevel: 'MEDIUM',
+      });
+      mockModuleReadiness.getReadiness.mockResolvedValue([
+        { module: 'finance', readinessScore: 85, automationAllowed: true, riskLevel: 'LOW' },
+        { module: 'operations', readinessScore: 75, automationAllowed: true, riskLevel: 'LOW' },
+      ]);
+
+      const intel = await (service as any).getGenomeIntelligence('biz_1', { readsRevenue: false });
+
+      expect(intel.crossDomainInsights).toBeNull();
+      expect(mockCrossDomain.getLatestCrossDomainSnapshot).not.toHaveBeenCalled();
+      expect(intel.opportunities).toEqual([]);
+      expect(mockOpportunityDetector.detectOpportunities).not.toHaveBeenCalled();
+      expect(intel.dnaScores).toEqual({ operations: 80, brand: 70 });
+      expect(intel.executiveReadiness).toBe(75);
+      expect(intel.genomeStage).toBe('restricted');
+      expect(intel.stage).toBe('restricted');
+      expect(intel.readiness).toEqual([{ module: 'operations', readinessScore: 75, automationAllowed: true, riskLevel: 'LOW' }]);
+      expect(intel.autonomyMap).toEqual({ operations: true });
+      expect(intel.signals.map((s: any) => s.id)).toEqual(['sig_ops']);
+      expect(intel.recommendations.map((r: any) => r.id)).toEqual(['rec_ops']);
+      expect(intel.recommendations[0]).not.toHaveProperty('rankScore');
+      expect(intel.recommendations[0]).not.toHaveProperty('financialViability');
+    });
   });
 
   describe('checkAutonomy', () => {
