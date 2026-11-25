@@ -959,6 +959,35 @@ export async function fetchContactEvents(
   );
 }
 
+/**
+ * FU-TIMELINE-LOAD-OLDER (D-284): one page of a contact's events, newest first. GET .../contacts/:c/events with
+ * paged=true and a limit (FU-TIMELINE-EVENTS-PAGING, crm.controller.ts contactEvents) answers
+ * { events, nextCursor, hasMore }: `limit` events strictly older than `cursor` (opaque: the nextCursor of the page
+ * before; none for the newest page). nextCursor is null on the last page. The server withholds money events from a
+ * member without revenue read on every page (D-100).
+ */
+export const CONTACT_EVENTS_PAGE_SIZE = 20;
+
+const contactEventsPageSchema = z.object({
+  events: z.array(eventSchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+export type ContactEventsPage = z.infer<typeof contactEventsPageSchema>;
+
+export async function fetchContactEventsPage(
+  contactId: string,
+  options: { cursor?: string | null; limit?: number } = {},
+  businessId: string = selectedBusinessId(),
+): Promise<ApiResult<ContactEventsPage>> {
+  const query = new URLSearchParams({ paged: "true", limit: String(options.limit ?? CONTACT_EVENTS_PAGE_SIZE) });
+  if (options.cursor) query.set("cursor", options.cursor);
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events?${query.toString()}`,
+    contactEventsPageSchema,
+  );
+}
+
 export async function fetchContactNotes(
   contactId: string,
   businessId: string = selectedBusinessId(),
