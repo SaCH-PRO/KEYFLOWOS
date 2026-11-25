@@ -1380,6 +1380,11 @@
 "prefix": "v64a_",
       "owner": "apps/server/test/key-proposal-result-reader-scope.integration.test.ts",
       "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
+    },
+    {
+      "prefix": "v96g_",
+      "owner": "apps/server/test/refund-gateway-refuse.integration.test.ts",
+      "packet": "V1-96 (FU-REFUND-GATEWAY-REFUSE)"
     }
   ],
   "pendingRenames": [],
