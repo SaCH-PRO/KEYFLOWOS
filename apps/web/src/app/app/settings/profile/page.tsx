@@ -125,6 +125,8 @@ function DevicePushSection() {
       "This browser can't receive push notifications. On iPhone or iPad, add KEYFLOWOS to your Home Screen and open it from there; elsewhere, use a current Chrome, Edge, Firefox or Safari.",
     denied: "Notifications are blocked for KEYFLOWOS in this browser. Allow them in your browser's site settings, then reload this page.",
     unconfigured: "Push notifications are not set up on this server yet, so they can't be turned on.",
+    "local-dev": "Push notifications are not available on a local development server.",
+    "another-member": "Push on this device belongs to another member's sign-in. They can turn it off from their My account.",
     unavailable: null,
     subscribed: "On for this device.",
     unsubscribed: "Off for this device.",
@@ -144,7 +146,8 @@ function DevicePushSection() {
         <div className="min-w-0 flex-1">
           <h2 id="device-push-heading" className="text-base font-semibold text-foreground">Push notifications on this device</h2>
           <p className="text-sm text-muted-foreground">
-            Alerts on this device, even when KEYFLOWOS is closed. This is your own setting and applies to this browser only.
+            Alerts on this device, even when KEYFLOWOS is closed. Owners get alerts here for new bookings, payments received
+            and payment claims; other members get none yet. This is your own setting and applies to this browser only.
           </p>
         </div>
       </div>

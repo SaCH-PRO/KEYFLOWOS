@@ -10,6 +10,17 @@
  * the config read failed, the key stayed null and subscribe returned without a word. Every state is now said:
  * unsupported, blocked, not set up on the server (no VAPID key), a read that failed, on, off, and a failed turn-on or
  * turn-off (`error`).
+ *
+ * Repair round 1 (reviews of b058731f):
+ * - A shared device (COR-M1): "on" is the browser's subscription, which may be another member's. Turn off asks the
+ *   server first; unsubscribeOwn removes only the caller's row and answers { count: 0 } when there is none. Then the
+ *   browser subscription is left alone (removing it would end the other member's push) and the state is 'another-member'.
+ * - A browser unsubscribe that throws after the server removed the device (COR-M11): the device is saved back and push
+ *   stays on, so server and browser agree again.
+ * - A local development origin (COR-M3): on localhost and 127.0.0.1 the app's worker unregisters itself (public/sw.js)
+ *   and the root layout unregisters any controlling worker, so a subscription there dies with it. The state is
+ *   'local-dev' and nothing is asked. TEST-ONLY: window.__KF_PUSH_ALLOW_LOCALHOST__ = true lifts this for the mocked
+ *   browser sweep (e2e/sweep-push-optin.spec.ts), which fakes the ServiceWorkerContainer. Nothing in the app sets it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '@/lib/api';
@@ -25,6 +36,10 @@ export type PushStatus =
   | 'unconfigured'
   /** The push config, or this device's subscription, could not be read (see `error`; `retry` reads again). */
   | 'unavailable'
+  /** A local development origin, where the app's service worker unregisters itself. */
+  | 'local-dev'
+  /** This device's push is another member's (the server holds none of this member's rows for it). */
+  | 'another-member'
   | 'subscribed'
   | 'unsubscribed';
 
@@ -45,6 +60,13 @@ function urlBase64ToUint8Array(base64String: string) {
 
 function pushSupported(): boolean {
   return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+/** localhost and 127.0.0.1, as public/sw.js and the root layout's inline script read them; see the header. */
+function localDevOrigin(): boolean {
+  const host = window.location.hostname;
+  if (host !== 'localhost' && host !== '127.0.0.1') return false;
+  return (window as unknown as { __KF_PUSH_ALLOW_LOCALHOST__?: unknown }).__KF_PUSH_ALLOW_LOCALHOST__ !== true;
 }
 
 const messageOf = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
@@ -95,6 +117,7 @@ export function usePushNotifications(businessId?: string | null) {
     };
     void (async () => {
       if (!pushSupported()) return settle('unsupported');
+      if (localDevOrigin()) return settle('local-dev');
       if (Notification.permission === 'denied') return settle('denied');
       if (!businessId) return settle('unavailable', 'Push settings could not be loaded: no business is selected.');
       settle('loading');
@@ -169,15 +192,26 @@ export function usePushNotifications(businessId?: string | null) {
     }
     if (!sub) return done('unsubscribed');
     // The server first: if it keeps the device, push stays on here too, and the member is told.
-    const { error: removeError } = await apiPost<unknown>({
+    const { data: removed, error: removeError } = await apiPost<{ count?: unknown }>({
       path: `/api/businesses/${encodeURIComponent(businessId)}/push/unsubscribe`,
       body: { endpoint: sub.endpoint },
     });
     if (removeError) return done('subscribed', `Push could not be turned off (${removeError}), so it stays on.`);
+    // None of this member's rows held the device: it is another member's. Leave their browser subscription alone.
+    if (removed?.count === 0) return done('another-member');
     try {
       await sub.unsubscribe();
     } catch (e) {
-      return done('unsubscribed', `This device was removed, but the browser kept its subscription (${messageOf(e, 'unknown error')}).`);
+      // The browser kept it: save the device back, so push stays on on both sides.
+      const { error: resaveError } = await apiPost<unknown>({
+        path: `/api/businesses/${encodeURIComponent(businessId)}/push/subscribe`,
+        body: { subscription: sub.toJSON() },
+      });
+      const why = messageOf(e, 'the browser refused');
+      if (resaveError) {
+        return done('unavailable', `Push could not be turned off in this browser (${why}), and this device could not be saved again (${resaveError}). Reload the page.`);
+      }
+      return done('subscribed', `Push could not be turned off in this browser (${why}), so it stays on.`);
     }
     done('unsubscribed');
   }, [businessId, busy]);
