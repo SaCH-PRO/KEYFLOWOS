@@ -46,10 +46,10 @@ export const CHANNEL_FILTERS: ReadonlyArray<{ id: ChannelFilter; label: string; 
   { id: "note", label: "Notes", noun: "notes", empty: "No notes yet." },
 ];
 
-/** What a filter with nothing to show says: "No calls yet.", or after a full read "No calls in the latest 20 events." */
+/** What a filter with nothing to show says: "No calls yet.", or after a full read "No calls in the latest 20 records." */
 export function emptyText(filter: ChannelFilter, full: boolean): string {
   const f = CHANNEL_FILTERS.find((c) => c.id === filter) ?? CHANNEL_FILTERS[0];
-  return full ? `No ${f.noun} in the latest ${EVENTS_READ_PAGE} events.` : f.empty;
+  return full ? `No ${f.noun} in the latest ${EVENTS_READ_PAGE} records.` : f.empty;
 }
 
 /** What the channel of an event is read from. */

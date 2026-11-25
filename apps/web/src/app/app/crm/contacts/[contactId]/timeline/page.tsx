@@ -142,12 +142,15 @@ export default function ContactTimelinePage() {
   const counts = useMemo(() => channelCounts(items, pasted), [items, pasted]);
   const shown = filter === "all" ? items : items.filter((ev) => eventChannel(ev, pasted) === filter);
   // COR-TCH-1: a full read may have left older events out; then everything below speaks of the latest events only.
+  // N-1: the read loads records (events); the page lists items (a pasted message's two records are one item). After a
+  // full read the header names both, so its count and the line's never read as two counts of the same thing.
   const full = readIsFull(events.length);
   const plural = items.length === 1 ? "event" : "events";
+  const fromRead = `${items.length === 1 ? "item" : "items"} from the latest ${EVENTS_READ_PAGE} records`;
   const header = full
     ? filter === "all"
-      ? `Latest ${items.length} ${plural}`
-      : `${shown.length} of the latest ${items.length} ${plural}`
+      ? `${items.length} ${fromRead}`
+      : `${shown.length} of ${items.length} ${fromRead}`
     : filter === "all"
       ? `${items.length} ${plural}`
       : `${shown.length} of ${items.length} ${plural}`;
@@ -198,7 +201,7 @@ export default function ContactTimelinePage() {
 
       {full && (
         <p className="text-xs text-muted-foreground">
-          Showing the latest {EVENTS_READ_PAGE} events. Older events are not listed or counted here.
+          Only the latest {EVENTS_READ_PAGE} timeline records were loaded; older ones are not listed or counted.
         </p>
       )}
 
