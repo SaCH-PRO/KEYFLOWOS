@@ -1,9 +1,8 @@
 /**
  * P82 — FU-KEY-GENOME-READS-RESIDUAL-2 (D-100, D-128, D-233, D-234, D-235):
  * Pure per-reader projections for residual live KEY genome, blueprint, fact,
- * module readiness, and V2 context reads. All projections fail closed: when
- * `readsRevenue` is false, financial/sales/tax/projection/commerce fields,
- * composite scores derived from them, and money-worded entries are withheld.
+ * module readiness, and V2 context reads. All projections fail closed and
+ * never mutate input objects/arrays.
  */
 import {
   dnaScoresForReader,
@@ -13,7 +12,7 @@ import {
   structuredValueStatesMoney,
 } from '../business-genome/key-genome/genome-finance-scope';
 
-/** Blueprint top-level sections / composite scores that carry or aggregate money/sales data. */
+/** Blueprint top-level sections / composite scores that carry or aggregate money/sales/cap-table/untyped data. */
 const BLUEPRINT_MONEY_KEYS = new Set([
   'financials',
   'taxProfile',
@@ -21,11 +20,31 @@ const BLUEPRINT_MONEY_KEYS = new Set([
   'offerArchitecture',
   'salesSystem',
   'riskProfile',
+  'ownershipProfile',
+  'businessAssets',
   'completeness',
   'readinessScore',
   'genomeIntegrity',
   'genomeStage',
   'executiveReadinessScore',
+  'summary',
+]);
+
+/** Nested keys inside non-money blueprint sections that carry revenue/tax/commerce/sales indicators. */
+const BLUEPRINT_NESTED_MONEY_KEYS = new Set([
+  'revenueModel',
+  'pricingModel',
+  'budgetRange',
+  'expenseRatio',
+  'quoteConversionRate',
+  'recentMomentumScore',
+  'vatStatus',
+  'birStatus',
+  'businessBankStatus',
+  'retainerCycle',
+  'quoteDrivenSales',
+  'ecommerceFulfillment',
+  'complianceScore',
 ]);
 
 /** V2 context top-level modules that carry money/revenue/sales/expense data. */
@@ -40,8 +59,70 @@ const V2_MONEY_MODULES = new Set([
   'sales',
 ]);
 
+/** V2 genome keys that expose whole-genome categorical/progress scores derived from financial DNA. */
+const V2_GENOME_WITHHELD_KEYS = new Set([
+  'currentStage',
+  'genomeStage',
+  'stageProgress',
+  'growthTrajectory',
+  'readinessScore',
+  'executiveReadiness',
+]);
+
+function stringStatesMoney(value: string): boolean {
+  return isMoneyLabel(value) || proposalTextStatesMoney(value);
+}
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return Boolean(val && typeof val === 'object' && !Array.isArray(val));
+}
+
 /**
- * Project a `BlueprintData` object for the caller's revenue visibility.
+ * Recursively sanitize an arbitrary blueprint sub-value without mutating input:
+ * drops keys in `BLUEPRINT_NESTED_MONEY_KEYS` or matching `isMoneyLabel`, drops
+ * money-worded strings/array items, and drops structured array items that state money.
+ */
+function sanitizeBlueprintValue(val: unknown, depth = 0): unknown {
+  if (depth > 8 || val === null || val === undefined) return val;
+  if (typeof val === 'string') {
+    return stringStatesMoney(val) ? undefined : val;
+  }
+  if (Array.isArray(val)) {
+    const out: unknown[] = [];
+    for (const item of val) {
+      if (typeof item === 'string') {
+        if (!stringStatesMoney(item)) out.push(item);
+      } else if (isPlainObject(item)) {
+        if (structuredValueStatesMoney(item)) continue;
+        const cleaned = sanitizeBlueprintValue(item, depth + 1);
+        if (isPlainObject(cleaned) && Object.keys(cleaned).length > 0) {
+          out.push(cleaned);
+        }
+      } else if (item !== undefined) {
+        out.push(item);
+      }
+    }
+    return out;
+  }
+  if (isPlainObject(val)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (BLUEPRINT_NESTED_MONEY_KEYS.has(k) || isMoneyLabel(k) || proposalTextStatesMoney(k)) {
+        continue;
+      }
+      const cleaned = sanitizeBlueprintValue(v, depth + 1);
+      if (cleaned !== undefined) {
+        out[k] = cleaned;
+      }
+    }
+    return out;
+  }
+  return val;
+}
+
+/**
+ * Project a `BlueprintData` (or `BlueprintContext`) object for the caller's revenue visibility.
+ * Never mutates the input object.
  */
 export function blueprintForReader<T extends Record<string, unknown>>(
   blueprint: T | null | undefined,
@@ -53,39 +134,19 @@ export function blueprintForReader<T extends Record<string, unknown>>(
   for (const [key, val] of Object.entries(blueprint)) {
     if (BLUEPRINT_MONEY_KEYS.has(key) || isMoneyLabel(key)) continue;
 
-    if (key === 'operatingModel' && val && typeof val === 'object' && !Array.isArray(val)) {
-      const om: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-        if (k === 'revenueModel' || k === 'pricingModel' || isMoneyLabel(k)) continue;
-        om[k] = v;
-      }
-      out[key] = om;
-      continue;
-    }
-
-    if (key === 'constraints' && val && typeof val === 'object' && !Array.isArray(val)) {
-      const c: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-        if (k === 'budgetRange' || isMoneyLabel(k)) continue;
-        c[k] = v;
-      }
-      out[key] = c;
-      continue;
-    }
-
-    if (key === 'genomeDnaScores' && val && typeof val === 'object' && !Array.isArray(val)) {
+    if (key === 'genomeDnaScores' && isPlainObject(val)) {
       out[key] = dnaScoresForReader(val as Record<string, number>, false);
       continue;
     }
 
-    if (key === 'genomeDnaConfidence' && val && typeof val === 'object' && !Array.isArray(val)) {
+    if (key === 'genomeDnaConfidence' && isPlainObject(val)) {
       out[key] = dnaScoresForReader(val as Record<string, number>, false);
       continue;
     }
 
-    if (key === 'confidenceScores' && val && typeof val === 'object' && !Array.isArray(val)) {
+    if (key === 'confidenceScores' && isPlainObject(val)) {
       const cs: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(val)) {
         if (BLUEPRINT_MONEY_KEYS.has(k) || isMoneyLabel(k)) continue;
         cs[k] = v;
       }
@@ -93,7 +154,10 @@ export function blueprintForReader<T extends Record<string, unknown>>(
       continue;
     }
 
-    out[key] = val;
+    const sanitized = sanitizeBlueprintValue(val);
+    if (sanitized !== undefined) {
+      out[key] = sanitized;
+    }
   }
 
   return out as T;
@@ -101,10 +165,11 @@ export function blueprintForReader<T extends Record<string, unknown>>(
 
 /**
  * Project a `GenomeIntegrityResult` for the caller's revenue visibility:
- * strips money/sales DNA sections & breakdown entries, omits `genomeStage`
- * (which encodes `REVENUE_ENGINE`), and recomputes `genomeIntegrity` and
- * `executiveReadinessScore` strictly from visible non-money sections so hidden
- * financial scores cannot be back-calculated from the average.
+ * - Strips money/sales DNA sections and enforces D-233 allowlist on `genomeDnaScores`,
+ *   `genomeDnaConfidence`, and `readinessBreakdown`.
+ * - Scrubs money field names/sentences from kept `dnaSections` (`missingFields`, `summary`, `recommendation`).
+ * - Omits `genomeStage` (which encodes `REVENUE_ENGINE`).
+ * - Recomputes `genomeIntegrity` and `executiveReadinessScore` strictly from visible sections.
  */
 export function genomeIntegrityForReader<T extends Record<string, unknown>>(
   integrity: T | null | undefined,
@@ -119,10 +184,26 @@ export function genomeIntegrityForReader<T extends Record<string, unknown>>(
   const visibleKeys = new Set(Object.keys(visibleScores));
 
   const rawSections = Array.isArray(integrity.dnaSections) ? integrity.dnaSections : [];
-  const visibleSections = rawSections.filter(
-    (s): s is Record<string, unknown> =>
-      Boolean(s && typeof s === 'object' && typeof (s as { key?: unknown }).key === 'string' && visibleKeys.has((s as { key: string }).key)),
-  );
+  const visibleSections = rawSections
+    .filter(
+      (s): s is Record<string, unknown> =>
+        Boolean(isPlainObject(s) && typeof s.key === 'string' && visibleKeys.has(s.key)),
+    )
+    .map((s) => {
+      const copy: Record<string, unknown> = { ...s };
+      if (Array.isArray(s.missingFields)) {
+        copy.missingFields = s.missingFields.filter(
+          (f): f is string => typeof f === 'string' && !stringStatesMoney(f),
+        );
+      }
+      if (typeof s.summary === 'string' && stringStatesMoney(s.summary)) {
+        copy.summary = '';
+      }
+      if (typeof s.recommendation === 'string' && stringStatesMoney(s.recommendation)) {
+        copy.recommendation = '';
+      }
+      return copy;
+    });
 
   const visibleIntegrities = visibleSections
     .map((s) => Number(s.integrity))
@@ -132,15 +213,11 @@ export function genomeIntegrityForReader<T extends Record<string, unknown>>(
       ? Math.round(visibleIntegrities.reduce((sum, v) => sum + v, 0) / visibleIntegrities.length)
       : 0;
 
-  const rawBreakdown =
-    integrity.readinessBreakdown && typeof integrity.readinessBreakdown === 'object' && !Array.isArray(integrity.readinessBreakdown)
-      ? (integrity.readinessBreakdown as Record<string, unknown>)
-      : {};
-  const visibleBreakdown: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(rawBreakdown)) {
-    if (isMoneyLabel(k)) continue;
-    visibleBreakdown[k] = v;
-  }
+  const rawBreakdown = isPlainObject(integrity.readinessBreakdown)
+    ? (integrity.readinessBreakdown as Record<string, number>)
+    : {};
+  // D-233: allowlist via dnaScoresForReader so unknown dimensions fail closed.
+  const visibleBreakdown = dnaScoresForReader(rawBreakdown, false);
 
   const out: Record<string, unknown> = {
     ...integrity,
@@ -155,24 +232,86 @@ export function genomeIntegrityForReader<T extends Record<string, unknown>>(
   return out as T;
 }
 
+function isUnclassifiedLabel(value: string | null | undefined): boolean {
+  return typeof value !== 'string' || value.trim() === '' || /^general$/i.test(value.trim());
+}
+
+function isRiskLabel(value: string | null | undefined): boolean {
+  return typeof value === 'string' && /(^risk(_|profile|\b)|riskprofile)/i.test(value.trim());
+}
+
 /**
- * Filter `GenomeFactData` rows for the caller's revenue visibility.
- * Withholds facts in money sections/domains/fields or whose value states money.
+ * Filter `GenomeFactData` rows for the caller's revenue visibility (D-234):
+ * - Fails closed when `section` and `domain` are both blank/null/`'general'`.
+ * - Withholds money provenance (`sourceModule`, `sourceType`, `sourceEntityType`) and `riskProfile` facts.
+ * - Checks `section`, `domain`, `field` via `isMoneyLabel` + `proposalTextStatesMoney`.
+ * - Mirrors `isFinanceSignal` (Codex P1 on #228): wraps `{ [field]: raw }` into `structuredValueStatesMoney`
+ *   so figure-word fields paired with numeric values (e.g. `hourlyRate: 250`, `monthlyRent: 4200`) are caught.
  */
 export function genomeFactsForReader<
-  T extends { section?: string | null; domain?: string | null; field?: string | null; value?: unknown },
+  T extends {
+    section?: string | null;
+    domain?: string | null;
+    field?: string | null;
+    value?: unknown;
+    sourceModule?: string | null;
+    sourceType?: string | null;
+    sourceEntityType?: string | null;
+  },
 >(facts: T[], readsRevenue = false): T[] {
   if (readsRevenue) return facts;
   return facts.filter((f) => {
-    if (isMoneyLabel(f.section) || isMoneyLabel(f.domain) || isMoneyLabel(f.field)) {
+    if (isUnclassifiedLabel(f.section) && isUnclassifiedLabel(f.domain)) {
+      return false;
+    }
+    if (
+      isMoneyLabel(f.section) ||
+      isMoneyLabel(f.domain) ||
+      isMoneyLabel(f.field) ||
+      isMoneyLabel(f.sourceModule) ||
+      isMoneyLabel(f.sourceType) ||
+      isMoneyLabel(f.sourceEntityType) ||
+      isRiskLabel(f.section) ||
+      isRiskLabel(f.domain)
+    ) {
+      return false;
+    }
+    if (
+      (typeof f.field === 'string' && proposalTextStatesMoney(f.field)) ||
+      (typeof f.domain === 'string' && proposalTextStatesMoney(f.domain))
+    ) {
       return false;
     }
     const raw = (f.value as { raw?: unknown } | null | undefined)?.raw ?? f.value;
-    if (typeof raw === 'string') {
-      return !proposalTextStatesMoney(raw);
+    if (typeof raw === 'string' && proposalTextStatesMoney(raw)) {
+      return false;
     }
-    return !structuredValueStatesMoney(raw);
+    if (structuredValueStatesMoney(raw)) {
+      return false;
+    }
+    // Check paired `{ [fieldName]: raw }` so figure-word field + bare numeric value cannot bypass.
+    const fieldName = typeof f.field === 'string' && f.field.trim() !== '' ? f.field.trim() : null;
+    if (fieldName && raw !== undefined && raw !== null) {
+      const paired = Object.defineProperty(Object.create(null), fieldName, { value: raw, enumerable: true });
+      if (structuredValueStatesMoney(paired)) return false;
+    }
+    return true;
   });
+}
+
+function isMoneyReqFact(item: unknown): boolean {
+  if (!isPlainObject(item)) return false;
+  const f = item as { section?: string; domain?: string; field?: string; reason?: string };
+  return (
+    isMoneyLabel(f.section) ||
+    isMoneyLabel(f.domain) ||
+    isMoneyLabel(f.field) ||
+    isRiskLabel(f.section) ||
+    isRiskLabel(f.domain) ||
+    (typeof f.field === 'string' && proposalTextStatesMoney(f.field)) ||
+    (typeof f.domain === 'string' && proposalTextStatesMoney(f.domain)) ||
+    (typeof f.reason === 'string' && stringStatesMoney(f.reason))
+  );
 }
 
 function projectSingleReadiness<T extends Record<string, unknown>>(entry: T): T | null {
@@ -180,25 +319,59 @@ function projectSingleReadiness<T extends Record<string, unknown>>(entry: T): T 
   if (!mod || isMoneyLabel(mod) || V2_MONEY_MODULES.has(mod.toLowerCase())) {
     return null;
   }
-  const filterReqFacts = (list: unknown) =>
-    Array.isArray(list)
-      ? list.filter((item) => {
-          if (!item || typeof item !== 'object') return true;
-          const f = item as { section?: string; domain?: string; field?: string; reason?: string };
-          return (
-            !isMoneyLabel(f.section) &&
-            !isMoneyLabel(f.domain) &&
-            !isMoneyLabel(f.field) &&
-            !(typeof f.reason === 'string' && proposalTextStatesMoney(f.reason))
-          );
-        })
-      : list;
 
-  return {
+  const filterReqFacts = (list: unknown) =>
+    Array.isArray(list) ? list.filter((item) => !isMoneyReqFact(item)) : list;
+
+  const rawRequired = Array.isArray(entry.requiredFacts) ? entry.requiredFacts : null;
+  const visibleRequired = rawRequired ? rawRequired.filter((item) => !isMoneyReqFact(item)) : null;
+
+  // If a module had required facts and EVERY one was money-scoped (e.g. `reports`), withhold the module.
+  if (rawRequired && rawRequired.length > 0 && visibleRequired && visibleRequired.length === 0) {
+    return null;
+  }
+
+  const rawMissing = Array.isArray(entry.missingFacts) ? entry.missingFacts : null;
+  const visibleMissing = rawMissing ? rawMissing.filter((item) => !isMoneyReqFact(item)) : null;
+  const visibleOptional = filterReqFacts(entry.optionalFacts);
+
+  const visibleBlockedReasons = Array.isArray(entry.blockedReasons)
+    ? entry.blockedReasons.filter((s): s is string => typeof s === 'string' && !stringStatesMoney(s))
+    : entry.blockedReasons;
+
+  const visibleSetupActions = Array.isArray(entry.recommendedSetupActions)
+    ? entry.recommendedSetupActions.filter((s): s is string => typeof s === 'string' && !stringStatesMoney(s))
+    : entry.recommendedSetupActions;
+
+  const out: Record<string, unknown> = {
     ...entry,
-    ...(entry.missingFacts !== undefined ? { missingFacts: filterReqFacts(entry.missingFacts) } : {}),
-    ...(entry.requiredFacts !== undefined ? { requiredFacts: filterReqFacts(entry.requiredFacts) } : {}),
+    ...(visibleRequired !== null ? { requiredFacts: visibleRequired } : {}),
+    ...(visibleMissing !== null ? { missingFacts: visibleMissing } : {}),
+    ...(entry.optionalFacts !== undefined ? { optionalFacts: visibleOptional } : {}),
+    ...(entry.blockedReasons !== undefined ? { blockedReasons: visibleBlockedReasons } : {}),
+    ...(entry.recommendedSetupActions !== undefined ? { recommendedSetupActions: visibleSetupActions } : {}),
   };
+
+  // Recompute readinessScore, automationAllowed, and riskLevel strictly from visible facts
+  // so missing hidden financial facts cannot be inferred mathematically.
+  if (visibleRequired !== null && visibleMissing !== null) {
+    const reqTotal = visibleRequired.length;
+    const missingCount = Math.min(reqTotal, visibleMissing.length);
+    const recomputedScore = reqTotal > 0 ? Math.round(((reqTotal - missingCount) / reqTotal) * 100) : 100;
+    const hasBlockingMissing = visibleMissing.some(
+      (m) => isPlainObject(m) && String(m.impact ?? '').toUpperCase() === 'BLOCKING',
+    );
+    const hasDegradedMissing = visibleMissing.some(
+      (m) => isPlainObject(m) && String(m.impact ?? '').toUpperCase() === 'DEGRADED',
+    );
+    if (out.readinessScore !== undefined) out.readinessScore = recomputedScore;
+    if (out.automationAllowed !== undefined) out.automationAllowed = !hasBlockingMissing;
+    if (out.riskLevel !== undefined) {
+      out.riskLevel = hasBlockingMissing ? 'HIGH' : hasDegradedMissing ? 'MEDIUM' : 'LOW';
+    }
+  }
+
+  return out as T;
 }
 
 /**
@@ -217,10 +390,17 @@ export function moduleReadinessForReader<T extends Record<string, unknown>>(
   return projectSingleReadiness(readiness);
 }
 
+function filterMoneyItems<T>(list: T[]): T[] {
+  return list.filter((item) => {
+    if (typeof item === 'string') return !stringStatesMoney(item);
+    if (isPlainObject(item)) return !structuredValueStatesMoney(item);
+    return true;
+  });
+}
+
 /**
  * Project `ContextV2Service.getFullContext()` output for the caller's revenue visibility.
- * Omits `commerce`, `finance`, `expenses`, `revenue`, `payroll`, `billing`, `accounting`, `sales`,
- * and projects the nested `genome` block (DNA scores, recommendations, omits `currentStage`/`readinessScore`).
+ * Never mutates the input object.
  */
 export function v2ContextForReader<T extends Record<string, unknown>>(
   v2Context: T | null | undefined,
@@ -232,20 +412,46 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
   for (const [mod, val] of Object.entries(v2Context)) {
     if (V2_MONEY_MODULES.has(mod.toLowerCase()) || isMoneyLabel(mod)) continue;
 
-    if (mod === 'genome' && val && typeof val === 'object' && !Array.isArray(val)) {
-      const g = val as Record<string, unknown>;
-      const projectedGenome: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(g)) {
-        if (k === 'currentStage' || k === 'genomeStage' || k === 'readinessScore' || k === 'executiveReadiness' || isMoneyLabel(k)) {
+    if (mod === 'summary' && isPlainObject(val)) {
+      const projectedSummary: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val)) {
+        if (k === 'totalRevenueOutstanding' || k === 'healthScore' || isMoneyLabel(k)) continue;
+        if (k === 'alerts' && Array.isArray(v)) {
+          projectedSummary[k] = v.filter((a) => typeof a === 'string' && !stringStatesMoney(a));
           continue;
         }
-        if (k === 'dnaScores' && v && typeof v === 'object' && !Array.isArray(v)) {
+        projectedSummary[k] = v;
+      }
+      out[mod] = projectedSummary;
+      continue;
+    }
+
+    if (mod === 'bookings' && isPlainObject(val)) {
+      const projectedBookings: Record<string, unknown> = { ...val };
+      if (isPlainObject(val.todayBookings)) {
+        const tb: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(val.todayBookings)) {
+          if (k === 'totalValue' || isMoneyLabel(k)) continue;
+          tb[k] = v;
+        }
+        projectedBookings.todayBookings = tb;
+      }
+      out[mod] = projectedBookings;
+      continue;
+    }
+
+    if (mod === 'genome' && isPlainObject(val)) {
+      const projectedGenome: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val)) {
+        if (V2_GENOME_WITHHELD_KEYS.has(k) || isMoneyLabel(k)) continue;
+        if (k === 'dnaScores' && isPlainObject(v)) {
           projectedGenome[k] = dnaScoresForReader(v as Record<string, number>, false);
           continue;
         }
         if (k === 'recommendations' && Array.isArray(v)) {
           projectedGenome[k] = v.filter((rec) => {
-            if (!rec || typeof rec !== 'object') return false;
+            if (typeof rec === 'string') return !stringStatesMoney(rec);
+            if (!isPlainObject(rec)) return false;
             const r = rec as { domain?: string; category?: string; title?: string; diagnosis?: string };
             return (
               !isFinanceRecommendation({
@@ -253,7 +459,7 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
                 title: r.title ?? null,
                 diagnosis: r.diagnosis ?? null,
               }) &&
-              !(typeof r.title === 'string' && proposalTextStatesMoney(r.title))
+              !(typeof r.title === 'string' && stringStatesMoney(r.title))
             );
           });
           continue;
@@ -261,6 +467,62 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
         projectedGenome[k] = v;
       }
       out[mod] = projectedGenome;
+      continue;
+    }
+
+    if (mod === 'crm' && isPlainObject(val)) {
+      out[mod] = {
+        ...val,
+        ...(Array.isArray(val.recentActivity) ? { recentActivity: filterMoneyItems(val.recentActivity) } : {}),
+        ...(Array.isArray(val.overdueTasks) ? { overdueTasks: filterMoneyItems(val.overdueTasks) } : {}),
+      };
+      continue;
+    }
+
+    if (mod === 'temporal' && isPlainObject(val)) {
+      out[mod] = {
+        ...val,
+        ...(Array.isArray(val.recentMemories) ? { recentMemories: filterMoneyItems(val.recentMemories) } : {}),
+      };
+      continue;
+    }
+
+    if (mod === 'autopilot' && isPlainObject(val)) {
+      out[mod] = {
+        ...val,
+        ...(Array.isArray(val.activeTasks) ? { activeTasks: filterMoneyItems(val.activeTasks) } : {}),
+      };
+      continue;
+    }
+
+    if (mod === 'inbox' && isPlainObject(val)) {
+      const projectedInbox: Record<string, unknown> = {
+        ...val,
+        ...(Array.isArray(val.urgentMessages) ? { urgentMessages: filterMoneyItems(val.urgentMessages) } : {}),
+      };
+      if (typeof val.aiSummary === 'string' && stringStatesMoney(val.aiSummary)) {
+        delete projectedInbox.aiSummary;
+      }
+      out[mod] = projectedInbox;
+      continue;
+    }
+
+    if (mod === 'device' && isPlainObject(val)) {
+      out[mod] = {
+        ...val,
+        ...(Array.isArray(val.recentCaptures)
+          ? {
+              recentCaptures: val.recentCaptures.filter((c) => {
+                if (!isPlainObject(c)) return true;
+                if (typeof c.detectedType === 'string' && stringStatesMoney(c.detectedType)) return false;
+                return !structuredValueStatesMoney(c);
+              }),
+            }
+          : {}),
+        ...(Array.isArray(val.linkedCommandItems)
+          ? { linkedCommandItems: filterMoneyItems(val.linkedCommandItems) }
+          : {}),
+      };
       continue;
     }
 
