@@ -121,7 +121,7 @@
 | P63 | D-283 six: FU-NOTIFICATIONS-PAGE-REFUSED, FU-STUDIO-PAGE-SCOPE, FU-E2E-MOCKED-SESSION-TOKEN, FU-UNDO-TOAST-SIGNOUT, FU-CONTACT-SEND-QUOTE-DOOR, FU-SIDESHEET-MOBILE-OFFSET (web, S each) | claude | todo | P41 | After P41, in that order |
 | P64 | W11-CALLS-LIST-PAGING (server, P2 launch-track, S, **unblocks 10**, F-30/F-31, `v66i_`: `@Type(() => Number)` on `ListCallsQueryDto.limit`/`offset` + total order `[{ scheduledAt: 'asc' }, { id: 'asc' }]` in `CallLogService.listCalls` & `getScheduledCalls`) | antigravity | in-progress | — | Claimed on `pkt/V1-W11-CALLS-LIST-PAGING` off `origin/main` (`08170696`) while Wave M15 PR #244 CI/queue runs |
 | P65 | FU-INVOICE-REMAINING-CREDITS (server, P2, S, Journey E, D-283 Antigravity follow-up: `CommerceService.getInvoiceForBusiness` nets applied credit notes via `appliedCreditsOf` + `creditAwareBalance` and returns `remaining: 0` on `VOID` and `FULLY_CREDITED`) | antigravity | claimed | — | Queued right after `P64` for Wave M17 (server lane) |
-| P64 | FU-TIMELINE-EVENTS-PAGING (server, S, launch, D-284: the contact events read takes a bounded limit and a cursor; money stays withheld per page, D-100) | antigravity | todo | — | Offered to Antigravity on #80; unblocks Claude P65 |
-| P65 | FU-TIMELINE-LOAD-OLDER (web, S, launch, D-284: 'Load older' on the contact Timeline) | claude | todo | P64, P41 | After P64 is on main |
+| P66 | FU-TIMELINE-EVENTS-PAGING (server, S, launch, D-284: the contact events read takes a bounded limit and a cursor; money stays withheld per page, D-100) | antigravity | todo | — | Offered to Antigravity on #80; unblocks Claude P67 |
+| P67 | FU-TIMELINE-LOAD-OLDER (web, S, launch, D-284: 'Load older' on the contact Timeline) | claude | todo | P66, P41 | After P66 is on main |
 
 Last updated: 2026-11-25 by the claude lane: merge queue ON for main (D-278 done: enqueue, never merge directly); rulings D-280..D-283 recorded (#80 7159721276).
