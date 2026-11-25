@@ -1815,6 +1815,12 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
   // flow-chat tool finance_list_action_items, echoed the normalized text as cashCurrency.
   it('CP-22 (review SEC-W11RL-1) RED-BEFORE: FIN_CASHFLOW_RISK evidence names the business currency only when it is a three-letter code; free text stored as the business currency is never echoed', async () => {
     await db.business.update({ where: { id: ID.bizK }, data: { currency: 'pay me now' } });
+    // W11-RUNWAY-BURN-CURRENCY (D-135): burn counts only business-currency expenses; seed a
+    // business-currency expense (900 over 90d = 10/day) so the alarm fires while K's TTD 900
+    // expenses are listed apart under otherCurrencyExpenses, never echoing 'pay me now'.
+    const freeTextExp = await db.expense.create({
+      data: { id: `${P}expK_freetext`, businessId: ID.bizK, description: 'V34A freetext burn', amount: 900, currency: 'pay me now', date: daysAgo(15) },
+    });
     try {
       // No cash is held under that text: K's TTD 100 and USD 550 are both held apart.
       const p = await cashPositionService.getCashPosition(ID.bizK);
@@ -1824,16 +1830,18 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
       const rows = await cashRiskRows(ID.bizK);
       expect(rows.length).toBe(1);
       expect(rows[0].body).toBe(
-        'Cash 0.00 against 10.00/day burn (90-day average). Runway is under 30 days. (business-currency cash only). Not counted: TTD 100.00, USD 550.00.',
+        'Cash 0.00 against 10.00/day burn (90-day average). Runway is under 30 days. (business-currency cash only). Not counted: TTD 100.00, USD 550.00. (business-currency burn only). Expenses not counted: TTD 900.00.',
       );
       expect(rows[0].evidence).toEqual({
         cash: 0, dailyBurn: 10, days: 0, cashCurrency: null,
         otherCurrencyCash: [{ currency: 'TTD', amount: 100 }, { currency: 'USD', amount: 550 }],
+        otherCurrencyExpenses: [{ currency: 'TTD', amount: 900 }],
       });
       for (const text of [JSON.stringify(rows[0]), JSON.stringify(mirrored), JSON.stringify(await commandRows(ID.bizK))]) {
         expect(text).not.toMatch(/pay me now/i);
       }
     } finally {
+      await db.expense.delete({ where: { id: freeTextExp.id } });
       await db.business.update({ where: { id: ID.bizK }, data: { currency: 'TTD' } });
     }
     // Back on TTD the evidence names it again.
@@ -2199,4 +2207,237 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     // Back on TTD the currency is named again.
     expect((await moneyHealth(bizM, svc)).metrics).toMatchObject({ cashCurrency: 'TTD' });
   });
+});
+
+/**
+ * W11-RUNWAY-BURN-CURRENCY (owner ruling D-135, extending D-107; plan CP-24, CP-25):
+ *   - Every runway burn (Finance overview LOW_RUNWAY, FIN_CASHFLOW_RISK, and the 'Protect cash
+ *     runway' money move) counts only business-currency expenses (normalized via normalizeCurrency
+ *     so legacy lower-case 'ttd' matches 'TTD').
+ *   - Other-currency expenses are never added or converted; each alarm's text names them
+ *     unconverted under SEC-W10LR-1 rules (three-letter codes only, bounded, non-code labels
+ *     counted and never echoed), and FIN_CASHFLOW_RISK's command-spine copy withholds figures.
+ *   - MoneyMoves' 180-day burn window stops at now (lt: now), so future-dated scheduled expenses
+ *     never inflate past burn.
+ */
+describe('W11-RUNWAY-BURN-CURRENCY (D-135): runway burn counts business-currency expenses only and money-moves stops at now', () => {
+  const ownerN = `${P}ownerN`;
+  const bizN = `${P}bizN`;
+  const ownerN2 = `${P}ownerN2`;
+  const bizN2 = `${P}bizN2`;
+  const ownerO = `${P}ownerO`;
+  const bizO = `${P}bizO`;
+  const INJECTED = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
+  let intel: any;
+  const mirrored: Array<{ businessId: string; type: string; title: string; detail: string; amountAtRisk: number; priority: number }> = [];
+
+  const overviewRoute = (biz: string, as: string) =>
+    request(financeApp.getHttpServer()).get(`/finance/businesses/${biz}/overview`).set(HEADER, as);
+  const moneyMovesRoute = (biz: string, as: string) =>
+    request(financeApp.getHttpServer()).get(`/finance/businesses/${biz}/money-moves`).set(HEADER, as);
+  const cashRiskRows = (biz: string) =>
+    db.financeActionItem.findMany({ where: { businessId: biz, kind: 'CASHFLOW_RISK' }, orderBy: { id: 'asc' } });
+  const commandRows = (biz: string) =>
+    db.commandItem.findMany({ where: { businessId: biz, sourceModule: 'finance', actionType: 'FIN8_CASHFLOW_RISK' }, orderBy: { id: 'asc' } });
+
+  beforeAll(async () => {
+    const { FinanceIntelligenceService } = await import('../src/modules/finance/finance-intelligence.service');
+    const revenueActionsStub = {
+      upsertExternal: async (input: any) => {
+        mirrored.push(input);
+        return { actionId: null };
+      },
+    };
+    intel = new (FinanceIntelligenceService as any)(
+      financePrisma,
+      {},
+      revenueActionsStub,
+      {},
+      cashPositionService,
+    );
+
+    for (const [user, biz, name, email] of [
+      [ownerN, bizN, 'V34A Biz N', `${P}owner_n@test.local`],
+      [ownerN2, bizN2, 'V34A Biz N2', `${P}owner_n2@test.local`],
+      [ownerO, bizO, 'V34A Biz O', `${P}owner_o@test.local`],
+    ] as const) {
+      await db.user.create({ data: { id: user, email, role: 'USER' } });
+      await db.business.create({ data: { id: biz, name, ownerId: user, currency: 'TTD' } });
+      await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
+      await coaSeeder.ensureDefaults(biz);
+    }
+
+    // Place expenses at daysAgo(35), daysAgo(55), daysAgo(75) so they fall inside every window
+    // regardless of the day of the month: [sixMonthsAgo, monthStart), [now-90d, now), [now-180d, now).
+    // N: TTD 1000 cash, TTD 1800 total (= TTD 300/month over 6m, 20/day over 90d -> 3.3m / 50d runway,
+    // no alarm) + USD 12000 total (= USD 2000/month over 6m).
+    await openAccount(bizN, 'V34A Till N', 'CASH', 'CASH', 1000);
+    for (const [idx, age, cur] of [
+      [1, 35, 'TTD'],
+      [2, 55, 'ttd'], // legacy lowercase matches TTD via normalizeCurrency
+      [3, 75, 'TTD'],
+    ] as const) {
+      await db.expense.create({
+        data: { id: `${P}expN_ttd_${idx}`, businessId: bizN, description: `V34A N TTD ${idx}`, amount: 600, currency: cur, date: daysAgo(age) },
+      });
+      await db.expense.create({
+        data: { id: `${P}expN_usd_${idx}`, businessId: bizN, description: `V34A N USD ${idx}`, amount: 4000, currency: 'USD', date: daysAgo(age) },
+      });
+    }
+
+    // N2: TTD 1000 cash, TTD 7200 total (= TTD 1200/month over 6m -> 0.8m; 80/day over 90d -> 13d;
+    // alarms DO fire from TTD burn alone) + USD 12000 total (= USD 2000/month).
+    await openAccount(bizN2, 'V34A Till N2', 'CASH', 'CASH', 1000);
+    for (const [idx, age, cur] of [
+      [1, 35, 'TTD'],
+      [2, 55, 'ttd'],
+      [3, 75, 'TTD'],
+    ] as const) {
+      await db.expense.create({
+        data: { id: `${P}expN2_ttd_${idx}`, businessId: bizN2, description: `V34A N2 TTD ${idx}`, amount: 2400, currency: cur, date: daysAgo(age) },
+      });
+      await db.expense.create({
+        data: { id: `${P}expN2_usd_${idx}`, businessId: bizN2, description: `V34A N2 USD ${idx}`, amount: 4000, currency: 'USD', date: daysAgo(age) },
+      });
+    }
+
+    // O: TTD 500 cash, TTD 1800 past burn (= TTD 300/month -> ~1.7m runway < 3m) + future-dated
+    // TTD 60000 scheduled expense (now + 30 days).
+    await openAccount(bizO, 'V34A Till O', 'CASH', 'CASH', 500);
+    for (const [idx, age] of [[1, 35], [2, 55], [3, 75]] as const) {
+      await db.expense.create({
+        data: { id: `${P}expO_past_${idx}`, businessId: bizO, description: `V34A O past ${idx}`, amount: 600, currency: 'TTD', date: daysAgo(age) },
+      });
+    }
+    await db.expense.create({
+      data: {
+        id: `${P}expO_future`,
+        businessId: bizO,
+        description: 'V34A O scheduled future bill',
+        amount: 60000,
+        currency: 'TTD',
+        date: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+      },
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    if (redis) {
+      for (const biz of [bizN, bizN2, bizO]) {
+        await redis.del(overviewKey(biz)).catch(() => undefined);
+      }
+    }
+  });
+
+  it('CP-30 (plan CP-24, D-135) RED-BEFORE: TTD business with TTD burn + USD expenses computes overview LOW_RUNWAY, FIN_CASHFLOW_RISK, and Protect cash runway from TTD burn only and names USD expenses unconverted without echoing non-code labels', async () => {
+    // Regime A (bizN): TTD 1000 cash, TTD 300/mo burn (3.3m / 50d) + USD 2000/mo expenses.
+    // TTD-only runway is safe -> no false alarms in any of the three readers.
+    if (redis) await redis.del(overviewKey(bizN)).catch(() => undefined);
+    const ovN = await overviewRoute(bizN, ownerN);
+    expect(ovN.status, JSON.stringify(ovN.body).slice(0, 300)).toBe(200);
+    expect(ovN.body.cashRunwayMonths).toBe(3.3);
+    expect((ovN.body.actions ?? []).filter((a: any) => a.type === 'LOW_RUNWAY')).toEqual([]);
+
+    await intel.scan(bizN);
+    expect(await cashRiskRows(bizN)).toEqual([]);
+
+    const mmN = await moneyMovesRoute(bizN, ownerN);
+    expect(mmN.status, JSON.stringify(mmN.body).slice(0, 300)).toBe(200);
+    expect((mmN.body ?? []).filter((m: any) => m.title === 'Protect cash runway')).toEqual([]);
+
+    // Regime B (bizN2): TTD 1000 cash, TTD 1200/mo burn (0.8m / 13d) + USD 12000 total (USD 2000/mo).
+    // All three alarms fire from TTD burn alone and name USD 12000.00 unconverted.
+    if (redis) await redis.del(overviewKey(bizN2)).catch(() => undefined);
+    const ovN2 = await overviewRoute(bizN2, ownerN2);
+    expect(ovN2.status, JSON.stringify(ovN2.body).slice(0, 300)).toBe(200);
+    expect(ovN2.body.cashRunwayMonths).toBe(0.8);
+    const lowRunway = (ovN2.body.actions ?? []).find((a: any) => a.type === 'LOW_RUNWAY');
+    expect(lowRunway).toBeDefined();
+    expect(lowRunway.detail).toBe(
+      '~0.8 months at current burn (TTD burn only). Expenses not counted: USD 12000.00.',
+    );
+
+    mirrored.length = 0;
+    await intel.scan(bizN2);
+    const riskRows = await cashRiskRows(bizN2);
+    expect(riskRows.length).toBe(1);
+    expect(riskRows[0].title).toBe('Low cash runway — ~13 days');
+    expect(riskRows[0].body).toBe(
+      'Cash 1000.00 against 80.00/day burn (90-day average). Runway is under 30 days. (TTD burn only). Expenses not counted: USD 12000.00.',
+    );
+    expect(riskRows[0].evidence).toMatchObject({
+      cash: 1000,
+      dailyBurn: 80,
+      days: 13,
+      cashCurrency: 'TTD',
+      otherCurrencyExpenses: [{ currency: 'USD', amount: 12000 }],
+    });
+    const mirrorN2 = mirrored.filter((m) => m.businessId === bizN2 && m.type === 'FIN_CASHFLOW_RISK');
+    expect(mirrorN2.map((m) => [m.title, m.detail, m.amountAtRisk, m.priority])).toEqual([
+      ['Low cash runway — ~13 days', riskRows[0].body, 1000, 1],
+    ]);
+    // Command-spine copy (read outside revenue:read) never leaks other-currency figures or codes.
+    const cmds = await commandRows(bizN2);
+    expect(cmds.length).toBe(1);
+    expect(cmds[0].description).toBe(
+      'Cash 1000.00 against 80.00/day burn (90-day average). Runway is under 30 days. (TTD burn only). Expenses in other currencies are not counted (amounts not shown here).',
+    );
+    expect(cmds[0].description).not.toMatch(/USD|12000/);
+
+    const mmN2 = await moneyMovesRoute(bizN2, ownerN2);
+    expect(mmN2.status).toBe(200);
+    const moveN2 = (mmN2.body ?? []).find((m: any) => m.title === 'Protect cash runway');
+    expect(moveN2).toBeDefined();
+    expect(moveN2.summary).toBe(
+      'Runway is ~0.8 months. Reducing burn or increasing collections is urgent. (TTD burn only). Expenses not counted: USD 12000.00.',
+    );
+
+    // SEC-W10LR-1: a non-code expense currency label is counted, never echoed.
+    const injectedExp = await db.expense.create({
+      data: { id: `${P}expN2_inj`, businessId: bizN2, description: 'V34A injected', amount: 50, currency: INJECTED, date: daysAgo(40) },
+    });
+    try {
+      if (redis) await redis.del(overviewKey(bizN2)).catch(() => undefined);
+      const ovInj = await overviewRoute(bizN2, ownerN2);
+      const lowInj = (ovInj.body.actions ?? []).find((a: any) => a.type === 'LOW_RUNWAY');
+      expect(lowInj.detail).toContain('1 amount held under a label that is not a currency code (label not shown)');
+      expect(lowInj.detail).not.toMatch(/URGENT|WIRE|4242/);
+
+      await intel.scan(bizN2);
+      const riskInj = await cashRiskRows(bizN2);
+      expect(riskInj[0].body).toContain('1 amount held under a label that is not a currency code (label not shown)');
+      expect(riskInj[0].evidence).toMatchObject({ otherCurrencyExpensesNotListed: 1 });
+      expect(JSON.stringify(riskInj[0])).not.toMatch(/URGENT|WIRE|4242/);
+
+      const mmInj = await moneyMovesRoute(bizN2, ownerN2);
+      const moveInj = (mmInj.body ?? []).find((m: any) => m.title === 'Protect cash runway');
+      expect(moveInj.summary).toContain('1 amount held under a label that is not a currency code (label not shown)');
+      expect(moveInj.summary).not.toMatch(/URGENT|WIRE|4242/);
+    } finally {
+      await db.expense.delete({ where: { id: injectedExp.id } });
+    }
+  }, 120_000);
+
+  it("CP-31 (plan CP-25) RED-BEFORE: a future-dated expense does not change the 'Protect cash runway' money move's runway", async () => {
+    const res = await moneyMovesRoute(bizO, ownerO);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    const move = (res.body ?? []).find((m: any) => m.title === 'Protect cash runway');
+    expect(move).toBeDefined();
+    // Past burn is TTD 1800 / 6 = 300/mo; cash is TTD 500 -> ~1.7 months (future 60,000 ignored).
+    expect(move.summary).toBe(
+      'Runway is ~1.7 months. Reducing burn or increasing collections is urgent.',
+    );
+
+    // Control: with TTD 1000 cash (3.3 months past runway), the future TTD 60,000 expense does
+    // not falsely trigger Protect cash runway.
+    await post(bizO, 'o_topup', 500, 'CASH', 'OWNER_EQUITY', 'INCOME');
+    try {
+      const resSafe = await moneyMovesRoute(bizO, ownerO);
+      expect(resSafe.status).toBe(200);
+      expect((resSafe.body ?? []).filter((m: any) => m.title === 'Protect cash runway')).toEqual([]);
+    } finally {
+      await db.ledgerEntry.deleteMany({ where: { businessId: bizO, transactionId: `${P}o_topup` } });
+      await db.financialTransaction.deleteMany({ where: { businessId: bizO, id: `${P}o_topup` } });
+    }
+  }, 60_000);
 });

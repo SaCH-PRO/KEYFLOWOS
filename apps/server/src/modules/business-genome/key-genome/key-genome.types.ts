@@ -379,6 +379,12 @@ export interface GenerateGenomeRecommendationsInput {
   businessId: string;
   sources?: GenomeRecommendationSource[];
   maxRecommendations?: number;
+  /**
+   * W11-GENOME-RECS-DOMAIN (D-128): false when the requesting member lacks
+   * `revenue:write`; prevents creating FINANCIAL/money recommendations or
+   * experiments from finance signals/readiness gaps/weak sections.
+   */
+  allowFinance?: boolean;
 }
 
 export interface CreateGenomeExperimentInput {
@@ -1466,6 +1472,8 @@ export interface GenomeRecommendationRankingOptions {
   includeRiskWeightedOnly?: boolean;
   maxEffortLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
   minConfidence?: number;
+  /** W11-GENOME-RECS-DOMAIN (D-128): false when caller lacks `revenue:write`. */
+  allowFinance?: boolean;
 }
 
 export interface GenomeRecommendationRankingResult {

@@ -1342,7 +1342,14 @@ async function giveUsdStoreOwnPaypal(): Promise<void> {
   });
   await db.business.update({
     where: { id: ID.bizUsd },
-    data: { metaData: { ...(metaData ?? {}), paypalClientId: `${P}own_paypal_client_16`, paypalClientSecret: `${P}own_paypal_secret_16` } },
+    data: {
+      metaData: {
+        ...(metaData ?? {}),
+        paypalClientId: `${P}own_paypal_client_16`,
+        paypalClientSecret: `${P}own_paypal_secret_16`,
+        paypalWebhookId: `${P}own_paypal_webhook_16`,
+      },
+    },
   });
 }
 
@@ -1493,7 +1500,11 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
    * need them (obviously fake values). No case here configures PayPal or Stripe through the platform env: whether the
    * platform's credentials may stand in for a store's own awaits an owner ruling (SEC-W11SCM-1, a D-105 analogue).
    */
-  const OWN_PAYPAL = { paypalClientId: `${P}own_paypal_client_fake`, paypalClientSecret: `${P}own_paypal_secret_fake` };
+  const OWN_PAYPAL = {
+    paypalClientId: `${P}own_paypal_client_fake`,
+    paypalClientSecret: `${P}own_paypal_secret_fake`,
+    paypalWebhookId: `${P}own_paypal_webhook_fake`,
+  };
   const OWN_STRIPE = {
     stripePublishableKey: `${P}own_stripe_publishable_fake`,
     stripeSecretKey: `${P}own_stripe_secret_fake`,

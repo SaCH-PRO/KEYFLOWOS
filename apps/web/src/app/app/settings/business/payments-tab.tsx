@@ -29,7 +29,7 @@ import { InfoBadge } from "@/components/ui/info-badge";
  * with Replace and Remove, and on save sends a secret only when the user typed
  * a new one (null for Remove). A secret it does not send stays as stored.
  */
-const SECRET_KEYS = ["wipayApiKey", "paypalClientSecret", "stripeSecretKey", "stripeWebhookSecret"] as const;
+const SECRET_KEYS = ["wipayApiKey", "paypalClientSecret", "paypalWebhookId", "stripeSecretKey", "stripeWebhookSecret"] as const;
 type SecretKey = (typeof SECRET_KEYS)[number];
 
 type SecretState = {
@@ -49,6 +49,7 @@ function emptySecrets(): Record<SecretKey, SecretState> {
   return {
     wipayApiKey: { ...emptySecret },
     paypalClientSecret: { ...emptySecret },
+    paypalWebhookId: { ...emptySecret },
     stripeSecretKey: { ...emptySecret },
     stripeWebhookSecret: { ...emptySecret },
   };
@@ -588,9 +589,9 @@ export function PaymentsTab() {
         : "disabled";
 
   const paypalStatus: "connected" | "partial" | "disabled" =
-    settings.paypalClientId && hasSecret("paypalClientSecret")
+    settings.paypalClientId && hasSecret("paypalClientSecret") && hasSecret("paypalWebhookId")
       ? "connected"
-      : settings.paypalClientId || hasSecret("paypalClientSecret")
+      : settings.paypalClientId || hasSecret("paypalClientSecret") || hasSecret("paypalWebhookId")
         ? "partial"
         : "disabled";
 
@@ -731,6 +732,12 @@ export function PaymentsTab() {
             {...secretFieldProps("paypalClientSecret")}
             placeholder="PayPal client secret"
             hint="Keep this secret — it authenticates your app with PayPal's API."
+          />
+          <WriteOnlySecretField
+            label="Webhook ID"
+            {...secretFieldProps("paypalWebhookId")}
+            placeholder="PayPal webhook ID"
+            hint="From PayPal Developer Portal → My Apps & Credentials → Webhooks. Required to verify and settle storefront PayPal payments."
           />
         </div>
       </PaymentCard>
