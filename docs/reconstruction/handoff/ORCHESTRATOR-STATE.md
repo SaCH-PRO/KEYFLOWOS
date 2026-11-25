@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~21:05 UTC by the acting orchestrator (second-lane account, Claude Code), right after M18
-merged; main `6f67c91e`. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~21:45 UTC by the acting orchestrator (second-lane account, Claude Code), while wave M20
+is assembled; main `6f67c91e`. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -101,23 +101,35 @@ Antigravity's M25 is gathering P87, P88, P89, P91, P92 and P93. P90 is blocked o
 - Both wave confirmations were CONFIRMED.
 - A first base comparison flagged H2 desktop and B4 phone. Re-run 3× at head and base, both proved intermittent on main as well: head 10/12, main 5/12 (PR #250 comments).
 
-**Claude packets in flight.** Every one of them goes into the next Claude wave once it is RETURNed.
+**Wave M20 (Claude): assembled, proof next.** Branch `wave/v1-wave-m20` on main `6f67c91e`: 7 commits, 27 files before docs. The only 3-way merge is `lib/client.ts` (refund + M18), checked as an exact union.
+
+| Packet | RETURN (#80) | Head |
+| --- | --- | --- |
+| P85 SWP-INV-REFUND-UI | 7175340837 | `5fa6b6ae` |
+| FU-UNDO-TOAST-SIGNOUT | 7175196432 | `17cff05b` |
+| P94 SWP-CRM-WEB-POLISH | 7175227657 | `4e7dff7d` |
+| FU-E2E-MOCKED-SESSION-TOKEN | 7174808551 | `364e7074` |
+
+Next for M20:
+1. Wave proof: the server (unchanged), the web, mocked, and live (release0, Journey C, E10, the refund/toast/CRM sweeps). Run a base comparison on main.
+2. Open the PR and get two wave confirmations.
+3. Enqueue.
+4. Flag the refund scope extension (WiPay "Record refund", Stripe/PayPal link) in the PR.
+
+**Claude packets still in flight** (they go to the wave after M20):
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **SWP-INV-REFUND-UI** (P85, crit. path #1) | `pkt/V1-SWP-INV-REFUND-UI` @ `a1ab2d8a` | Repair round 1 done. Refund is offered by server-built manual id shape, not provider; WiPay gets "Record refund" (out of band); Stripe/PayPal link to the gateway refund. Security confirmation CONFIRMED (minor R-1: a WiPay-paid store order's invoice refund leaves the order PAID). Correctness confirmation running (agent a87a10720ea39eeb8). | On CONFIRMED: RETURN. R-1 is a follow-up or owner question |
-| **CATALOG-1 web** (P86, P0) | `pkt/V1-CATALOG-1-WEB` @ `b3e6567d` | Both lenses ACCEPT WITH FOLLOW-UPS. Repair round 1 is in progress (worker a9dd428130de87b49): scope gating, bulk archive confirm, https-only image link, business-switch reload, PRODUCT default, product currency on edit, all pages loaded, forwarded fields, count parity with /book, Products door on Sales (commerce/page.tsx, allowed under CHECKLISTS B line 59; proof:release0 at the wave), /app/templates "already applied" | Confirmations, RETURN |
-| **FU-CONTACT-SEND-QUOTE-DOOR** | `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` @ `4d99b534` | Both lenses ACCEPT WITH FOLLOW-UPS. Repair round 1 sent (cloud session_01TnVBvEZbY4vXtvn1Rwe3fk): gate on revenue write, encode contactId on the other doors, remove the dead listener | Confirmations, RETURN |
-| **FU-UNDO-TOAST-SIGNOUT** | `pkt/V1-FU-UNDO-TOAST-SIGNOUT` @ `aeb8608b` (RED for item 2) | Correctness REPAIR (a weak keep-check, fixed at 6691dd4c) plus both lenses' late-toast finding. Ruling: CONF-P37-1 is superseded by the stricter no-toast pin (#80 7174351286). Cloud session_01TnVBvDxNUYEcwZ9waPUH4z is finishing | Round-2 report, then confirmations |
-| **FU-E2E-MOCKED-SESSION-TOKEN** | `pkt/V1-FU-E2E-MOCKED-SESSION-TOKEN` @ `faea7a1c` | Security ACCEPT WITH FOLLOW-UPS (add the spec to CI's mocked list as a follow-up; check the redirect hop). Correctness review running (agent afb0e8c6873e5349f) | Repair round, then RETURN |
-| **P67 FU-TIMELINE-LOAD-OLDER** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` @ `8bbd3d6f` | Two reviews running (agents a01c8d7712f5f7225, ab47df79ddf6a2852) | Repair or RETURN |
-| **P94 SWP-CRM-WEB-POLISH** | `pkt/V1-SWP-CRM-WEB-POLISH` @ `769f8933` | BUG-080/130/082 done. C8 is split to its own packet (owner question 53). Two reviews running (agents a0216d7fa63f582db, a2be113e8926baeb3) | Repair or RETURN |
+| **FU-CONTACT-SEND-QUOTE-DOOR** | `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` @ `0d4b9795` | Both lenses CONFIRMED round 3. Round 4 sent (cloud session_01TnVBvEZbY4vXtvn1Rwe3fk): pin the businessId check in useOffersQuote, and gate the next-action Send Quote on revenue write | Confirmations (agents af2a8caf27fa27f67 sec, a0fdabde685c8842f cor), RETURN |
+| **CATALOG-1 web** (P86, P0) | `pkt/V1-CATALOG-1-WEB` @ `b3e6567d` + repair | Repair round 1 in progress (worker a9dd428130de87b49, worktree wt-catalog, ports 3201/5400) | Confirmations (a8fbb482df73fd590 sec, a13fd66b7ba630c7c cor), RETURN |
+| **P67 FU-TIMELINE-LOAD-OLDER** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` @ `8bbd3d6f` + repair | Repair round 1 sent (cloud session_01TnVBvEKF6S66iYNwT5nAqe): real page validation, stale first-page pin, guard pin, 4xx cursor, business switch | Confirmations (a01c8d7712f5f7225 sec, ab47df79ddf6a2852 cor), RETURN |
+| **P95 OWNER-ALERTS-WEB** | `pkt/V1-OWNER-ALERTS-WEB` @ `3b392515` (claim, main `6f67c91e`) | Building (cloud session_01TnVBvJUNNMJKxwjseFmpYf). BUG-068 may already be fixed by P62; no staging | Two reviews |
+| **FU-NOTIFICATIONS-PAGE-REFUSED** | `pkt/V1-FU-NOTIFICATIONS-PAGE-REFUSED` @ `a0d744f4` (claim) | Building (cloud session_01TnVBvE2ehdmAcXkhkSmph3). Shares settings/notifications/page.tsx with P95 | Two reviews |
 
-If any of those agents or sessions is gone, start fresh reviewers on the branch head with ACCEPTANCE-REVIEW-BRIEF.md (or CONFIRMATION-REVIEW-BRIEF.md for a delta). The worker's report is on #80.
+If an agent or session is gone, start fresh reviewers on the branch head with ACCEPTANCE-REVIEW-BRIEF.md, or CONFIRMATION-REVIEW-BRIEF.md for a delta. Every worker report is on #80.
 
 **Queue:**
 - **Owner-gated:** RR-OWNER-RULINGS-RECORD (docs; it records the answers to OQ-5/13/19/30 and two RR migrations).
-- **Now free:** OWNER-ALERTS-WEB, FU-NOTIFICATIONS-PAGE-REFUSED.
 - **After Antigravity's M25:** SWP-KEY-SHELL-SMOKE web (needs P89).
 - **After the server lane:** EXPENSES-HUB-1 web, CLAIM-LOOP web (after DECIMALS-SERVER), TODAY-4BLOCK.
 
@@ -190,9 +202,10 @@ Main is at `6f67c91e`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **Claude packets** | the seven in section 0 | Review or repair rounds | RETURN each, then wave M20 (Claude) |
+| **M20 (Claude)** | `wave/v1-wave-m20` | Assembled (4 packets) | Wave proof, PR, enqueue |
+| **Claude packets** | the five in section 0 | Repair, confirmation or building | RETURN, then the next wave |
 | **Antigravity** | M25: P87, P88, P89, P91, P92, P93; P90 blocked (question 52) | Building | Their wave |
-| **Owner** | - | - | Section 4 questions 40-54; production redeploy (D-266) |
+| **Owner** | - | - | Section 4 questions 40-55; production redeploy (D-266) |
 | `wave/v1-docs-p19` | main 6f67c91e merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -348,6 +361,7 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 
     C8 is also red on desktop. Reordering alone gets the row to y≈720 at best. Should a contacts-screen layout packet put the list first on phones (and what on desktop)? (Default: split C8 into its own packet; P94 ships without it; #80 7174372256.)
 54. **Journey B1 asks for Tax and Stock fields when creating a product.** The product model has neither: stock lives in InventoryStock, and there is no tax field. Add them (a server packet), or change B1? (Default: B1 stays red on those two fields until you rule.)
+55. **WiPay refunds and storefront orders (with 51).** The refund screen (P85) lets an owner record a WiPay payment as refunded outside KeyFlow, because WiPay has no refund API (D-121). On a storefront order's checkout invoice this refunds the invoice payment, but the order stays PAID until someone uses the order refund. That is money-safe: the order refund tolerates the 409. The web cannot route this, because the invoice has no structured order link. Options: refuse on checkout invoices (needs a server link), route to the order refund, or keep as is. Also: is "Record refund" for WiPay the v1 door you want? (Default: keep as built.)
 
 ## 5. How to work here (learned the hard way)
 
