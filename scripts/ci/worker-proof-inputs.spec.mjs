@@ -347,8 +347,10 @@ function repo({ withGate = true } = {}) {
   return { dir, base, write };
 }
 
+/** The gate the checkout carries (as the workflow runs it), or the real one when the checkout has none. */
 function cli(dir, args) {
-  const r = spawnSync(process.execPath, [GATE, ...args], { cwd: dir, encoding: 'utf8' });
+  const own = path.join(dir, 'scripts/ci/worker-proof-inputs.mjs');
+  const r = spawnSync(process.execPath, [fs.existsSync(own) ? own : GATE, ...args], { cwd: dir, encoding: 'utf8' });
   return { ...r, decision: r.status === 0 && args.includes('--json') ? JSON.parse(r.stdout) : null };
 }
 
@@ -601,12 +603,16 @@ describe('worker proof input list: completeness (every file the suites read is a
     const list = loadInputs(LIST);
     const manifest = parseYaml(fs.readFileSync(path.join(ROOT, 'scripts/agent-control/negative-controls.yaml'), 'utf8'));
     const missing = [];
+    let named = 0;
     for (const c of manifest.negative_controls) {
       if (!inputFor(c.mutation.file, list)) missing.push(`${c.id}: mutation.file ${c.mutation.file}`);
-      for (const m of c.proof_command.matchAll(/\S+\.(?:mjs|js|ps1|ya?ml|json|md)\b/g)) {
-        if (!inputFor(m[0], list)) missing.push(`${c.id}: proof_command names ${m[0]}`);
+      // Path arguments only: a --test-name-pattern="..." value names a test, not a file.
+      for (const m of c.proof_command.matchAll(/(?:^|\s)([^\s"'=]+\/[^\s"']+\.(?:mjs|js|ps1|ya?ml|json|md))(?=\s|$)/g)) {
+        named += 1;
+        if (!inputFor(m[1], list)) missing.push(`${c.id}: proof_command names ${m[1]}`);
       }
     }
+    assert.ok(named >= manifest.negative_controls.length, `every proof command names its spec (${named} paths found)`);
     assert.deepEqual(missing, []);
   });
 
