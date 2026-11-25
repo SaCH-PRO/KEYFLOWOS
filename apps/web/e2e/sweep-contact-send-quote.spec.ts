@@ -26,6 +26,10 @@ import { test, expect, API_URL, memberOf, signedInContext, type Tenant } from ".
  * Quick actions, as the WhatsApp sheet offers New quote only to one who may write quotes; the card's other actions stay.
  * RED at the base, where every member is offered it.
  *
+ * Round 4 (review SEC-SQD-4): the same member is not offered the next-action Send Quote either. Their next actions
+ * (GET .../next-actions answered by page.route, as in the owner's next-action case) hold a send_quote and a follow_up
+ * for the seeded customer: the Follow Up is shown, the Send Quote is not.
+ *
  * Live only (E2E_LIVE=1, a production build, a real API and database: the journey harness's own fixtures, README in
  * e2e/journeys); without E2E_LIVE every case is skipped. Run it in the "chromium" project:
  *
@@ -94,6 +98,30 @@ for (const width of [375, 768, 1024, 1440]) {
       await expect(memberPage.getByRole("menuitem", { name: /^book appointment$/i })).toBeVisible();
       // The member's access is read by the screen; once it is answered the door is not offered.
       await expect(memberPage.getByRole("menuitem", { name: /^send quote$/i })).toHaveCount(0, { timeout: 15_000 });
+    });
+
+    test(`a member with revenue read is not offered the next-action Send Quote (${width})`, async ({ browser, request, owner }) => {
+      test.setTimeout(3 * 60_000);
+      const c = await seedCustomer(request, owner);
+      const name = `${c.first} ${c.last}`;
+      const member = await memberOf(request, owner, "next quote reader", { role: "STAFF", scopes: { crm: "write", revenue: "read" } });
+      const context = await signedInContext(browser, member, { viewport: { width, height: width < 768 ? 812 : 900 } });
+      const memberPage = await context.newPage();
+      await memberPage.route(new RegExp(`/crm/businesses/${owner.businessId}/next-actions(\\?.*)?$`), (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify([
+                { id: `sendquote_${c.id}`, type: "send_quote", contactId: c.id, contactName: name, description: "Prospect for 9d with no quote — prepare proposal", estimatedTime: 45, priority: "high" },
+                { id: `followup_${c.id}`, type: "follow_up", contactId: c.id, contactName: name, description: "No touch in 21d — check in", estimatedTime: 15, priority: "high" },
+              ]),
+            })
+          : route.continue(),
+      );
+      await memberPage.goto("/app/crm/contacts");
+      await expect(memberPage.getByTitle(`Follow Up — ${name}`).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+      await expect(memberPage.getByTitle(`Send Quote — ${name}`)).toHaveCount(0, { timeout: 15_000 });
     });
 
     test(`Next action > Send Quote opens New Quote for that customer (${width})`, async ({ page, request, owner }) => {
