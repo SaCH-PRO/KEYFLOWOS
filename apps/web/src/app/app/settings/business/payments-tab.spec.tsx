@@ -25,11 +25,12 @@ import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-li
 import { PaymentsTab } from "./payments-tab";
 
 const BUSINESS = "biz_sec2c";
-const SECRET_KEYS = ["stripeSecretKey", "stripeWebhookSecret", "paypalClientSecret", "wipayApiKey"] as const;
+const SECRET_KEYS = ["stripeSecretKey", "stripeWebhookSecret", "paypalClientSecret", "paypalWebhookId", "wipayApiKey"] as const;
 const PLAINTEXT = {
   stripeSecretKey: "sk_live_SEC2C_STRIPE_SECRET_91ab",
   stripeWebhookSecret: "whsec_SEC2C_WEBHOOK_SECRET_44cd",
   paypalClientSecret: "SEC2C_PAYPAL_SECRET_7e0f",
+  paypalWebhookId: "SEC2C_PAYPAL_WEBHOOK_5a1b",
   wipayApiKey: "SEC2C_WIPAY_KEY_2b3a",
 };
 const MASKED = { configured: true };
@@ -121,17 +122,17 @@ describe("payments tab: payment provider secrets are write-only (R0-SEC2c)", () 
 
   it("[SEC2c-UI02] RED-BEFORE: a {configured:true} marker shows 'Configured' with a Replace and a Remove control for each secret, the gateways read as connected, and a save omits every secret (the stored ones stay)", async () => {
     const { patches } = stubServer({
-      stripeSecretKey: MASKED, stripeWebhookSecret: MASKED, paypalClientSecret: MASKED, wipayApiKey: MASKED, ...PUBLIC_META,
+      stripeSecretKey: MASKED, stripeWebhookSecret: MASKED, paypalClientSecret: MASKED, paypalWebhookId: MASKED, wipayApiKey: MASKED, ...PUBLIC_META,
     });
     render(<PaymentsTab />);
     await openGatewayCards();
 
-    expect(await screen.findAllByText("Configured")).toHaveLength(4);
-    for (const label of ["Secret Key", "Webhook Signing Secret", "Client Secret", "API Key (Developer ID)"]) {
+    expect(await screen.findAllByText("Configured")).toHaveLength(5);
+    for (const label of ["Secret Key", "Webhook Signing Secret", "Client Secret", "Webhook ID", "API Key (Developer ID)"]) {
       expect(screen.getByRole("button", { name: `Replace ${label}` })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: `Remove ${label}` })).toBeInTheDocument();
     }
-    // Stripe (publishable + both secrets), PayPal (id + secret) and WiPay (key + account) are complete.
+    // Stripe (publishable + both secrets), PayPal (id + secret + webhook id) and WiPay (key + account) are complete.
     expect(screen.getAllByText("Connected")).toHaveLength(3);
 
     await save();
@@ -140,9 +141,9 @@ describe("payments tab: payment provider secrets are write-only (R0-SEC2c)", () 
     expect(patches[0].metaData.stripePublishableKey).toBe(PUBLIC_META.stripePublishableKey);
   });
 
-  it("[SEC2c-UI03] Replace: the user types a new Stripe secret key; the save sends that one secret and omits the other three, and the typed value leaves the page", async () => {
+  it("[SEC2c-UI03] Replace: the user types a new Stripe secret key; the save sends that one secret and omits the other four, and the typed value leaves the page", async () => {
     const { patches } = stubServer({
-      stripeSecretKey: MASKED, stripeWebhookSecret: MASKED, paypalClientSecret: MASKED, wipayApiKey: MASKED, ...PUBLIC_META,
+      stripeSecretKey: MASKED, stripeWebhookSecret: MASKED, paypalClientSecret: MASKED, paypalWebhookId: MASKED, wipayApiKey: MASKED, ...PUBLIC_META,
     });
     render(<PaymentsTab />);
     await openGatewayCards();
@@ -158,12 +159,12 @@ describe("payments tab: payment provider secrets are write-only (R0-SEC2c)", () 
     for (const k of SECRET_KEYS.filter((s) => s !== "stripeSecretKey")) expect(patches[0].metaData).not.toHaveProperty(k);
     // Saved: the field is back to 'Configured', the typed secret is not kept in an input.
     await waitFor(() => expect(inputValues()).not.toContain("sk_live_brand_new"));
-    expect(screen.getAllByText("Configured")).toHaveLength(4);
+    expect(screen.getAllByText("Configured")).toHaveLength(5);
   });
 
   it("[SEC2c-UI04] Remove: an explicit clear sends null for that secret only; the gateway then reads as partial", async () => {
     const { patches } = stubServer({
-      stripeSecretKey: MASKED, stripeWebhookSecret: MASKED, paypalClientSecret: MASKED, wipayApiKey: MASKED, ...PUBLIC_META,
+      stripeSecretKey: MASKED, stripeWebhookSecret: MASKED, paypalClientSecret: MASKED, paypalWebhookId: MASKED, wipayApiKey: MASKED, ...PUBLIC_META,
     });
     render(<PaymentsTab />);
     await openGatewayCards();
@@ -175,7 +176,7 @@ describe("payments tab: payment provider secrets are write-only (R0-SEC2c)", () 
     expect(patches).toHaveLength(1);
     expect(patches[0].metaData).toHaveProperty("paypalClientSecret", null);
     for (const k of SECRET_KEYS.filter((s) => s !== "paypalClientSecret")) expect(patches[0].metaData).not.toHaveProperty(k);
-    expect(screen.getAllByText("Configured")).toHaveLength(3);
+    expect(screen.getAllByText("Configured")).toHaveLength(4);
     expect(screen.getAllByText("Connected")).toHaveLength(2);
   });
 
@@ -195,6 +196,27 @@ describe("payments tab: payment provider secrets are write-only (R0-SEC2c)", () 
     for (const k of SECRET_KEYS.filter((s) => s !== "wipayApiKey")) expect(patches[0].metaData).not.toHaveProperty(k);
     const card = screen.getByText("Card Payments (WiPay)").closest("button") as HTMLElement;
     expect(within(card).getByText("Connected")).toBeInTheDocument();
+  });
+
+  it("[W1F-SP-UI01] (W1F-STORE-PAYPAL, OPK-COR-2): PayPal without Webhook ID reads as Partial; typing a Webhook ID saves it write-only, marks PayPal Connected, and clears the input", async () => {
+    const { patches } = stubServer({ paypalClientSecret: MASKED, ...PUBLIC_META });
+    render(<PaymentsTab />);
+    fireEvent.click(await screen.findByText("PayPal"));
+
+    const card = screen.getByText("PayPal").closest("button") as HTMLElement;
+    await waitFor(() => expect(within(card).getByText("Partial")).toBeInTheDocument());
+
+    const whInput = screen.getByLabelText("Webhook ID") as HTMLInputElement;
+    expect(whInput.value).toBe("");
+    fireEvent.change(whInput, { target: { value: "WH-LIVE-PAYPAL-99" } });
+
+    await save();
+    expect(patches).toHaveLength(1);
+    expect(patches[0].metaData.paypalWebhookId).toBe("WH-LIVE-PAYPAL-99");
+    expect(patches[0].metaData).not.toHaveProperty("paypalClientSecret");
+    await waitFor(() => expect(inputValues()).not.toContain("WH-LIVE-PAYPAL-99"));
+    expect(within(card).getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace Webhook ID" })).toBeInTheDocument();
   });
 });
 
