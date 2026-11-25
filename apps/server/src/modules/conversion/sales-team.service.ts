@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 
@@ -114,6 +115,7 @@ export class SalesTeamService {
     const contacts = await this.prisma.client.contact.findMany({
       where: {
         businessId,
+        deletedAt: null,
         custom: { path: ['salesRepId'], equals: repId },
       },
       select: {
@@ -130,10 +132,10 @@ export class SalesTeamService {
     const result = [];
     for (const c of contacts) {
       const openDeals = await this.prisma.client.invoice.count({
-        where: { businessId, contactId: c.id, status: { in: ['SENT', 'OVERDUE'] } },
+        where: { businessId, contactId: c.id, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
       });
       const paidDeals = await this.prisma.client.invoice.count({
-        where: { businessId, contactId: c.id, status: 'PAID' },
+        where: { businessId, contactId: c.id, deletedAt: null, status: 'PAID' },
       });
       const custom = (c.custom as Record<string, any>) ?? {};
       result.push({

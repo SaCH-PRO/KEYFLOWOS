@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES } from '../../commerce/commerce-stats.service';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { CommerceService } from '../../commerce/commerce.service';
@@ -266,14 +267,14 @@ export class CommerceAdapterService {
     const result = await this.commerce.listInvoices(input.businessId, 1, input.limit ?? 200);
     let rows = (result as { data?: Array<{ status?: string; contactId?: string; dueDate?: string | Date }> }).data ?? [];
     rows = rows.filter((inv) =>
-      ['SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(inv.status ?? ''),
+      OPEN_RECEIVABLE_STATUSES.has(inv.status ?? ''),
     );
     if (input.contactId) {
       rows = rows.filter((inv) => inv.contactId === input.contactId);
     }
     if (input.overdueOnly) {
       const now = new Date();
-      rows = rows.filter((inv) => inv.dueDate && new Date(inv.dueDate) < now);
+      rows = rows.filter((inv) => inv.status === 'OVERDUE' || (inv.dueDate && new Date(inv.dueDate) < now));
     }
     return rows;
   }

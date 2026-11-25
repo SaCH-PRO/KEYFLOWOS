@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 interface FlowPhase {
@@ -185,8 +186,8 @@ export class FlowService {
     const leads = contacts.filter(c => c.status === 'LEAD');
     const activeLeads = leads.length;
     const totalContacts = contacts.length;
-    const pendingInvoices = invoices.filter(i => i.status === 'SENT' || i.status === 'DRAFT').length;
-    const overdueInvoices = invoices.filter(i => i.status === 'OVERDUE' || (i.status === 'SENT' && i.dueDate && new Date(i.dueDate) < now)).length;
+    const pendingInvoices = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).length;
+    const overdueInvoices = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status) && (i.status === 'OVERDUE' || (i.dueDate && new Date(i.dueDate) < now))).length;
     const upcomingBookings = bookings.filter(b => new Date(b.startTime) > now && b.status !== 'CANCELLED').length;
 
     const paidInvoicesThisMonth = invoices.filter(i => i.status === 'PAID' && i.paidAt && new Date(i.paidAt) >= startOfMonth);
@@ -205,7 +206,7 @@ export class FlowService {
       { name: 'Leads', count: activeLeads, value: activeLeads * 100, trend: 'stable' },
       { name: 'Quotes Sent', count: quotes.filter(q => q.status === 'SENT').length, value: quotes.filter(q => q.status === 'SENT').reduce((s, q) => s + q.total, 0), trend: 'stable' },
       { name: 'Accepted', count: quotes.filter(q => q.status === 'ACCEPTED').length, value: quotes.filter(q => q.status === 'ACCEPTED').reduce((s, q) => s + q.total, 0), trend: 'up' },
-      { name: 'Invoiced', count: invoices.filter(i => i.status === 'SENT').length, value: invoices.filter(i => i.status === 'SENT').reduce((s, i) => s + i.total, 0), trend: 'stable' },
+      { name: 'Invoiced', count: invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).length, value: invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).reduce((s, i) => s + i.total, 0), trend: 'stable' },
       { name: 'Paid', count: paidInvoicesThisMonth.length, value: monthlyRevenue, trend: 'up' },
     ];
 

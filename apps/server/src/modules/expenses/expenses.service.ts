@@ -1,4 +1,5 @@
 import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -1026,7 +1027,7 @@ export class ExpensesService {
         select: { amount: true, projectId: true, contactId: true, serviceId: true, isRecurring: true, categoryId: true },
       }),
       this.prisma.client.invoice.findMany({
-        where: { businessId, deletedAt: null, status: { in: ['PAID', 'SENT', 'OVERDUE'] }, issueDate: { gte: startDate, lte: endDate } },
+        where: { businessId, deletedAt: null, status: { in: ['PAID', ...OPEN_RECEIVABLE_STATUS_LIST] }, issueDate: { gte: startDate, lte: endDate } },
         select: { total: true, status: true, contactId: true },
       }),
     ]);
@@ -1107,7 +1108,7 @@ export class ExpensesService {
       if (productIds.length > 0) {
         const svcInvoiceItems = await this.prisma.client.invoiceItem.findMany({
           where: {
-            invoice: { businessId, issueDate: { gte: startDate, lte: endDate }, status: { in: ['PAID', 'SENT', 'OVERDUE'] } },
+            invoice: { businessId, deletedAt: null, issueDate: { gte: startDate, lte: endDate }, status: { in: ['PAID', ...OPEN_RECEIVABLE_STATUS_LIST] } },
             productId: { in: productIds },
           },
           select: { total: true, productId: true },

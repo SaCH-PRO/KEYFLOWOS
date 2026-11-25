@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES, OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { Prisma, type Contact } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
@@ -367,6 +368,7 @@ export class CrmStatsService {
     if (ids.length === 0) return contacts;
 
     const idList = Prisma.join(ids);
+    const openStatusesSql = Prisma.join(OPEN_RECEIVABLE_STATUS_LIST);
 
     const [
       invoiceRows,
@@ -389,10 +391,10 @@ export class CrmStatsService {
           contact_id,
           COUNT(*)::int AS invoice_count,
           COALESCE(SUM(total) FILTER (WHERE status = 'PAID'), 0)::float AS total_revenue,
-          COALESCE(SUM(total) FILTER (WHERE status IN ('SENT','OVERDUE')), 0)::float AS outstanding_balance,
+          COALESCE(SUM(total) FILTER (WHERE status::text IN (${openStatusesSql})), 0)::float AS outstanding_balance,
           COUNT(*) FILTER (WHERE status = 'PAID')::int AS paid_invoices,
-          COUNT(*) FILTER (WHERE status IN ('SENT','OVERDUE'))::int AS unpaid_invoices,
-          MIN(due_date) FILTER (WHERE status IN ('SENT','OVERDUE')) AS oldest_unpaid_due_at
+          COUNT(*) FILTER (WHERE status::text IN (${openStatusesSql}))::int AS unpaid_invoices,
+          MIN(due_date) FILTER (WHERE status::text IN (${openStatusesSql})) AS oldest_unpaid_due_at
         FROM invoices
         WHERE business_id = ${businessId}
           AND contact_id IN (${idList})
@@ -814,7 +816,7 @@ export class CrmStatsService {
 
     for (const inv of invoices) {
       meta.invoiceCount += 1;
-      if (['SENT', 'OVERDUE'].includes(inv.status)) {
+      if (OPEN_RECEIVABLE_STATUSES.has(inv.status)) {
         meta.outstandingBalance += Number(inv.total ?? 0);
         meta.unpaidInvoices += 1;
         const dueDate = inv.dueDate ?? inv.issueDate ?? inv.createdAt;
@@ -918,7 +920,7 @@ export class CrmStatsService {
       this.prisma.client.contact.count({ where: { ...base, status: 'CLIENT' } }),
       this.prisma.client.contact.count({ where: { ...base, status: 'LOST' } }),
       this.prisma.client.contact.count({
-        where: { ...base, invoices: { some: { status: { in: ['SENT', 'OVERDUE'] }, deletedAt: null } } },
+        where: { ...base, invoices: { some: { status: { in: OPEN_RECEIVABLE_STATUS_LIST }, deletedAt: null } } },
       }),
       this.prisma.client.contact.count({
         where: {
@@ -1221,7 +1223,7 @@ export class CrmStatsService {
           ...contactWhereBase(businessId),
           invoices: {
             some: {
-              status: { in: ['SENT', 'OVERDUE'] as const },
+              status: { in: OPEN_RECEIVABLE_STATUS_LIST },
               deletedAt: null,
             },
           },

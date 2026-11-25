@@ -64,7 +64,7 @@ jobs:
       # Explicit files or `<dir>/*.spec.mjs` globs, never a bare directory,
       # and no env (see the step above).
       - name: Check every script spec runs in CI
-        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/ci/ci-verdict.spec.mjs scripts/ci/verify-vitest-shards.spec.mjs scripts/research/research-corpus-parse.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
+        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/ci/ci-verdict.spec.mjs scripts/ci/verify-vitest-shards.spec.mjs scripts/ci/ci-pg-no-password.spec.mjs scripts/research/research-corpus-parse.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -670,7 +670,7 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: keyflow
-          POSTGRES_PASSWORD: keyflow
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: keyflowos
         ports:
           - 5432:5432
@@ -691,8 +691,8 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
-      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DATABASE_URL: postgresql://keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow@localhost:5432/keyflowos
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -788,7 +788,7 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: keyflow
-          POSTGRES_PASSWORD: keyflow
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: keyflowos
         ports:
           - 5432:5432
@@ -809,8 +809,8 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
-      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DATABASE_URL: postgresql://keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow@localhost:5432/keyflowos
       REDIS_URL: redis://localhost:6379
 
     steps:

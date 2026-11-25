@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES, OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
@@ -404,7 +405,7 @@ ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} $
         select: { type: true, createdAt: true, data: true },
       }),
       this.db.invoice.findMany({
-        where: { contactId, businessId },
+        where: { contactId, businessId, deletedAt: null },
         take: 20,
         orderBy: { createdAt: 'desc' },
         select: { total: true, status: true, createdAt: true, dueDate: true },
@@ -431,7 +432,7 @@ ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} $
       : null;
 
     const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
-    const outstandingBalance = invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).reduce((s, i) => s + Number(i.total ?? 0), 0);
+    const outstandingBalance = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).reduce((s, i) => s + Number(i.total ?? 0), 0);
 
     const contextBlock = `CONTACT PROFILE:
 Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}
@@ -1047,7 +1048,7 @@ Respond in valid JSON:
         select: { type: true, createdAt: true, data: true },
       }),
       this.db.invoice.findMany({
-        where: { contactId, businessId },
+        where: { contactId, businessId, deletedAt: null },
         take: 20,
         orderBy: { createdAt: 'desc' },
         select: { total: true, status: true, createdAt: true, dueDate: true, invoiceNumber: true },
@@ -1080,7 +1081,7 @@ Respond in valid JSON:
       : null;
 
     const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
-    const outstandingBalance = invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).reduce((s, i) => s + Number(i.total ?? 0), 0);
+    const outstandingBalance = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).reduce((s, i) => s + Number(i.total ?? 0), 0);
     const overdueInvoices = invoices.filter(i => i.status === 'OVERDUE');
     const openQuotes = quotes.filter(q => ['DRAFT', 'SENT'].includes(q.status));
     const openTasks = tasks.filter(t => t.status === 'OPEN');
@@ -1758,7 +1759,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         select: { type: true, createdAt: true, data: true },
       }),
       this.db.invoice.findMany({
-        where: { contactId, businessId, status: { in: ['SENT', 'OVERDUE'] } },
+        where: { contactId, businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         take: 5,
         select: { total: true, status: true },
       }),
@@ -1772,7 +1773,7 @@ Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${
 Channel: ${contact.preferredChannel ?? 'email'}
 Recent Notes: ${notes.map(n => n.body.substring(0, 100)).join('; ') || 'None'}
 Recent Events: ${events.map(e => e.type).join(', ') || 'None'}
-Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status})`).join(', ') : 'None'}`;
+Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status === 'PENDING' ? 'PENDING — not yet sent; do not send a payment reminder' : i.status})`).join(', ') : 'None'}`;
 
     const systemPrompt = `You are a Caribbean business communication specialist writing follow-up messages for a Trinidad & Tobago service business.
 Write in a warm, professional Caribbean style. Use TTD for currency. Be concise and actionable.
