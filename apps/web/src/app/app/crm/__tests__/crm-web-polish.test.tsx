@@ -21,7 +21,8 @@
  *
  * Repair round 1 (reviews at 769f8933):
  *   CWP-R1a   RED-AT-769f8933  (SEC-CWP-1) a stored table view with no string search, applied while the screen
- *                         searches "Kwame", hands the screen no undefined search and the table keeps rendering
+ *                         searches "Kwame", hands the screen "" (never undefined), as the table applies, and the
+ *                         table keeps rendering
  *   CWP-R1b   RED-AT-769f8933  the same stored view applied in a table with no screen search does not crash the table
  *                         (its own debounce called .trim() on undefined; the bug was on main already)
  *   CWP-R2    RED-AT-769f8933  (COR-CWP-1) a table mounted while the screen searches "Kwame" sends exactly one read,
@@ -279,6 +280,9 @@ describe("Repair round 1: the table's saved views and first read", () => {
     caught.stop();
     expect(caught.errors).toEqual([]);
     expect(onSearchChange.mock.calls.every(([v]) => typeof v === "string")).toBe(true);
+    // The table searches for nothing (the view saved none), and so does the screen: the two still agree.
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect((screen.getByRole("textbox", { name: "Search contacts database" }) as HTMLInputElement).value).toBe("");
     expect(screen.getByRole("grid", { name: "Contacts database table" })).toBeInTheDocument();
   });
 
