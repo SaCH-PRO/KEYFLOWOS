@@ -213,6 +213,24 @@ describe("CATALOG-1 Sales > Products (/app/commerce/products)", () => {
     expect(rowOf("Sorrel drink")).toBeInTheDocument();
   });
 
+  // Journey B6 at 9c8097ff: a product named "Archived item" made the card itself (role=button, named after the
+  // product) answer to "Archive", so the row's Archive opened the product instead. A row's open control is named
+  // "Open <product>", never like a row action, in both views.
+  it.each(["grid", "list"])("in the %s view, no control on a row is named like an action except the action (a product named 'Archived item' / 'Edit kit')", async (view) => {
+    window.localStorage.setItem("kf-products-view", view);
+    rows = [
+      { ...PEPPER, id: "prod_arch", name: "Archived item" },
+      { ...SORREL, id: "prod_edit", name: "Edit kit" },
+    ];
+    await mountPage();
+    await waitFor(() => expect(rowOf("Archived item")).toBeInTheDocument());
+    for (const name of ["Archived item", "Edit kit"]) {
+      const row = rowOf(name);
+      expect(within(row).queryAllByRole("button", { name: /^(archive|edit)/i }), `${name}: buttons named like an action`).toHaveLength(0);
+      expect(within(row).getByRole("button", { name: new RegExp(`^open ${name}`, "i") })).toBeInTheDocument();
+    }
+  });
+
   it("?action=add (the command palette's 'Add product') opens New product", async () => {
     nav.search = "action=add";
     await mountPage();
