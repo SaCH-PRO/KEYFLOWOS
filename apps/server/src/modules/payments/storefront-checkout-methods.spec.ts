@@ -51,6 +51,7 @@ import { PaymentsService } from './payments.service';
 const ENV_KEYS = [
   'PAYPAL_CLIENT_ID',
   'PAYPAL_CLIENT_SECRET',
+  'PAYPAL_WEBHOOK_ID',
   'STRIPE_PUBLISHABLE_KEY',
   'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
   'STRIPE_SECRET_KEY',
@@ -62,15 +63,21 @@ type EnvKey = (typeof ENV_KEYS)[number];
 // differ, so a reading that mixes them is visible.
 const PP_ID = 'scm-paypal-client-fake';
 const PP_SECRET = 'scm-paypal-secret-fake';
+const PP_WH = 'scm-paypal-webhook-fake';
 const ST_PUB = 'scm-stripe-publishable-fake';
 const ST_SECRET = 'scm-stripe-secret-fake';
 const ST_WH = 'scm-stripe-webhook-fake';
 const PLATFORM_PP_ID = 'scm-platform-paypal-client-fake';
 const PLATFORM_PP_SECRET = 'scm-platform-paypal-secret-fake';
+const PLATFORM_PP_WH = 'scm-platform-paypal-webhook-fake';
 const PLATFORM_ST_PUB = 'scm-platform-stripe-publishable-fake';
 const PLATFORM_ST_SECRET = 'scm-platform-stripe-secret-fake';
 const PLATFORM_ST_WH = 'scm-platform-stripe-webhook-fake';
-const PLATFORM_PAYPAL_ENV = { PAYPAL_CLIENT_ID: PLATFORM_PP_ID, PAYPAL_CLIENT_SECRET: PLATFORM_PP_SECRET };
+const PLATFORM_PAYPAL_ENV = {
+  PAYPAL_CLIENT_ID: PLATFORM_PP_ID,
+  PAYPAL_CLIENT_SECRET: PLATFORM_PP_SECRET,
+  PAYPAL_WEBHOOK_ID: PLATFORM_PP_WH,
+};
 const PLATFORM_STRIPE_ENV = {
   STRIPE_PUBLISHABLE_KEY: PLATFORM_ST_PUB,
   STRIPE_SECRET_KEY: PLATFORM_ST_SECRET,
@@ -84,34 +91,53 @@ type Row = {
   label: string;
   meta: unknown;
   env: Partial<Record<EnvKey, string>>;
-  /** D-138: the storefront (gateway list, checkout gate, createStorePayment). */
+  /** D-138 + W1F-STORE-PAYPAL (OPK-COR-2): the storefront (gateway list, checkout gate, createStorePayment). */
   store: Offer;
   /** The invoice pay link (getAvailableGateways), unchanged by D-138: rows marked "pay link as built" admit the env. */
   payLink: Offer;
 };
 
-// D-138 (W11-STORE-OWN-PAYMENT-KEYS): the storefront offers PayPal / Stripe only for the business's own complete set
-// in its settings. Rows marked "pay link as built" are the invoice pay link's reading, which this packet does not
-// change (the platform env alone or mixed with a business's own still counts there): a deviation recorded for an owner
-// ruling, not a ruled expectation.
+// D-138 (W11-STORE-OWN-PAYMENT-KEYS) + W1F-STORE-PAYPAL (OPK-COR-2): the storefront offers PayPal / Stripe only for the
+// business's own complete set in its settings (PayPal: client id, secret, and webhook id; Stripe: publishable key,
+// secret key, and webhook secret). Rows marked "pay link as built" are the invoice pay link's reading, unchanged.
 const ROWS: Row[] = [
   { label: 'nothing anywhere', meta: null, env: {}, store: [false, false], payLink: [false, false] },
   { label: 'empty settings', meta: {}, env: {}, store: [false, false], payLink: [false, false] },
   { label: 'settings that are not an object', meta: 'not-an-object', env: {}, store: [false, false], payLink: [false, false] },
-  { label: 'PayPal pair in the settings', meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET }, env: {}, store: [true, false], payLink: [true, false] },
   {
-    label: 'PayPal pair in the settings, another pair in the env',
-    meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET },
+    label: 'PayPal triple in the settings (W1F-STORE-PAYPAL)',
+    meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, paypalWebhookId: PP_WH },
+    env: {},
+    store: [true, false],
+    payLink: [true, false],
+  },
+  {
+    label: 'PayPal triple in the settings, another triple in the env (W1F-STORE-PAYPAL)',
+    meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, paypalWebhookId: PP_WH },
     env: PLATFORM_PAYPAL_ENV,
     store: [true, false],
     payLink: [true, false],
   },
+  {
+    label: 'PayPal pair in the settings without webhook id (OPK-COR-2: cannot settle; pay link as built)',
+    meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET },
+    env: {},
+    store: [false, false],
+    payLink: [true, false],
+  },
+  {
+    label: 'PayPal pair in the settings, platform webhook id in env (OPK-COR-2: never mixed; pay link as built)',
+    meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET },
+    env: PLATFORM_PAYPAL_ENV,
+    store: [false, false],
+    payLink: [true, false],
+  },
   { label: 'PayPal id only in the settings', meta: { paypalClientId: PP_ID }, env: {}, store: [false, false], payLink: [false, false] },
   { label: 'PayPal secret only in the settings', meta: { paypalClientSecret: PP_SECRET }, env: {}, store: [false, false], payLink: [false, false] },
-  { label: 'PayPal blank in the settings', meta: { paypalClientId: '', paypalClientSecret: '' }, env: {}, store: [false, false], payLink: [false, false] },
+  { label: 'PayPal blank in the settings', meta: { paypalClientId: '', paypalClientSecret: '', paypalWebhookId: '' }, env: {}, store: [false, false], payLink: [false, false] },
   {
     label: 'PayPal spaces in the settings (no saved credential; pay link as built)',
-    meta: { paypalClientId: '   ', paypalClientSecret: ' ' },
+    meta: { paypalClientId: '   ', paypalClientSecret: ' ', paypalWebhookId: '  ' },
     env: {},
     store: [false, false],
     payLink: [true, false],
@@ -194,7 +220,14 @@ const ROWS: Row[] = [
   { label: 'Stripe env without a publishable key', meta: {}, env: { STRIPE_SECRET_KEY: PLATFORM_ST_SECRET, STRIPE_WEBHOOK_SECRET: PLATFORM_ST_WH }, store: [false, false], payLink: [false, false] },
   {
     label: 'both in the settings',
-    meta: { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, stripePublishableKey: ST_PUB, stripeSecretKey: ST_SECRET, stripeWebhookSecret: ST_WH },
+    meta: {
+      paypalClientId: PP_ID,
+      paypalClientSecret: PP_SECRET,
+      paypalWebhookId: PP_WH,
+      stripePublishableKey: ST_PUB,
+      stripeSecretKey: ST_SECRET,
+      stripeWebhookSecret: ST_WH,
+    },
     env: {},
     store: [true, true],
     payLink: [true, true],
@@ -308,7 +341,11 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE: the methods a storefront checkout may 
     Object.assign(process.env, PLATFORM_PAYPAL_ENV, PLATFORM_STRIPE_ENV, { NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: PLATFORM_ST_PUB });
 
     // The store's own complete sets: its values, each one, with the platform's complete sets in the env.
-    expect(storePaypalCredentials({ paypalClientId: PP_ID, paypalClientSecret: PP_SECRET })).toEqual({ clientId: PP_ID, clientSecret: PP_SECRET });
+    expect(storePaypalCredentials({ paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, paypalWebhookId: PP_WH })).toEqual({
+      clientId: PP_ID,
+      clientSecret: PP_SECRET,
+      webhookId: PP_WH,
+    });
     expect(storeStripeCredentials({ stripePublishableKey: ST_PUB, stripeSecretKey: ST_SECRET, stripeWebhookSecret: ST_WH })).toEqual({
       publishableKey: ST_PUB,
       secretKey: ST_SECRET,
@@ -324,12 +361,17 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE: the methods a storefront checkout may 
       'not-an-object',
       { paypalClientId: PP_ID },
       { paypalClientSecret: PP_SECRET },
-      { paypalClientId: PP_ID, paypalClientSecret: '' },
-      { paypalClientId: '', paypalClientSecret: PP_SECRET },
-      { paypalClientId: PP_ID, paypalClientSecret: '   ' },
-      { paypalClientId: ' \t', paypalClientSecret: PP_SECRET },
-      { paypalClientId: PP_ID, paypalClientSecret: 7 },
-      { paypalClientId: { id: PP_ID }, paypalClientSecret: PP_SECRET },
+      { paypalWebhookId: PP_WH },
+      { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET },
+      { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, paypalWebhookId: '' },
+      { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, paypalWebhookId: '   ' },
+      { paypalClientId: PP_ID, paypalClientSecret: PP_SECRET, paypalWebhookId: 99 },
+      { paypalClientId: PP_ID, paypalClientSecret: '', paypalWebhookId: PP_WH },
+      { paypalClientId: '', paypalClientSecret: PP_SECRET, paypalWebhookId: PP_WH },
+      { paypalClientId: PP_ID, paypalClientSecret: '   ', paypalWebhookId: PP_WH },
+      { paypalClientId: ' \t', paypalClientSecret: PP_SECRET, paypalWebhookId: PP_WH },
+      { paypalClientId: PP_ID, paypalClientSecret: 7, paypalWebhookId: PP_WH },
+      { paypalClientId: { id: PP_ID }, paypalClientSecret: PP_SECRET, paypalWebhookId: PP_WH },
     ];
     for (const meta of paypalPartial) {
       expect(storePaypalCredentials(meta), `PayPal ${JSON.stringify(meta)}`).toBeNull();

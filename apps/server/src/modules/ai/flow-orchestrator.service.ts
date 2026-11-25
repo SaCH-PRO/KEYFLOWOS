@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
+import { EXCLUDE_WHATSAPP_INBOUND_SOURCE } from '../crm/whatsapp-inbound-exclusion';
 import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
@@ -26,6 +27,9 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService, type GovernanceDecision } from './ai-oversight.service';
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { FinanceAccountsService } from '../finance/finance-accounts.service';
+import { SafeToSpendService } from '../finance/safe-to-spend.service';
+import { CashflowForecastService } from '../finance/cashflow-forecast.service';
+import { MoneyMovesService } from '../finance/money-moves.service';
 import { BankMatchingService } from '../finance/bank-matching.service';
 import { FinanceCoaService } from '../finance/finance-coa.service';
 import { PostingService } from '../finance/posting.service';
@@ -1275,6 +1279,15 @@ export class FlowOrchestratorService {
   }
   private getFinanceAccounts() {
     return this.moduleRef.get(FinanceAccountsService, { strict: false });
+  }
+  private getSafeToSpend() {
+    return this.moduleRef.get(SafeToSpendService, { strict: false });
+  }
+  private getCashflowForecast() {
+    return this.moduleRef.get(CashflowForecastService, { strict: false });
+  }
+  private getMoneyMoves() {
+    return this.moduleRef.get(MoneyMovesService, { strict: false });
   }
   private getFinanceCoa() {
     return this.moduleRef.get(FinanceCoaService, { strict: false });
@@ -3957,9 +3970,16 @@ ${triage.standingContext}`;
       if (schema.type === 'string' && typeof value !== 'string') {
         throw new BadRequestException(`Field "${key}" for ${toolName} must be a string`);
       }
-      if (schema.type === 'number' && typeof value !== 'number') {
-        const num = Number(value);
-        if (isNaN(num)) throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
+      if (schema.type === 'number') {
+        const num = typeof value === 'number' ? value : Number(value);
+        if (
+          value === null ||
+          typeof value === 'boolean' ||
+          (typeof value === 'string' && value.trim() === '') ||
+          !Number.isFinite(num)
+        ) {
+          throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
+        }
         args[key] = num;
       }
       // W11-KEY-TRANSFER-INTEGER: 'integer' reads a number or a numeric string as the 'number'
@@ -5631,8 +5651,28 @@ ${triage.standingContext}`;
         });
         if (!contact) throw new Error('Contact not found');
 
+        // D-280 (SEC-WAW-1 / SEC-P60-1): fail closed — only explicit interactive
+        // human surfaces with a server-verified principalUserId may include
+        // pasted WhatsApp notes; every automatic/background/external surface
+        // excludes them.
+        const INTERACTIVE_OWNER_SURFACES = new Set([
+          'CHAT',
+          'CHAT_STREAM',
+          'CHAT_CONFIRM',
+          'GRAPH_ACTION',
+          'PLAN_HTTP',
+          'PROPOSAL',
+        ]);
+        const isOwnerInitiatedInteractive =
+          Boolean(action?.principalUserId) &&
+          typeof action?.surface === 'string' &&
+          INTERACTIVE_OWNER_SURFACES.has(action.surface);
         const recentNotes = await this.prisma.client.contactNote.findMany({
-          where: { contactId: args.contactId, businessId },
+          where: {
+            contactId: args.contactId,
+            businessId,
+            ...(isOwnerInitiatedInteractive ? {} : { AND: [EXCLUDE_WHATSAPP_INBOUND_SOURCE] }),
+          },
           orderBy: { createdAt: 'desc' },
           take: 3,
           select: { body: true, createdAt: true },
@@ -7218,6 +7258,31 @@ ${triage.standingContext}`;
       case 'finance_cashflow': {
         const { from, to } = this.parseReportRange(args.from, args.to);
         return this.getLedgerReporting().getCashflow(businessId, from, to, this.parseBasis(args.basis));
+      }
+
+      // Forward-looking finance intelligence uses the same domain services as
+      // the Finance screen and the legacy KEY registry. These are distinct from
+      // finance_cashflow: one is a historical ledger report; the forecast is a
+      // projection. Keeping them as separate canonical capabilities prevents a
+      // semantic alias from turning prediction into observed fact.
+      case 'finance_safe_to_spend':
+        return this.getSafeToSpend().calculate(businessId);
+
+      case 'finance_cashflow_forecast': {
+        const rawHorizon = args.horizonDays ?? 90;
+        const horizonDays =
+          typeof rawHorizon === 'boolean' || (typeof rawHorizon === 'string' && rawHorizon.trim() === '')
+            ? Number.NaN
+            : Number(rawHorizon);
+        if (!Number.isFinite(horizonDays) || horizonDays < 1 || horizonDays > 365) {
+          throw new Error(`horizonDays must be between 1 and 365 — got ${JSON.stringify(args.horizonDays)}`);
+        }
+        return this.getCashflowForecast().forecast(businessId, Math.floor(horizonDays));
+      }
+
+      case 'finance_money_moves': {
+        const moves = await this.getMoneyMoves().generate(businessId);
+        return { moves };
       }
 
       case 'finance_balance_sheet': {

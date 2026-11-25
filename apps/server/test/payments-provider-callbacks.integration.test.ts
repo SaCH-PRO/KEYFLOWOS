@@ -275,7 +275,11 @@ const paypalRefusal = (currency: string, payable: 'invoice' | 'order') => ({
 /** PayPal app credentials (env), set only inside the cases that read a gateway list for PayPal (PC-08b..PC-08d). */
 const PAYPAL_ENV = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
 /** W11-STORE-OWN-PAYMENT-KEYS (D-138): a business's own PayPal pair and Stripe triple, as its settings store them. */
-const OWN_PAYPAL = { paypalClientId: `${P}own_paypal_client_fake`, paypalClientSecret: `${P}own_paypal_secret_fake` };
+const OWN_PAYPAL = {
+  paypalClientId: `${P}own_paypal_client_fake`,
+  paypalClientSecret: `${P}own_paypal_secret_fake`,
+  paypalWebhookId: `${P}own_paypal_webhook_fake`,
+};
 const OWN_STRIPE = {
   stripePublishableKey: `${P}own_stripe_publishable_fake`,
   stripeSecretKey: `${P}own_stripe_secret_fake`,

@@ -5,7 +5,15 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { RevenueActionService } from '../commerce/revenue-action.service';
 import { CommandService } from '../command/command.service';
 import { CashPositionService, otherCurrencyCash } from './cash-position.service';
-import { namedCashCurrency, notCountedCash, notCountedCashNote, otherCurrencyCashWithheldNote } from './finance-overview.service';
+import {
+  namedCashCurrency,
+  notCountedCash,
+  notCountedCashNote,
+  notCountedExpenseNote,
+  otherCurrencyCashWithheldNote,
+  otherCurrencyExpensesWithheldNote,
+  splitExpensesByCurrency,
+} from './finance-overview.service';
 
 /**
  * FIN8 — Finance intelligence detectors. Eight deterministic detectors
@@ -294,31 +302,43 @@ export class FinanceIntelligenceService {
    */
   private async detectCashflowRisk(businessId: string, now: Date): Promise<Detection[]> {
     const ninetyAgo = new Date(now.getTime() - 90 * MS_DAY);
-    const [position, ninetyExp] = await Promise.all([
+    const [position, ninetyExpGroups] = await Promise.all([
       this.cashPosition.getCashPosition(businessId),
-      this.prisma.client.expense.aggregate({
+      this.prisma.client.expense.groupBy({
+        by: ['currency'],
         where: { businessId, deletedAt: null, date: { gte: ninetyAgo, lt: now } },
         _sum: { amount: true },
       }),
     ]);
     const cash = position.cashBalance;
     const other = otherCurrencyCash(position);
-    const dailyBurn = Number(ninetyExp._sum.amount ?? 0) / 90;
+    const { businessTotal: ninetyBusinessBurn, otherExpenses } = splitExpensesByCurrency(
+      ninetyExpGroups,
+      position.currency,
+    );
+    const dailyBurn = ninetyBusinessBurn / 90;
     if (dailyBurn <= 0) return [];
     const days = cash / dailyBurn;
     if (days >= 30) return [];
     const severity: FinSeverity = days < 14 ? 'CRITICAL' : 'WARNING';
     const shownDays = Math.max(0, days);
     const base = `Cash ${cash.toFixed(2)} against ${dailyBurn.toFixed(2)}/day burn (90-day average). Runway is under 30 days.`;
-    const note = notCountedCashNote(position.currency, other);
-    const withheld = otherCurrencyCashWithheldNote(position.currency, other);
+    const notes = [
+      notCountedCashNote(position.currency, other),
+      notCountedExpenseNote(position.currency, otherExpenses),
+    ].filter(Boolean);
+    const withheldNotes = [
+      otherCurrencyCashWithheldNote(position.currency, other),
+      otherCurrencyExpensesWithheldNote(position.currency, otherExpenses),
+    ].filter(Boolean);
     const named = notCountedCash(other);
+    const namedExp = notCountedCash(otherExpenses);
     return [{
       kind: 'CASHFLOW_RISK',
       severity,
       title: `Low cash runway — ~${shownDays.toFixed(0)} days`,
-      body: note ? `${base} ${note}` : base,
-      commandBody: withheld ? `${base} ${withheld}` : base,
+      body: notes.length > 0 ? `${base} ${notes.join(' ')}` : base,
+      commandBody: withheldNotes.length > 0 ? `${base} ${withheldNotes.join(' ')}` : base,
       entityType: 'business',
       entityId: businessId,
       recommendedAction: '/app/finance/cashflow',
@@ -331,6 +351,12 @@ export class FinanceIntelligenceService {
         cashCurrency: namedCashCurrency(position.currency),
         otherCurrencyCash: named.listed,
         ...(named.notListed > 0 ? { otherCurrencyCashNotListed: named.notListed } : {}),
+        ...(otherExpenses.length > 0
+          ? {
+              otherCurrencyExpenses: namedExp.listed,
+              ...(namedExp.notListed > 0 ? { otherCurrencyExpensesNotListed: namedExp.notListed } : {}),
+            }
+          : {}),
       },
     }];
   }

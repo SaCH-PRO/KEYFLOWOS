@@ -5,9 +5,10 @@ import type { ContactsCacheOwner, LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, clearCachedContacts, contactsCacheKey, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { classifyContactsLoadError, CONTACTS_DENIED_MESSAGE, type ContactsLoadFailure } from "./use-contacts-data";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
-import { bulkUpdateContacts, bulkDeleteContacts, bulkReassignContacts, addContactsToList, fetchContacts, fetchTeamMembers, fetchSequences, enrollContactsInSequence, type TeamMemberSummary, type CrmSequence } from "@/lib/client";
+import { bulkUpdateContacts, bulkReassignContacts, addContactsToList, fetchContacts, fetchTeamMembers, fetchSequences, enrollContactsInSequence, type TeamMemberSummary, type CrmSequence } from "@/lib/client";
 import { getCachedUser } from "@/lib/workspace";
 import { toast } from "sonner";
+import { deleteContactsWithUndo } from "./contacts-bulk-delete";
 
 export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl";
 export type SortDir = "asc" | "desc";
@@ -391,6 +392,11 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       if (!controller.signal.aborted) setServerLoading(false);
     }
   }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi, ownedByMe, cacheOwner]);
+  // The latest loaders, for a bulk delete's Undo, which runs from a toast after the render that made it.
+  const loadServerContactsRef = useRef(loadServerContacts);
+  loadServerContactsRef.current = loadServerContacts;
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
 
   useEffect(() => {
     if (isMobilePrev.current !== isMobile) {
@@ -778,12 +784,19 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       onConfirm: async () => {
         setBulkActing(true);
         try {
-          const res = await bulkDeleteContacts({ businessId, contactIds: ids });
-          if (res.error) throw new Error(res.error);
-          toast.success(`Deleted ${ids.length} contacts`);
+          // FU-BULK-DELETE-UNDO (D-277b): sent at once; the toast offers Undo when the ids deleted are known. The
+          // table shows its own read (serverContacts) over the screen's, so both are read again after the delete
+          // and after an Undo, through the latest loaders (the table may have changed, or gone, by then).
+          const outcome = await deleteContactsWithUndo({
+            businessId,
+            ids,
+            onRestored: () => { onRefreshRef.current(); void loadServerContactsRef.current(); },
+          });
+          if (!outcome) return;
           setSelectedIds(new Set());
           setAllPagesSelected(false);
           onRefresh();
+          void loadServerContactsRef.current();
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Bulk delete failed";
           toast.error(message);

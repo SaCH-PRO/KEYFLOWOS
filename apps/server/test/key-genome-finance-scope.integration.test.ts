@@ -315,8 +315,9 @@ beforeAll(async () => {
     prisma, offRoute('GenomeFactService') as any, offRoute('GenomeEvidenceService') as any, offRoute('GenomeScoringService') as any,
     offRoute('GenomeModuleReadinessService') as any, offRoute('EventEmitter2') as any, noop() as any,
   ));
+  const experimentStandIn = { createExperiment: async () => ({ id: `${P}exp_stub` }) };
   const recommendationsOf = (prisma: any) => once('recommendations', () => new GenomeRecommendationService(
-    prisma, signalsOf(prisma), readinessStandIn as any, scoringStandIn as any, offRoute('GenomeExperimentService') as any,
+    prisma, signalsOf(prisma), readinessStandIn as any, scoringStandIn as any, experimentStandIn as any,
     memoryOf(prisma), noop() as any, noop() as any,
   ));
   const departmentsOf = (prisma: any) => once('departments', () => new GenomeDepartmentService(prisma));
@@ -1254,4 +1255,149 @@ describe('FU-PROPOSAL-REVENUE-SIGHT review repairs (security MAJOR-1, MAJOR-2; D
   }, 30_000);
 
   // [PRS-04] (MAJOR-2, experiments) is in key-genome.controller.spec.ts: this suite stands in GenomeExperimentService.
+});
+
+describe('P47 (W11-GENOME-RECS-DOMAIN, D-128): recommendation generation creates FINANCIAL rows only for revenue:write members', () => {
+  const SIG = {
+    fin: `${P}grd_sig_fin`,
+    ops: `${P}grd_sig_ops`,
+  };
+  const cleanupGenerated = async () => {
+    await db.genomeRecommendation.deleteMany({
+      where: {
+        businessId: ID.biz,
+        OR: [
+          { title: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          { title: { contains: 'V97U_GRD_OPS_SIGNAL' } },
+          { diagnosis: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          { diagnosis: { contains: 'V97U_GRD_OPS_SIGNAL' } },
+          { insight: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          { insight: { contains: 'V97U_GRD_OPS_SIGNAL' } },
+        ],
+      },
+    });
+  };
+
+  beforeAll(async () => {
+    await db.genomeSignal.deleteMany({ where: { id: { in: [SIG.fin, SIG.ops] } } });
+    await db.genomeSignal.createMany({
+      data: [
+        {
+          id: SIG.fin,
+          businessId: ID.biz,
+          sourceModule: 'finance',
+          section: 'FINANCIAL',
+          domain: 'finance',
+          field: 'V97U_GRD_FIN_SIGNAL_RUNWAY',
+          signalType: 'MISSING_FACT',
+          confidence: 0.92,
+          reason: 'V97U_GRD_FIN_SIGNAL: Cash runway below 1.2 months',
+          status: 'NEW',
+        },
+        {
+          id: SIG.ops,
+          businessId: ID.biz,
+          sourceModule: 'operations',
+          section: 'OPERATIONAL_MODEL',
+          domain: 'operations',
+          field: 'V97U_GRD_OPS_SIGNAL_SOP',
+          signalType: 'MISSING_FACT',
+          confidence: 0.91,
+          reason: 'V97U_GRD_OPS_SIGNAL: Delivery checklist missing SOP steps',
+          status: 'NEW',
+        },
+      ],
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    await cleanupGenerated();
+    await db.genomeSignal.deleteMany({ where: { id: { in: [SIG.fin, SIG.ops] } } });
+  }, 60_000);
+
+  it('[GRD-01] RED-BEFORE (D-128): POST recommendations/generate by revenue:none or revenue:read STAFF creates NO FINANCIAL recommendation row in DB (even if body tries allowFinance:true), while still creating non-finance recommendations; OWNER creates both', async () => {
+    for (const actor of [ID.staffNone, ID.staffRead]) {
+      await cleanupGenerated();
+      const res = await post('recommendations/generate', actor, {
+        sources: ['SIGNAL'],
+        maxRecommendations: 20,
+        allowFinance: true,
+      });
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(201);
+
+      const persistedFin = await db.genomeRecommendation.findMany({
+        where: {
+          businessId: ID.biz,
+          OR: [
+            { title: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+            { insight: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          ],
+        },
+      });
+      expect(persistedFin, `${actor} must not persist FINANCIAL recommendations`).toHaveLength(0);
+
+      const persistedOps = await db.genomeRecommendation.findMany({
+        where: {
+          businessId: ID.biz,
+          OR: [
+            { title: { contains: 'V97U_GRD_OPS_SIGNAL' } },
+            { insight: { contains: 'V97U_GRD_OPS_SIGNAL' } },
+          ],
+        },
+      });
+      expect(persistedOps.length, `${actor} still generates non-finance recommendations`).toBeGreaterThanOrEqual(1);
+    }
+
+    // Control: OWNER (has revenue:write) creates both FINANCIAL and non-finance recommendations.
+    await cleanupGenerated();
+    const ownerRes = await post('recommendations/generate', ID.owner, { sources: ['SIGNAL'], maxRecommendations: 20 });
+    expect(ownerRes.status, JSON.stringify(ownerRes.body)).toBe(201);
+    const ownerFin = await db.genomeRecommendation.findMany({
+      where: {
+        businessId: ID.biz,
+        OR: [
+          { title: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          { insight: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+        ],
+      },
+    });
+    expect(ownerFin.length).toBeGreaterThanOrEqual(1);
+  }, 30_000);
+
+  it('[GRD-02] RED-BEFORE (D-128): POST cross-domain/recommendations/ranked/generate by revenue:read STAFF (with existing snapshot) creates NO FINANCIAL recommendation row in DB; OWNER creates it', async () => {
+    await cleanupGenerated();
+    const existingSnap = await db.genomeCrossDomainSnapshot.findFirst({ where: { businessId: ID.biz } });
+    if (!existingSnap) {
+      await post('cross-domain/snapshot/compute', ID.owner, {});
+    }
+
+    const readRes = await post('cross-domain/recommendations/ranked/generate', ID.staffRead, {});
+    expect(readRes.status, JSON.stringify(readRes.body)).toBe(201);
+
+    const persistedFin = await db.genomeRecommendation.findMany({
+      where: {
+        businessId: ID.biz,
+        OR: [
+          { title: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          { insight: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+        ],
+      },
+    });
+    expect(persistedFin, 'revenue:read must not persist FINANCIAL recommendations via ranked/generate').toHaveLength(0);
+
+    // Control: OWNER creates the FINANCIAL recommendation.
+    await cleanupGenerated();
+    const ownerRes = await post('cross-domain/recommendations/ranked/generate', ID.owner, {});
+    expect(ownerRes.status, JSON.stringify(ownerRes.body)).toBe(201);
+    const ownerFin = await db.genomeRecommendation.findMany({
+      where: {
+        businessId: ID.biz,
+        OR: [
+          { title: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+          { insight: { contains: 'V97U_GRD_FIN_SIGNAL' } },
+        ],
+      },
+    });
+    expect(ownerFin.length).toBeGreaterThanOrEqual(1);
+  }, 30_000);
 });
