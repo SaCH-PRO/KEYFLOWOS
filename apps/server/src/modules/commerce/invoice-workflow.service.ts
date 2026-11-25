@@ -74,6 +74,13 @@ export function isCreditAwareShareableInvoiceStatus(status: string): boolean {
 }
 
 /**
+ * Invoice statuses eligible for customer payment reminders and chases (V1-57, D-256, D-260).
+ * Matches CommerceService.REMINDABLE_INVOICE_STATUSES: never includes DRAFT, never-sent PENDING,
+ * or PARTIALLY_CREDITED (refused 409 by sendInvoiceReminder).
+ */
+export const REMINDABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+
+/**
  * Allowed transitions. Server-side enforcement; UI/clients can request
  * a transition but the workflow throws 409 ConflictException for anything
  * not in this map.

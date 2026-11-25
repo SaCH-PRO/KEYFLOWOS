@@ -1016,7 +1016,15 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
 
   async updatePreferences(businessId: string, prefs: Partial<NotificationPreferences>): Promise<NotificationPreferences> {
     const current = await this.getPreferences(businessId);
-    const updated = { ...current, ...prefs };
+    const sanitized: Partial<NotificationPreferences> = {};
+    if (prefs && typeof prefs === 'object') {
+      for (const key of Object.keys(DEFAULT_PREFERENCES) as Array<keyof NotificationPreferences>) {
+        if (Object.prototype.hasOwnProperty.call(prefs, key) && typeof prefs[key] === 'boolean') {
+          sanitized[key] = prefs[key];
+        }
+      }
+    }
+    const updated = { ...current, ...sanitized };
     await this.prisma.client.business.update({
       where: { id: businessId },
       data: { notificationPreferences: updated },
@@ -1025,13 +1033,18 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
   }
 
   async getNotificationLog(businessId: string, opts?: { limit?: number; type?: string }) {
+    const rawLimit = opts?.limit;
+    const take =
+      typeof rawLimit === 'number' && Number.isFinite(rawLimit) && rawLimit > 0
+        ? Math.min(Math.floor(rawLimit), 200)
+        : 50;
     return this.prisma.client.customerNotificationLog.findMany({
       where: {
         businessId,
         ...(opts?.type ? { type: opts.type } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      take: opts?.limit ?? 50,
+      take,
     });
   }
 

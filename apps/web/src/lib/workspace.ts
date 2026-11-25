@@ -5,6 +5,12 @@ import { bootstrapIdentity } from "./client";
 // file, so pulling API_BASE from there would close an import cycle and could
 // leave the constant undefined depending on which module initialises first.
 import { getApiBase } from "./api-base";
+import {
+  dismissRemovedBusinessNotice,
+  getRemovedBusinessNotice,
+  getRemovedBusinessNoticeUserId,
+  raiseRemovedBusinessNotice,
+} from "./removed-business-notice";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
@@ -303,6 +309,10 @@ export function purgeOnboardingTranscripts() {
 /** Remove the admin session from localStorage and the cookies. Never throws. */
 export function clearAdminSession() {
   if (typeof window === "undefined") return;
+  // Every sign-in and sign-out runs this first: a removed-business notice belongs to the session that raised it,
+  // never to the next person on the device (SWP-REMOVED-MEMBER-NOTICE, security review MAJOR-1). Silently: the
+  // session is ending or starting, so the gate must not react to it (correctness review R-MINOR-1).
+  dismissRemovedBusinessNotice({ silent: true });
   for (const key of ADMIN_SESSION_KEYS) {
     window.localStorage.removeItem(key);
     if (typeof document !== "undefined") {
@@ -333,8 +343,37 @@ export async function adminSignOut(): Promise<void> {
   }
 }
 
+/** Forget the stored business (its id, cookie and cache) and keep the session: tokens and the cached user stay. */
+function forgetStoredBusiness() {
+  window.localStorage.removeItem(BUSINESS_ID_KEY);
+  window.localStorage.removeItem(BUSINESS_CACHE_KEY);
+  clearBusinessIdCookie();
+  businessCache = null;
+}
+
+// SWP-REMOVED-MEMBER-NOTICE: the notice's storage is its own module; re-exported for callers of this one.
+export {
+  BUSINESS_REMOVED_EVENT,
+  dismissRemovedBusinessNotice,
+  getRemovedBusinessNotice,
+  type RemovedBusinessNotice,
+} from "./removed-business-notice";
+
+/**
+ * The authoritative list no longer holds `stored`. Called before the caches are rewritten: the business cache still
+ * describes the lost business (its name is taken only when it is that business), and the cached user is compared with
+ * the signed-in one, so a stale id left by another account on a shared device never names that account's business.
+ */
+function noteRemovedBusiness(stored: string, signedIn: CachedUser | null) {
+  const before = getCachedUser();
+  if (!signedIn || !before || before.id !== signedIn.id) return;
+  const cached = getCachedBusiness();
+  raiseRemovedBusinessNotice({ id: stored, name: cached?.id === stored && cached.name ? cached.name : null }, signedIn.id);
+}
+
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
+  dismissRemovedBusinessNotice({ silent: true });
   purgeOnboardingTranscripts();
   // RR-ADMIN-LOGOUT: no sign-out leaves the admin bearer behind.
   clearAdminSession();
@@ -421,6 +460,7 @@ export async function listMyBusinesses(): Promise<CachedBusiness[] | null> {
 
 async function bootstrapFirstBusiness(
   generation: number,
+  stored: string | null,
   onSuperseded: () => Promise<string | null>,
 ): Promise<string | null> {
   const result = await bootstrapIdentity({});
@@ -431,7 +471,17 @@ async function bootstrapFirstBusiness(
     return onSuperseded();
   }
   const business = result.data?.business;
-  if (!business?.id) return null;
+  if (!business?.id) {
+    // bootstrapIdentity writes nothing when it gives no business: a stored id that changed while it ran was written
+    // by someone else (another tab), so it is resolved afresh, not forgotten.
+    if (getStoredBusinessId() !== stored) return onSuperseded();
+    // The membership list was authoritative and empty, and bootstrap gave no business (403
+    // OWNER_MEMBERSHIP_REQUIRED: recorded as an owner, a member nowhere): a stored id is not the caller's, and every
+    // screen would keep addressing a business BusinessGuard refuses. Forget the business only; the session stays
+    // (not clearStoredBusinessId, which is the sign-out wipe and removes the tokens).
+    forgetStoredBusiness();
+    return null;
+  }
   setStoredBusinessId(business.id);
   setCachedBusiness(business as CachedBusiness);
   if (result.data?.user) setCachedUser(result.data.user as CachedUser);
@@ -460,16 +510,35 @@ async function resolveBusinessSelection(
   if (generation !== selectionGeneration || getStoredBusinessId() !== stored) return onSuperseded();
   const user = me && typeof me === "object" && typeof (me as CachedUser).id === "string" ? (me as CachedUser) : null;
 
+  // SWP-REMOVED-MEMBER-NOTICE (security review MINOR-1): the stored business and its cache were left by another person
+  // (the cached user is not the signed-in one): they are not this person's to keep, to name or to lose. Forget them,
+  // and any notice, before anything below reads them or overwrites the cached user.
+  let current = stored;
+  const before = getCachedUser();
+  if (user && before && before.id !== user.id) {
+    forgetStoredBusiness();
+    dismissRemovedBusinessNotice();
+    current = null;
+  }
+  // A notice is only ever the person's it was raised for (security review MAJOR-1).
+  const noticeFor = getRemovedBusinessNoticeUserId();
+  if (user && noticeFor && noticeFor !== user.id) dismissRemovedBusinessNotice();
+
   if (businesses === null) {
     if (user) setCachedUser(user);
-    return stored;
+    return current;
   }
-  if (businesses.length === 0) return bootstrapFirstBusiness(generation, onSuperseded);
+  // The list is authoritative: a stored business it no longer holds was lost (removed by an owner), not chosen away.
+  if (current && !businesses.some((b) => b.id === current)) noteRemovedBusiness(current, user);
+  // Access given back (re-invited): the notice no longer holds.
+  const pending = getRemovedBusinessNotice();
+  if (pending && businesses.some((b) => b.id === pending.id)) dismissRemovedBusinessNotice();
+  if (businesses.length === 0) return bootstrapFirstBusiness(generation, current, onSuperseded);
 
   const chosen =
     preferred.map((id) => businesses.find((b) => b.id === id)).find((b) => b !== undefined) ??
     businesses[0];
-  if (chosen.id !== stored) setStoredBusinessId(chosen.id);
+  if (chosen.id !== current) setStoredBusinessId(chosen.id);
   setCachedBusiness(chosen);
   if (user) setCachedUser(user);
   return chosen.id;

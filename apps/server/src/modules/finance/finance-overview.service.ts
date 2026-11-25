@@ -1,4 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import type { Prisma, RevenueAction } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
@@ -399,7 +400,7 @@ export class FinanceOverviewService {
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         _sum: { total: true },
         _count: true,
       }),

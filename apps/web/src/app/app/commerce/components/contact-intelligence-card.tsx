@@ -10,6 +10,7 @@ import {
   Activity,
 } from "lucide-react";
 import type { Invoice } from "@/lib/client";
+import { OWED_STATUSES, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import { formatCurrency } from "@/lib/currency";
 import { CustomerBadge } from "./customer-badge";
 import { AiBadge } from "@/components/ui/ai-badge";
@@ -36,11 +37,11 @@ export const ContactIntelligenceCard = React.memo(function ContactIntelligenceCa
     const contactInvoices = invoices.filter((inv) => inv.contactId === contactId);
     const paidInvoices = contactInvoices.filter((inv) => inv.status === "PAID");
     const overdueInvoices = contactInvoices.filter((inv) => inv.status === "OVERDUE");
-    const sentInvoices = contactInvoices.filter((inv) => inv.status === "SENT");
+    const openInvoices = contactInvoices.filter((inv) => OWED_STATUSES.has(inv.status));
 
-    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.total ?? 0), 0);
+    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + safeInvoiceAmount(inv.total), 0);
     const outstandingBalance =
-      [...overdueInvoices, ...sentInvoices].reduce((sum, inv) => sum + Number(inv.total ?? 0), 0);
+      openInvoices.reduce((sum, inv) => sum + invoiceRemainingOwed(inv), 0);
 
     const paymentRate = contactInvoices.length > 0
       ? Math.round((paidInvoices.length / contactInvoices.length) * 100)

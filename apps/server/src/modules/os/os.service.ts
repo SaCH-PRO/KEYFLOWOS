@@ -1,4 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommandService } from '../command/command.service';
 import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from '../finance/cash-position.service';
@@ -130,7 +131,7 @@ export class OsService {
       // V1-34 (CF-41): cash is the ledger's, not the currentBalance snapshot.
       this.cashPosition.getCashPosition(businessId),
       this.prisma.client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         _sum: { total: true },
       }),
       this.prisma.client.invoice.aggregate({

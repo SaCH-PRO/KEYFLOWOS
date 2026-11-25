@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface ForecastBucket {
@@ -61,7 +62,7 @@ export class RevenueForecastService {
         select: { total: true, paidAt: true, createdAt: true, dueDate: true },
       }),
       this.db.invoice.findMany({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         select: { id: true, total: true, dueDate: true, issueDate: true },
       }),
       this.db.quote.findMany({

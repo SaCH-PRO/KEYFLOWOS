@@ -9,6 +9,7 @@ import { AiUsageService } from './ai-usage.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { DocumentParsingService } from '../ingestion/document-parsing.service';
+import { ObjectNotFoundError, ObjectStorageService } from '../../core/object-storage/objectStorage';
 
 export interface DocumentExtractionRequest {
   businessId: string;
@@ -181,9 +182,63 @@ export class DocumentIntelligenceService {
   private getDocling() {
     return this.moduleRef.get(DocumentParsingService, { strict: false });
   }
+  private objectStorage?: ObjectStorageService;
+  private getObjectStorage(): ObjectStorageService {
+    return (this.objectStorage ??= new ObjectStorageService());
+  }
 
-  async extractFromDocument(req: DocumentExtractionRequest): Promise<DocumentExtractionResult> {
+  /**
+   * FU-OUTBOUND-ATTACHMENT-URL: the request as it may reach the model, or null when its source can
+   * not be read for its business. A client URL never goes to the provider as is:
+   *  - with content already given, the URL is dropped;
+   *  - a URL naming one of our objects is read here, through resolveObjectForBusiness for
+   *    req.businessId, and sent as content; another business's object, an object issued before
+   *    uploads were bound to a business, and an absent object all answer null alike;
+   *  - any other URL answers null (review round 2: SEC-FUOAU-1/2/3 — arbitrary external URLs
+   *    are refused across every caller including contract term extraction).
+   */
+  private async resolveRequestSource(
+    req: DocumentExtractionRequest,
+  ): Promise<DocumentExtractionRequest | null | 'storage_failed'> {
+    if (!req.url) return { ...req, url: undefined };
+    if (req.base64Content) return { ...req, url: undefined };
+    const storage = this.getObjectStorage();
+    const objectPath = storage.objectPathFromClientUrl(req.url);
+    if (objectPath) {
+      try {
+        const { buffer, contentType } = await storage.getObjectEntityBuffer(objectPath, req.businessId);
+        const stored = contentType && contentType !== 'application/octet-stream' ? contentType : undefined;
+        return { ...req, url: undefined, base64Content: buffer.toString('base64'), mimeType: stored ?? req.mimeType };
+      } catch (err) {
+        // Review round 1 (S1-3, C1-1): absent, another business's, or over the read cap: absent. Any other
+        // error (the store is down, timed out, refused our credentials) is a failed read the caller may
+        // retry. Another business's object is refused before the store is asked, so this tells nothing.
+        return err instanceof ObjectNotFoundError ? null : 'storage_failed';
+      }
+    }
+    return null;
+  }
+
+  async extractFromDocument(
+    request: DocumentExtractionRequest,
+  ): Promise<DocumentExtractionResult> {
     const startTime = Date.now();
+
+    // FU-OUTBOUND-ATTACHMENT-URL: no client URL reaches the provider (resolveRequestSource). A source
+    // that can not be read for this business answers as an absent file, before any model call; the
+    // log names no URL or path.
+    const resolved = await this.resolveRequestSource(request);
+    if (resolved === 'storage_failed') {
+      this.logger.warn(`Document source for ${request.source} could not be read from storage now; nothing was sent to the model.`);
+      const failed: DocumentExtractionResult = { documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] };
+      FAILED_EXTRACTIONS.add(failed);
+      return failed;
+    }
+    if (!resolved) {
+      this.logger.warn(`Document source for ${request.source} could not be read for this business; nothing was sent to the model.`);
+      return { documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] };
+    }
+    const req = resolved;
 
     // Build prompt based on available data
     const hasImage = req.mimeType.startsWith('image/') || req.mimeType === 'application/pdf';

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, forwardRef, Get, Inject, NotFoundException, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
@@ -1742,7 +1743,7 @@ export class AiController {
         : null,
       readsRevenue
         ? (this.prisma as any).client.invoice.count({
-            where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
+            where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
           })
         : 0,
       readsCrm

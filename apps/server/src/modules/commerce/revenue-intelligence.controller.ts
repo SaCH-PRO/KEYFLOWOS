@@ -13,6 +13,7 @@ import { RevenueForecastService } from './revenue-forecast.service';
 import { SlowPayerDetector, SlowPayerReport } from './slow-payer-detector.service';
 import { PricingSignalsService } from './pricing-signals.service';
 import { RevenueBriefingService, RevenueBriefingChase, RevenueBriefingSnapshot } from './revenue-briefing.service';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 
 /**
  * W7-BRIEFINGS-REST (review SEC-W6BS-1; owner ruling D-63, as W5/W6 applied it to the morning and
@@ -82,7 +83,7 @@ function slowPayersFor(report: SlowPayerReport, rule: BriefingContactRule): Slow
 }
 
 /** The open invoices and pending quotes the revenue briefing names their contacts from (RevenueBriefingService.generate). */
-const BRIEFING_OPEN_INVOICE: Prisma.InvoiceWhereInput = { deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } };
+const BRIEFING_OPEN_INVOICE: Prisma.InvoiceWhereInput = { deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } };
 const BRIEFING_PENDING_QUOTE: Prisma.QuoteWhereInput = { deletedAt: null, status: { in: ['SENT', 'ACCEPTED'] }, invoiceId: null };
 const BRIEFING_HEADLINE = 'Here is your revenue briefing.';
 

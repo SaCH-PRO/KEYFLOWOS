@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { BUSINESS_REMOVED_EVENT, getRemovedBusinessNotice } from "@/lib/removed-business-notice";
 import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
 
 const ALLOWED_PATHS = [
@@ -60,6 +61,14 @@ export function useGenomeGate(): GenomeGateState {
     genomeIntegrity: null,
     genesisCompleted: null,
   }));
+  // SWP-REMOVED-MEMBER-NOTICE (security review MINOR-3): re-check when the removed-business notice is raised or
+  // dismissed, so the gate applies again as soon as the member dismisses it.
+  const [noticeVersion, setNoticeVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setNoticeVersion((v) => v + 1);
+    window.addEventListener(BUSINESS_REMOVED_EVENT, bump);
+    return () => window.removeEventListener(BUSINESS_REMOVED_EVENT, bump);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,10 +78,19 @@ export function useGenomeGate(): GenomeGateState {
       ? `${pathname}?${searchParams.toString()}`
       : pathname || "";
 
+    // SWP-REMOVED-MEMBER-NOTICE (BUG-117): a member who just lost access to a business is told so by the shell's
+    // notice; they are never sent to onboarding for that reason (their remaining business, or none, is not a choice
+    // they made). Once they dismiss the notice, the gate applies as usual.
+    const removedPending = getRemovedBusinessNotice() !== null;
+
     if (!businessId) {
       // No business selected -> keep gate closed and send to onboarding.
-      if (!isAllowedPath(pathWithQuery)) {
-        router.replace("/app/onboarding");
+      // The pending-notice guard wraps the allowed-path guard, never merges into it: the redirect keeps the exact form
+      // e2e/onboarding-loop-regression.spec.ts (Release 0 evidence, R0-06) pins.
+      if (!removedPending) {
+        if (!isAllowedPath(pathWithQuery)) {
+          router.replace("/app/onboarding");
+        }
       }
       // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag lifecycle: closes the gate once the no-business path resolves
       setState((s) => ({ ...s, checking: false, gateActive: true }));
@@ -109,8 +127,10 @@ export function useGenomeGate(): GenomeGateState {
           genesisCompleted: null,
         });
 
-        if (gateActive && pathWithQuery && !isAllowedPath(pathWithQuery)) {
-          router.replace("/app/onboarding");
+        if (!removedPending) {
+          if (gateActive && pathWithQuery && !isAllowedPath(pathWithQuery)) {
+            router.replace("/app/onboarding");
+          }
         }
       })
       .catch((err) => {
@@ -124,7 +144,7 @@ export function useGenomeGate(): GenomeGateState {
     return () => {
       cancelled = true;
     };
-  }, [pathname, searchParams, router]);
+  }, [pathname, searchParams, router, noticeVersion]);
 
   return state;
 }

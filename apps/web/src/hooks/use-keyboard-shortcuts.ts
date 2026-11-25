@@ -11,6 +11,11 @@ interface ShortcutConfig {
   handler: () => void;
   description: string;
   category: string;
+  /**
+   * Listed here (for the shortcuts help) but answered by another component, which owns the key: this hook leaves
+   * the keypress alone, so the key has one owner however many screens call useKeyboardShortcuts.
+   */
+  ownedBy?: "KeyAgent";
 }
 
 // Legacy format used by some pages (bookings, etc.)
@@ -33,6 +38,11 @@ const SHORTCUTS: ShortcutConfig[] = [
     key: "k",
     modifier: "meta",
     global: true,
+    // KeyAgent (components/key/key-agent.tsx) owns Cmd/Ctrl+K: it opens and closes the palette. When this hook
+    // answered it too (by sending kf:open-key, which opens the palette), one keypress opened the palette and KeyAgent's
+    // toggle shut it again whenever this hook's listener ran first: in the app it does, as KeyAgent mounts after the
+    // Business Genome check (journey C4, FU-C4-CMDK-SEARCH).
+    ownedBy: "KeyAgent",
     handler: () => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "palette" } })),
     description: "Open command palette",
     category: "Navigation",
@@ -148,6 +158,9 @@ export function useKeyboardShortcuts(legacyGroups?: LegacyShortcutGroup[], _enab
 
         if ((keyMatch || isQuestionMark) && modifierMatch) {
           e.preventDefault();
+          // Its owner answers it (kept from the browser here too, so a route without the owner, such as onboarding,
+          // does not hand Ctrl+K to the browser); nor is it a page's shortcut.
+          if (shortcut.ownedBy) return;
           const now = Date.now();
           if (shortcut.category === "Navigation" && now - lastNavTime.current < 100) continue;
           lastNavTime.current = now;

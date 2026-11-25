@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 
@@ -94,7 +95,7 @@ export class GamificationService {
     const metaData = (business.metaData as Record<string, unknown>) || {};
     const paidInvoices = invoices.filter(i => i.status === 'PAID').length;
     const sentInvoices = invoices.filter(i => ['SENT', 'PAID'].includes(i.status)).length;
-    const overdueInvoices = invoices.filter(i => i.status === 'OVERDUE' || (i.status === 'SENT' && i.dueDate && new Date(i.dueDate) < now)).length;
+    const overdueInvoices = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status) && (i.status === 'OVERDUE' || (i.dueDate && new Date(i.dueDate) < now))).length;
     const profileComplete = !!(business.name && business.address && business.phone && business.email && business.logoUrl);
 
     const achievementStatus: Record<string, boolean> = {

@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { Invoice, Contact, Product } from "@/lib/client";
-import { canShareInvoicePayLink } from "@/lib/commerce-status";
+import { canRemindInvoice, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { formatAmount, getDaysUntilDue, formatRelativeDate } from "../../utils/commerce-utils";
 import { getStatusBadge, BILLING_SORT_OPTIONS, BillingSortKey, INVOICE_STATUS_FILTERS } from "../../components/commerce-types";
 import { useCommerceSearch } from "../../hooks/use-commerce-search";
@@ -77,7 +77,7 @@ export function InvoiceList({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
+    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, PENDING: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
     for (const inv of invoices) {
       if (inv.status && counts[inv.status] !== undefined) counts[inv.status]++;
     }
@@ -278,7 +278,7 @@ export function InvoiceList({
                             {gmailStatus?.connected && (
                               <MenuItem icon={Mail} label="Send via email" onClick={() => { setOpenMenuId(null); /* open send email */ }} />
                             )}
-                            {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && gmailStatus?.connected && (
+                            {canRemindInvoice(inv.status) && gmailStatus?.connected && (
                               <MenuItem icon={Bell} label="Send reminder" onClick={() => { setOpenMenuId(null); onReminder(inv); }} />
                             )}
                             {inv.status === "PAID" && gmailStatus?.connected && inv.contact?.email && (

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface SlowPayerEntry {
@@ -88,7 +89,7 @@ export class SlowPayerDetector {
             by: ['contactId'],
             where: {
               businessId, deletedAt: null,
-              status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+              status: { in: OPEN_RECEIVABLE_STATUS_LIST },
               contactId: { in: contactIds },
             },
             _sum: { total: true },

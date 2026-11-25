@@ -53,6 +53,8 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { Readable } from 'node:stream';
+import { ObjectStorageService } from '../src/core/object-storage/objectStorage';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -809,10 +811,22 @@ const MONEY: Array<{
     business: 1,
     cognitive: 1,
     write: async () => {
-      const res = await agent().post(`/expenses/businesses/${ID.biz}/expenses/extract-receipt`).set(HEADER, ID.owner)
-        .send({ url: 'https://files.v70c.invalid/receipt.jpg', filename: 'v70c-receipt.jpg' });
-      expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
-      expect(res.body.invoiceData.total).toBe(3141.59);
+      // FU-OUTBOUND-ATTACHMENT-URL: extractFromDocument sends no client URL to the model; it reads one of this
+      // business's own uploads, by the URL the receipt form sends (`${API_BASE}/objects/uploads/<biz>/<id>`). The
+      // storage read under the real business check is stood in (no bucket in this suite).
+      const read = vi.spyOn(ObjectStorageService.prototype, 'getObjectEntityFile').mockResolvedValue({
+        bucket: 'v70c', key: 'v70c', getMetadata: async () => ({}), setMetadata: async () => undefined, exists: async () => true,
+        read: async () => ({ body: Readable.from([Buffer.from('v70c receipt')]), contentType: 'image/jpeg' }),
+      });
+      try {
+        const res = await agent().post(`/expenses/businesses/${ID.biz}/expenses/extract-receipt`).set(HEADER, ID.owner)
+          .send({ url: `https://api.v70c.invalid/objects/uploads/${ID.biz}/v70c-receipt`, filename: 'v70c-receipt.jpg' });
+        expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+        expect(res.body.invoiceData.total).toBe(3141.59);
+        expect(read).toHaveBeenCalledWith(`/objects/uploads/${ID.biz}/v70c-receipt`);
+      } finally {
+        read.mockRestore();
+      }
     },
   },
   {
