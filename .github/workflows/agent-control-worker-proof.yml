@@ -5,14 +5,34 @@ name: Agent Control Worker Proof
 #
 #   portable -- the control-plane suite on Ubuntu. PowerShell is REQUIRED
 #               (KF_REQUIRE_POWERSHELL=1), so the authority and verdict proofs
-#               cannot silently skip.
-#   windows  -- the portable suite plus tests/windows/ on windows-latest: the
-#               worker's real tick (authority, bounded retry, worktree
-#               isolation), install/uninstall, and ScheduledTasks cmdlet
-#               resolution run where the worker actually runs. Those suites
-#               fail, never skip, off Windows. The negative controls run here
-#               too, because half of them restore defects only a Windows run
-#               can observe.
+#               cannot silently skip. Always runs.
+#   windows  -- "Windows worker proof": the portable suite plus tests/windows/
+#               on windows-latest (the worker's real tick, install/uninstall,
+#               ScheduledTasks cmdlet resolution), and the negative controls,
+#               because half of them restore defects only a Windows run can
+#               observe.
+#
+# Gated by its inputs and sharded (FU-CI-WINDOWS-INPUT-GATE, owner ruling
+# D-279; R&D-1 C2):
+#   gate              -- always runs. Diffs the PR (or merge group) against its
+#                        merge base. When no proof input changed
+#                        (scripts/ci/worker-proof-inputs.json) and no change is
+#                        a path a Windows checkout cannot reproduce, it decides
+#                        skip and names the diff it checked; otherwise, on the
+#                        nightly schedule, and whenever it cannot tell, it
+#                        decides run. The gate at the merge base is asked too:
+#                        run wins, so an accidental change to the gate or its
+#                        list cannot skip the proof (not a security boundary:
+#                        this file and the gate code are the PR's own, as on
+#                        any pull_request run; review guards their rewrite).
+#   suites            -- the Windows and portable suites, when the gate said run.
+#   negative-controls -- the manifest's controls in 4 shards, when it said run.
+#   windows           -- the aggregate, carrying the required name. Runs always;
+#                        passes only a gated skip with every leg skipped, or
+#                        every leg green with every control of the manifest
+#                        reported exactly once, live, at the gated head
+#                        (scripts/ci/worker-proof-aggregate.mjs).
+# scripts/ci/worker-proof-workflow.spec.mjs is the contract of this file.
 #
 # No path filter: admission requires this workflow at the exact head of every
 # impl/* PR (REQUIRED_WORKFLOWS in scripts/agent-control/lib/events.mjs), so it
@@ -22,6 +42,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   merge_group: {}
+  schedule:
+    # D-279: the full proof runs nightly on main, whatever changed.
+    - cron: '41 3 * * *'
 
 permissions:
   contents: read
@@ -48,14 +71,46 @@ jobs:
       - name: Prove the programme DAG is executable
         run: node scripts/agent-control/validate-dag.mjs
 
-  windows:
-    name: Windows worker proof
+  gate:
+    name: Worker proof input gate
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      sha: ${{ steps.decide.outputs.sha }}
+      decision: ${{ steps.decide.outputs.decision }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20.18.1'
+      - name: Prove the gate's own logic
+        run: node --test scripts/ci/worker-proof-inputs.spec.mjs scripts/ci/worker-proof-shards.spec.mjs scripts/ci/worker-proof-workflow.spec.mjs
+      - name: Decide whether the Windows proof runs (D-279)
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: node scripts/ci/worker-proof-inputs.mjs --event "$EVENT" --base "$BASE" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  suites:
+    name: Windows proof suites
+    needs: [gate]
+    if: needs.gate.outputs.run == 'true'
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          ref: ${{ needs.gate.outputs.sha }}
+      - name: Verify the checkout is the gated head
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.gate.outputs.sha }}
+        run: test -n "$EXPECTED" && test "$(git rev-parse HEAD)" = "$EXPECTED"
       - uses: actions/setup-node@v7
         with:
           node-version: '20.18.1'
@@ -64,6 +119,67 @@ jobs:
         env:
           KF_REQUIRE_POWERSHELL: '1'
         run: node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
-      - name: Negative controls (every proof must fail with its defect restored)
+
+  negative-controls:
+    name: Windows negative controls (shard ${{ matrix.shard }}/4)
+    needs: [gate]
+    if: needs.gate.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - name: Verify the checkout is the gated head
         shell: bash
-        run: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+        env:
+          EXPECTED: ${{ needs.gate.outputs.sha }}
+        run: test -n "$EXPECTED" && test "$(git rev-parse HEAD)" = "$EXPECTED"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20.18.1'
+      - name: Negative controls, shard ${{ matrix.shard }} of 4 (every proof must fail with its defect restored)
+        shell: bash
+        run: node scripts/ci/worker-proof-shard.mjs --manifest scripts/agent-control/negative-controls.yaml --shard ${{ matrix.shard }} --of 4 --out .proof/worker-proof/shard-${{ matrix.shard }}.json
+      - name: Upload the shard report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: worker-proof-nc-shard-${{ matrix.shard }}
+          path: .proof/worker-proof/shard-${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
+
+  # The required check. Passes only a gated skip (every leg skipped, the diff
+  # named) or a full run (every leg green, every control reported exactly once,
+  # live, at the gated head).
+  windows:
+    name: Windows worker proof
+    needs: [gate, suites, negative-controls]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20.18.1'
+      - name: Download the shard reports
+        if: needs.gate.outputs.run == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: worker-proof-nc-shard-*
+          path: .proof/worker-proof
+      - name: Every leg green and every control reported exactly once, or a gated skip
+        env:
+          DECISION: ${{ needs.gate.outputs.decision }}
+          NEEDS: ${{ toJSON(needs) }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: node scripts/ci/worker-proof-aggregate.mjs --manifest scripts/agent-control/negative-controls.yaml --reports .proof/worker-proof --of 4 --legs suites,negative-controls
