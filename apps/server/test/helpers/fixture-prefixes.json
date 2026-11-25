@@ -818,6 +818,11 @@
       "packet": "V1-94 (W8-MONEY-SIGNALS)"
     },
     {
+      "prefix": "v94w_",
+      "owner": "apps/server/test/wa-inbound-key-exclude.integration.test.ts",
+      "packet": "V1-94 (FU-WA-INBOUND-KEY-EXCLUDE, D-280 / SEC-WAW-1)"
+    },
+    {
       "prefix": "v95b_",
       "owner": "apps/server/test/google-identity-backfill.integration.test.ts",
       "packet": "V1-95 (W9-IDENTITY-BACKFILL-SCRIPT)"
