@@ -4197,4 +4197,76 @@ describe('W11-SHIP-STOCK-DECREMENT (F-26; D-136)', () => {
       shippedEvents: 1,
     });
   }, 20_000);
+
+  it('RC-63 (W11-SHIP-STOCK-DECREMENT review P50-SEC-1) malformed carrier, trackingNumber, or estimatedDelivery returns 400 with nothing written (order, routes, stock, shipments, movements unchanged)', async () => {
+    const order = await paidOrderWithLines([{ productId: ID.productA, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, order.id);
+    await market.fulfillOrder(ID.biz, order.id, 'process', {}, ID.owner);
+
+    const badPayloads = [
+      { carrier: 12345 },
+      { trackingNumber: { set: 'TRK' } },
+      { carrier: 'DHL', trackingNumber: 'TRK-BAD-DATE', estimatedDelivery: 'not-a-date' },
+      { carrier: 'DHL', estimatedDelivery: 999999 },
+    ];
+    const codes: number[] = [];
+    for (const payload of badPayloads) {
+      try {
+        await market.fulfillOrder(ID.biz, order.id, 'ship', payload, ID.owner);
+        codes.push(200);
+      } catch (err: any) {
+        codes.push(typeof err?.getStatus === 'function' ? err.getStatus() : 500);
+      }
+    }
+
+    const shipments = await db.shipment.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+    expect({
+      codes,
+      status: await statusOf(order.id),
+      routes: await routesOf(order.id),
+      stockA: await stockOf(ID.stockA),
+      shipmentCount: shipments.length,
+      movements: await shipMovementsFor(order.id),
+      shippedEvents: shippedEventsFor(order.id),
+    }).toEqual({
+      codes: [400, 400, 400, 400],
+      status: 'picking_packing/PAID',
+      routes: ['LOCAL_STOCK:PICKING_PACKING'],
+      stockA: '10/2',
+      shipmentCount: 0,
+      movements: [],
+      shippedEvents: 0,
+    });
+  }, 20_000);
+
+  it('RC-64 (W11-SHIP-STOCK-DECREMENT review P50-CONC-1 / D-136) concurrent ship (with carrier/tracking) and cancel serialize under the routing claim: exactly one commits and the other answers 400 with consistent stock and routes', async () => {
+    const order = await paidOrderWithLines([{ productId: ID.productA, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, order.id);
+    await market.fulfillOrder(ID.biz, order.id, 'process', {}, ID.owner);
+
+    const [shipRes, cancelRes] = await Promise.allSettled([
+      market.fulfillOrder(ID.biz, order.id, 'ship', { carrier: 'DHL', trackingNumber: `${P}TRK_RC64` }, ID.owner),
+      market.fulfillOrder(ID.biz, order.id, 'cancel', { reason: 'rc64' }, ID.owner),
+    ]);
+
+    const statusOfResult = (r: PromiseSettledResult<any>) =>
+      r.status === 'fulfilled'
+        ? `200:${r.value.status}`
+        : `${typeof r.reason?.getStatus === 'function' ? r.reason.getStatus() : 500}`;
+
+    const outcomes = [statusOfResult(shipRes), statusOfResult(cancelRes)];
+    const finalStatus = await statusOf(order.id);
+    if (finalStatus === 'shipped/PAID') {
+      expect(outcomes).toEqual(['200:shipped', '400']);
+      expect(await stockOf(ID.stockA)).toBe('8/0');
+      expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:SHIPPED']);
+      expect((await shipMovementsFor(order.id)).length).toBe(1);
+    } else {
+      expect(finalStatus).toBe('cancelled/PAID');
+      expect(outcomes).toEqual(['400', '200:cancelled']);
+      expect(await stockOf(ID.stockA)).toBe('10/0');
+      expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:CANCELLED']);
+      expect(await shipMovementsFor(order.id)).toEqual([]);
+    }
+  }, 20_000);
 });

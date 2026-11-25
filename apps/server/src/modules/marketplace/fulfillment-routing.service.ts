@@ -1126,23 +1126,28 @@ export class FulfillmentRoutingService {
    * letting concurrent 'ship' calls both succeed and double-decrement.
    *
    * Order of operations inside `tx`:
-   *   1. claimOrderRouting(tx, businessId, orderId) — serializes with routing,
+   *   1. validate optional `carrier`, `trackingNumber`, and `estimatedDelivery`
+   *      inputs (400 on malformed values before mutating state);
+   *   2. claimOrderRouting(tx, businessId, orderId) — serializes with routing,
    *      concurrent ships, and cancels on this order;
-   *   2. re-read the order's status, shippingAddress, and items under the claim
+   *   3. re-read the order's status, shippingAddress, and items under the claim
    *      and refuse 400 unless canTransitionOrder(status, 'shipped');
-   *   3. create the Shipment when carrier or trackingNumber is given;
    *   4. read the order's LOCAL_STOCK routes in RESERVED or PICKING_PACKING;
    *   5. lock the (productId, warehouseId) inventory_stocks rows of the tracked
    *      ones in the global order (lockStockRowPairsInOrder), skipping routes
    *      that are noReservationRequired, untracked, virtual, or lack a
-   *      warehouseId or order item;
-   *   6. for each LOCAL_STOCK route, compare-and-set RESERVED/PICKING_PACKING
+   *      warehouseId or order item — strictly BEFORE creating the Shipment row
+   *      (whose FK takes FOR KEY SHARE on marketplace_orders, avoiding a 40P01
+   *      cycle with completeCheckout which locks inventory_stocks then
+   *      marketplace_orders FOR UPDATE);
+   *   6. create the Shipment when carrier or trackingNumber is given;
+   *   7. for each LOCAL_STOCK route, compare-and-set RESERVED/PICKING_PACKING
    *      to SHIPPED (with shipmentId when created); only when count === 1 and
    *      the route is tracked, read the locked stock row, clamp quantity and
    *      reserved at 0, update it, write a SALE/SHIP StockMovement audit row
    *      naming the acting member, and collect the stock id for post-commit
    *      reorder alerting;
-   *   7. move remaining PICKING_PACKING, PO_RAISED, and PREORDER_ACCEPTED
+   *   8. move remaining PICKING_PACKING, PO_RAISED, and PREORDER_ACCEPTED
    *      routes (e.g. MANUAL, DROPSHIP, PREORDER) to SHIPPED.
    *
    * Returns the deduplicated ids of stock rows decremented so the caller runs
@@ -1152,9 +1157,37 @@ export class FulfillmentRoutingService {
     tx: RoutingTx,
     businessId: string,
     orderId: string,
-    data?: { carrier?: string; trackingNumber?: string; estimatedDelivery?: string | Date },
+    data?: { carrier?: unknown; trackingNumber?: unknown; estimatedDelivery?: unknown },
     actorId: string | null = null,
   ): Promise<string[]> {
+    const carrier =
+      data?.carrier === undefined || data?.carrier === null
+        ? undefined
+        : typeof data.carrier === 'string'
+          ? data.carrier
+          : (() => {
+              throw new BadRequestException('carrier must be a string');
+            })();
+    const trackingNumber =
+      data?.trackingNumber === undefined || data?.trackingNumber === null
+        ? undefined
+        : typeof data.trackingNumber === 'string'
+          ? data.trackingNumber
+          : (() => {
+              throw new BadRequestException('trackingNumber must be a string');
+            })();
+    let estimatedDelivery: Date | undefined;
+    if (data?.estimatedDelivery !== undefined && data?.estimatedDelivery !== null && data?.estimatedDelivery !== '') {
+      if (typeof data.estimatedDelivery !== 'string' && !(data.estimatedDelivery instanceof Date)) {
+        throw new BadRequestException('estimatedDelivery must be a valid date');
+      }
+      const parsed = data.estimatedDelivery instanceof Date ? data.estimatedDelivery : new Date(data.estimatedDelivery);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('estimatedDelivery must be a valid date');
+      }
+      estimatedDelivery = parsed;
+    }
+
     await claimOrderRouting(tx, businessId, orderId);
 
     const order = await tx.marketplaceOrder.findFirst({
@@ -1168,23 +1201,6 @@ export class FulfillmentRoutingService {
     if (!order) throw new NotFoundException('Order not found');
     if (!canTransitionOrder(order.status, 'shipped')) {
       throw new BadRequestException(`Cannot ship order in ${order.status} status`);
-    }
-
-    let shipmentId: string | undefined;
-    if (data?.carrier || data?.trackingNumber) {
-      const shipment = await tx.shipment.create({
-        data: {
-          businessId,
-          orderId,
-          carrier: data.carrier,
-          trackingNumber: data.trackingNumber,
-          status: 'IN_TRANSIT',
-          shippedAt: new Date(),
-          estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : undefined,
-          destinationAddress: order.shippingAddress ?? undefined,
-        },
-      });
-      shipmentId = shipment.id;
     }
 
     const itemsById = new Map(order.items.map((item) => [item.id, item]));
@@ -1215,6 +1231,23 @@ export class FulfillmentRoutingService {
         tracked && route.warehouseId && item ? [{ productId: item.productId, warehouseId: route.warehouseId }] : [],
       ),
     );
+
+    let shipmentId: string | undefined;
+    if (carrier || trackingNumber) {
+      const shipment = await tx.shipment.create({
+        data: {
+          businessId,
+          orderId,
+          carrier,
+          trackingNumber,
+          status: 'IN_TRANSIT',
+          shippedAt: new Date(),
+          estimatedDelivery,
+          destinationAddress: order.shippingAddress ?? undefined,
+        },
+      });
+      shipmentId = shipment.id;
+    }
 
     const decrementedStockIds = new Set<string>();
     for (const { route, routeMeta, item, tracked } of routeEntries) {
@@ -1324,7 +1357,7 @@ export class FulfillmentRoutingService {
       include: { product: true, warehouse: true },
     });
 
-    if (!stock || !stock.reorderAt) return;
+    if (!stock || stock.businessId !== businessId || !stock.reorderAt) return;
 
     const available = stock.quantity - stock.reserved;
 
