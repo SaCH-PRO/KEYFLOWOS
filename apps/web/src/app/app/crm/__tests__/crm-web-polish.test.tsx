@@ -6,7 +6,7 @@
  *                         "1 of 1" (before: it read its own, empty search and showed every customer, "3 of 3")
  *   CWP-080b  RED-BEFORE  a later change of the screen's search ("Kwame" -> "Ama") re-reads the table with it
  *   CWP-080c  RED-BEFORE  the table's own search box shows the screen's search, and typing in it changes the
- *                         screen's search (one search, not two that disagree)
+ *                         screen's search (one search, not two that disagree) and the table's own rows at once
  *   CWP-080f  RED-BEFORE  a saved table view applied in the table hands its search to the screen too ("All
  *                         Contacts" saves no search, so the screen's "Kwame" clears), so the two never disagree
  *   CWP-080d  control     without a screen search the table's own box still searches on its own (the prop is
@@ -140,6 +140,9 @@ describe("BUG-080: the table view honours the screen's search, and its count agr
     await waitFor(() => expect(box.value).toBe("Kwame"));
     fireEvent.change(box, { target: { value: "Kofi" } });
     expect(onSearchChange).toHaveBeenLastCalledWith("Kofi");
+    // The table takes what was typed at once, whether or not the screen hands it back (here it does not).
+    expect(box.value).toBe("Kofi");
+    await waitFor(() => expect(tableNames()).toEqual(["Kofi"]), { timeout: 3_000 });
     fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(onSearchChange).toHaveBeenLastCalledWith("");
   });
