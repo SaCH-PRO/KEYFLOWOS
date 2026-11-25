@@ -79,8 +79,17 @@ function storedMatchesShown(shown: VerifiedSession | null): boolean {
 type IdentityAnswer =
   | { kind: "stale" }
   | { kind: "unauthorized" }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; transient: boolean }
   | { kind: "ok"; session: StoredSession | null; userId: string | null };
+
+/**
+ * A failure that says nothing about the session: the fetch threw (network), or a 5xx, 408 or 429. A background
+ * re-verify keeps a verified same-user shell only for these; any other answer (a 403, or the 404 /identity/me gives
+ * once the user row is gone) tears it down.
+ */
+function isTransientStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
+}
 
 /**
  * GET /identity/me for the stored session, retrying a few times on transient non-401 errors and once after a token
@@ -123,7 +132,7 @@ async function askIdentity(stale: () => boolean): Promise<IdentityAnswer> {
         if (stale()) return { kind: "stale" };
         continue;
       }
-      return { kind: "error", message };
+      return { kind: "error", message, transient: isTransientStatus(res.status) };
     } catch (err) {
       if (stale()) return { kind: "stale" };
       const message = err instanceof Error ? err.message : "Network error";
@@ -133,10 +142,10 @@ async function askIdentity(stale: () => boolean): Promise<IdentityAnswer> {
         if (stale()) return { kind: "stale" };
         continue;
       }
-      return { kind: "error", message };
+      return { kind: "error", message, transient: true };
     }
   }
-  return { kind: "error", message: "Unable to verify your session" };
+  return { kind: "error", message: "Unable to verify your session", transient: true };
 }
 
 /**
@@ -240,11 +249,18 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
           redirectToLogin("server rejected token (401)");
           return;
         }
+        if (answer.kind === "error" && background && !answer.transient) {
+          // A 403, or a 404 (the user row is gone): not a passing failure. Verify again as a first load would, which
+          // ends in the error state (or sign-in on a 401).
+          background = false;
+          tearDown();
+          continue;
+        }
         if (answer.kind === "error") {
           verifyingRef.current = false;
           if (background) {
-            // A verified same-user shell is not torn down for an unreachable API: the pages' own 401s, and the next
-            // check, still apply.
+            // A verified same-user shell is not torn down for an unreachable API (a network failure, a 5xx, 408 or
+            // 429): the pages' own 401s, and the next check, still apply.
             console.warn(`[RequireAuth] ${answer.message}; keeping the verified session`);
             return;
           }
@@ -324,10 +340,16 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   }, [verify, recheck, redirectToLogin]);
 
   // A page change only compares the stored session with the verified one (a token rotated in this tab raises no
-  // storage event); it never verifies an unchanged session again.
+  // storage event); it never verifies an unchanged session again. From the error state a page change verifies again.
   useEffect(() => {
     recheck();
   }, [pathname, recheck]);
+
+  // Every other render does the same comparison (a navigation that changes only the search parameters re-renders the
+  // render guard below without a pathname change), except in the error state, which waits for Retry or a page change.
+  useEffect(() => {
+    if (status !== "error") recheck();
+  });
 
   if (status === "error") {
     return (
