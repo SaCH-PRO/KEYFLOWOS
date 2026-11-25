@@ -221,8 +221,15 @@ describe('CommandCenterKeyGenomeBridgeService', () => {
     const brief = await (service as any).buildCrossDomainBrief(
       'biz_1',
       [
-        { module: 'finance', readinessScore: 20, missingFacts: [{ impact: 'BLOCKING' }] } as any,
-        { module: 'operations', readinessScore: 80, missingFacts: [{ impact: 'BLOCKING' }] } as any,
+        { module: 'finance', readinessScore: 20, missingFacts: [{ impact: 'BLOCKING', section: 'FINANCIAL', field: 'finance.cash_balance' }] } as any,
+        {
+          module: 'operations',
+          readinessScore: 80,
+          missingFacts: [
+            { impact: 'BLOCKING', section: 'OPERATIONAL_MODEL', field: 'ops.sla' },
+            { impact: 'BLOCKING', section: 'BUSINESS_MODEL', field: 'model.revenue_model' },
+          ],
+        } as any,
       ],
       { readsRevenue: false },
     );
@@ -233,12 +240,15 @@ describe('CommandCenterKeyGenomeBridgeService', () => {
     expect(brief.overallRiskLevel).toBe('UNKNOWN');
     expect(brief.confidenceScore).toBe(0);
     expect(brief.topOpportunities).toEqual([]);
+    expect(brief.topRecommendations).toEqual([]);
+    expect(brief.unsafeAutomationBlocks).toEqual([]);
     expect(opportunityDetector.detectOpportunities).not.toHaveBeenCalled();
-    expect(brief.topRecommendations.every((r: any) => r.domain !== 'FINANCIAL')).toBe(true);
+    expect(ranker.rankRecommendations).not.toHaveBeenCalled();
+    expect(autonomyGate.checkGate).not.toHaveBeenCalled();
     expect(brief.staleFactCount).toBe(1);
     expect(brief.criticalMissingFactCount).toBe(1);
 
-    // When no snapshot exists and readsRevenue is false, never trigger computeCrossDomainSnapshot or ranker ensureSnapshot.
+    // When no snapshot exists and readsRevenue is false, never trigger computeCrossDomainSnapshot, ranker, or autonomyGate.
     crossDomain.getLatestCrossDomainSnapshot.mockResolvedValue(null);
     crossDomain.computeCrossDomainSnapshot.mockClear();
     ranker.rankRecommendations.mockClear();
@@ -249,5 +259,16 @@ describe('CommandCenterKeyGenomeBridgeService', () => {
     expect(autonomyGate.checkGate).not.toHaveBeenCalled();
     expect(noSnap.healthScore).toBe(0);
     expect(noSnap.domainHealth).toEqual({});
+
+    // D-128 (SEC-GFS-1): revenue:read without revenue:write also never triggers computeCrossDomainSnapshot.
+    const readOnlyNoSnap = await (service as any).buildCrossDomainBrief(
+      'biz_1',
+      [{ module: 'operations', readinessScore: 80, missingFacts: [] } as any],
+      { readsRevenue: true, writesRevenue: false },
+    );
+    expect(crossDomain.computeCrossDomainSnapshot).not.toHaveBeenCalled();
+    expect(ranker.rankRecommendations).not.toHaveBeenCalled();
+    expect(opportunityDetector.detectOpportunities).not.toHaveBeenCalled();
+    expect(readOnlyNoSnap.healthScore).toBe(0);
   });
 });

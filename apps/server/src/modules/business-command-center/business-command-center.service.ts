@@ -3,7 +3,7 @@ import { BusinessIntelligenceService } from '../intelligence/business-intelligen
 import { KeyExecutiveModeService } from '../intelligence/key-executive-mode.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import {
-  genomeReaderReadsRevenue,
+  genomeReaderRevenueLevel,
   listRecommendationsForReader,
   listSignalsForReader,
   type GenomeReader,
@@ -286,17 +286,20 @@ export class BusinessCommandCenterService {
 
     // W11-GENOME-RECS-DOMAIN (D-128/D-100): pass caller revenue authority to
     // the genome bridge and genome signal/recommendation mappers so a member
-    // without revenue:read receives no finance snapshot, signal, or recommendation.
-    const readsRevenue =
+    // without revenue:read receives no finance snapshot, signal, or recommendation,
+    // and a member without revenue:write never triggers a finance snapshot recompute.
+    const revLevel =
       reader === undefined
-        ? true
+        ? 'admin'
         : await this.safeResolve(
             sources,
             'genomeRevenueScope',
             businessId,
-            () => genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined),
-            false,
+            () => genomeReaderRevenueLevel(this.prisma, businessId, reader ?? undefined),
+            'none',
           );
+    const readsRevenue = rankOf(revLevel) >= LEVEL_RANK.read;
+    const writesRevenue = rankOf(revLevel) >= LEVEL_RANK.write;
 
     // Compute KEY Genome scores and module readiness after the parallel block
     // so readiness uses freshly-scored facts rather than stale DB values.
@@ -304,7 +307,7 @@ export class BusinessCommandCenterService {
     const keyGenomeScore = this.safeResolveSync(sources, 'keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
     const moduleReadiness = await this.safeResolve(sources, 'moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
     const keyGenome = this.buildKeyGenome(keyGenomeScore);
-    keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness, { readsRevenue }), undefined);
+    keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness, { readsRevenue, writesRevenue }), undefined);
 
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);

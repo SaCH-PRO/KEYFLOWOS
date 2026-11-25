@@ -11,7 +11,6 @@ import type {
 } from '../business-genome/key-genome/key-genome.types';
 import type { CommandCenterKeyGenomeCrossDomain } from './business-command-center.types';
 import {
-  isFinanceRecommendation,
   isFinanceSignal,
   isMoneyLabel,
 } from '../business-genome/key-genome/genome-finance-scope';
@@ -32,27 +31,30 @@ export class CommandCenterKeyGenomeBridgeService {
   async buildCrossDomainBrief(
     businessId: string,
     moduleReadiness: ModuleReadinessData[],
-    options: { readsRevenue?: boolean } = {},
+    options: { readsRevenue?: boolean; writesRevenue?: boolean } = {},
   ): Promise<CommandCenterKeyGenomeCrossDomain> {
     const readsRevenue = options.readsRevenue !== false;
+    const writesRevenue = options.writesRevenue ?? readsRevenue;
 
     const latestSnapshot = await this.crossDomain.getLatestCrossDomainSnapshot(businessId);
     const snapshot =
       latestSnapshot ??
-      (readsRevenue
+      (readsRevenue && writesRevenue
         ? await this.crossDomain.computeCrossDomainSnapshot(businessId).catch(() => null)
         : null);
 
-    // W11-GENOME-RECS-DOMAIN (D-128/D-100): ranker/opportunityDetector/autonomyGate
-    // trigger ensureSnapshot (a finance snapshot write) when no cross-domain snapshot
-    // exists, and opportunities carry monetary values. Without revenue:read, never
-    // trigger a recompute and never surface money domains, recommendations, signals,
-    // or opportunities.
+    // W11-GENOME-RECS-DOMAIN (D-128/D-100): ranker, opportunityDetector, and
+    // autonomyGate read snapshot.domainRisks.finance / overallRiskLevel (exposing
+    // financialViability, money-weighted rankScore/rankReason/order, and finance
+    // risk blocks) and persist CROSS_DOMAIN_GENOME memory events or recompute the
+    // cross-domain snapshot. Without revenue:read, never invoke them; non-finance
+    // recommendations remain served via BusinessCommandCenterService's
+    // listRecommendationsForReader mapper.
     const [ranked, opportunities, staleFacts, lowConfidenceFacts] = await Promise.all([
-      readsRevenue || snapshot !== null
-        ? this.ranker.rankRecommendations(businessId, { limit: readsRevenue ? 5 : 50 }).catch(() => null)
+      readsRevenue && snapshot !== null
+        ? this.ranker.rankRecommendations(businessId, { limit: 5 }).catch(() => null)
         : Promise.resolve(null),
-      readsRevenue
+      readsRevenue && snapshot !== null
         ? this.opportunityDetector.detectOpportunities(businessId, { limit: 5 }).catch(() => null)
         : Promise.resolve(null),
       this.signalService
@@ -63,20 +65,14 @@ export class CommandCenterKeyGenomeBridgeService {
         .catch(() => []),
     ]);
 
-    const rawTopRecs = ranked?.rankedRecommendations ?? [];
-    const topRecommendations = readsRevenue
-      ? rawTopRecs
-      : rawTopRecs
-          .filter((r) => !isFinanceRecommendation({ domain: r.domain, title: r.title }))
-          .slice(0, 5);
+    const topRecommendations = readsRevenue ? (ranked?.rankedRecommendations ?? []) : [];
 
-    const rawBlocked = ranked?.blockedActions ?? [];
-    const blockedActions = readsRevenue
-      ? rawBlocked
-      : rawBlocked.filter((r) => !isFinanceRecommendation({ domain: r.domain, title: r.title }));
     const unsafeBlocks =
-      readsRevenue || snapshot !== null
-        ? await this.evaluateUnsafeBlocks(businessId, blockedActions.slice(0, UNSAFE_BLOCK_LIMIT))
+      readsRevenue && snapshot !== null
+        ? await this.evaluateUnsafeBlocks(
+            businessId,
+            (ranked?.blockedActions ?? []).slice(0, UNSAFE_BLOCK_LIMIT),
+          )
         : [];
 
     const domainHealth: Record<string, number> = {};
@@ -101,7 +97,13 @@ export class CommandCenterKeyGenomeBridgeService {
       : moduleReadiness.filter((m) => !isMoneyLabel(m.module));
 
     const criticalMissingFactCount = visibleModuleReadiness.reduce(
-      (count, module) => count + module.missingFacts.filter((fact) => fact.impact === 'BLOCKING').length,
+      (count, module) =>
+        count +
+        module.missingFacts.filter(
+          (fact) =>
+            fact.impact === 'BLOCKING' &&
+            (readsRevenue || (!isMoneyLabel(fact.section) && !isMoneyLabel(fact.field))),
+        ).length,
       0,
     );
 

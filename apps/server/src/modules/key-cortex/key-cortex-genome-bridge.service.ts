@@ -26,7 +26,7 @@ import {
   GenomeCrossDomainDomainKey,
   GenomeRankedRecommendation,
 } from '../business-genome/key-genome/key-genome.types';
-import { dnaScoresForReader, isFinanceSignal, isMoneyLabel } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal, isMoneyLabel } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeIntelligence {
   businessId: string;
@@ -168,16 +168,23 @@ export class KeyCortexGenomeBridgeService {
     // Load real signals, recommendations, opportunities, and readiness in parallel
     // Round 8 (D-235): the signals are read once as a pool, so a reader without revenue read is projected from more than
     // what is left of the newest twenty; the signals are its first twenty, as before.
-    // W11-GENOME-RECS-DOMAIN (D-128/D-100): without revenue:read, skip loading the
-    // finance-inclusive cross-domain snapshot and opportunities, and project the
-    // remaining genome fields to non-money rows/modules.
-    const [signalPool, ranked, opportunities, crossDomain, rawModuleReadiness] = await Promise.all([
-      this.loadSignals(businessId, { limit: GENOME_SIGNAL_POOL }),
-      this.loadRankedRecommendations(businessId, GENOME_RECOMMENDATION_POOL),
-      readsRevenue ? this.loadOpportunities(businessId, 5) : Promise.resolve([]),
-      readsRevenue ? this.loadCrossDomainSnapshot(businessId) : Promise.resolve(null),
-      this.loadModuleReadiness(businessId),
-    ]);
+    // W11-GENOME-RECS-DOMAIN (D-128/D-100): without revenue:read, skip the ranker
+    // (which calls ensureSnapshot -> computeCrossDomainSnapshot and persists
+    // CROSS_DOMAIN_GENOME memory events), opportunities, and cross-domain snapshot,
+    // and read stored recommendations purely read-only with full-row finance filtering.
+    const [signalPool, ranked, storedRecs, opportunities, crossDomain, rawModuleReadiness] =
+      await Promise.all([
+        this.loadSignals(businessId, { limit: GENOME_SIGNAL_POOL }),
+        readsRevenue
+          ? this.loadRankedRecommendations(businessId, GENOME_RECOMMENDATION_POOL)
+          : Promise.resolve([]),
+        readsRevenue
+          ? Promise.resolve([])
+          : this.loadStoredRecommendationsForNonRevenueReader(businessId, GENOME_RECOMMENDATION_POOL),
+        readsRevenue ? this.loadOpportunities(businessId, 5) : Promise.resolve([]),
+        readsRevenue ? this.loadCrossDomainSnapshot(businessId) : Promise.resolve(null),
+        this.loadModuleReadiness(businessId),
+      ]);
 
     const moduleReadiness = readsRevenue
       ? rawModuleReadiness
@@ -202,13 +209,9 @@ export class KeyCortexGenomeBridgeService {
           )
           .map(({ isFinance: _f, ...sig }) => sig);
 
-    const bridgedRecs = ranked.map((r) => this.toBridgeRecommendation(r));
     const visibleRecs = readsRevenue
-      ? bridgedRecs
-      : genomeRecommendationsForReader(
-          bridgedRecs as Array<{ category: string } & Record<string, unknown>>,
-          false,
-        );
+      ? ranked.map((r) => this.toBridgeRecommendation(r))
+      : storedRecs;
 
     return {
       businessId,
@@ -690,6 +693,58 @@ export class KeyCortexGenomeBridgeService {
     } catch (err: any) {
       this.logger.warn(
         `[loadRankedRecommendations] Failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * W11-GENOME-RECS-DOMAIN (D-128/D-100): read non-finance recommendations directly
+   * from stored rows without invoking rankerService (which computes/writes a finance
+   * cross-domain snapshot and CROSS_DOMAIN_GENOME memory events, and embeds money-weighted
+   * financialViability/rankScore). Filters the full stored row (including diagnosis)
+   * before mapping and projects through genomeRecommendationsForReader.
+   */
+  private async loadStoredRecommendationsForNonRevenueReader(
+    businessId: string,
+    limit: number,
+  ): Promise<Array<Record<string, unknown>>> {
+    const repo = this.prisma.client.genomeRecommendation;
+    if (!repo || typeof repo.findMany !== 'function') return [];
+    try {
+      const rows = await repo.findMany({
+        where: {
+          businessId,
+          status: { in: ['ACTIVE', 'ACCEPTED', 'APPLIED'] },
+        },
+        orderBy: [
+          { expectedGainScore: 'desc' },
+          { confidence: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: 200,
+      });
+      const safeBridged = rows
+        .filter(
+          (r) =>
+            !isFinanceRecommendation({
+              domain: r.domain,
+              title: r.title,
+              diagnosis: r.diagnosis,
+            }),
+        )
+        .map((r) => ({
+          id: r.id,
+          title: r.title,
+          description: r.recommendation,
+          impact: r.riskLevel?.toLowerCase() ?? 'medium',
+          category: r.domain,
+          confidence: r.confidence,
+        }));
+      return genomeRecommendationsForReader(safeBridged, false).slice(0, limit);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[loadStoredRecommendationsForNonRevenueReader] Failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return [];
     }
