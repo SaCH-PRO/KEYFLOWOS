@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
 import { ValidationPipe } from '@nestjs/common';
-import * as appBootstrap from '../../app-bootstrap';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../../app-bootstrap';
 import { AssetController } from './asset.controller';
 import { AssetService } from './asset.service';
 import { ListAssetsQueryDto } from './dto/list-assets-query.dto';
@@ -50,11 +50,7 @@ describe('AssetController', () => {
   it('RED-BEFORE (W11-QUERY-DTO-COERCION): coerces string limit="10" & offset="20" through production ValidationPipe before reaching listAssets', async () => {
     const svc = createMockService();
     const ctrl = new AssetController(svc);
-    const opts =
-      ((appBootstrap as Record<string, unknown>).GLOBAL_VALIDATION_PIPE_OPTIONS as
-        | { whitelist: true; transform: true }
-        | undefined) ?? { whitelist: true, transform: true };
-    const pipe = new ValidationPipe(opts);
+    const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
 
     const query = (await pipe.transform(
       { limit: '10', offset: '20' },
