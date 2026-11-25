@@ -151,6 +151,9 @@ export default function BookingsPage() {
 
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
+  const [businessCurrency, setBusinessCurrency] = useState<string | null>(null);
+  // SWP-SERVICE-DEPOSIT: the service the deposit tip's door names (?serviceId=), until Setup has opened it.
+  const [focusServiceId, setFocusServiceId] = useState<string | null>(null);
   const [pendingWaitlistData, setPendingWaitlistData] = useState<{
     contactId: string;
     serviceId: string;
@@ -220,7 +223,23 @@ export default function BookingsPage() {
       setShowCreateBooking(true);
       window.history.replaceState({}, "", "/app/bookings");
     }
+    // SWP-SERVICE-DEPOSIT (BUG-048): Presence's "add a deposit" tip links to ?tab=catalog&serviceId=<id>. The shell
+    // reads ?tab=; the service is a one-time hand-off, so it is taken and leaves the URL (?tab= stays, so a reload
+    // stays on Setup), and Setup opens that service's deposit editor.
+    const serviceIdParam = searchParams?.get("serviceId");
+    if (serviceIdParam) {
+      setTab("catalog");
+      setFocusServiceId(serviceIdParam);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("serviceId");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
   }, [searchParams, businessSlug]);
+
+  const handleFocusServiceHandled = useCallback(() => setFocusServiceId(null), []);
+  const handleServiceUpdated = useCallback((updated: Service) => {
+    setServices((prev) => prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)));
+  }, []);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -273,6 +292,7 @@ export default function BookingsPage() {
       ai.updateContext({ businessId, activeView: tab });
       getBusinessById(businessId).then((res) => {
         if (res.data?.slug) setBusinessSlug(res.data.slug);
+        if (res.data?.currency) setBusinessCurrency(res.data.currency);
         if (res.data?.businessHours) {
           const bh = res.data.businessHours;
           const hasAnyEnabled = Object.values(bh).some((entry) => !entry.closed);
@@ -823,6 +843,10 @@ export default function BookingsPage() {
               businessId={businessId}
               businessHoursSet={businessHoursSet}
               onBusinessHoursSaved={() => setBusinessHoursSet(true)}
+              currency={businessCurrency}
+              focusServiceId={focusServiceId}
+              onFocusServiceHandled={handleFocusServiceHandled}
+              onServiceUpdated={handleServiceUpdated}
             />
             </div>
           )}
