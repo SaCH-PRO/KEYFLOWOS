@@ -114,8 +114,11 @@ export class StoreOrderRoutingListener {
     try {
       const stored = await this.prisma.client.marketplaceOrder.findFirst({
         where: { id: orderId, businessId },
-        select: { paymentStatus: true },
+        select: { paymentStatus: true, type: true },
       });
+      // V1-66 (QUICK-SALE-SERVER): counter sales decrement stock atomically inside completeCheckout;
+      // never run async fulfilment routing/reservation on them.
+      if (stored?.type === 'QUICK_SALE') return false;
       if ((stored?.paymentStatus ?? '').toUpperCase() === 'PAID') return true;
       this.logger.warn(
         `store_order.paid for order ${orderId} not stored PAID in business ${businessId} (${stored ? stored.paymentStatus : 'not found'}); not routed`,

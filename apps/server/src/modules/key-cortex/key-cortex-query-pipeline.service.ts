@@ -30,6 +30,7 @@ import {
 } from './key-cortex.types';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexContextService, snapshotForViewer } from './key-cortex-context.service';
+import { v2ContextForReader } from './genome-read-projections';
 import { KeyCortexActionsService } from './key-cortex-actions.service';
 import {
   AdaptiveRouterService,
@@ -403,7 +404,11 @@ export class KeyCortexQueryPipelineService {
       // builds (V3, V2, the personality's business context block, formatContextForPrompt) and the answer's
       // contextUsed read the snapshot as this reader may see it: no revenue figure, pending-invoice count or
       // finance or sales DNA score for a reader without revenue read.
-      contextSnapshot = snapshotForViewer(contextSnapshot, await this.readsRevenue(query));
+      const canReadRevenue = await this.readsRevenue(query);
+      contextSnapshot = snapshotForViewer(contextSnapshot, canReadRevenue);
+      if (v2Context) {
+        v2Context = v2ContextForReader(v2Context, canReadRevenue);
+      }
 
       await this.logEvent(correlationId, 'STEP_3_FULL_CONTEXT', {
         v2Available: !!v2Context,
@@ -1224,7 +1229,11 @@ export class KeyCortexQueryPipelineService {
       // builds (V3, V2, the personality's business context block, formatContextForPrompt) and the answer's
       // contextUsed read the snapshot as this reader may see it: no revenue figure, pending-invoice count or
       // finance or sales DNA score for a reader without revenue read.
-      contextSnapshot = snapshotForViewer(contextSnapshot, await this.readsRevenue(query));
+      const canReadRevenue = await this.readsRevenue(query);
+      contextSnapshot = snapshotForViewer(contextSnapshot, canReadRevenue);
+      if (v2Context) {
+        v2Context = v2ContextForReader(v2Context, canReadRevenue);
+      }
 
       let detectedPersona: CortexPersona | undefined;
       if (!query.persona) {

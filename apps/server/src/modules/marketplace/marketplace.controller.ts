@@ -1,11 +1,12 @@
 // @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Req, Res, UseGuards, Inject, UploadedFile, UseInterceptors, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Req, Res, Headers, UseGuards, Inject, UploadedFile, UseInterceptors, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { MarketplaceService } from './marketplace.service';
+import { CreateQuickSaleDto } from './dto/quick-sale.dto';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -182,6 +183,24 @@ export class MarketplaceController {
   @Post('businesses/:businessId/orders')
   createOrder(@Param('businessId') businessId: string, @Body() body: any, @Req() req: { user?: { id?: string } }) {
     return this.marketplaceService.createOrder(businessId, body, req?.user?.id ?? null);
+  }
+
+  /**
+   * V1-66 (QUICK-SALE-SERVER, P83, Journey L, D-155/D-160/D-164):
+   * Owner-created counter sale (cash or bank_transfer, optional customer or
+   * shared Walk-in customer contact, atomic order + PAID invoice + payment +
+   * ledger + stock decrement + COGS + receipt token link).
+   */
+  @CrmRateLimit(20, 60_000)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/quick-sales')
+  createQuickSale(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateQuickSaleDto,
+    @Req() req: { user?: { id?: string } },
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.marketplaceService.createQuickSale(businessId, body, req?.user?.id ?? null, idempotencyKey);
   }
 
   /**

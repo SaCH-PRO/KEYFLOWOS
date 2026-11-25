@@ -13,9 +13,16 @@ import { GenomeSignalService } from '../../business-genome/key-genome/genome-sig
 import { GenomeRecommendationService } from '../../business-genome/key-genome/genome-recommendation.service';
 import {
   genomeReaderReadsRevenue,
+  isMoneyLabel,
   listRecommendationsForReader,
   listSignalsForReader,
 } from '../../business-genome/key-genome/genome-finance-scope';
+import {
+  blueprintForReader,
+  genomeFactsForReader,
+  genomeIntegrityForReader,
+  moduleReadinessForReader,
+} from '../genome-read-projections';
 import { GenomeFactService } from '../../business-genome/key-genome/genome-fact.service';
 import { GenomeModuleReadinessService } from '../../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeScoringService } from '../../business-genome/key-genome/genome-scoring.service';
@@ -98,8 +105,14 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
         [],
         {},
         async (ctx) => {
-          const blueprint = await this.blueprint.getBlueprint(ctx.businessId);
-          return { success: true, data: blueprint };
+          const [blueprint, readsRevenue] = await Promise.all([
+            this.blueprint.getBlueprint(ctx.businessId),
+            this.readerReadsRevenue(ctx),
+          ]);
+          return {
+            success: true,
+            data: blueprintForReader(blueprint as unknown as Record<string, unknown>, readsRevenue),
+          };
         },
       ),
       this.makeTool(
@@ -110,8 +123,14 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
         [],
         {},
         async (ctx) => {
-          const integrity = await this.blueprint.calculateGenomeIntegrity(ctx.businessId);
-          return { success: true, data: integrity };
+          const [integrity, readsRevenue] = await Promise.all([
+            this.blueprint.calculateGenomeIntegrity(ctx.businessId),
+            this.readerReadsRevenue(ctx),
+          ]);
+          return {
+            success: true,
+            data: genomeIntegrityForReader(integrity as unknown as Record<string, unknown>, readsRevenue),
+          };
         },
       ),
       this.makeTool(
@@ -167,9 +186,15 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           limit: { type: 'number' },
         },
         async (ctx, input) => {
-          const facts = await this.factService.listFacts(ctx.businessId, {
-            section: input.section as string,
-          });
+          const readsRevenue = await this.readerReadsRevenue(ctx);
+          const section = input.section as string | undefined;
+          if (!readsRevenue && section && isMoneyLabel(section)) {
+            return { success: true, data: { facts: [], count: 0 } };
+          }
+          const rawFacts = await this.factService.listFacts(ctx.businessId, { section });
+          const visible = genomeFactsForReader(rawFacts, readsRevenue);
+          const limit = typeof input.limit === 'number' && input.limit > 0 ? input.limit : undefined;
+          const facts = limit ? visible.slice(0, limit) : visible;
           return { success: true, data: { facts, count: facts.length } };
         },
       ),
@@ -183,7 +208,13 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           module: { type: 'string' },
         },
         async (ctx, input) => {
-          const readiness = await this.readinessService.getReadiness(ctx.businessId, input.module as any);
+          const readsRevenue = await this.readerReadsRevenue(ctx);
+          const mod = input.module as string | undefined;
+          if (!readsRevenue && mod && isMoneyLabel(mod)) {
+            return { success: true, data: { readiness: null } };
+          }
+          const rawReadiness = await this.readinessService.getReadiness(ctx.businessId, mod as any);
+          const readiness = moduleReadinessForReader(rawReadiness as any, readsRevenue);
           return { success: true, data: { readiness } };
         },
       ),

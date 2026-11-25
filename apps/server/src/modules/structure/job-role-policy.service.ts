@@ -187,8 +187,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   // inventory_adjust_stock / inventory_transfer_stock: POST marketplace inventory/adjust and
   // inventory/transfer require storefront write (SWEEP-P0-SCOPES, browser sweep BUG-015)
   storefront: { inventory_adjust_stock: 'write', inventory_transfer_stock: 'write' },
-  settings: {},
-  ai: {},
+  // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write; KeyflowCommandController.createNote requires ai write
+  settings: { update_business_blueprint: 'write' },
+  ai: { keyflow_create_note: 'write' },
   team: {
     structure_create_delegation_rule: 'write', structure_get_org_tree: 'read',
     structure_get_stats: 'read', structure_list_assignments: 'read',
