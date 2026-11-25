@@ -1,4 +1,5 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { CatalogService } from '../catalog/catalog.service';
@@ -17,6 +18,7 @@ export class TemplatesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   async listTemplates() {
@@ -82,69 +84,144 @@ export class TemplatesService {
       throw new NotFoundException('Template not found');
     }
 
-    const config = template.config as any;
+    const config = (template.config ?? {}) as {
+      products?: Array<{ name?: string; description?: string | null; price?: number; category?: string; duration?: number | null }>;
+      services?: Array<{ name?: string; description?: string | null; price?: number; duration?: number }>;
+      expenseCategories?: Array<{ name?: string; icon?: string | null; color?: string | null }>;
+    };
 
-    if (config.products && Array.isArray(config.products)) {
-      for (const product of config.products) {
-        await this.catalog.createProduct({
-          businessId,
-          name: product.name,
-          description: product.description ?? null,
-          price: product.price ?? 0,
-          category: product.category ?? 'PRODUCT',
-          duration: product.duration ?? null,
-        });
-      }
-    }
+    const normalizeName = (name: unknown): string | null =>
+      typeof name === 'string' && name.trim().length > 0 ? name.trim().toLowerCase() : null;
 
-    if (config.services && Array.isArray(config.services)) {
-      for (const service of config.services) {
-        await this.catalog.createService({
-          businessId,
-          name: service.name,
-          description: service.description ?? null,
-          price: service.price ?? 0,
-          duration: service.duration ?? 60,
-        });
-      }
-    }
+    // CATALOG-1 server half (SWP-TEMPLATE-APPLY-ONCE, BUG-075, V1-64, P78):
+    // serialize template applications per business in one transaction so a
+    // repeat or concurrent apply adds nothing twice (products, services,
+    // expense categories, or usage) and never clobbers later Business edits.
+    // SEC-P78-1: buffer catalog events until after commit so a rolled-back
+    // transaction emits nothing.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
+    const result = await this.prisma.client.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('template_apply'), hashtext(${businessId}))`;
 
-    if (config.expenseCategories && Array.isArray(config.expenseCategories)) {
-      for (const category of config.expenseCategories) {
-        await this.prisma.client.expenseCategory.upsert({
+        const existingUsage = await tx.businessTemplateUsage.findUnique({
           where: {
-            businessId_name: { businessId, name: category.name },
+            businessId_templateId: { businessId, templateId },
           },
-          create: {
-            businessId,
-            name: category.name,
-            icon: category.icon ?? null,
-            color: category.color ?? null,
-          },
-          update: {},
+          select: { id: true },
         });
-      }
-    }
+        if (existingUsage) {
+          return { success: true, templateName: template.displayName, alreadyApplied: true };
+        }
 
-    if (template.archetype || template.industry) {
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: {
-          ...(template.archetype && { archetype: template.archetype }),
-          ...(template.industry && { industry: template.industry }),
-        },
-      });
-    }
+        const [existingProducts, existingServices, existingCategories] = await Promise.all([
+          tx.product.findMany({
+            where: { businessId, deletedAt: null },
+            select: { name: true },
+          }),
+          tx.service.findMany({
+            where: { businessId, deletedAt: null },
+            select: { name: true },
+          }),
+          tx.expenseCategory.findMany({
+            where: { businessId },
+            select: { name: true },
+          }),
+        ]);
+        const existingProductNames = new Set(
+          existingProducts.map((p) => normalizeName(p.name)).filter((n): n is string => n !== null),
+        );
+        const existingServiceNames = new Set(
+          existingServices.map((s) => normalizeName(s.name)).filter((n): n is string => n !== null),
+        );
+        const existingCategoryNames = new Set(
+          existingCategories.map((c) => normalizeName(c.name)).filter((n): n is string => n !== null),
+        );
 
-    await this.prisma.client.businessTemplateUsage.upsert({
-      where: {
-        businessId_templateId: { businessId, templateId },
+        if (Array.isArray(config.products)) {
+          for (const product of config.products) {
+            const key = normalizeName(product?.name);
+            if (!key || existingProductNames.has(key)) continue;
+            await this.catalog.createProduct(
+              {
+                businessId,
+                name: product.name!.trim(),
+                description: product.description ?? null,
+                price: product.price ?? 0,
+                category: product.category ?? 'PRODUCT',
+                duration: product.duration ?? null,
+              },
+              tx,
+              pendingEvents,
+            );
+            existingProductNames.add(key);
+          }
+        }
+
+        if (Array.isArray(config.services)) {
+          for (const service of config.services) {
+            const key = normalizeName(service?.name);
+            if (!key || existingServiceNames.has(key)) continue;
+            await this.catalog.createService(
+              {
+                businessId,
+                name: service.name!.trim(),
+                description: service.description ?? null,
+                price: service.price ?? 0,
+                duration: service.duration ?? 60,
+              },
+              tx,
+              pendingEvents,
+            );
+            existingServiceNames.add(key);
+          }
+        }
+
+        if (Array.isArray(config.expenseCategories)) {
+          for (const category of config.expenseCategories) {
+            const key = normalizeName(category?.name);
+            if (!key || existingCategoryNames.has(key)) continue;
+            const trimmed = category.name!.trim();
+            existingCategoryNames.add(key);
+            await tx.expenseCategory.upsert({
+              where: {
+                businessId_name: { businessId, name: trimmed },
+              },
+              create: {
+                businessId,
+                name: trimmed,
+                icon: category.icon ?? null,
+                color: category.color ?? null,
+              },
+              update: {},
+            });
+          }
+        }
+
+        if (template.archetype || template.industry) {
+          await tx.business.update({
+            where: { id: businessId },
+            data: {
+              ...(template.archetype && { archetype: template.archetype }),
+              ...(template.industry && { industry: template.industry }),
+            },
+          });
+        }
+
+        await tx.businessTemplateUsage.create({
+          data: { businessId, templateId },
+        });
+
+        return { success: true, templateName: template.displayName, alreadyApplied: false };
       },
-      create: { businessId, templateId },
-      update: { appliedAt: new Date() },
-    });
+      { timeout: 15_000, maxWait: 10_000 },
+    );
 
-    return { success: true, templateName: template.displayName };
+    for (const evt of pendingEvents) {
+      this.events.emit(evt.name, evt.payload);
+    }
+
+    return result;
   }
 
   async seedDefaultTemplates() {

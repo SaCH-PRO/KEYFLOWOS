@@ -133,6 +133,9 @@ const GUARDED: Record<string, 'invoice' | 'quote'> = {
   resendReceipt: 'invoice',
   createPaymentLink: 'invoice',
   deactivatePaymentLink: 'invoice',
+  // CLAIM-LOOP (V1-65, P76, D-46): confirming or dismissing a customer payment claim mutates payment/invoice state.
+  confirmPaymentClaim: 'invoice',
+  dismissPaymentClaim: 'invoice',
   // W3-D46-CREATE-AND-RECURRING (D-46): was EXEMPT, pinned by CC-FORWARD's
   // non-member SUPER_ADMIN 201 (now aligned to the refusal).
   createInvoice: 'invoice',
@@ -155,6 +158,7 @@ const EXEMPT: Record<string, string> = {
   sendGmailMessage: GMAIL,
   replyGmailThread: GMAIL,
   backfillStoreLinks: 'store/backfill-links: storefront link maintenance, not an invoice, quote or payment write',
+  listPaymentClaims: 'claims: read-only GET listing of pending customer payment claims (D-46 rules writes; confirm/dismiss are GUARDED)',
 };
 
 /**
