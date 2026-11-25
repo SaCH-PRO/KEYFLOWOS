@@ -1295,6 +1295,11 @@
 "prefix": "v91r_",
       "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
       "packet": "V1-91 (FU-BULK-DELETE-UNDO, P37)"
+    },
+    {
+"prefix": "v64a_",
+      "owner": "apps/server/test/key-proposal-result-reader-scope.integration.test.ts",
+      "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
     }
   ],
   "pendingRenames": [],
