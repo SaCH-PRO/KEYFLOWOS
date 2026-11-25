@@ -6,7 +6,9 @@
  *   R1-01  RED-BEFORE  COR-M1 shared device: the browser's subscription is another member's (the server's
  *                      unsubscribeOwn deletes none of the caller's rows and answers 201 { count: 0 }). The browser
  *                      subscription is NOT removed (that would end the other member's push); the page says whose it is
- *                      and offers no Turn off
+ *                      and offers no Turn off. Round 2 (N1): count 0 alone no longer says whose it is; the hook asks
+ *                      with POST /push/subscribe, and subscribeOwn's 403 "This device is subscribed by another member"
+ *                      does (my-account-push-r2.test.tsx R2-01..04), so this case's server answers that 403 too
  *   R1-02  pin         COR-M2: with no service worker registered yet, Turn on registers /sw.js and waits for it
  *   R1-03  pin         COR-M2: a service worker that never becomes ready is reported after 10 s; nothing is saved
  *   R1-04  pin         COR-M2: the state read does not wait on navigator.serviceWorker.ready (it never resolves when
@@ -41,6 +43,7 @@ interface Sent { method: string; path: string; body: unknown }
 interface Serve {
   config?: { status: number; body: unknown };
   unsubscribe?: { status: number; body: unknown };
+  subscribe?: { status: number; body: unknown };
 }
 
 function json(status: number, body: unknown): Response {
@@ -60,7 +63,10 @@ function serve(opts: Serve = {}): Sent[] {
       const c = opts.config ?? { status: 200, body: { publicKey: VAPID_PUBLIC, enabled: true } };
       return json(c.status, c.body);
     }
-    if (pathname === `/api/businesses/${BIZ}/push/subscribe` && method === "POST") return json(201, { id: "psub_r1" });
+    if (pathname === `/api/businesses/${BIZ}/push/subscribe` && method === "POST") {
+      const a = opts.subscribe ?? { status: 201, body: { id: "psub_r1" } };
+      return json(a.status, a.body);
+    }
     if (pathname === `/api/businesses/${BIZ}/push/unsubscribe` && method === "POST") {
       // What the server answers (push-notification.controller.ts unsubscribe: unsubscribeOwn's prisma deleteMany, 201).
       const u = opts.unsubscribe ?? { status: 201, body: { count: 1 } };
@@ -165,7 +171,11 @@ afterEach(() => {
 
 describe("D-282 repair round 1", () => {
   it("R1-01 RED-BEFORE: another member's push on a shared device is not removed by this member's Turn off", async () => {
-    const sent = serve({ unsubscribe: { status: 201, body: { count: 0 } } });
+    const sent = serve({
+      unsubscribe: { status: 201, body: { count: 0 } },
+      // subscribeOwn (push-notification.service.ts): another member's row holds this endpoint.
+      subscribe: { status: 403, body: { statusCode: 403, message: "This device is subscribed by another member", error: "Forbidden" } },
+    });
     const env = installPush({ permission: "granted", existing: true });
     await renderMyAccount();
     const push = await pushSection();
