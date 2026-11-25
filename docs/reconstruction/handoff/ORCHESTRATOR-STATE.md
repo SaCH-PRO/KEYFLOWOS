@@ -205,7 +205,7 @@ Main is at `6f67c91e`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | **M20 (Claude)** | `wave/v1-wave-m20` | Assembled (4 packets) | Wave proof, PR, enqueue |
 | **Claude packets** | the five in section 0 | Repair, confirmation or building | RETURN, then the next wave |
 | **Antigravity** | M25: P87, P88, P89, P91, P92, P93; P90 blocked (question 52) | Building | Their wave |
-| **Owner** | - | - | Section 4 questions 40-55; production redeploy (D-266) |
+| **Owner** | - | - | Section 4 questions 40-56; production redeploy (D-266) |
 | `wave/v1-docs-p19` | main 6f67c91e merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -362,6 +362,12 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     C8 is also red on desktop. Reordering alone gets the row to y≈720 at best. Should a contacts-screen layout packet put the list first on phones (and what on desktop)? (Default: split C8 into its own packet; P94 ships without it; #80 7174372256.)
 54. **Journey B1 asks for Tax and Stock fields when creating a product.** The product model has neither: stock lives in InventoryStock, and there is no tax field. Add them (a server packet), or change B1? (Default: B1 stays red on those two fields until you rule.)
 55. **WiPay refunds and storefront orders (with 51).** The refund screen (P85) lets an owner record a WiPay payment as refunded outside KeyFlow, because WiPay has no refund API (D-121). On a storefront order's checkout invoice this refunds the invoice payment, but the order stays PAID until someone uses the order refund. That is money-safe: the order refund tolerates the 409. The web cannot route this, because the invoice has no structured order link. Options: refuse on checkout invoices (needs a server link), route to the order refund, or keep as is. Also: is "Record refund" for WiPay the v1 door you want? (Default: keep as built.)
+56. **Who may change the owner's alerts (P95 OWNER-ALERTS-WEB).** The alerts cover bookings, payments and "I've paid" claims. They are business-wide settings that today any member with settings write could change, and no audit record is kept. Interim ruling: owner only, enforced on the server (#80). Options:
+    - owner only;
+    - owner and admins, with an audit record;
+    - each owner has their own alerts.
+
+    (Default: owner only.)
 
 ## 5. How to work here (learned the hard way)
 
