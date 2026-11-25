@@ -70,8 +70,11 @@ async function cleanup() {
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_plan_steps WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM approval_steps WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM approval_requests WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -82,6 +85,7 @@ async function cleanup() {
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_shares WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -608,5 +612,208 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
     expect(resB.body.today.orders).toEqual([]);
     expect(resB.body.pulse.cash).toBe(0);
     expect(resB.body.pulse.owedToYou).toBe(0);
+  });
+
+  it('[TD-06] R1 security (M7 / D-63): PRIVATE and crm_view="owned" contacts are scrubbed on bookings and hidden on claims, invoices, and reminders', async () => {
+    const staffOwnedId = `${P}staffOwned`;
+    const privateContactId = `${P}contactPriv`;
+    const privateBookingId = `${P}bookingPriv`;
+    const privateInvoiceId = `${P}invPriv`;
+    const privateClaimId = `${P}claimPriv`;
+
+    await db.user.create({
+      data: { id: staffOwnedId, email: `${P}staffowned@example.test`, name: 'Owned-Only Rep', role: 'USER' },
+    });
+    await db.membership.create({
+      data: {
+        id: `${P}memOwned`,
+        userId: staffOwnedId,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { bookings: 'read', revenue: 'write', crm: 'read', crm_view: 'owned' },
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: privateContactId,
+        businessId: ID.bizA,
+        firstName: 'Secret',
+        lastName: 'VIP',
+        email: `${P}vip@example.test`,
+        phone: '+18685559999',
+        visibility: 'PRIVATE',
+        ownerId: ID.ownerA,
+      },
+    });
+    const now = new Date();
+    const soonStart = new Date(now.getTime() + 90 * 60_000);
+    await db.booking.create({
+      data: {
+        id: privateBookingId,
+        businessId: ID.bizA,
+        contactId: privateContactId,
+        serviceId: ID.serviceA,
+        startTime: soonStart,
+        endTime: new Date(soonStart.getTime() + 60 * 60_000),
+        status: 'CONFIRMED',
+      },
+    });
+    await db.invoice.create({
+      data: {
+        id: privateInvoiceId,
+        businessId: ID.bizA,
+        contactId: privateContactId,
+        invoiceNumber: `${P}INV-VIP`,
+        status: 'OVERDUE',
+        dueDate: new Date(now.getTime() - 24 * 60 * 60_000),
+        subtotal: 900,
+        total: 900,
+        currency: 'TTD',
+      },
+    });
+    await db.payment.create({
+      data: {
+        id: privateClaimId,
+        businessId: ID.bizA,
+        invoiceId: privateInvoiceId,
+        amount: 900,
+        currency: 'TTD',
+        status: 'PENDING',
+        provider: 'bank_transfer',
+        method: 'bank_transfer',
+        providerPaymentId: `manual_${P}vipclaim`,
+      },
+    });
+
+    // Bookings-only STAFF (crm: 'none'): keeps booking slot for PRIVATE contact, scrubs customerName & contactId
+    const staffBookRes = await getToday(ID.bizA, ID.staffBookings).expect(200);
+    const privBookingForStaff = staffBookRes.body.today.bookings.find((b: any) => b.id === privateBookingId);
+    expect(privBookingForStaff).toBeDefined();
+    expect(privBookingForStaff.customerName).toBeNull();
+    expect(privBookingForStaff.contactId).toBeNull();
+
+    // STAFF with crm_view='owned' (owns neither Maria nor Secret VIP):
+    // - bookings scrub customerName & contactId for out-of-book contacts
+    // - claims, invoices, and reminders drop out-of-book & PRIVATE contacts completely
+    const ownedRes = await getToday(ID.bizA, staffOwnedId).expect(200);
+    for (const b of ownedRes.body.today.bookings) {
+      expect(b.customerName).toBeNull();
+      expect(b.contactId).toBeNull();
+    }
+    expect(ownedRes.body.needsYou.items.some((i: any) => i.sourceId === privateClaimId || i.sourceId === ID.claimIntent)).toBe(false);
+    expect(ownedRes.body.today.invoices.some((i: any) => i.id === privateInvoiceId || i.id === ID.invOverdue)).toBe(false);
+    expect(ownedRes.body.today.reminders.some((r: any) => r.contactId === privateContactId || r.contactId === ID.contactMaria)).toBe(false);
+  });
+
+  it('[TD-07] R1 security (D-74 / D-57 / D-96 / D-234): STAFF sees no unassigned approvals, no other-member or financial plan steps, and storefront-only STAFF sees total: null on paid orders', async () => {
+    const staffOpsId = `${P}staffOps`;
+    const staffStoreId = `${P}staffStore`;
+    const approvalId = `${P}apprExp`;
+    const planId = `${P}planOwner`;
+    const planStepId = `${P}stepFin`;
+
+    await db.user.create({
+      data: { id: staffOpsId, email: `${P}staffops@example.test`, name: 'Ops Staff', role: 'USER' },
+    });
+    await db.membership.create({
+      data: {
+        id: `${P}memOps`,
+        userId: staffOpsId,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { operations: 'read' },
+      },
+    });
+    await db.user.create({
+      data: { id: staffStoreId, email: `${P}staffstore@example.test`, name: 'Store Staff', role: 'USER' },
+    });
+    await db.membership.create({
+      data: {
+        id: `${P}memStore`,
+        userId: staffStoreId,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { storefront: 'read' },
+      },
+    });
+
+    await db.approvalRequest.create({
+      data: {
+        id: approvalId,
+        businessId: ID.bizA,
+        requestType: 'EXPENSE',
+        title: 'Approve Q4 Vendor Payout',
+        status: 'pending',
+        currentStep: 1,
+        requesterId: ID.ownerA,
+        payload: {},
+        steps: {
+          create: {
+            id: `${P}apprStep1`,
+            stepOrder: 1,
+            approverId: ID.ownerA,
+            status: 'pending',
+          },
+        },
+      },
+    });
+
+    await db.aiPlan.create({
+      data: {
+        id: planId,
+        businessId: ID.bizA,
+        userId: ID.ownerA,
+        objective: 'Send invoices',
+        status: 'pending',
+      },
+    });
+    await db.aiPlanStep.create({
+      data: {
+        id: planStepId,
+        planId,
+        order: 1,
+        action: 'Send high-value invoice',
+        module: null,
+        toolName: 'commerce_send_invoice',
+        requiresApproval: true,
+        status: 'awaiting_approval',
+      },
+    });
+
+    // Ops-only STAFF sees neither the OWNER's approval nor the OWNER's financial plan step
+    const opsRes = await getToday(ID.bizA, staffOpsId).expect(200);
+    expect(opsRes.body.needsYou.items.some((i: any) => i.sourceId === approvalId)).toBe(false);
+    expect(opsRes.body.needsYou.items.some((i: any) => i.sourceId === planStepId)).toBe(false);
+    expect(opsRes.body.pulse).toBeNull();
+
+    // Storefront-only STAFF sees the order queue for fulfilment, with total withheld (null)
+    const storeRes = await getToday(ID.bizA, staffStoreId).expect(200);
+    expect(storeRes.body.pulse).toBeNull();
+    expect(storeRes.body.pulseStatus).toBe('RESTRICTED');
+    const order = storeRes.body.today.orders.find((o: any) => o.id === ID.orderToFulfil);
+    expect(order).toBeDefined();
+    expect(order.total).toBeNull();
+  });
+
+  it('[TD-08] R1 correctness: PaymentsTab flat metaData.bankTransferEnabled ticks payments step, KEY proposals use /actions/proposals/ endpoints, and hasMore reflects >5 items', async () => {
+    // Update bizFresh with flat PaymentsTab key
+    await db.business.update({
+      where: { id: ID.bizFresh },
+      data: { metaData: { bankTransferEnabled: true } },
+    });
+    const freshRes = await getToday(ID.bizFresh, ID.ownerFresh).expect(200);
+    const paymentsStep = freshRes.body.getSetUp.steps.find((s: any) => s.key === 'payments');
+    expect(paymentsStep?.done).toBe(true);
+
+    // Owner on bizA has >5 needsYou items -> hasMore === true, and KEY proposal actions include /actions/proposals/
+    const ownerRes = await getToday(ID.bizA, ID.ownerA).expect(200);
+    expect(ownerRes.body.needsYou.totalCount).toBeGreaterThan(5);
+    expect(ownerRes.body.needsYou.hasMore).toBe(true);
+    const keyProposalItem = ownerRes.body.needsYou.items.find((i: any) => i.kind === 'KEY_PROPOSAL');
+    if (keyProposalItem) {
+      expect(keyProposalItem.actions[0].endpoint).toContain(
+        `/key-autonomy/businesses/${ID.bizA}/actions/proposals/${keyProposalItem.sourceId}/`,
+      );
+    }
   });
 });

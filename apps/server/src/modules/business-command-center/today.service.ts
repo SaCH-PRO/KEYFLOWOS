@@ -1,15 +1,22 @@
 import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { keyDisabled } from '../../core/config/env';
-import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { graphPlanReadScope } from '../ai/graph-actions.controller';
+import {
+  type CrmAccess,
+  contactVisibilityFilter,
+  resolveCrmAccess,
+  visibilityClause,
+} from '../crm/crm-permissions.helper';
 import { FinanceOverviewService } from '../finance/finance-overview.service';
 import { SafeToSpendService } from '../finance/safe-to-spend.service';
 import { ReadyToSendService } from '../commerce/ready-to-send.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { appliedCreditsOf, balanceOfStoredRows, creditAwareBalance } from '../commerce/invoice-workflow.service';
+import { roundMoney } from '../commerce/money';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import type {
   TodayAcceptedQuoteItem,
@@ -33,9 +40,16 @@ export interface TodayReader {
 interface TodayMemberAccess {
   authenticated: boolean;
   isSuperAdmin: boolean;
+  isOwner: boolean;
+  isAdmin: boolean;
+  crmAccess: CrmAccess | null;
+  /** True when non-owner/non-superadmin has explicit `crm_view: 'owned'` ("my book" restriction). */
+  crmBookRestricted: boolean;
   crmRead: boolean;
   revenueRead: boolean;
   revenueWrite: boolean;
+  expensesRead: boolean;
+  contentRead: boolean;
   bookingsRead: boolean;
   storefrontRead: boolean;
   operationsRead: boolean;
@@ -45,9 +59,15 @@ interface TodayMemberAccess {
 const NO_ACCESS: TodayMemberAccess = {
   authenticated: false,
   isSuperAdmin: false,
+  isOwner: false,
+  isAdmin: false,
+  crmAccess: null,
+  crmBookRestricted: false,
   crmRead: false,
   revenueRead: false,
   revenueWrite: false,
+  expensesRead: false,
+  contentRead: false,
   bookingsRead: false,
   storefrontRead: false,
   operationsRead: false,
@@ -56,8 +76,25 @@ const NO_ACCESS: TodayMemberAccess = {
 
 const DEFAULT_TIMEZONE = 'America/Port_of_Spain';
 const MAX_NEEDS_YOU = 5;
-const FINANCIAL_APPROVAL_TYPES = new Set(['quote_discount', 'expense', 'refund', 'po']);
-const FINANCIAL_PLAN_MODULES = new Set(['finance', 'commerce', 'revenue', 'expenses', 'payroll']);
+
+/**
+ * Lowercase allowlist mapping ApprovalRequest.requestType to the module read scope
+ * required to view it on Today (D-96 / D-57). Unknown request types fail closed
+ * (visible only to OWNER / SUPER_ADMIN).
+ */
+const APPROVAL_TYPE_SCOPE: Readonly<Record<string, 'revenueRead' | 'expensesRead' | 'contentRead' | 'operationsRead'>> =
+  {
+    quote_discount: 'revenueRead',
+    refund: 'revenueRead',
+    expense: 'expensesRead',
+    po: 'expensesRead',
+    content_delivery: 'contentRead',
+    task_completion: 'operationsRead',
+    evidence_verification: 'operationsRead',
+    time_off: 'operationsRead',
+    general: 'operationsRead',
+  };
+
 const CLOSED_ORDER_STATUSES = [
   'shipped',
   'delivered',
@@ -89,7 +126,7 @@ function resolveValidTimeZone(raw: string | null | undefined): string {
   }
 }
 
-function localDayBoundsUtc(now: Date, timeZone: string): { start: Date; end: Date } {
+function zonedDateParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -99,25 +136,45 @@ function localDayBoundsUtc(now: Date, timeZone: string): { start: Date; end: Dat
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
-  }).formatToParts(now);
+  }).formatToParts(date);
   const num = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-  const year = num('year');
-  const month = num('month');
-  const day = num('day');
-  const hour = num('hour') % 24;
-  const minute = num('minute');
-  const second = num('second');
-
-  // Offset between local clock in `timeZone` and UTC at `now`
-  const localAsUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
-  const offsetMs = localAsUtcMs - Math.floor(now.getTime() / 1000) * 1000;
-
-  const startMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0) - offsetMs;
-  const endMs = Date.UTC(year, month - 1, day, 23, 59, 59, 999) - offsetMs;
-  return { start: new Date(startMs), end: new Date(endMs) };
+  return {
+    year: num('year'),
+    month: num('month'),
+    day: num('day'),
+    hour: num('hour') % 24,
+    minute: num('minute'),
+    second: num('second'),
+  };
 }
 
-function formatCustomerName(contact: { firstName?: string | null; lastName?: string | null } | null | undefined): string | null {
+/**
+ * Computes midnight (00:00:00.000) of the given calendar date `(year, month, day)` in `timeZone`
+ * using two offset-refinement passes so spring-forward and fall-back DST boundaries stay exact.
+ */
+function zonedMidnightUtc(year: number, month: number, day: number, timeZone: string): Date {
+  const targetLocalMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+  let guess = targetLocalMs;
+  for (let i = 0; i < 2; i++) {
+    const gp = zonedDateParts(new Date(guess), timeZone);
+    const guessLocalMs = Date.UTC(gp.year, gp.month - 1, gp.day, gp.hour, gp.minute, gp.second, 0);
+    const diff = targetLocalMs - guessLocalMs;
+    if (diff === 0) break;
+    guess += diff;
+  }
+  return new Date(guess);
+}
+
+function localDayBoundsUtc(now: Date, timeZone: string): { start: Date; end: Date } {
+  const p = zonedDateParts(now, timeZone);
+  const start = zonedMidnightUtc(p.year, p.month, p.day, timeZone);
+  const nextDayStart = zonedMidnightUtc(p.year, p.month, p.day + 1, timeZone);
+  return { start, end: new Date(nextDayStart.getTime() - 1) };
+}
+
+function formatCustomerName(
+  contact: { firstName?: string | null; lastName?: string | null } | null | undefined,
+): string | null {
   if (!contact) return null;
   const joined = [contact.firstName, contact.lastName].filter(Boolean).join(' ').trim();
   return joined.length > 0 ? joined : null;
@@ -128,6 +185,10 @@ function parseMetaData(raw: unknown): Record<string, unknown> {
     return raw as Record<string, unknown>;
   }
   return {};
+}
+
+function nonBlankString(v: unknown): boolean {
+  return typeof v === 'string' && v.trim().length > 0;
 }
 
 function hasConfiguredBusinessHours(raw: unknown): boolean {
@@ -145,6 +206,12 @@ function hasConfiguredBusinessHours(raw: unknown): boolean {
 
 function hasConfiguredPaymentMethod(meta: Record<string, unknown>): boolean {
   if (meta.paymentMethodsConfigured === true) return true;
+  // Flat keys written by `/app/settings/business?tab=payments` (`PaymentsTab`)
+  if (meta.bankTransferEnabled === true || meta.cashEnabled === true) return true;
+  if (nonBlankString(meta.wipayAccountNumber) && nonBlankString(meta.wipayApiKey)) return true;
+  if (nonBlankString(meta.paypalClientId) && nonBlankString(meta.paypalClientSecret)) return true;
+  if (nonBlankString(meta.stripePublishableKey) && nonBlankString(meta.stripeSecretKey)) return true;
+
   const paymentConfig = parseMetaData(meta.paymentConfig);
   const providers = ['wipay', 'paypal', 'stripe', 'googlepay', 'cash', 'bankTransfer'];
   return providers.some((key) => {
@@ -173,9 +240,15 @@ export class TodayService {
       return {
         authenticated: true,
         isSuperAdmin: true,
+        isOwner: false,
+        isAdmin: false,
+        crmAccess: crm,
+        crmBookRestricted: false,
         crmRead: true,
         revenueRead: true,
         revenueWrite: true,
+        expensesRead: true,
+        contentRead: true,
         bookingsRead: true,
         storefrontRead: true,
         operationsRead: true,
@@ -189,19 +262,31 @@ export class TodayService {
     });
     if (!membership) return NO_ACCESS;
 
-    const scopes: Record<string, string> =
-      membership.permissionScopes && typeof membership.permissionScopes === 'object'
-        ? (membership.permissionScopes as Record<string, string>)
-        : defaultScopesForRole(membership.role);
+    // D-71: read scopes through canonical `memberModuleLevel` (handles null, object map, and array shapes).
+    const hasLevel = (mod: string, min: 'read' | 'write') =>
+      rankOf(memberModuleLevel(membership, mod)) >= LEVEL_RANK[min];
 
-    const hasLevel = (mod: string, min: 'read' | 'write') => rankOf(scopes[mod] || 'none') >= LEVEL_RANK[min];
+    const rawScopes =
+      membership.permissionScopes &&
+      typeof membership.permissionScopes === 'object' &&
+      !Array.isArray(membership.permissionScopes)
+        ? (membership.permissionScopes as Record<string, unknown>)
+        : null;
+    const isOwner = membership.role === 'OWNER';
+    const crmBookRestricted = !isOwner && rawScopes?.crm_view === 'owned';
 
     return {
       authenticated: true,
       isSuperAdmin: false,
+      isOwner,
+      isAdmin: membership.role === 'ADMIN',
+      crmAccess: crm,
+      crmBookRestricted,
       crmRead: hasLevel('crm', 'read'),
       revenueRead: hasLevel('revenue', 'read'),
       revenueWrite: hasLevel('revenue', 'write'),
+      expensesRead: hasLevel('expenses', 'read'),
+      contentRead: hasLevel('content', 'read'),
       bookingsRead: hasLevel('bookings', 'read'),
       storefrontRead: hasLevel('storefront', 'read'),
       operationsRead: hasLevel('operations', 'read'),
@@ -245,12 +330,12 @@ export class TodayService {
       reminders,
       pulse,
     ] = await Promise.all([
-      this.loadClaims(businessId, access),
+      this.loadClaims(businessId, access, reader),
       this.loadAcceptedQuotes(businessId, access),
       this.loadKeyProposals(businessId, access, reader),
-      this.loadApprovalRequests(businessId, access),
-      this.loadPlanSteps(businessId, access),
-      this.loadTodayBookings(businessId, access, dayStart, dayEnd),
+      this.loadApprovalRequests(businessId, access, reader),
+      this.loadPlanSteps(businessId, access, reader),
+      this.loadTodayBookings(businessId, access, reader, dayStart, dayEnd),
       this.loadTodayInvoices(businessId, access, dayEnd, now),
       this.loadTodayTasks(businessId, access, dayEnd),
       this.loadOrdersToFulfil(businessId, access),
@@ -299,6 +384,7 @@ export class TodayService {
       needsYou: {
         items: allNeedsYou.slice(0, MAX_NEEDS_YOU),
         totalCount: allNeedsYou.length,
+        hasMore: allNeedsYou.length > MAX_NEEDS_YOU,
       },
       today: {
         bookings,
@@ -315,36 +401,70 @@ export class TodayService {
     };
   }
 
-  private async loadClaims(businessId: string, access: TodayMemberAccess): Promise<TodayNeedsYouItem[]> {
+  private async loadClaims(
+    businessId: string,
+    access: TodayMemberAccess,
+    reader: TodayReader | null,
+  ): Promise<TodayNeedsYouItem[]> {
     if (!access.revenueWrite || !this.commerce) return [];
     const claims = await this.commerce.listPaymentClaims(businessId);
-    return claims.map((c) => ({
-      id: `claim:${c.id}`,
-      kind: 'CLAIM' as const,
-      sourceId: c.id,
-      title: `${c.customerName ?? 'Customer'} reported payment for ${c.invoiceNumber}`,
-      summary: `${c.currency} ${c.amount.toFixed(2)} via ${c.method.replace(/_/g, ' ')}`,
-      contactId: c.contactId ?? null,
-      customerName: c.customerName ?? null,
-      amount: c.amount,
-      currency: c.currency,
-      createdAt: c.createdAt,
-      href: `/app/commerce/invoices?invoiceId=${encodeURIComponent(c.invoiceId)}`,
-      actions: [
-        {
-          label: 'Confirm',
-          actionType: 'CONFIRM' as const,
-          method: 'POST' as const,
-          endpoint: `/commerce/businesses/${businessId}/claims/${c.id}/confirm`,
-        },
-        {
-          label: 'Not yet',
-          actionType: 'DISMISS' as const,
-          method: 'POST' as const,
-          endpoint: `/commerce/businesses/${businessId}/claims/${c.id}/dismiss`,
-        },
-      ],
-    }));
+    if (claims.length === 0) return [];
+
+    const contactIds = claims.map((c) => c.contactId).filter((id): id is string => typeof id === 'string' && id.length > 0);
+    // D-63 / M7: check live tenant ownership + contactVisibility for all claim contacts.
+    const liveContactIds = new Set<string>();
+    if (contactIds.length > 0) {
+      const liveRows = await this.prisma.client.contact.findMany({
+        where: { businessId, deletedAt: null, id: { in: [...new Set(contactIds)] } },
+        select: { id: true },
+      });
+      for (const r of liveRows) liveContactIds.add(r.id);
+    }
+
+    const canOpenContact =
+      access.contactVisibility && access.crmAccess && reader?.id
+        ? await contactVisibilityFilter(this.prisma, businessId, access.crmAccess, reader.id, contactIds)
+        : null;
+
+    const items: TodayNeedsYouItem[] = [];
+    for (const c of claims) {
+      const isLive = Boolean(c.contactId && liveContactIds.has(c.contactId));
+      // If a live contact exists on this claim and is outside the viewer's CRM visibility (PRIVATE or crm_view='owned'),
+      // hide the claim (matches loadTodayInvoices & loadAcceptedQuotes under D-63).
+      if (isLive && c.contactId && canOpenContact && !canOpenContact(c.contactId)) {
+        continue;
+      }
+      const customerName = isLive ? (c.customerName ?? null) : null;
+      const contactId = isLive && access.crmRead ? (c.contactId ?? null) : null;
+      items.push({
+        id: `claim:${c.id}`,
+        kind: 'CLAIM' as const,
+        sourceId: c.id,
+        title: `${customerName ?? 'Customer'} reported payment for ${c.invoiceNumber}`,
+        summary: `${c.currency} ${c.amount.toFixed(2)} via ${c.method.replace(/_/g, ' ')}`,
+        contactId,
+        customerName,
+        amount: c.amount,
+        currency: c.currency,
+        createdAt: c.createdAt,
+        href: `/app/commerce/invoices/${encodeURIComponent(c.invoiceId)}`,
+        actions: [
+          {
+            label: 'Confirm',
+            actionType: 'CONFIRM' as const,
+            method: 'POST' as const,
+            endpoint: `/commerce/businesses/${businessId}/claims/${c.id}/confirm`,
+          },
+          {
+            label: 'Not yet',
+            actionType: 'DISMISS' as const,
+            method: 'POST' as const,
+            endpoint: `/commerce/businesses/${businessId}/claims/${c.id}/dismiss`,
+          },
+        ],
+      });
+    }
+    return items;
   }
 
   private async loadAcceptedQuotes(
@@ -358,7 +478,9 @@ export class TodayService {
       status: 'ACCEPTED',
       invoiceId: null,
       invoice: { is: null },
-      ...(access.contactVisibility ? { contact: access.contactVisibility } : {}),
+      ...(access.contactVisibility
+        ? { contact: { businessId, deletedAt: null, AND: [access.contactVisibility] } }
+        : {}),
     };
     const quotes = await this.prisma.client.quote.findMany({
       where,
@@ -370,7 +492,7 @@ export class TodayService {
         acceptedAt: true,
         createdAt: true,
         contactId: true,
-        contact: { select: { firstName: true, lastName: true } },
+        contact: { select: { businessId: true, deletedAt: true, firstName: true, lastName: true } },
       },
       orderBy: [{ acceptedAt: 'desc' }, { id: 'desc' }],
       take: 25,
@@ -379,8 +501,11 @@ export class TodayService {
     const todayItems: TodayAcceptedQuoteItem[] = [];
     const needsYouItems: TodayNeedsYouItem[] = [];
     for (const q of quotes) {
-      const customerName = formatCustomerName(q.contact);
+      const liveContact = q.contact && q.contact.businessId === businessId && q.contact.deletedAt === null ? q.contact : null;
+      const customerName = formatCustomerName(liveContact);
+      const visibleContactId = liveContact && access.crmRead ? q.contactId : null;
       const acceptedIso = q.acceptedAt ? q.acceptedAt.toISOString() : q.createdAt.toISOString();
+      const quoteHref = `/app/commerce?tab=quotes&quoteId=${encodeURIComponent(q.id)}`;
       todayItems.push({
         id: q.id,
         quoteNumber: q.quoteNumber,
@@ -388,7 +513,7 @@ export class TodayService {
         currency: q.currency || 'TTD',
         acceptedAt: q.acceptedAt ? q.acceptedAt.toISOString() : null,
         customerName,
-        contactId: q.contactId,
+        contactId: visibleContactId,
       });
       needsYouItems.push({
         id: `quote:${q.id}`,
@@ -396,21 +521,29 @@ export class TodayService {
         sourceId: q.id,
         title: `${customerName ? `${customerName} accepted` : 'Accepted'} Quote ${q.quoteNumber}: Convert to invoice`,
         summary: `${q.currency || 'TTD'} ${Number(q.total).toFixed(2)}`,
-        contactId: q.contactId,
+        contactId: visibleContactId,
         customerName,
         amount: Number(q.total),
         currency: q.currency || 'TTD',
         createdAt: acceptedIso,
-        href: `/app/commerce?tab=quotes&quoteId=${encodeURIComponent(q.id)}`,
-        actions: [
-          {
-            label: 'Convert to invoice',
-            actionType: 'CONVERT',
-            method: 'POST',
-            endpoint: `/commerce/businesses/${businessId}/quotes/${q.id}/convert`,
-            href: `/app/commerce?tab=quotes&quoteId=${encodeURIComponent(q.id)}`,
-          },
-        ],
+        href: quoteHref,
+        actions: access.revenueWrite
+          ? [
+              {
+                label: 'Convert to invoice',
+                actionType: 'CONVERT',
+                method: 'POST',
+                endpoint: `/commerce/businesses/${businessId}/quotes/${q.id}/convert`,
+                href: quoteHref,
+              },
+            ]
+          : [
+              {
+                label: 'View quote',
+                actionType: 'OPEN',
+                href: quoteHref,
+              },
+            ],
       });
     }
     return { needsYouItems, todayItems };
@@ -445,13 +578,13 @@ export class TodayService {
             label: 'Approve',
             actionType: 'APPROVE',
             method: 'POST',
-            endpoint: `/key-autonomy/businesses/${businessId}/proposals/${p.id}/approve`,
+            endpoint: `/key-autonomy/businesses/${businessId}/actions/proposals/${p.id}/approve`,
           },
           {
             label: 'Reject',
             actionType: 'REJECT',
             method: 'POST',
-            endpoint: `/key-autonomy/businesses/${businessId}/proposals/${p.id}/reject`,
+            endpoint: `/key-autonomy/businesses/${businessId}/actions/proposals/${p.id}/reject`,
           },
         ],
       });
@@ -473,7 +606,7 @@ export class TodayService {
             label: 'Run',
             actionType: 'EXECUTE',
             method: 'POST',
-            endpoint: `/key-autonomy/businesses/${businessId}/proposals/${p.id}/execute`,
+            endpoint: `/key-autonomy/businesses/${businessId}/actions/proposals/${p.id}/execute`,
           },
         ],
       });
@@ -484,24 +617,63 @@ export class TodayService {
   private async loadApprovalRequests(
     businessId: string,
     access: TodayMemberAccess,
+    reader: TodayReader | null,
   ): Promise<TodayNeedsYouItem[]> {
-    if (!access.operationsRead && !access.revenueWrite) return [];
+    if (!access.authenticated || !reader?.id) return [];
+    const canSeeAllBusinessApprovals = access.isOwner || access.isAdmin || access.isSuperAdmin;
     const rows = await this.prisma.client.approvalRequest.findMany({
-      where: { businessId, status: 'pending', migratedToProposalId: null },
+      where: {
+        businessId,
+        status: 'pending',
+        migratedToProposalId: null,
+        ...(!canSeeAllBusinessApprovals
+          ? {
+              steps: {
+                some: {
+                  status: 'pending',
+                  OR: [{ approverId: reader.id }, { delegatedTo: reader.id }],
+                },
+              },
+            }
+          : {}),
+      },
       select: {
         id: true,
         requestType: true,
         title: true,
         description: true,
+        currentStep: true,
         createdAt: true,
+        steps: {
+          select: {
+            stepOrder: true,
+            status: true,
+            approverId: true,
+            delegatedTo: true,
+          },
+          orderBy: [{ stepOrder: 'asc' }, { id: 'asc' }],
+        },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 25,
     });
     return rows
       .filter((r) => {
-        if (FINANCIAL_APPROVAL_TYPES.has(r.requestType)) return access.revenueRead;
-        return access.operationsRead;
+        if (!canSeeAllBusinessApprovals) {
+          const currentStep = r.steps.find((s) => s.stepOrder === r.currentStep && s.status === 'pending');
+          if (!currentStep || (currentStep.approverId !== reader.id && currentStep.delegatedTo !== reader.id)) {
+            return false;
+          }
+        }
+        const normalizedType = (r.requestType || '').trim().toLowerCase();
+        const requiredScope = Object.prototype.hasOwnProperty.call(APPROVAL_TYPE_SCOPE, normalizedType)
+          ? APPROVAL_TYPE_SCOPE[normalizedType]
+          : null;
+        if (!requiredScope) {
+          // Fail closed for unknown approval types.
+          return access.isOwner || access.isSuperAdmin;
+        }
+        return access[requiredScope];
       })
       .map((r) => ({
         id: `approval:${r.id}`,
@@ -520,13 +692,23 @@ export class TodayService {
   private async loadPlanSteps(
     businessId: string,
     access: TodayMemberAccess,
+    reader: TodayReader | null,
   ): Promise<TodayNeedsYouItem[]> {
-    if (!access.operationsRead || keyDisabled()) return [];
+    if (!access.authenticated || !reader?.id || keyDisabled()) return [];
+    // D-74 / SEC-R3a-1: reuse canonical graphPlanReadScope for plan ownership & per-step module authority.
+    const mayRead = await graphPlanReadScope(this.prisma, businessId, {
+      id: reader.id,
+      role: reader.role,
+    });
     const steps = await this.prisma.client.aiPlanStep.findMany({
       where: {
         requiresApproval: true,
-        status: 'pending',
-        plan: { businessId },
+        status: { in: ['pending', 'awaiting_approval'] },
+        plan: {
+          businessId,
+          status: { in: ['draft', 'pending', 'running', 'awaiting_approval'] },
+          ...(!mayRead.seesEveryPlan ? { userId: reader.id } : {}),
+        },
       },
       select: {
         id: true,
@@ -534,6 +716,7 @@ export class TodayService {
         action: true,
         description: true,
         module: true,
+        toolName: true,
         createdAt: true,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -541,9 +724,9 @@ export class TodayService {
     });
     return steps
       .filter((s) => {
-        const mod = (s.module || '').toLowerCase();
-        if (FINANCIAL_PLAN_MODULES.has(mod)) return access.revenueRead;
-        return true;
+        if (s.toolName) return mayRead.step(s.toolName);
+        if (s.module) return mayRead.cortexStep(s.module);
+        return false;
       })
       .map((s) => ({
         id: `plan-step:${s.id}`,
@@ -555,13 +738,20 @@ export class TodayService {
         customerName: null,
         createdAt: s.createdAt.toISOString(),
         href: `/app/plans/${encodeURIComponent(s.planId)}`,
-        actions: [{ label: 'Review', actionType: 'OPEN' as const, href: `/app/plans/${encodeURIComponent(s.planId)}` }],
+        actions: [
+          {
+            label: 'Review',
+            actionType: 'OPEN' as const,
+            href: `/app/plans/${encodeURIComponent(s.planId)}`,
+          },
+        ],
       }));
   }
 
   private async loadTodayBookings(
     businessId: string,
     access: TodayMemberAccess,
+    reader: TodayReader | null,
     dayStart: Date,
     dayEnd: Date,
   ): Promise<TodayBookingItem[]> {
@@ -579,21 +769,77 @@ export class TodayService {
         endTime: true,
         status: true,
         contactId: true,
-        contact: { select: { firstName: true, lastName: true } },
+        contact: {
+          select: {
+            id: true,
+            businessId: true,
+            deletedAt: true,
+            visibility: true,
+            ownerId: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
         service: { select: { name: true } },
       },
       orderBy: [{ startTime: 'asc' }, { id: 'asc' }],
       take: 50,
     });
-    return rows.map((b) => ({
-      id: b.id,
-      startTime: b.startTime.toISOString(),
-      endTime: b.endTime.toISOString(),
-      status: b.status,
-      serviceName: b.service?.name ?? null,
-      customerName: formatCustomerName(b.contact),
-      contactId: access.crmRead ? b.contactId : null,
-    }));
+
+    const canViewAll = access.isOwner || access.isSuperAdmin;
+    const readerId = reader?.id ?? null;
+
+    // If explicitly restricted to "my book" (`crm_view: 'owned'`), run canonical contactVisibilityFilter.
+    const bookFilter =
+      !canViewAll && access.crmBookRestricted && access.crmAccess && readerId
+        ? await contactVisibilityFilter(
+            this.prisma,
+            businessId,
+            access.crmAccess,
+            readerId,
+            rows.map((r) => r.contactId),
+          )
+        : null;
+
+    // For non-owner callers without `crm_view: 'owned'`, enforce PRIVATE contact hiding (R28-ST-01 / M7).
+    const sharedPrivateIds = new Set<string>();
+    if (!canViewAll && !bookFilter && readerId) {
+      const unownedPrivateIds = rows
+        .map((r) => r.contact)
+        .filter(
+          (c): c is NonNullable<(typeof rows)[number]['contact']> =>
+            Boolean(c && c.businessId === businessId && c.deletedAt === null && c.visibility === 'PRIVATE' && c.ownerId !== readerId),
+        )
+        .map((c) => c.id);
+      if (unownedPrivateIds.length > 0) {
+        const shares = await this.prisma.client.contactShare.findMany({
+          where: { userId: readerId, contactId: { in: [...new Set(unownedPrivateIds)] } },
+          select: { contactId: true },
+        });
+        for (const s of shares) sharedPrivateIds.add(s.contactId);
+      }
+    }
+
+    return rows.map((b) => {
+      const c = b.contact;
+      let contactVisible = Boolean(c && c.businessId === businessId && c.deletedAt === null);
+      if (contactVisible && c && !canViewAll) {
+        if (bookFilter) {
+          contactVisible = bookFilter(c.id);
+        } else if (c.visibility === 'PRIVATE') {
+          contactVisible = Boolean(readerId && (c.ownerId === readerId || sharedPrivateIds.has(c.id)));
+        }
+      }
+      return {
+        id: b.id,
+        startTime: b.startTime.toISOString(),
+        endTime: b.endTime.toISOString(),
+        status: b.status,
+        serviceName: b.service?.name ?? null,
+        customerName: contactVisible ? formatCustomerName(c) : null,
+        contactId: contactVisible && access.crmRead ? b.contactId : null,
+      };
+    });
   }
 
   private async loadTodayInvoices(
@@ -603,14 +849,19 @@ export class TodayService {
     now: Date,
   ): Promise<TodayInvoiceItem[]> {
     if (!access.revenueRead) return [];
+    const where: Prisma.InvoiceWhereInput = {
+      businessId,
+      deletedAt: null,
+      status: { in: OPEN_RECEIVABLE_STATUS_LIST },
+      AND: [
+        { OR: [{ status: 'OVERDUE' }, { dueDate: { lte: dayEnd } }] },
+        ...(access.contactVisibility
+          ? [{ contact: { businessId, deletedAt: null, AND: [access.contactVisibility] } }]
+          : []),
+      ],
+    };
     const rows = await this.prisma.client.invoice.findMany({
-      where: {
-        businessId,
-        deletedAt: null,
-        status: { in: OPEN_RECEIVABLE_STATUS_LIST },
-        OR: [{ status: 'OVERDUE' }, { dueDate: { lte: dayEnd } }],
-        ...(access.contactVisibility ? { contact: access.contactVisibility } : {}),
-      },
+      where,
       select: {
         id: true,
         invoiceNumber: true,
@@ -619,7 +870,7 @@ export class TodayService {
         total: true,
         currency: true,
         contactId: true,
-        contact: { select: { firstName: true, lastName: true } },
+        contact: { select: { businessId: true, deletedAt: true, firstName: true, lastName: true } },
         payments: { where: { businessId }, select: { amount: true, status: true } },
       },
       orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
@@ -637,11 +888,15 @@ export class TodayService {
         balanceOfStoredRows(Number(inv.total), inv.payments, inv.currency),
         credited,
       );
-      const remaining = Math.min(balance.remaining, balance.total);
+      // D-250: cap remaining at net-of-credits total (matches CommerceStatsService).
+      const netCap = Math.max(0, roundMoney(balance.total - balance.credited));
+      const remaining = Math.min(balance.remaining, netCap);
       if (remaining <= 0) continue;
 
       const isOverdue =
         inv.status === 'OVERDUE' || (inv.dueDate !== null && inv.dueDate.getTime() < now.getTime());
+      const liveContact =
+        inv.contact && inv.contact.businessId === businessId && inv.contact.deletedAt === null ? inv.contact : null;
 
       items.push({
         id: inv.id,
@@ -651,8 +906,8 @@ export class TodayService {
         remaining,
         total: Number(inv.total),
         currency: inv.currency || 'TTD',
-        customerName: formatCustomerName(inv.contact),
-        contactId: inv.contactId,
+        customerName: formatCustomerName(liveContact),
+        contactId: liveContact && access.crmRead ? inv.contactId : null,
         isOverdue,
       });
     }
@@ -671,7 +926,11 @@ export class TodayService {
         deletedAt: null,
         status: 'OPEN',
         dueDate: { lte: dayEnd },
-        ...(access.contactVisibility ? { contact: access.contactVisibility } : {}),
+        contact: {
+          businessId,
+          deletedAt: null,
+          ...(access.contactVisibility ? { AND: [access.contactVisibility] } : {}),
+        },
       },
       select: {
         id: true,
@@ -721,7 +980,8 @@ export class TodayService {
       id: o.id,
       orderNumber: o.orderNumber,
       status: o.status,
-      total: Number(o.total),
+      // D-57 / D-100 / D-234: withhold PAID order monetary totals below revenue:read.
+      total: access.revenueRead ? Number(o.total) : null,
       currency: o.currency || 'TTD',
       customerName: o.customerName || null,
       createdAt: o.createdAt.toISOString(),
@@ -735,19 +995,49 @@ export class TodayService {
   ): Promise<TodayReminderItem[]> {
     if (!access.authenticated) return [];
     const result = await this.readyToSend.listDue(businessId, reader);
-    return result.items.map((item) => ({
-      kind: item.kind,
-      id: item.id,
-      contactId: item.contactId,
-      customerName: item.customerName,
-      whatsappUrl: item.whatsappUrl,
-      messageText: item.messageText,
-      dueAt: item.dueAt,
-      reference: item.reference,
-      ...(item.amountDue !== undefined ? { amountDue: item.amountDue } : {}),
-      ...(item.currency !== undefined ? { currency: item.currency } : {}),
-      ...(item.serviceName !== undefined ? { serviceName: item.serviceName } : {}),
-    }));
+    if (result.items.length === 0) return [];
+
+    // M7 / D-63: ReadyToSendService already hides PRIVATE/soft-deleted/cross-tenant contacts,
+    // and here we also enforce `crm_view: 'owned'` (for all reminders) and `contactVisibility` (for invoice reminders).
+    const needVisFilter =
+      !access.isOwner &&
+      !access.isSuperAdmin &&
+      Boolean(access.crmAccess && reader?.id) &&
+      (access.crmBookRestricted || Boolean(access.contactVisibility));
+    const canOpenContact =
+      needVisFilter && access.crmAccess && reader?.id
+        ? await contactVisibilityFilter(
+            this.prisma,
+            businessId,
+            access.crmAccess,
+            reader.id,
+            result.items.map((item) => item.contactId),
+          )
+        : null;
+
+    const filtered: TodayReminderItem[] = [];
+    for (const item of result.items) {
+      if (item.contactId && canOpenContact) {
+        const mustRestrict = access.crmBookRestricted || item.kind === 'invoice';
+        if (mustRestrict && !canOpenContact(item.contactId)) {
+          continue;
+        }
+      }
+      filtered.push({
+        kind: item.kind,
+        id: item.id,
+        contactId: access.crmRead ? item.contactId : null,
+        customerName: item.customerName,
+        whatsappUrl: item.whatsappUrl,
+        messageText: item.messageText,
+        dueAt: item.dueAt,
+        reference: item.reference,
+        ...(item.amountDue !== undefined ? { amountDue: item.amountDue } : {}),
+        ...(item.currency !== undefined ? { currency: item.currency } : {}),
+        ...(item.serviceName !== undefined ? { serviceName: item.serviceName } : {}),
+      });
+    }
+    return filtered;
   }
 
   private async loadPulse(
@@ -802,7 +1092,7 @@ export class TodayService {
         key: 'hours',
         label: 'Set your business hours',
         done: hasConfiguredBusinessHours(business?.businessHours),
-        href: '/app/settings/business',
+        href: '/app/profile',
       },
       {
         key: 'payments',

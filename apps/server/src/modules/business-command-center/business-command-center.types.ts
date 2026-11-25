@@ -280,6 +280,7 @@ export interface TodayNeedsYouItem {
 export interface TodayNeedsYouBlock {
   items: TodayNeedsYouItem[];
   totalCount: number;
+  hasMore: boolean;
 }
 
 export interface TodayBookingItem {
@@ -328,7 +329,7 @@ export interface TodayOrderItem {
   id: string;
   orderNumber: string;
   status: string;
-  total: number;
+  total: number | null;
   currency: string;
   customerName: string | null;
   createdAt: string;

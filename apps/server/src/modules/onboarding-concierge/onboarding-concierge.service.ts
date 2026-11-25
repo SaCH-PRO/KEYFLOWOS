@@ -1024,7 +1024,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Set your business hours',
         body: "Customers need to know when you're available. I can set typical Trinidad hours for your business type.",
         ctaLabel: 'Set hours',
-        ctaHref: '/app/settings/business',
+        ctaHref: '/app/profile',
       },
       {
         key: 'storefront',
