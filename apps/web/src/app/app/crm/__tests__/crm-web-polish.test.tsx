@@ -19,6 +19,15 @@
  *   CWP-082b  control     (false premise, pinned) the customers screen's Next Actions queue renders its items' text
  *                         visibly: opacity 1, not 0
  *
+ * Repair round 1 (reviews at 769f8933):
+ *   CWP-R1a   RED-AT-769f8933  (SEC-CWP-1) a stored table view with no string search, applied while the screen
+ *                         searches "Kwame", hands the screen no undefined search and the table keeps rendering
+ *   CWP-R1b   RED-AT-769f8933  the same stored view applied in a table with no screen search does not crash the table
+ *                         (its own debounce called .trim() on undefined; the bug was on main already)
+ *   CWP-R2    RED-AT-769f8933  (COR-CWP-1) a table mounted while the screen searches "Kwame" sends exactly one read,
+ *                         with that search, and never shows the unfiltered count ("3 of 3")
+ *   CWP-R4    RED-AT-769f8933  (COR-CWP-5) the dashboard's Next actions widget, mounted nowhere since the fix, is gone
+ *
  * Components render for real on the real client; only fetch, the Next router hooks and toasts are stubbed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -221,5 +230,95 @@ describe("BUG-082: the customers screen's Next Actions queue (false premise, pin
       { timeout: 3_000 },
     );
     expect(screen.getByText("Kwame Mensah")).toBeVisible();
+  });
+});
+
+describe("Repair round 1: the table's saved views and first read", () => {
+  /** Errors thrown outside React (the search debounce runs in a timer). */
+  function catchWindowErrors() {
+    const errors: string[] = [];
+    const onError = (e: ErrorEvent) => {
+      errors.push(String(e.error?.message ?? e.message));
+      e.preventDefault();
+    };
+    // A throw in a timer reaches the process, not the window, under vitest's jsdom.
+    const onUncaught = (err: unknown) => {
+      errors.push(String((err as Error)?.message ?? err));
+    };
+    window.addEventListener("error", onError);
+    process.prependListener("uncaughtException", onUncaught);
+    return {
+      errors,
+      stop: () => {
+        window.removeEventListener("error", onError);
+        process.removeListener("uncaughtException", onUncaught);
+      },
+    };
+  }
+
+  /** A stored view in an old or tampered format: its config has no search. */
+  function storeViewWithoutSearch() {
+    const view = {
+      id: "view_old", name: "Old view", isDefault: false,
+      config: { statusFilter: "ALL", sortField: "firstName", sortDir: "asc", visibleColumns: ["firstName", "lastName"], pageSize: 25 },
+    };
+    window.localStorage.setItem("kf_db_saved_views", JSON.stringify([view]));
+  }
+
+  it("CWP-R1a RED-AT-769f8933: a stored view with no search hands the screen no undefined search", async () => {
+    storeViewWithoutSearch();
+    const caught = catchWindowErrors();
+    const onSearchChange = vi.fn();
+    renderTable({ search: "Kwame", onSearchChange });
+    await waitFor(() => expect(tableNames()).toEqual(["Kwame"]), { timeout: 3_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Saved views" }));
+    fireEvent.click(screen.getByText("Old view").closest("button") as HTMLButtonElement);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    caught.stop();
+    expect(caught.errors).toEqual([]);
+    expect(onSearchChange.mock.calls.every(([v]) => typeof v === "string")).toBe(true);
+    expect(screen.getByRole("grid", { name: "Contacts database table" })).toBeInTheDocument();
+  });
+
+  it("CWP-R1b RED-AT-769f8933: the same view applied in a table with no screen search does not crash it", async () => {
+    storeViewWithoutSearch();
+    const caught = catchWindowErrors();
+    renderTable();
+    await waitFor(() => expect(tableNames()).toEqual(["Kwame", "Ama", "Kofi"]), { timeout: 3_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Saved views" }));
+    fireEvent.click(screen.getByText("Old view").closest("button") as HTMLButtonElement);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    caught.stop();
+    expect(caught.errors).toEqual([]);
+    expect(screen.getByRole("grid", { name: "Contacts database table" })).toBeInTheDocument();
+    expect((screen.getByRole("textbox", { name: "Search contacts database" }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("CWP-R2 RED-AT-769f8933: a table mounted under the screen's search reads once, with it, and never shows the unfiltered count", async () => {
+    const counts: string[] = [];
+    const observer = new MutationObserver(() => {
+      for (const el of Array.from(document.body.querySelectorAll("span, div, p"))) {
+        const t = el.textContent?.trim() ?? "";
+        if (/^\d+ of \d+$/.test(t)) counts.push(t);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    renderTable({ search: "Kwame" });
+    await waitFor(() => expect(tableNames()).toEqual(["Kwame"]), { timeout: 3_000 });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    observer.disconnect();
+    expect(searches).toEqual(["kwame"]);
+    expect(counts).not.toContain("3 of 3");
+    expect(screen.getByText("1 of 1")).toBeInTheDocument();
+  });
+
+  it("CWP-R4 RED-AT-769f8933: the dashboard's unmounted Next actions widget is deleted", () => {
+    expect(fs.existsSync(path.resolve(__dirname, "../dashboard/next-actions-widget.tsx"))).toBe(false);
   });
 });
