@@ -148,6 +148,8 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
                   <p className="kf-text-caption text-muted-foreground">{description}</p>
                 </div>
               </div>
+              {/* h-6 w-11 / h-5 w-5: Tailwind 3 has no h-5.5 or h-4.5 (the page's customer-email switches use them
+                  and render 0px tall in a browser). */}
               <button
                 type="button"
                 role="switch"
@@ -155,12 +157,12 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
                 aria-label={`Alerts for ${label}`}
                 onClick={() => toggle(key)}
                 disabled={saving !== null}
-                className="relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0 disabled:opacity-70"
+                className="relative h-6 w-11 rounded-full transition-colors duration-200 flex-shrink-0 disabled:opacity-70"
                 style={{ background: on ? "hsl(var(--kf-success))" : "hsl(var(--muted))" }}
               >
                 <span
-                  className="absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition-transform duration-200"
-                  style={{ transform: on ? "translateX(19px)" : "translateX(2px)" }}
+                  className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200"
+                  style={{ transform: on ? "translateX(22px)" : "translateX(2px)" }}
                 />
                 {saving === key && (
                   <Loader2
