@@ -1815,6 +1815,12 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
   // flow-chat tool finance_list_action_items, echoed the normalized text as cashCurrency.
   it('CP-22 (review SEC-W11RL-1) RED-BEFORE: FIN_CASHFLOW_RISK evidence names the business currency only when it is a three-letter code; free text stored as the business currency is never echoed', async () => {
     await db.business.update({ where: { id: ID.bizK }, data: { currency: 'pay me now' } });
+    // W11-RUNWAY-BURN-CURRENCY (D-135): burn counts only business-currency expenses; seed a
+    // business-currency expense (900 over 90d = 10/day) so the alarm fires while K's TTD 900
+    // expenses are listed apart under otherCurrencyExpenses, never echoing 'pay me now'.
+    const freeTextExp = await db.expense.create({
+      data: { id: `${P}expK_freetext`, businessId: ID.bizK, description: 'V34A freetext burn', amount: 900, currency: 'pay me now', date: daysAgo(15) },
+    });
     try {
       // No cash is held under that text: K's TTD 100 and USD 550 are both held apart.
       const p = await cashPositionService.getCashPosition(ID.bizK);
@@ -1824,16 +1830,18 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
       const rows = await cashRiskRows(ID.bizK);
       expect(rows.length).toBe(1);
       expect(rows[0].body).toBe(
-        'Cash 0.00 against 10.00/day burn (90-day average). Runway is under 30 days. (business-currency cash only). Not counted: TTD 100.00, USD 550.00.',
+        'Cash 0.00 against 10.00/day burn (90-day average). Runway is under 30 days. (business-currency cash only). Not counted: TTD 100.00, USD 550.00. (business-currency burn only). Expenses not counted: TTD 900.00.',
       );
       expect(rows[0].evidence).toEqual({
         cash: 0, dailyBurn: 10, days: 0, cashCurrency: null,
         otherCurrencyCash: [{ currency: 'TTD', amount: 100 }, { currency: 'USD', amount: 550 }],
+        otherCurrencyExpenses: [{ currency: 'TTD', amount: 900 }],
       });
       for (const text of [JSON.stringify(rows[0]), JSON.stringify(mirrored), JSON.stringify(await commandRows(ID.bizK))]) {
         expect(text).not.toMatch(/pay me now/i);
       }
     } finally {
+      await db.expense.delete({ where: { id: freeTextExp.id } });
       await db.business.update({ where: { id: ID.bizK }, data: { currency: 'TTD' } });
     }
     // Back on TTD the evidence names it again.
@@ -2219,6 +2227,7 @@ describe('W11-RUNWAY-BURN-CURRENCY (D-135): runway burn counts business-currency
   const bizN2 = `${P}bizN2`;
   const ownerO = `${P}ownerO`;
   const bizO = `${P}bizO`;
+  const INJECTED = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
   let intel: any;
   const mirrored: Array<{ businessId: string; type: string; title: string; detail: string; amountAtRisk: number; priority: number }> = [];
 
@@ -2229,7 +2238,7 @@ describe('W11-RUNWAY-BURN-CURRENCY (D-135): runway burn counts business-currency
   const cashRiskRows = (biz: string) =>
     db.financeActionItem.findMany({ where: { businessId: biz, kind: 'CASHFLOW_RISK' }, orderBy: { id: 'asc' } });
   const commandRows = (biz: string) =>
-    db.commandItem.findMany({ where: { businessId: biz, source: 'FINANCE_INTELLIGENCE', entityId: biz }, orderBy: { id: 'asc' } });
+    db.commandItem.findMany({ where: { businessId: biz, sourceModule: 'finance', actionType: 'FIN8_CASHFLOW_RISK' }, orderBy: { id: 'asc' } });
 
   beforeAll(async () => {
     const { FinanceIntelligenceService } = await import('../src/modules/finance/finance-intelligence.service');
