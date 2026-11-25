@@ -5,8 +5,8 @@ import { test, expect, API_URL, type Tenant } from "./journeys/journey-helpers";
  * FU-CONTACT-SEND-QUOTE-DOOR, the browser half (D-283; journeys C and D). The jsdom half is
  * src/app/app/commerce/__tests__/contact-send-quote-door.test.tsx (CSQ-*).
  *
- * A customer is seeded through the API. Then, on Customers (/app/crm/contacts, the list view), the customer's card
- * Quick actions > Send Quote must open Sales > Quotes with the New Quote sheet open and that customer chosen, by a
+ * A customer is seeded through the API. Then, on Customers' list view (/app/crm/contacts?view=list: the cards there
+ * carry Quick actions; the default focus view's cards do not), the customer's card Quick actions > Send Quote must open Sales > Quotes with the New Quote sheet open and that customer chosen, by a
  * client navigation (the contacts screen's router.push; the shell stays mounted since FU-REQUIRE-AUTH-REMOUNT):
  *
  *   CSQB-01 the URL lands on /app/commerce on the Quotes tab, and the one-shot contactId has left it
@@ -44,7 +44,7 @@ for (const width of [375, 768, 1024, 1440]) {
       test.setTimeout(3 * 60_000);
       const c = await seedCustomer(request, owner);
 
-      await page.goto("/app/crm/contacts");
+      await page.goto("/app/crm/contacts?view=list");
       // The card (role=option, labelled "<name> - <status>"), as release0-live.spec.ts selects it.
       const card = page.locator(`div[role="option"][aria-label^="${c.first} ${c.last} - "]`);
       await expect(card).toBeVisible({ timeout: 30_000 });
