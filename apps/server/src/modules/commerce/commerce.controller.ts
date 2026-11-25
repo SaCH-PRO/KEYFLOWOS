@@ -2135,6 +2135,45 @@ export class CommerceController {
     return this.commerce.markReceiptSent(invoiceId, businessId);
   }
 
+  // ========== PAYMENT CLAIMS (CLAIM-LOOP, V1-65, P76) ==========
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Get('businesses/:businessId/claims')
+  listPaymentClaims(@Param('businessId') businessId: string) {
+    return this.commerce.listPaymentClaims(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/claims/:claimId/confirm')
+  async confirmPaymentClaim(
+    @Param('businessId') businessId: string,
+    @Param('claimId') claimId: string,
+    @Body() body: { amount?: unknown; reference?: string; notes?: string },
+    @Req() req?: { user?: { id?: string; role?: string } },
+  ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
+    const result = await this.commerce.confirmPaymentClaim(claimId, businessId, req?.user?.id ?? null, {
+      amount: body?.amount,
+      reference: typeof body?.reference === 'string' ? (sanitizeString(body.reference, 200) ?? undefined) : undefined,
+      notes: typeof body?.notes === 'string' ? (sanitizeString(body.notes, 1000) ?? undefined) : undefined,
+    });
+    return { ...result, invoice: result.invoice ? toInvoiceWriteResponse(result.invoice) : result.invoice };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/claims/:claimId/dismiss')
+  async dismissPaymentClaim(
+    @Param('businessId') businessId: string,
+    @Param('claimId') claimId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
+  ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
+    return this.commerce.dismissPaymentClaim(claimId, businessId);
+  }
+
   // ========== PAYMENT LINKS ==========
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

@@ -1016,7 +1016,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Add your products or services',
         body: "You haven't added any products yet. Want me to help set up your catalog with suggested pricing? Takes about 2 minutes.",
         ctaLabel: 'Set up products',
-        ctaHref: '/app/onboarding?step=products',
+        ctaHref: '/app/settings/catalog',
       },
       {
         key: 'businessHours',
@@ -1024,7 +1024,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Set your business hours',
         body: "Customers need to know when you're available. I can set typical Trinidad hours for your business type.",
         ctaLabel: 'Set hours',
-        ctaHref: '/app/onboarding?step=hours',
+        ctaHref: '/app/profile',
       },
       {
         key: 'storefront',
@@ -1032,7 +1032,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Enable your online storefront',
         body: "You've added products but haven't enabled your storefront yet — want me to help? Takes about 3 minutes.",
         ctaLabel: 'Set up storefront',
-        ctaHref: '/app/onboarding?step=storefront',
+        ctaHref: '/app/store',
       },
       {
         key: 'contacts',
@@ -1056,7 +1056,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Complete your legal setup',
         body: 'KEY can generate your Trinidad & Tobago registration checklist once you confirm your entity type.',
         ctaLabel: 'Set up legal profile',
-        ctaHref: '/app/onboarding',
+        ctaHref: '/app/legal',
       },
       {
         key: 'genesis-finance',
@@ -1064,7 +1064,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Build your financial model',
         body: 'Add your startup costs, monthly fixed costs, and pricing so KEY can forecast break-even and runway.',
         ctaLabel: 'Build finance model',
-        ctaHref: '/app/onboarding',
+        ctaHref: '/app/finance',
       },
       {
         key: 'genesis-market',
@@ -1072,7 +1072,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Define your market strategy',
         body: 'Tell KEY who your ideal customer is, what your core offer is, and how you plan to reach them.',
         ctaLabel: 'Define market strategy',
-        ctaHref: '/app/onboarding',
+        ctaHref: '/app/genome',
       },
       {
         key: 'genesis-compliance',
@@ -1080,7 +1080,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Complete your compliance checklist',
         body: 'Run the Trinidad & Tobago compliance check so you know which registrations and licences you need.',
         ctaLabel: 'Run compliance check',
-        ctaHref: '/app/onboarding',
+        ctaHref: '/app/settings/compliance',
       },
     ];
 

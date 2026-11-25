@@ -352,7 +352,11 @@ export class CatalogService {
     };
   }
 
-  async createProduct(input: CatalogProductInput, tx?: TransactionClient) {
+  async createProduct(
+    input: CatalogProductInput,
+    tx?: TransactionClient,
+    eventBuffer?: Array<{ name: string; payload: unknown }>,
+  ) {
     if (!input.name?.trim()) throw new Error('Product name is required');
     if (typeof input.price !== 'number' || Number.isNaN(input.price)) {
       throw new Error('Product price must be a number');
@@ -385,8 +389,19 @@ export class CatalogService {
       },
     });
     // Canonical Catalog event + legacy product event for back-compat.
-    this.events.emit('catalog.product.created', { product, businessId: input.businessId } as CatalogProductCreatedPayload);
-    this.events.emit('product.created', { product, businessId: input.businessId } as ProductCreatedPayload);
+    // SEC-P78-1: callers running inside a Prisma $transaction pass eventBuffer
+    // and flush after commit so listeners never act on rolled-back rows.
+    const catalogProductPayload: CatalogProductCreatedPayload = { product, businessId: input.businessId };
+    const productPayload: ProductCreatedPayload = { product, businessId: input.businessId };
+    if (eventBuffer) {
+      eventBuffer.push(
+        { name: 'catalog.product.created', payload: catalogProductPayload },
+        { name: 'product.created', payload: productPayload },
+      );
+    } else {
+      this.events.emit('catalog.product.created', catalogProductPayload);
+      this.events.emit('product.created', productPayload);
+    }
     return product;
   }
 
@@ -554,7 +569,11 @@ export class CatalogService {
     return { depositRequired: true, depositType: 'FIXED', depositValue: next.depositValue };
   }
 
-  async createService(input: CatalogServiceInput, tx?: TransactionClient) {
+  async createService(
+    input: CatalogServiceInput,
+    tx?: TransactionClient,
+    eventBuffer?: Array<{ name: string; payload: unknown }>,
+  ) {
     const client = tx ?? this.prisma.client;
     if (!input.name?.trim()) throw new BadRequestException('Service name is required');
     if (typeof input.duration !== 'number' || !Number.isFinite(input.duration) || input.duration <= 0) {
@@ -585,7 +604,12 @@ export class CatalogService {
         depositValue: deposit.depositValue,
       },
     });
-    this.events.emit('catalog.service.created', { service, businessId: input.businessId } as CatalogServiceCreatedPayload);
+    const servicePayload: CatalogServiceCreatedPayload = { service, businessId: input.businessId };
+    if (eventBuffer) {
+      eventBuffer.push({ name: 'catalog.service.created', payload: servicePayload });
+    } else {
+      this.events.emit('catalog.service.created', servicePayload);
+    }
     return service;
   }
 
