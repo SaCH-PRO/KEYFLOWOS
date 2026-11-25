@@ -367,11 +367,22 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processBookingReminders() {
-    let businesses: Array<{ id: string; bookingReminderMins: number | null }>;
+    let businesses: Array<{
+      id: string;
+      bookingReminderMins: number | null;
+      gmailEmail: string | null;
+      gmailRefreshToken: string | null;
+    }>;
     try {
+      // READY-TO-SEND (D-82): customer messages leave only through the business's own Gmail;
+      // scheduled booking email reminders run only for businesses with Gmail connected.
       businesses = await this.prisma.client.business.findMany({
-        where: { bookingReminderMins: { gt: 0 } },
-        select: { id: true, bookingReminderMins: true },
+        where: {
+          bookingReminderMins: { gt: 0 },
+          gmailEmail: { not: null },
+          gmailRefreshToken: { not: null },
+        },
+        select: { id: true, bookingReminderMins: true, gmailEmail: true, gmailRefreshToken: true },
       });
     } catch (e) {
       this.logger.warn(`Booking reminder check skipped — DB unavailable: ${(e as Error).message}`);
@@ -381,6 +392,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     if (businesses.length === 0) return;
 
     for (const biz of businesses) {
+      if (!biz.gmailEmail?.trim() || !biz.gmailRefreshToken?.trim()) continue;
       const reminderMins = biz.bookingReminderMins ?? 60;
       const now = new Date();
       const windowStart = new Date(now.getTime() + (reminderMins - 5) * 60_000);
@@ -391,6 +403,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         upcomingBookings = await this.prisma.client.booking.findMany({
           where: {
             businessId: biz.id,
+            deletedAt: null,
             startTime: { gte: windowStart, lte: windowEnd },
             status: { in: ['CONFIRMED', 'PENDING'] },
             reminderSentAt: null,

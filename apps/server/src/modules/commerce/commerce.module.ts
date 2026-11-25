@@ -59,6 +59,8 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
 import { DriveIntakeController } from './drive-intake.controller';
 import { DriveIntakeOrchestrator } from './drive-intake-orchestrator.service';
 import { DriveIntakeListener } from './drive-intake.listener';
+import { ReadyToSendController } from './ready-to-send.controller';
+import { ReadyToSendService } from './ready-to-send.service';
 import type { NotificationsModule as NotificationsModuleType } from '../notifications/notifications.module';
 
 @Module({
@@ -90,9 +92,10 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         (await import('../notifications/notifications.module')).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DriveIntakeController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DriveIntakeController, ReadyToSendController],
   providers: [
     CommerceService,
+    ReadyToSendService,
     CommerceStatsService,
     InvoiceWorkflowService,
     InvoiceOverdueScheduler,
@@ -153,6 +156,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     TimeCostService,
     DocumentTemplateService,
     DriveIntakeOrchestrator,
+    ReadyToSendService,
   ],
 })
 export class CommerceModule {}
