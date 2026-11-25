@@ -24,8 +24,9 @@
  *   SSM-01  RED  on a phone the open sheet's panel carries no x offset from the desktop slide
  *   SSM-02  RED  on a phone the sheet never renders its desktop layout, not even for its first render
  *   SSM-03  RED  on a phone the panel is the full-width bottom sheet: no fixed desktop width applies below 640px
- *   SSM-04  control  on a desktop the sheet is the right-hand panel sliding in from the right, at its width
- *   SSM-05  control  an open sheet rendered on the server hydrates on a phone with no hydration warning
+ *   SSM-04  control  on a desktop the sheet is the right-hand panel sliding in from the right, at its width, to rest at x: 0
+ *   SSM-05  control  an open sheet rendered on the server (no screen) hydrates on a phone with no hydration warning
+ *   SSM-06  RED  a sheet whose screen turns to a phone while it slides in comes to rest on screen, at x: 0 and y: 0
  */
 import type { ReactElement } from "react";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
@@ -36,10 +37,15 @@ import { hydrateRoot, type Root } from "react-dom/client";
 import { SideSheet } from "../side-sheet";
 
 let phone = false;
+/** While true, no screen answers: a server render, where no media query can match. */
+let noScreen = false;
 const realMatchMedia = window.matchMedia;
+/** The change listeners the page registered, by query, so a test can turn the screen (resize). */
+const listeners = new Set<{ query: string; fn: (e: { matches: boolean; media: string }) => void }>();
 
 /** A screen 375px wide (phone) or 1440px wide: a media query matches as a browser of that width would answer it. */
 function answers(query: string): boolean {
+  if (noScreen) return false;
   const width = phone ? 375 : 1440;
   const max = /max-width:\s*(\d+(?:\.\d+)?)px/.exec(query);
   const min = /min-width:\s*(\d+(?:\.\d+)?)px/.exec(query);
@@ -49,22 +55,36 @@ function answers(query: string): boolean {
 }
 
 beforeEach(() => {
-  window.matchMedia = ((query: string) => ({
-    matches: answers(query),
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })) as unknown as typeof window.matchMedia;
+  noScreen = false;
+  listeners.clear();
+  window.matchMedia = ((query: string) => {
+    const add = (_type: string, fn: (e: { matches: boolean; media: string }) => void) => listeners.add({ query, fn });
+    const remove = (_type: string, fn: (e: { matches: boolean; media: string }) => void) => {
+      for (const l of listeners) if (l.fn === fn && l.query === query) listeners.delete(l);
+    };
+    return {
+      matches: answers(query),
+      media: query,
+      onchange: null,
+      addListener: (fn: (e: { matches: boolean; media: string }) => void) => add("change", fn),
+      removeListener: (fn: (e: { matches: boolean; media: string }) => void) => remove("change", fn),
+      addEventListener: add,
+      removeEventListener: remove,
+      dispatchEvent: vi.fn(),
+    };
+  }) as unknown as typeof window.matchMedia;
 });
 afterEach(() => {
   cleanup();
   window.matchMedia = realMatchMedia;
   document.body.innerHTML = "";
 });
+
+/** The screen turns to a phone (or back): every registered query hears its new answer, as a browser tells it. */
+function turnScreen(toPhone: boolean) {
+  phone = toPhone;
+  for (const l of [...listeners]) l.fn({ matches: answers(l.query), media: l.query });
+}
 
 const tokens = (cls: string | null | undefined) => new Set((cls ?? "").split(/\s+/).filter(Boolean));
 
@@ -80,6 +100,15 @@ function xOffset(transform: string): string {
   const m = /translateX\(\s*([-\d.]+)(px|%)?\s*\)/.exec(transform);
   if (m) return Number(m[1]) === 0 ? "none" : `${m[1]}${m[2] ?? ""}`;
   const m3 = /translate3d\(\s*([-\d.]+)(px|%)?\s*,/.exec(transform);
+  if (m3) return Number(m3[1]) === 0 ? "none" : `${m3[1]}${m3[2] ?? ""}`;
+  return "none";
+}
+
+/** The y offset a transform carries ("none" when it carries none, or a zero one). */
+function yOffset(transform: string): string {
+  const m = /translateY\(\s*([-\d.]+)(px|%)?\s*\)/.exec(transform);
+  if (m) return Number(m[1]) === 0 ? "none" : `${m[1]}${m[2] ?? ""}`;
+  const m3 = /translate3d\(\s*[-\d.]+(?:px|%)?\s*,\s*([-\d.]+)(px|%)?/.exec(transform);
   if (m3) return Number(m3[1]) === 0 ? "none" : `${m3[1]}${m3[2] ?? ""}`;
   return "none";
 }
@@ -171,20 +200,29 @@ describe("FU-SIDESHEET-MOBILE-OFFSET: the shared SideSheet mounted open on a pho
 
   it("SSM-04 control: on a desktop the sheet is the right-hand panel sliding in from the right, at its width", async () => {
     phone = false;
-    const { dialog, panel } = await mountRecordingLayouts(sheet, "Order KF-1042");
+    const { dialog, panel, seen } = await mountRecordingLayouts(sheet, "Order KF-1042");
     const d = tokens(dialog.getAttribute("class"));
     expect(d.has("justify-end") || d.has("sm:justify-end"), `the dialog's class is "${dialog.className}"`).toBe(true);
     const p = tokens(panel.getAttribute("class"));
     expect(p.has("border-l") || p.has("sm:border-l"), `the panel's class is "${panel.className}"`).toBe(true);
     // "lg" is 640px wide, as before (an inline width, or the sm: class that applies it from 640px up).
     expect(panel.style.width === "640px" || p.has("sm:w-[640px]"), `the panel is ${panel.style.width || panel.className}`).toBe(true);
-    expect(panel.style.transform, "it slides in from the right").toMatch(/translateX\(100%\)|translate3d\(100%/);
+    // The style it was inserted with (the first recorded): the slide starts past the right edge...
+    const first = seen.find((x) => x.who === "panel" && x.attr === "style")?.value ?? "";
+    expect(first, "it slides in from the right").toMatch(/translateX\(100%\)|translate3d\(100%/);
+    // ...and comes to rest at x: 0.
+    await vi.waitFor(() => expect(xOffset(panel.style.transform), `the panel's transform is "${panel.style.transform}"`).toBe("none"), {
+      timeout: 4_000,
+      interval: 50,
+    });
   });
 
   it("SSM-05 control: an open sheet rendered on the server hydrates on a phone with no hydration warning", async () => {
     // The server has no screen: it renders as it always did, and the phone's first client render must agree with it.
     phone = true;
+    noScreen = true;
     const html = renderToString(sheet);
+    noScreen = false;
     const host = document.createElement("div");
     host.innerHTML = html;
     document.body.appendChild(host);
@@ -206,5 +244,22 @@ describe("FU-SIDESHEET-MOBILE-OFFSET: the shared SideSheet mounted open on a pho
       spy.mockRestore();
       await act(async () => root?.unmount());
     }
+  });
+
+  it("SSM-06 RED: a sheet whose screen turns to a phone while it slides in comes to rest on screen, at x: 0 and y: 0", async () => {
+    // A desktop-width sheet opens and, before its slide ends, the screen is a phone: a tablet turned at the 640px
+    // line, or an open sheet hydrating on a phone. Whatever slide it began, it must not stay offset.
+    phone = false;
+    const { panel } = await mountRecordingLayouts(sheet, "Order KF-1042");
+    expect(panel.style.transform, "it began its slide from the right").toMatch(/translateX\((?!0)/);
+    await act(async () => turnScreen(true));
+    await vi.waitFor(
+      () => {
+        const t = panel.style.transform;
+        expect(xOffset(t), `the panel's transform is "${t}"`).toBe("none");
+        expect(yOffset(t), `the panel's transform is "${t}"`).toBe("none");
+      },
+      { timeout: 4_000, interval: 50 },
+    );
   });
 });
