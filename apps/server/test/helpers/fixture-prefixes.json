@@ -1158,6 +1158,11 @@
       "packet": "V1-64 (SWP-INV-DETAIL)"
     },
     {
+      "prefix": "v64d_",
+      "owner": "apps/server/test/template-apply-idempotent.integration.test.ts",
+      "packet": "V1-64 (CATALOG-1)"
+    },
+    {
       "prefix": "v64g_",
       "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
@@ -1181,6 +1186,11 @@
       "prefix": "v66c_",
       "owner": "apps/server/test/storefront-fulfil-steps.integration.test.ts",
       "packet": "V1-66 (W11-STOREFRONT-FULFIL-STEPS)"
+    },
+    {
+      "prefix": "v66d_",
+      "owner": "apps/server/test/inventory-summary-skus.integration.test.ts",
+      "packet": "V1-66 (SWP-INV-SKU-COUNT)"
     },
     {
       "prefix": "v66g_",
@@ -1325,6 +1335,16 @@
       "prefix": "v65a_",
       "owner": "apps/server/test/finance-overview-truth.integration.test.ts",
       "packet": "V1-65 (SWP-FIN-OVERVIEW-TRUTH)"
+    },
+    {
+      "prefix": "v65b_",
+      "owner": "apps/server/test/today-aggregate.integration.test.ts",
+      "packet": "V1-65 (TODAY-AGGREGATE)"
+    },
+    {
+      "prefix": "v65d_",
+      "owner": "apps/server/test/payment-claim-loop.integration.test.ts",
+      "packet": "V1-65 (CLAIM-LOOP)"
     },
     {
       "prefix": "v65e_",

@@ -104,6 +104,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             setUserMenuOpen={layout.setUserMenuOpen}
             userMenuRef={layout.userMenuRef}
             handleLogout={layout.handleLogout}
+            moduleLevels={layout.moduleLevels}
           />
           {/* SWP-REMOVED-MEMBER-NOTICE: a member who lost access to a business is told so, by name, until they dismiss it. */}
           <RemovedBusinessNotice />
