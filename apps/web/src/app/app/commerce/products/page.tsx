@@ -1,13 +1,15 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Package, Plus, Loader2 } from "lucide-react";
+import { Package, Plus, Loader2, X } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
-import { fetchProducts, type Product } from "@/lib/client";
+import { fetchAllProducts, type Product } from "@/lib/client";
 import { apiGet } from "@/lib/api";
-import { refreshWorkspace, getStoredBusinessId, getCachedBusiness } from "@/lib/workspace";
+import { refreshWorkspace, getStoredBusinessId, getCachedBusiness, BUSINESS_CHANGED_EVENT } from "@/lib/workspace";
+import { useMemberModuleLevels } from "@/hooks/use-app-layout";
+import { hadBrowserOnlyPhotos } from "@/lib/image-store";
 import { useProducts } from "../hooks/use-products";
 import { ProductsPanel } from "./products-panel";
 import { ProductFormModal } from "./product-form-modal";
@@ -18,72 +20,152 @@ import { ProductFormModal } from "./product-form-modal";
  * The products panel (presentational) lost its host in 6ad9b1c8 and nothing mounted it again, so this route was a
  * 404 while Settings > Catalog's 'Manage products', Your page > Catalog and the command palette's 'Add product'
  * (?action=add) pointed here. It is mounted again through useProducts for create, edit and archive only:
- *   - a product is created in the business currency (Business.currency), and its price shows in it;
- *   - its photo is the link stored with it (no photo kept in this browser only; lib/image-store.ts is not a store);
+ *   - a product is created in the business currency (Business.currency), and its price shows in it; an edit shows
+ *     the product's own currency (COR-CAT-4);
+ *   - its photo is an https:// link stored with it (no photo kept in this browser only; lib/image-store.ts is not a
+ *     store, and a browser that kept photos is told so once: SEC-CAT-4);
  *   - Archive is the server's soft delete: the product leaves this list, the line pickers and the store, documents
- *     that used it keep their lines, and Trash restores it.
- * Services and deposits stay in Schedule > Services; 'Add to store' / 'Remove from store' stay on Your page.
+ *     that used it keep their lines, and Trash restores it;
+ *   - a member with revenue "read" sees the products and changes nothing (SEC-CAT-1);
+ *   - every product is read (paged: COR-CAT-5), again when the business changes (SEC-CAT-5).
+ * Services and deposits stay in Schedule > Services, so New product here makes a product or a package (COR-CAT-3);
+ * 'Add to store' / 'Remove from store' stay on Your page.
  */
+
+const PHOTO_NOTICE_DISMISSED = "kf-catalog-local-photos-notice-dismissed";
 
 function businessCurrencyOf(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : null;
 }
 
+type CategoryValue = "SERVICE" | "PRODUCT" | "PACKAGE";
+const NEW_PRODUCT_CATEGORIES: readonly CategoryValue[] = ["PRODUCT", "PACKAGE"];
+
 function ProductsPageInner() {
   const searchParams = useSearchParams();
+  const levels = useMemberModuleLevels();
+  // Unknown (no answer yet, a failed read) hides nothing; the server still refuses (lib/nav-config canOpenModule).
+  const readOnly = levels?.revenue === "read" || levels?.revenue === "none";
+
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [currency, setCurrency] = useState<string | null>(null);
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [photoNotice, setPhotoNotice] = useState(false);
   const actionHandled = useRef(false);
+  const loadToken = useRef(0);
 
-  const actions = useProducts(businessId, setProducts, { currency });
+  const actions = useProducts(businessId, setProducts, { currency, defaultCategory: "PRODUCT" });
+  const { closeProductForm } = actions;
 
   const load = useCallback(async (id: string) => {
+    const token = ++loadToken.current;
     setLoading(true);
     setLoadError(null);
+    setCurrencyError(null);
     const cached = getCachedBusiness();
     const cachedCurrency = cached?.id === id ? businessCurrencyOf(cached.currency) : null;
     if (cachedCurrency) setCurrency(cachedCurrency);
-    const [productsRes, bizRes] = await Promise.all([
-      fetchProducts(id),
-      apiGet<{ currency?: string | null }>(`/identity/businesses/${encodeURIComponent(id)}`),
-    ]);
-    const serverCurrency = businessCurrencyOf(bizRes.data?.currency);
-    if (serverCurrency) setCurrency(serverCurrency);
+
+    // The list does not wait on the currency read (COR-CAT-7, COR-CAT-9): each lands on its own.
+    void apiGet<{ currency?: string | null }>(`/identity/businesses/${encodeURIComponent(id)}`).then((bizRes) => {
+      if (token !== loadToken.current) return;
+      const serverCurrency = businessCurrencyOf(bizRes.data?.currency);
+      if (serverCurrency) setCurrency(serverCurrency);
+      else if (!cachedCurrency) setCurrencyError(bizRes.error ?? "no currency is set");
+    });
+
+    const productsRes = await fetchAllProducts(id);
+    if (token !== loadToken.current) return;
     if (productsRes.error) setLoadError(productsRes.error);
-    // A product is created and priced in the business currency; without it nothing is created (no TTD guess).
-    else if (!serverCurrency && !cachedCurrency) setLoadError(bizRes.error ?? "Your business's currency could not be read.");
     else setProducts((productsRes.data ?? []) as Product[]);
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    const init = async () => {
-      const id = (await refreshWorkspace().catch(() => null)) ?? getStoredBusinessId();
-      if (!id) {
-        setLoadError("Could not find your workspace. Please sign in again.");
-        setLoading(false);
-        return;
-      }
-      setBusinessId(id);
-      await load(id);
-    };
-    void init();
+  const start = useCallback(async () => {
+    const id = (await refreshWorkspace().catch(() => null)) ?? getStoredBusinessId();
+    if (!id) {
+      setLoadError("Could not find your workspace. Please sign in again.");
+      setLoading(false);
+      return;
+    }
+    setBusinessId(id);
+    await load(id);
   }, [load]);
+
+  useEffect(() => {
+    void start();
+  }, [start]);
+
+  // SEC-CAT-5: another business selected (here or in another part of the app): nothing of the previous one stays.
+  useEffect(() => {
+    const onChange = () => {
+      loadToken.current += 1;
+      closeProductForm();
+      setArchiveTarget(null);
+      setProducts([]);
+      setCurrency(null);
+      setCurrencyError(null);
+      setBusinessId(null);
+      actionHandled.current = true;
+      void start();
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+  }, [start, closeProductForm]);
+
+  // SEC-CAT-4: a browser that kept product photos (the old IndexedDB store) is told once; the store is not opened.
+  useEffect(() => {
+    let dismissed = false;
+    try { dismissed = window.localStorage.getItem(PHOTO_NOTICE_DISMISSED) === "1"; } catch { /* private mode */ }
+    if (dismissed) return;
+    let live = true;
+    void hadBrowserOnlyPhotos().then((had) => { if (live && had) setPhotoNotice(true); });
+    return () => { live = false; };
+  }, []);
+
+  const dismissPhotoNotice = useCallback(() => {
+    setPhotoNotice(false);
+    try { window.localStorage.setItem(PHOTO_NOTICE_DISMISSED, "1"); } catch { /* private mode */ }
+  }, []);
+
+  // A product is created and priced in the business currency, so New product waits for it; never while the page
+  // could not load (SEC-CAT-6) or for a member who cannot change products (SEC-CAT-1).
+  const canCreate = !!businessId && !!currency && !loading && !loadError && !readOnly;
+  const openAdd = canCreate ? actions.openAddProduct : undefined;
 
   // The command palette's 'Add product' (and any other door) opens New product with ?action=add.
   const { openAddProduct } = actions;
   useEffect(() => {
-    if (actionHandled.current || !businessId || !currency || loading || loadError) return;
+    if (actionHandled.current || !canCreate) return;
     if (searchParams.get("action") === "add") {
       actionHandled.current = true;
       openAddProduct();
     }
-  }, [businessId, currency, loading, loadError, searchParams, openAddProduct]);
+  }, [canCreate, searchParams, openAddProduct]);
+
+  const confirmArchive = useCallback(async () => {
+    if (!archiveTarget) return;
+    setArchiving(true);
+    setArchiveError(null);
+    try {
+      const outcome = await actions.handleArchiveProduct(archiveTarget.id);
+      if (outcome.ok) setArchiveTarget(null);
+      else setArchiveError(outcome.error);
+    } finally {
+      setArchiving(false);
+    }
+  }, [archiveTarget, actions]);
+
+  const askArchive = useCallback((p: Product) => {
+    setArchiveError(null);
+    setArchiveTarget(p);
+  }, []);
 
   // Escape cancels the Archive confirmation and goes no further (the app's Escape shortcut would leave the page).
   useEffect(() => {
@@ -98,21 +180,17 @@ function ProductsPageInner() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [archiveTarget, archiving]);
 
-  const confirmArchive = useCallback(async () => {
-    if (!archiveTarget) return;
-    setArchiving(true);
-    try {
-      const done = await actions.handleArchiveProduct(archiveTarget.id);
-      if (done) setArchiveTarget(null);
-    } finally {
-      setArchiving(false);
-    }
-  }, [archiveTarget, actions]);
-
-  // Until the business currency is known, prices show in each product's own currency and nothing can be created.
-  const shownCurrency = currency ?? undefined;
-  const canCreate = !!businessId && !!currency;
-  const openAdd = canCreate ? actions.openAddProduct : undefined;
+  // COR-CAT-4: an edit shows the product's own currency; a new product, the business's.
+  const editing = useMemo(
+    () => (actions.editingProductId ? products.find((p) => p.id === actions.editingProductId) ?? null : null),
+    [actions.editingProductId, products],
+  );
+  const formCurrency = (editing?.currency ?? currency) ?? undefined;
+  // COR-CAT-3: a new product is a product or a package; an edit keeps the card of the category it has.
+  const formCategories = useMemo<readonly CategoryValue[]>(() => {
+    const own = editing?.category as CategoryValue | undefined;
+    return own && !NEW_PRODUCT_CATEGORIES.includes(own) ? [own, ...NEW_PRODUCT_CATEGORIES] : NEW_PRODUCT_CATEGORIES;
+  }, [editing]);
 
   return (
     <div className="space-y-4">
@@ -130,6 +208,34 @@ function ProductsPageInner() {
         actionIcon={Plus}
         onAction={openAdd}
       />
+
+      {photoNotice && (
+        <div role="status" aria-label="Photos kept in this browser" className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+          <p className="flex-1">
+            Photos you added to products earlier were kept only in this browser, so no other device or customer saw
+            them, and they are no longer shown. Add a photo&apos;s https:// link to each product to show it everywhere.
+          </p>
+          <button type="button" onClick={dismissPhotoNotice} aria-label="Dismiss" className="p-1 rounded-lg hover:bg-muted/50">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {readOnly && !loadError && (
+        <p className="text-sm text-muted-foreground">You can see the products. Changing products needs revenue write access.</p>
+      )}
+
+      {!loadError && currencyError && !readOnly && (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+          Your business&apos;s currency could not be read ({currencyError}), so New product is off until it is: a
+          product is priced in that currency.
+          {businessId && (
+            <button type="button" onClick={() => void load(businessId)} className="ml-2 text-xs font-medium underline underline-offset-2">
+              Try again
+            </button>
+          )}
+        </div>
+      )}
 
       {loadError ? (
         <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm">
@@ -150,22 +256,24 @@ function ProductsPageInner() {
           onEdit={actions.openEditProduct}
           onDelete={(id) => {
             const p = products.find((x) => x.id === id);
-            if (p) setArchiveTarget(p);
+            if (p) askArchive(p);
           }}
-          onToggleActive={actions.handleToggleProductActive}
+          onToggleActive={readOnly ? undefined : actions.handleToggleProductActive}
           onAdd={openAdd ?? (() => {})}
+          canAdd={canCreate}
+          readOnly={readOnly}
           deleteConfirm={actions.deleteConfirm}
           setDeleteConfirm={actions.setDeleteConfirm}
           businessId={businessId}
           onBulkAction={() => { if (businessId) void load(businessId); }}
-          currency={shownCurrency}
+          currency={currency ?? undefined}
           onOpenProduct={actions.openEditProduct}
-          onArchive={setArchiveTarget}
+          onArchive={askArchive}
         />
       )}
 
       <ProductFormModal
-        open={actions.showProductForm}
+        open={actions.showProductForm && !readOnly}
         editingProductId={actions.editingProductId}
         productForm={actions.productForm}
         setProductForm={actions.setProductForm}
@@ -177,7 +285,9 @@ function ProductsPageInner() {
         onSave={actions.handleSaveProduct}
         onSaveAndAddAnother={actions.handleSaveAndAddAnother}
         onRemoveImage={actions.removeImage}
-        currency={shownCurrency}
+        currency={formCurrency}
+        categories={formCategories}
+        categoryHint={<>Bookable services are made in <Link href="/app/bookings?tab=catalog" className="underline underline-offset-2">Schedule &gt; Services</Link>.</>}
       />
 
       {archiveTarget && (
@@ -199,6 +309,7 @@ function ProductsPageInner() {
               It leaves your products, new quotes and invoices, and your store. Quotes and invoices that already use it
               keep it. You can restore it from <Link href="/app/trash" className="underline underline-offset-2">Trash</Link>.
             </p>
+            {archiveError && <p role="alert" className="mt-3 text-sm text-red-400">{archiveError}</p>}
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"

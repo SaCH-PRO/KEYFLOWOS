@@ -60,6 +60,15 @@ const CATEGORY_CARDS: {
 
 const DESC_MAX_LENGTH = 500;
 
+/** SEC-CAT-3: an absolute https:// address (the hook refuses anything else on save). */
+function isHttpsLink(value: string): boolean {
+  try {
+    return new URL(value.trim()).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <div className="flex items-center gap-2 pb-2 mb-3 border-b border-border/30">
@@ -218,6 +227,13 @@ interface ProductFormModalProps {
   onSaveAndAddAnother?: () => void;
   onRemoveImage: () => void;
   currency?: string;
+  /**
+   * CATALOG-1 (COR-CAT-3): the category cards offered (all three when not given). Sales > Products offers Product
+   * and Package for a new product, plus the product's own category when an edit opens one of another category.
+   */
+  categories?: ReadonlyArray<"SERVICE" | "PRODUCT" | "PACKAGE">;
+  /** Shown under the category cards (Sales > Products: where services are made). */
+  categoryHint?: React.ReactNode;
 }
 
 type FieldErrors = {
@@ -239,6 +255,8 @@ export const ProductFormModal = React.memo(function ProductFormModal({
   onSaveAndAddAnother,
   onRemoveImage,
   currency = "TTD",
+  categories,
+  categoryHint,
 }: ProductFormModalProps) {
   const nameRef = useRef<HTMLInputElement>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -453,6 +471,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
             <div className="p-5 space-y-6 max-h-[calc(100vh-10rem)] overflow-y-auto">
               {formError && (
                 <motion.div
+                  role="alert"
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200 flex items-center gap-2"
@@ -529,12 +548,13 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                       Category
                     </label>
                     <div className="grid grid-cols-3 gap-2">
-                      {CATEGORY_CARDS.map((cat) => {
+                      {CATEGORY_CARDS.filter((cat) => !categories || categories.includes(cat.value)).map((cat) => {
                         const selected = productForm.category === cat.value;
                         return (
                           <button
                             key={cat.value}
                             type="button"
+                            aria-pressed={selected}
                             onClick={() =>
                               setProductForm((f) => ({ ...f, category: cat.value }))
                             }
@@ -560,6 +580,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                         );
                       })}
                     </div>
+                    {categoryHint && <p className="text-[10px] text-muted-foreground/60 mt-1.5">{categoryHint}</p>}
                   </div>
                 </div>
               </section>
@@ -724,14 +745,16 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                     type="url"
                     value={productForm.imageUrl === "__local__" ? "" : productForm.imageUrl}
                     onChange={(e) => {
-                      setProductForm((f) => ({ ...f, imageUrl: e.target.value }));
-                      setImagePreview(e.target.value || null);
+                      const value = e.target.value;
+                      setProductForm((f) => ({ ...f, imageUrl: value }));
+                      // SEC-CAT-3: only an https:// address is previewed (or saved).
+                      setImagePreview(isHttpsLink(value) ? value.trim() : null);
                     }}
                     placeholder="https://example.com/image.jpg"
                     className={inputClass}
                   />
                   <p className="text-[10px] text-muted-foreground/50 mt-1">
-                    Paste a link to a photo that is already online. Photo upload is not available yet.
+                    A full https:// link to a photo that is already online. Photo upload is not available yet.
                   </p>
                   {imagePreview && (
                     <div className="relative mt-2 rounded-xl border border-border/50 overflow-hidden bg-muted/20">

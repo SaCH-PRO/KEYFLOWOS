@@ -763,6 +763,32 @@ export async function fetchProducts(businessId: string = selectedBusinessId()) {
   return { data: res.data?.data ?? null, error: res.error };
 }
 
+/**
+ * CATALOG-1 (COR-CAT-5): every product of the business, read page by page (the list route answers at most 100 a
+ * page, 50 when none is asked). fetchProducts reads only the first page. Any page failing fails the read.
+ */
+export async function fetchAllProducts(businessId: string = selectedBusinessId()) {
+  const envelopeSchema = z.object({
+    data: z.array(productSchema),
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+    totalPages: z.number(),
+  });
+  const all: Product[] = [];
+  const MAX_PAGES = 100;
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await apiGet(
+      `/commerce/businesses/${encodeURIComponent(businessId)}/products?page=${page}&pageSize=100`,
+      envelopeSchema,
+    );
+    if (res.error || !res.data) return { data: null, error: res.error ?? "Failed to load products" };
+    all.push(...(res.data.data as unknown as Product[]));
+    if (page >= res.data.totalPages || res.data.data.length === 0) break;
+  }
+  return { data: all, error: null as string | null };
+}
+
 export async function fetchInvoices(businessId: string = selectedBusinessId()) {
   const invoiceItemSchema = z.object({
     id: z.string(),
@@ -2176,6 +2202,8 @@ export async function createProduct(input: {
   imageUrl?: string | null;
   sku?: string | null;
   isActive?: boolean;
+  inventoryMode?: string | null;
+  outOfStockBehavior?: string | null;
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
 
@@ -2190,6 +2218,9 @@ export async function createProduct(input: {
   };
   if (input.imageUrl) body.imageUrl = input.imageUrl;
   if (input.sku) body.sku = input.sku;
+  // CATALOG-1 (COR-CAT-6): the form's inventory settings were dropped here.
+  if (input.inventoryMode) body.inventoryMode = input.inventoryMode;
+  if (input.outOfStockBehavior) body.outOfStockBehavior = input.outOfStockBehavior;
 
   const res = await apiPost<Product>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
@@ -2197,7 +2228,8 @@ export async function createProduct(input: {
   });
 
   if (res.data) return res;
-  return { data: null, error: res.error ?? "Failed to create product" };
+  // The status is kept, so a caller can tell a module-scope refusal (403) from any other failure.
+  return { data: null, error: res.error ?? "Failed to create product", status: res.status };
 }
 
 export async function updateProduct(input: {
@@ -2212,6 +2244,8 @@ export async function updateProduct(input: {
   imageUrl?: string | null;
   sku?: string | null;
   isActive?: boolean;
+  inventoryMode?: string | null;
+  outOfStockBehavior?: string | null;
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
 
@@ -2225,6 +2259,8 @@ export async function updateProduct(input: {
   if (input.imageUrl !== undefined) body.imageUrl = input.imageUrl;
   if (input.sku !== undefined) body.sku = input.sku;
   if (input.isActive !== undefined) body.isActive = input.isActive;
+  if (input.inventoryMode !== undefined) body.inventoryMode = input.inventoryMode;
+  if (input.outOfStockBehavior !== undefined) body.outOfStockBehavior = input.outOfStockBehavior;
 
   return apiPatch<Product>(
     `/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(input.productId)}`,

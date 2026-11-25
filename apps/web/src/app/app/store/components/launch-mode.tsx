@@ -47,16 +47,44 @@ type Props = {
   hasFaq?: boolean;
   hasPolicies?: boolean;
   hasBookingCta?: boolean;
+  /** COR-CAT-8: the business's stock per product (useStoreData), for the count; undefined while not read. */
+  stockByProduct?: StockByProduct | null;
 };
 
+/** The business's stock per product: its own inventory rows summed (quantity, reserved), as the server sums them. */
+export type StockByProduct = Map<string, { quantity: number; reserved: number }>;
+
+/** The product categories /book draws (book/[slug]/page.tsx catalogItems); any other is not shown. */
+const BOOK_DRAWN_CATEGORIES = new Set(["PRODUCT", "PACKAGE", "SERVICE"]);
+
 /**
- * CATALOG-1 (BUG-106): the items a customer sees on /book/<slug>, each once. A bookable service (no sourceProductId)
- * is one item; a product is one item when 'Add to store' listed it (a listing service names it in sourceProductId)
- * and it is active, however many listing services name it. A product never added to the store is not an item
- * (ruling D-185). Services plus all products counted a listed product twice and an unlisted one once.
+ * Whether the public store leaves the product out for stock (CatalogService.projectAvailability): tracked (its
+ * inventory mode, or no mode and stock rows: resolveInventoryMode), nothing available, and out-of-stock behaviour
+ * "hide" (the default).
  */
-export function countStoreItems(services: Service[], commerceProducts: Product[]): number {
-  const activeProducts = new Set(commerceProducts.filter((p) => p.isActive !== false).map((p) => p.id));
+function hiddenForStock(p: Product, stock: StockByProduct): boolean {
+  const ext = p as Product & { inventoryMode?: string | null; outOfStockBehavior?: string | null };
+  const row = stock.get(p.id);
+  const mode = ext.inventoryMode || (row ? "tracked" : "untracked");
+  if (mode !== "tracked") return false;
+  const available = Math.max(0, (row?.quantity ?? 0) - (row?.reserved ?? 0));
+  return available <= 0 && (ext.outOfStockBehavior ?? "hide") === "hide";
+}
+
+/**
+ * CATALOG-1 (BUG-106, COR-CAT-8): the items a customer sees on /book/<slug>, each once. A bookable service (no
+ * sourceProductId) is one item; a product is one item when 'Add to store' listed it (a listing service names it in
+ * sourceProductId), it is active, /book draws its category, and its stock does not hide it, however many listing
+ * services name it. A product never added to the store is not an item (ruling D-185). Without the stock (not read),
+ * the stock rule cannot be applied and a listed product counts. Not mirrored here (follow-up): /book's
+ * de-duplication of a SERVICE-category product against a bookable service of the same name.
+ */
+export function countStoreItems(services: Service[], commerceProducts: Product[], stock?: StockByProduct | null): number {
+  const activeProducts = new Set(
+    commerceProducts
+      .filter((p) => p.isActive !== false && BOOK_DRAWN_CATEGORIES.has(p.category ?? "SERVICE") && !(stock && hiddenForStock(p, stock)))
+      .map((p) => p.id),
+  );
   const listedProducts = new Set<string>();
   let bookable = 0;
   for (const s of services) {
@@ -258,11 +286,12 @@ export function LaunchMode({
   hasFaq = false,
   hasPolicies = false,
   hasBookingCta = false,
+  stockByProduct,
 }: Props) {
   const pc = businessData?.primaryColor || "#F97316";
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
 
-  const itemCount = countStoreItems(services, commerceProducts);
+  const itemCount = countStoreItems(services, commerceProducts, stockByProduct);
   const readinessPercent = readiness?.scores?.overall ?? 0;
   const totalItems = readiness?.items?.length ?? 0;
   const resolvedItems = readiness?.items?.filter((i) => i.resolved).length ?? 0;

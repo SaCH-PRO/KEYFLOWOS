@@ -10,6 +10,7 @@ import {
   Product,
 } from "@/lib/client";
 import { notifyProductsChanged } from "@/lib/product-sync";
+import { moduleWriteRefusal } from "@/lib/module-scope-refusal";
 import { moduleEvents } from "@/lib/module-events";
 import { ProductForm } from "../components/commerce-types";
 
@@ -24,10 +25,29 @@ const productSchema = z.object({
  * device and the store show the same one. A photo kept in this browser (a data: or blob: address, or the old
  * "__local__" marker of lib/image-store.ts) never reaches another device, so it is refused, not saved.
  */
-export const LOCAL_IMAGE_REFUSAL = "That photo is only in this browser, so no other device would see it. Paste a link to a photo that is already online.";
+export const LOCAL_IMAGE_REFUSAL = "That photo is only in this browser, so no other device would see it. Paste a full https:// link to a photo that is already online.";
 
 function isBrowserOnlyImage(value: string | null | undefined): boolean {
   return !!value && (/^(data|blob):/i.test(value) || value === "__local__");
+}
+
+/**
+ * SEC-CAT-3: an image link is an absolute https:// address, nothing else (no javascript:, http:, protocol-relative
+ * "//host" or text that is not a link). The store and the line pickers draw it for every customer.
+ */
+export const IMAGE_LINK_RULE = "An image link must be a full https:// address, for example https://example.com/photo.jpg.";
+
+export function isHttpsImageLink(value: string): boolean {
+  try {
+    return new URL(value.trim()).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** What the form says for a refused or failed write: the module refusal (403, revenue), else the server's words. */
+function writeError(res: { error?: string | null; status?: number }, what: string, fallback: string): string {
+  return moduleWriteRefusal(res, "revenue", what) ?? res.error ?? fallback;
 }
 
 const DEFAULT_PRODUCT_FORM: ProductForm = {
@@ -41,18 +61,19 @@ const DEFAULT_PRODUCT_FORM: ProductForm = {
   isActive: true,
 };
 
-function buildProductPayload(form: ProductForm) {
+function buildProductPayload(form: ProductForm, mode: "create" | "update" = "create") {
   const durationValue = form.duration ? parseInt(form.duration) : null;
   const imageUrl = form.imageUrl.trim();
+  // COR-CAT-6: an edit that clears a field clears it on the server (null), not "leave as is" (undefined).
+  const cleared = mode === "update" ? null : undefined;
   return {
     name: form.name,
     price: Number(form.price),
-    description: form.description || undefined,
+    description: form.description.trim() ? form.description : cleared,
     category: form.category,
     duration: durationValue,
-    // An edit that clears the link clears it on the server (null), not "leave as is" (undefined).
     imageUrl: imageUrl ? imageUrl : null,
-    sku: form.sku || undefined,
+    sku: form.sku.trim() ? form.sku.trim() : cleared,
     isActive: form.isActive,
     inventoryMode: form.inventoryMode || undefined,
     outOfStockBehavior: form.outOfStockBehavior || undefined,
@@ -65,7 +86,12 @@ export interface UseProductsOptions {
    * falls back to TTD whatever the business sells in.
    */
   currency?: string | null;
+  /** COR-CAT-3: the category a new product starts in (Sales > Products: PRODUCT). */
+  defaultCategory?: ProductForm["category"];
 }
+
+/** What an archive came to: done (or already archived), or refused with the reason to show. */
+export type ArchiveOutcome = { ok: true; alreadyArchived?: boolean } | { ok: false; error: string };
 
 export function useProducts(
   businessId: string | null,
@@ -73,6 +99,8 @@ export function useProducts(
   options: UseProductsOptions = {},
 ) {
   const currency = options.currency ?? undefined;
+  const defaultCategory = options.defaultCategory ?? DEFAULT_PRODUCT_FORM.category;
+  const blankForm = useCallback((): ProductForm => ({ ...DEFAULT_PRODUCT_FORM, category: defaultCategory }), [defaultCategory]);
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState<ProductForm>({ ...DEFAULT_PRODUCT_FORM });
@@ -85,11 +113,11 @@ export function useProducts(
 
   const openAddProduct = useCallback(() => {
     setEditingProductId(null);
-    setProductForm({ ...DEFAULT_PRODUCT_FORM });
+    setProductForm(blankForm());
     setImagePreview(null);
     setFormError(null);
     setShowProductForm(true);
-  }, []);
+  }, [blankForm]);
 
   const openEditProduct = useCallback((product: Product) => {
     setEditingProductId(product.id);
@@ -105,7 +133,7 @@ export function useProducts(
       inventoryMode: ((product as { inventoryMode?: string }).inventoryMode as "tracked" | "untracked" | "virtual" | undefined) ?? undefined,
       outOfStockBehavior: ((product as { outOfStockBehavior?: string }).outOfStockBehavior as "hide" | "show_oos" | "allow_backorder" | undefined) ?? undefined,
     });
-    setImagePreview(product.imageUrl || null);
+    setImagePreview(product.imageUrl && isHttpsImageLink(product.imageUrl) ? product.imageUrl : null);
     setFormError(null);
     setShowProductForm(true);
   }, []);
@@ -113,10 +141,10 @@ export function useProducts(
   const closeProductForm = useCallback(() => {
     setShowProductForm(false);
     setEditingProductId(null);
-    setProductForm({ ...DEFAULT_PRODUCT_FORM });
+    setProductForm(blankForm());
     setImagePreview(null);
     setFormError(null);
-  }, []);
+  }, [blankForm]);
 
   const removeImage = useCallback(() => {
     setImagePreview(null);
@@ -140,15 +168,22 @@ export function useProducts(
       setFormError(LOCAL_IMAGE_REFUSAL);
       return false;
     }
+    if (productForm.imageUrl.trim() && !isHttpsImageLink(productForm.imageUrl)) {
+      setFormError(IMAGE_LINK_RULE);
+      return false;
+    }
     return true;
   }, [productForm, imagePreview]);
 
   const create = useCallback(async () => {
     if (!businessId) return null;
-    const { data, error } = await createProduct({ businessId, ...buildProductPayload(productForm), ...(currency ? { currency } : {}) });
-    if (error || !data) {
-      setFormError(error ?? "Failed to create product");
-      toast.error("Failed to create product");
+    const payload = buildProductPayload(productForm, "create");
+    const res = await createProduct({ businessId, ...payload, description: payload.description ?? undefined, ...(currency ? { currency } : {}) });
+    const data = res.data;
+    if (res.error || !data) {
+      const message = writeError(res as { error?: string | null; status?: number }, "add products", "Failed to create product");
+      setFormError(message);
+      toast.error(message);
       return null;
     }
     setProducts((prev) => [data, ...prev]);
@@ -162,8 +197,14 @@ export function useProducts(
     setSaving(true);
     try {
       if (editingProductId) {
-        const { data, error } = await updateProduct({ businessId, productId: editingProductId, ...buildProductPayload(productForm) });
-        if (error || !data) { setFormError(error ?? "Failed to update product"); toast.error("Failed to update product"); return; }
+        const res = await updateProduct({ businessId, productId: editingProductId, ...buildProductPayload(productForm, "update") });
+        const data = res.data;
+        if (res.error || !data) {
+          const message = writeError(res, "change products", "Failed to update product");
+          setFormError(message);
+          toast.error(message);
+          return;
+        }
         setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
         closeProductForm();
         toast.success("Product updated");
@@ -187,14 +228,14 @@ export function useProducts(
       const data = await create();
       if (!data) return;
       const prevCategory = productForm.category;
-      setProductForm({ ...DEFAULT_PRODUCT_FORM, category: prevCategory });
+      setProductForm({ ...blankForm(), category: prevCategory });
       setImagePreview(null);
       setFormError(null);
       toast.success(`"${data.name}" created — add another`);
     } finally {
       setSaving(false);
     }
-  }, [validate, businessId, create, productForm.category]);
+  }, [validate, businessId, create, productForm.category, blankForm]);
 
   const handleDuplicateProduct = useCallback(async (product: Product) => {
     if (!businessId) return;
@@ -221,12 +262,13 @@ export function useProducts(
   const handleToggleProductActive = useCallback(async (product: Product) => {
     if (!businessId) return;
     const newActive = !product.isActive;
-    const { data, error } = await updateProduct({
+    const res = await updateProduct({
       businessId,
       productId: product.id,
       isActive: newActive,
     });
-    if (error) { toast.error("Failed to update product status"); return; }
+    const { data, error } = res;
+    if (error) { toast.error(writeError({ error, status: (res as { status?: number }).status }, "change products", "Failed to update product status")); return; }
     if (data) {
       setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, isActive: newActive } : p)));
       toast.success(newActive ? "Product activated" : "Product deactivated");
@@ -246,8 +288,13 @@ export function useProducts(
       toast.error(LOCAL_IMAGE_REFUSAL);
       throw new Error(LOCAL_IMAGE_REFUSAL);
     }
-    const { data, error } = await updateProduct({ businessId, productId, ...buildProductPayload(form) });
-    if (error) { toast.error("Failed to update product"); throw new Error(error); }
+    if (form.imageUrl.trim() && !isHttpsImageLink(form.imageUrl)) {
+      toast.error(IMAGE_LINK_RULE);
+      throw new Error(IMAGE_LINK_RULE);
+    }
+    const res = await updateProduct({ businessId, productId, ...buildProductPayload(form, "update") });
+    const { data, error } = res;
+    if (error) { const message = writeError(res, "change products", "Failed to update product"); toast.error(message); throw new Error(message); }
     if (data) {
       setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, ...data } : p)));
       toast.success("Product updated");
@@ -261,16 +308,22 @@ export function useProducts(
    * leaves the product list, the line pickers and the store, invoices and quotes that used it keep their lines,
    * and the owner can restore it from Trash.
    */
-  const handleDeleteProduct = useCallback(async (productId: string): Promise<boolean> => {
-    if (!businessId) return false;
-    const { error } = await deleteProduct(productId, businessId);
-    if (error) { toast.error("Failed to archive product"); return false; }
+  const handleDeleteProduct = useCallback(async (productId: string): Promise<ArchiveOutcome> => {
+    if (!businessId) return { ok: false, error: "Could not find your workspace. Please sign in again." };
+    const res = (await deleteProduct(productId, businessId)) as { error?: string | null; status?: number };
+    // COR-CAT-12: a 404 is a product already archived (or gone): it leaves the list like an archive.
+    const alreadyArchived = !!res.error && res.status === 404;
+    if (res.error && !alreadyArchived) {
+      const message = writeError(res, "archive products", "Failed to archive product");
+      toast.error(message);
+      return { ok: false, error: message };
+    }
     setProducts((prev) => prev.filter((p) => p.id !== productId));
     setDeleteConfirm(null);
-    toast.success("Product archived. You can restore it from Trash.");
+    toast.success(alreadyArchived ? "That product was already archived." : "Product archived. You can restore it from Trash.");
     notifyProductsChanged();
-    moduleEvents.emit("commerce:product_deleted", "commerce", { productId });
-    return true;
+    if (!alreadyArchived) moduleEvents.emit("commerce:product_deleted", "commerce", { productId });
+    return alreadyArchived ? { ok: true, alreadyArchived: true } : { ok: true };
   }, [businessId, setProducts]);
 
   return {

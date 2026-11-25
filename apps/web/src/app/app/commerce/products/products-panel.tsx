@@ -2,12 +2,13 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, Upload, LayoutGrid, List, Camera, Sparkles, MoreHorizontal, Pencil, Archive } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, ToggleLeft, ToggleRight, Upload, LayoutGrid, List, Camera, Sparkles, MoreHorizontal, Pencil, Archive } from "lucide-react";
 import { ProductImportModal } from "./product-import-modal";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { moduleWriteRefusal } from "@/lib/module-scope-refusal";
 import type { ProductForm } from "../components/commerce-types";
 import type { ProductSlots } from "../utils/commerce-slots";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
@@ -57,6 +58,13 @@ interface ProductsPanelProps {
   onOpenProduct?: (product: Product) => void;
   /** CATALOG-1: the row's Archive (behind the row's More actions menu, beside Edit). The host asks to confirm. */
   onArchive?: (product: Product) => void;
+  /**
+   * CATALOG-1 (SEC-CAT-1): the member may read products but not change them (revenue "read"): no add, no row
+   * actions, no bulk, and opening a product opens nothing to edit.
+   */
+  readOnly?: boolean;
+  /** CATALOG-1 (SEC-CAT-6, COR-CAT-7): whether a product can be added now (false hides the add buttons). */
+  canAdd?: boolean;
 }
 
 /**
@@ -176,7 +184,10 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   onAiHealthScan,
   onOpenProduct,
   onArchive,
+  readOnly = false,
+  canAdd = true,
 }: ProductsPanelProps) {
+  const showAdd = canAdd && !readOnly;
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [showImport, setShowImport] = useState(false);
@@ -204,6 +215,9 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  // SEC-CAT-2: a bulk archive is asked first, as a single archive is.
+  const [bulkArchiveAsk, setBulkArchiveAsk] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const sortRef = useRef<HTMLDivElement>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
@@ -326,14 +340,36 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   const handleBulkAction = useCallback(async (action: "activate" | "deactivate" | "delete") => {
     if (!businessId || selectedIds.size === 0) return;
     setBulkLoading(true);
-    const { data, error } = await bulkUpdateProducts(businessId, Array.from(selectedIds), action);
+    const res = await bulkUpdateProducts(businessId, Array.from(selectedIds), action);
     setBulkLoading(false);
-    if (error) { toast.error(error); return; }
-    toast.success(`${data?.updated ?? 0} product(s) ${action === "delete" ? "deleted" : action === "activate" ? "activated" : "deactivated"}`);
+    if (res.error) {
+      const what = action === "delete" ? "archive products" : "change products";
+      const message = moduleWriteRefusal(res, "revenue", what) ?? res.error;
+      if (action === "delete") setBulkError(message);
+      toast.error(message);
+      return;
+    }
+    const n = res.data?.updated ?? 0;
+    toast.success(action === "delete"
+      ? `${n} product(s) archived. You can restore them from Trash.`
+      : `${n} product(s) ${action === "activate" ? "activated" : "deactivated"}`);
+    setBulkArchiveAsk(false);
     setSelectedIds(new Set());
     setBulkMode(false);
     onBulkAction?.();
   }, [businessId, selectedIds, onBulkAction]);
+
+  useEffect(() => {
+    if (!bulkArchiveAsk) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!bulkLoading) setBulkArchiveAsk(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [bulkArchiveAsk, bulkLoading]);
 
   const productStats = useProductStats({
     productId: selectedProduct?.id ?? null,
@@ -368,10 +404,10 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   const handleDetailClose = useCallback(() => setSelectedProduct(null), []);
 
   const handleProductClick = useCallback((p: Product) => {
-    if (bulkMode) return;
+    if (bulkMode || readOnly) return;
     if (onOpenProduct) onOpenProduct(p);
     else setSelectedProduct(p);
-  }, [bulkMode, onOpenProduct]);
+  }, [bulkMode, readOnly, onOpenProduct]);
 
   return (
     <motion.div
@@ -402,14 +438,14 @@ export const ProductsPanel = React.memo(function ProductsPanel({
               </button>
             )}
           </div>
-          <button
+          {showAdd && <button
             onClick={onAdd}
             className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all flex-shrink-0"
             aria-label="Add product"
             title="Add product"
           >
             <Plus className="w-4 h-4" />
-          </button>
+          </button>}
         </div>
 
         <div className="flex items-center justify-between gap-2">
@@ -459,14 +495,14 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                 )}
               </AnimatePresence>
             </div>
-            <button
+            {!readOnly && <button
               onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}
               className={`p-2 rounded-xl transition-all flex-shrink-0 ${bulkMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
               aria-label={bulkMode ? "Exit bulk select" : "Bulk select"}
               title={bulkMode ? "Exit bulk select" : "Bulk select"}
             >
               <CheckSquare className="w-4 h-4" />
-            </button>
+            </button>}
             <button
               onClick={() => setShowInactive(!showInactive)}
               className={`p-2 rounded-xl transition-all flex-shrink-0 ${showInactive ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
@@ -574,11 +610,11 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                 <ToggleLeft className="w-3.5 h-3.5" /> Deactivate
               </button>
               <button
-                onClick={() => handleBulkAction("delete")}
+                onClick={() => { setBulkError(null); setBulkArchiveAsk(true); }}
                 disabled={bulkLoading}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/30 transition-all disabled:opacity-50"
               >
-                <Trash2 className="w-3.5 h-3.5" /> Delete
+                <Archive className="w-3.5 h-3.5" /> Archive
               </button>
               <div className="w-px h-5 bg-border/50" />
               <button
@@ -668,12 +704,12 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                 Create your first product or service to start building invoices and quotes.
               </p>
               <div className="flex items-center gap-3 flex-wrap justify-center">
-                <button
+                {showAdd && <button
                   onClick={onAdd}
                   className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/30 hover:to-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 transition-all"
                 >
                   <Plus className="w-4 h-4" /> Add Product
-                </button>
+                </button>}
                 {setProducts && (
                   <button
                     onClick={() => setShowImport(true)}
@@ -738,8 +774,9 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                       currency={currency}
                       onAiPricing={onAiPricing}
                     />
-                    {!bulkMode && (
-                      <ProductRowActions product={product} onEdit={onEdit} onArchive={onArchive} className="absolute top-1 right-1 z-10" />
+                    {/* COR-CAT-11: below the card's top-right badges (Off, stale), inside the 72px image band. */}
+                    {!bulkMode && !readOnly && (
+                      <ProductRowActions product={product} onEdit={onEdit} onArchive={onArchive} className="absolute top-[40px] right-1 z-10" />
                     )}
                     {slots?.renderCardBadge?.(product)}
                   </article>
@@ -821,7 +858,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                           <Sparkles className="w-3.5 h-3.5" />
                         </div>
                       )}
-                      {!bulkMode && <ProductRowActions product={product} onEdit={onEdit} onArchive={onArchive} className="relative shrink-0" />}
+                      {!bulkMode && !readOnly && <ProductRowActions product={product} onEdit={onEdit} onArchive={onArchive} className="relative shrink-0" />}
                     </motion.article>
                   );
                 })}
@@ -829,6 +866,50 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             </div>
           )}
         </>
+      )}
+
+      {bulkArchiveAsk && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={(e) => { if (e.target === e.currentTarget && !bulkLoading) setBulkArchiveAsk(false); }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bulk-archive-title"
+            aria-describedby="bulk-archive-desc"
+            className="w-full max-w-sm rounded-2xl border border-border/60 bg-card p-5 shadow-2xl"
+          >
+            <h2 id="bulk-archive-title" className="text-base font-semibold">
+              Archive {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"}?
+            </h2>
+            <p id="bulk-archive-desc" className="text-sm text-muted-foreground mt-2">
+              They leave your products, new quotes and invoices, and your store. Quotes and invoices that already use
+              them keep them. You can restore them from Trash.
+            </p>
+            {bulkError && (
+              <p role="alert" className="mt-3 text-sm text-red-400">{bulkError}</p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBulkArchiveAsk(false)}
+                disabled={bulkLoading}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleBulkAction("delete")}
+                disabled={bulkLoading}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-colors disabled:opacity-50"
+              >
+                Archive
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {selectedProduct && (

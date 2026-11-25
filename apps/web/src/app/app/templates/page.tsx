@@ -16,6 +16,7 @@ import {
   Camera,
   ShoppingBag,
   Building2,
+  Info,
 } from "lucide-react";
 import { fetchTemplates, applyTemplate, type BusinessTemplate } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -66,6 +67,8 @@ export default function TemplatesPage() {
   const [applying, setApplying] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
+  // CATALOG-1 (BUG-075): a repeat apply adds nothing (TemplatesService answers alreadyApplied: true); say so.
+  const [alreadyId, setAlreadyId] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<{ templateId: string; message: string } | null>(null);
 
   useEffect(() => {
@@ -93,9 +96,13 @@ export default function TemplatesPage() {
     setApplying(templateId);
     setConfirmId(null);
     setRefusal(null);
+    setAlreadyId(null);
     try {
       const res: { data: unknown; error: string | null; status?: number } = await applyTemplate(businessId, templateId);
-      if (res.data) {
+      if (res.data && (res.data as { alreadyApplied?: unknown }).alreadyApplied === true) {
+        setAlreadyId(templateId);
+        setTimeout(() => setAlreadyId(null), 5000);
+      } else if (res.data) {
         setSuccessId(templateId);
         setTimeout(() => setSuccessId(null), 3000);
       } else {
@@ -187,7 +194,12 @@ export default function TemplatesPage() {
                 </div>
 
                 <div className="mt-auto">
-                  {successId === template.id ? (
+                  {alreadyId === template.id ? (
+                    <div role="status" className="flex items-center gap-2 text-muted-foreground text-sm font-medium">
+                      <Info className="w-4 h-4" />
+                      Already applied — nothing new was added
+                    </div>
+                  ) : successId === template.id ? (
                     <div className="flex items-center gap-2 text-green-400 text-sm font-medium">
                       <Check className="w-4 h-4" />
                       Template applied successfully!

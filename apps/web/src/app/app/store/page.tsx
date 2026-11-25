@@ -357,6 +357,7 @@ export default function StorePage() {
                 businessData={s.businessData}
                 services={s.services}
                 commerceProducts={s.commerceProducts}
+                stockByProduct={s.stockByProduct}
                 storefrontConfig={cfg}
                 hasHeroImage={hasHeroImage}
                 hoursConfigured={hoursConfigured}

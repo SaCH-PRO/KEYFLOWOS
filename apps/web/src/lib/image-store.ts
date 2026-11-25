@@ -15,3 +15,21 @@
 export async function getAllProductImages(): Promise<Record<string, string>> {
   return {};
 }
+
+/** The IndexedDB database the old photo store wrote ("keyflow-product-images"). */
+export const LEGACY_PHOTO_DB = "keyflow-product-images";
+
+/**
+ * CATALOG-1 (SEC-CAT-4): whether this browser holds the old photo store, so Sales > Products can say once that
+ * those photos are no longer shown. It asks the browser for its database names (indexedDB.databases()) and never
+ * opens the database (opening would create it) or reads a photo. A browser without databases() answers false.
+ */
+export async function hadBrowserOnlyPhotos(): Promise<boolean> {
+  try {
+    if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return false;
+    const dbs = await indexedDB.databases();
+    return dbs.some((d) => d.name === LEGACY_PHOTO_DB);
+  } catch {
+    return false;
+  }
+}
