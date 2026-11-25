@@ -192,17 +192,18 @@ function objectLiteralHasKeyDeep(
   node: ts.Node,
   key: string,
   scope: ReadonlyMap<string, ts.Expression>,
-  visited = new Set<string>(),
+  visitedNodes = new Set<ts.Node>(),
 ): boolean {
   let found = false;
   const visit = (n: ts.Node) => {
-    if (found) return;
+    if (found || visitedNodes.has(n)) return;
+    visitedNodes.add(n);
     if (ts.isPropertyAssignment(n)) {
       if (propNameText(n.name) === key) {
         found = true;
         return;
       }
-      const val = unwrapExpression(n.initializer, scope, new Set(visited));
+      const val = unwrapExpression(n.initializer, scope);
       if (ts.isObjectLiteralExpression(val) || ts.isArrayLiteralExpression(val)) {
         visit(val);
       }
@@ -213,28 +214,24 @@ function objectLiteralHasKeyDeep(
         found = true;
         return;
       }
-      if (isObjectOrArrayExpr(n.name, scope, new Set(visited))) {
-        const resolved = unwrapExpression(n.name, scope, new Set(visited));
-        const nextVisited = new Set(visited);
-        nextVisited.add(n.name.text);
-        if (objectLiteralHasKeyDeep(resolved, key, scope, nextVisited)) {
-          found = true;
-        }
+      if (isObjectOrArrayExpr(n.name, scope)) {
+        const resolved = unwrapExpression(n.name, scope);
+        visit(resolved);
       }
       return;
     }
     if (ts.isSpreadAssignment(n)) {
-      const target = unwrapExpression(n.expression, scope, new Set(visited));
-      if (ts.isObjectLiteralExpression(target) && objectLiteralHasKeyDeep(target, key, scope, new Set(visited))) {
-        found = true;
+      const target = unwrapExpression(n.expression, scope);
+      if (ts.isObjectLiteralExpression(target)) {
+        visit(target);
       }
       return;
     }
     if (ts.isArrayLiteralExpression(n)) {
       for (const el of n.elements) {
         const resolved = ts.isSpreadElement(el)
-          ? unwrapExpression(el.expression, scope, new Set(visited))
-          : unwrapExpression(el, scope, new Set(visited));
+          ? unwrapExpression(el.expression, scope)
+          : unwrapExpression(el, scope);
         if (ts.isObjectLiteralExpression(resolved) || ts.isArrayLiteralExpression(resolved)) {
           visit(resolved);
         }
@@ -243,7 +240,7 @@ function objectLiteralHasKeyDeep(
     }
     ts.forEachChild(n, visit);
   };
-  const root = ts.isExpression(node) ? unwrapExpression(node, scope, new Set(visited)) : node;
+  const root = ts.isExpression(node) ? unwrapExpression(node, scope) : node;
   if (ts.isObjectLiteralExpression(root) || ts.isArrayLiteralExpression(root)) {
     visit(root);
   }
@@ -254,8 +251,10 @@ function getPropertyInitializer(
   obj: ts.ObjectLiteralExpression,
   key: string,
   scope: ReadonlyMap<string, ts.Expression>,
-  visited = new Set<string>(),
+  visitedNodes = new Set<ts.Node>(),
 ): ts.Expression | null {
+  if (visitedNodes.has(obj)) return null;
+  visitedNodes.add(obj);
   for (const prop of obj.properties) {
     if (ts.isPropertyAssignment(prop) && propNameText(prop.name) === key) {
       return prop.initializer;
@@ -264,9 +263,9 @@ function getPropertyInitializer(
       return prop.name;
     }
     if (ts.isSpreadAssignment(prop)) {
-      const spreadTarget = unwrapExpression(prop.expression, scope, new Set(visited));
+      const spreadTarget = unwrapExpression(prop.expression, scope);
       if (ts.isObjectLiteralExpression(spreadTarget)) {
-        const fromSpread = getPropertyInitializer(spreadTarget, key, scope, new Set(visited));
+        const fromSpread = getPropertyInitializer(spreadTarget, key, scope, visitedNodes);
         if (fromSpread) return fromSpread;
       }
     }
@@ -697,6 +696,51 @@ describe('W11-OWNER-HELPER-REST (D-116, D-125, W11SEAM-OWN-3): single owner rule
     const dupRes = inspectNamedOwnerCheck('synthetic/dup.ts', duplicateSymbol, 'isOwner', 'helper');
     expect(dupRes.found).toBe(true);
     expect(dupRes.problems.some((p) => p.includes('ambiguous'))).toBe(true);
+
+    // Cyclic & shadowed variable-rebinding termination controls (must terminate cleanly without stack overflow).
+    const cyclicPropertyShape = `
+      function q(prisma: any) {
+        const a: any = { x: b };
+        const b: any = { x: a };
+        return prisma.business.findFirst({ where: a });
+      }
+    `;
+    const shadowedSpreadWhereShape = `
+      const baseWhere = { deletedAt: null };
+      const activeWhere = { ...baseWhere, status: 'ACTIVE' };
+      function q(prisma: any) {
+        const baseWhere = { ...activeWhere, archived: false };
+        return prisma.business.findFirst({ where: baseWhere });
+      }
+    `;
+    const shadowedSpreadWithOwnerId = `
+      const baseWhere = { deletedAt: null };
+      const activeWhere = { ...baseWhere, ownerId: 'u1' };
+      function q(prisma: any) {
+        const baseWhere = { ...activeWhere, id: 'b1' };
+        return prisma.business.findFirst({ where: baseWhere });
+      }
+    `;
+    const cyclicArrayShape = `
+      function q(prisma: any) {
+        const a: any = { AND: [b] };
+        const b: any = { AND: [a] };
+        return prisma.business.findFirst({ where: a });
+      }
+    `;
+    const shadowedSpreadArgsShape = `
+      const base = { select: { id: true } };
+      const args = { ...base };
+      function q(prisma: any) {
+        const base = { ...args };
+        return prisma.business.findFirst(base);
+      }
+    `;
+    expect(scanSourceForOwnerIdBusinessReads('synthetic/cycle-prop.ts', cyclicPropertyShape)).toEqual([]);
+    expect(scanSourceForOwnerIdBusinessReads('synthetic/cycle-spread-where.ts', shadowedSpreadWhereShape)).toEqual([]);
+    expect(scanSourceForOwnerIdBusinessReads('synthetic/cycle-spread-owner.ts', shadowedSpreadWithOwnerId)).toHaveLength(1);
+    expect(scanSourceForOwnerIdBusinessReads('synthetic/cycle-array.ts', cyclicArrayShape)).toEqual([]);
+    expect(scanSourceForOwnerIdBusinessReads('synthetic/cycle-spread-args.ts', shadowedSpreadArgsShape)).toEqual([]);
 
     // Clean positive controls pass both (a) and (b).
     const cleanHelper = `
