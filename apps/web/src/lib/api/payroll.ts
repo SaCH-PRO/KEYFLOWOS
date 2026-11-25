@@ -50,7 +50,7 @@ export async function listRates(
 export async function listRuns(
   businessId: string,
   filters?: { status?: string; limit?: number },
-): Promise<{ data: PayrollRunListItem[] | null; error: string | null }> {
+): Promise<{ data: PayrollRunListItem[] | null; error: string | null; status?: number }> {
   const params = new URLSearchParams();
   if (filters?.status) params.set("status", filters.status);
   if (filters?.limit !== undefined) params.set("limit", String(filters.limit));
@@ -87,5 +87,23 @@ export async function markRunPaid(
   return apiPost<PayrollRun>({
     path: `/payroll/businesses/${encodeURIComponent(businessId)}/runs/${encodeURIComponent(runId)}/mark-paid`,
     body: input,
+  });
+}
+
+/**
+ * V1-65 (TOF-PAYROLL-DISCARD, D-144): discard a payroll run, so safe-to-spend stops reserving it.
+ * POST /payroll/businesses/:b/runs/:r/discard needs operations write; the server records the signed-in member as the
+ * actor and the reason (trimmed, at most 500 characters), and answers the run as VOID. It answers 409 for a PAID,
+ * VOID or posted run, and for an APPROVED run in the business currency (only an unposted DRAFT run, or an unposted
+ * DRAFT/APPROVED run in another currency, is discarded). The answer's `status` lets a screen say a refusal as one.
+ */
+export async function discardRun(
+  businessId: string,
+  runId: string,
+  reason: string,
+): Promise<{ data: PayrollRun | null; error: string | null; status?: number }> {
+  return apiPost<PayrollRun>({
+    path: `/payroll/businesses/${encodeURIComponent(businessId)}/runs/${encodeURIComponent(runId)}/discard`,
+    body: { reason },
   });
 }

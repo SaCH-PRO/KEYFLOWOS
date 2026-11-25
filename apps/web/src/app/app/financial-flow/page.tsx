@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2, BookOpen, Scale, ListFilter, Repeat, FileMinus, CalendarDays, Package, Globe, Cable, PackageCheck, Truck, ClipboardList, Send, Bell, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,9 @@ import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type Res
 import { fetchRoleFlowQueue, resolveFlowSignal, type FlowSignal } from "@/lib/api/flow-signal";
 import { apiPost } from "@/lib/api";
 import { moduleReadRefusal, moduleWriteRefusal } from "@/lib/module-access";
+import { discardRun, listRuns, type PayrollRunListItem } from "@/lib/api/payroll";
+import { formatCurrency } from "@/lib/currency";
+import { memberModuleLevelsOf, type ModuleLevels } from "@/lib/nav-config";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -39,6 +42,36 @@ interface SafeToSpend {
   explanation?: string[];
 }
 
+/**
+ * V1-65 (SWP-FIN-OVERVIEW-TRUTH; D-144): the runs safe-to-spend reserves are the DRAFT and APPROVED ones
+ * (SafeToSpendService), never PAID or VOID. Read with operations read (GET payroll runs); a refusal is said as one.
+ */
+type ReservingRuns = { runs: PayrollRunListItem[] } | { refusal: string } | { error: string };
+
+const RESERVING_STATUSES = ["DRAFT", "APPROVED"] as const;
+
+async function readReservingRuns(businessId: string): Promise<ReservingRuns> {
+  const answers = await Promise.all(RESERVING_STATUSES.map((status) => listRuns(businessId, { status, limit: 100 })));
+  for (const res of answers) {
+    const refusal = moduleReadRefusal(res, "operations", "the payroll runs");
+    if (refusal) return { refusal };
+    if (res.error) return { error: res.error };
+  }
+  const runs = answers
+    .flatMap((res) => (Array.isArray(res.data) ? res.data : []))
+    .filter((run) => (RESERVING_STATUSES as readonly string[]).includes(run.status))
+    .sort((a, b) => String(a.periodStart).localeCompare(String(b.periodStart)));
+  return { runs };
+}
+
+/** A currency code as the server compares it (posting.service normalizeCurrency): trimmed, upper case. */
+const currencyCode = (code: string | null | undefined) => (typeof code === "string" ? code.trim().toUpperCase() : "");
+
+/** A run's period as the server's discard record names it: the two ISO dates, never shifted by the viewer's zone. */
+const runPeriod = (run: PayrollRunListItem) => `${String(run.periodStart).slice(0, 10)} to ${String(run.periodEnd).slice(0, 10)}`;
+
+const runStatusLabel = (status: string) => (status === "DRAFT" ? "Draft" : status === "APPROVED" ? "Approved" : status);
+
 export default function FinancialFlowPage() {
   const router = useRouter();
   const businessId = getStoredBusinessId() ?? "";
@@ -56,6 +89,21 @@ export default function FinancialFlowPage() {
   const [newTarget, setNewTarget] = useState("");
   const [newCurrent, setNewCurrent] = useState("");
   const [saving, setSaving] = useState(false);
+  // V1-65: what a refused bucket write said (the server kept what it had; so does the page).
+  const [reserveError, setReserveError] = useState<string | null>(null);
+
+  // V1-65 (D-144): the payroll runs safe-to-spend reserves, the member's module levels (Discard needs operations
+  // write), and the Discard dialog.
+  const [reservingRuns, setReservingRuns] = useState<ReservingRuns | null>(null);
+  const [moduleLevels, setModuleLevels] = useState<ModuleLevels>(null);
+  const [discardTarget, setDiscardTarget] = useState<PayrollRunListItem | null>(null);
+  const [discardReason, setDiscardReason] = useState("");
+  const [discarding, setDiscarding] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
+  const [discardNotice, setDiscardNotice] = useState<string | null>(null);
+  // The latest read wins: an older answer landing after a newer one never overwrites it.
+  const safeSeq = useRef(0);
+  const runsSeq = useRef(0);
 
   // KEY FLOWS: AR Clerk proof-of-concept queue
   const [roleKey] = useState("ACCOUNTS_RECEIVABLE_CLERK");
@@ -107,10 +155,59 @@ export default function FinancialFlowPage() {
 
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
 
+  const loadReservingRuns = useCallback(async () => {
+    if (!businessId) return;
+    const seq = ++runsSeq.current;
+    let next: ReservingRuns;
+    try {
+      next = await readReservingRuns(businessId);
+    } catch {
+      next = { error: "The payroll runs could not be read." };
+    }
+    if (seq === runsSeq.current) setReservingRuns(next);
+  }, [businessId]);
+
+  /**
+   * V1-65: read safe-to-spend again after a change that moves it (a reserve bucket added or deleted, a payroll run
+   * discarded), so the figure shown is the server's after the change. A failed read is said in the load banner and
+   * no figure from before the change is kept as if current.
+   */
+  const refreshSafeToSpend = useCallback(async () => {
+    if (!businessId) return;
+    const seq = ++safeSeq.current;
+    const res = await apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`);
+    if (seq !== safeSeq.current) return;
+    if (res.data) {
+      setSafe(res.data);
+      setLoadErrors((prev) => prev.filter((label) => label !== "Safe-to-spend"));
+    } else {
+      setSafe(null);
+      setLoadErrors((prev) => (prev.includes("Safe-to-spend") ? prev : [...prev, "Safe-to-spend"]));
+    }
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId) return;
+    let disposed = false;
+    // NAV-A1's read of the member's own module levels (GET identity/businesses/:b/my-access). Unknown (a failed
+    // read) offers no Discard: it is destructive, and only a member the server states holds operations write gets it.
+    void apiGet(`/identity/businesses/${encodeURIComponent(businessId)}/my-access`)
+      .then((res) => (res.error ? null : memberModuleLevelsOf(res.data)))
+      .catch(() => null)
+      .then((levels) => {
+        if (!disposed) setModuleLevels(levels);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [businessId]);
+
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     setLoadErrors([]);
+    void loadReservingRuns();
+    const safeLoad = ++safeSeq.current;
     // Each call races a 12s timeout and all settle independently — one slow or
     // failing endpoint must never hang the whole page (audit P0).
     const withTimeout = <T,>(p: Promise<{ data: T | null; error: string | null }>, label: string) =>
@@ -135,7 +232,9 @@ export default function FinancialFlowPage() {
       ]);
       const failed: string[] = [];
       if (ovRes.data) setOverview(ovRes.data); else failed.push(ovRes.label);
-      if (safeRes.data) setSafe(safeRes.data); else failed.push(safeRes.label);
+      if (safeLoad === safeSeq.current) {
+        if (safeRes.data) setSafe(safeRes.data); else failed.push(safeRes.label);
+      }
       if (fcRes.data) setForecast(fcRes.data); else failed.push(fcRes.label);
       const refusal = moduleReadRefusal(bucketRes, "revenue", "the reserve buckets");
       setBucketsRefusal(refusal);
@@ -150,7 +249,7 @@ export default function FinancialFlowPage() {
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, loadReservingRuns]);
 
   useEffect(() => {
     load();
@@ -159,6 +258,7 @@ export default function FinancialFlowPage() {
   const handleAdd = async () => {
     if (!businessId || !newName.trim()) return;
     setSaving(true);
+    setReserveError(null);
     try {
       const res = await createReserveBucket(businessId, {
         name: newName.trim(),
@@ -166,6 +266,11 @@ export default function FinancialFlowPage() {
         targetAmount: newTarget ? Number(newTarget) : undefined,
         currentAmount: newCurrent ? Number(newCurrent) : 0,
       });
+      const notAdded = moduleWriteRefusal(res, "revenue", "add reserve buckets");
+      if (notAdded) {
+        setReserveError(`The bucket was not added. ${notAdded}`);
+        return;
+      }
       if (res.data) {
         setBuckets((prev) => [...prev, res.data!]);
         setNewName("");
@@ -174,6 +279,8 @@ export default function FinancialFlowPage() {
         setNewCurrent("");
         setShowAdd(false);
       }
+      // V1-65: an active bucket is subtracted from Safe to Spend; read the figure again.
+      await refreshSafeToSpend();
     } finally {
       setSaving(false);
     }
@@ -181,11 +288,75 @@ export default function FinancialFlowPage() {
 
   const handleDelete = async (id: string) => {
     if (!businessId) return;
-    await deleteReserveBucket(businessId, id);
+    setReserveError(null);
+    const res = await deleteReserveBucket(businessId, id);
+    const notDeleted = moduleWriteRefusal(res, "revenue", "delete reserve buckets");
+    if (notDeleted) {
+      // The server kept the bucket: so does the page, and its figure is unchanged.
+      setReserveError(`The bucket was not deleted. ${notDeleted}`);
+      return;
+    }
     setBuckets((prev) => prev.filter((b) => b.id !== id));
+    await refreshSafeToSpend();
+  };
+
+  const openDiscard = (run: PayrollRunListItem) => {
+    setDiscardTarget(run);
+    setDiscardReason("");
+    setDiscardError(null);
+    setDiscardNotice(null);
+  };
+
+  const closeDiscard = () => {
+    if (discarding) return;
+    setDiscardTarget(null);
+    setDiscardError(null);
+  };
+
+  /**
+   * V1-65 (TOF-PAYROLL-DISCARD, D-144): discard the run with the member's reason, after the confirm. The server is the
+   * judge: its refusal (409 for a run paid, posted or approved in the business currency since this page read it; 403
+   * without operations write) is said in its own words and nothing is claimed. After a discard, and after a 409 (the
+   * run is not what this page last read), the runs and safe-to-spend are read again, so the page shows what the
+   * server now holds.
+   */
+  const confirmDiscard = async () => {
+    const run = discardTarget;
+    const reason = discardReason.trim();
+    if (!businessId || !run || !reason || discarding) return;
+    setDiscarding(true);
+    setDiscardError(null);
+    try {
+      const res = await discardRun(businessId, run.id, reason);
+      const notDiscarded = moduleWriteRefusal(res, "operations", "discard payroll runs");
+      if (notDiscarded) {
+        setDiscardError(`The run was not discarded: ${notDiscarded}`);
+        if (res.status === 409) await Promise.all([refreshSafeToSpend(), loadReservingRuns()]);
+        return;
+      }
+      setDiscardTarget(null);
+      setDiscardNotice(`The payroll run ${runPeriod(run)} was discarded: Safe to Spend no longer reserves it.`);
+      await Promise.all([refreshSafeToSpend(), loadReservingRuns()]);
+    } finally {
+      setDiscarding(false);
+    }
   };
 
   const currency = overview?.currency ?? "TTD";
+
+  // V1-65 (D-144): the payroll reserve line. Money is shown only with the safe-to-spend read, which needs revenue
+  // read (D-100): a member refused it sees no line and no run amount.
+  const businessCurrency = currencyCode(safe?.currency) || currencyCode(currency);
+  const payrollReserved = Number(safe?.payrollReserved ?? 0);
+  const listedRuns = reservingRuns && "runs" in reservingRuns ? reservingRuns.runs : [];
+  const showPayrollReserve = Boolean(safe) && (payrollReserved > 0 || listedRuns.length > 0);
+  const operationsLevel = moduleLevels?.operations;
+  const mayDiscard = operationsLevel === "write" || operationsLevel === "admin";
+  const runCurrency = (run: PayrollRunListItem) => currencyCode(run.currency) || businessCurrency;
+  // Where PayrollService.discardRun accepts a run: DRAFT, or APPROVED in a currency other than the business's. (A
+  // posted run is refused 409, and said so; the list does not tell a posted run apart.)
+  const serverWouldDiscard = (run: PayrollRunListItem) =>
+    run.status === "DRAFT" || (run.status === "APPROVED" && runCurrency(run) !== businessCurrency);
 
   const launcherSections: ModuleLauncherSection[] = [
     {
@@ -308,6 +479,53 @@ export default function FinancialFlowPage() {
               <p className="text-[10px] text-muted-foreground">Safe to Spend</p>
             </div>
           </div>
+          {showPayrollReserve && (
+            <section aria-label="Payroll reserve" className="mx-4 mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+              <p className="text-xs">
+                <span className="font-medium">Payroll reserved:</span>{" "}
+                <strong className="font-semibold">{formatCurrency(payrollReserved, businessCurrency)}</strong> is held back from
+                Safe to Spend for payroll runs not yet paid (draft or approved).
+              </p>
+              {reservingRuns && "refusal" in reservingRuns && (
+                <p className="text-xs text-amber-500" role="alert">{reservingRuns.refusal}</p>
+              )}
+              {reservingRuns && "error" in reservingRuns && (
+                <p className="text-xs text-amber-500" role="alert">The runs could not be listed: {reservingRuns.error}</p>
+              )}
+              {listedRuns.length > 0 && (
+                <ul className="space-y-1.5">
+                  {listedRuns.map((run) => {
+                    const code = runCurrency(run);
+                    const label = runStatusLabel(run.status);
+                    return (
+                      <li key={run.id} className="flex flex-col gap-1.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+                        <span className="min-w-0 break-words">
+                          {label} run, {runPeriod(run)}: {formatCurrency(Number(run.totalGross ?? 0), code)}
+                          {code !== businessCurrency && (
+                            <span className="text-muted-foreground"> (in {code}: not counted in Safe to Spend, which is in {businessCurrency})</span>
+                          )}
+                        </span>
+                        {mayDiscard && serverWouldDiscard(run) && (
+                          <button
+                            type="button"
+                            onClick={() => openDiscard(run)}
+                            aria-label={`Discard the ${label.toLowerCase()} payroll run ${runPeriod(run)}`}
+                            className="inline-flex min-h-[36px] shrink-0 items-center gap-1 self-start rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10 sm:self-auto"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            Discard
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          )}
+          {discardNotice && (
+            <p className="mx-4 mb-4 text-xs text-emerald-500" role="status">{discardNotice}</p>
+          )}
         </SectionCard>
       )}
 
@@ -424,6 +642,10 @@ export default function FinancialFlowPage() {
           </div>
         )}
 
+        {reserveError && (
+          <p className="text-xs text-amber-500 py-2" role="alert">{reserveError}</p>
+        )}
+
         {bucketsRefusal ? (
           <p className="text-xs text-amber-500 py-2" role="alert">{bucketsRefusal}</p>
         ) : buckets.length === 0 && !showAdd ? (
@@ -445,6 +667,7 @@ export default function FinancialFlowPage() {
                   </div>
                   <button
                     onClick={() => handleDelete(bucket.id)}
+                    aria-label={`Delete ${bucket.name}`}
                     className="text-muted-foreground hover:text-red-500 transition-colors"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -582,6 +805,62 @@ export default function FinancialFlowPage() {
           )}
         </div>
       </SectionCard>
+
+      {discardTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payroll-discard-title"
+          aria-describedby="payroll-discard-desc"
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeDiscard} aria-hidden="true" />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-border/60 bg-slate-900/95 p-5 shadow-2xl backdrop-blur-xl space-y-3">
+            <h3 id="payroll-discard-title" className="text-base font-semibold">Discard payroll run?</h3>
+            <p id="payroll-discard-desc" className="text-sm text-muted-foreground">
+              The {runStatusLabel(discardTarget.status).toLowerCase()} run {runPeriod(discardTarget)} (
+              {formatCurrency(Number(discardTarget.totalGross ?? 0), runCurrency(discardTarget))}) becomes VOID and is no
+              longer reserved. This cannot be undone.
+            </p>
+            <label className="block space-y-1 text-xs">
+              <span className="font-medium">Reason (required)</span>
+              <textarea
+                value={discardReason}
+                onChange={(e) => setDiscardReason(e.target.value)}
+                maxLength={500}
+                rows={3}
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+                placeholder="Why is this run being discarded?"
+              />
+            </label>
+            {discardError && (
+              <p className="text-xs text-amber-500" role="alert">{discardError}</p>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDiscard}
+                disabled={discarding}
+                className="min-h-[40px] rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDiscard}
+                disabled={discarding || !discardReason.trim()}
+                aria-busy={discarding || undefined}
+                className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {discarding && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Discard run
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </UnifiedPageShell>
   );
 }
