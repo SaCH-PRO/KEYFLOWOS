@@ -21,7 +21,10 @@ name: Agent Control Worker Proof
 #                        skip and names the diff it checked; otherwise, on the
 #                        nightly schedule, and whenever it cannot tell, it
 #                        decides run. The gate at the merge base is asked too:
-#                        run wins.
+#                        run wins, so an accidental change to the gate or its
+#                        list cannot skip the proof (not a security boundary:
+#                        this file and the gate code are the PR's own, as on
+#                        any pull_request run; review guards their rewrite).
 #   suites            -- the Windows and portable suites, when the gate said run.
 #   negative-controls -- the manifest's controls in 4 shards, when it said run.
 #   windows           -- the aggregate, carrying the required name. Runs always;

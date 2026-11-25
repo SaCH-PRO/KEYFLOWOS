@@ -14,7 +14,10 @@
  *
  * The gate at the merge base is asked too (its copy of this file and of the list, run on their own: this file
  * imports only node: builtins), and the full proof runs when either gate says so, when the merge base has no gate,
- * or when it cannot be run. A PR therefore cannot skip by changing the gate it brings.
+ * or when it cannot be run. So an accidental change to the input list or to decide() cannot skip the proof. It is
+ * not a security boundary: the code that asks the merge base gate, the aggregate and the workflow are the PR's own,
+ * as on any pull_request run; a PR that rewrites them is caught by review (each is a proof input, so the diff of
+ * scripts/ci/worker-proof-* or the workflow always runs the full proof unless that code itself is rewritten).
  *
  * Usage:
  *   node scripts/ci/worker-proof-inputs.mjs --event <name> --base <sha> --head <sha>
@@ -135,6 +138,7 @@ export function checkoutHazards(paths, tree, crlf) {
       if (/[<>:"|?*\\\x00-\x1f\x7f]/.test(part)) why.push(`"${part}" has a character Windows refuses`);
       if (/[. ]$/.test(part)) why.push(`"${part}" ends with a dot or a space`);
       if (/^(\.git|git~\d+)$/i.test(part)) why.push(`"${part}" names a .git directory`);
+      else if (/~\d+(\.|$)/.test(part)) why.push(`"${part}" looks like a Windows 8.3 short name, which can alias a long name`);
     }
     if (/[^\x20-\x7e]/.test(p)) why.push('a non-ASCII name');
     if (p.length > MAX_PATH_LENGTH) why.push(`a long path (${p.length} > ${MAX_PATH_LENGTH} characters)`);
@@ -325,10 +329,31 @@ function arg(argv, name) {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
 }
 
-/** The decision as one line for GITHUB_OUTPUT: every changed path up to a bound, and how many there were. */
-function compact(decision, bound = 300) {
-  const changed = decision.changed.slice(0, bound);
-  return JSON.stringify({ ...decision, changed, changed_count: decision.changed.length, changed_truncated: decision.changed.length > bound, inputs_hit: decision.inputs_hit.slice(0, bound), hazards: decision.hazards.slice(0, bound) });
+/**
+ * Most bytes of the decision written to GITHUB_OUTPUT. The aggregate reads it from the environment twice (DECISION,
+ * and inside toJSON(needs)); Linux caps one environment string at 128 KiB.
+ */
+export const DECISION_LIMIT = 32 * 1024;
+
+/**
+ * The decision as one line for GITHUB_OUTPUT, at most DECISION_LIMIT bytes: as many changed paths, inputs hit and
+ * hazards as fit, with how many paths there were (the gate's log lists them all).
+ */
+export function compact(decision) {
+  const line = (bound) => JSON.stringify({
+    ...decision,
+    reason: String(decision.reason ?? '').slice(0, 1000),
+    changed: decision.changed.slice(0, bound),
+    changed_count: decision.changed.length,
+    changed_truncated: decision.changed.length > bound,
+    inputs_hit: decision.inputs_hit.slice(0, bound),
+    hazards: decision.hazards.slice(0, bound),
+  });
+  for (let bound = Math.min(300, decision.changed.length); bound > 0; bound = Math.floor(bound / 2)) {
+    const out = line(bound);
+    if (Buffer.byteLength(out) <= DECISION_LIMIT) return out;
+  }
+  return line(0);
 }
 
 function human(decision) {
