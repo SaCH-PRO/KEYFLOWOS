@@ -41,6 +41,9 @@
  *                    ordinary note's edit stays a note
  *   TCH-18  RED      MIN-4: a failed events read is not an empty history: an error line with Retry, no filter
  *                    counts, never "No timeline events yet"; Retry reads again and shows the timeline
+ *   TCH-19  pin      MIN-2: a logged message with direction "in" reads "... received"
+ *   TCH-20  pin      MIN-2: outcome "received" reads "Call received", "Email received", "SMS received"
+ *   TCH-21  pin      MIN-2: a long message is shown whole (whitespace-pre-wrap, no line clamp); other details clamp
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -441,5 +444,34 @@ describe("D-277: the Timeline has a channel filter", () => {
     expect(reads.mock.calls.length).toBe(before + 1);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(countOf("All")).toBe(2);
+  });
+
+  it("TCH-19 pin: a logged message with direction 'in' reads as received", async () => {
+    served = [
+      { id: "ev_in", contactId: C, type: "communication.whatsapp", createdAt: at(1), data: { direction: "in", body: "Are you open Sunday?" } },
+      { id: "ev_out", contactId: C, type: "communication.whatsapp", createdAt: at(2), data: { direction: "out", body: "Yes, from 9" } },
+    ];
+    await renderTimeline();
+    expect(screen.getAllByText("WhatsApp message received")).toHaveLength(1);
+    expect(screen.getAllByText("WhatsApp logged")).toHaveLength(1);
+  });
+
+  it("TCH-20 pin: outcome 'received' reads 'Call received', 'Email received', 'SMS received'", async () => {
+    served = (["call", "email", "sms"] as const).map((ch, i) => ({
+      id: `ev_rcv_${ch}`, contactId: C, type: `communication.${ch}`, source: "crm", createdAt: at(i), data: { channelType: ch, outcome: "received" },
+    }));
+    await renderTimeline();
+    for (const title of ["Call received", "Email received", "SMS received"]) expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.queryByText(/ logged$/)).not.toBeInTheDocument();
+  });
+
+  it("TCH-21 pin: a long message is shown whole; another event's detail is clamped", async () => {
+    const long = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long WhatsApp message about the order.`).join("\n");
+    served = [{ ...PASTED[1], data: { ...PASTED[1].data, body: long } }, TASK];
+    await renderTimeline();
+    const message = screen.getByText((_, el) => el?.tagName === "P" && el.textContent === long);
+    expect(message).toHaveClass("whitespace-pre-wrap");
+    expect(message).not.toHaveClass("line-clamp-2");
+    expect(screen.getByText("Call back Monday")).toHaveClass("line-clamp-2");
   });
 });
