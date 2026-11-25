@@ -1148,6 +1148,11 @@
       "packet": "V1-99 (FU-CONTRACT-FETCH-OUTBOUND-GUARD, D-246)"
     },
     {
+      "prefix": "v66c_",
+      "owner": "apps/server/test/storefront-fulfil-steps.integration.test.ts",
+      "packet": "V1-66 (W11-STOREFRONT-FULFIL-STEPS)"
+    },
+    {
       "prefix": "v66g_",
       "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
       "packet": "V1-66 (SWP-FIN-LEDGER)"
