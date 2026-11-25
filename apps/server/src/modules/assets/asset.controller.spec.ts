@@ -1,6 +1,10 @@
+import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
+import { ValidationPipe } from '@nestjs/common';
+import * as appBootstrap from '../../app-bootstrap';
 import { AssetController } from './asset.controller';
 import { AssetService } from './asset.service';
+import { ListAssetsQueryDto } from './dto/list-assets-query.dto';
 
 describe('AssetController', () => {
   function createMockService(): AssetService {
@@ -41,6 +45,27 @@ describe('AssetController', () => {
     const result = await ctrl.list('biz_1', {} as any);
     expect(result.total).toBe(0);
     expect(svc.listAssets).toHaveBeenCalledWith('biz_1', expect.any(Object));
+  });
+
+  it('RED-BEFORE (W11-QUERY-DTO-COERCION): coerces string limit="10" & offset="20" through production ValidationPipe before reaching listAssets', async () => {
+    const svc = createMockService();
+    const ctrl = new AssetController(svc);
+    const opts =
+      ((appBootstrap as Record<string, unknown>).GLOBAL_VALIDATION_PIPE_OPTIONS as
+        | { whitelist: true; transform: true }
+        | undefined) ?? { whitelist: true, transform: true };
+    const pipe = new ValidationPipe(opts);
+
+    const query = (await pipe.transform(
+      { limit: '10', offset: '20' },
+      { type: 'query', metatype: ListAssetsQueryDto },
+    )) as ListAssetsQueryDto;
+    await ctrl.list('biz_1', query);
+
+    expect(svc.listAssets).toHaveBeenCalledWith(
+      'biz_1',
+      expect.objectContaining({ limit: 10, offset: 20 }),
+    );
   });
 
   it('gets asset by id', async () => {
