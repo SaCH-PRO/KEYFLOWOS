@@ -35,6 +35,10 @@
  *   TCH-16  RED      MIN-1: an inbound message the omnichannel processor logs (type message_received, source the
  *                    channel: omnichannel-processor.service.ts) is that channel's, "Email received" / "SMS received";
  *                    a source of no channel of the filter's is in All only
+ *   TCH-17  RED      MIN-3: a pasted message's note edited or deleted (note.updated / note.deleted { noteId }, source
+ *                    system: crm-timeline.service.ts updateNote / deleteNote) is WhatsApp, when the page shows that the
+ *                    note is a pasted one (its communication.whatsapp or its whatsapp_inbound note.created); an
+ *                    ordinary note's edit stays a note
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -383,5 +387,29 @@ describe("D-277: the Timeline has a channel filter", () => {
     choose("SMS");
     expect(screen.getByText("SMS received")).toBeInTheDocument();
     expect(screen.queryByText("Email received")).not.toBeInTheDocument();
+  });
+
+  it("TCH-17 RED: a pasted message's note edited or deleted is WhatsApp; an ordinary note's edit stays a note", async () => {
+    served = [
+      ...PASTED,
+      { id: "ev_wa_upd", contactId: C, type: "note.updated", source: "system", createdAt: at(12), data: { noteId: "n_wa" } },
+      { id: "ev_wa_del", contactId: C, type: "note.deleted", source: "system", createdAt: at(13), data: { noteId: "n_wa", body: PASTED_TEXT } },
+      NOTE,
+      { id: "ev_note_upd", contactId: C, type: "note.updated", source: "system", createdAt: at(2), data: { noteId: "n_1" } },
+    ];
+    await renderTimeline();
+    expect([countOf("All"), countOf("WhatsApp"), countOf("Notes")]).toEqual([5, 3, 2]);
+    choose("Notes");
+    expect(screen.queryByText("Note deleted")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^Note (added|updated)$/)).toHaveLength(2);
+    choose("WhatsApp");
+    expect(screen.getByText("Note deleted")).toBeInTheDocument();
+    expect(screen.getByText("Note updated")).toBeInTheDocument();
+    cleanup();
+
+    // Known from its whatsapp_inbound note.created alone (its WhatsApp event not on the page).
+    served = [PASTED[0], { id: "ev_wa_upd", contactId: C, type: "note.updated", source: "system", createdAt: at(12), data: { noteId: "n_wa" } }];
+    await renderTimeline();
+    expect([countOf("WhatsApp"), countOf("Notes")]).toEqual([2, 0]);
   });
 });
