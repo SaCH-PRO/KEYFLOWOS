@@ -104,6 +104,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
     expect(listed).toContain('Membership');
     expect(listed).toContain('Course');
     expect(listed).toContain('FlowRun');
+    expect(listed).toContain('ProductTierPrice');
   });
 });
 

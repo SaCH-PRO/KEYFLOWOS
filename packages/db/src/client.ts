@@ -430,6 +430,11 @@ const BUSINESS_ID_MODELS = new Set([
   'ContactExternalMapping', 'Course', 'DriveIntakeFile', 'FlowRun',
   'IngestionItem', 'IntegrationConnection', 'InventoryStock', 'KeyCallSession',
   'Membership', 'MessageIntake', 'SitePageDraft', 'SyncJob', 'WhatsAppMessage',
+
+  // ── MIGRATION-SET-A (D-167), 2026-11-24 ───────────────────────────────────
+  // Added in the same commit as the ProductTierPrice model so the tenant
+  // interceptor scopes every read and write by default from day one.
+  'ProductTierPrice',
 ]);
 
 

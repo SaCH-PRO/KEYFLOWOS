@@ -241,6 +241,14 @@ const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: s
     // revenue:write handler too (a rejected plan can no longer be approved).
     reject: { kind: 'GUARDED', why: DRIVE_INTAKE_REJECT_GUARDED },
   },
+  ReadyToSendController: {
+    markInvoiceSent: {
+      kind: 'EXEMPT',
+      why:
+        'READY-TO-SEND: records a reminder-sent Activity row for an overdue invoice ' +
+        '(no invoice amount, line, status, quote, or payment write), so not the D-46 invoice-write door',
+    },
+  },
 };
 
 /** The constructor dependencies of each other controller with GUARDED writes, by name, in order. */

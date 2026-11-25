@@ -537,14 +537,33 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
 
   async handleBookingReminders() {
     try {
+      // READY-TO-SEND (D-82): scheduled booking email reminders run only for businesses
+      // with Gmail connected and bookingReminderMins > 0, and only for bookings not yet
+      // marked reminded (Booking.reminderSentAt: null). Query businesses top-level so
+      // encrypted gmailRefreshToken is decrypted by Prisma's top-level extension.
+      const eligibleBusinesses = await this.prisma.client.business.findMany({
+        where: {
+          bookingReminderMins: { gt: 0 },
+          gmailEmail: { not: null },
+          gmailRefreshToken: { not: null },
+        },
+        select: { id: true, gmailEmail: true, gmailRefreshToken: true },
+      });
+      const eligibleBusinessIds = eligibleBusinesses
+        .filter((b) => Boolean(b.gmailEmail?.trim() && b.gmailRefreshToken?.trim()))
+        .map((b) => b.id);
+      if (eligibleBusinessIds.length === 0) return;
+
       const now = new Date();
       const reminderWindowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
       const reminderWindowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
 
       const upcomingBookings = await this.prisma.client.booking.findMany({
         where: {
+          businessId: { in: eligibleBusinessIds },
           status: { in: ['CONFIRMED', 'PENDING'] },
           deletedAt: null,
+          reminderSentAt: null,
           startTime: { gte: reminderWindowStart, lt: reminderWindowEnd },
         },
         include: {
@@ -555,6 +574,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       });
 
       for (const booking of upcomingBookings) {
+        if (!booking.contact?.email) continue;
         const dedupeKey = `reminder_${booking.id}`;
         const alreadySent = await this.prisma.client.customerNotificationLog.findFirst({
           where: {
@@ -576,6 +596,13 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
           locationPlaceId: (booking as any).locationPlaceId ?? null,
           locationLatLng: (booking as any).locationLatLng ?? null,
         }, dedupeKey);
+
+        await this.prisma.client.booking
+          .updateMany({
+            where: { id: booking.id, businessId: booking.businessId, deletedAt: null, reminderSentAt: null },
+            data: { reminderSentAt: now },
+          })
+          .catch(() => undefined);
       }
 
       if (upcomingBookings.length > 0) {

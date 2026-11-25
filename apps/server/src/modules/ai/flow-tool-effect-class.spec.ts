@@ -135,14 +135,15 @@ describe('RR-TOOL-EFFECT-CLASS: every FLOW_TOOLS entry declares an effect class'
   });
 
   it('R0 KEEP: no tool changed name, family, riskTier or route; getToolByName still resolves every tool; the count is unchanged', () => {
-    expect(FLOW_TOOLS).toHaveLength(286);
+    // +3 canonical finance intelligence READ tools (TOF-FINANCE-CANONICAL-TOOLS, P44)
+    expect(FLOW_TOOLS).toHaveLength(289);
     for (const tool of FLOW_TOOLS) {
       expect(getToolByName(tool.name)).toBe(tool);
       expect(['read', 'draft', 'organize', 'execute', 'crud']).toContain(tool.family);
       expect(typeof tool.manualEquivalentRoute).toBe('string');
     }
     const readFamily = FLOW_TOOLS.filter((t) => t.family === 'read');
-    expect(readFamily).toHaveLength(117);
-    expect(readFamily.filter((t) => !t.changedEntities || t.changedEntities.length === 0)).toHaveLength(115);
+    expect(readFamily).toHaveLength(120);
+    expect(readFamily.filter((t) => !t.changedEntities || t.changedEntities.length === 0)).toHaveLength(118);
   });
 });
