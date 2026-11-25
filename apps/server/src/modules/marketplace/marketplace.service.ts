@@ -2002,6 +2002,8 @@ export class MarketplaceService {
     const steps: Array<Record<string, unknown>> = [];
     const now = new Date().toISOString();
 
+    const isStorefront = (order.type ?? '').toUpperCase() === 'STOREFRONT';
+    const isPaid = String(order.paymentStatus ?? '').toUpperCase() === 'PAID';
     let newStatus = order.status;
     const updateData: Record<string, unknown> = {};
 
@@ -2010,8 +2012,10 @@ export class MarketplaceService {
         if (!canTransitionOrder(order.status, 'awaiting_payment')) {
           throw new BadRequestException(`Cannot confirm order from ${order.status} status`);
         }
-        newStatus = 'awaiting_payment';
-        steps.push({ status: 'awaiting_payment', timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
+        // W11-STOREFRONT-FULFIL-STEPS (Journey G, option A): STOREFRONT orders advance in their own vocabulary
+        // (PENDING -> CONFIRMED -> PROCESSING); CONFIRMED normalizes to awaiting_payment. STANDARD orders unchanged.
+        newStatus = isStorefront ? 'CONFIRMED' : 'awaiting_payment';
+        steps.push({ status: newStatus, timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
         break;
       }
 
@@ -2095,10 +2099,15 @@ export class MarketplaceService {
 
       case 'process': {
         const target = 'picking_packing';
-        if (!canTransitionOrder(order.status, target)) {
+        // W11-STOREFRONT-FULFIL-STEPS (Journey G, option A): a STOREFRONT order paid through the D-112 door stays
+        // stored CONFIRMED with paymentStatus PAID (ROUTING_ADVANCES_FROM keeps it out of marketplace statuses).
+        // Admit it here and store 'PROCESSING' (which normalizes to picking_packing so 'ship' keeps working);
+        // unpaid CONFIRMED storefront orders stay refused 400, and STANDARD orders are unchanged.
+        const paidConfirmedStorefront = isStorefront && order.status === 'CONFIRMED' && isPaid;
+        if (!canTransitionOrder(order.status, target) && !paidConfirmedStorefront) {
           throw new BadRequestException(`Cannot process order in ${order.status} status`);
         }
-        newStatus = target;
+        newStatus = isStorefront ? 'PROCESSING' : target;
         steps.push({ status: target, timestamp: now, note: data?.note });
         await this.fulfillmentRoutingService.createPickPackTasks(businessId, orderId, order.items);
         break;
