@@ -3,23 +3,24 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
 
 /**
  * FU-STUDIO-PAGE-SCOPE (owner ruling D-283), the browser half. The jsdom half is
- * src/app/studio/__tests__/studio-page-scope.test.tsx (SPS-01..07).
+ * src/__tests__/studio-page-scope.test.tsx (SPS-01..06).
  *
  * /studio ("Business Setup") listed Notifications, Webhooks & API and Payment Gateways, with Business Profile and
- * Compliance & Tax, to anyone who typed the URL: no module filter, and outside the /app shell. Now /studio sends the
- * visitor to /app/settings, whose index offers each entry only when the member's modules open it.
+ * Compliance & Tax, to anyone who typed the URL: no module filter, and outside the /app shell. The page is removed and
+ * next.config.ts answers /studio with a 307 to /app/settings, whose index offers each entry only when the member's
+ * modules open it.
  *
  *   SPB-01 a member whose settings access is none, at /studio: no settings entry anywhere on the page, and the page is
  *          /app/settings, offering only My account (RED at the base: /studio lists the settings entries).
  *   SPB-02 a settings reader, at /studio: /app/settings, offering Getting paid and Notifications.
  *   SPB-03 an owner, at /studio: /app/settings, offering all eight entries.
  *   SPB-04 a signed-out visitor, at /studio: the sign-in page, no settings entry.
- *   SPB-05 the /studio request itself answers 307 with Location /app/settings (RED at 8b05aa1b: a prerendered 200 with
- *          a meta refresh).
+ *   SPB-05 the /studio request itself answers 307 with Location /app/settings (RED at 8b05aa1b and 7ded133c, where the
+ *          page redirected in itself: a 200 with a meta refresh).
  *
  * Run at 375, 768, 1024 and 1440. Mocked: every API call is answered by page.route on api.test.local; skipped under
  * E2E_LIVE. CI's e2e-mocked step runs a fixed list of specs that does not include this one: it is the packet's browser
- * proof, and the standing guards are SPS-01..07 in Vitest.
+ * proof, and the standing guards are SPS-01..06 in Vitest.
  *   pnpm run build (NEXT_PUBLIC_API_BASE_URL=http://api.test.local), then
  *   E2E_WEB_COMMAND=standalone E2E_PORT=5300 pnpm exec playwright test e2e/sweep-studio-scope.spec.ts --project=chromium
  */
