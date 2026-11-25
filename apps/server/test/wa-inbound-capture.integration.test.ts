@@ -260,7 +260,7 @@ beforeAll(async () => {
     },
   });
 
-  // TT contact holding WhatsApp number only (blank phone)
+  // TT contact holding WhatsApp number only with separator inside last 4 digits (SEC/COR-WAIC-1)
   await db.contact.create({
     data: {
       id: ID.contactWaOnlyTT,
@@ -269,21 +269,21 @@ beforeAll(async () => {
       lastName: 'Ali',
       phone: null,
       phoneNormalized: null,
-      whatsappNumber: '+18687124902',
+      whatsappNumber: '+1 868 712 49 02',
       status: 'LEAD',
     },
   });
 
-  // Owner-owned PRIVATE contact in bizTT (invisible to staffBook)
+  // Owner-owned PRIVATE contact in bizTT (invisible to staffBook), whatsappNumber-only with separator inside last 4 digits
   await db.contact.create({
     data: {
       id: ID.contactPrivateTT,
       businessId: ID.bizTT,
       firstName: 'Private',
       lastName: 'VIP',
-      phone: '+18687124903',
-      phoneNormalized: '+18687124903',
-      whatsappNumber: '+18687124903',
+      phone: null,
+      phoneNormalized: null,
+      whatsappNumber: '+1 868 712 49 03',
       ownerId: ID.ownerA,
       visibility: 'PRIVATE',
       status: 'CLIENT',
@@ -344,6 +344,8 @@ describe('P46 (WEDGE-WA-INBOUND-CAPTURE, server half): POST /crm/businesses/:bus
       contactId: res.body.contact.id,
       type: 'communication.whatsapp',
       source: 'whatsapp_inbound',
+      actorType: 'USER',
+      actorId: ID.ownerA,
       data: {
         channel: 'whatsapp',
         direction: 'inbound',
@@ -403,7 +405,7 @@ describe('P46 (WEDGE-WA-INBOUND-CAPTURE, server half): POST /crm/businesses/:bus
     expect(afterCount).toBe(beforeCount);
   });
 
-  it('WAIC-03 RED-BEFORE: matches existing customer by whatsappNumber when phone is blank', async () => {
+  it('WAIC-03 RED-BEFORE: matches existing customer by formatted whatsappNumber (separator inside last 4 digits) when phone is blank, and supports explicit visible contactId', async () => {
     const beforeCount = await db.contact.count({ where: { businessId: ID.bizTT, deletedAt: null } });
 
     const res = await capture(ID.ownerA, ID.bizTT, {
@@ -414,6 +416,15 @@ describe('P46 (WEDGE-WA-INBOUND-CAPTURE, server half): POST /crm/businesses/:bus
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.created).toBe(false);
     expect(res.body.contact.id).toBe(ID.contactWaOnlyTT);
+
+    const explicit = await capture(ID.ownerA, ID.bizTT, {
+      phone: '(868) 712-4902',
+      message: 'Follow-up message via explicit contactId',
+      contactId: ID.contactWaOnlyTT,
+    });
+    expect(explicit.status, JSON.stringify(explicit.body)).toBe(201);
+    expect(explicit.body.created).toBe(false);
+    expect(explicit.body.contact.id).toBe(ID.contactWaOnlyTT);
 
     const afterCount = await db.contact.count({ where: { businessId: ID.bizTT, deletedAt: null } });
     expect(afterCount).toBe(beforeCount);
@@ -456,8 +467,8 @@ describe('P46 (WEDGE-WA-INBOUND-CAPTURE, server half): POST /crm/businesses/:bus
     expect(foreignNotes).toBe(0);
   });
 
-  it('WAIC-06 RED-BEFORE: respects M7 member visibility — refuses invisible phone holder without leaking id, refuses invisible contactId with 404, and assigns new contact to owned-book member', async () => {
-    // Invisible existing phone holder (owned by ownerA, PRIVATE): refused 409 without leaking holder id
+  it('WAIC-06 RED-BEFORE: respects M7 member visibility — refuses invisible formatted whatsappNumber holder without leaking id, refuses invisible contactId with 404, and assigns new contact to owned-book member', async () => {
+    // Invisible existing formatted whatsappNumber holder (owned by ownerA, PRIVATE): refused 409 without leaking holder id
     const hiddenHolder = await capture(ID.staffBook, ID.bizTT, {
       phone: '712-4903',
       message: 'Trying to reach private VIP',
