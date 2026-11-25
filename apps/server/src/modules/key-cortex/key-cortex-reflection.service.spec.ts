@@ -7,7 +7,22 @@
  * no queries against relations that do not exist.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as ts from 'typescript';
 import { KeyCortexReflectionService } from './key-cortex-reflection.service';
+
+/**
+ * The class's CODE, with comments dropped (string literals kept). The class's
+ * own comments name the capabilities it does not have ("needs
+ * KeyCortexInsight", "validateHypothesisAgainstSource was never implemented"),
+ * and whether a comment survives in toString() is up to the transform: esbuild
+ * dropped them, swc and tsc (production) keep them
+ * (FU-VITEST-DECORATOR-METADATA). These checks are about what the code does.
+ */
+function codeOf(fn: Function): string {
+  return ts.transpileModule(fn.toString(), {
+    compilerOptions: { removeComments: true, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+}
 
 function makeService() {
   const model = () => ({
@@ -96,14 +111,17 @@ describe('KeyCortexReflectionService', () => {
 
   describe('honesty about missing capability', () => {
     it('never queries KeyCortexInsight — no such table exists', () => {
-      const src = KeyCortexReflectionService.prototype.constructor.toString();
-      expect(src).not.toContain('KeyCortexInsight');
+      const src = codeOf(KeyCortexReflectionService.prototype.constructor);
+      expect(src).toContain('getLastReflectionSession');
+      // Case-insensitive, so a Prisma accessor (db.keyCortexInsight) counts too.
+      expect(src.toLowerCase()).not.toContain('keycortexinsight');
     });
 
     it('does not fabricate evidence for hypothesis sources', async () => {
       // validateHypothesisAgainstSource was never implemented; the organ must
       // contribute no evidence rather than inventing supporting facts.
-      const src = KeyCortexReflectionService.prototype.constructor.toString();
+      const src = codeOf(KeyCortexReflectionService.prototype.constructor);
+      expect(src).toContain('getLastReflectionSession');
       expect(src).not.toContain('validateHypothesisAgainstSource');
     });
   });

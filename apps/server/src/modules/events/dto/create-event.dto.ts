@@ -1,14 +1,14 @@
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
-  IsISO8601,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
 import { sanitize } from '../../../core/utils/sanitize';
+import { IsIsoDate } from './iso-date.decorator';
 
 export const EVENT_STATUSES = ['DRAFT', 'PUBLISHED', 'CANCELLED', 'COMPLETED'] as const;
 
@@ -25,13 +25,11 @@ export class CreateEventDto {
   @Transform(({ value }) => sanitize(value, 5000))
   description?: string;
 
-  @IsISO8601()
-  @Type(() => Date)
+  @IsIsoDate()
   startsAt!: Date;
 
   @IsOptional()
-  @IsISO8601()
-  @Type(() => Date)
+  @IsIsoDate()
   endsAt?: Date;
 
   @IsOptional()
