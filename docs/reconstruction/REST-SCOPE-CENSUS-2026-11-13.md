@@ -1127,10 +1127,10 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `BlueprintController.inferFromEvents` | POST | `/blueprint/businesses/:businessId/infer/events` | open | membership only; follow-up SWEEP-CENSUS: settings write; the business blueprint and genome DNA |
-| `BlueprintController.inferFromOnboarding` | POST | `/blueprint/businesses/:businessId/infer/onboarding` | open | membership only; follow-up SWEEP-CENSUS: settings write; the business blueprint and genome DNA |
-| `BlueprintController.update` | PATCH | `/blueprint/businesses/:businessId` | open | membership only; follow-up SWEEP-CENSUS: settings write; the business blueprint and genome DNA |
-| `BlueprintController.updateDnaSection` | PATCH | `/blueprint/businesses/:businessId/genome/dna/:section` | open | membership only; follow-up SWEEP-CENSUS: settings write; the business blueprint and genome DNA |
+| `BlueprintController.inferFromEvents` | POST | `/blueprint/businesses/:businessId/infer/events` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BlueprintController.inferFromOnboarding` | POST | `/blueprint/businesses/:businessId/infer/onboarding` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BlueprintController.update` | PATCH | `/blueprint/businesses/:businessId` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BlueprintController.updateDnaSection` | PATCH | `/blueprint/businesses/:businessId/genome/dna/:section` | applied | `settings:write` (SWP-CENSUS-GENOME) |
 
 ### BookingsAiController (`bookings/bookings-ai.controller.ts`)
 
@@ -1185,81 +1185,81 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `BusinessGenesisController.analyzeIdea` | POST | `/business-genesis/businesses/:businessId/analyze-idea` | open | membership only; follow-up SWEEP-CENSUS: settings write; genesis documents for the business |
-| `BusinessGenesisController.generateDocumentPack` | POST | `/business-genesis/businesses/:businessId/generate-document-pack` | open | membership only; follow-up SWEEP-CENSUS: settings write; genesis documents for the business |
-| `BusinessGenesisController.generateMarketStrategy` | POST | `/business-genesis/businesses/:businessId/generate-market-strategy` | open | membership only; follow-up SWEEP-CENSUS: settings write; genesis documents for the business |
-| `BusinessGenesisController.generateRiskRegister` | POST | `/business-genesis/businesses/:businessId/generate-risk-register` | open | membership only; follow-up SWEEP-CENSUS: settings write; genesis documents for the business |
-| `BusinessGenesisController.generateRoadmap` | POST | `/business-genesis/businesses/:businessId/generate-roadmap` | open | membership only; follow-up SWEEP-CENSUS: settings write; genesis documents for the business |
+| `BusinessGenesisController.analyzeIdea` | POST | `/business-genesis/businesses/:businessId/analyze-idea` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BusinessGenesisController.generateDocumentPack` | POST | `/business-genesis/businesses/:businessId/generate-document-pack` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BusinessGenesisController.generateMarketStrategy` | POST | `/business-genesis/businesses/:businessId/generate-market-strategy` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BusinessGenesisController.generateRiskRegister` | POST | `/business-genesis/businesses/:businessId/generate-risk-register` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `BusinessGenesisController.generateRoadmap` | POST | `/business-genesis/businesses/:businessId/generate-roadmap` | applied | `settings:write` (SWP-CENSUS-GENOME) |
 | `BusinessGenesisController.submitAnswers` | POST | `/business-genesis/businesses/:businessId/answers` | exempt-check | check:assertProfileAnswersOwner (D-11) |
 
 ### GenomeChatController (`business-genesis/genome-chat.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `GenomeChatController.applyUpdates` | POST | `/genome-chat/businesses/:businessId/apply-updates` | open | membership only; follow-up SWEEP-CENSUS: settings write |
-| `GenomeChatController.sendMessage` | POST | `/genome-chat/businesses/:businessId/messages` | open | membership only; follow-up SWEEP-CENSUS: settings write |
+| `GenomeChatController.applyUpdates` | POST | `/genome-chat/businesses/:businessId/apply-updates` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `GenomeChatController.sendMessage` | POST | `/genome-chat/businesses/:businessId/messages` | applied | `settings:write` (SWP-CENSUS-GENOME) |
 
 ### ConstitutionVersionController (`business-genome/constitution-version.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `ConstitutionVersionController.archive` | POST | `/business-genome/businesses/:businessId/constitution/versions/:version/archive` | open | membership only; follow-up SWEEP-CENSUS: settings write |
-| `ConstitutionVersionController.generate` | POST | `/business-genome/businesses/:businessId/constitution/generate` | open | membership only; follow-up SWEEP-CENSUS: settings write |
+| `ConstitutionVersionController.archive` | POST | `/business-genome/businesses/:businessId/constitution/versions/:version/archive` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `ConstitutionVersionController.generate` | POST | `/business-genome/businesses/:businessId/constitution/generate` | applied | `settings:write` (SWP-CENSUS-GENOME) |
 
 ### GenomeEvolutionController (`business-genome/genome-evolution.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `GenomeEvolutionController.approve` | POST | `/business-genome/businesses/:businessId/evolution-proposals/:id/approve` | open | membership only; follow-up SWEEP-CENSUS: settings write |
-| `GenomeEvolutionController.create` | POST | `/business-genome/businesses/:businessId/evolution-proposals` | open | membership only; follow-up SWEEP-CENSUS: settings write |
-| `GenomeEvolutionController.edit` | PATCH | `/business-genome/businesses/:businessId/evolution-proposals/:id` | open | membership only; follow-up SWEEP-CENSUS: settings write |
-| `GenomeEvolutionController.generateFromTemporalFlow` | POST | `/business-genome/businesses/:businessId/evolution-proposals/generate-from-temporal-flow` | open | membership only; follow-up SWEEP-CENSUS: settings write |
-| `GenomeEvolutionController.reject` | POST | `/business-genome/businesses/:businessId/evolution-proposals/:id/reject` | open | membership only; follow-up SWEEP-CENSUS: settings write |
+| `GenomeEvolutionController.approve` | POST | `/business-genome/businesses/:businessId/evolution-proposals/:id/approve` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `GenomeEvolutionController.create` | POST | `/business-genome/businesses/:businessId/evolution-proposals` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `GenomeEvolutionController.edit` | PATCH | `/business-genome/businesses/:businessId/evolution-proposals/:id` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `GenomeEvolutionController.generateFromTemporalFlow` | POST | `/business-genome/businesses/:businessId/evolution-proposals/generate-from-temporal-flow` | applied | `settings:write` (SWP-CENSUS-GENOME) |
+| `GenomeEvolutionController.reject` | POST | `/business-genome/businesses/:businessId/evolution-proposals/:id/reject` | applied | `settings:write` (SWP-CENSUS-GENOME) |
 
 ### KeyGenomeController (`business-genome/key-genome/key-genome.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyGenomeController.accept` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/accept` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.acceptRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/accept` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.applyRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/apply` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.cancelExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments/:experimentId/cancel` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.completeExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments/:experimentId/complete` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.computeDepartment` | POST | `/business-genome/businesses/:businessId/key-genome/departments/:code/compute` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.computeDepartments` | POST | `/business-genome/businesses/:businessId/key-genome/departments/compute` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.computeMarketingGrowthSnapshot` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/snapshot/compute` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.computeOperationsSnapshot` | POST | `/business-genome/businesses/:businessId/key-genome/operations/snapshot/compute` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.createContentStrategy` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/content-strategy` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.createExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.createGrowthChannel` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/channels` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.deleteContentStrategy` | DELETE | `/business-genome/businesses/:businessId/key-genome/marketing-growth/content-strategy/:strategyId` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
+| `KeyGenomeController.accept` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/accept` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.acceptRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/accept` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.applyRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/apply` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.cancelExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments/:experimentId/cancel` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.completeExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments/:experimentId/complete` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.computeDepartment` | POST | `/business-genome/businesses/:businessId/key-genome/departments/:code/compute` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.computeDepartments` | POST | `/business-genome/businesses/:businessId/key-genome/departments/compute` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.computeMarketingGrowthSnapshot` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/snapshot/compute` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.computeOperationsSnapshot` | POST | `/business-genome/businesses/:businessId/key-genome/operations/snapshot/compute` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.createContentStrategy` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/content-strategy` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.createExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.createGrowthChannel` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/channels` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.deleteContentStrategy` | DELETE | `/business-genome/businesses/:businessId/key-genome/marketing-growth/content-strategy/:strategyId` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
 | `KeyGenomeController.deleteCustomerSegment` | DELETE | `/business-genome/businesses/:businessId/key-genome/customer-sales/segments/:segmentId` | applied | `revenue:write` (FU-GENOME-REVENUE-CLASSIFIER, security review BLOCKING-2; D-234: revenue, cost, lifetime value and acquisition cost per segment or sales motion are finance) |
-| `KeyGenomeController.deleteDeliveryCapability` | DELETE | `/business-genome/businesses/:businessId/key-genome/operations/capabilities/:capabilityId` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.deleteGrowthChannel` | DELETE | `/business-genome/businesses/:businessId/key-genome/marketing-growth/channels/:channelId` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.deleteOperationalProcess` | DELETE | `/business-genome/businesses/:businessId/key-genome/operations/processes/:processId` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
+| `KeyGenomeController.deleteDeliveryCapability` | DELETE | `/business-genome/businesses/:businessId/key-genome/operations/capabilities/:capabilityId` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.deleteGrowthChannel` | DELETE | `/business-genome/businesses/:businessId/key-genome/marketing-growth/channels/:channelId` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.deleteOperationalProcess` | DELETE | `/business-genome/businesses/:businessId/key-genome/operations/processes/:processId` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
 | `KeyGenomeController.deleteSalesMotion` | DELETE | `/business-genome/businesses/:businessId/key-genome/customer-sales/motions/:motionId` | applied | `revenue:write` (FU-GENOME-REVENUE-CLASSIFIER, security review BLOCKING-2; D-234: revenue, cost, lifetime value and acquisition cost per segment or sales motion are finance) |
-| `KeyGenomeController.dismissRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/dismiss` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.escalateRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/escalate` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
+| `KeyGenomeController.dismissRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/dismiss` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.escalateRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/escalate` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
 | `KeyGenomeController.generateCustomerSalesRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/customer-sales/recommendations/generate` | applied | `revenue:write` (FU-GENOME-REVENUE-CLASSIFIER; D-234 with D-128 option a: sales-derived signals and recommendations are finance, generated by revenue writers as the finance ones are) |
 | `KeyGenomeController.generateCustomerSalesSignals` | POST | `/business-genome/businesses/:businessId/key-genome/customer-sales/signals/generate` | applied | `revenue:write` (FU-GENOME-REVENUE-CLASSIFIER; D-234 with D-128 option a: sales-derived signals and recommendations are finance, generated by revenue writers as the finance ones are) |
-| `KeyGenomeController.generateMarketingGrowthRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/recommendations/generate` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.generateMarketingGrowthSignals` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/signals/generate` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.generateOperationsRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/operations/recommendations/generate` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.generateOperationsSignals` | POST | `/business-genome/businesses/:businessId/key-genome/operations/signals/generate` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.generateRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/generate` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.ignoreRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/ignore` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.merge` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/merge` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.reject` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/reject` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.review` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/review` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.seedDepartments` | POST | `/business-genome/businesses/:businessId/key-genome/departments/seed` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.setOutcomeLearningWindow` | PUT | `/business-genome/businesses/:businessId/key-genome/outcome-windows/:domain` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.startExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments/:experimentId/start` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.trackRecommendationOutcome` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/track-outcome` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.updateContentStrategy` | PATCH | `/business-genome/businesses/:businessId/key-genome/marketing-growth/content-strategy/:strategyId` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.updateGrowthChannel` | PATCH | `/business-genome/businesses/:businessId/key-genome/marketing-growth/channels/:channelId` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
+| `KeyGenomeController.generateMarketingGrowthRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/recommendations/generate` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.generateMarketingGrowthSignals` | POST | `/business-genome/businesses/:businessId/key-genome/marketing-growth/signals/generate` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.generateOperationsRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/operations/recommendations/generate` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.generateOperationsSignals` | POST | `/business-genome/businesses/:businessId/key-genome/operations/signals/generate` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.generateRecommendations` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/generate` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.ignoreRecommendation` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/ignore` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.merge` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/merge` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.reject` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/reject` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.review` | POST | `/business-genome/businesses/:businessId/key-genome/signals/:signalId/review` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.seedDepartments` | POST | `/business-genome/businesses/:businessId/key-genome/departments/seed` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.setOutcomeLearningWindow` | PUT | `/business-genome/businesses/:businessId/key-genome/outcome-windows/:domain` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.startExperiment` | POST | `/business-genome/businesses/:businessId/key-genome/experiments/:experimentId/start` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.trackRecommendationOutcome` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/track-outcome` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.updateContentStrategy` | PATCH | `/business-genome/businesses/:businessId/key-genome/marketing-growth/content-strategy/:strategyId` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.updateGrowthChannel` | PATCH | `/business-genome/businesses/:businessId/key-genome/marketing-growth/channels/:channelId` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
 | `KeyGenomeController.upsertCustomerSegment` | POST | `/business-genome/businesses/:businessId/key-genome/customer-sales/segments` | applied | `revenue:write` (FU-GENOME-REVENUE-CLASSIFIER, security review BLOCKING-2; D-234: revenue, cost, lifetime value and acquisition cost per segment or sales motion are finance) |
-| `KeyGenomeController.upsertDeliveryCapability` | POST | `/business-genome/businesses/:businessId/key-genome/operations/capabilities` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
-| `KeyGenomeController.upsertOperationalProcess` | POST | `/business-genome/businesses/:businessId/key-genome/operations/processes` | open | membership only; follow-up SWEEP-CENSUS: settings write; finance signals and recommendations already need revenue write (requireSignalAction / requireRecommendationAction, D-128); the rest is membership only |
+| `KeyGenomeController.upsertDeliveryCapability` | POST | `/business-genome/businesses/:businessId/key-genome/operations/capabilities` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
+| `KeyGenomeController.upsertOperationalProcess` | POST | `/business-genome/businesses/:businessId/key-genome/operations/processes` | applied | `settings:write` (SWP-CENSUS-GENOME; finance signals and recommendations also keep D-128 revenue:write checks) |
 | `KeyGenomeController.upsertSalesMotion` | POST | `/business-genome/businesses/:businessId/key-genome/customer-sales/motions` | applied | `revenue:write` (FU-GENOME-REVENUE-CLASSIFIER, security review BLOCKING-2; D-234: revenue, cost, lifetime value and acquisition cost per segment or sales motion are finance) |
 
 ### CalendarController (`calendar/calendar.controller.ts`)
@@ -1769,10 +1769,10 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `GrowthIntelligenceController.backfill` | POST | `/growth-intelligence/businesses/:businessId/journeys/backfill` | open | membership only; follow-up SWEEP-CENSUS: analytics write |
-| `GrowthIntelligenceController.recomputeAttribution` | POST | `/growth-intelligence/businesses/:businessId/attribution/recompute` | open | membership only; follow-up SWEEP-CENSUS: analytics write |
-| `GrowthIntelligenceController.regenerate` | POST | `/growth-intelligence/businesses/:businessId/insights/regenerate` | open | membership only; follow-up SWEEP-CENSUS: analytics write |
-| `GrowthIntelligenceController.updateInsight` | POST | `/growth-intelligence/businesses/:businessId/insights/:insightId/status` | open | membership only; follow-up SWEEP-CENSUS: analytics write |
+| `GrowthIntelligenceController.backfill` | POST | `/growth-intelligence/businesses/:businessId/journeys/backfill` | applied | `analytics:write` (SWP-CENSUS-GENOME) |
+| `GrowthIntelligenceController.recomputeAttribution` | POST | `/growth-intelligence/businesses/:businessId/attribution/recompute` | applied | `analytics:write` (SWP-CENSUS-GENOME) |
+| `GrowthIntelligenceController.regenerate` | POST | `/growth-intelligence/businesses/:businessId/insights/regenerate` | applied | `analytics:write` (SWP-CENSUS-GENOME) |
+| `GrowthIntelligenceController.updateInsight` | POST | `/growth-intelligence/businesses/:businessId/insights/:insightId/status` | applied | `analytics:write` (SWP-CENSUS-GENOME) |
 
 ### HelpdeskController (`helpdesk/helpdesk.controller.ts`)
 
@@ -1889,12 +1889,12 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyflowCommandController.createNote` | POST | `/keyflow/businesses/:businessId/notes` | open | membership only; follow-up SWEEP-CENSUS: ai write |
-| `KeyflowCommandController.deleteNote` | DELETE | `/keyflow/businesses/:businessId/notes/:noteId` | open | membership only; follow-up SWEEP-CENSUS: ai write |
-| `KeyflowCommandController.generateBrief` | POST | `/keyflow/businesses/:businessId/notes/:noteId/brief` | open | membership only; follow-up SWEEP-CENSUS: ai write |
-| `KeyflowCommandController.transcribe` | POST | `/keyflow/businesses/:businessId/voice/transcribe` | open | membership only; follow-up SWEEP-CENSUS: ai write |
-| `KeyflowCommandController.tts` | POST | `/keyflow/businesses/:businessId/voice/tts` | open | membership only; follow-up SWEEP-CENSUS: ai write |
-| `KeyflowCommandController.updateNote` | PUT | `/keyflow/businesses/:businessId/notes/:noteId` | open | membership only; follow-up SWEEP-CENSUS: ai write |
+| `KeyflowCommandController.createNote` | POST | `/keyflow/businesses/:businessId/notes` | applied | `ai:write` (SWP-CENSUS-GENOME) |
+| `KeyflowCommandController.deleteNote` | DELETE | `/keyflow/businesses/:businessId/notes/:noteId` | applied | `ai:write` (SWP-CENSUS-GENOME) |
+| `KeyflowCommandController.generateBrief` | POST | `/keyflow/businesses/:businessId/notes/:noteId/brief` | applied | `ai:write` (SWP-CENSUS-GENOME) |
+| `KeyflowCommandController.transcribe` | POST | `/keyflow/businesses/:businessId/voice/transcribe` | applied | `ai:write` (SWP-CENSUS-GENOME) |
+| `KeyflowCommandController.tts` | POST | `/keyflow/businesses/:businessId/voice/tts` | applied | `ai:write` (SWP-CENSUS-GENOME) |
+| `KeyflowCommandController.updateNote` | PUT | `/keyflow/businesses/:businessId/notes/:noteId` | applied | `ai:write` (SWP-CENSUS-GENOME) |
 
 ### KeystoreAdminController (`keystore/keystore-admin.controller.ts`)
 
@@ -1972,7 +1972,7 @@ Every other route is applied (above).
 | `MomentumController.actionRecommendation` | POST | `/momentum/businesses/:businessId/recommendations/:id/action` | exempt-check | check:assertRecommendationVisible (CRM visibility of the recommendation's contact) |
 | `MomentumController.dismissRecommendation` | POST | `/momentum/businesses/:businessId/recommendations/:id/dismiss` | exempt-check | check:assertRecommendationVisible |
 | `MomentumController.generateDraft` | POST | `/momentum/businesses/:businessId/recommendations/:id/draft` | exempt-check | check:assertRecommendationVisible; check:assertContactVisible |
-| `MomentumController.runDailySweep` | POST | `/momentum/businesses/:businessId/sweep` | open | membership only; follow-up SWEEP-CENSUS: crm write |
+| `MomentumController.runDailySweep` | POST | `/momentum/businesses/:businessId/sweep` | applied | `crm:write` (SWP-CENSUS-GENOME) |
 | `MomentumController.snoozeRecommendation` | POST | `/momentum/businesses/:businessId/recommendations/:id/snooze` | exempt-check | check:assertRecommendationVisible |
 
 ### NotificationsController (`notifications/notifications.controller.ts`)

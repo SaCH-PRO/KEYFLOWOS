@@ -89,7 +89,7 @@ export { isFinanceRecommendation, isFinanceSignal, isMoneyMemoryEvent };
 type GenomeRequest = { user?: { id?: string; role?: string } };
 
 @Controller('business-genome/businesses/:businessId/key-genome')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class KeyGenomeController {
   constructor(
     @Inject(GenomeSignalService) private readonly signalService: GenomeSignalService,
@@ -211,6 +211,7 @@ export class KeyGenomeController {
     return signal;
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('signals/:signalId/review')
   async review(
     @Param('businessId') businessId: string,
@@ -221,6 +222,7 @@ export class KeyGenomeController {
     return this.signalService.reviewSignal(businessId, signalId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('signals/:signalId/accept')
   async accept(
     @Param('businessId') businessId: string,
@@ -231,6 +233,7 @@ export class KeyGenomeController {
     return this.signalService.acceptSignal(businessId, signalId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('signals/:signalId/reject')
   async reject(
     @Param('businessId') businessId: string,
@@ -241,6 +244,7 @@ export class KeyGenomeController {
     return this.signalService.rejectSignal(businessId, signalId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('signals/:signalId/merge')
   async merge(
     @Param('businessId') businessId: string,
@@ -274,6 +278,7 @@ export class KeyGenomeController {
     return listRecommendationsForReader(this.recommendationService, businessId, filters, await this.readsRevenue(businessId, req));
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/generate')
   async generateRecommendations(
     @Param('businessId') businessId: string,
@@ -317,6 +322,7 @@ export class KeyGenomeController {
     return recommendation;
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/:recommendationId/accept')
   async acceptRecommendation(
     @Param('businessId') businessId: string,
@@ -327,6 +333,7 @@ export class KeyGenomeController {
     return this.recommendationService.acceptRecommendation(businessId, recommendationId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/:recommendationId/dismiss')
   async dismissRecommendation(
     @Param('businessId') businessId: string,
@@ -343,6 +350,7 @@ export class KeyGenomeController {
     );
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/:recommendationId/apply')
   async applyRecommendation(
     @Param('businessId') businessId: string,
@@ -353,6 +361,7 @@ export class KeyGenomeController {
     return this.recommendationService.applyRecommendation(businessId, recommendationId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/:recommendationId/ignore')
   async ignoreRecommendation(
     @Param('businessId') businessId: string,
@@ -369,6 +378,7 @@ export class KeyGenomeController {
     );
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/:recommendationId/escalate')
   async escalateRecommendation(
     @Param('businessId') businessId: string,
@@ -379,6 +389,7 @@ export class KeyGenomeController {
     return this.recommendationService.escalateRecommendation(businessId, recommendationId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('recommendations/:recommendationId/track-outcome')
   async trackRecommendationOutcome(
     @Param('businessId') businessId: string,
@@ -493,6 +504,7 @@ export class KeyGenomeController {
     return this.outcomeService.getLearningWindow(businessId, domain);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Put('outcome-windows/:domain')
   async setOutcomeLearningWindow(
     @Param('businessId') businessId: string,
@@ -527,6 +539,7 @@ export class KeyGenomeController {
     );
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('experiments')
   async createExperiment(
     @Param('businessId') businessId: string,
@@ -543,6 +556,7 @@ export class KeyGenomeController {
     return this.experimentService.getExperiment(businessId, experimentId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('experiments/:experimentId/start')
   async startExperiment(
     @Param('businessId') businessId: string,
@@ -551,6 +565,7 @@ export class KeyGenomeController {
     return this.experimentService.startExperiment(businessId, experimentId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('experiments/:experimentId/complete')
   async completeExperiment(
     @Param('businessId') businessId: string,
@@ -560,6 +575,7 @@ export class KeyGenomeController {
     return this.experimentService.completeExperiment(businessId, experimentId, body);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('experiments/:experimentId/cancel')
   async cancelExperiment(
     @Param('businessId') businessId: string,
@@ -721,11 +737,13 @@ export class KeyGenomeController {
     return this.departments.summary(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('departments/seed')
   async seedDepartments(@Param('businessId') businessId: string) {
     return this.departments.seedDepartments(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('departments/compute')
   async computeDepartments(@Param('businessId') businessId: string) {
     return this.departmentReadiness.computeDepartmentReadiness(businessId);
@@ -739,6 +757,7 @@ export class KeyGenomeController {
     return this.departments.getDepartment(businessId, code);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('departments/:code/compute')
   async computeDepartment(
     @Param('businessId') businessId: string,
@@ -1000,6 +1019,7 @@ export class KeyGenomeController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('operations/processes')
   async upsertOperationalProcess(
     @Param('businessId') businessId: string,
@@ -1008,6 +1028,7 @@ export class KeyGenomeController {
     return this.operationalProcesses.upsertProcess({ ...body, businessId });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Delete('operations/processes/:processId')
   async deleteOperationalProcess(
     @Param('businessId') businessId: string,
@@ -1030,6 +1051,7 @@ export class KeyGenomeController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('operations/capabilities')
   async upsertDeliveryCapability(
     @Param('businessId') businessId: string,
@@ -1038,6 +1060,7 @@ export class KeyGenomeController {
     return this.deliveryCapabilities.upsertCapability({ ...body, businessId });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Delete('operations/capabilities/:capabilityId')
   async deleteDeliveryCapability(
     @Param('businessId') businessId: string,
@@ -1051,6 +1074,7 @@ export class KeyGenomeController {
     return this.operationsGenome.getLatestOperationsSnapshot(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('operations/snapshot/compute')
   async computeOperationsSnapshot(
     @Param('businessId') businessId: string,
@@ -1073,11 +1097,13 @@ export class KeyGenomeController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('operations/signals/generate')
   async generateOperationsSignals(@Param('businessId') businessId: string) {
     return this.operationsGenome.generateOperationsSignals(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('operations/recommendations/generate')
   async generateOperationsRecommendations(@Param('businessId') businessId: string) {
     return this.operationsGenome.generateOperationsRecommendations(businessId);
@@ -1103,6 +1129,7 @@ export class KeyGenomeController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/channels')
   async createGrowthChannel(
     @Param('businessId') businessId: string,
@@ -1111,6 +1138,7 @@ export class KeyGenomeController {
     return this.growthChannels.create(businessId, body);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Patch('marketing-growth/channels/:channelId')
   async updateGrowthChannel(
     @Param('businessId') businessId: string,
@@ -1120,6 +1148,7 @@ export class KeyGenomeController {
     return this.growthChannels.update(businessId, channelId, body);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Delete('marketing-growth/channels/:channelId')
   async deleteGrowthChannel(
     @Param('businessId') businessId: string,
@@ -1138,6 +1167,7 @@ export class KeyGenomeController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/content-strategy')
   async createContentStrategy(
     @Param('businessId') businessId: string,
@@ -1146,6 +1176,7 @@ export class KeyGenomeController {
     return this.contentStrategies.create(businessId, body);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Patch('marketing-growth/content-strategy/:strategyId')
   async updateContentStrategy(
     @Param('businessId') businessId: string,
@@ -1155,6 +1186,7 @@ export class KeyGenomeController {
     return this.contentStrategies.update(businessId, strategyId, body);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Delete('marketing-growth/content-strategy/:strategyId')
   async deleteContentStrategy(
     @Param('businessId') businessId: string,
@@ -1168,6 +1200,7 @@ export class KeyGenomeController {
     return this.marketingGenome.getLatestMarketingGrowthSnapshot(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/snapshot/compute')
   async computeMarketingGrowthSnapshot(
     @Param('businessId') businessId: string,
@@ -1190,11 +1223,13 @@ export class KeyGenomeController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/signals/generate')
   async generateMarketingGrowthSignals(@Param('businessId') businessId: string) {
     return this.marketingGenome.generateMarketingGrowthSignals(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/recommendations/generate')
   async generateMarketingGrowthRecommendations(@Param('businessId') businessId: string) {
     return this.marketingGenome.generateMarketingGrowthRecommendations(businessId);
