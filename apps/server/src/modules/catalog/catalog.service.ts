@@ -391,14 +391,16 @@ export class CatalogService {
     // Canonical Catalog event + legacy product event for back-compat.
     // SEC-P78-1: callers running inside a Prisma $transaction pass eventBuffer
     // and flush after commit so listeners never act on rolled-back rows.
-    const productEvents: Array<{ name: string; payload: unknown }> = [
-      { name: 'catalog.product.created', payload: { product, businessId: input.businessId } as CatalogProductCreatedPayload },
-      { name: 'product.created', payload: { product, businessId: input.businessId } as ProductCreatedPayload },
-    ];
+    const catalogProductPayload: CatalogProductCreatedPayload = { product, businessId: input.businessId };
+    const productPayload: ProductCreatedPayload = { product, businessId: input.businessId };
     if (eventBuffer) {
-      eventBuffer.push(...productEvents);
+      eventBuffer.push(
+        { name: 'catalog.product.created', payload: catalogProductPayload },
+        { name: 'product.created', payload: productPayload },
+      );
     } else {
-      for (const evt of productEvents) this.events.emit(evt.name, evt.payload);
+      this.events.emit('catalog.product.created', catalogProductPayload);
+      this.events.emit('product.created', productPayload);
     }
     return product;
   }
@@ -602,11 +604,11 @@ export class CatalogService {
         depositValue: deposit.depositValue,
       },
     });
-    const evt = { name: 'catalog.service.created', payload: { service, businessId: input.businessId } as CatalogServiceCreatedPayload };
+    const servicePayload: CatalogServiceCreatedPayload = { service, businessId: input.businessId };
     if (eventBuffer) {
-      eventBuffer.push(evt);
+      eventBuffer.push({ name: 'catalog.service.created', payload: servicePayload });
     } else {
-      this.events.emit(evt.name, evt.payload);
+      this.events.emit('catalog.service.created', servicePayload);
     }
     return service;
   }
