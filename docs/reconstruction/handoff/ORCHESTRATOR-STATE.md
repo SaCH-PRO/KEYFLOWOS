@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~21:45 UTC by the acting orchestrator (second-lane account, Claude Code), while wave M20
-is assembled; main `6f67c91e`. Rewrite in place on every merge, packet return
+Last written: 2026-11-26 ~00:05 UTC by the acting orchestrator (second-lane account, Claude Code), with M20 in the
+merge queue; main `6f67c91e`. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -107,32 +107,37 @@ Antigravity's M25 is gathering P87, P88, P89, P91, P92 and P93. P90 is blocked o
 - Both wave confirmations were CONFIRMED.
 - A first base comparison flagged H2 desktop and B4 phone. Re-run 3× at head and base, both proved intermittent on main as well: head 10/12, main 5/12 (PR #250 comments).
 
-**Wave M20 (Claude): assembled, proof next.** Branch `wave/v1-wave-m20` on main `6f67c91e`: 7 commits, 27 files before docs. The only 3-way merge is `lib/client.ts` (refund + M18), checked as an exact union.
+**Wave M20 (Claude): ENQUEUED** (PR #251, head `33949ba3`, base main `6f67c91e`).
+- Packets: P85 refund, FU-UNDO-TOAST-SIGNOUT, P94 CRM polish, FU-E2E-MOCKED-SESSION-TOKEN, plus docs.
+- CI is green at the exact head, and both wave confirmations are CONFIRMED.
+- Live proof: release0 2/2 and sweeps 20/20. Journeys C and E show no new failures, and E10 now passes. VN-06 passed 22/22 alone, twice.
+- After the merge: status, then rewrite this file, update the board and post MERGED on #80.
+
+**Returned and waiting for the next Claude wave (M22).** All four are confirmed by both lenses at these heads:
 
 | Packet | RETURN (#80) | Head |
 | --- | --- | --- |
-| P85 SWP-INV-REFUND-UI | 7175340837 | `5fa6b6ae` |
-| FU-UNDO-TOAST-SIGNOUT | 7175196432 | `17cff05b` |
-| P94 SWP-CRM-WEB-POLISH | 7175227657 | `4e7dff7d` |
-| FU-E2E-MOCKED-SESSION-TOKEN | 7174808551 | `364e7074` |
+| P67 FU-TIMELINE-LOAD-OLDER | 7175848843 | `558fc74d` |
+| FU-CONTACT-SEND-QUOTE-DOOR | 7175905083 | `480accfd` |
+| FU-NOTIFICATIONS-PAGE-REFUSED | 7178168855 | `ff6261ad` |
+| P95 OWNER-ALERTS-WEB | 7178169116 | `3acf76ff` |
 
-Next for M20:
-1. Wave proof: the server (unchanged), the web, mocked, and live (release0, Journey C, E10, the refund/toast/CRM sweeps). Run a base comparison on main.
-2. Open the PR and get two wave confirmations.
-3. Enqueue.
-4. Flag the refund scope extension (WiPay "Record refund", Stripe/PayPal link) in the PR.
+Expect about 44 files plus the docs.
+- notifications/page.tsx has two trivial conflicts between FU-NOTIFICATIONS-PAGE-REFUSED and OWNER-ALERTS-WEB: the `activeTab` union and the tab label. compact.sh cannot resolve them, so resolve by hand. Both reviewers did a trial merge, and the resolved file passes the notifications tests.
+- client.ts is touched by P67 and by main (M20 refund). Check that the 3-way merge produces an exact union.
+- OWNER-ALERTS-WEB carries a server hunk (D-288). The wave needs the server proof and Release 0.
 
-**Claude packets still in flight** (they go to the wave after M20):
+**Claude packets in flight:**
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **FU-CONTACT-SEND-QUOTE-DOOR** | `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` @ `0d4b9795` | Both lenses CONFIRMED round 3. Round 4 sent (cloud session_01TnVBvEZbY4vXtvn1Rwe3fk): pin the businessId check in useOffersQuote, and gate the next-action Send Quote on revenue write | Confirmations (agents af2a8caf27fa27f67 sec, a0fdabde685c8842f cor), RETURN |
-| **CATALOG-1 web** (P86, P0) | `pkt/V1-CATALOG-1-WEB` @ `b3e6567d` + repair | Repair round 1 in progress (worker a9dd428130de87b49, worktree wt-catalog, ports 3201/5400) | Confirmations (a8fbb482df73fd590 sec, a13fd66b7ba630c7c cor), RETURN |
-| **P67 FU-TIMELINE-LOAD-OLDER** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` @ `8bbd3d6f` + repair | Repair round 1 sent (cloud session_01TnVBvEKF6S66iYNwT5nAqe): real page validation, stale first-page pin, guard pin, 4xx cursor, business switch | Confirmations (a01c8d7712f5f7225 sec, ab47df79ddf6a2852 cor), RETURN |
-| **P95 OWNER-ALERTS-WEB** | `pkt/V1-OWNER-ALERTS-WEB` @ `3b392515` (claim, main `6f67c91e`) | Building (cloud session_01TnVBvJUNNMJKxwjseFmpYf). BUG-068 may already be fixed by P62; no staging | Two reviews |
-| **FU-NOTIFICATIONS-PAGE-REFUSED** | `pkt/V1-FU-NOTIFICATIONS-PAGE-REFUSED` @ `a0d744f4` (claim) | Building (cloud session_01TnVBvE2ehdmAcXkhkSmph3). Shares settings/notifications/page.tsx with P95 | Two reviews |
+| **CATALOG-1 web** (P86, P0) | `pkt/V1-CATALOG-1-WEB` @ `36068fb0` | Round 3 done: Your page follows a business switch, and new products default to Untracked. Fresh confirmations are running (the older reviewers were lost in a container restart). | RETURN, then wave M24 |
+| **P28 FU-CONTACT-PAGES-RAW-STATUS** | claim `13397315` | Building, cloud session_01TnVBvH393vm6vtetBUdtEh | Two reviews |
+| **P34 FU-KEY-CTRLJ-OWNERS** | claim `4716b3a5` | Building, cloud session_01TnVBvHETCGwk33Bpb8yi8d | Two reviews |
+| **RR-ADMIN-SHELL-SERVER-GATE**, then **RR-SESSION-STORAGE-CENSUS** | claims `4bb8c2c2`, `25b7f437` | Building, one after the other, in cloud session_01TnVBvEpu3HwDAmyBPKq3Qv | Two reviews each |
+| **CONTACTS-LIST-FIRST** (D-289, board P98) | not claimed | Waits for M20 on main, since it builds on P94 | Claim after M20 merges |
 
-If an agent or session is gone, start fresh reviewers on the branch head with ACCEPTANCE-REVIEW-BRIEF.md, or CONFIRMATION-REVIEW-BRIEF.md for a delta. Every worker report is on #80.
+If an agent or session is gone, start fresh reviewers on the branch head with ACCEPTANCE-REVIEW-BRIEF.md, or CONFIRMATION-REVIEW-BRIEF.md for a delta. Worker reports are on #80.
 
 **Queue:**
 - **Owner-gated:** RR-OWNER-RULINGS-RECORD (docs; it records the answers to OQ-5/13/19/30 and two RR migrations).
@@ -208,7 +213,7 @@ Main is at `6f67c91e`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **M20 (Claude)** | `wave/v1-wave-m20` | Assembled (4 packets) | Wave proof, PR, enqueue |
+| **M20 (Claude)** | `wave/v1-wave-m20` @ `33949ba3`, PR #251 | Enqueued | After the merge: status, this file, board, MERGED |
 | **Claude packets** | the five in section 0 | Repair, confirmation or building | RETURN, then the next wave |
 | **Antigravity** | M25: P87, P88, P89, P91, P92, P93; P90 blocked (question 52) | Building | Their wave |
 | **Owner** | - | - | Section 4 questions 40-50, 54 (51-53, 55, 56 answered: D-286 to D-289); production redeploy (D-266) |
