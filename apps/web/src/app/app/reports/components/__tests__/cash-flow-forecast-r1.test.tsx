@@ -218,6 +218,25 @@ describe("SWP-FIN-CASH-SOURCES web, repair round 1", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
+  it("R1-11 (SEC-CFW-2): while a Retry is still loading, the figures from before the failure do not come back", async () => {
+    api.apiGet.mockResolvedValueOnce({ data: USD_FORECAST, error: null });
+    const { container } = render(<CashFlowForecastView businessId="biz_r1" />);
+    expect(await screen.findByText("USD 350.00")).toBeInTheDocument();
+
+    api.apiGet.mockResolvedValueOnce({ data: null, error: "Internal Server Error", status: 500 });
+    fireEvent.click(refreshButton(container));
+    await settle();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    // The retry's answer never arrives in this test: the view stays loading.
+    api.apiGet.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await settle();
+    expect(screen.queryByText("USD 350.00")).toBeNull();
+    expect(screen.queryByText("Current Balance")).toBeNull();
+    expect(container.textContent).not.toMatch(/\d\.\d{2}/);
+  });
+
   it("R1-10 (D-57, D-100, control): a 403 is still the revenue-access notice with no Retry and no error", async () => {
     api.apiGet.mockResolvedValue({ data: null, error: "Forbidden", status: 403 });
     render(<CashFlowForecastView businessId="biz_r1" />);
