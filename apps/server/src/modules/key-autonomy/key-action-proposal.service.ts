@@ -11,7 +11,25 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { financialProposalsWithProvenance, financialProposalWithProvenance, genomeReaderReadsRevenue, nonFinancialProposalForReader, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
+import {
+  isCanonicalModule,
+  LEVEL_RANK,
+  memberModuleLevel,
+  rankOf,
+  type CanonicalModule,
+} from '../../core/authority/module-vocabulary';
+import {
+  financialProposalsWithProvenance,
+  financialProposalWithProvenance,
+  isFinanceRecommendation,
+  isFinanceSignal,
+  nonFinancialProposalForReader,
+  redactedProposalView,
+  type GenomeReader,
+  type GenomeRowFields,
+  type ProposalFields,
+} from '../business-genome/key-genome/genome-finance-scope';
+import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -59,6 +77,291 @@ type ClaimOutcome =
   | { kind: 'claimed' }
   | { kind: 'conflict' }
   | { kind: 'lapsed'; reason: string; approvedBy: string | null; recorded: boolean };
+
+/**
+ * W11-PROPOSAL-RESULT-READER-SCOPE (SEC-SR-2; D-238):
+ * Resolved read rights of a proposal reader within a business.
+ */
+interface ProposalReaderAccess {
+  userId: string | null;
+  isSuperAdmin: boolean;
+  isOwner: boolean;
+  readsRevenue: boolean;
+  canReadModule: (module: CanonicalModule) => boolean;
+}
+
+const CLOSED_READER_ACCESS: ProposalReaderAccess = {
+  userId: null,
+  isSuperAdmin: false,
+  isOwner: false,
+  readsRevenue: false,
+  canReadModule: () => false,
+};
+
+/**
+ * Non-canonical module aliases used by KEY proposal producers mapped to the
+ * canonical human-authority module vocabulary (module-vocabulary.ts).
+ */
+const MODULE_SCOPE_ALIASES: Readonly<Record<string, CanonicalModule>> = {
+  contacts: 'crm',
+  clients: 'crm',
+  calendar: 'bookings',
+  appointments: 'bookings',
+  tasks: 'projects',
+  social: 'content',
+  communications: 'content',
+  marketing: 'content',
+  finance: 'revenue',
+  commerce: 'revenue',
+  billing: 'revenue',
+  invoices: 'revenue',
+  payments: 'revenue',
+  sales: 'revenue',
+  marketplace: 'storefront',
+  inventory: 'storefront',
+};
+
+function resolveCanonicalModule(raw: string | null | undefined): CanonicalModule | null {
+  if (typeof raw !== 'string') return null;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (isCanonicalModule(normalized)) return normalized;
+  return MODULE_SCOPE_ALIASES[normalized] ?? null;
+}
+
+/**
+ * Canonical modules whose `read` scope is required to view a proposal's stored
+ * `executionResult`. Derived from the tool's organ-authority map first, plus
+ * the proposal's module (or tool prefix). Empty means unclassified.
+ */
+function requiredResultModules(proposal: Pick<KeyActionProposalData, 'toolName' | 'module'>): CanonicalModule[] {
+  const modules = new Set<CanonicalModule>();
+  const tool = typeof proposal.toolName === 'string' && proposal.toolName.trim() ? proposal.toolName.trim() : null;
+  if (tool) {
+    const authority = keyOrganToolAuthority(tool);
+    if (authority && 'scopes' in authority) {
+      for (const scope of authority.scopes) {
+        modules.add(scope.module);
+      }
+    }
+  }
+  const directModule = resolveCanonicalModule(proposal.module);
+  if (directModule) {
+    modules.add(directModule);
+  } else if (tool && tool.includes('.')) {
+    const prefixModule = resolveCanonicalModule(tool.split('.')[0]);
+    if (prefixModule) modules.add(prefixModule);
+  }
+  return [...modules];
+}
+
+async function resolveProposalReaderAccess(
+  prisma: PrismaService,
+  businessId: string,
+  reader: GenomeReader,
+): Promise<ProposalReaderAccess> {
+  if (reader?.role === 'SUPER_ADMIN') {
+    return {
+      userId: reader.id ?? null,
+      isSuperAdmin: true,
+      isOwner: false,
+      readsRevenue: true,
+      canReadModule: () => true,
+    };
+  }
+  if (!reader?.id) return CLOSED_READER_ACCESS;
+  if (reader.role === undefined) {
+    let platformRole: string | undefined;
+    try {
+      platformRole = (await prisma.client.user?.findUnique({ where: { id: reader.id }, select: { role: true } }))?.role;
+    } catch {
+      platformRole = undefined;
+    }
+    if (platformRole === 'SUPER_ADMIN') {
+      return {
+        userId: reader.id,
+        isSuperAdmin: true,
+        isOwner: false,
+        readsRevenue: true,
+        canReadModule: () => true,
+      };
+    }
+  }
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: reader.id, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return CLOSED_READER_ACCESS;
+  const isOwner = membership.role === 'OWNER';
+  const canReadModule = (mod: CanonicalModule) => rankOf(memberModuleLevel(membership, mod)) >= LEVEL_RANK.read;
+  return {
+    userId: reader.id,
+    isSuperAdmin: false,
+    isOwner,
+    readsRevenue: canReadModule('revenue'),
+    canReadModule,
+  };
+}
+
+const MAX_RESULT_WALK_DEPTH = 8;
+const MAX_RESULT_WALK_NODES = 200;
+
+interface ExtractedGenomeRefs {
+  recIds: string[];
+  sigIds: string[];
+  truncated: boolean;
+}
+
+/**
+ * Extract genome recommendation and signal IDs referenced inside a stored
+ * `executionResult` (bounded depth/nodes; truncated results fail closed).
+ */
+function extractGenomeRefs(value: unknown): ExtractedGenomeRefs {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return { recIds: [], sigIds: [], truncated: false };
+  }
+  const recIds = new Set<string>();
+  const sigIds = new Set<string>();
+  let visited = 0;
+  let truncated = false;
+
+  const pushString = (target: Set<string>, v: unknown) => {
+    if (typeof v === 'string' && v.trim().length > 0) target.add(v.trim());
+  };
+
+  const walk = (node: unknown, depth: number): void => {
+    if (truncated || node === null || node === undefined || typeof node !== 'object') return;
+    if (depth > MAX_RESULT_WALK_DEPTH || ++visited > MAX_RESULT_WALK_NODES) {
+      truncated = true;
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+      if (key === 'recommendationId') {
+        pushString(recIds, val);
+      } else if (key === 'signalId') {
+        pushString(sigIds, val);
+      } else if (key === 'recommendationIds' && Array.isArray(val)) {
+        for (const id of val) pushString(recIds, id);
+      } else if (key === 'signalIds' && Array.isArray(val)) {
+        for (const id of val) pushString(sigIds, id);
+      } else if (key === 'recommendations' && Array.isArray(val)) {
+        for (const entry of val) {
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+            pushString(recIds, (entry as Record<string, unknown>).id);
+          }
+          walk(entry, depth + 1);
+        }
+      } else if (key === 'signals' && Array.isArray(val)) {
+        for (const entry of val) {
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+            pushString(sigIds, (entry as Record<string, unknown>).id);
+          }
+          walk(entry, depth + 1);
+        }
+      } else if (val && typeof val === 'object') {
+        walk(val, depth + 1);
+      }
+    }
+  };
+
+  walk(value, 0);
+  return { recIds: [...recIds], sigIds: [...sigIds], truncated };
+}
+
+/**
+ * SEC-SR-2: batch-checks whether any proposal's `executionResult` references a
+ * FINANCIAL genome recommendation or signal by ID in `businessId` (fail closed
+ * on missing rows, truncated payloads, or DB errors).
+ */
+async function executionResultsReferenceFinanceGenome(
+  prisma: PrismaService,
+  businessId: string,
+  proposals: ReadonlyArray<Pick<KeyActionProposalData, 'executionResult'>>,
+): Promise<boolean[]> {
+  const extracted = proposals.map((p) => extractGenomeRefs(p.executionResult));
+  const wantedRecIds = [...new Set(extracted.flatMap((e) => e.recIds))];
+  const wantedSigIds = [...new Set(extracted.flatMap((e) => e.sigIds))];
+  if (wantedRecIds.length === 0 && wantedSigIds.length === 0) {
+    return extracted.map((e) => e.truncated);
+  }
+
+  let recMap: Map<string, GenomeRowFields> | null = new Map();
+  let sigMap: Map<string, GenomeRowFields> | null = new Map();
+  if (wantedRecIds.length > 0) {
+    try {
+      const recs = ((await prisma.client.genomeRecommendation?.findMany({
+        where: { businessId, id: { in: wantedRecIds } },
+        select: { id: true, domain: true, title: true, diagnosis: true },
+      })) ?? []) as Array<{ id: string } & GenomeRowFields>;
+      recMap = new Map(recs.map((r) => [r.id, r]));
+    } catch {
+      recMap = null;
+    }
+  }
+  if (wantedSigIds.length > 0) {
+    try {
+      const sigs = ((await prisma.client.genomeSignal?.findMany({
+        where: { businessId, id: { in: wantedSigIds } },
+        select: { id: true, sourceModule: true, section: true, domain: true, signalType: true, field: true, reason: true },
+      })) ?? []) as Array<{ id: string } & GenomeRowFields>;
+      sigMap = new Map(sigs.map((s) => [s.id, s]));
+    } catch {
+      sigMap = null;
+    }
+  }
+
+  return extracted.map(({ recIds, sigIds, truncated }) => {
+    if (truncated) return true;
+    if (recIds.length > 0) {
+      if (!recMap) return true;
+      for (const id of recIds) {
+        const rec = recMap.get(id);
+        if (!rec || isFinanceRecommendation(rec)) return true;
+      }
+    }
+    if (sigIds.length > 0) {
+      if (!sigMap) return true;
+      for (const id of sigIds) {
+        const sig = sigMap.get(id);
+        if (!sig || isFinanceSignal(sig)) return true;
+      }
+    }
+    return false;
+  });
+}
+
+/**
+ * SEC-SR-2: project a proposal's stored `executionResult` for the reader.
+ * Simplest correct rule:
+ *   - No `executionResult` -> unchanged.
+ *   - `SUPER_ADMIN` or `OWNER` -> keeps `executionResult`.
+ *   - Referenced finance genome row without `revenue:read` -> withhold (`null`).
+ *   - Declared tool/module scopes -> reader must hold `read` on every required
+ *     module, else withhold (`null`).
+ *   - Unclassified module -> only the run's member (`executedBy === reader.id`)
+ *     keeps `executionResult`, else withhold (`null`).
+ */
+function projectExecutionResultForReader<T extends KeyActionProposalData>(
+  proposal: T,
+  access: ProposalReaderAccess,
+  referencesFinanceGenome: boolean,
+): T {
+  if (proposal.executionResult === null || proposal.executionResult === undefined) return proposal;
+  if (access.isSuperAdmin || access.isOwner) return proposal;
+  if (!access.readsRevenue && referencesFinanceGenome) {
+    return { ...proposal, executionResult: null };
+  }
+  const required = requiredResultModules(proposal);
+  if (required.length > 0) {
+    return required.every((mod) => access.canReadModule(mod)) ? proposal : { ...proposal, executionResult: null };
+  }
+  const isRunMember = Boolean(access.userId && proposal.executedBy && access.userId === proposal.executedBy);
+  return isRunMember ? proposal : { ...proposal, executionResult: null };
+}
 
 @Injectable()
 export class KeyActionProposalService {
@@ -152,40 +455,71 @@ export class KeyActionProposalService {
   }
 
   /**
-   * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; security review BLOCKING-1): the proposals a reader is served over
-   * REST (GET actions/proposals, ai/approvals and its history). A reader without revenue read (ModuleScopeGuard's
-   * reading: SUPER_ADMIN passes; no reader or no membership reads none) is served only the non-financial ones, by their
-   * type, module, tool, text and parameters (isFinancialProposal; unknown fails closed). Revenue readers: unchanged.
+   * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; security review BLOCKING-1) &
+   * W11-PROPOSAL-RESULT-READER-SCOPE (SEC-SR-2): the proposals a reader is served
+   * over REST (GET actions/proposals, ai/approvals and its history).
+   * - Without revenue read: financial proposals are omitted (isFinancialProposal
+   *   + bridged recommendation provenance), and non-financial proposals have
+   *   money failure/evidence blanked and finance-referencing `executionResult`
+   *   withheld.
+   * - For every returned proposal with a stored `executionResult`: the result is
+   *   projected for the reader's module read rights (or run membership when the
+   *   proposal's module is unclassified).
    */
   async listForReader(businessId: string, query: ListKeyActionProposalsQuery, reader: GenomeReader | null): Promise<KeyActionProposalData[]> {
     const rows = await this.list(businessId, query);
-    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return rows;
+    const access = await resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined);
+    if (access.readsRevenue) {
+      return rows.map((row) => projectExecutionResultForReader(row, access, false));
+    }
     // One query for the recommendations the rows were bridged from (round-4 correctness minor 5).
     const financial = await financialProposalsWithProvenance(this.prisma, businessId, rows as unknown as ProposalFields[]);
-    return rows.filter((_row, i) => !financial[i]).map((row) => nonFinancialProposalForReader(row));
-  }
-
-  /** D-238: a financial proposal does not exist for a reader without revenue read: GET proposals/:id answers 404, exactly as an unknown id. */
-  async getForReader(businessId: string, proposalId: string, reader: GenomeReader | null): Promise<KeyActionProposalData> {
-    const proposal = await this.get(businessId, proposalId);
-    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return proposal;
-    if (await this.isFinancial(businessId, proposal)) throw new NotFoundException('Action proposal not found');
-    return nonFinancialProposalForReader(proposal);
+    const visible = rows.filter((_row, i) => !financial[i]).map((row) => nonFinancialProposalForReader(row));
+    const refsFin = await executionResultsReferenceFinanceGenome(this.prisma, businessId, visible);
+    return visible.map((row, i) => projectExecutionResultForReader(row, access, refsFin[i]));
   }
 
   /**
-   * D-238 (round 3): what an action on a proposal (approve, reject, cancel, execute, a legacy resolve) answers the actor.
-   * The action stays governed by the existing authority (risk tiers, D-140, D-119); a reader without revenue read is
-   * answered a financial proposal's redacted view (id, status and a failure reason that states no money).
+   * D-238 + W11-PROPOSAL-RESULT-READER-SCOPE (SEC-SR-2): a financial proposal
+   * does not exist for a reader without revenue read (404), and any visible
+   * proposal's stored `executionResult` is projected for the reader's scope.
+   */
+  async getForReader(businessId: string, proposalId: string, reader: GenomeReader | null): Promise<KeyActionProposalData> {
+    const proposal = await this.get(businessId, proposalId);
+    const access = await resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined);
+    if (access.readsRevenue) {
+      return projectExecutionResultForReader(proposal, access, false);
+    }
+    if (await this.isFinancial(businessId, proposal)) throw new NotFoundException('Action proposal not found');
+    const safe = nonFinancialProposalForReader(proposal);
+    const [refsFin] = await executionResultsReferenceFinanceGenome(this.prisma, businessId, [safe]);
+    return projectExecutionResultForReader(safe, access, refsFin);
+  }
+
+  /**
+   * D-238 (round 3) + W11-PROPOSAL-RESULT-READER-SCOPE (SEC-SR-2): what an
+   * action on a proposal (approve, reject, cancel, execute, a legacy resolve)
+   * answers the actor. The action stays governed by the existing authority
+   * (risk tiers, D-140, D-119); a reader without revenue read is answered a
+   * financial proposal's redacted view, and any non-redacted proposal's stored
+   * `executionResult` is projected for the reader's module scope.
    */
   async viewForReader<T extends KeyActionProposalData>(businessId: string, proposal: T, reader: GenomeReader | null): Promise<T | ReturnType<typeof redactedProposalView>> {
     if (!proposal || typeof proposal !== 'object' || typeof (proposal as { id?: unknown }).id !== 'string') return proposal;
     // The action has committed: a failed read answers the redacted view (fail closed), never an error for an action that
     // took effect (round-4 correctness minor 7).
-    const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined).catch(() => false);
-    if (readsRevenue) return proposal;
-    const financial = await this.isFinancial(businessId, proposal).catch(() => true);
-    return financial ? redactedProposalView(proposal) : nonFinancialProposalForReader(proposal);
+    const access = await resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined).catch(
+      () => CLOSED_READER_ACCESS,
+    );
+    if (!access.readsRevenue) {
+      const financial = await this.isFinancial(businessId, proposal).catch(() => true);
+      if (financial) return redactedProposalView(proposal);
+    }
+    const base = access.readsRevenue ? proposal : nonFinancialProposalForReader(proposal);
+    const [refsFin] = access.readsRevenue
+      ? [false]
+      : await executionResultsReferenceFinanceGenome(this.prisma, businessId, [base]).catch(() => [true]);
+    return projectExecutionResultForReader(base, access, refsFin);
   }
 
   /** D-238: whether a proposal of `businessId` is financial, by its own fields or the recommendation it was bridged from. */
