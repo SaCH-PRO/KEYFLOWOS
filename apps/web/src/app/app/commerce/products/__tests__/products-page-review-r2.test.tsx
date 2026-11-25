@@ -138,17 +138,19 @@ afterEach(() => {
 });
 
 describe("4. a new product is created with the inventory settings the form shows", () => {
-  it("defaults untouched: inventoryMode 'tracked' and outOfStockBehavior 'hide' are sent", async () => {
+  // Re-pinned in round 3 (orchestrator ruling COR-CAT-R2-1): the form's default is Untracked, shown and sent.
+  it("defaults untouched: what the form shows (Untracked) is sent, with no out-of-stock behaviour", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: /^new product$/i }));
     const form = await screen.findByRole("dialog");
-    expect(within(form).getByLabelText(/^inventory mode/i)).toHaveValue("tracked");
-    expect(within(form).getByLabelText(/^when out of stock/i)).toHaveValue("hide");
+    expect(within(form).getByLabelText(/^inventory mode/i)).toHaveValue("untracked");
     fireEvent.change(within(form).getByLabelText(/^name/i), { target: { value: "Pepper jelly" } });
     fireEvent.change(within(form).getByLabelText(/^price/i), { target: { value: "25" } });
     fireEvent.click(within(form).getByRole("button", { name: /^create product$/i }));
     await waitFor(() => expect(api.apiPost).toHaveBeenCalledTimes(1));
-    expect((api.apiPost.mock.calls[0][0] as { body: Record<string, unknown> }).body).toMatchObject({ inventoryMode: "tracked", outOfStockBehavior: "hide" });
+    const body = (api.apiPost.mock.calls[0][0] as { body: Record<string, unknown> }).body;
+    expect(body.inventoryMode).toBe("untracked");
+    expect(body.outOfStockBehavior).toBeUndefined();
   });
 
   it("untracked chosen: no out-of-stock behaviour is sent with it", async () => {

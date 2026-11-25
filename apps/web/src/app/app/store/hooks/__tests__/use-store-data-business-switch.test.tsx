@@ -100,3 +100,26 @@ describe.each(["event", "storage"] as const)("Your page follows a business switc
     expect(inventoryReads(A)).toBe(0);
   });
 });
+
+describe("a reload of A still in flight when B is selected", () => {
+  it("A's answer, arriving after the switch, does not replace B's products (a bulk add/remove reloads this way)", async () => {
+    const hook = renderHook(() => useStoreData());
+    await waitFor(() => expect(hook.result.current.commerceProducts.map((p) => p.id)).toEqual([`p_${A}`]));
+    // The next read of A's products waits until released.
+    let releaseA: () => void = () => {};
+    const aHeld = new Promise<void>((r) => { releaseA = r; });
+    const plain = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).getMockImplementation()!;
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).includes(`/commerce/businesses/${A}/products`)) await aHeld;
+      return plain(input);
+    });
+    act(() => { void hook.result.current.loadData(); });
+    act(() => {
+      ws.businessId = B;
+      window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: B } }));
+    });
+    await waitFor(() => expect(hook.result.current.commerceProducts.map((p) => p.id)).toEqual([`p_${B}`]));
+    await act(async () => { releaseA(); await new Promise((r) => setTimeout(r, 50)); });
+    expect(hook.result.current.commerceProducts.map((p) => p.id)).toEqual([`p_${B}`]);
+  });
+});
