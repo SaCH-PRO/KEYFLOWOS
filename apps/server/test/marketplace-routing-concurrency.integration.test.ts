@@ -416,6 +416,7 @@ async function cleanup() {
     `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM shipments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM purchase_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM pre_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -3911,4 +3912,289 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       row: [[ID.biz, IN_STOCK, 5]],
     });
   }, 30_000);
+});
+
+describe('W11-SHIP-STOCK-DECREMENT (F-26; D-136)', () => {
+  /** Paid STANDARD order with explicit per-line quantities (e.g. tracked A×2 or A×3). */
+  async function paidOrderWithLines(lines: Array<{ productId: string; quantity: number }>) {
+    orderSeq += 1;
+    const total = lines.reduce((sum, l) => sum + PRICE * l.quantity, 0);
+    const order = await db.marketplaceOrder.create({
+      data: {
+        businessId: ID.biz,
+        orderNumber: `${P}ord_${orderSeq}_${Date.now()}`,
+        type: 'STANDARD',
+        status: 'paid',
+        paymentStatus: 'PAID',
+        paymentMethod: 'CASH',
+        customerName: 'Vee Router',
+        customerEmail: CUSTOMER_EMAIL,
+        subtotal: total,
+        total,
+        currency: 'TTD',
+        metadata: { statusTimeline: [{ status: 'paid', timestamp: '2026-11-12T10:00:00.000Z', note: 'Order placed' }] },
+      },
+    });
+    for (const line of lines) {
+      await db.marketplaceOrderItem.create({
+        data: {
+          orderId: order.id,
+          productId: line.productId,
+          name: line.productId,
+          quantity: line.quantity,
+          unitPrice: PRICE,
+          total: PRICE * line.quantity,
+        },
+      });
+    }
+    return order;
+  }
+
+  const shipMovementsFor = async (orderId: string) =>
+    (
+      await db.stockMovement.findMany({
+        where: { businessId: ID.biz, referenceId: orderId },
+        orderBy: { createdAt: 'asc' },
+      })
+    ).map((m: any) => ({
+      productId: m.productId,
+      warehouseId: m.warehouseId,
+      type: m.type,
+      quantityChange: m.quantityChange,
+      reasonCode: m.reasonCode,
+      createdBy: m.createdBy,
+    }));
+
+  const shippedEventsFor = (orderId: string) =>
+    seen.filter((e) => e.name === 'store_order.shipped' && e.payload?.order?.id === orderId).length;
+
+  it('RC-58 (W11-SHIP-STOCK-DECREMENT; packet case RC-24; F-26, D-136) route → process → ship of tracked A×2 decrements A to 8/0, moves the route to SHIPPED with shipmentId, writes one SALE/SHIP StockMovement naming the acting member, and emits one store_order.shipped', async () => {
+    const order = await paidOrderWithLines([{ productId: ID.productA, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, order.id);
+    expect(await stockOf(ID.stockA)).toBe('10/2');
+    expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+
+    await market.fulfillOrder(ID.biz, order.id, 'process', {}, ID.owner);
+    expect(await statusOf(order.id)).toBe('picking_packing/PAID');
+    expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:PICKING_PACKING']);
+    expect(await stockOf(ID.stockA)).toBe('10/2');
+
+    await market.fulfillOrder(
+      ID.biz,
+      order.id,
+      'ship',
+      { carrier: 'DHL', trackingNumber: `${P}TRK_RC58` },
+      ID.owner,
+    );
+
+    const routes = await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+    const shipments = await db.shipment.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+    expect({
+      status: await statusOf(order.id),
+      stockA: await stockOf(ID.stockA),
+      routes: routes.map((r: any) => `${r.strategy}:${r.status}:${Boolean(r.shipmentId)}`),
+      shipmentCount: shipments.length,
+      linkedShipment: routes[0]?.shipmentId === shipments[0]?.id,
+      movements: await shipMovementsFor(order.id),
+      shippedEvents: shippedEventsFor(order.id),
+    }).toEqual({
+      status: 'shipped/PAID',
+      stockA: '8/0',
+      routes: ['LOCAL_STOCK:SHIPPED:true'],
+      shipmentCount: 1,
+      linkedShipment: true,
+      movements: [
+        {
+          productId: ID.productA,
+          warehouseId: ID.warehouse,
+          type: 'SALE',
+          quantityChange: -2,
+          reasonCode: 'SHIP',
+          createdBy: ID.owner,
+        },
+      ],
+      shippedEvents: 1,
+    });
+  }, 20_000);
+
+  it('RC-59 (W11-SHIP-STOCK-DECREMENT; packet case RC-25; F-26, D-136) ship while the route is still RESERVED (status set to picking_packing by PATCH) decrements A to 8/0 once and writes one SALE/SHIP StockMovement', async () => {
+    const order = await paidOrderWithLines([{ productId: ID.productA, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, order.id);
+    expect(await stockOf(ID.stockA)).toBe('10/2');
+
+    // PATCH status directly to picking_packing leaves the LOCAL_STOCK route RESERVED.
+    await market.updateOrderStatus(ID.biz, order.id, 'picking_packing');
+    expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+
+    await market.fulfillOrder(ID.biz, order.id, 'ship', {}, ID.owner);
+
+    expect({
+      status: await statusOf(order.id),
+      stockA: await stockOf(ID.stockA),
+      routes: await routesOf(order.id),
+      movements: await shipMovementsFor(order.id),
+      shippedEvents: shippedEventsFor(order.id),
+    }).toEqual({
+      status: 'shipped/PAID',
+      stockA: '8/0',
+      routes: ['LOCAL_STOCK:SHIPPED'],
+      movements: [
+        {
+          productId: ID.productA,
+          warehouseId: ID.warehouse,
+          type: 'SALE',
+          quantityChange: -2,
+          reasonCode: 'SHIP',
+          createdBy: ID.owner,
+        },
+      ],
+      shippedEvents: 1,
+    });
+  }, 20_000);
+
+  it('RC-60 (W11-SHIP-STOCK-DECREMENT; packet case RC-26; F-26, D-136) two ship calls at once: one answers 200 and the other 400; A ends at 8/0 with one shipment, one SALE/SHIP movement and one store_order.shipped event', async () => {
+    const order = await paidOrderWithLines([{ productId: ID.productA, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, order.id);
+    await market.fulfillOrder(ID.biz, order.id, 'process', {}, ID.owner);
+
+    const results = await Promise.allSettled([
+      market.fulfillOrder(ID.biz, order.id, 'ship', { carrier: 'DHL', trackingNumber: `${P}TRK_RC60_1` }, ID.owner),
+      market.fulfillOrder(ID.biz, order.id, 'ship', { carrier: 'DHL', trackingNumber: `${P}TRK_RC60_2` }, ID.owner),
+    ]);
+
+    const summary = results
+      .map((r) => {
+        if (r.status === 'fulfilled') return `200:${r.value.status}`;
+        const err: any = r.reason;
+        const code = typeof err?.getStatus === 'function' ? err.getStatus() : 500;
+        return `${code}:${err?.message ?? String(err)}`;
+      })
+      .sort();
+
+    const shipments = await db.shipment.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+    expect({
+      summary,
+      status: await statusOf(order.id),
+      stockA: await stockOf(ID.stockA),
+      routes: await routesOf(order.id),
+      shipmentCount: shipments.length,
+      movements: await shipMovementsFor(order.id),
+      shippedEvents: shippedEventsFor(order.id),
+    }).toEqual({
+      summary: ['200:shipped', '400:Cannot ship order in shipped status'],
+      status: 'shipped/PAID',
+      stockA: '8/0',
+      routes: ['LOCAL_STOCK:SHIPPED'],
+      shipmentCount: 1,
+      movements: [
+        {
+          productId: ID.productA,
+          warehouseId: ID.warehouse,
+          type: 'SALE',
+          quantityChange: -2,
+          reasonCode: 'SHIP',
+          createdBy: ID.owner,
+        },
+      ],
+      shippedEvents: 1,
+    });
+  }, 20_000);
+
+  it('RC-61 (W11-SHIP-STOCK-DECREMENT; packet case RC-27; F-26, D-136) ship order O1 (A×2) while routing order O2 (A×3) is held after its reservation: ship waits on the stock lock, both commit, and A ends at 8/3 with no lost reservation', async () => {
+    const o1 = await paidOrderWithLines([{ productId: ID.productA, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, o1.id);
+    await market.fulfillOrder(ID.biz, o1.id, 'process', {}, ID.owner);
+    expect(await stockOf(ID.stockA)).toBe('10/2');
+
+    const o2 = await paidOrderWithLines([{ productId: ID.productA, quantity: 3 }]);
+
+    let o2Reserved!: () => void;
+    const o2Held = new Promise<void>((resolve) => (o2Reserved = resolve));
+    let releaseO2!: () => void;
+    const goO2 = new Promise<void>((resolve) => (releaseO2 = resolve));
+    let hookedOnce = false;
+
+    const hook = hookStockWrites(async (_txNo, args) => {
+      if (hookedOnce || args?.where?.id !== ID.stockA) return;
+      hookedOnce = true;
+      o2Reserved();
+      await goO2;
+    });
+
+    let shipWaited = false;
+    try {
+      const routeO2 = routing.routeOrder(ID.biz, o2.id);
+      await o2Held;
+
+      const shipO1 = market.fulfillOrder(ID.biz, o1.id, 'ship', {}, ID.owner);
+      // Under the fix, ship locks stockA FOR UPDATE and blocks behind O2's uncommitted reservation until O2 commits.
+      const start = Date.now();
+      while (Date.now() - start < 4_000) {
+        if ((await waitingSessions()) >= 1) {
+          shipWaited = true;
+          break;
+        }
+        await sleep(50);
+      }
+
+      releaseO2();
+      await Promise.all([routeO2, shipO1]);
+    } finally {
+      releaseO2();
+      hook.restore();
+    }
+
+    expect({
+      shipWaited,
+      stockA: await stockOf(ID.stockA),
+      o1Status: await statusOf(o1.id),
+      o1Routes: await routesOf(o1.id),
+      o2Status: await statusOf(o2.id),
+      o2Routes: await routesOf(o2.id),
+      o1Movements: await shipMovementsFor(o1.id),
+    }).toEqual({
+      shipWaited: true,
+      stockA: '8/3',
+      o1Status: 'shipped/PAID',
+      o1Routes: ['LOCAL_STOCK:SHIPPED'],
+      o2Status: 'routed/PAID',
+      o2Routes: ['LOCAL_STOCK:RESERVED'],
+      o1Movements: [
+        {
+          productId: ID.productA,
+          warehouseId: ID.warehouse,
+          type: 'SALE',
+          quantityChange: -2,
+          reasonCode: 'SHIP',
+          createdBy: ID.owner,
+        },
+      ],
+    });
+  }, 30_000);
+
+  it('RC-62 (W11-SHIP-STOCK-DECREMENT; packet case RC-28; F-26, D-136) shipping an untracked line writes no stock and no StockMovement', async () => {
+    const order = await paidOrderWithLines([{ productId: ID.productU, quantity: 2 }]);
+    await routing.routeOrder(ID.biz, order.id);
+    await market.fulfillOrder(ID.biz, order.id, 'process', {}, ID.owner);
+    await market.fulfillOrder(ID.biz, order.id, 'ship', {}, ID.owner);
+
+    const untrackedStocks = await db.inventoryStock.findMany({
+      where: { businessId: ID.biz, productId: ID.productU },
+    });
+    expect({
+      status: await statusOf(order.id),
+      routes: await routesOf(order.id),
+      untrackedStockCount: untrackedStocks.length,
+      stockA: await stockOf(ID.stockA),
+      movements: await shipMovementsFor(order.id),
+      shippedEvents: shippedEventsFor(order.id),
+    }).toEqual({
+      status: 'shipped/PAID',
+      routes: ['LOCAL_STOCK:SHIPPED'],
+      untrackedStockCount: 0,
+      stockA: '10/0',
+      movements: [],
+      shippedEvents: 1,
+    });
+  }, 20_000);
 });
