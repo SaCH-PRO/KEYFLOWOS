@@ -322,8 +322,22 @@ export function actingMemberNow(): string {
  * business is read again. `sentAs` is who sent the write (actingMemberNow() taken before it was sent): an answer that
  * lands after the member changed is recorded for nobody.
  */
-export function noteBusinessSettings(businessId: string, answer: unknown, sentAs: string = actingMember()): boolean {
+export function noteBusinessSettings(businessId: string, answer: unknown, sentAs: string = actingMember(), sequence?: number): boolean {
   if (!businessId) return false;
+  // FU-SETTINGS-MANUAL-STEP-FENCE: a caller that sends its own write takes a number for it before sending
+  // (beginBusinessWrite) and passes it here, so its answer is fenced like the store's own writes (`recorded`): an answer
+  // older than one already recorded records nothing and the business is read again; a newer one raises the mark.
+  if (sequence !== undefined && sentAs === actingMember()) {
+    if ((newestWriteRecorded.get(businessId) ?? 0) > sequence) {
+      answerRecorded(businessId);
+      if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
+      else if (entries.delete(businessId)) emit();
+      return isPlainObject(answer) && answer.id === businessId;
+    }
+    // Raised for any answer recorded for the member acting, readable or not, as `recorded` does (review round 1,
+    // MINOR-2): the mark only discards older answers, it never records one.
+    newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  }
   answerRecorded(businessId);
   const own = isPlainObject(answer) && answer.id === businessId;
   if (sentAs !== actingMember()) {
@@ -368,6 +382,14 @@ function nextWrite(businessId: string): number {
   return sequence;
 }
 
+/**
+ * FU-SETTINGS-MANUAL-STEP-FENCE: the number of a settings write a caller sends itself (the manual onboarding step's
+ * profile PATCH), taken just before sending; pass it to noteBusinessSettings with the answer.
+ */
+export function beginBusinessWrite(businessId: string): number {
+  return nextWrite(businessId);
+}
+
 type WriteAnswer = Awaited<ReturnType<typeof apiPatch<Record<string, unknown>>>>;
 
 const notSent = (error: string): WriteAnswer => ({ data: null, error });
@@ -378,6 +400,39 @@ const UNREADABLE_ANSWER = "The change was sent, but the answer could not be read
 const MEMBER_CHANGED = "The change was sent by someone who is no longer signed in here. Check what is shown before changing it again.";
 /** A 2xx for this business that does not hold what was sent (review SEC2-1). */
 const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show it. Check what is shown here before trying again.";
+
+/**
+ * A write whose outcome is unknown (no status: a dropped connection, a timeout; or a 5xx: a gateway that gave up while
+ * the server went on, a failure after the write was stored) may have been applied (reviews SEC5-1, SEC6-2).
+ *
+ * It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after theirs, so
+ * an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer check takes an
+ * answer older than one recorded: nothing of it is recorded, and the business is read again. Raised whoever is acting
+ * now (review round 1): the write may have been applied whoever sent it, and the fence records nothing for anyone, it
+ * only discards an older answer (SEC-3 governs recording an answer). What is held meanwhile is no longer taken as
+ * current (SEC6-1).
+ */
+function outcomeUnknown(businessId: string, sequence: number): void {
+  newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  answerRecorded(businessId);
+  const held = entries.get(businessId);
+  if (!watched.has(businessId)) {
+    if (entries.delete(businessId)) emit();
+  } else {
+    if (held?.status === "ready") entries.set(businessId, { ...held, readAt: 0 });
+    void loadBusinessSettings(businessId, { force: true });
+  }
+}
+
+/**
+ * FU-SETTINGS-MANUAL-STEP-FENCE (review round 1, MINOR-1): a caller's own numbered write (beginBusinessWrite) that
+ * failed. A failure with no status or a 5xx is an unknown outcome and fences older answers exactly as the store's own
+ * writes do (outcomeUnknown); a 4xx is the server's answer that nothing changed, and changes nothing here.
+ */
+export function noteBusinessWriteFailed(businessId: string, status: number | undefined, sequence: number): void {
+  if (!businessId) return;
+  if (status === undefined || status >= 500) outcomeUnknown(businessId, sequence);
+}
 
 /**
  * The answer of a write as the caller gets it. A 2xx is a success only when it answered for this business and holds
@@ -412,22 +467,7 @@ function recorded(
     // is, and what the business holds is read again. What is held meanwhile is no longer taken as current (review
     // SEC6-1): if that re-read fails too, the next mount or look at the tab reads again. A 4xx is the server's
     // answer that nothing changed, and changes nothing here.
-    if (res.status === undefined || res.status >= 500) {
-      // It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after
-      // theirs, so an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer
-      // check above takes an answer older than one recorded: nothing of it is recorded, and the business is read
-      // again. Raised whoever is acting now (review round 1): the write may have been applied whoever sent it, and
-      // the fence records nothing for anyone, it only discards an older answer (SEC-3 governs recording an answer).
-      newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
-      answerRecorded(businessId);
-      const held = entries.get(businessId);
-      if (!watched.has(businessId)) {
-        if (entries.delete(businessId)) emit();
-      } else {
-        if (held?.status === "ready") entries.set(businessId, { ...held, readAt: 0 });
-        void loadBusinessSettings(businessId, { force: true });
-      }
-    }
+    if (res.status === undefined || res.status >= 500) outcomeUnknown(businessId, sequence);
     return res;
   }
   if (sentAs !== actingMember()) {

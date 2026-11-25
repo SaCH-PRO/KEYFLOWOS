@@ -781,7 +781,8 @@ export function ContactsDatabase({
       <ConfirmDialog
         open={db.confirmState.open}
         title="Delete Contacts"
-        message={`Delete ${db.confirmState.count} contacts? This action cannot be undone.`}
+        // BUG-128: a bulk delete is a soft delete (crm.service.ts bulkDeleteContacts sets deletedAt).
+        message={`Delete ${db.confirmState.count} contacts? They move to Trash, where you can restore them.`}
         confirmLabel="Delete"
         variant="danger"
         onConfirm={() => { db.confirmState.onConfirm(); db.handleConfirmClose(); }}
