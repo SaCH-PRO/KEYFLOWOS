@@ -39,6 +39,8 @@
  *                    system: crm-timeline.service.ts updateNote / deleteNote) is WhatsApp, when the page shows that the
  *                    note is a pasted one (its communication.whatsapp or its whatsapp_inbound note.created); an
  *                    ordinary note's edit stays a note
+ *   TCH-18  RED      MIN-4: a failed events read is not an empty history: an error line with Retry, no filter
+ *                    counts, never "No timeline events yet"; Retry reads again and shows the timeline
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -118,6 +120,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** The filter group and its buttons, by their visible names. */
@@ -411,5 +414,32 @@ describe("D-277: the Timeline has a channel filter", () => {
     served = [PASTED[0], { id: "ev_wa_upd", contactId: C, type: "note.updated", source: "system", createdAt: at(12), data: { noteId: "n_wa" } }];
     await renderTimeline();
     expect([countOf("WhatsApp"), countOf("Notes")]).toEqual([2, 0]);
+  });
+
+  it("TCH-18 RED: a failed read says so with Retry, shows no counts and no empty history; Retry reads again", async () => {
+    let failing = true;
+    const reads = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(url, "http://localhost");
+      if (!pathname.endsWith(`/contacts/${C}/events`)) return json(404, { message: "Not stubbed" });
+      return failing ? json(503, { message: "Service unavailable" }) : json(200, [NOTE, ...PASTED]);
+    });
+    vi.stubGlobal("fetch", reads);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await renderTimeline();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/could not load the timeline/i);
+    expect(screen.queryByText(/no timeline events yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^0 events$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /filter by channel/i })).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("(0)");
+
+    failing = false;
+    const before = reads.mock.calls.length;
+    fireEvent.click(within(alert).getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText(PASTED_TEXT)).toBeInTheDocument();
+    expect(reads.mock.calls.length).toBe(before + 1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(countOf("All")).toBe(2);
   });
 });
