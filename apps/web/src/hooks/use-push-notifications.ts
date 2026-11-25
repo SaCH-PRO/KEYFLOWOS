@@ -13,8 +13,13 @@
  *
  * Repair round 1 (reviews of b058731f):
  * - A shared device (COR-M1): "on" is the browser's subscription, which may be another member's. Turn off asks the
- *   server first; unsubscribeOwn removes only the caller's row and answers { count: 0 } when there is none. Then the
- *   browser subscription is left alone (removing it would end the other member's push) and the state is 'another-member'.
+ *   server first; unsubscribeOwn removes only the caller's row and answers { count: 0 } when there is none.
+ *   Repair round 2 (N1): count 0 also means no row at all (a failed re-save, a refused save whose browser rollback
+ *   failed, the server's expiry cleanup), so it is resolved, not assumed: POST /push/subscribe with the same
+ *   subscription. subscribeOwn refuses with 403 "This device is subscribed by another member" when another member's
+ *   row holds it: the browser subscription is left alone (removing it would end their push) and the state is
+ *   'another-member'. When it saves, the device was this member's own stale one, and the turn-off they asked for is
+ *   completed (unsubscribe again, then the browser). Any other answer: 'unavailable' with Retry, browser left alone.
  * - A browser unsubscribe that throws after the server removed the device (COR-M11): the device is saved back and push
  *   stays on, so server and browser agree again.
  * - A local development origin (COR-M3): on localhost and 127.0.0.1 the app's worker unregisters itself (public/sw.js)
@@ -197,8 +202,26 @@ export function usePushNotifications(businessId?: string | null) {
       body: { endpoint: sub.endpoint },
     });
     if (removeError) return done('subscribed', `Push could not be turned off (${removeError}), so it stays on.`);
-    // None of this member's rows held the device: it is another member's. Leave their browser subscription alone.
-    if (removed?.count === 0) return done('another-member');
+    if (removed?.count === 0) {
+      // None of this member's rows held the device: ask who holds it (see the header, N1).
+      const probe = await apiPost<unknown>({
+        path: `/api/businesses/${encodeURIComponent(businessId)}/push/subscribe`,
+        body: { subscription: sub.toJSON() },
+      });
+      if (probe.error && probe.status === 403) return done('another-member');
+      if (probe.error) {
+        return done('unavailable', `Push could not be turned off: who this device belongs to could not be checked (${probe.error}).`);
+      }
+      // This member's own device, now saved again: complete the turn-off.
+      const again = await apiPost<{ count?: unknown }>({
+        path: `/api/businesses/${encodeURIComponent(businessId)}/push/unsubscribe`,
+        body: { endpoint: sub.endpoint },
+      });
+      if (again.error) return done('subscribed', `Push could not be turned off (${again.error}), so it stays on.`);
+      if (again.data?.count === 0) {
+        return done('unavailable', 'Push could not be turned off: the server did not remove this device. Reload the page.');
+      }
+    }
     try {
       await sub.unsubscribe();
     } catch (e) {
