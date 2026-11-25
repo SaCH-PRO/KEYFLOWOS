@@ -1500,3 +1500,59 @@ describe('CR-29b-1 (FOLLOW3-A4-PUBLIC-PAID-NET): every public reader of the pay 
     for (const [label, f] of Object.entries(readers)) expect(f.paid, `${label}: the ledger cash net`).toBe(cashNet);
   });
 });
+
+describe('P96 review R1-COR-1: hand-recorded PayPal/PAYPAL/pre-D-55 manual_* payments stay manually refundable', () => {
+  it('RF-15 (R1-COR-1): manual web-form PayPal, evidence PAYPAL, and pre-D-55 manual_* stripe payments refund 201 via POST .../payments/:id/refund', async () => {
+    const inv = `${P}inv_manual_paypal_ctrl`;
+    await db.invoice.create({
+      data: {
+        id: inv,
+        businessId: ID.bizA,
+        contactId: ID.contact,
+        invoiceNumber: `${P}INV-R1COR1`,
+        status: 'SENT',
+        subtotal: 150,
+        total: 150,
+        currency: 'TTD',
+      },
+    });
+
+    // 1. Web Record Payment modal sends method='PayPal' -> provider='PayPal', providerPaymentId='manual_...' (D-55)
+    const webPaypal = await pay(inv, { amount: 50, method: 'PayPal', reference: 'V29A-WEB-PP' });
+    expect(webPaypal.status, JSON.stringify(webPaypal.body)).toBe(201);
+    expect(webPaypal.body.payment.provider).toBe('PayPal');
+    expect(webPaypal.body.payment.providerPaymentId).toMatch(/^manual_/);
+
+    // 2. Evidence confirm sends method='PAYPAL' -> provider='PAYPAL', providerPaymentId='manual_...'
+    const evPaypal = await pay(inv, { amount: 50, method: 'PAYPAL', reference: 'V29A-EV-PP' });
+    expect(evPaypal.status, JSON.stringify(evPaypal.body)).toBe(201);
+    expect(evPaypal.body.payment.provider).toBe('PAYPAL');
+    expect(evPaypal.body.payment.providerPaymentId).toMatch(/^manual_/);
+
+    // 3. Pre-D-55 legacy manual row with provider='stripe' and providerPaymentId='manual_...'
+    const legacyManual = await db.payment.create({
+      data: {
+        id: `${inv}_legacy_stripe`,
+        businessId: ID.bizA,
+        invoiceId: inv,
+        amount: 50,
+        currency: 'TTD',
+        status: 'SUCCESSFUL',
+        provider: 'stripe',
+        method: 'stripe',
+        providerPaymentId: `manual_${P}legacy_stripe`,
+      },
+    });
+
+    for (const [label, pid] of [
+      ['web PayPal', webPaypal.body.payment.id],
+      ['evidence PAYPAL', evPaypal.body.payment.id],
+      ['pre-D-55 manual stripe', legacyManual.id],
+    ] as const) {
+      const res = await refund(pid, `manual refund ${label}`);
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body).toMatchObject({ amount: -50, status: 'REFUNDED', refundOfPaymentId: pid });
+    }
+    expect(await balanceOf(inv)).toMatchObject({ paid: 150, refunded: 150, net: 0, remaining: 150 });
+  });
+});
