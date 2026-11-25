@@ -9,7 +9,44 @@ import { formatCurrency } from "./report-types";
 
 interface CashFlowForecastViewProps {
   businessId: string | null;
-  currency?: string;
+}
+
+/**
+ * SWP-FIN-CASH-SOURCES (D-13, D-135; SEC-W10LR-1): a currency is named only when it is a three-letter
+ * code, as the server's rule (finance-overview.service.ts namedCashCurrency). The server already omits a
+ * free-text business currency and lists only coded other-currency cash; the view applies the same rule
+ * so that a label that is not a code is never echoed, whatever answers.
+ */
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+
+/** The forecast's figures as the view shows them: the server's, with nothing recomputed or added. */
+interface CashFigures {
+  /** The business currency's code, or null when the server names none (free text): never a default. */
+  code: string | null;
+  /** Other-currency cash, unconverted, never part of currentBalance (D-135). */
+  otherCash: Array<{ currency: string; amount: number }>;
+  /** Other-currency amounts held but not listed: the server's count plus any label that is not a code. */
+  notListed: number;
+}
+
+function cashFigures(forecast: CashFlowForecast): CashFigures {
+  const code = typeof forecast.currency === "string" && CURRENCY_CODE.test(forecast.currency) ? forecast.currency : null;
+  const served = Array.isArray(forecast.otherCurrencyCash) ? forecast.otherCurrencyCash : [];
+  const otherCash = served.filter(
+    (o) => typeof o?.currency === "string" && CURRENCY_CODE.test(o.currency) && Number.isFinite(o.amount),
+  );
+  const servedNotListed = Number.isFinite(forecast.otherCurrencyCashNotListed) ? Number(forecast.otherCurrencyCashNotListed) : 0;
+  return { code, otherCash, notListed: servedNotListed + (served.length - otherCash.length) };
+}
+
+/**
+ * A business-currency figure: report-types formatCurrency with the server's code; with no code, the same
+ * number format and no label (the basis line says the figures are in the business currency).
+ */
+function formatCash(amount: number, code: string | null): string {
+  return code
+    ? formatCurrency(amount, code)
+    : amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 interface ForecastPoint {
@@ -41,7 +78,7 @@ const TREND_CONFIG: Record<string, { icon: typeof TrendingUp; color: string; lab
   stable: { icon: Minus, color: "--kf-info", label: "Stable" },
 };
 
-export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowForecastViewProps) {
+export function CashFlowForecastView({ businessId }: CashFlowForecastViewProps) {
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [loading, setLoading] = useState(false);
   // W11-AI-CASHFLOW-REVENUE (D-57, D-100): the forecast needs revenue read; the server answers 403 otherwise.
@@ -82,15 +119,22 @@ export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowF
   const trend = TREND_CONFIG[trendKey] ?? TREND_CONFIG.stable;
   const TrendIcon = trend.icon;
   const confidence = forecast ? computeConfidence(forecast) : null;
-  const netDaily = (forecast?.dailyRevenueRate ?? 0) - (forecast?.dailyExpenseRate ?? 0);
+  const figures = forecast ? cashFigures(forecast) : null;
+  const code = figures?.code ?? null;
+  const money = (amount: number) => formatCash(amount, code);
 
+  // SWP-FIN-CASH-SOURCES: the line runs from the server's currentBalance (ledger cash) to its
+  // projectedBalance over the server's projection days. It was recomputed from the rounded daily rates,
+  // so its last day disagreed with the "Projected" figure (1349.90 against 1350.00).
   const chartData: ForecastPoint[] = [];
   if (forecast) {
     const start = forecast.currentBalance;
+    const end = forecast.projectedBalance;
+    const span = forecast.projectionDays && forecast.projectionDays > 0 ? forecast.projectionDays : 90;
     for (let d = 0; d <= 90; d++) {
       chartData.push({
         day: d === 0 ? "Now" : d % 30 === 0 ? `${d}d` : d % 10 === 0 ? `${d}d` : `${d}`,
-        balance: Math.round((start + netDaily * d) * 100) / 100,
+        balance: Math.round((start + (end - start) * (d / span)) * 100) / 100,
       });
     }
   }
@@ -134,29 +178,62 @@ export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowF
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <MetricCard
               label="Current Balance"
-              value={formatCurrency(forecast.currentBalance, currency)}
+              value={money(forecast.currentBalance)}
               color="--kf-accent1"
             />
             <MetricCard
               label="Projected (90d)"
-              value={formatCurrency(forecast.projectedBalance, currency)}
+              value={money(forecast.projectedBalance)}
               color={forecast.projectedBalance >= forecast.currentBalance ? "--kf-success" : "--kf-error"}
               change={forecast.projectedBalance - forecast.currentBalance}
-              currency={currency}
+              formatChange={money}
             />
             <MetricCard
               label="Daily Inflow"
-              value={formatCurrency(forecast.dailyRevenueRate, currency)}
+              value={money(forecast.dailyRevenueRate)}
               color="--kf-success"
               icon={ArrowUpRight}
             />
             <MetricCard
               label="Daily Outflow"
-              value={formatCurrency(forecast.dailyExpenseRate, currency)}
+              value={money(forecast.dailyExpenseRate)}
               color="--kf-error"
               icon={ArrowDownRight}
             />
           </div>
+
+          {/* SWP-FIN-CASH-SOURCES (D-135): what the balance is, and in which currency. */}
+          <p data-testid="cash-basis" className="text-[11px] text-muted-foreground -mt-1">
+            {forecast.cashBasis === "ledger"
+              ? `Current balance is booked ledger cash in ${code ?? "the business currency"} up to today; future-dated entries are not counted.`
+              : `Amounts in ${code ?? "the business currency"}.`}
+            {forecast.cashBasis === "ledger" && !code ? " Your business currency is not set as a three-letter code, so no code is shown." : ""}
+          </p>
+
+          {figures && (figures.otherCash.length > 0 || figures.notListed > 0) && (
+            <div
+              data-testid="other-currency-cash"
+              className="rounded-xl p-3 border border-border/30 text-xs"
+              style={{ background: "hsl(var(--kf-info) / 0.04)" }}
+            >
+              <p className="font-medium">Cash in other currencies</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Not converted, and not included in the balance or the projection above.
+              </p>
+              {figures.otherCash.length > 0 && (
+                <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {figures.otherCash.map((o) => (
+                    <li key={o.currency} className="font-mono">{formatCurrency(o.amount, o.currency)}</li>
+                  ))}
+                </ul>
+              )}
+              {figures.notListed > 0 && (
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  {figures.notListed} more {figures.notListed === 1 ? "amount" : "amounts"} held in other currencies, not listed.
+                </p>
+              )}
+            </div>
+          )}
 
           <Card className="p-4 backdrop-blur border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
             <div className="flex items-center justify-between mb-3">
@@ -204,7 +281,7 @@ export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowF
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    formatter={(value) => [formatCurrency(Number(value), currency), "Balance"]}
+                    formatter={(value) => [money(Number(value)), "Balance"]}
                     labelFormatter={(label) => `Day: ${label}`}
                   />
                   <ReferenceLine y={0} stroke="hsl(var(--kf-error) / 0.5)" strokeDasharray="4 4" />
@@ -264,14 +341,14 @@ function MetricCard({
   value,
   color,
   change,
-  currency,
+  formatChange,
   icon: Icon,
 }: {
   label: string;
   value: string;
   color: string;
   change?: number;
-  currency?: string;
+  formatChange?: (amount: number) => string;
   icon?: typeof ArrowUpRight;
 }) {
   return (
@@ -281,9 +358,9 @@ function MetricCard({
         <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</p>
       </div>
       <p className="text-sm font-bold" style={{ color: `hsl(var(${color}))` }}>{value}</p>
-      {change !== undefined && currency && (
+      {change !== undefined && formatChange && (
         <p className="text-[10px] mt-0.5" style={{ color: change >= 0 ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))" }}>
-          {change >= 0 ? "+" : ""}{formatCurrency(change, currency)}
+          {change >= 0 ? "+" : ""}{formatChange(change)}
         </p>
       )}
     </div>

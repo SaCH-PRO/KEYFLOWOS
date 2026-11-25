@@ -6170,7 +6170,27 @@ export async function resendReceipt(businessId: string, invoiceId: string): Prom
 // ---
 export interface AiChatResponse { reply: string }
 export interface AiBriefing { summary: string; highlights: string[]; priorities: string[]; cashFlow: { revenue: number; expenses: number; net: number }; suggestion: string }
-export interface CashFlowForecast { currentBalance: number; projectedBalance: number; daysUntilNegative: number | null; trend: string; alerts: string[]; dailyRevenueRate: number; dailyExpenseRate: number }
+export interface CashFlowForecast {
+  /** SWP-FIN-CASH-SOURCES (D-135): booked ledger cash up to now, in the business currency (CashPositionService). */
+  currentBalance: number;
+  projectedBalance: number;
+  daysUntilNegative: number | null;
+  trend: string;
+  alerts: string[];
+  /** Business-currency paid invoices and expenses of the last 90 days, per day. */
+  dailyRevenueRate: number;
+  dailyExpenseRate: number;
+  /** The days projectedBalance is projected over (the request's `days`). */
+  projectionDays?: number;
+  /** What currentBalance is read from: always 'ledger' on a server with SWP-FIN-CASH-SOURCES. */
+  cashBasis?: "ledger";
+  /** The business currency, a three-letter code; omitted when Business.currency is free text. */
+  currency?: string;
+  /** Cash held in other currencies, unconverted and never part of currentBalance; at most five codes. */
+  otherCurrencyCash?: Array<{ currency: string; amount: number }>;
+  /** How many other-currency amounts are held but not listed (codes past the five, labels that are not codes). */
+  otherCurrencyCashNotListed?: number;
+}
 export async function sendAiChat(businessId: string, message: string, history?: { role: string; content: string }[]): Promise<ApiResult<AiChatResponse>> {
   return apiPost<AiChatResponse>({ path: `/ai/businesses/${encodeURIComponent(businessId)}/ai/chat`, body: { message, history } });
 }
