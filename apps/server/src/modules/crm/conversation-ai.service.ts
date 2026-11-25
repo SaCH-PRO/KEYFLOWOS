@@ -6,6 +6,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import type { MessageReceivedPayload } from '../../core/event-bus/events.types';
+import {
+  EXCLUDE_WHATSAPP_INBOUND_CONTACT_EVENTS,
+  isInboundWhatsAppEvent,
+} from './whatsapp-inbound-exclusion';
 
 export type Sentiment = 'positive' | 'neutral' | 'negative' | 'mixed';
 export type InsightKind = 'thread_summary' | 'message_analysis';
@@ -88,7 +92,13 @@ export class ConversationAiService {
 
   // ---------- Thread loading ----------
 
-  private async loadThread(businessId: string, contactId: string, limit = MAX_THREAD_MESSAGES): Promise<ThreadEntryLite[]> {
+  private async loadThread(
+    businessId: string,
+    contactId: string,
+    limit = MAX_THREAD_MESSAGES,
+    opts?: { includeInboundWhatsApp?: boolean },
+  ): Promise<ThreadEntryLite[]> {
+    const includeInboundWhatsApp = opts?.includeInboundWhatsApp === true;
     const waContact = await this.prisma.client.whatsAppContact.findFirst({
       where: { businessId, contactId },
       select: { id: true },
@@ -96,7 +106,11 @@ export class ConversationAiService {
 
     const [events, waMessages] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
-        where: { businessId, contactId },
+        where: {
+          businessId,
+          contactId,
+          ...(includeInboundWhatsApp ? {} : EXCLUDE_WHATSAPP_INBOUND_CONTACT_EVENTS),
+        },
         orderBy: { createdAt: 'desc' },
         take: limit,
       }),
@@ -120,6 +134,7 @@ export class ConversationAiService {
       });
     }
     for (const ev of events) {
+      if (!includeInboundWhatsApp && isInboundWhatsAppEvent(ev)) continue;
       const data = (ev.data && typeof ev.data === 'object' ? (ev.data as Record<string, unknown>) : {});
       const body = (typeof data.body === 'string' && data.body) ||
         (typeof data.message === 'string' && data.message) ||
@@ -215,9 +230,11 @@ export class ConversationAiService {
   async summarizeThread(
     businessId: string,
     contactId: string,
-    opts?: { force?: boolean },
+    opts?: { force?: boolean; includeInboundWhatsApp?: boolean },
   ): Promise<{ insight: ThreadSummaryResult | null; cached: boolean; hash: string | null }> {
-    const thread = await this.loadThread(businessId, contactId);
+    const thread = await this.loadThread(businessId, contactId, MAX_THREAD_MESSAGES, {
+      includeInboundWhatsApp: opts?.includeInboundWhatsApp,
+    });
     if (thread.length === 0) {
       return { insight: null, cached: false, hash: null };
     }
@@ -365,10 +382,12 @@ Return JSON:
   async suggestReplies(
     businessId: string,
     contactId: string,
-    opts?: { count?: number; preferredChannel?: string; tone?: string },
+    opts?: { count?: number; preferredChannel?: string; tone?: string; includeInboundWhatsApp?: boolean },
   ): Promise<SuggestedReply[]> {
     const count = Math.max(1, Math.min(opts?.count ?? 3, 5));
-    const thread = await this.loadThread(businessId, contactId);
+    const thread = await this.loadThread(businessId, contactId, MAX_THREAD_MESSAGES, {
+      includeInboundWhatsApp: opts?.includeInboundWhatsApp,
+    });
     if (thread.length === 0) return [];
 
     const business = await this.prisma.client.business.findUnique({

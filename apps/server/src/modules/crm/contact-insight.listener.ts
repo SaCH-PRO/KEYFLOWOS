@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ContactInsightService } from './contact-insight.service';
+import { isInboundWhatsAppEvent } from './whatsapp-inbound-exclusion';
 
 interface ContactScopedPayload {
   businessId: string;
@@ -36,8 +37,12 @@ export class ContactInsightListener {
   }
 
   @OnEvent('crm.contact_event.logged', { async: true })
-  async onContactEventLogged(payload: ContactScopedPayload & { type?: string }): Promise<void> {
+  async onContactEventLogged(
+    payload: ContactScopedPayload & { type?: string; source?: string | null; data?: unknown },
+  ): Promise<void> {
     if (!payload?.businessId || !payload?.contactId) return;
+    // D-280 (SEC-WAW-1): pasting a WhatsApp message must not trigger automatic KEY/LLM recomputation.
+    if (isInboundWhatsAppEvent(payload)) return;
     const t = payload.type ?? '';
     // Only invalidate on relationship-changing events to avoid recompute storms.
     const relationshipChanging =
