@@ -611,7 +611,7 @@ describe("SWP-INV-DETAIL review round 1 (31861dcf): pins and repairs", () => {
 
   it("RED-BEFORE (MINOR-4): Download PDF writes text outside WinAnsi plainly: fr-FR amounts (U+202F) read 'TTD 1 234,50', a non-Latin name reads as '?', and no string is written as 2-byte text", async () => {
     const toLocale = Number.prototype.toLocaleString;
-    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, _locales?: string | string[], options?: Intl.NumberFormatOptions) {
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, _locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
       return toLocale.call(this, "fr-FR", options);
     });
     await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 1234.5 }, {

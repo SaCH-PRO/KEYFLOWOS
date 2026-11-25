@@ -46,7 +46,7 @@ import {
   InvoiceTimelineEntry,
 } from "@/lib/client";
 import { apiDelete, providerUnavailableOf } from "@/lib/api";
-import { canShareInvoicePayLink } from "@/lib/commerce-status";
+import { canMarkInvoicePaid, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
@@ -160,13 +160,21 @@ export default function InvoiceDetailPage() {
   // again once something here changed them without answering them (Mark paid); a payment recorded here is listed
   // from the answer at once. It read the list only while its own was empty, so a payment recorded before the tab was
   // opened was the only row it ever listed, and Mark paid's payment was never listed.
+  // Review MINOR-2: each read takes a generation, and only the latest read's answer is listed, so a read that was in
+  // flight when money was recorded never replaces the list read after it.
   const loadedInvoiceId = invoice?.id;
   const [paymentsLoaded, setPaymentsLoaded] = useState(false);
+  const paymentsReadRef = useRef(0);
   const loadPayments = useCallback(async () => {
     if (!businessId || !loadedInvoiceId) return;
+    const read = ++paymentsReadRef.current;
     setPaymentsLoading(true);
-    try { const { data } = await listInvoicePayments(businessId, loadedInvoiceId); if (data && mountedRef.current) setPayments(data.payments); }
-    finally { if (mountedRef.current) { setPaymentsLoading(false); setPaymentsLoaded(true); } }
+    try {
+      const { data } = await listInvoicePayments(businessId, loadedInvoiceId);
+      if (data && mountedRef.current && read === paymentsReadRef.current) setPayments(data.payments);
+    } finally {
+      if (mountedRef.current && read === paymentsReadRef.current) { setPaymentsLoading(false); setPaymentsLoaded(true); }
+    }
   }, [businessId, loadedInvoiceId]);
 
   useEffect(() => { if (activeTab === "payments" && !paymentsLoaded && !paymentsLoading) void loadPayments(); }, [activeTab, paymentsLoaded, paymentsLoading, loadPayments]);
@@ -198,6 +206,10 @@ export default function InvoiceDetailPage() {
   })();
   const paidAmount = serverFigures?.paidAmount ?? rowFigures?.paidAmount ?? 0;
   const remaining = serverFigures?.remaining ?? rowFigures?.remaining ?? 0;
+  // SWP-INV-DETAIL review MINOR-3: a VOID or FULLY_CREDITED invoice owes nothing, whatever remaining is stored on it:
+  // Amount due, the print sheet and the PDF say 0 (a VOID one keeps its Void status beside it). A PARTIALLY_CREDITED
+  // invoice shows the server's figure: netting its credit notes is the server's (follow-up), never the web's.
+  const amountDue = invoice?.status === "VOID" || invoice?.status === "FULLY_CREDITED" ? 0 : remaining;
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
 
   // R0-21 (M26, CF-08): one payment attempt per open of the payment form. Its
@@ -277,11 +289,13 @@ export default function InvoiceDetailPage() {
   // read again, so the page says nothing is due and lists the payment.
   const handleMarkPaid = () => withLoading("paid", async () => {
     if (!invoice || !businessId) return;
-    const { data, error } = await markInvoicePaid(invoice.id);
+    // Review S-2: the write names the page's business, not whatever storage holds.
+    const { data, error } = await markInvoicePaid(invoice.id, businessId);
     if (!error && data) {
       setInvoice(prev => prev ? { ...prev, status: data.status ?? "PAID", paidAt: data.paidAt ?? new Date().toISOString() } : prev);
       toast.success("Marked as paid");
-      setPaymentsLoaded(false);
+      // Review MINOR-2: read again whatever is in flight (a newer read wins).
+      void loadPayments();
       const fresh = await getInvoice(businessId, invoice.id);
       if (fresh.data && mountedRef.current) setInvoice(fresh.data);
       await refreshTimeline();
@@ -331,6 +345,9 @@ export default function InvoiceDetailPage() {
         setPayments(prev => [data.payment, ...prev.filter(p => p.id !== data.payment.id)]);
         toast.success(data.invoice.status === "PAID" ? "Fully paid!" : `Payment recorded`);
         setShowPaymentForm(false); setPaymentForm({ amount: "", method: "Cash", reference: "", notes: "" });
+        // Review MINOR-2: once the tab has read (or is reading) the list, it is read again, so a read in flight
+        // from before this payment never replaces the list with one that lacks it.
+        if (paymentsLoaded || paymentsLoading) void loadPayments();
         void refreshTimeline();
       } else toast.error(error ?? "Failed");
     } finally { recordingPaymentRef.current = false; setRecordingPayment(false); }
@@ -403,7 +420,7 @@ export default function InvoiceDetailPage() {
   const handleDownloadPdf = () => withLoading("pdf", async () => {
     if (!invoice) return;
     try {
-      const doc = invoiceDocumentOf(invoice, paidAmount, remaining);
+      const doc = invoiceDocumentOf(invoice, paidAmount, amountDue);
       const blob = await invoicePdfBlob(doc);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -436,7 +453,7 @@ export default function InvoiceDetailPage() {
   const canRecordPayment = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   // SWP-INV-DETAIL (BUG-086): Mark paid records the balance as a payment, so it is offered where a payment can be
   // recorded. It was offered on a DRAFT only, which the server refuses (409), and never on an invoice that can be paid.
-  const canMarkPaid = canRecordPayment;
+  const canMarkPaid = canMarkInvoicePaid(invoice.status);
   const canSharePayLink = canShareInvoicePayLink(invoice.status);
   const canVoid = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canDelete = invoice.status === "DRAFT" || invoice.status === "VOID";
@@ -520,7 +537,7 @@ export default function InvoiceDetailPage() {
           {/* Info Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {/* SWP-INV-DETAIL (BUG-085): what is still owed (the Payment Summary's Remaining), not the total. */}
-            <InfoCard icon={DollarSign} label="Amount due" value={formatAmount(remaining, invoice.currency)} />
+            <InfoCard icon={DollarSign} label="Amount due" value={formatAmount(amountDue, invoice.currency)} />
             <InfoCard icon={Calendar} label="Issue date" value={invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : "—"} />
             <InfoCard icon={Clock} label="Due date" value={invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "—"} highlight={invoice.status === "OVERDUE" ? "text-red-600" : undefined} />
             <InfoCard icon={User} label="Client" value={invoice.contact ? `${invoice.contact.firstName ?? ""} ${invoice.contact.lastName ?? ""}`.trim() || invoice.contact.email || "—" : "—"} />
@@ -720,7 +737,7 @@ export default function InvoiceDetailPage() {
         </div>
       )}
 
-      {printSheetShown && createPortal(<InvoicePrintSheet doc={invoiceDocumentOf(invoice, paidAmount, remaining)} />, document.body)}
+      {printSheetShown && createPortal(<InvoicePrintSheet doc={invoiceDocumentOf(invoice, paidAmount, amountDue)} />, document.body)}
 
       <ConfirmDialog open={confirmOpen} onCancel={() => setConfirmOpen(false)} title={confirmTitle} message={confirmMessage} confirmLabel="Confirm" variant={confirmTitle.includes("Delete") || confirmTitle.includes("Void") ? "danger" : "default"} onConfirm={() => { confirmAction?.(); setConfirmOpen(false); }} />
     </motion.div>
@@ -870,12 +887,28 @@ function InvoicePrintSheet({ doc }: { doc: InvoiceDocument }) {
   );
 }
 
+/** The characters WinAnsiEncoding holds beyond Latin-1 (jspdf writes them as single bytes). */
+const WIN_ANSI_EXTRAS = "\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178";
+
+/**
+ * Review MINOR-4: every string written to the PDF. jspdf's standard fonts are WinAnsi; a string holding any other
+ * character is written as 2-byte text, which they show as gibberish (fr-FR's U+202F thousands separator made every
+ * amount unreadable). Spaces of any width are written as a space, and any other character outside WinAnsi as "?".
+ */
+function pdfText(s: string): string {
+  return Array.from(s.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000\t]/g, " "), (c) => {
+    const code = c.codePointAt(0) ?? 0;
+    if (c === "\n" || (code >= 0x20 && code <= 0x7e) || (code >= 0xa1 && code <= 0xff) || WIN_ANSI_EXTRAS.includes(c)) return c;
+    return "?";
+  }).join("");
+}
+
 /** The invoice document as a one-invoice A4 PDF (jspdf and jspdf-autotable, loaded when asked for). */
 async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
   const [{ default: JsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const pdf = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  // jspdf's standard fonts are WinAnsi: a character outside it (an em dash placeholder) is written plainly.
-  const text = (s: string) => s.replace(/\u2014/g, "-");
+  // Review MINOR-4: every string goes through pdfText.
+  const text = pdfText;
   const margin = 18;
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -886,7 +919,7 @@ async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
 
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(22);
-  pdf.text("Invoice", margin, 26);
+  pdf.text(text("Invoice"), margin, 26);
   pdf.setFontSize(12);
   pdf.text(text(doc.number), margin, 33);
 
@@ -895,13 +928,13 @@ async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
   const meta: Array<[string, string]> = [["Status", doc.status], ["Issue date", doc.issueDate], ["Due date", doc.dueDate]];
   meta.forEach(([label, value], i) => {
     pdf.setTextColor(110);
-    pdf.text(label, right - 60, 22 + i * 6);
+    pdf.text(text(label), right - 60, 22 + i * 6);
     pdf.setTextColor(20);
     pdf.text(text(value), right, 22 + i * 6, { align: "right" });
   });
 
   pdf.setTextColor(110);
-  pdf.text("Bill to", margin, y);
+  pdf.text(text("Bill to"), margin, y);
   pdf.setTextColor(20);
   if (doc.billTo) {
     pdf.setFont("helvetica", "bold");
@@ -909,14 +942,14 @@ async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
     pdf.setFont("helvetica", "normal");
     if (doc.billTo.email) pdf.text(text(doc.billTo.email), margin, y + 11);
   } else {
-    pdf.text("No contact assigned", margin, y + 6);
+    pdf.text(text("No contact assigned"), margin, y + 6);
   }
   y += 20;
 
   autoTable(pdf, {
     startY: y,
-    head: [["Description", "Qty", "Unit price", "Amount"]],
-    body: doc.lines.map((line) => [text(line.description), String(line.quantity), formatAmount(line.unitPrice, doc.currency), formatAmount(line.total, doc.currency)]),
+    head: [["Description", "Qty", "Unit price", "Amount"].map(text)],
+    body: doc.lines.map((line) => [line.description, String(line.quantity), formatAmount(line.unitPrice, doc.currency), formatAmount(line.total, doc.currency)].map(text)),
     margin: { left: margin, right: margin },
     styles: { fontSize: 10, cellPadding: 2.5, textColor: 20 },
     headStyles: { fillColor: [241, 245, 249], textColor: 60, fontStyle: "bold" },
@@ -929,7 +962,7 @@ async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
   room(totals.length * 6);
   for (const row of totals) {
     pdf.setFont("helvetica", row.strong ? "bold" : "normal");
-    pdf.text(row.label, right - 70, y);
+    pdf.text(text(row.label), right - 70, y);
     pdf.text(text(row.value), right, y, { align: "right" });
     y += 6;
   }
@@ -940,7 +973,7 @@ async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
     room(6 + noteLines.length * 5);
     pdf.setFont("helvetica", "normal");
     pdf.setTextColor(110);
-    pdf.text("Notes", margin, y);
+    pdf.text(text("Notes"), margin, y);
     pdf.setTextColor(20);
     pdf.text(noteLines, margin, y + 6);
   }

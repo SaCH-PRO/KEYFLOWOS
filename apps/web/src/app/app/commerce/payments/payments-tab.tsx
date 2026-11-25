@@ -31,7 +31,7 @@ import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../compo
 import type { DateRange } from "../components/date-range-filter";
 import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 
-import { OWED_STATUSES, canRemindInvoice as canRemind } from "@/lib/commerce-status";
+import { OWED_STATUSES, canMarkPaidOnPaymentsTab, canRemindInvoice as canRemind } from "@/lib/commerce-status";
 
 export { OWED_STATUSES };
 
@@ -157,14 +157,6 @@ interface PaymentsTabProps {
   businessId: string | null;
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
 }
-
-/**
- * SWP-INV-DETAIL (BUG-086): Mark paid records the balance as a payment, which the server refuses (409) on a DRAFT, a
- * VOID or a FULLY_CREDITED invoice; a PAID one has nothing to mark. Neither the row button nor the bulk action is
- * offered for them (a DRAFT row offered it).
- */
-const MARK_PAID_REFUSED: ReadonlySet<string> = new Set(["DRAFT", "VOID", "FULLY_CREDITED", "PAID"]);
-const canMarkPaid = (status: string) => !MARK_PAID_REFUSED.has(status);
 
 type PaymentView = "all" | "received" | "pending" | "overdue";
 
@@ -374,7 +366,7 @@ export default function PaymentsTab({
     if (!businessId) return;
     const ids = Array.from(selectedIds).filter((id) => {
       const inv = invoices.find((i) => i.id === id);
-      return inv && canMarkPaid(inv.status);
+      return inv && canMarkPaidOnPaymentsTab(inv.status);
     });
     if (ids.length === 0) {
       toast.info("No eligible invoices to mark as paid");
@@ -764,7 +756,7 @@ export default function PaymentsTab({
                           )}
                         </button>
                       )}
-                      {canMarkPaid(inv.status) && (
+                      {canMarkPaidOnPaymentsTab(inv.status) && (
                         <button
                           onClick={() => handleMarkPaid(inv.id)}
                           disabled={!!isLoading}
