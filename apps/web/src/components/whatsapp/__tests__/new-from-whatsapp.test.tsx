@@ -14,6 +14,10 @@
  *   WAW-04 the message is saved verbatim and shown as plain text: markup in it is text, never HTML.
  *   WAW-05 New quote opens the Quotes tab with the customer chosen (?tab=quotes&contactId=<id>).
  *   WAW-06 New booking opens Bookings with the customer chosen (?contactId=<id>).
+ *          Both doors are a full page load (newFromWhatsAppNavigation.assign), not router.push: RequireAuth
+ *          (components/require-auth.tsx) verifies again on every pathname change and shows its spinner in place of
+ *          the whole app shell, so a client navigation mounts the destination page twice; the first instance read and
+ *          dropped the one-shot ?contactId and the second opened no form (seen in the browser sweep at every width).
  *   WAW-07 a refusal keeps the sheet open, with what was typed, and says why (400, 403 crm read, 409, network).
  *   WAW-08 nothing is sent to the customer from here: the only request is the capture.
  *   WAW-09 Save waits for a number and a message; a message over 10,000 characters is said, not sent or cut.
@@ -36,7 +40,7 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
 
-import { NewFromWhatsAppSheet, mayCaptureFromWhatsApp } from "../new-from-whatsapp";
+import { NewFromWhatsAppSheet, mayCaptureFromWhatsApp, newFromWhatsAppNavigation } from "../new-from-whatsapp";
 import { setCachedBusiness } from "@/lib/workspace";
 
 const BIZ = "biz_waw_a";
@@ -85,6 +89,13 @@ function sentBody(i = 0): Record<string, unknown> {
 }
 
 const onClose = vi.fn();
+let assign: ReturnType<typeof vi.fn>;
+
+/** The door the sheet opened: a full page load, never a client navigation (see WAW-05). */
+function opened(href: string) {
+  expect(assign).toHaveBeenCalledWith(href);
+  expect(nav.push).not.toHaveBeenCalled();
+}
 
 function open(props: Partial<React.ComponentProps<typeof NewFromWhatsAppSheet>> = {}) {
   return render(<NewFromWhatsAppSheet open onClose={onClose} {...props} />);
@@ -120,9 +131,14 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   nav.push.mockReset();
   onClose.mockReset();
+  // (Absent before the doors became full page loads: the door cases then fail on their own assertion, not here.)
+  assign = newFromWhatsAppNavigation
+    ? vi.spyOn(newFromWhatsAppNavigation, "assign").mockImplementation(() => {})
+    : vi.fn();
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.localStorage.clear();
 });
@@ -164,7 +180,7 @@ describe("WEDGE-WA-INBOUND-CAPTURE: + New > From WhatsApp", () => {
     expect(captureCalls()).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(([url, init]) => /\/contacts(\?|$)/.test(String(url)) && (init as RequestInit | undefined)?.method === "POST")).toEqual([]);
     fireEvent.click(within(dialog()).getByRole("button", { name: /^new quote$/i }));
-    expect(nav.push).toHaveBeenCalledWith("/app/commerce?tab=quotes&contactId=c_waw_existing");
+    opened("/app/commerce?tab=quotes&contactId=c_waw_existing");
   });
 
   it("WAW-03 a new customer is created, with the optional name sent", async () => {
@@ -210,7 +226,7 @@ describe("WEDGE-WA-INBOUND-CAPTURE: + New > From WhatsApp", () => {
     fill("7771234", "Quote please");
     await save();
     fireEvent.click(await within(dialog()).findByRole("button", { name: /^new quote$/i }));
-    expect(nav.push).toHaveBeenCalledWith("/app/commerce?tab=quotes&contactId=c_waw_1");
+    opened("/app/commerce?tab=quotes&contactId=c_waw_1");
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -219,7 +235,7 @@ describe("WEDGE-WA-INBOUND-CAPTURE: + New > From WhatsApp", () => {
     fill("7771234", "Can I book Friday?");
     await save();
     fireEvent.click(await within(dialog()).findByRole("button", { name: /^new booking$/i }));
-    expect(nav.push).toHaveBeenCalledWith("/app/bookings?contactId=c_waw_1");
+    opened("/app/bookings?contactId=c_waw_1");
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -229,7 +245,7 @@ describe("WEDGE-WA-INBOUND-CAPTURE: + New > From WhatsApp", () => {
     fill("7771234", "Hi");
     await save();
     fireEvent.click(await within(dialog()).findByRole("button", { name: /^new booking$/i }));
-    expect(nav.push).toHaveBeenCalledWith("/app/bookings?contactId=c%2F1%3Fx%3Dy");
+    opened("/app/bookings?contactId=c%2F1%3Fx%3Dy");
   });
 
   describe("WAW-07 a refusal keeps the sheet open with what was typed and says why", () => {
@@ -264,6 +280,7 @@ describe("WEDGE-WA-INBOUND-CAPTURE: + New > From WhatsApp", () => {
         expect(within(dialog()).queryByRole("button", { name: /^new quote$/i })).toBeNull();
         expect(onClose).not.toHaveBeenCalled();
         expect(nav.push).not.toHaveBeenCalled();
+        expect(assign).not.toHaveBeenCalled();
       });
     }
 

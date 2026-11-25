@@ -13,14 +13,15 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
  *
  *   WAB-01 New > From WhatsApp > Save > New quote: the capture is sent as typed, the saved message is shown as text,
  *          and Sales > Quotes opens the New Quote sheet with the customer chosen.
- *   WAB-02 ... > New booking: Bookings opens the new-booking sheet with the customer chosen.
+ *   WAB-02 ... > New booking: Bookings opens the new-booking sheet with the customer chosen (its heading names them).
  *   WAB-03 a refusal (the number cannot be read for the business's country) keeps the sheet open with what was typed
  *          and says why; no customer screen opens.
  *   WAB-04 a member with crm read is not offered the door (the server would refuse the capture); the other doors stay.
  *          A guard: it passes at the base too.
  *
  * Entry points: at 375 the phone bottom bar's New (it opens the header's New menu), from 768 the header's New button.
- * 375, 768, 1024 and 1440 are run.
+ * 375, 768, 1024 and 1440 are run. The flow starts on Settings, which loads cleanly under these mocks (the cockpit's
+ * own reads are not mocked and show its error state; the New menu is the shell's, so the screen does not matter).
  *
  * Mocked: every API call is answered by page.route on api.test.local; nothing reaches WhatsApp or KEY (the spec fails
  * if a request leaves for wa.me or the Graph API). Skipped under E2E_LIVE. CI's e2e-mocked step runs a fixed list of
@@ -94,6 +95,14 @@ async function signIn(page: Page, access: unknown, capture: Capture = SAVED): Pr
   await page.route(/\/identity\/businesses(\?.*)?$/, (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: TEST_BUSINESS_ID, name: "E2E Test Business" }]) }),
   );
+  // The onboarding gate (use-genome-gate.ts) reads this on every navigation: a finished business.
+  await page.route(`**/onboarding-concierge/businesses/${TEST_BUSINESS_ID}/onboarding-state**`, (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ onboardingComplete: true, onboardingCompletedAt: "2026-11-01T00:00:00.000Z", threePillarMet: true }),
+    }),
+  );
   await page.route(`**/identity/businesses/${TEST_BUSINESS_ID}/my-access**`, (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(access) }),
   );
@@ -103,11 +112,33 @@ async function signIn(page: Page, access: unknown, capture: Capture = SAVED): Pr
       ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ contacts: [CONTACT], nextCursor: null, hasMore: false }) })
       : route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "the sheet must not create contacts itself" }) }),
   );
+  await mockQuotesAndBookingsScreens(page);
   await page.route(`**/crm/businesses/${TEST_BUSINESS_ID}/whatsapp/inbound-capture`, (route: Route) => {
     sent.captures.push(JSON.parse(route.request().postData() ?? "{}"));
     return route.fulfill({ status: capture.status, contentType: "application/json", body: JSON.stringify(capture.body) });
   });
   return sent;
+}
+
+/**
+ * The reads Sales > Quotes and Bookings make, in the shapes their clients parse (lib/client.ts), so both screens load
+ * empty under the catch-all (whose bare [] they refuse): no quotes, products, invoices, bookings or events yet. The
+ * stats reads answer 404: the screens show no figures for a failed read.
+ */
+async function mockQuotesAndBookingsScreens(page: Page): Promise<void> {
+  const json = (body: unknown, status = 200) => (route: Route) =>
+    route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+  const page0 = { data: [], total: 0, page: 1, pageSize: 50, totalPages: 0 };
+  const B = TEST_BUSINESS_ID;
+  for (const list of ["products", "invoices", "quotes"]) {
+    await page.route(new RegExp(`/commerce/businesses/${B}/${list}(\\?.*)?$`), json(page0));
+  }
+  await page.route(new RegExp(`/commerce/businesses/${B}/stats(\\?.*)?$`), json({ message: "Not Found" }, 404));
+  await page.route(new RegExp(`/bookings/businesses/${B}/stats(\\?.*)?$`), json({ todayCount: 0, weekCount: 0, pendingCount: 0, totalBookings: 0 }));
+  await page.route(new RegExp(`/bookings/businesses/${B}/calendar/status(\\?.*)?$`), json({ connected: false }));
+  await page.route(new RegExp(`/bookings/businesses/${B}/optimizer/schedule-health(\\?.*)?$`), json({ message: "Not Found" }, 404));
+  await page.route(new RegExp(`/calendar/businesses/${B}/events(\\?.*)?$`), json({ events: [], total: 0, truncated: false, cap: 500, limit: 500, nextCursor: null }));
+  await page.route(new RegExp(`/calendar/businesses/${B}/conflicts(\\?.*)?$`), json({ conflicts: [], scanned: 0 }));
 }
 
 /** Opens + New the way this width offers it: the phone bottom bar's New at 375, the header's New from 768. */
@@ -142,7 +173,7 @@ for (const width of [375, 768, 1024, 1440]) {
 
     test(`WAB-01 New > From WhatsApp > New quote opens with the customer chosen (${width})`, async ({ page }) => {
       const sent = await signIn(page, OWNER);
-      await page.goto("/app/command-center");
+      await page.goto("/app/settings");
       const sheet = await captureFromWhatsApp(page, width, "777 1234");
 
       await expect(sheet.getByText(/saved/i).first()).toBeVisible();
@@ -163,21 +194,21 @@ for (const width of [375, 768, 1024, 1440]) {
 
     test(`WAB-02 New > From WhatsApp > New booking opens with the customer chosen (${width})`, async ({ page }) => {
       const sent = await signIn(page, OWNER);
-      await page.goto("/app/command-center");
+      await page.goto("/app/settings");
       const sheet = await captureFromWhatsApp(page, width, "+1 868 777 1234");
       await expect(sheet.getByText(/saved/i).first()).toBeVisible();
 
       await sheet.getByRole("button", { name: /^new booking$/i }).click();
       await expect(page).toHaveURL(/\/app\/bookings/);
-      const booking = page.getByRole("dialog").filter({ hasText: /booking/i }).filter({ visible: true });
-      await expect(booking.first()).toBeVisible({ timeout: 20_000 });
-      await expect(booking.first().getByText(/Keisha Ramdial/).first()).toBeVisible();
+      // The new-booking sheet (booking-side-sheet.tsx) names the customer it was opened for in its heading.
+      const booking = page.getByRole("heading", { name: /^new booking · keisha ramdial$/i }).filter({ visible: true });
+      await expect(booking).toHaveCount(1, { timeout: 20_000 });
       expect(sent.offsite).toEqual([]);
     });
 
     test(`WAB-03 a refusal keeps the sheet open with what was typed and says why (${width})`, async ({ page }) => {
       const sent = await signIn(page, OWNER, UNREADABLE);
-      await page.goto("/app/command-center");
+      await page.goto("/app/settings");
       const sheet = await captureFromWhatsApp(page, width, "12");
 
       await expect(sheet.getByRole("alert")).toContainText(/could not be normalised for this business country/i);
@@ -186,12 +217,12 @@ for (const width of [375, 768, 1024, 1440]) {
       await expect(sheet.getByLabel(/their message/i)).toHaveValue(MESSAGE);
       await expect(sheet.getByRole("button", { name: /^new quote$/i })).toHaveCount(0);
       expect(sent.captures).toHaveLength(1);
-      await expect(page).toHaveURL(/\/app\/command-center/);
+      await expect(page).toHaveURL(/\/app\/settings/);
     });
 
     test(`WAB-04 a member with crm read is not offered From WhatsApp (${width})`, async ({ page }) => {
       await signIn(page, CRM_READER);
-      await page.goto("/app/command-center");
+      await page.goto("/app/settings");
       await openNewMenu(page, width);
       await expect(page.getByRole("menuitem", { name: /^invoice/i })).toBeVisible();
       await expect(page.getByRole("menuitem", { name: /from whatsapp/i })).toHaveCount(0);
