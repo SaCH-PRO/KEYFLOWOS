@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -19,6 +20,7 @@ export class QuickSaleItemDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(1_000_000)
   quantity!: number;
 }
 

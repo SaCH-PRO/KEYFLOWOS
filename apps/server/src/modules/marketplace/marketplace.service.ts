@@ -987,7 +987,8 @@ export class MarketplaceService {
    * PAID and its payment still SUCCESSFUL.
    */
   private async moneyOnTheDoors(order: { businessId: string; type?: string | null; orderNumber: string }): Promise<boolean> {
-    if ((order.type ?? '').toUpperCase() === 'STOREFRONT') return true;
+    const orderType = (order.type ?? '').toUpperCase();
+    if (orderType === 'STOREFRONT' || orderType === 'QUICK_SALE') return true;
     return this.storeOrders().hasCheckoutInvoice(order.businessId, order.orderNumber);
   }
 
@@ -1321,6 +1322,11 @@ export class MarketplaceService {
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
+    if ((order.type ?? '').toUpperCase() === 'QUICK_SALE') {
+      throw new BadRequestException(
+        'A quick sale is already completed at checkout and cannot change fulfilment status; refund it through the refund door instead',
+      );
+    }
     this.assertNotRefundingThroughStatus(status);
     const onDoors = await this.moneyOnTheDoors(order);
     this.assertNotPayingDoorOrder(onDoors, status, paymentStatus);
@@ -2013,6 +2019,10 @@ export class MarketplaceService {
       }
       await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
       expenseRefundAmount = this.expenseRefundAmount(order, data?.refundAmount);
+    } else if ((order.type ?? '').toUpperCase() === 'QUICK_SALE') {
+      throw new BadRequestException(
+        'A quick sale is already completed at checkout and cannot run fulfilment actions; use refund to reverse it',
+      );
     }
 
     // W10-SOP-FIX (SOP-V4): the timeline steps this action adds, appended to the order's statusTimeline in one statement

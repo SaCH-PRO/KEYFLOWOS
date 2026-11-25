@@ -16,9 +16,11 @@ import {
   type QuickSalePaymentSummary,
 } from '../site/store-order.service';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { computeDocumentAmounts, lineAmount } from '../commerce/money';
 import type { CreateQuickSaleDto } from './dto/quick-sale.dto';
 
 const QUICK_SALE_METHODS = new Set(['cash', 'bank_transfer']);
+const QUICK_SALE_MAX_QTY = 1_000_000;
 
 function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
@@ -64,8 +66,8 @@ export class QuickSaleService {
    *   - PAID Invoice bound to named contact or per-business 'Walk-in customer'
    *     contact created at most once under pg_advisory_xact_lock
    *   - SUCCESSFUL Payment + RevenuePostingService ledger entries
-   *   - InventoryStock decrement + StockMovement audit rows under routing claim
-   *     and global stock lock order (oversell refused cleanly with 0 rows committed)
+   *   - InventoryStock decrement + StockMovement audit rows under global stock
+   *     lock order (oversell refused cleanly with 0 rows committed)
    *   - COGS posting via ExpensePostingService.onProductSold
    *   - PaymentLink token served by existing GET /commerce/public/invoice-link/:token/receipt
    *   - Optional Idempotency-Key slot committed in the same transaction
@@ -112,41 +114,23 @@ export class QuickSaleService {
       if (!productId) {
         throw new BadRequestException('Each quick sale item must specify a productId');
       }
-      if (!Number.isInteger(quantity) || quantity <= 0) {
-        throw new BadRequestException('Each quick sale item needs a whole quantity of 1 or more');
+      if (!Number.isInteger(quantity) || quantity <= 0 || quantity > QUICK_SALE_MAX_QTY) {
+        throw new BadRequestException(`Each quick sale item needs a whole quantity between 1 and ${QUICK_SALE_MAX_QTY}`);
       }
-      aggregatedMap.set(productId, (aggregatedMap.get(productId) ?? 0) + quantity);
+      const summed = (aggregatedMap.get(productId) ?? 0) + quantity;
+      if (summed > QUICK_SALE_MAX_QTY) {
+        throw new BadRequestException(`Total quantity per product cannot exceed ${QUICK_SALE_MAX_QTY}`);
+      }
+      aggregatedMap.set(productId, summed);
     }
     const normalizedItems = [...aggregatedMap.entries()].map(([productId, quantity]) => ({ productId, quantity }));
 
     const contactId = typeof body?.contactId === 'string' && body.contactId.trim() ? body.contactId.trim() : null;
     const notes = typeof body?.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
 
-    // Resolve optional Idempotency-Key (header and/or body).
-    const headerKey = typeof idempotencyHeader === 'string' && idempotencyHeader.trim() ? idempotencyHeader.trim() : null;
-    const bodyKey = typeof body?.idempotencyKey === 'string' && body.idempotencyKey.trim() ? body.idempotencyKey.trim() : null;
-    if (headerKey && bodyKey && headerKey !== bodyKey) {
-      throw new BadRequestException('Idempotency-Key header and body.idempotencyKey must match');
-    }
-    const rawIdemKey = headerKey ?? bodyKey;
-    const idemSlot = rawIdemKey ? `quick_sale:${sha256(rawIdemKey)}` : null;
-    const requestHash = idemSlot
-      ? sha256(
-          canonicalJson({
-            items: [...normalizedItems].sort((a, b) => a.productId.localeCompare(b.productId)),
-            paymentMethod: rawMethod,
-            contactId,
-            notes,
-          }),
-        )
-      : null;
-
-    if (idemSlot && requestHash) {
-      const prior = await this.readReplay(businessId, idemSlot, requestHash);
-      if (prior) return prior;
-    }
-
-    // Validate named contactId with tenant + CRM visibility enforcement.
+    // Validate named contactId with tenant + CRM visibility BEFORE idempotency replay
+    // (SEC-QS-1 / SEC-V45-3: a caller who cannot see a PRIVATE contact must get 404,
+    // never a replayed order containing that contact's PII or a 409 existence oracle).
     let namedContact: {
       id: string;
       firstName: string | null;
@@ -172,6 +156,31 @@ export class QuickSaleService {
       }
     }
 
+    // Resolve optional Idempotency-Key (header and/or body), binding requestHash to actorId (SEC-QS-1).
+    const headerKey = typeof idempotencyHeader === 'string' && idempotencyHeader.trim() ? idempotencyHeader.trim() : null;
+    const bodyKey = typeof body?.idempotencyKey === 'string' && body.idempotencyKey.trim() ? body.idempotencyKey.trim() : null;
+    if (headerKey && bodyKey && headerKey !== bodyKey) {
+      throw new BadRequestException('Idempotency-Key header and body.idempotencyKey must match');
+    }
+    const rawIdemKey = headerKey ?? bodyKey;
+    const idemSlot = rawIdemKey ? `quick_sale:${sha256(rawIdemKey)}` : null;
+    const requestHash = idemSlot
+      ? sha256(
+          canonicalJson({
+            actorId: actorId ?? null,
+            items: [...normalizedItems].sort((a, b) => a.productId.localeCompare(b.productId)),
+            paymentMethod: rawMethod,
+            contactId,
+            notes,
+          }),
+        )
+      : null;
+
+    if (idemSlot && requestHash) {
+      const prior = await this.readReplay(businessId, idemSlot, requestHash);
+      if (prior) return prior;
+    }
+
     // Load business & products inside this tenant.
     const [business, products] = await Promise.all([
       this.prisma.client.business.findFirst({
@@ -194,7 +203,6 @@ export class QuickSaleService {
 
     const productById = new Map(products.map((p) => [p.id, p]));
     let currency: string | null = null;
-    let subtotal = 0;
     const orderItems: Array<{
       productId: string;
       name: string;
@@ -220,8 +228,8 @@ export class QuickSaleService {
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {
         throw new BadRequestException(`Product "${product.name}" has an invalid price`);
       }
-      const lineTotal = Math.round(unitPrice * item.quantity * 100) / 100;
-      subtotal = Math.round((subtotal + lineTotal) * 100) / 100;
+      // COR-QS-2 / D-13: canonical integer-cents rounding via commerce/money.ts
+      const lineTotal = lineAmount(item.quantity, unitPrice);
       orderItems.push({
         productId: product.id,
         name: product.name,
@@ -235,8 +243,10 @@ export class QuickSaleService {
 
     const saleCurrency = currency ?? business.currency ?? 'TTD';
     const taxRate = business.defaultTaxRate ?? 0;
-    const taxAmount = Math.round(((subtotal * taxRate) / 100) * 100) / 100;
-    const total = Math.round((subtotal + taxAmount) * 100) / 100;
+    const { subtotal, taxAmount, total } = computeDocumentAmounts({
+      lines: orderItems.map((i) => i.total),
+      taxRate,
+    });
     if (!(total > 0)) {
       throw new BadRequestException('Quick sale total must be greater than zero');
     }
@@ -250,7 +260,7 @@ export class QuickSaleService {
         'Customer'
       : 'Walk-in customer';
 
-    const committedHolder: { value: QuickSaleCommittedResult | null } = { value: null };
+    const committedHolder: { value: QuickSaleCommittedResult | null; replayed: boolean } = { value: null, replayed: false };
     try {
       await this.storeOrders().completeCheckout({
         orderId: '',
@@ -275,13 +285,16 @@ export class QuickSaleService {
           items: orderItems,
           receiptToken,
           idempotency: idemSlot && requestHash ? { slot: idemSlot, requestHash } : null,
-          onCommitted: (summary) => {
+          onCommitted: (summary, replayed = false) => {
             committedHolder.value = summary;
+            committedHolder.replayed = replayed;
           },
         },
       });
     } catch (err) {
-      if (idemSlot && requestHash && isUniqueViolation(err)) {
+      // CONC-QS-2: if a concurrent retry with the same Idempotency-Key lost on P2002 OR hit
+      // INSUFFICIENT_STOCK after the winner decremented the last unit, replay the winner cleanly.
+      if (idemSlot && requestHash && (isUniqueViolation(err) || err instanceof ConflictException)) {
         const winner = await this.readReplay(businessId, idemSlot, requestHash);
         if (winner) return winner;
       }
@@ -299,7 +312,7 @@ export class QuickSaleService {
       payment: committed.payment,
       receiptToken: committed.receiptToken,
       receiptPath: `/commerce/public/invoice-link/${committed.receiptToken}/receipt`,
-      replayed: false,
+      replayed: committedHolder.replayed,
     };
   }
 
