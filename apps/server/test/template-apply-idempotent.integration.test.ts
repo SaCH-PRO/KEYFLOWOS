@@ -26,11 +26,14 @@ const ID = {
   ownerB: `${P}ownerB`,
   ownerRace: `${P}ownerRace`,
   ownerPre: `${P}ownerPre`,
+  ownerRollback: `${P}ownerRollback`,
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   bizRace: `${P}bizRace`,
   bizPre: `${P}bizPre`,
+  bizRollback: `${P}bizRollback`,
   tpl1: `${P}tpl_salon`,
+  tplBroken: `${P}tpl_broken`,
 };
 
 let db: any;
@@ -130,6 +133,7 @@ beforeAll(async () => {
     [ID.ownerB, ID.bizB, `${P}b@example.test`, 'Template Biz B'],
     [ID.ownerRace, ID.bizRace, `${P}race@example.test`, 'Template Biz Race'],
     [ID.ownerPre, ID.bizPre, `${P}pre@example.test`, 'Template Biz Pre'],
+    [ID.ownerRollback, ID.bizRollback, `${P}rollback@example.test`, 'Template Biz Rollback'],
   ] as const) {
     await db.user.create({ data: { id: userId, email, role: 'USER' } });
     await db.business.create({ data: { id: bizId, name: bizName, ownerId: userId, currency: 'TTD' } });
@@ -162,6 +166,23 @@ beforeAll(async () => {
           { name: 'Supplies', icon: '🧴' },
           { name: 'Rent', icon: '🏠' },
         ],
+      },
+    },
+  });
+
+  await db.businessTemplate.create({
+    data: {
+      id: ID.tplBroken,
+      name: `${P}broken_tpl`,
+      displayName: 'Broken Template',
+      description: 'Valid product followed by invalid service to trigger tx rollback',
+      icon: '⚠️',
+      industry: 'Retail',
+      archetype: 'ECOMMERCE',
+      isPublished: true,
+      config: {
+        products: [{ name: 'Should Roll Back Product', price: 50, category: 'PRODUCT' }],
+        services: [{ name: 'Invalid Duration Service', price: 40, duration: -5 }],
       },
     },
   });
@@ -210,18 +231,31 @@ describe('P78 — V1-64 (CATALOG-1 server half: SWP-TEMPLATE-APPLY-ONCE, P0, BUG
     expect(flags).toEqual([false, true]);
   });
 
-  it('[TA-03] RED-BEFORE: pre-existing active product/service with matching name (case/whitespace-insensitive) is not duplicated on first apply', async () => {
+  it('[TA-03] RED-BEFORE: pre-existing active product/service/category (case/whitespace-insensitive) is not duplicated and soft-deleted items do not block creation', async () => {
     await db.product.create({
       data: { businessId: ID.bizPre, name: '  hair care bundle  ', price: 99, currency: 'TTD', category: 'PRODUCT' },
+    });
+    // Soft-deleted product with same name as second template item must NOT block creation
+    await db.product.create({
+      data: { businessId: ID.bizPre, name: 'Styling Oil', price: 10, currency: 'TTD', category: 'PRODUCT', deletedAt: new Date() },
     });
     await db.service.create({
       data: { businessId: ID.bizPre, name: 'HAIRCUT', price: 120, duration: 60 },
     });
+    await db.expenseCategory.create({
+      data: { businessId: ID.bizPre, name: 'supplies' },
+    });
 
     const res = await applyTemplate(ID.ownerPre, ID.bizPre).expect(201);
-    // Still only 2 products (pre-existing Hair Care Bundle + new Styling Oil) and 2 services (pre-existing Haircut + new Color)
+    // Still only 2 active products (pre-existing Hair Care Bundle + new Styling Oil), 2 services, 2 categories
     expect(await countsFor(ID.bizPre)).toEqual({ products: 2, services: 2, categories: 2, usages: 1 });
     expect(res.body).toMatchObject({ success: true, templateName: 'Salon Starter', alreadyApplied: false });
+
+    const preserved = await db.product.findFirst({
+      where: { businessId: ID.bizPre, deletedAt: null, name: '  hair care bundle  ' },
+      select: { price: true },
+    });
+    expect(preserved?.price).toBe(99);
   });
 
   it('[TA-04] RBAC & tenant isolation: STAFF is refused 403 and tenant B can still apply the same template once independently', async () => {
@@ -242,5 +276,14 @@ describe('P78 — V1-64 (CATALOG-1 server half: SWP-TEMPLATE-APPLY-ONCE, P0, BUG
   it('[TA-05] unknown template returns 404 without writing anything', async () => {
     await applyTemplate(ID.ownerB, ID.bizB, `${P}does_not_exist`).expect(404);
     expect(await countsFor(ID.bizB)).toEqual({ products: 2, services: 2, categories: 2, usages: 1 });
+  });
+
+  it('[TA-06] SEC-P78-1: a mid-transaction failure rolls back all created items AND emits zero catalog events', async () => {
+    const eventsBefore = emittedEvents.length;
+
+    await applyTemplate(ID.ownerRollback, ID.bizRollback, ID.tplBroken).expect(400);
+
+    expect(await countsFor(ID.bizRollback)).toEqual({ products: 0, services: 0, categories: 0, usages: 0 });
+    expect(emittedEvents.length).toBe(eventsBefore);
   });
 });

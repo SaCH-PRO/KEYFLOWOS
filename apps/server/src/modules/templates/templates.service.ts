@@ -1,4 +1,5 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { CatalogService } from '../catalog/catalog.service';
@@ -17,6 +18,7 @@ export class TemplatesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Optional() @Inject(EventEmitter2) private readonly events?: EventEmitter2,
   ) {}
 
   async listTemplates() {
@@ -95,110 +97,131 @@ export class TemplatesService {
     // serialize template applications per business in one transaction so a
     // repeat or concurrent apply adds nothing twice (products, services,
     // expense categories, or usage) and never clobbers later Business edits.
-    return this.prisma.client.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('template_apply'), hashtext(${businessId}))`;
+    // SEC-P78-1: buffer catalog events until after commit so a rolled-back
+    // transaction emits nothing.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
+    const result = await this.prisma.client.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('template_apply'), hashtext(${businessId}))`;
 
-      const existingUsage = await tx.businessTemplateUsage.findUnique({
-        where: {
-          businessId_templateId: { businessId, templateId },
-        },
-        select: { id: true },
-      });
-      if (existingUsage) {
-        return { success: true, templateName: template.displayName, alreadyApplied: true };
-      }
-
-      const [existingProducts, existingServices] = await Promise.all([
-        tx.product.findMany({
-          where: { businessId, deletedAt: null },
-          select: { name: true },
-        }),
-        tx.service.findMany({
-          where: { businessId, deletedAt: null },
-          select: { name: true },
-        }),
-      ]);
-      const existingProductNames = new Set(
-        existingProducts.map((p) => normalizeName(p.name)).filter((n): n is string => n !== null),
-      );
-      const existingServiceNames = new Set(
-        existingServices.map((s) => normalizeName(s.name)).filter((n): n is string => n !== null),
-      );
-
-      if (Array.isArray(config.products)) {
-        for (const product of config.products) {
-          const key = normalizeName(product?.name);
-          if (!key || existingProductNames.has(key)) continue;
-          await this.catalog.createProduct(
-            {
-              businessId,
-              name: product.name!.trim(),
-              description: product.description ?? null,
-              price: product.price ?? 0,
-              category: product.category ?? 'PRODUCT',
-              duration: product.duration ?? null,
-            },
-            tx,
-          );
-          existingProductNames.add(key);
+        const existingUsage = await tx.businessTemplateUsage.findUnique({
+          where: {
+            businessId_templateId: { businessId, templateId },
+          },
+          select: { id: true },
+        });
+        if (existingUsage) {
+          return { success: true, templateName: template.displayName, alreadyApplied: true };
         }
-      }
 
-      if (Array.isArray(config.services)) {
-        for (const service of config.services) {
-          const key = normalizeName(service?.name);
-          if (!key || existingServiceNames.has(key)) continue;
-          await this.catalog.createService(
-            {
-              businessId,
-              name: service.name!.trim(),
-              description: service.description ?? null,
-              price: service.price ?? 0,
-              duration: service.duration ?? 60,
-            },
-            tx,
-          );
-          existingServiceNames.add(key);
+        const [existingProducts, existingServices, existingCategories] = await Promise.all([
+          tx.product.findMany({
+            where: { businessId, deletedAt: null },
+            select: { name: true },
+          }),
+          tx.service.findMany({
+            where: { businessId, deletedAt: null },
+            select: { name: true },
+          }),
+          tx.expenseCategory.findMany({
+            where: { businessId },
+            select: { name: true },
+          }),
+        ]);
+        const existingProductNames = new Set(
+          existingProducts.map((p) => normalizeName(p.name)).filter((n): n is string => n !== null),
+        );
+        const existingServiceNames = new Set(
+          existingServices.map((s) => normalizeName(s.name)).filter((n): n is string => n !== null),
+        );
+        const existingCategoryNames = new Set(
+          existingCategories.map((c) => normalizeName(c.name)).filter((n): n is string => n !== null),
+        );
+
+        if (Array.isArray(config.products)) {
+          for (const product of config.products) {
+            const key = normalizeName(product?.name);
+            if (!key || existingProductNames.has(key)) continue;
+            await this.catalog.createProduct(
+              {
+                businessId,
+                name: product.name!.trim(),
+                description: product.description ?? null,
+                price: product.price ?? 0,
+                category: product.category ?? 'PRODUCT',
+                duration: product.duration ?? null,
+              },
+              tx,
+              pendingEvents,
+            );
+            existingProductNames.add(key);
+          }
         }
-      }
 
-      if (Array.isArray(config.expenseCategories)) {
-        const seenCategories = new Set<string>();
-        for (const category of config.expenseCategories) {
-          const trimmed = typeof category?.name === 'string' ? category.name.trim() : '';
-          if (!trimmed || seenCategories.has(trimmed.toLowerCase())) continue;
-          seenCategories.add(trimmed.toLowerCase());
-          await tx.expenseCategory.upsert({
-            where: {
-              businessId_name: { businessId, name: trimmed },
+        if (Array.isArray(config.services)) {
+          for (const service of config.services) {
+            const key = normalizeName(service?.name);
+            if (!key || existingServiceNames.has(key)) continue;
+            await this.catalog.createService(
+              {
+                businessId,
+                name: service.name!.trim(),
+                description: service.description ?? null,
+                price: service.price ?? 0,
+                duration: service.duration ?? 60,
+              },
+              tx,
+              pendingEvents,
+            );
+            existingServiceNames.add(key);
+          }
+        }
+
+        if (Array.isArray(config.expenseCategories)) {
+          for (const category of config.expenseCategories) {
+            const key = normalizeName(category?.name);
+            if (!key || existingCategoryNames.has(key)) continue;
+            const trimmed = category.name!.trim();
+            existingCategoryNames.add(key);
+            await tx.expenseCategory.upsert({
+              where: {
+                businessId_name: { businessId, name: trimmed },
+              },
+              create: {
+                businessId,
+                name: trimmed,
+                icon: category.icon ?? null,
+                color: category.color ?? null,
+              },
+              update: {},
+            });
+          }
+        }
+
+        if (template.archetype || template.industry) {
+          await tx.business.update({
+            where: { id: businessId },
+            data: {
+              ...(template.archetype && { archetype: template.archetype }),
+              ...(template.industry && { industry: template.industry }),
             },
-            create: {
-              businessId,
-              name: trimmed,
-              icon: category.icon ?? null,
-              color: category.color ?? null,
-            },
-            update: {},
           });
         }
-      }
 
-      if (template.archetype || template.industry) {
-        await tx.business.update({
-          where: { id: businessId },
-          data: {
-            ...(template.archetype && { archetype: template.archetype }),
-            ...(template.industry && { industry: template.industry }),
-          },
+        await tx.businessTemplateUsage.create({
+          data: { businessId, templateId },
         });
-      }
 
-      await tx.businessTemplateUsage.create({
-        data: { businessId, templateId },
-      });
+        return { success: true, templateName: template.displayName, alreadyApplied: false };
+      },
+      { timeout: 15_000, maxWait: 10_000 },
+    );
 
-      return { success: true, templateName: template.displayName, alreadyApplied: false };
-    });
+    for (const evt of pendingEvents) {
+      this.events?.emit(evt.name, evt.payload);
+    }
+
+    return result;
   }
 
   async seedDefaultTemplates() {
