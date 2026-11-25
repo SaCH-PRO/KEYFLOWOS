@@ -778,6 +778,8 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                       <button
                         type="button"
                         onClick={() => handleProductClick(product)}
+                        // "Open <product>", never a name that reads as a row action (a product named "Archived item").
+                        aria-label={`Open ${product.name} — ${formatCurrency(product.price, displayCurrency)}`}
                         className="flex-1 min-w-0 flex items-center gap-3 text-left"
                       >
                       <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/[0.04] border border-border/20">
