@@ -9,7 +9,7 @@ written here. The local JWT secret is a random string you generate once.
 ## 0. One-time machine setup
 
 - **Node:** 22.23.4, the version in `.nvmrc`. Put it first on `PATH`, for example
-  `export PATH=/opt/node-22.23.4/bin:$PATH`. Check with `node -v`.
+  `export PATH=/opt/node-22.23.4/bin:$PATH`. Check with `node -v`. Some containers carry only `/opt/node22` (22.23.5, a patch above the pin): use it and say so in the proof (pnpm prints an "Unsupported engine" warning).
 - **Postgres 16** with pgvector, and **Redis**, on localhost. A container restart stops both. Check them before
   every proof run and restart them if needed:
   ```bash

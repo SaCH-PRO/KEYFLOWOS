@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { createPortal, flushSync } from "react-dom";
+import Link from "next/link";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -26,6 +28,7 @@ import {
   User,
   ChevronRight,
   Pencil,
+  Download,
 } from "lucide-react";
 import {
   getInvoice,
@@ -43,13 +46,15 @@ import {
   InvoiceTimelineEntry,
 } from "@/lib/client";
 import { apiDelete, providerUnavailableOf } from "@/lib/api";
-import { canShareInvoicePayLink } from "@/lib/commerce-status";
+import { canMarkInvoicePaid, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { attemptIdempotencyKey, newPaymentAttempt, type PaymentAttempt } from "../../../finance/components/payment-record-modal";
+// SWP-INV-DETAIL (BUG-051): what a print of this page shows (the invoice sheet alone).
+import "./print.css";
 
 const STATUS_ORDER = ["DRAFT", "SENT", "PAID", "OVERDUE", "VOID"];
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
@@ -78,6 +83,9 @@ const isPendingExtractedPayment = (p: PaymentRecord) => p.status === "PENDING" &
  * payments route no longer serves it; the invoice read still carries it.
  */
 const isListedPayment = (p: PaymentRecord) => p.status !== "CONFIRMED";
+
+/** SWP-INV-DETAIL (BUG-051): set on <body> while the invoice sheet is printed; print.css prints the sheet alone. */
+const PRINTING_INVOICE_CLASS = "kf-printing-invoice";
 
 export default function InvoiceDetailPage() {
   const router = useRouter();
@@ -148,14 +156,37 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => { if (searchParams.get("action") === "record-payment" && invoice) setShowPaymentForm(true); }, [searchParams, invoice]);
 
+  // SWP-INV-DETAIL (BUG-084): the Payments tab lists the server's rows. It reads them when it is first opened, and
+  // again once something here changed them without answering them (Mark paid); a payment recorded here is listed
+  // from the answer at once. It read the list only while its own was empty, so a payment recorded before the tab was
+  // opened was the only row it ever listed, and Mark paid's payment was never listed.
+  // Review MINOR-2: each read takes a generation, and only the latest read's answer is listed, so a read that was in
+  // flight when money was recorded never replaces the list read after it.
+  const loadedInvoiceId = invoice?.id;
+  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
+  const paymentsReadRef = useRef(0);
   const loadPayments = useCallback(async () => {
-    if (!businessId || !invoice) return;
+    if (!businessId || !loadedInvoiceId) return;
+    const read = ++paymentsReadRef.current;
     setPaymentsLoading(true);
-    try { const { data } = await listInvoicePayments(businessId, invoice.id); if (data && mountedRef.current) setPayments(data.payments); }
-    finally { if (mountedRef.current) setPaymentsLoading(false); }
-  }, [businessId, invoice]);
+    try {
+      const { data } = await listInvoicePayments(businessId, loadedInvoiceId);
+      if (data && mountedRef.current && read === paymentsReadRef.current) setPayments(data.payments);
+    } finally {
+      if (mountedRef.current && read === paymentsReadRef.current) { setPaymentsLoading(false); setPaymentsLoaded(true); }
+    }
+  }, [businessId, loadedInvoiceId]);
 
-  useEffect(() => { if (activeTab === "payments" && payments.length === 0) void loadPayments(); }, [activeTab, loadPayments, payments.length]);
+  useEffect(() => { if (activeTab === "payments" && !paymentsLoaded && !paymentsLoading) void loadPayments(); }, [activeTab, paymentsLoaded, paymentsLoading, loadPayments]);
+
+  // SWP-INV-DETAIL (BUG-088, web side): the Activity tab is the server's timeline (its 'Invoice sent' entry comes
+  // from the sentAt the server stamps on DRAFT -> SENT). It is read again after each action here that adds an entry,
+  // so the entry shows without a reload.
+  const refreshTimeline = useCallback(async () => {
+    if (!businessId || !loadedInvoiceId) return;
+    const tl = await getInvoiceTimeline(businessId, loadedInvoiceId);
+    if (tl.data && mountedRef.current) setTimeline(tl.data.entries);
+  }, [businessId, loadedInvoiceId]);
 
   // R0-21 (M29): the server's status-aware figures (tenant detail route, and
   // after a record the payments route's response). A response that carries no
@@ -175,6 +206,10 @@ export default function InvoiceDetailPage() {
   })();
   const paidAmount = serverFigures?.paidAmount ?? rowFigures?.paidAmount ?? 0;
   const remaining = serverFigures?.remaining ?? rowFigures?.remaining ?? 0;
+  // SWP-INV-DETAIL review MINOR-3: a VOID or FULLY_CREDITED invoice owes nothing, whatever remaining is stored on it:
+  // Amount due, the print sheet and the PDF say 0 (a VOID one keeps its Void status beside it). A PARTIALLY_CREDITED
+  // invoice shows the server's figure: netting its credit notes is the server's (follow-up), never the web's.
+  const amountDue = invoice?.status === "VOID" || invoice?.status === "FULLY_CREDITED" ? 0 : remaining;
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
 
   // R0-21 (M26, CF-08): one payment attempt per open of the payment form. Its
@@ -184,6 +219,29 @@ export default function InvoiceDetailPage() {
   const paymentAttemptRef = useRef<PaymentAttempt | null>(null);
   const recordingPaymentRef = useRef(false);
   useEffect(() => { if (!showPaymentForm) paymentAttemptRef.current = null; }, [showPaymentForm]);
+
+  // SWP-INV-DETAIL (BUG-051): Print printed the app screen (navigation, tabs, buttons). While the browser prints
+  // (this page's Print, or the browser's own, which fires beforeprint), the invoice sheet is placed beside the app
+  // under <body>, and print.css prints it alone; it is removed once printing is over (afterprint). flushSync puts
+  // it in place before the browser lays the page out for printing.
+  const [printing, setPrinting] = useState(false);
+  useEffect(() => {
+    const before = () => flushSync(() => setPrinting(true));
+    const after = () => setPrinting(false);
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", after);
+    return () => { window.removeEventListener("beforeprint", before); window.removeEventListener("afterprint", after); };
+  }, []);
+  const printSheetShown = printing && !!invoice;
+  useLayoutEffect(() => {
+    if (!printSheetShown) return;
+    document.body.classList.add(PRINTING_INVOICE_CLASS);
+    return () => document.body.classList.remove(PRINTING_INVOICE_CLASS);
+  }, [printSheetShown]);
+  const handlePrint = () => {
+    flushSync(() => setPrinting(true));
+    window.print();
+  };
 
   const withLoading = async (key: string, fn: () => Promise<void>) => {
     setActionLoading(prev => ({ ...prev, [key]: true }));
@@ -196,7 +254,7 @@ export default function InvoiceDetailPage() {
     setShowSendReview(false);
     await withLoading("send", async () => {
       const { data, error } = await updateInvoiceStatus(invoice.id, "SENT");
-      if (!error && data) { setInvoice(prev => prev ? { ...prev, status: "SENT" } : prev); toast.success("Invoice sent"); }
+      if (!error && data) { setInvoice(prev => prev ? { ...prev, status: "SENT" } : prev); toast.success("Invoice sent"); await refreshTimeline(); }
       else toast.error(error ?? "Failed");
     });
   };
@@ -216,6 +274,7 @@ export default function InvoiceDetailPage() {
     if (!res.error && res.data) {
       if (invoice.status === "DRAFT") setInvoice(prev => prev ? { ...prev, status: "SENT" } : prev);
       toast.success("Invoice emailed");
+      await refreshTimeline();
       return;
     }
     const unavailable = providerUnavailableOf(res);
@@ -225,10 +284,22 @@ export default function InvoiceDetailPage() {
     } else toast.error(res.error ?? "Could not email this invoice");
   });
 
+  // SWP-INV-DETAIL (BUG-084, BUG-085): Mark paid records the balance as a payment on the server (R0-PL-04), and its
+  // answer carries no figures: the invoice (with the server's Paid and Remaining), its activity and its payments are
+  // read again, so the page says nothing is due and lists the payment.
   const handleMarkPaid = () => withLoading("paid", async () => {
-    if (!invoice) return;
-    const { data, error } = await markInvoicePaid(invoice.id);
-    if (!error && data) { setInvoice(prev => prev ? { ...prev, status: data.status ?? "PAID", paidAt: new Date().toISOString() } : prev); toast.success("Marked as paid"); }
+    if (!invoice || !businessId) return;
+    // Review S-2: the write names the page's business, not whatever storage holds.
+    const { data, error } = await markInvoicePaid(invoice.id, businessId);
+    if (!error && data) {
+      setInvoice(prev => prev ? { ...prev, status: data.status ?? "PAID", paidAt: data.paidAt ?? new Date().toISOString() } : prev);
+      toast.success("Marked as paid");
+      // Review MINOR-2: read again whatever is in flight (a newer read wins).
+      void loadPayments();
+      const fresh = await getInvoice(businessId, invoice.id);
+      if (fresh.data && mountedRef.current) setInvoice(fresh.data);
+      await refreshTimeline();
+    }
     else toast.error(error ?? "Failed");
   });
 
@@ -238,7 +309,7 @@ export default function InvoiceDetailPage() {
     setConfirmAction(() => async () => {
       await withLoading("void", async () => {
         const { data, error } = await updateInvoiceStatus(invoice.id, "VOID");
-        if (!error && data) { setInvoice(prev => prev ? { ...prev, status: "VOID" } : prev); toast.success("Voided"); }
+        if (!error && data) { setInvoice(prev => prev ? { ...prev, status: "VOID" } : prev); toast.success("Voided"); await refreshTimeline(); }
         else toast.error(error ?? "Failed");
       });
     });
@@ -274,6 +345,10 @@ export default function InvoiceDetailPage() {
         setPayments(prev => [data.payment, ...prev.filter(p => p.id !== data.payment.id)]);
         toast.success(data.invoice.status === "PAID" ? "Fully paid!" : `Payment recorded`);
         setShowPaymentForm(false); setPaymentForm({ amount: "", method: "Cash", reference: "", notes: "" });
+        // Review MINOR-2: once the tab has read (or is reading) the list, it is read again, so a read in flight
+        // from before this payment never replaces the list with one that lacks it.
+        if (paymentsLoaded || paymentsLoading) void loadPayments();
+        void refreshTimeline();
       } else toast.error(error ?? "Failed");
     } finally { recordingPaymentRef.current = false; setRecordingPayment(false); }
   };
@@ -295,6 +370,7 @@ export default function InvoiceDetailPage() {
         setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
         toast.success(`Payment of ${formatAmount(data.payment.amount, data.payment.currency)} confirmed`);
         await loadPayments();
+        void refreshTimeline();
       } else if (status === 403) {
         setConfirmForbidden(true);
         toast.error("Confirming a payment needs revenue write access", { description: error ?? undefined });
@@ -339,6 +415,26 @@ export default function InvoiceDetailPage() {
     toast.success("Copied");
   };
 
+  // SWP-INV-DETAIL (BUG-051): Download PDF builds a one-invoice A4 PDF (jspdf, jspdf-autotable) from the same
+  // projection the page and its print sheet show, and downloads it as <invoice number>.pdf.
+  const handleDownloadPdf = () => withLoading("pdf", async () => {
+    if (!invoice) return;
+    try {
+      const doc = invoiceDocumentOf(invoice, paidAmount, amountDue);
+      const blob = await invoicePdfBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${doc.number.replace(/[^A-Za-z0-9._-]+/g, "_")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL?.(url), 30_000);
+    } catch {
+      toast.error("Could not make the PDF of this invoice");
+    }
+  });
+
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
   if (error || !invoice) return (
     <div className="max-w-4xl mx-auto py-20 text-center">
@@ -355,6 +451,9 @@ export default function InvoiceDetailPage() {
   const canEmail = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canRemind = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   const canRecordPayment = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
+  // SWP-INV-DETAIL (BUG-086): Mark paid records the balance as a payment, so it is offered where a payment can be
+  // recorded. It was offered on a DRAFT only, which the server refuses (409), and never on an invoice that can be paid.
+  const canMarkPaid = canMarkInvoicePaid(invoice.status);
   const canSharePayLink = canShareInvoicePayLink(invoice.status);
   const canVoid = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canDelete = invoice.status === "DRAFT" || invoice.status === "VOID";
@@ -394,9 +493,10 @@ export default function InvoiceDetailPage() {
             <button className="inline-flex items-center gap-1.5 px-3 h-9 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><MoreHorizontal className="w-3.5 h-3.5" /></button>
             <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1 hidden group-hover:block">
               <DropdownItem icon={LinkIcon} label="Copy payment link" show={canSharePayLink} onClick={copyPaymentLink} />
-              <DropdownItem icon={Printer} label="Print / PDF" show onClick={() => window.print()} />
+              <DropdownItem icon={Printer} label="Print" show onClick={handlePrint} />
+              <DropdownItem icon={Download} label="Download PDF" show onClick={handleDownloadPdf} loading={actionLoading.pdf} />
               {invoice.status === "PAID" && <DropdownItem icon={Receipt} label="Resend receipt" show onClick={() => resendInvoiceReceipt(businessId!, invoice.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} />}
-              {canEdit && <DropdownItem icon={CheckCircle} label="Mark paid" show onClick={handleMarkPaid} loading={actionLoading.paid} />}
+              {canMarkPaid && <DropdownItem icon={CheckCircle} label="Mark paid" show onClick={handleMarkPaid} loading={actionLoading.paid} />}
               {canVoid && <DropdownItem icon={Ban} label="Void" show onClick={handleVoid} loading={actionLoading.void} />}
               {canDelete && <><div className="border-t border-border my-1" /><DropdownItem icon={Trash2} label="Delete" show destructive onClick={handleDelete} /></>}
             </div>
@@ -436,7 +536,8 @@ export default function InvoiceDetailPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Info Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <InfoCard icon={DollarSign} label="Amount due" value={formatAmount(Number(invoice.total), invoice.currency)} />
+            {/* SWP-INV-DETAIL (BUG-085): what is still owed (the Payment Summary's Remaining), not the total. */}
+            <InfoCard icon={DollarSign} label="Amount due" value={formatAmount(amountDue, invoice.currency)} />
             <InfoCard icon={Calendar} label="Issue date" value={invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : "—"} />
             <InfoCard icon={Clock} label="Due date" value={invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "—"} highlight={invoice.status === "OVERDUE" ? "text-red-600" : undefined} />
             <InfoCard icon={User} label="Client" value={invoice.contact ? `${invoice.contact.firstName ?? ""} ${invoice.contact.lastName ?? ""}`.trim() || invoice.contact.email || "—" : "—"} />
@@ -552,7 +653,12 @@ export default function InvoiceDetailPage() {
                   {(invoice.contact.firstName?.[0] ?? "") + (invoice.contact.lastName?.[0] ?? "")}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">{`${invoice.contact.firstName ?? ""} ${invoice.contact.lastName ?? ""}`.trim() || "Unnamed"}</p>
+                  {/* FCP-COR-1 (journey C4): the customer opens their page. */}
+                  {invoice.contactId ? (
+                    <Link href={`/app/crm/contacts/${encodeURIComponent(invoice.contactId)}`} className="block text-sm font-semibold truncate text-[hsl(var(--kf-accent1))] hover:underline">{`${invoice.contact.firstName ?? ""} ${invoice.contact.lastName ?? ""}`.trim() || "Unnamed"}</Link>
+                  ) : (
+                    <p className="text-sm font-semibold truncate">{`${invoice.contact.firstName ?? ""} ${invoice.contact.lastName ?? ""}`.trim() || "Unnamed"}</p>
+                  )}
                   {invoice.contact.email && <p className="text-[11px] text-muted-foreground truncate">{invoice.contact.email}</p>}
                 </div>
               </div>
@@ -582,8 +688,9 @@ export default function InvoiceDetailPage() {
             {canRemind && <ActionButton icon={Bell} label="Send reminder" onClick={handleSendReminder} />}
             {canRecordPayment && <ActionButton icon={DollarSign} label="Record payment" onClick={() => setShowPaymentForm(true)} />}
             {canSharePayLink && <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />}
-            <ActionButton icon={Printer} label="Print / PDF" onClick={() => window.print()} />
-            {canEdit && <ActionButton icon={CheckCircle} label="Mark paid" onClick={handleMarkPaid} loading={actionLoading.paid} />}
+            <ActionButton icon={Printer} label="Print" onClick={handlePrint} />
+            <ActionButton icon={Download} label="Download PDF" onClick={handleDownloadPdf} loading={actionLoading.pdf} />
+            {canMarkPaid && <ActionButton icon={CheckCircle} label="Mark paid" onClick={handleMarkPaid} loading={actionLoading.paid} />}
             {canVoid && <ActionButton icon={Ban} label="Void invoice" onClick={handleVoid} loading={actionLoading.void} />}
           </div>
         </div>
@@ -630,6 +737,8 @@ export default function InvoiceDetailPage() {
         </div>
       )}
 
+      {printSheetShown && createPortal(<InvoicePrintSheet doc={invoiceDocumentOf(invoice, paidAmount, amountDue)} />, document.body)}
+
       <ConfirmDialog open={confirmOpen} onCancel={() => setConfirmOpen(false)} title={confirmTitle} message={confirmMessage} confirmLabel="Confirm" variant={confirmTitle.includes("Delete") || confirmTitle.includes("Void") ? "danger" : "default"} onConfirm={() => { confirmAction?.(); setConfirmOpen(false); }} />
     </motion.div>
   );
@@ -659,4 +768,215 @@ function DropdownItem({ icon: Icon, label, onClick, show, loading, destructive }
       <Icon className={`w-3.5 h-3.5 shrink-0 ${loading ? "animate-spin" : ""}`} />{label}
     </button>
   );
+}
+
+/**
+ * SWP-INV-DETAIL (BUG-051): the invoice as this page shows it (its number, status, dates, customer, lines, totals,
+ * what was paid and what is still due: the server's figures), one projection for the print sheet and the PDF.
+ * VAT-BASICS adds the business's VAT number to it.
+ */
+interface InvoiceDocument {
+  number: string;
+  status: string;
+  issueDate: string;
+  dueDate: string;
+  billTo: { name: string; email: string | null } | null;
+  lines: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+  paid: number;
+  balanceDue: number;
+  currency: string;
+  notes: string | null;
+}
+
+function invoiceDocumentOf(invoice: Invoice, paidAmount: number, remaining: number): InvoiceDocument {
+  const lines = (invoice.items ?? []).map((item) => ({
+    description: item.description || "Unnamed item",
+    quantity: Number(item.quantity),
+    unitPrice: Number(item.unitPrice),
+    total: Number(item.total ?? Number(item.quantity) * Number(item.unitPrice)),
+  }));
+  const name = invoice.contact ? `${invoice.contact.firstName ?? ""} ${invoice.contact.lastName ?? ""}`.trim() || invoice.contact.email || "" : "";
+  return {
+    number: invoice.invoiceNumber ?? invoice.id.slice(0, 8),
+    status: STATUS_META[invoice.status]?.label ?? invoice.status,
+    issueDate: invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : "—",
+    dueDate: invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "—",
+    billTo: invoice.contact ? { name: name || "Unnamed", email: invoice.contact.email ?? null } : null,
+    lines,
+    subtotal: Number(invoice.subtotal ?? lines.reduce((sum, l) => sum + l.total, 0)),
+    taxRate: Number(invoice.taxRate ?? 0),
+    taxAmount: Number(invoice.taxAmount ?? 0),
+    discountAmount: Number(invoice.discountAmount ?? 0),
+    total: Number(invoice.total),
+    paid: paidAmount,
+    balanceDue: remaining,
+    currency: invoice.currency,
+    notes: invoice.notes ?? null,
+  };
+}
+
+/** The totals of an invoice document, in the order the sheet and the PDF list them. */
+function invoiceDocumentTotals(doc: InvoiceDocument): Array<{ label: string; value: string; strong?: boolean }> {
+  const rows: Array<{ label: string; value: string; strong?: boolean }> = [{ label: "Subtotal", value: formatAmount(doc.subtotal, doc.currency) }];
+  if (doc.taxRate > 0) rows.push({ label: `Tax (${doc.taxRate}%)`, value: formatAmount(doc.taxAmount, doc.currency) });
+  if (doc.discountAmount > 0) rows.push({ label: "Discount", value: `-${formatAmount(doc.discountAmount, doc.currency)}` });
+  rows.push({ label: "Total", value: formatAmount(doc.total, doc.currency), strong: true });
+  rows.push({ label: "Paid", value: formatAmount(doc.paid, doc.currency) });
+  rows.push({ label: "Balance due", value: formatAmount(doc.balanceDue, doc.currency), strong: true });
+  return rows;
+}
+
+/** The printed invoice: placed under <body> while the browser prints (print.css shows it alone). */
+function InvoicePrintSheet({ doc }: { doc: InvoiceDocument }) {
+  return (
+    <div className="kf-invoice-print" data-invoice-print="">
+      <div className="kf-invoice-print__head">
+        <div>
+          <p className="kf-invoice-print__title">Invoice</p>
+          <p className="kf-invoice-print__number">{doc.number}</p>
+        </div>
+        <dl className="kf-invoice-print__meta">
+          <div><dt>Status</dt><dd>{doc.status}</dd></div>
+          <div><dt>Issue date</dt><dd>{doc.issueDate}</dd></div>
+          <div><dt>Due date</dt><dd>{doc.dueDate}</dd></div>
+        </dl>
+      </div>
+      <div className="kf-invoice-print__billto">
+        <p className="kf-invoice-print__label">Bill to</p>
+        {doc.billTo ? (
+          <>
+            <p className="kf-invoice-print__strong">{doc.billTo.name}</p>
+            {doc.billTo.email && <p>{doc.billTo.email}</p>}
+          </>
+        ) : <p>No contact assigned</p>}
+      </div>
+      <table className="kf-invoice-print__lines">
+        <thead>
+          <tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr>
+        </thead>
+        <tbody>
+          {doc.lines.map((line, idx) => (
+            <tr key={idx}>
+              <td>{line.description}</td>
+              <td>{line.quantity}</td>
+              <td>{formatAmount(line.unitPrice, doc.currency)}</td>
+              <td>{formatAmount(line.total, doc.currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <table className="kf-invoice-print__totals">
+        <tbody>
+          {invoiceDocumentTotals(doc).map((row) => (
+            <tr key={row.label} className={row.strong ? "kf-invoice-print__strong" : undefined}><th>{row.label}</th><td>{row.value}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      {doc.notes && (
+        <div className="kf-invoice-print__notes">
+          <p className="kf-invoice-print__label">Notes</p>
+          <p>{doc.notes}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The characters WinAnsiEncoding holds beyond Latin-1 (jspdf writes them as single bytes). */
+const WIN_ANSI_EXTRAS = "\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178";
+
+/**
+ * Review MINOR-4: every string written to the PDF. jspdf's standard fonts are WinAnsi; a string holding any other
+ * character is written as 2-byte text, which they show as gibberish (fr-FR's U+202F thousands separator made every
+ * amount unreadable). Spaces of any width are written as a space, and any other character outside WinAnsi as "?".
+ */
+function pdfText(s: string): string {
+  return Array.from(s.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000\t]/g, " "), (c) => {
+    const code = c.codePointAt(0) ?? 0;
+    if (c === "\n" || (code >= 0x20 && code <= 0x7e) || (code >= 0xa1 && code <= 0xff) || WIN_ANSI_EXTRAS.includes(c)) return c;
+    return "?";
+  }).join("");
+}
+
+/** The invoice document as a one-invoice A4 PDF (jspdf and jspdf-autotable, loaded when asked for). */
+async function invoicePdfBlob(doc: InvoiceDocument): Promise<Blob> {
+  const [{ default: JsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+  const pdf = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  // Review MINOR-4: every string goes through pdfText.
+  const text = pdfText;
+  const margin = 18;
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const right = pageW - margin;
+  let y = 48;
+  /** A new page when the next block of this height would run past the bottom margin. */
+  const room = (height: number) => { if (y + height > pageH - margin) { pdf.addPage(); y = margin + 6; } };
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(22);
+  pdf.text(text("Invoice"), margin, 26);
+  pdf.setFontSize(12);
+  pdf.text(text(doc.number), margin, 33);
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  const meta: Array<[string, string]> = [["Status", doc.status], ["Issue date", doc.issueDate], ["Due date", doc.dueDate]];
+  meta.forEach(([label, value], i) => {
+    pdf.setTextColor(110);
+    pdf.text(text(label), right - 60, 22 + i * 6);
+    pdf.setTextColor(20);
+    pdf.text(text(value), right, 22 + i * 6, { align: "right" });
+  });
+
+  pdf.setTextColor(110);
+  pdf.text(text("Bill to"), margin, y);
+  pdf.setTextColor(20);
+  if (doc.billTo) {
+    pdf.setFont("helvetica", "bold");
+    pdf.text(text(doc.billTo.name), margin, y + 6);
+    pdf.setFont("helvetica", "normal");
+    if (doc.billTo.email) pdf.text(text(doc.billTo.email), margin, y + 11);
+  } else {
+    pdf.text(text("No contact assigned"), margin, y + 6);
+  }
+  y += 20;
+
+  autoTable(pdf, {
+    startY: y,
+    head: [["Description", "Qty", "Unit price", "Amount"].map(text)],
+    body: doc.lines.map((line) => [line.description, String(line.quantity), formatAmount(line.unitPrice, doc.currency), formatAmount(line.total, doc.currency)].map(text)),
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 10, cellPadding: 2.5, textColor: 20 },
+    headStyles: { fillColor: [241, 245, 249], textColor: 60, fontStyle: "bold" },
+    columnStyles: { 1: { halign: "right", cellWidth: 18 }, 2: { halign: "right", cellWidth: 36 }, 3: { halign: "right", cellWidth: 36 } },
+    theme: "plain",
+  });
+  y = ((pdf as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? y) + 8;
+
+  const totals = invoiceDocumentTotals(doc);
+  room(totals.length * 6);
+  for (const row of totals) {
+    pdf.setFont("helvetica", row.strong ? "bold" : "normal");
+    pdf.text(text(row.label), right - 70, y);
+    pdf.text(text(row.value), right, y, { align: "right" });
+    y += 6;
+  }
+
+  if (doc.notes) {
+    const noteLines = pdf.splitTextToSize(text(doc.notes), right - margin) as string[];
+    y += 6;
+    room(6 + noteLines.length * 5);
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(110);
+    pdf.text(text("Notes"), margin, y);
+    pdf.setTextColor(20);
+    pdf.text(noteLines, margin, y + 6);
+  }
+
+  return pdf.output("blob");
 }

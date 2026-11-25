@@ -43,6 +43,7 @@ import {
 import { apiDelete } from "@/lib/api";
 import {
   OWED_STATUSES,
+  canMarkInvoicePaid,
   canRemindInvoice,
   canShareInvoicePayLink,
   invoiceRemainingOwed,
@@ -232,7 +233,9 @@ export default function InvoicesHubPage() {
   });
 
   const handleMarkPaid = (id: string) => withLoading(id, "paid", async () => {
-    const { data, error } = await markInvoicePaid(id);
+    // SWP-INV-DETAIL review S-2: the write names the page's business, not whatever storage holds.
+    if (!businessId) return;
+    const { data, error } = await markInvoicePaid(id, businessId);
     if (!error && data) { setInvoices(prev => prev.map(i => i.id === id ? { ...i, status: data.status ?? "PAID" } : i)); toast.success("Marked as paid"); }
     else toast.error(error ?? "Failed");
   });
@@ -434,7 +437,8 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={DollarSign} label={inv.status === "PARTIALLY_PAID" ? "Record balance" : "Record payment"} onClick={() => router.push(`/app/commerce/invoices/${inv.id}?action=record-payment`)} show={inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID"} />
                                 <DropdownItem icon={MessageCircle} label="Remind" onClick={() => remindWhatsApp(inv)} show={inv.status === "PARTIALLY_PAID" && invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency).remaining > 0} />
                                 <DropdownItem icon={Bell} label="Send reminder" onClick={() => openComposer({ to: inv.contact?.email ?? "", subject: `Friendly reminder: invoice ${inv.invoiceNumber ?? ""}`, body: "", context: { type: "follow_up", recordNumber: inv.invoiceNumber ?? inv.id, contactName: inv.contact?.firstName ? `${inv.contact.firstName} ${inv.contact.lastName ?? ""}`.trim() : undefined }, onSent: () => toast.success("Reminder sent") })} show={canRemindInvoice(inv.status)} />
-                                <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
+                                {/* SWP-INV-DETAIL (BUG-086): the shared Mark paid allow-list (as on the invoice's page), never a DRAFT. */}
+                                <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={canMarkInvoicePaid(inv.status)} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
                                 <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => { void shareWhatsApp(inv); }} show={canShareInvoicePayLink(inv.status)} />

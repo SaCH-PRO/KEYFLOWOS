@@ -31,7 +31,7 @@ import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../compo
 import type { DateRange } from "../components/date-range-filter";
 import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 
-import { OWED_STATUSES, canRemindInvoice as canRemind } from "@/lib/commerce-status";
+import { OWED_STATUSES, canMarkPaidOnPaymentsTab, canRemindInvoice as canRemind } from "@/lib/commerce-status";
 
 export { OWED_STATUSES };
 
@@ -366,7 +366,7 @@ export default function PaymentsTab({
     if (!businessId) return;
     const ids = Array.from(selectedIds).filter((id) => {
       const inv = invoices.find((i) => i.id === id);
-      return inv && inv.status !== "PAID" && inv.status !== "VOID";
+      return inv && canMarkPaidOnPaymentsTab(inv.status);
     });
     if (ids.length === 0) {
       toast.info("No eligible invoices to mark as paid");
@@ -756,18 +756,20 @@ export default function PaymentsTab({
                           )}
                         </button>
                       )}
-                      <button
-                        onClick={() => handleMarkPaid(inv.id)}
-                        disabled={!!isLoading}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-                        title="Mark Paid"
-                      >
-                        {isLoading === "paid" ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      {canMarkPaidOnPaymentsTab(inv.status) && (
+                        <button
+                          onClick={() => handleMarkPaid(inv.id)}
+                          disabled={!!isLoading}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                          title="Mark Paid"
+                        >
+                          {isLoading === "paid" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

@@ -19,8 +19,9 @@ This file is the one place that records how we work faster. Add to it, keep entr
 | Merge queue (one PR at a time, D-272) | 1 CI cycle per PR, plus a re-run after merging main in | **no** | the bottleneck |
 | Full server suite plus Release 0 at a wave head | about 30 min | once per wave | |
 
-GitHub's merge queue is not available: the repository is owned by a personal account (checked 2026-11-24), and the
-queue needs an organization-owned repository.
+GitHub's merge queue was not available on 2026-11-24 (a personal-account repository). Since D-278 the repository is
+organization-owned (`KEYFLOWOS/KEYFLOWOS`, 2026-11-25) and FU-CI-MERGE-QUEUE adds the `merge_group` triggers; the queue
+is on once the owner switches it on for `main`.
 
 ## 2. Adopted (any lane, from now)
 
@@ -37,12 +38,12 @@ queue needs an organization-owned repository.
 | A9 | **The plan's named browser spec goes in with the RED, never after the fix.** A packet whose files or definition of done name an `e2e/*.spec.ts` is not ready for review without it; if it cannot be written, declare the departure in the RETURN. | SWP-CONTACT-DETAIL's acceptance review rejected on a missing sweep spec (2026-11-24). | D-274 |
 | A10 | **Replacing a fresh-per-unit resource with reuse (a worktree, a database, a browser context) in a gate needs structural equivalence.** Define "same as fresh" by recording the fresh state and comparing to it, not by listing kinds of drift; every RED is checked against the old implementation too (it must pass there); and an equivalence run over the real gate (0 differences) comes before the RETURN. | C1 needed four review rounds: each list of drift kinds missed another (HEAD, index flags, a redirected .git, an attached HEAD, per-worktree state, autocrlf, racy index entries). | D-274 |
 
-## 3. Proposed, waiting for the owner
+## 3. Proposals (both ruled 2026-11-24: P1 as D-278, P2 as D-279; kept for the record)
 
 | # | Proposal | Gain | What it needs |
 |---|---|---|---|
-| P1 | Move the repository into a free GitHub organization, then turn on the merge queue (with FU-CI-MERGE-GROUP: `merge_group` triggers, the agent-control gate reporting its PR result on a queue entry). | Waves test in parallel on the combined result; about 3 h of serial CI for three waves becomes about 1 h. | Owner: create the org and transfer (integrations to re-check: Vercel, the Claude and Codex GitHub apps, GitGuardian, Supabase preview); then a ruling that "merge" under D-239/D-272 means "add to the queue". |
-| P2 | Run the Windows worker proof only when the paths it exercises change, with a required aggregate job so a needed run can never be skipped. | About 60 min off every web-only or docs-only wave. | A gate ruling; the path list from R&D-1 below. |
+| P1 (**ruled D-278**, done) | Move the repository into a free GitHub organization, then turn on the merge queue (with FU-CI-MERGE-GROUP: `merge_group` triggers, the agent-control gate reporting its PR result on a queue entry). | Waves test in parallel on the combined result; about 3 h of serial CI for three waves becomes about 1 h. | Owner: create the org and transfer (integrations to re-check: Vercel, the Claude and Codex GitHub apps, GitGuardian, Supabase preview); then a ruling that "merge" under D-239/D-272 means "add to the queue". |
+| P2 (**ruled D-279**, built as FU-CI-WINDOWS-INPUT-GATE) | Run the Windows worker proof only when the paths it exercises change, with a required aggregate job so a needed run can never be skipped. | About 60 min off every web-only or docs-only wave. | A gate ruling; the path list from R&D-1 below. |
 
 ## 4. Research in progress
 

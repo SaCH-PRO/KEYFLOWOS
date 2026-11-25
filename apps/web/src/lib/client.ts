@@ -1834,7 +1834,9 @@ export async function bulkDeleteContacts(input: {
   contactIds: string[];
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
-  return apiDelete<{ deleted: number }>(
+  // `deletedIds` is optional: the server answers the count; an answer that also names the ids lets a partial delete
+  // offer Undo for exactly those (FU-BULK-DELETE-UNDO, D-277b; contacts-bulk-delete.ts).
+  return apiDelete<{ deleted: number; deletedIds?: string[] }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
     { contactIds: input.contactIds },
   );
@@ -15557,6 +15559,29 @@ export async function restoreTrashItem(
   return apiPost({
     path: `/api/businesses/${encodeURIComponent(businessId)}/trash/${encodeURIComponent(model)}/${encodeURIComponent(id)}/restore`,
     body: {},
+  });
+}
+
+/** One failed id of a bulk restore, as the server names it (trash.controller.ts bulkRestore). */
+export type BulkRestoreFailure = {
+  id: string;
+  code: "not_found" | "forbidden" | "contact_email_taken" | "contact_phone_taken" | "restore_failed" | string;
+  message: string;
+  existingContactId?: string | null;
+};
+
+/**
+ * FU-BULK-DELETE-UNDO (D-277b): restores up to 100 trashed records of `model` in one call (POST
+ * /api/businesses/:b/trash/:model/bulk-restore). A partial failure does not abort the others: the answer lists both.
+ */
+export async function bulkRestoreTrashItems(
+  businessId: string,
+  model: string,
+  ids: string[],
+): Promise<ApiResult<{ model: string; restored: string[]; failed: BulkRestoreFailure[]; restoredCount: number; failedCount: number }>> {
+  return apiPost({
+    path: `/api/businesses/${encodeURIComponent(businessId)}/trash/${encodeURIComponent(model)}/bulk-restore`,
+    body: { ids },
   });
 }
 
