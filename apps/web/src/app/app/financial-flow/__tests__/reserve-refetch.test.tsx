@@ -59,7 +59,7 @@ function stubServer(opts: { buckets?: Bucket[]; deleteAnswer?: () => Response; c
   const buckets: Bucket[] = (opts.buckets ?? []).map((b) => ({ ...b }));
   const calls: { method: string; pathname: string; body?: unknown }[] = [];
   const safe = () => {
-    const otherReserves = buckets.reduce((s, b) => s + b.currentAmount, 0);
+    const otherReserves = buckets.filter((b) => b.status === "ACTIVE").reduce((s, b) => s + b.currentAmount, 0);
     return { safeToSpend: 1_000 - otherReserves, cashBalance: 1_000, taxReserved: 0, billsDueNext30Days: 0, payrollReserved: 0, operatingBuffer: 0, otherReserves, currency: "TTD" };
   };
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
