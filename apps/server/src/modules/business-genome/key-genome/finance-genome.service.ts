@@ -1,6 +1,8 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, Optional, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { CashPositionService, type CashPosition } from '../../finance/cash-position.service';
+import { normalizeCurrency } from '../../finance/posting.service';
 import { GenomeFactService } from './genome-fact.service';
 
 import { GenomeSignalService } from './genome-signal.service';
@@ -21,6 +23,8 @@ import type {
 } from './key-genome.types';
 import { GenomeFinancialMetricService } from './genome-financial-metric.service';
 
+const DEFAULT_FINANCE_CURRENCY = 'TTD';
+
 function asJsonValue<T>(value: T): Prisma.InputJsonValue {
   return value as unknown as Prisma.InputJsonValue;
 }
@@ -32,6 +36,47 @@ function clamp(value: number, min = 0, max = 100): number {
 function toMetricNumber(metric?: GenomeFinancialMetricData | null): number | undefined {
   if (!metric) return undefined;
   return typeof metric.value === 'number' ? metric.value : undefined;
+}
+
+/**
+ * W11-GENOME-RUNWAY (D-135): a financial metric participates in the business's
+ * currency-bound runway calculation only when its normalized currency matches
+ * the business's normalized currency (unlabelled legacy rows default to TTD,
+ * matching GenomeFinancialMetric.currency).
+ */
+function metricMatchesCurrency(
+  metric: GenomeFinancialMetricData | null | undefined,
+  businessCurrency: string,
+): boolean {
+  if (!metric || typeof metric.value !== 'number') return false;
+  const metricCurrency = normalizeCurrency(metric.currency) || DEFAULT_FINANCE_CURRENCY;
+  return metricCurrency === businessCurrency;
+}
+
+/**
+ * W11-GENOME-RUNWAY (D-135): true when the ledger holds any cash position in
+ * the business currency (non-zero cashBalance, a non-zero cash-class ledger
+ * account row in that currency, or an unposted opening balance in that
+ * currency). Idle zero-balance rows or foreign-currency-only rows do not mask
+ * a valid business-currency CASH_ON_HAND metric fallback.
+ */
+function hasLedgerCashInCurrency(position: CashPosition, businessCurrency: string): boolean {
+  if (position.cashBalance !== 0) return true;
+  if (
+    position.accounts.some(
+      (a) => normalizeCurrency(a.currency) === businessCurrency && a.balance !== 0,
+    )
+  ) {
+    return true;
+  }
+  if (
+    position.unpostedOpeningBalances.some(
+      (o) => normalizeCurrency(o.currency) === businessCurrency && o.amount !== 0,
+    )
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function toRiskScore(risk: GenomeFinanceRiskLevel): number {
@@ -139,6 +184,8 @@ function overallRisk(risks: GenomeFinanceRiskLevel[]): GenomeFinanceRiskLevel {
 
 @Injectable()
 export class FinanceGenomeService {
+  private readonly cashPosition: CashPositionService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly metricService: GenomeFinancialMetricService,
@@ -149,20 +196,45 @@ export class FinanceGenomeService {
     private readonly memory: GenomeMemoryService,
     @Inject(forwardRef(() => DepartmentReadinessService))
     @Inject(forwardRef(() => DepartmentReadinessService)) private readonly departmentReadiness: DepartmentReadinessService,
-  ) {}
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
   async computeFinanceSnapshot(
     businessId: string,
     period?: string,
   ): Promise<GenomeFinanceSnapshotData> {
-    const metrics = await this.metricService.getLatestMetricsByType(businessId);
-    const currency = 'TTD';
+    const [metrics, position] = await Promise.all([
+      this.metricService.getLatestMetricsByType(businessId),
+      this.cashPosition.getCashPosition(businessId),
+    ]);
+    const currency = normalizeCurrency(position.currency) || DEFAULT_FINANCE_CURRENCY;
 
     const revenue = toMetricNumber(metrics.REVENUE);
     const grossProfit = toMetricNumber(metrics.GROSS_PROFIT);
     const netProfit = toMetricNumber(metrics.NET_PROFIT);
-    const monthlyExpenses = toMetricNumber(metrics.MONTHLY_EXPENSE);
-    const cashOnHand = toMetricNumber(metrics.CASH_ON_HAND);
+
+    const rawMonthlyExpense = toMetricNumber(metrics.MONTHLY_EXPENSE);
+    const monthlyExpenseOtherCurrency =
+      rawMonthlyExpense !== undefined && !metricMatchesCurrency(metrics.MONTHLY_EXPENSE, currency);
+    const monthlyExpenses = monthlyExpenseOtherCurrency ? undefined : rawMonthlyExpense;
+
+    let cashOnHand: number | undefined;
+    let cashOnHandOtherCurrency = false;
+    if (hasLedgerCashInCurrency(position, currency)) {
+      cashOnHand = position.cashBalance;
+    } else {
+      const rawCashOnHand = toMetricNumber(metrics.CASH_ON_HAND);
+      if (rawCashOnHand !== undefined) {
+        if (metricMatchesCurrency(metrics.CASH_ON_HAND, currency)) {
+          cashOnHand = rawCashOnHand;
+        } else {
+          cashOnHandOtherCurrency = true;
+        }
+      }
+    }
+
     const accountsReceivable = toMetricNumber(metrics.ACCOUNTS_RECEIVABLE);
     const accountsPayable = toMetricNumber(metrics.ACCOUNTS_PAYABLE);
     const taxReserve = toMetricNumber(metrics.TAX_RESERVE);
@@ -188,8 +260,12 @@ export class FinanceGenomeService {
 
     const missingInputs: string[] = [];
     if (revenue === undefined) missingInputs.push('revenue');
-    if (monthlyExpenses === undefined) missingInputs.push('monthly_expenses');
-    if (cashOnHand === undefined) missingInputs.push('cash_on_hand');
+    if (monthlyExpenses === undefined) {
+      missingInputs.push(monthlyExpenseOtherCurrency ? 'monthly_expenses (other currency)' : 'monthly_expenses');
+    }
+    if (cashOnHand === undefined) {
+      missingInputs.push(cashOnHandOtherCurrency ? 'cash_on_hand (other currency)' : 'cash_on_hand');
+    }
     if (!currencyFact) missingInputs.push('finance.currency');
     if (!costStructureFact) missingInputs.push('finance.cost_structure');
     if (finalAverageTicket === undefined) missingInputs.push('average_ticket');

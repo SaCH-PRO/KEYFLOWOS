@@ -2188,6 +2188,7 @@ Every other route is applied (above).
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `TrashController.permanentDelete` | DELETE | `/api/businesses/:businessId/trash/:model/:id` | exempt-check | check:assertMayWrite (write on the trashed record's own module, D-95) |
+| `TrashController.bulkRestore` | POST | `/api/businesses/:businessId/trash/:model/bulk-restore` | exempt-check | check:assertMayWrite (write on the trashed record's own module, D-95 / D-277b; the class @RequireModuleScope('settings') is inert) |
 | `TrashController.restore` | POST | `/api/businesses/:businessId/trash/:model/:id/restore` | exempt-check | check:assertMayWrite (write on the trashed record's own module, D-95; the class @RequireModuleScope('settings') is inert) |
 
 ### UploadsController (`uploads/uploads.controller.ts`)

@@ -236,6 +236,9 @@ export const KEY_BOOKS_MEMBERSHIP_READ_TOOLS: ReadonlySet<string> = new Set([
   'finance_list_bank_accounts',
   'reconcile_list_unmatched',
   'finance_list_action_items',
+  'finance_safe_to_spend',
+  'finance_cashflow_forecast',
+  'finance_money_moves',
 ]);
 
 /**

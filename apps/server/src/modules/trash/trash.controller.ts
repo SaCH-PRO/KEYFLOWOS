@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Post,
@@ -7,6 +8,7 @@ import {
   Param,
   UseGuards,
   Inject,
+  Optional,
   ParseIntPipe,
   DefaultValuePipe,
   BadRequestException,
@@ -16,11 +18,13 @@ import {
   Req,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { CrmCacheService } from '../crm/crm-cache.service';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { contactWhereBase } from '../crm/crm.helpers';
 import { contactIdentityViolation } from '../crm/crm.service';
@@ -309,6 +313,7 @@ export class TrashController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Optional() @Inject(CrmCacheService) private readonly crmCache?: CrmCacheService,
   ) {}
 
   // W4-TRASH-D46 review repair SEC-TRASH-D46-1: a revenue model is listed only
@@ -582,14 +587,18 @@ export class TrashController {
    * caller may open (the same visibility clause; null otherwise). It answered
    * 500. Anything else is rethrown untouched.
    */
-  private async rejectContactIdentityTaken(
+  private async describeContactIdentityConflict(
     err: unknown,
     businessId: string,
     trashed: Record<string, unknown>,
     visibility: ContactVisibility,
-  ): Promise<never> {
+  ): Promise<{
+    code: 'contact_email_taken' | 'contact_phone_taken';
+    message: string;
+    existingContactId: string | null;
+  } | null> {
     const field = contactIdentityViolation(err);
-    if (!field) throw err;
+    if (!field) return null;
     const value = trashed[field === 'email' ? 'emailNormalized' : 'phoneNormalized'];
     let holder: { id: string } | null = null;
     if (typeof value === 'string' && value.length > 0) {
@@ -600,11 +609,144 @@ export class TrashController {
       holder = await this.prisma.client.contact.findFirst({ where, select: { id: true } });
     }
     const label = field === 'email' ? 'email' : 'phone number';
-    throw new ConflictException({
+    return {
       code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
       message: `A contact with this ${label} already exists in this business`,
       existingContactId: holder?.id ?? null,
-    });
+    };
+  }
+
+  private async rejectContactIdentityTaken(
+    err: unknown,
+    businessId: string,
+    trashed: Record<string, unknown>,
+    visibility: ContactVisibility,
+  ): Promise<never> {
+    const conflict = await this.describeContactIdentityConflict(err, businessId, trashed, visibility);
+    if (!conflict) throw err;
+    throw new ConflictException(conflict);
+  }
+
+  /**
+   * P37 (FU-BULK-DELETE-UNDO, owner ruling D-277b): restore up to 100 trashed
+   * records of `model` in one call so a bulk-delete Undo restores the deleted
+   * ids from Trash without weakening any TrashController rule:
+   *   - assertMayWrite (D-46 / D-95 / non-member SUPER_ADMIN refusal) runs
+   *     first before any read or write;
+   *   - contacts enforce CRM visibility, crm_edit ('none' refused upfront;
+   *     'owned' checked per record), heldContactSql (GDPR forget / merged
+   *     duplicates stay hidden as not_found), and visibility-bounded D-16
+   *     identity conflicts without aborting sibling restores;
+   *   - product / service delegate to CatalogService.restoreProduct / restoreService.
+   */
+  @Post(':model/bulk-restore')
+  @UseGuards(AuthGuard, BusinessGuard)
+  @RequireModuleScope('settings')
+  async bulkRestore(
+    @Param('businessId') businessId: string,
+    @Param('model') model: string,
+    @Body() body: { ids?: unknown } | undefined,
+    @Req() req?: ActorRequest,
+  ) {
+    if (!isTrashableModel(model)) {
+      throw new BadRequestException(`Model '${model}' is not trashable`);
+    }
+    const rawIds = body?.ids;
+    if (!Array.isArray(rawIds) || rawIds.length === 0 || rawIds.length > 100) {
+      throw new BadRequestException('ids must be a non-empty array of at most 100 items');
+    }
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const entry of rawIds) {
+      if (typeof entry !== 'string' || entry.trim().length === 0) {
+        throw new BadRequestException('Each id must be a non-empty string');
+      }
+      const trimmed = entry.trim();
+      if (!seen.has(trimmed)) {
+        seen.add(trimmed);
+        ids.push(trimmed);
+      }
+    }
+
+    await this.assertMayWrite(req, businessId, model);
+    const contactRules = model === 'contact' ? await this.contactWriteAccess(req, businessId, true) : null;
+
+    const restored: string[] = [];
+    const failed: Array<{
+      id: string;
+      code: 'not_found' | 'forbidden' | 'contact_email_taken' | 'contact_phone_taken' | 'restore_failed';
+      message: string;
+      existingContactId?: string | null;
+    }> = [];
+
+    for (const id of ids) {
+      const existing = await this.findTrashed(model, businessId, id, contactRules?.visibility ?? null);
+      if (!isTrashed(existing)) {
+        failed.push({ id, code: 'not_found', message: `Trashed ${model} not found` });
+        continue;
+      }
+
+      if (contactRules) {
+        try {
+          await this.assertMayEditContact(contactRules.access, contactRules.userId, existing!);
+        } catch (err: unknown) {
+          if (err instanceof ForbiddenException) {
+            failed.push({ id, code: 'forbidden', message: err.message });
+            continue;
+          }
+          throw err;
+        }
+        try {
+          await this.updateModel(model, id, { deletedAt: null });
+          restored.push(id);
+        } catch (err: unknown) {
+          const conflict = await this.describeContactIdentityConflict(
+            err,
+            businessId,
+            existing!,
+            contactRules.visibility,
+          );
+          if (conflict) {
+            failed.push({
+              id,
+              code: conflict.code,
+              message: conflict.message,
+              existingContactId: conflict.existingContactId,
+            });
+          } else {
+            failed.push({ id, code: 'restore_failed', message: `Failed to restore ${model}` });
+          }
+        }
+        continue;
+      }
+
+      try {
+        if (model === 'product') {
+          await this.catalog.restoreProduct(businessId, id);
+        } else if (model === 'service') {
+          await this.catalog.restoreService(businessId, id);
+        } else {
+          await this.updateModel(model, id, { deletedAt: null });
+        }
+        restored.push(id);
+      } catch {
+        failed.push({ id, code: 'restore_failed', message: `Failed to restore ${model}` });
+      }
+    }
+
+    if (model === 'contact' && restored.length > 0) {
+      // COR-P37-3: bulk-delete invalidates CRM stats/flow caches (60s TTL); clear them
+      // after restoring contacts so Undo immediately reflects restored customers.
+      void this.crmCache?.invalidate(businessId);
+    }
+
+    return {
+      model,
+      restored,
+      failed,
+      restoredCount: restored.length,
+      failedCount: failed.length,
+    };
   }
 
   // W4-TRASH-D46 (D-46): a revenue model runs assertMayWrite first.
@@ -641,6 +783,7 @@ export class TrashController {
       restored = await this.updateModel(model, id, { deletedAt: null }).catch((err: unknown) =>
         this.rejectContactIdentityTaken(err, businessId, existing!, contactRules.visibility),
       );
+      void this.crmCache?.invalidate(businessId);
       return { restored: true, model, id, item: restored };
     }
     // W6-TRASH-MODULE-SCOPE: CatalogService.updateProduct ignores deletedAt (the

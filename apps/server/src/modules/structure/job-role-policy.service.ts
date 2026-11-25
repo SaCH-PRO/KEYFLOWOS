@@ -156,6 +156,8 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // bank-transactions): the Books reads need revenue read (owner rulings D-57, D-146; PR195-KEY-GATES, review
     // findings SEC-P195BW-4/5), so the legacy `finance` key no longer reaches the three finance_* reads (D-35's narrowing)
     finance_customer_balance: 'read', finance_list_action_items: 'read', finance_list_bank_accounts: 'read',
+    // TOF-FINANCE-CANONICAL-TOOLS (D-57, D-141, D-145): forward finance intelligence reads need revenue read
+    finance_cashflow_forecast: 'read', finance_money_moves: 'read', finance_safe_to_spend: 'read',
     reconcile_list_unmatched: 'read',
     payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
