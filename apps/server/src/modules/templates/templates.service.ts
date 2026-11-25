@@ -82,69 +82,123 @@ export class TemplatesService {
       throw new NotFoundException('Template not found');
     }
 
-    const config = template.config as any;
+    const config = (template.config ?? {}) as {
+      products?: Array<{ name?: string; description?: string | null; price?: number; category?: string; duration?: number | null }>;
+      services?: Array<{ name?: string; description?: string | null; price?: number; duration?: number }>;
+      expenseCategories?: Array<{ name?: string; icon?: string | null; color?: string | null }>;
+    };
 
-    if (config.products && Array.isArray(config.products)) {
-      for (const product of config.products) {
-        await this.catalog.createProduct({
-          businessId,
-          name: product.name,
-          description: product.description ?? null,
-          price: product.price ?? 0,
-          category: product.category ?? 'PRODUCT',
-          duration: product.duration ?? null,
-        });
-      }
-    }
+    const normalizeName = (name: unknown): string | null =>
+      typeof name === 'string' && name.trim().length > 0 ? name.trim().toLowerCase() : null;
 
-    if (config.services && Array.isArray(config.services)) {
-      for (const service of config.services) {
-        await this.catalog.createService({
-          businessId,
-          name: service.name,
-          description: service.description ?? null,
-          price: service.price ?? 0,
-          duration: service.duration ?? 60,
-        });
-      }
-    }
+    // CATALOG-1 server half (SWP-TEMPLATE-APPLY-ONCE, BUG-075, V1-64, P78):
+    // serialize template applications per business in one transaction so a
+    // repeat or concurrent apply adds nothing twice (products, services,
+    // expense categories, or usage) and never clobbers later Business edits.
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('template_apply'), hashtext(${businessId}))`;
 
-    if (config.expenseCategories && Array.isArray(config.expenseCategories)) {
-      for (const category of config.expenseCategories) {
-        await this.prisma.client.expenseCategory.upsert({
-          where: {
-            businessId_name: { businessId, name: category.name },
-          },
-          create: {
-            businessId,
-            name: category.name,
-            icon: category.icon ?? null,
-            color: category.color ?? null,
-          },
-          update: {},
-        });
-      }
-    }
-
-    if (template.archetype || template.industry) {
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: {
-          ...(template.archetype && { archetype: template.archetype }),
-          ...(template.industry && { industry: template.industry }),
+      const existingUsage = await tx.businessTemplateUsage.findUnique({
+        where: {
+          businessId_templateId: { businessId, templateId },
         },
+        select: { id: true },
       });
-    }
+      if (existingUsage) {
+        return { success: true, templateName: template.displayName, alreadyApplied: true };
+      }
 
-    await this.prisma.client.businessTemplateUsage.upsert({
-      where: {
-        businessId_templateId: { businessId, templateId },
-      },
-      create: { businessId, templateId },
-      update: { appliedAt: new Date() },
+      const [existingProducts, existingServices] = await Promise.all([
+        tx.product.findMany({
+          where: { businessId, deletedAt: null },
+          select: { name: true },
+        }),
+        tx.service.findMany({
+          where: { businessId, deletedAt: null },
+          select: { name: true },
+        }),
+      ]);
+      const existingProductNames = new Set(
+        existingProducts.map((p) => normalizeName(p.name)).filter((n): n is string => n !== null),
+      );
+      const existingServiceNames = new Set(
+        existingServices.map((s) => normalizeName(s.name)).filter((n): n is string => n !== null),
+      );
+
+      if (Array.isArray(config.products)) {
+        for (const product of config.products) {
+          const key = normalizeName(product?.name);
+          if (!key || existingProductNames.has(key)) continue;
+          await this.catalog.createProduct(
+            {
+              businessId,
+              name: product.name!.trim(),
+              description: product.description ?? null,
+              price: product.price ?? 0,
+              category: product.category ?? 'PRODUCT',
+              duration: product.duration ?? null,
+            },
+            tx,
+          );
+          existingProductNames.add(key);
+        }
+      }
+
+      if (Array.isArray(config.services)) {
+        for (const service of config.services) {
+          const key = normalizeName(service?.name);
+          if (!key || existingServiceNames.has(key)) continue;
+          await this.catalog.createService(
+            {
+              businessId,
+              name: service.name!.trim(),
+              description: service.description ?? null,
+              price: service.price ?? 0,
+              duration: service.duration ?? 60,
+            },
+            tx,
+          );
+          existingServiceNames.add(key);
+        }
+      }
+
+      if (Array.isArray(config.expenseCategories)) {
+        const seenCategories = new Set<string>();
+        for (const category of config.expenseCategories) {
+          const trimmed = typeof category?.name === 'string' ? category.name.trim() : '';
+          if (!trimmed || seenCategories.has(trimmed.toLowerCase())) continue;
+          seenCategories.add(trimmed.toLowerCase());
+          await tx.expenseCategory.upsert({
+            where: {
+              businessId_name: { businessId, name: trimmed },
+            },
+            create: {
+              businessId,
+              name: trimmed,
+              icon: category.icon ?? null,
+              color: category.color ?? null,
+            },
+            update: {},
+          });
+        }
+      }
+
+      if (template.archetype || template.industry) {
+        await tx.business.update({
+          where: { id: businessId },
+          data: {
+            ...(template.archetype && { archetype: template.archetype }),
+            ...(template.industry && { industry: template.industry }),
+          },
+        });
+      }
+
+      await tx.businessTemplateUsage.create({
+        data: { businessId, templateId },
+      });
+
+      return { success: true, templateName: template.displayName, alreadyApplied: false };
     });
-
-    return { success: true, templateName: template.displayName };
   }
 
   async seedDefaultTemplates() {
