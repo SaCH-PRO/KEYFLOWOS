@@ -1,4 +1,4 @@
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import { test, expect, API_URL, type Tenant } from "./journeys/journey-helpers";
 
 /**
@@ -11,6 +11,13 @@ import { test, expect, API_URL, type Tenant } from "./journeys/journey-helpers";
  *
  *   CSQB-01 the URL lands on /app/commerce on the Quotes tab, and the one-shot contactId has left it
  *   CSQB-02 the New Quote sheet is open and names the customer
+ *
+ * Round 2 (orchestrator fold-in): the next-action "Send Quote" door (Customers > Action Center > the action's button,
+ * use-contacts-pipeline.ts handleDoAction, router.push to the same URL) gets the same CSQB-01/02 checks. The server
+ * proposes send_quote only for a PROSPECT customer created more than 5 days ago (crm-actions.service.ts), which the API
+ * cannot backdate, so that one read (GET .../next-actions) is answered by page.route with a send_quote action for the
+ * customer seeded through the real API. Everything else is live. That door's code is not changed by this packet: the
+ * cases prove it now works (it failed only because RequireAuth remounted the shell, FU-REQUIRE-AUTH-REMOUNT).
  *
  * 375, 768, 1024 and 1440 are run. RED at the packet's base (main 977a265c, claim c067bf97): Send Quote pushed
  * ?tab=billing&segment=quotes&contactId=, which the commerce page rewrites to ?tab=snapshot, and no sheet opens.
@@ -36,6 +43,20 @@ async function seedCustomer(request: APIRequestContext, owner: Tenant): Promise<
   return { id: (JSON.parse(text) as { id: string }).id, first, last };
 }
 
+/** CSQB-01 and CSQB-02, after a door was pressed. */
+async function expectNewQuoteFor(page: Page, c: { first: string; last: string }): Promise<void> {
+  await test.step("CSQB-01 Sales > Quotes, and the one-shot contactId has left the URL", async () => {
+    await expect(page).toHaveURL(/\/app\/commerce\?(.*&)?tab=quotes(&|$)/, { timeout: 20_000 });
+    await expect.poll(() => new URL(page.url()).searchParams.get("contactId"), { timeout: 10_000 }).toBeNull();
+  });
+
+  await test.step("CSQB-02 the New Quote sheet is open with that customer chosen", async () => {
+    const sheet = page.getByRole("dialog", { name: /new quote/i });
+    await expect(sheet).toBeVisible({ timeout: 20_000 });
+    await expect(sheet.getByText(new RegExp(`${c.first} ${c.last}`)).first()).toBeVisible();
+  });
+}
+
 for (const width of [375, 768, 1024, 1440]) {
   test.describe(`FU-CONTACT-SEND-QUOTE-DOOR a contact's Send Quote (${width}px)`, () => {
     test.use({ viewport: { width, height: width < 768 ? 812 : 900 } });
@@ -52,16 +73,40 @@ for (const width of [375, 768, 1024, 1440]) {
       await card.getByTitle("Quick actions").click();
       await page.getByRole("menuitem", { name: /^send quote$/i }).click();
 
-      await test.step("CSQB-01 Sales > Quotes, and the one-shot contactId has left the URL", async () => {
-        await expect(page).toHaveURL(/\/app\/commerce\?(.*&)?tab=quotes(&|$)/, { timeout: 20_000 });
-        await expect.poll(() => new URL(page.url()).searchParams.get("contactId"), { timeout: 10_000 }).toBeNull();
-      });
+      await expectNewQuoteFor(page, c);
+    });
 
-      await test.step("CSQB-02 the New Quote sheet is open with that customer chosen", async () => {
-        const sheet = page.getByRole("dialog", { name: /new quote/i });
-        await expect(sheet).toBeVisible({ timeout: 20_000 });
-        await expect(sheet.getByText(new RegExp(`${c.first} ${c.last}`)).first()).toBeVisible();
-      });
+    test(`Next action > Send Quote opens New Quote for that customer (${width})`, async ({ page, request, owner }) => {
+      test.setTimeout(3 * 60_000);
+      const c = await seedCustomer(request, owner);
+      const name = `${c.first} ${c.last}`;
+      // The one read answered by the test (see the header): a send_quote action, in the shape the server sends it.
+      await page.route(new RegExp(`/crm/businesses/${owner.businessId}/next-actions(\\?.*)?$`), (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify([
+                {
+                  id: `sendquote_${c.id}`,
+                  type: "send_quote",
+                  contactId: c.id,
+                  contactName: name,
+                  description: "Prospect for 9d with no quote — prepare proposal",
+                  estimatedTime: 45,
+                  priority: "high",
+                },
+              ]),
+            })
+          : route.continue(),
+      );
+
+      await page.goto("/app/crm/contacts");
+      const door = page.getByTitle(`Send Quote — ${name}`).filter({ visible: true }).first();
+      await expect(door).toBeVisible({ timeout: 30_000 });
+      await door.click();
+
+      await expectNewQuoteFor(page, c);
     });
   });
 }
