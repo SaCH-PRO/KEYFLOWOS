@@ -117,10 +117,14 @@ async function expectToastGone() {
   });
 }
 
-/** Waits long enough for a wrongly dismissed toast to leave, then checks it is still up. */
+/**
+ * Waits, then checks the toast is still up and was never dismissed: a dismissed sonner toast stays in the DOM while it
+ * animates out, marked data-removed="true" (review COR-UTS-1), so its presence alone does not prove it was kept.
+ */
 async function expectToastKept() {
   await settle(600);
-  expect(screen.getByText("Deleted 3 contacts")).toBeTruthy();
+  const text = screen.getByText("Deleted 3 contacts");
+  expect(text.closest("[data-sonner-toast]")?.getAttribute("data-removed"), "the toast was not dismissed").toBe("false");
   expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
 }
 
@@ -234,7 +238,7 @@ describe("FU-UNDO-TOAST-SIGNOUT: RequireAuth ends the toasts of a session that e
     });
     await screen.findByTestId("shell");
     await expectToastKept();
-    expect(screen.getByText("Welcome back")).toBeTruthy();
+    expect(screen.getByText("Welcome back").closest("[data-sonner-toast]")?.getAttribute("data-removed")).toBe("false");
   });
 
   it("RAT-08 a same-user rotation answered by a server error in the background keeps the toast", async () => {

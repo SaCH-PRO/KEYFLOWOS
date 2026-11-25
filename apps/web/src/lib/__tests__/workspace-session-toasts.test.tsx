@@ -103,7 +103,10 @@ describe("FU-UNDO-TOAST-SIGNOUT: toasts end with the session (workspace)", () =>
     await act(async () => {
       await new Promise((r) => setTimeout(r, 600));
     });
-    expect(screen.getByText("Deleted 3 contacts")).toBeTruthy();
+    // Present and never dismissed: a dismissed toast stays in the DOM while it animates out, data-removed="true"
+    // (review COR-UTS-1).
+    const text = screen.getByText("Deleted 3 contacts");
+    expect(text.closest("[data-sonner-toast]")?.getAttribute("data-removed"), "the toast was not dismissed").toBe("false");
     expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
   });
 });
