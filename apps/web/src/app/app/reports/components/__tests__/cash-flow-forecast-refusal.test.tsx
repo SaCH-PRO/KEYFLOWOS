@@ -70,6 +70,11 @@ const FORECAST = {
   dailyRevenueRate: 86.41,
   dailyExpenseRate: 0,
   projectionDays: 90,
+  // SWP-FIN-CASH-SOURCES (D-135): the server names the business currency it serves the cash in; the
+  // view labels its figures with it (cash-flow-forecast-ledger-cash.test.tsx), so the "TTD" below is the server's.
+  cashBasis: "ledger",
+  currency: "TTD",
+  otherCurrencyCash: [],
 };
 const NOTICE = "Cash flow forecast needs revenue access.";
 const CHART_NOTE = "Projections need revenue access.";

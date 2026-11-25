@@ -137,6 +137,18 @@ const nextConfig: NextConfig = {
         destination: "/app/command-center",
         permanent: false,
       },
+      // FU-STUDIO-PAGE-SCOPE (D-283): /studio was "Business Setup", outside the
+      // /app shell, listing Notifications, Webhooks and Payment Gateways to every
+      // visitor with no module filter. Nothing linked to it. The page is removed;
+      // an old bookmark lands on the Settings index, which offers each entry only
+      // when the member's modules open it. Here, not as redirect() in the page:
+      // the root loading.tsx makes a page stream, so that answers 200 with a meta
+      // refresh, not 307.
+      {
+        source: "/studio",
+        destination: "/app/settings",
+        permanent: false,
+      },
       // REMOVED 2026-08-07: /app/payments -> /app/commerce?tab=payments.
       //
       // Commerce redirects on to /app/money/revenue (a one-line re-export of
