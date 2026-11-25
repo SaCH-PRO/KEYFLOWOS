@@ -92,9 +92,18 @@ function namedChannel(data: unknown): MessageChannel | null {
 }
 
 /**
- * MIN-3: the ids of the notes the page shows to be pasted WhatsApp messages: the noteId a communication.whatsapp
- * event carries, and that of a note.created written with source whatsapp_inbound (captureInboundWhatsApp writes
- * both). A note's later note.updated / note.deleted carry only { noteId } (source system), so they are known to be a
+ * SEC-TCH-C1: a WhatsApp event captureInboundWhatsApp wrote, which alone may say which note is a pasted message. Any
+ * member with crm write can log a communication.whatsapp event (POST .../events, source crm) naming any note id; only
+ * the capture writes source whatsapp_inbound.
+ */
+function isCapturedMessage(event: ChannelEvent): boolean {
+  return code(event.type).type === "communication.whatsapp" && event.source === PASTED_WHATSAPP_SOURCE;
+}
+
+/**
+ * MIN-3: the ids of the notes the page shows to be pasted WhatsApp messages: the noteId of a communication.whatsapp
+ * event or a note.created that captureInboundWhatsApp wrote (both carry source whatsapp_inbound; SEC-TCH-C1: one with
+ * any other source names nothing). A note's later note.updated / note.deleted carry only { noteId } (source system), so they are known to be a
  * pasted message's only through this; a pasted note whose two events are both off the page is not known, and its
  * edit stays under Notes.
  */
@@ -104,7 +113,8 @@ export function pastedNoteIds(events: readonly ChannelEvent[]): Set<string> {
     const { type } = code(event.type);
     const noteId = field(event.data, "noteId");
     if (typeof noteId !== "string" || !noteId) continue;
-    if (type === "communication.whatsapp" || (type === "note.created" && event.source === PASTED_WHATSAPP_SOURCE)) ids.add(noteId);
+    const pastedNote = type === "note.created" && event.source === PASTED_WHATSAPP_SOURCE;
+    if (isCapturedMessage(event) || pastedNote) ids.add(noteId);
   }
   return ids;
 }
@@ -142,7 +152,7 @@ export function foldPastedNotes<T extends ChannelEvent>(events: readonly T[]): T
   const carried = new Set<string>();
   for (const event of events) {
     const noteId = field(event.data, "noteId");
-    if (code(event.type).type === "communication.whatsapp" && typeof noteId === "string" && noteId) carried.add(noteId);
+    if (isCapturedMessage(event) && typeof noteId === "string" && noteId) carried.add(noteId);
   }
   return events.filter((event) => {
     if (code(event.type).type !== "note.created" || event.source !== PASTED_WHATSAPP_SOURCE) return true;
