@@ -13,6 +13,8 @@
  *   MONEY-02  sweep: every price from 0.01 to 200.00 at 7.5, 10, 12.5, 15, 25, 33 and 75% equals an independent
  *             integer re-implementation of the server's rule, and the server's percentOf itself
  *   MONEY-03  a FIXED deposit is shown as the server bills it: at most the price (computeServiceDeposit's min)
+ *   CENTS-01  a FIXED deposit with more than two decimals is refused before anything is sent, with a clear message
+ *   CENTS-02  control: whole cents (10, 10.5, 10.50, 0.01) are accepted
  *
  * Mounted on the real CatalogCapacityTab; the write is stubbed at the api module, the toast is stubbed.
  */
@@ -170,5 +172,42 @@ describe("Bookings > Setup: the deposit shown is the deposit billed (SWP-SERVICE
     ]);
     expect(depositButton()).toHaveTextContent("Deposit USD 30.00");
     expect(depositButton("Pedicure")).toHaveTextContent("Deposit USD 80.00");
+  });
+
+  it.each(["10.005", "0.001", "119.999", "1e-3"])(
+    "CENTS-01 a FIXED deposit of %s (more than two decimals) is refused before anything is sent",
+    (value) => {
+      renderTab([svc()]);
+      const editor = openEditor();
+      fireEvent.click(within(editor).getByLabelText("Require a deposit"));
+      fireEvent.change(within(editor).getByLabelText("Deposit type"), { target: { value: "FIXED" } });
+      fireEvent.change(within(editor).getByLabelText("Deposit amount (USD)"), { target: { value } });
+
+      expect(within(editor).getByTestId("deposit-problem")).toHaveTextContent(
+        "A fixed deposit can have at most two decimal places (whole cents).",
+      );
+      expect(within(editor).queryByTestId("deposit-preview")).not.toBeInTheDocument();
+      const save = within(editor).getByRole("button", { name: "Save deposit" });
+      expect(save).toBeDisabled();
+      fireEvent.click(save);
+      expect(api.apiPatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["10", "USD 10.00"],
+    ["10.5", "USD 10.50"],
+    ["10.50", "USD 10.50"],
+    ["0.01", "USD 0.01"],
+  ])("CENTS-02 control: a FIXED deposit of %s is accepted and previewed as %s", (value, shown) => {
+    renderTab([svc()]);
+    const editor = openEditor();
+    fireEvent.click(within(editor).getByLabelText("Require a deposit"));
+    fireEvent.change(within(editor).getByLabelText("Deposit type"), { target: { value: "FIXED" } });
+    fireEvent.change(within(editor).getByLabelText("Deposit amount (USD)"), { target: { value } });
+
+    expect(within(editor).queryByTestId("deposit-problem")).not.toBeInTheDocument();
+    expect(within(editor).getByTestId("deposit-preview")).toHaveTextContent(`Customers pay ${shown} of USD 120.00`);
+    expect(within(editor).getByRole("button", { name: "Save deposit" })).toBeEnabled();
   });
 });
