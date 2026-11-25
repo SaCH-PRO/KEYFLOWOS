@@ -1332,6 +1332,11 @@
       "packet": "V1-64 (SWP-SERVICE-DEPOSIT)"
     },
     {
+      "prefix": "v64m_",
+      "owner": "apps/server/test/census-genome.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-GENOME)"
+    },
+    {
 "prefix": "v64n_",
       "owner": "apps/server/test/v1-hold-migration.integration.test.ts",
       "packet": "V1-64 (MIGRATION-SET-A)"
