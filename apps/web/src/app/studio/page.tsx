@@ -9,7 +9,12 @@ import { redirect } from "next/navigation";
  * server refused the reads behind most of its entries to a member without settings. The page is removed. Its address
  * stays, as a redirect to /app/settings, whose index offers each entry only when the member's modules open it
  * (HubIndex, canOpenModule), and which the middleware sends a signed-out visitor to sign in from.
+ *
+ * Rendered on request: prerendered, a page that only redirects is served as a 200 with a meta refresh; on request,
+ * /studio answers with an HTTP 307 to /app/settings.
  */
+export const dynamic = "force-dynamic";
+
 export default function StudioPage() {
   redirect("/app/settings");
 }
