@@ -136,9 +136,11 @@ Plus docs.
   - P67 FU-TIMELINE-LOAD-OLDER: claim `ecf7a0e1`, session_01TnVBvEKF6S66iYNwT5nAqe.
   - FU-CONTACT-SEND-QUOTE-DOOR: claim `c067bf97`, session_01TnVBvEZbY4vXtvn1Rwe3fk.
   - FU-UNDO-TOAST-SIGNOUT: claim `0022c0bf`, session_01TnVBvDxNUYEcwZ9waPUH4z.
+  - FU-E2E-MOCKED-SESSION-TOKEN: claim `7afe87e0`, session_01TnVBvHC6oFPFsYMTGeubVV (claimed 20:00).
+  - P94 SWP-CRM-WEB-POLISH: claim `68aafd49`, session_01TnVBvErbVSNdzvspLGA6vB (claimed 20:00).
   - Each worker posts "PACKET REPORT (pre-review)" on #80. Then the orchestrator runs two reviews and posts RETURN.
   - If a session is gone, resume from its pkt branch: every commit is pushed.
-- **Free now:** FU-E2E-MOCKED-SESSION-TOKEN, SWP-CRM-WEB-POLISH, RR-OWNER-RULINGS-RECORD (docs).
+- **Owner-gated:** RR-OWNER-RULINGS-RECORD (docs; it records the owner's answers to OQ-5/13/19/30 and two RR migrations, so ask in the owner batch).
 - **After M18:** OWNER-ALERTS-WEB and FU-NOTIFICATIONS-PAGE-REFUSED.
 - **After the server lane:** SWP-KEY-SHELL-SMOKE web (after P89), EXPENSES-HUB-1 web, CLAIM-LOOP web (after DECIMALS-SERVER), TODAY-4BLOCK.
 
@@ -201,7 +203,7 @@ Main is at `977a265c`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | **M18 (Claude)** | `wave/v1-wave-m18` (rebuild from the six pkt heads in section 0) | Proof mostly green; base run of journeys B/F/H on main in progress | PR, wave confirmations, enqueue |
 | **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 58423afe (+ repair) | Repair round 1 | Two confirmations, RETURN |
 | **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Two reviews |
-| **Claude cloud sessions** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` (ecf7a0e1), `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` (c067bf97), `pkt/V1-FU-UNDO-TOAST-SIGNOUT` (0022c0bf) | Building (#80 7172995787) | Wait for each PACKET REPORT, then two reviews, RETURN, next Claude wave |
+| **Claude cloud sessions** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` (ecf7a0e1), `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` (c067bf97), `pkt/V1-FU-UNDO-TOAST-SIGNOUT` (0022c0bf), `pkt/V1-FU-E2E-MOCKED-SESSION-TOKEN` (7afe87e0), `pkt/V1-SWP-CRM-WEB-POLISH` (68aafd49) | Building (#80 7172995787) | Wait for each PACKET REPORT, then two reviews, RETURN, next Claude wave |
 | **Antigravity** | M23 (P82-P84) in the merge queue; M25 gathering P87, P88, P89, P91, P92; P90 blocked (question 52) | Building | Their next wave |
 | **Owner** | - | - | Section 4 questions 40-52 (51 = refund door S-1, 52 = P90 Release 0 contradiction, P0); production redeploy (D-266) |
 | `wave/v1-docs-p19` | main 977a265c merged in | This file, V1-STATUS | Squashed into each Claude wave |
