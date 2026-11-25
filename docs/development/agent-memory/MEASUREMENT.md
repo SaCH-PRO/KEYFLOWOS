@@ -62,7 +62,7 @@ Compare the first two against 2,739 and against one real inline review brief.
 
 ## 5. Resume test
 
-Give a fresh agent only this: "Read `docs/development/agent-memory/README.md` in SaCH-PRO/KEYFLOWOS and follow it.
+Give a fresh agent only this: "Read `docs/development/agent-memory/README.md` in KEYFLOWOS/KEYFLOWOS and follow it.
 Do not open `MEASUREMENT.md` or issue #80, and do not read the plan or the build map whole. Then answer these ten
 questions and list what you opened." Pass: ten correct. Record the answers, the files opened and the characters read.
 
