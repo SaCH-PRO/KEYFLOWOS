@@ -61,6 +61,7 @@ export const BUSINESS_META_PAYMENT_SECRET_KEYS = [
   'stripeSecretKey',
   'stripeWebhookSecret',
   'paypalClientSecret',
+  'paypalWebhookId',
   'wipayApiKey',
 ] as const;
 

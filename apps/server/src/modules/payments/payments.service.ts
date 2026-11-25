@@ -29,7 +29,6 @@ import { paypalCurrencyRefusal, paypalTakesCurrency } from './paypal-currency';
 import {
   paypalConfigured,
   storePaypalCredentials,
-  storePaypalWebhookId,
   storeStripeCredentials,
   storefrontMethodNotOffered,
   stripeConfigured,
@@ -122,7 +121,7 @@ function storefrontPaypalCredentials(businessId: string, meta: unknown): PaypalW
   return {
     clientId: own?.clientId ?? null,
     clientSecret: own?.clientSecret ?? null,
-    webhookId: storePaypalWebhookId(meta),
+    webhookId: own?.webhookId ?? null,
     businessId,
     storefrontBusinessId: businessId,
   };
