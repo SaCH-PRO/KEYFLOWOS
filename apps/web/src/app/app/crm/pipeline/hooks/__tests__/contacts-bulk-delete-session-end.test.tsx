@@ -13,6 +13,9 @@
  *   BSE-06 an Undo's restore answered after another person's token was stored: no toast, no onRestored
  *   BSE-07 control: a same-user token rotation while the delete and the restore are on their way changes nothing:
  *          "Deleted 3 contacts" with Undo, then "Restored 3 contacts" and onRestored
+ *   BSE-08 pin (the undo-time guard, SEC-P37W-1; orchestrator ruling with CONF-P37-1's supersession): a toast that
+ *          survives a session change by some other path (another person's token written straight into storage, no
+ *          dismiss) still cannot restore: its Undo says "earlier session" and sends nothing
  *
  * The real deleteContactsWithUndo and failure kit run; the HTTP client is gated; sonner is replaced by spies.
  */
@@ -163,6 +166,22 @@ describe("FU-UNDO-TOAST-SIGNOUT SEC-UTS-1: a bulk delete answered after its sess
     await flush();
     await flush();
     expect(toastCalls()).toEqual([]);
+    expect(onRestored).not.toHaveBeenCalled();
+  });
+
+  it("BSE-08 pin: an Undo pressed after the stored session changed without a dismiss says 'earlier session' and sends nothing", async () => {
+    client.bulkDeleteContacts.mockResolvedValue(DELETED_ALL);
+    const onRestored = vi.fn();
+    await deleteContactsWithUndo({ businessId: BIZ, ids: IDS, onRestored });
+    // Another person's token, written directly (not through clearAdminSession): the toast was not dismissed.
+    window.localStorage.setItem("kf_token", tokenFor("user-b"));
+    pressUndo();
+    await flush();
+    expect(client.bulkRestoreTrashItems, "no restore under the other person's session").not.toHaveBeenCalled();
+    expect(toastSpies.warning).toHaveBeenCalledWith(
+      "Nothing was restored: this Undo belonged to an earlier session.",
+      expect.objectContaining({ description: "The contacts are still in Trash." }),
+    );
     expect(onRestored).not.toHaveBeenCalled();
   });
 
