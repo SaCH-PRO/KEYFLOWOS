@@ -55,6 +55,11 @@ async function signIn(page: Page, mods: Record<string, string>): Promise<void> {
 /** The pages /studio listed whose reads need settings, or which the Settings index hides. */
 const SETTINGS_HREF = /^\/app\/settings\/(notifications|developers|webhooks|business|compliance)(\?|$)/;
 const SETTINGS_NAME = /notifications|webhooks|payment gateways|developers|compliance/i;
+/**
+ * "My account" is every member's own page, never a settings entry, whatever its description says: since
+ * FU-PUSH-OPTIN-MY-ACCOUNT (D-282) it reads "… and push notifications", which the name pattern would match.
+ */
+const MY_ACCOUNT_HREF = /^\/app\/settings\/profile(\?|$)/;
 
 /** Waits for /studio's own page, the Settings index or the sign-in page, then lets the my-access answer land. */
 async function settle(page: Page): Promise<void> {
@@ -71,7 +76,7 @@ async function settingsLinksShown(page: Page): Promise<{ name: string; href: str
   const links = await page.locator("a").filter({ visible: true }).evaluateAll((as) =>
     as.map((a) => ({ name: (a.textContent ?? "").replace(/\s+/g, " ").trim(), href: a.getAttribute("href") ?? "" })),
   );
-  return links.filter((l) => SETTINGS_HREF.test(l.href) || SETTINGS_NAME.test(l.name));
+  return links.filter((l) => !MY_ACCOUNT_HREF.test(l.href) && (SETTINGS_HREF.test(l.href) || SETTINGS_NAME.test(l.name)));
 }
 
 /** The names the Settings index offers, once the member's access has landed. */
