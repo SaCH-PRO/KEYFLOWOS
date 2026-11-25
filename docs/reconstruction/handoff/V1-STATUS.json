@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "cd7f503b74917d90f58919a9cfacf9901b21ba3a",
-  "main_commit_date": "2026-11-25T15:35:56+00:00",
+  "main_sha": "977a265cca37926a6d11f3c2f3afae8287aeb5a4",
+  "main_commit_date": "2026-11-25T18:01:10+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 568.5,
   "by_status": {
    "done": {
-    "packets": 164,
-    "points": 240.5,
-    "pct_by_points": 42.3
+    "packets": 170,
+    "points": 252.5,
+    "pct_by_points": 44.4
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 231,
-    "points": 328,
-    "pct_by_points": 57.7
+    "packets": 225,
+    "points": 316,
+    "pct_by_points": 55.6
    }
   },
   "by_step": {
@@ -72,21 +72,21 @@
     "total": 149
    },
    "4": {
-    "done": 22,
+    "done": 23,
     "in-progress": 0,
-    "todo": 31,
+    "todo": 30,
     "total": 53
    },
    "5": {
-    "done": 35,
+    "done": 38,
     "in-progress": 0,
-    "todo": 56,
+    "todo": 53,
     "total": 91
    },
    "6": {
-    "done": 11,
+    "done": 13,
     "in-progress": 0,
-    "todo": 29,
+    "todo": 27,
     "total": 40
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 76,
+    "done": 82,
     "in-progress": 0,
-    "todo": 178,
+    "todo": 172,
     "total": 254
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 111,
+   "prior-status-file": 107,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 57,
-   "compacted-commit": 60,
-   "no-evidence": 139
+   "code-commit-subject": 60,
+   "compacted-commit": 63,
+   "no-evidence": 137
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -136,6 +136,7 @@
    "W11-OWNER-HELPER-REST",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
+   "CATALOG-1",
    "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
    "SWP-STORE-OVERSELL",
@@ -147,12 +148,15 @@
    "TOF-PAYROLL-DISCARD",
    "SWP-FIN-OVERVIEW-TRUTH",
    "SWP-FIN-CASH-SOURCES",
+   "TODAY-AGGREGATE",
+   "CLAIM-LOOP",
    "READY-TO-SEND",
    "OWNER-ALERTS-SERVER",
    "W11-SHIP-STOCK-DECREMENT",
    "W11-STOREFRONT-ROUTE-DECREMENTED",
    "W11-STOREFRONT-FULFIL-STEPS",
    "W11-PLANTED-STOCK-CENSUS",
+   "SWP-INV-SKU-COUNT",
    "SWP-CENSUS-OPEN-WRITES",
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
@@ -179,7 +183,6 @@
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
    "FU-WEB-PAYLINK-STATUS-BUTTONS",
-   "WEDGE-WA-INBOUND-CAPTURE",
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL",
    "FU-NOTIFICATIONS-PREFS-GUARD",
@@ -188,14 +191,12 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 119,
-  "todo_with_dependencies_met_launch": 91
+  "todo_with_dependencies_met": 127,
+  "todo_with_dependencies_met_launch": 98
  },
  "critical_path": {
   "plan_recorded_remaining": [
    "SWP-INV-REFUND-UI",
-   "CLAIM-LOOP",
-   "TODAY-AGGREGATE",
    "DEMO-PREVIEW",
    "TODAY-4BLOCK",
    "HARNESS-REMOVAL",
@@ -210,17 +211,14 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 37,
+   "weight": 26,
    "chain": [
-    "TOF-KEY-SELF-MODEL",
-    "TOF-KNOWLEDGE-UPLOAD",
-    "KEY-TOOL-ALLOWLIST",
-    "DECIMALS-SERVER",
-    "CLAIM-LOOP",
-    "TODAY-AGGREGATE",
-    "DEMO-PREVIEW",
-    "TODAY-4BLOCK",
-    "HARNESS-REMOVAL",
+    "SWP-CRM-WEB-POLISH",
+    "SWP-TEAM-WEB",
+    "SWP-FIN-WEB-CRASHES",
+    "SWP-UI-COPY",
+    "W11-WEB-INVENTORY-REFUSALS",
+    "SWP-CALENDAR-TRUTH",
     "NAV-B-HIDE",
     "NAV-B-HIDE-2",
     "NAV-B-LINKS",
@@ -241,7 +239,17 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 41
+   "unblocks": 39
+  },
+  {
+   "id": "DEMO-PREVIEW",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": true,
+   "unblocks": 20
   },
   {
    "id": "TOF-KEY-SELF-MODEL",
@@ -251,7 +259,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 52
+   "unblocks": 50
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -262,16 +270,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 32
-  },
-  {
-   "id": "CATALOG-1",
-   "step": 4,
-   "priority": "P0",
-   "size": "L",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 23
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -294,14 +292,24 @@
    "unblocks": 18
   },
   {
-   "id": "SWP-INV-SKU-COUNT",
+   "id": "VAT-BASICS",
    "step": 6,
-   "priority": "P3",
-   "size": "S",
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 18
+  },
+  {
+   "id": "QUICK-SALE-SERVER",
+   "step": 6,
+   "priority": "P1",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 16
+   "unblocks": 15
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -374,21 +382,21 @@
    "unblocks": 8
   },
   {
-   "id": "FU-CONTACT-TIMELINE-CHANNELS",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
    "id": "RR-OWNER-RULINGS-RECORD",
    "step": 3,
    "priority": "P2",
    "size": "XS",
    "lane": "docs",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
+   "id": "SWP-READ-SCOPE-CENSUS",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
@@ -420,6 +428,16 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "SWP-STORE-FRAME",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 3
   },
@@ -684,16 +702,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-REQUIRE-AUTH-REMOUNT",
-   "step": 6,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-SEARCH-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -719,6 +727,16 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TIMELINE-LOAD-OLDER",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -844,6 +862,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -939,6 +967,16 @@
    "priority": "P2",
    "size": "S",
    "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-SIDESHEET-MOBILE-OFFSET",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1114,12 +1152,52 @@
    "unblocks": 0
   },
   {
+   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
    "step": 6,
    "priority": "P3",
    "size": "S",
    "lane": "web",
    "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-STUDIO-PAGE-SCOPE",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNDO-TOAST-SIGNOUT",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1433,7 +1511,17 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 41
+   "unblocks": 39
+  },
+  {
+   "id": "DEMO-PREVIEW",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": true,
+   "unblocks": 20
   },
   {
    "id": "TOF-KEY-SELF-MODEL",
@@ -1443,7 +1531,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 52
+   "unblocks": 50
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -1454,16 +1542,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 32
-  },
-  {
-   "id": "CATALOG-1",
-   "step": 4,
-   "priority": "P0",
-   "size": "L",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 23
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -1486,14 +1564,24 @@
    "unblocks": 18
   },
   {
-   "id": "SWP-INV-SKU-COUNT",
+   "id": "VAT-BASICS",
    "step": 6,
-   "priority": "P3",
-   "size": "S",
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 18
+  },
+  {
+   "id": "QUICK-SALE-SERVER",
+   "step": 6,
+   "priority": "P1",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 16
+   "unblocks": 15
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -1566,21 +1654,21 @@
    "unblocks": 8
   },
   {
-   "id": "FU-CONTACT-TIMELINE-CHANNELS",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
    "id": "RR-OWNER-RULINGS-RECORD",
    "step": 3,
    "priority": "P2",
    "size": "XS",
    "lane": "docs",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
+   "id": "SWP-READ-SCOPE-CENSUS",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
@@ -1866,16 +1954,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-REQUIRE-AUTH-REMOUNT",
-   "step": 6,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-SEARCH-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -1901,6 +1979,16 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TIMELINE-LOAD-OLDER",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2026,6 +2114,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -2126,6 +2224,16 @@
    "unblocks": 0
   },
   {
+   "id": "FU-SIDESHEET-MOBILE-OFFSET",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-TEST-FLAKES-2026-11-23",
    "step": 5,
    "priority": "P2",
@@ -2191,6 +2299,46 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-STUDIO-PAGE-SCOPE",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNDO-TOAST-SIGNOUT",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -3689,16 +3837,18 @@
    "size": "L",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "c184f0cc"
+   ],
    "depends_on": [
     "NAV-A3",
     "W11-OWNER-HELPER-D11"
    ],
    "title": "Sales > Products: create, edit and archive products through useProducts; each product listed once on the store; Launch counts once; a template applies once",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-STORE-FRAME",
@@ -3717,7 +3867,7 @@
     "NAV-A3"
    ],
    "title": "Embeddable widgets and the in-app store preview can be framed (X-Frame-Options/CSP per route)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-STORE-OPS-WEB",
@@ -4185,10 +4335,12 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "75161a8c"
+   ],
    "depends_on": [
     "SWP-FIN-CASH-SOURCES",
     "W11-GENOME-RUNWAY",
@@ -4196,7 +4348,7 @@
     "CLAIM-LOOP"
    ],
    "title": "One server read for Today: Needs you, Today's list, Pulse and Get set up, filtered per member (D-96) with Pulse gated on revenue:read (D-57)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "DEMO-PREVIEW",
@@ -4214,7 +4366,7 @@
     "W11-OWNER-HELPER-REST"
    ],
    "title": "Onboarding stops seeding a demo contact and DRAFT invoice; the checklist shows a sample as a preview instead",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "CLAIM-LOOP",
@@ -4223,10 +4375,12 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "a3204575"
+   ],
    "depends_on": [
     "SWP-INV-PUBLIC-LINK",
     "DECIMALS-SERVER",
@@ -4234,7 +4388,7 @@
     "SWP-INV-REFUND-UI"
    ],
    "title": "Bank-transfer claim loop: 'I've paid by bank transfer' becomes a Needs-you item; Confirm records the payment in one tap; the pay page tells the truth",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "READY-TO-SEND",
@@ -4593,7 +4747,7 @@
     "BIZ-SETTINGS-WEB"
    ],
    "title": "VAT basics: a VAT registration number on the business, printed on invoices, receipts, PDFs and customer pages whenever tax is charged; tax off by default with a 12.5% preset",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "CUSTOMER-PAGE-HONESTY",
@@ -4772,15 +4926,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "49b0a987"
+   ],
    "depends_on": [
     "W11-PLANTED-STOCK-CENSUS"
    ],
    "title": "Inventory 'Total SKUs' counts products, not stock rows",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "QUICK-SALE-SERVER",
@@ -4798,7 +4954,7 @@
     "SWP-STORE-OVERSELL"
    ],
    "title": "Quick counter sale on the store-order path: owner-created, paid in cash or bank transfer, optional customer, stock and COGS post",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-CENSUS-MARKETPLACE",
@@ -5000,7 +5156,7 @@
     "CLAIM-LOOP"
    ],
    "title": "A read-side REST scope census: membership-only GET routes that answer module data or secrets",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-CENSUS-V1-A",
@@ -8829,10 +8985,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "5dd5e44e"
+    "0360fd09"
    ],
    "depends_on": [
     "FU-WA-INBOUND-KEY-EXCLUDE",
@@ -9184,15 +9340,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "1fe4279c"
+   ],
    "depends_on": [
     "WEDGE-WA-INBOUND-CAPTURE"
    ],
    "title": "The contact Timeline gets a channel filter, where pasted WhatsApp messages land",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
@@ -9210,7 +9368,7 @@
     "FU-ME-NOTIFICATIONS-SCOPE"
    ],
    "title": "The customer notifications page says 'no access' on a refused read, not 'nothing sent'",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-STUDIO-PAGE-SCOPE",
@@ -9227,7 +9385,7 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The orphan /studio setup page offers settings entries only to settings readers, or is removed",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-E2E-MOCKED-SESSION-TOKEN",
@@ -9244,7 +9402,7 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The mocked e2e helpers store a session the edge middleware accepts",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-UNDO-TOAST-SIGNOUT",
@@ -9262,7 +9420,7 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "Undo toasts are dismissed when the session ends",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
@@ -9289,13 +9447,15 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "04434a63"
+   ],
    "depends_on": [],
    "title": "The app shell is not torn down and re-verified on every page change",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-SIDESHEET-MOBILE-OFFSET",
@@ -9312,7 +9472,7 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The shared SideSheet opens in place on phones",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CONTACT-SEND-QUOTE-DOOR",
@@ -9329,7 +9489,7 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The contact's Send quote opens New quote for that customer",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-INVOICE-REMAINING-CREDITS",
@@ -9413,7 +9573,7 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The contact Timeline loads older events",
-   "deps_met": false
+   "deps_met": true
   }
  ]
 }
