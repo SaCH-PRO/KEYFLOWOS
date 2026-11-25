@@ -13,6 +13,9 @@
  *            (tab stays, so a reload stays on Setup)
  *   DOOR-02  a plain ?tab=catalog opens Setup with no editor open (control)
  *   DOOR-03  the Setup cards' money is in the business's currency (GET /identity/businesses/:id)
+ *   DOOR-04  the door survives the page being mounted afresh when serviceId leaves the URL (found live: from
+ *            Presence, a client navigation, the App Router remounts the page on the strip, and the editor stayed shut)
+ *   DOOR-05  control: a door, once used, does not reopen on a later visit
  *
  * Mounted on the real BookingsPage, WorkspaceShell, CatalogCapacityTab and the
  * real getBusinessById. The list reads are stubbed at the client module; heavy
@@ -144,6 +147,33 @@ describe("the deposit tip's door into Bookings > Setup (SWP-SERVICE-DEPOSIT)", (
     expect(await screen.findByRole("button", { name: "Deposit for Pedicure" })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: /^Deposit settings for/ })).not.toBeInTheDocument();
     expect(window.location.search).toBe("?tab=catalog");
+  });
+
+  it("DOOR-04 the door survives the page being mounted afresh when serviceId leaves the URL", async () => {
+    // Live, from Presence's tip (a client navigation), the App Router mounts the page afresh when the strip changes its
+    // search params: the first page reads serviceId and goes before its services have loaded; the second mounts on
+    // ?tab=catalog alone. The named service's editor must still open.
+    window.history.replaceState(null, "", "/app/bookings?tab=catalog&serviceId=svc_2");
+    const first = render(<BookingsPage />);
+    expect(window.location.search).toBe("?tab=catalog");
+    expect(screen.queryByText("Setup Readiness")).not.toBeInTheDocument();
+    first.unmount();
+
+    render(<BookingsPage />);
+    expect(await screen.findByRole("group", { name: "Deposit settings for Pedicure" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Deposit settings for Gel manicure" })).not.toBeInTheDocument();
+  });
+
+  it("DOOR-05 control: once the door has opened its service, a later visit to Setup opens nothing", async () => {
+    window.history.replaceState(null, "", "/app/bookings?tab=catalog&serviceId=svc_2");
+    const first = render(<BookingsPage />);
+    expect(await screen.findByRole("group", { name: "Deposit settings for Pedicure" })).toBeInTheDocument();
+    first.unmount();
+
+    window.history.replaceState(null, "", "/app/bookings?tab=catalog");
+    render(<BookingsPage />);
+    expect(await screen.findByRole("button", { name: "Deposit for Pedicure" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /^Deposit settings for/ })).not.toBeInTheDocument();
   });
 
   it("DOOR-03 the Setup cards write money in the business's currency", async () => {
