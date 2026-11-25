@@ -102,7 +102,7 @@ async function cleanup() {
 
 describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
   let app: any;
-  let bookingsService: BookingsService;
+  let redis: any;
   let presenceOverview: PresenceOverviewService;
 
   beforeAll(async () => {
@@ -136,6 +136,9 @@ describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
       },
     });
 
+    const IORedis = (await import('ioredis')).default;
+    redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+
     const prismaStub = { client: db } as unknown as PrismaService;
     const offRoute = {};
     const crmStub = {
@@ -154,7 +157,7 @@ describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
         PublicRateLimitGuard,
         HoneypotGuard,
         TeamAuditInterceptor,
-        { provide: REDIS_CLIENT, useValue: { incr: async () => 1, expire: async () => 1, ttl: async () => 60 } },
+        { provide: REDIS_CLIENT, useValue: redis },
         CatalogService,
         BookingsService,
         CommerceService,
@@ -183,7 +186,6 @@ describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
       ],
     }).compile();
 
-    bookingsService = ref.get(BookingsService);
     presenceOverview = ref.get(PresenceOverviewService);
 
     app = ref.createNestApplication();
@@ -202,6 +204,7 @@ describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
 
   afterAll(async () => {
     if (app) await app.close();
+    if (redis) await redis.quit().catch(() => undefined);
     await cleanup();
   });
 
@@ -330,17 +333,22 @@ describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
     expect(svcRes.status, JSON.stringify(svcRes.body)).toBe(201);
 
     const startTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    startTime.setUTCMinutes(0, 0, 0);
-    const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
-    const booking = await bookingsService.createBooking({
-      businessId: ID.biz,
-      contactId: ID.contact,
-      serviceId: svcRes.body.id,
-      startTime,
-      endTime,
-    });
+    startTime.setUTCHours(14, 0, 0, 0);
+    const bookRes = await request(app.getHttpServer())
+      .post(`/bookings/public/businesses/${ID.biz}`)
+      .send({
+        serviceId: svcRes.body.id,
+        startTime: startTime.toISOString(),
+        firstName: 'Ada',
+        lastName: 'Deposit',
+        email: `${P}ada@test.local`,
+        phone: '+18685550164',
+      });
+    expect(bookRes.status, JSON.stringify(bookRes.body)).toBe(201);
+    expect(bookRes.body.depositInvoiceId, 'booking must bill an up-front deposit invoice').toBeTruthy();
 
-    expect(booking.depositInvoiceId, 'booking must bill an up-front deposit invoice').toBeTruthy();
+    const booking = await db.booking.findUniqueOrThrow({ where: { id: bookRes.body.bookingId } });
+    expect(booking.depositInvoiceId).toBe(bookRes.body.depositInvoiceId);
     expect(booking.invoiceId).toBeNull();
 
     const depInv = await db.invoice.findUniqueOrThrow({ where: { id: booking.depositInvoiceId! } });

@@ -233,7 +233,7 @@ export class PresenceOverviewService {
       }),
       this.prisma.client.service.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true, price: true, duration: true },
+        select: { id: true, name: true, price: true, duration: true, depositRequired: true, depositType: true, depositValue: true },
         take: 200,
       }),
       this.prisma.client.product.findMany({
@@ -290,6 +290,8 @@ export class PresenceOverviewService {
     for (const [id, count] of canonicalServiceBookings.entries()) {
       const svc = serviceById.get(id);
       if (!svc) continue;
+      if (svc.price <= 0) continue;
+      if (svc.depositRequired && Number(svc.depositValue ?? 0) > 0) continue;
       if (count >= 3) {
         popularNoDeposit.push({ id, name: svc.name, bookings: count });
       }
@@ -542,7 +544,7 @@ export class PresenceOverviewService {
         description: `${svc.name} got ${svc.bookings} booking${svc.bookings === 1 ? '' : 's'} recently. A deposit reduces no-shows.`,
         severity: 'info',
         ctaLabel: 'Edit service',
-        ctaHref: `/app/store?serviceId=${encodeURIComponent(svc.id)}`,
+        ctaHref: `/app/bookings?tab=catalog&serviceId=${encodeURIComponent(svc.id)}`,
         relatedType: 'service',
         relatedId: svc.id,
       });
