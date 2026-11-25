@@ -82,11 +82,11 @@ export function useContactsPipeline() {
     const channel = action.bestChannel ?? undefined;
     switch (action.type) {
       case "send_quote":
-        router.push(`/app/commerce?tab=quotes&contactId=${action.contactId}`);
+        router.push(`/app/commerce?tab=quotes&contactId=${encodeURIComponent(action.contactId)}`);
         toast.info(`Opening quote builder for ${action.contactName}`);
         break;
       case "payment_reminder":
-        router.push(`/app/commerce?tab=invoices&contactId=${action.contactId}`);
+        router.push(`/app/commerce?tab=invoices&contactId=${encodeURIComponent(action.contactId)}`);
         toast.info(`Opening invoices for ${action.contactName}`);
         break;
       case "email":

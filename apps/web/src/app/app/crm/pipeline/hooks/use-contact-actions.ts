@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
 import type { QuickActionType } from "@/components/contacts";
 import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
+import type { ModuleLevels } from "@/lib/nav-config";
 import {
   addContactNote,
   addContactTask,
@@ -27,6 +28,18 @@ import {
 import { moduleEvents } from "@/lib/module-events";
 import { showRefusal } from "@/lib/failure-kit";
 import { deleteContactsWithUndo } from "./contacts-bulk-delete";
+
+/**
+ * FU-CONTACT-SEND-QUOTE-DOOR (review SEC-SQD-1): whether a member with `levels` (useMemberModuleLevels) is offered a
+ * contact's Send Quote: only one who may write quotes (revenue write or admin), as the WhatsApp sheet's New quote
+ * (new-from-whatsapp.tsx). Unknown (no answer yet, a failed read, an answer that does not name revenue) hides nothing:
+ * the server still refuses.
+ */
+export function offersQuote(levels: ModuleLevels): boolean {
+  if (!levels) return true;
+  const revenue = levels.revenue;
+  return revenue === undefined || revenue === "write" || revenue === "admin";
+}
 
 interface UseContactActionsParams {
   businessId: string | null;

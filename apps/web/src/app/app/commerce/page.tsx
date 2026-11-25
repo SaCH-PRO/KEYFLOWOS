@@ -219,11 +219,12 @@ export default function CommercePage() {
   }, [paramTab, paramView, router]);
 
   // WEDGE-WA-INBOUND-CAPTURE (D-263): New quote for a customer from another screen ("+ New > From WhatsApp") is the
-  // Quotes door with ?contactId=<id>: the Quotes tab opens the New quote form with that customer chosen, as a
-  // contact's "Create quote" event does. It follows the URL while the page is mounted; the id then leaves the URL, so a
-  // reload or Back does not open a second form. A contactId on any other tab is left alone. Every door here is this
-  // URL: the WhatsApp sheet (a full page load), a contact's Send quote (use-contact-actions.ts) and the next-action
-  // Send quote (use-contacts-pipeline.ts), both router.push. A client navigation mounts this page once since
+  // Quotes door with ?contactId=<id>: the Quotes tab opens the New quote form with that customer chosen. It follows
+  // the URL while the page is mounted; the id then leaves the URL, so a reload or Back does not open a second form. A
+  // contactId on any other tab is left alone. Every door to a new quote for a customer is this URL: the WhatsApp sheet
+  // (a full page load), a contact's Send quote (use-contact-actions.ts) and the next-action Send quote
+  // (use-contacts-pipeline.ts), both router.push; the "commerce:create_quote_for_contact" event this page also
+  // listened for had no sender left and is gone. A client navigation mounts this page once since
   // FU-REQUIRE-AUTH-REMOUNT (RequireAuth no longer remounts the shell on a pathname change), so it reads the id
   // (FU-CONTACT-SEND-QUOTE-DOOR).
   const paramContactId = searchParams.get("contactId");
@@ -277,8 +278,9 @@ export default function CommercePage() {
   }, [businessId, gmailParam, gmailPendingParam, gmailReasonParam, loadPendingGmail]);
 
   useEffect(() => {
-    // A quote prefill (a contact's "Create quote") opens the Quotes tab, where
-    // the panel reads it; an invoice prefill goes to the invoice list's builder.
+    // A quote prefill (a customer's ?contactId on the Quotes door) opens the
+    // Quotes tab, where the panel reads it; an invoice prefill goes to the
+    // invoice list's builder.
     if (billing.pendingPrefill?.targetSegment === "quotes") {
       if (activeTab !== "quotes") handleTabChange("quotes");
     } else if (billing.pendingPrefill?.targetSegment === "invoices") {
@@ -286,21 +288,6 @@ export default function CommercePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to new prefill arrivals
   }, [billing.pendingPrefill]);
-
-  useModuleEvent<{ contactId?: string; items?: import("./components/commerce-types").InvoiceLineItem[] }>(
-    "commerce:create_quote_for_contact",
-    useCallback(
-      (event) => {
-        const { contactId, items } = event.data ?? {};
-        if (contactId) {
-          billing.prefillForContact(contactId, "quotes", items);
-          handleTabChange("quotes");
-          toast.success("Opening quote builder for contact...");
-        }
-      },
-      [billing, handleTabChange],
-    ),
-  );
 
   useModuleEvent<{ contactId?: string; items?: import("./components/commerce-types").InvoiceLineItem[] }>(
     "commerce:create_invoice_for_contact",
