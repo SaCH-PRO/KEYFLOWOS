@@ -8,6 +8,7 @@ import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { OutcomeLearningService } from './outcome-learning.service';
 import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
+import { isFinanceRecommendation, isFinanceSignal } from './genome-finance-scope';
 import {
   KEY_GENOME_SECTION_CONFIG,
   type KeyGenomeSection,
@@ -396,7 +397,9 @@ export class GenomeRecommendationService {
         minConfidence: 0.6,
         limit: 50,
       });
-      candidates.push(...this.buildSignalCandidates(signals));
+      const eligibleSignals =
+        input.allowFinance === false ? signals.filter((signal) => !isFinanceSignal(signal)) : signals;
+      candidates.push(...this.buildSignalCandidates(eligibleSignals));
     }
 
     if (sources.includes('WEAK_SECTION')) {
@@ -405,7 +408,19 @@ export class GenomeRecommendationService {
       candidates.push(...this.buildWeakSectionCandidates(score));
     }
 
-    const adjusted = await this.applyMemoryConfidenceAdjustment(input.businessId, candidates);
+    const eligibleCandidates =
+      input.allowFinance === false
+        ? candidates.filter(
+            (candidate) =>
+              !isFinanceRecommendation({
+                domain: candidate.domain,
+                title: candidate.title,
+                diagnosis: candidate.diagnosis,
+              }),
+          )
+        : candidates;
+
+    const adjusted = await this.applyMemoryConfidenceAdjustment(input.businessId, eligibleCandidates);
     const ranked = this.rankCandidates(adjusted).slice(0, maxRecommendations);
     const created: GenomeRecommendationData[] = [];
 

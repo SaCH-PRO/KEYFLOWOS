@@ -315,8 +315,9 @@ beforeAll(async () => {
     prisma, offRoute('GenomeFactService') as any, offRoute('GenomeEvidenceService') as any, offRoute('GenomeScoringService') as any,
     offRoute('GenomeModuleReadinessService') as any, offRoute('EventEmitter2') as any, noop() as any,
   ));
+  const experimentStandIn = { createExperiment: async () => ({ id: `${P}exp_stub` }) };
   const recommendationsOf = (prisma: any) => once('recommendations', () => new GenomeRecommendationService(
-    prisma, signalsOf(prisma), readinessStandIn as any, scoringStandIn as any, offRoute('GenomeExperimentService') as any,
+    prisma, signalsOf(prisma), readinessStandIn as any, scoringStandIn as any, experimentStandIn as any,
     memoryOf(prisma), noop() as any, noop() as any,
   ));
   const departmentsOf = (prisma: any) => once('departments', () => new GenomeDepartmentService(prisma));
@@ -1288,7 +1289,7 @@ describe('P47 (W11-GENOME-RECS-DOMAIN, D-128): recommendation generation creates
           section: 'FINANCIAL',
           domain: 'finance',
           field: 'V97U_GRD_FIN_SIGNAL_RUNWAY',
-          signalType: 'RISK_ALERT',
+          signalType: 'MISSING_FACT',
           confidence: 0.92,
           reason: 'V97U_GRD_FIN_SIGNAL: Cash runway below 1.2 months',
           status: 'NEW',

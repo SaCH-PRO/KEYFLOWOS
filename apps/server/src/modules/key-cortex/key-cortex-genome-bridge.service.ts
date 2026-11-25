@@ -1,5 +1,13 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { GENOME_RECOMMENDATION_POOL, GENOME_RECOMMENDATIONS_SERVED, GENOME_SIGNAL_POOL, GENOME_SIGNALS_SERVED } from './genome-context-for-reader';
+import {
+  autonomyMapForReader,
+  GENOME_RECOMMENDATION_POOL,
+  GENOME_RECOMMENDATIONS_SERVED,
+  GENOME_SIGNAL_POOL,
+  GENOME_SIGNALS_SERVED,
+  genomeRecommendationsForReader,
+  readinessFromVisibleDna,
+} from './genome-context-for-reader';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService, actionResultOf, type KeyActionResult, type KeyCortexClaim } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
@@ -18,7 +26,7 @@ import {
   GenomeCrossDomainDomainKey,
   GenomeRankedRecommendation,
 } from '../business-genome/key-genome/key-genome.types';
-import { isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, isFinanceSignal, isMoneyLabel } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeIntelligence {
   businessId: string;
@@ -142,24 +150,65 @@ export class KeyCortexGenomeBridgeService {
     private readonly outcomeLearningService?: GenomeOutcomeLearningService,
   ) {}
 
-  async getGenomeIntelligence(businessId: string): Promise<GenomeIntelligence> {
+  async getGenomeIntelligence(
+    businessId: string,
+    options: { readsRevenue?: boolean } = {},
+  ): Promise<GenomeIntelligence> {
+    const readsRevenue = options.readsRevenue !== false;
     const genome = await this.prisma.client.businessGenome.findUnique({ where: { businessId } });
-    const dnaScores = (genome?.dnaScores as Record<string, number>) ?? {};
-    const stage = (genome?.stage as string) ?? 'unknown';
-    const readiness = (genome?.executiveReadiness as number) ?? 0;
+    const rawDnaScores = (genome?.dnaScores as Record<string, number>) ?? {};
+    const dnaScores = readsRevenue
+      ? rawDnaScores
+      : (dnaScoresForReader(rawDnaScores, false) as Record<string, number>);
+    const stage = readsRevenue ? ((genome?.stage as string) ?? 'unknown') : 'restricted';
+    const readiness = readsRevenue
+      ? ((genome?.executiveReadiness as number) ?? 0)
+      : readinessFromVisibleDna(dnaScores);
 
     // Load real signals, recommendations, opportunities, and readiness in parallel
     // Round 8 (D-235): the signals are read once as a pool, so a reader without revenue read is projected from more than
     // what is left of the newest twenty; the signals are its first twenty, as before.
-    const [signalPool, ranked, opportunities, crossDomain, moduleReadiness] = await Promise.all([
+    // W11-GENOME-RECS-DOMAIN (D-128/D-100): without revenue:read, skip loading the
+    // finance-inclusive cross-domain snapshot and opportunities, and project the
+    // remaining genome fields to non-money rows/modules.
+    const [signalPool, ranked, opportunities, crossDomain, rawModuleReadiness] = await Promise.all([
       this.loadSignals(businessId, { limit: GENOME_SIGNAL_POOL }),
       this.loadRankedRecommendations(businessId, GENOME_RECOMMENDATION_POOL),
-      this.loadOpportunities(businessId, 5),
-      this.loadCrossDomainSnapshot(businessId),
+      readsRevenue ? this.loadOpportunities(businessId, 5) : Promise.resolve([]),
+      readsRevenue ? this.loadCrossDomainSnapshot(businessId) : Promise.resolve(null),
       this.loadModuleReadiness(businessId),
     ]);
 
-    const autonomyMap = this.buildAutonomyMap(moduleReadiness);
+    const moduleReadiness = readsRevenue
+      ? rawModuleReadiness
+      : rawModuleReadiness.filter((m) => !isMoneyLabel(m.module));
+    const rawAutonomyMap = this.buildAutonomyMap(moduleReadiness);
+    const autonomyMap = readsRevenue ? rawAutonomyMap : autonomyMapForReader(rawAutonomyMap);
+
+    const bridgedSignals = signalPool.map((s) => this.toBridgeSignal(s));
+    const visibleSignals = readsRevenue
+      ? bridgedSignals
+      : bridgedSignals
+          .filter(
+            (s) =>
+              s.isFinance !== true &&
+              !isFinanceSignal({
+                sourceModule: s.module as string | undefined,
+                section: s.section as string | undefined,
+                domain: s.domain as string | undefined,
+                signalType: s.type as string | undefined,
+                message: s.message,
+              }),
+          )
+          .map(({ isFinance: _f, ...sig }) => sig);
+
+    const bridgedRecs = ranked.map((r) => this.toBridgeRecommendation(r));
+    const visibleRecs = readsRevenue
+      ? bridgedRecs
+      : genomeRecommendationsForReader(
+          bridgedRecs as Array<{ category: string } & Record<string, unknown>>,
+          false,
+        );
 
     return {
       businessId,
@@ -170,12 +219,12 @@ export class KeyCortexGenomeBridgeService {
       readiness: moduleReadiness,
       // Round 9 (D-235): ranked once as a pool; the recommendations are its first ten, as before (the ranker sorts, then
       // takes the limit, so they are the same rows a limit of ten gives).
-      recommendations: ranked.slice(0, GENOME_RECOMMENDATIONS_SERVED).map((r) => this.toBridgeRecommendation(r)),
-      recommendationPool: ranked.map((r) => this.toBridgeRecommendation(r)),
-      signals: signalPool.slice(0, GENOME_SIGNALS_SERVED).map((s) => this.toBridgeSignal(s)),
-      signalPool: signalPool.map((s) => this.toBridgeSignal(s)),
+      recommendations: visibleRecs.slice(0, GENOME_RECOMMENDATIONS_SERVED),
+      recommendationPool: visibleRecs,
+      signals: visibleSignals.slice(0, GENOME_SIGNALS_SERVED),
+      signalPool: visibleSignals,
       crossDomainInsights: crossDomain,
-      opportunities: opportunities.map((o) => this.toBridgeOpportunity(o)),
+      opportunities: readsRevenue ? opportunities.map((o) => this.toBridgeOpportunity(o)) : [],
       generatedAt: new Date().toISOString(),
       autonomyMap,
     };
@@ -589,8 +638,9 @@ export class KeyCortexGenomeBridgeService {
   async enrichContextWithGenome(
     businessId: string,
     context: Record<string, unknown>,
+    options: { readsRevenue?: boolean } = {},
   ): Promise<Record<string, unknown>> {
-    const genome = await this.getGenomeIntelligence(businessId);
+    const genome = await this.getGenomeIntelligence(businessId, options);
     return {
       ...context,
       genomeStage: genome.genomeStage,
