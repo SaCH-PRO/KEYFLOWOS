@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   DollarSign,
@@ -21,13 +22,13 @@ import {
 } from "lucide-react";
 import { fetchContactMomentum, fetchContactMomentumHistory, type MomentumScore, type MomentumHistory } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { eventLabel } from "@/lib/status-labels";
 import type { ContactDetailData, ContactEvent, DetailQuickAction } from "./contact-detail";
 import { ContactCommandItems } from "./contact-command-items";
 
 interface ContactDetailStatsProps {
   contact: ContactDetailData;
   events: ContactEvent[];
-  onSetActiveTab: (tab: string) => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   /** The business the contact is shown in; without it, the member's selected business (SEC-R015d-1). */
@@ -136,24 +137,13 @@ const SCORE_FACTORS = [
   { label: "Engagement frequency", points: 25 },
 ];
 
-const EVENT_LABELS: Record<string, string> = {
-  "contact.created": "Contact created",
-  "contact.updated": "Contact updated",
-  "invoice.created": "Invoice created",
-  "invoice.paid": "Invoice paid",
-  "booking.created": "Booking made",
-  "booking.completed": "Booking completed",
-  "quote.created": "Quote sent",
-  "quote.accepted": "Quote accepted",
-  "note.created": "Note added",
-  "task.created": "Task created",
-  "task.completed": "Task completed",
-  "email.sent": "Email sent",
-  "whatsapp.sent": "WhatsApp sent",
-  "message.copied": "Message copied",
-  "form.submitted": "Form submitted",
-  "followup.scheduled": "Follow-up set",
-};
+/**
+ * An event type in plain words (BUG-129), the same words the contact's Timeline page uses (eventLabel,
+ * lib/status-labels.ts): "Note.Created" is "Note added". Never the raw code; nothing for no type.
+ */
+function recentEventLabel(type: string | null | undefined): string {
+  return eventLabel(type);
+}
 
 function CollapsibleCard({
   icon: Icon,
@@ -410,7 +400,7 @@ function MomentumBadge({ contactId, businessId }: { contactId: string; businessI
   );
 }
 
-export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAction, businessId }: ContactDetailStatsProps) {
+export function ContactDetailStats({ contact, events, onQuickAction, businessId }: ContactDetailStatsProps) {
   const router = useRouter();
   const goInvoices = (status?: string) => {
     const qs = new URLSearchParams({ tab: "invoices", contactId: contact.id });
@@ -597,24 +587,25 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
 
       {recentEvents.length > 0 && (
         <CollapsibleCard icon={History} title="Recent Activity" hasData={recentEvents.length > 0}
-          preview={recentEvents.length > 0 ? `${recentEvents.length} recent · ${EVENT_LABELS[recentEvents[0].type] || recentEvents[0].type}` : undefined}
+          preview={recentEvents.length > 0 ? `${recentEvents.length} recent · ${recentEventLabel(recentEvents[0].type)}` : undefined}
         >
           <div className="space-y-1.5">
             {recentEvents.map((event) => (
               <div key={event.id} className="flex items-center justify-between text-xs">
-                <span className="font-medium truncate mr-2">{EVENT_LABELS[event.type] || event.type}</span>
+                <span className="font-medium truncate mr-2">{recentEventLabel(event.type)}</span>
                 <span className="text-muted-foreground text-[10px] whitespace-nowrap flex-shrink-0">
                   {relativeTime(event.createdAt)}
                 </span>
               </div>
             ))}
           </div>
-          <button
-            onClick={() => onSetActiveTab("timeline")}
-            className="mt-2 text-[10px] text-[hsl(var(--kf-accent2))] hover:underline"
+          {/* BUG-062: the side panel has no tabs; the contact's own Timeline page holds every event. */}
+          <Link
+            href={`/app/crm/contacts/${encodeURIComponent(contact.id)}/timeline`}
+            className="mt-2 inline-block text-[10px] text-[hsl(var(--kf-accent2))] hover:underline"
           >
             View all
-          </button>
+          </Link>
         </CollapsibleCard>
       )}
     </>

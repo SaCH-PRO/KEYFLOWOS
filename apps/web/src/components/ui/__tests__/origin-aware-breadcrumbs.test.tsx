@@ -264,3 +264,23 @@ describe("NAV-A3 review repairs: the trail's other branches", () => {
   });
 });
 
+/**
+ * FU-NAV-A3-CODEX-235 (a) (Codex on PR #235): a route slug is never taken for a database id. isId took any segment of
+ * 16 or more letters and digits with a digit in it for an id, so the KEY FLOWS role page
+ * /app/key-flows/l1_l2_customer_support_agent (key-flows/page.tsx links each role in lower case) lost its crumb and
+ * marked "KEY FLOWS" as the current page. Ids are uuids, cuids and cuid2s: letters and digits only.
+ */
+describe("FU-NAV-A3-CODEX-235 (a): a slug with a digit is a crumb, an id is not", () => {
+  it("RED-BEFORE: the KEY FLOWS role page has its role's crumb, and it is the current page", () => {
+    const { labels } = trail("/app/key-flows/l1_l2_customer_support_agent");
+    expect(labels[labels.length - 1]).toMatch(/customer support agent/i);
+  });
+
+  it("control: a cuid, a cuid2 and a uuid are still never a crumb", () => {
+    for (const id of ["cmwujpiuf00n57dx4navng6ud", "tz4a98xxat96iws9zmbrgj3a", "3f2b8c1e-9d4a-4e7b-8f6a-2c5d9e0b1a7f"]) {
+      const { text } = trail(`/app/crm/contacts/${id}/overview`);
+      expect(text, id).not.toContain(id);
+    }
+  });
+});
+
