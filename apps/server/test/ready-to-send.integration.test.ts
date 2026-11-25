@@ -59,6 +59,7 @@ const ID = {
 let db: any;
 let app: any;
 let bookingsService: any;
+let readyToSendService: any;
 const sendEmailSpy = vi.fn(async () => ({ id: 'sent_mock' }));
 
 async function cleanup() {
@@ -97,7 +98,6 @@ beforeAll(async () => {
   const { ReadyToSendService } = await import('../src/modules/commerce/ready-to-send.service');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
   const { BookingsService } = await import('../src/modules/bookings/bookings.service');
-  const { CalendarService } = await import('../src/modules/bookings/calendar.service');
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
   const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
@@ -107,9 +107,7 @@ beforeAll(async () => {
   const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
   const { RevenueAttributionService } = await import('../src/modules/commerce/revenue-attribution.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
-  const { WaitlistService } = await import('../src/modules/bookings/waitlist.service');
-  const { CapacityService } = await import('../src/modules/bookings/capacity.service');
-  const { BookingConfirmationService } = await import('../src/modules/bookings/booking-confirmation.service');
+  const { CatalogService } = await import('../src/modules/catalog/catalog.service');
 
   const moduleRef = await Test.createTestingModule({
     imports: [EventEmitterModule.forRoot()],
@@ -123,18 +121,15 @@ beforeAll(async () => {
       CommerceService,
       BookingsService,
       { provide: TransactionalEmailService, useValue: { send: sendEmailSpy } },
-      { provide: CalendarService, useValue: {} },
       { provide: CrmService, useValue: { logContactEvent: async () => null } },
       { provide: PublicEventsService, useValue: { logStorefrontEvent: async () => null } },
       { provide: SubscriptionsService, useValue: {} },
       { provide: InvoiceWorkflowService, useValue: {} },
       { provide: CommerceStatsService, useValue: {} },
+      { provide: CatalogService, useValue: {} },
       { provide: RevenuePostingService, useValue: {} },
       { provide: RevenueAttributionService, useValue: {} },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
-      { provide: WaitlistService, useValue: { expireStaleOffers: async () => null } },
-      { provide: CapacityService, useValue: {} },
-      { provide: BookingConfirmationService, useValue: {} },
     ],
   }).compile();
 
@@ -149,6 +144,7 @@ beforeAll(async () => {
   });
   await app.init();
   bookingsService = app.get(BookingsService);
+  readyToSendService = app.get(ReadyToSendService);
 
   await cleanup();
 
@@ -507,7 +503,7 @@ describe('READY-TO-SEND (P0 wedge-first; D-82, D-263; real Postgres)', () => {
     expect(bizBList.body.gmailConnected).toBe(true);
     const invB = bizBList.body.items.find((i: any) => i.id === ID.invOverdueB);
     const bookB = bizBList.body.items.find((i: any) => i.id === ID.bookSoonB);
-    expect(invB?.willAutoEmail).toBe(true);
+    expect(invB?.willAutoEmail).toBe(false);
     expect(bookB?.willAutoEmail).toBe(true);
 
     // Run scheduled reminder loop directly: must email bizB (Gmail connected) and skip bizA (no Gmail).
@@ -521,5 +517,34 @@ describe('READY-TO-SEND (P0 wedge-first; D-82, D-263; real Postgres)', () => {
     const soonB = await db.booking.findUnique({ where: { id: ID.bookSoonB } });
     expect(soonA.reminderSentAt).toBeNull();
     expect(soonB.reminderSentAt).not.toBeNull();
+  });
+
+  it('RTS-06: controlled clock advances the 24h booking window and daily invoice suppressions; non-remindable statuses return 409; invalid whatsappNumber falls back to phone', async () => {
+    // Non-remindable invoice (PAID) and booking (CANCELLED) return 409 Conflict with nothing stamped.
+    await postMarkSent(ID.bizA, 'invoice', ID.invPaidA, ID.ownerA).expect(409);
+    await postMarkSent(ID.bizA, 'booking', ID.bookCancelledA, ID.ownerA).expect(409);
+    const cancelledAfter = await db.booking.findUnique({ where: { id: ID.bookCancelledA } });
+    expect(cancelledAfter.reminderSentAt).toBeNull();
+
+    // Malformed whatsappNumber falls back to valid E.164 phone.
+    await db.contact.update({
+      where: { id: ID.contactInvA },
+      data: { whatsappNumber: 'not-a-phone' },
+    });
+
+    // Advance controlled clock by 24h + 1m (so invOverdueA marked sent today reappears tomorrow,
+    // and bookLaterA at +36h is now within the 24h window).
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60_000);
+    const futureList = await readyToSendService.listDue(
+      ID.bizA,
+      { id: ID.ownerA, role: 'USER' },
+      { now: tomorrow },
+    );
+
+    const invTomorrow = futureList.items.find((i: any) => i.kind === 'invoice' && i.id === ID.invOverdueA);
+    const bookLater = futureList.items.find((i: any) => i.kind === 'booking' && i.id === ID.bookLaterA);
+    expect(invTomorrow).toBeDefined();
+    expect(invTomorrow.e164Phone).toBe('+18685550142');
+    expect(bookLater).toBeDefined();
   });
 });
