@@ -132,6 +132,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   revenue: {
     commerce_convert_quote: 'write', commerce_create_invoice: 'write',
     commerce_create_quote: 'write', commerce_delete_invoice: 'write',
+    // SWP-CENSUS-V1-A (P87): CatalogController product writes require revenue write
+    apply_storefront_recommendation: 'write',
+    commerce_create_product: 'write', commerce_update_product: 'write',
     commerce_list_invoices: 'read', commerce_mark_invoice_paid: 'write',
     commerce_update_invoice: 'write', finance_view_receivables: 'read',
     // finance_* reports and reports_generate: GET reports/{pnl, cashflow, balance-sheet,
@@ -165,6 +168,13 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     payments_search_transactions: 'read', reports_generate: 'read',
   },
   bookings: {
+    // SWP-CENSUS-V1-A (P87): BookingsController write routes require bookings write
+    bookings_add_to_waitlist: 'write',
+    bookings_cancel_booking: 'write',
+    bookings_cancel_waitlist_entry: 'write',
+    bookings_create_booking: 'write',
+    bookings_mark_no_show: 'write',
+    bookings_reschedule_booking: 'write',
     calendar_create_event: 'write', calendar_list_events: 'read',
   },
   // projects_*: every ProjectsController route requires projects (SWEEP-P0-SCOPES, browser sweep BUG-014)
@@ -229,6 +239,8 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
  * not a canonical key, not a legacy family, not the baseline.
  */
 export const GOVERNED_UNGRANTED: Readonly<Record<string, string>> = {
+  bookings_offer_waitlist_slot:
+    'bookings:write (BookingsController.offerWaitlistSlot) but BookingWaitlistService.offerSlot finds the waitlist entry by its bare id (AMBIENT-BOUND)',
   commerce_send_invoice:
     "revenue:write (CommerceService.updateInvoiceStatus) beside TransactionalEmailService.send to the invoice's customer, which no member route does (review 7 DRV5-2)",
   execute_custom_logic: 're-enters the dispatcher for any tool (innerToolExecutor -> executeToolByName)',
@@ -262,7 +274,12 @@ export const CRM_SUBPERMISSION_TOOLS: Readonly<Record<'crm_edit' | 'crm_delete',
  * methods that reach visibilityClause( (a holder-aware dispatcher that passes the actor is the
  * way back; an owner decision).
  */
-export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = ['crm_delete_contact', 'crm_update_contact', 'tag_contact'];
+export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = [
+  'bookings_create_booking',
+  'crm_delete_contact',
+  'crm_update_contact',
+  'tag_contact',
+];
 
 /**
  * Tools no route governs whose dispatcher call finds a row of a tenant-scoped model by an id the
@@ -282,7 +299,7 @@ export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = ['crm_delete_contact'
  */
 export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
   approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id',
-  bookings_offer_waitlist_slot: 'BookingWaitlistService.offerSlot finds the waitlist entry by its bare id',
+  // bookings_offer_waitlist_slot moved to GOVERNED_UNGRANTED when SWP-CENSUS-V1-A (P87) gated BookingsController.offerWaitlistSlot (bookings:write)
   content_assign_request: 'ContentRequestService.assignRequest finds the content request by its bare id',
   content_deliver_request: 'ContentRequestService.deliverRequest finds the content request by its bare id',
   content_get_request: 'ContentRequestService.getById finds the content request by its bare id',
@@ -670,7 +687,7 @@ export class JobRolePolicyService {
             patterns: names,
             tier,
             family: false,
-            withheld: key === 'crm' ? crmWithheld(permissions, level) : undefined,
+            withheld: key === 'crm' ? crmWithheld(permissions, level) : new Set<string>(CRM_ROW_VISIBILITY_TOOLS),
           });
           maxRiskTier = Math.max(maxRiskTier, tier);
         }

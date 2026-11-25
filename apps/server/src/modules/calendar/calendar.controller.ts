@@ -509,7 +509,8 @@ export class CalendarController {
 
   /* ---------- KEY Talk Pipeline ---------- */
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/key/interpret')
   async keyInterpretCalendar(
     @Param('businessId') businessId: string,
@@ -627,7 +628,8 @@ Return ONLY valid JSON in this exact format:
     }
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/key/execute')
   async keyExecuteCalendar(
     @Param('businessId') businessId: string,

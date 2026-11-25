@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../../core/auth/module-scope.guard';
 import { CrmRateLimit, CrmRateLimitGuard } from '../../crm/guards/rate-limit.guard';
 import { DocumentTemplateService } from './document-template.service';
 import { CreateDocumentTemplateDto } from './dto/create-document-template.dto';
@@ -19,28 +20,32 @@ export class DocumentTemplateController {
   }
 
   @Post('businesses/:businessId')
-  @UseGuards(BusinessGuard)
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @CrmRateLimit(30, 60_000)
   async create(@Param('businessId') businessId: string, @Body() dto: CreateDocumentTemplateDto) {
     return this.service.create(businessId, dto);
   }
 
   @Patch('businesses/:businessId/:id')
-  @UseGuards(BusinessGuard)
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @CrmRateLimit(30, 60_000)
   async update(@Param('businessId') businessId: string, @Param('id') id: string, @Body() dto: UpdateDocumentTemplateDto) {
     return this.service.update(businessId, id, dto);
   }
 
   @Delete('businesses/:businessId/:id')
-  @UseGuards(BusinessGuard)
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @CrmRateLimit(30, 60_000)
   async delete(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.service.delete(businessId, id);
   }
 
   @Post('businesses/:businessId/:id/set-default')
-  @UseGuards(BusinessGuard)
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @CrmRateLimit(30, 60_000)
   async setDefault(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.service.setDefault(businessId, id);
