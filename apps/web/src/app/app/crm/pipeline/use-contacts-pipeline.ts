@@ -8,7 +8,7 @@ import type { NextAction as NextActionUI } from "@/components/contacts/next-acti
 import type { PipelineDetailPanelProps } from "./pipeline-detail-panel";
 import { useContactsData } from "./hooks/use-contacts-data";
 import { useContactDetail } from "./hooks/use-contact-detail";
-import { useContactActions } from "./hooks/use-contact-actions";
+import { useContactActions, useOffersQuote } from "./hooks/use-contact-actions";
 import { useFlowIntelligence } from "./hooks/use-flow-intelligence";
 import { useOpenComposer } from "@/hooks/use-open-composer";
 
@@ -34,6 +34,15 @@ export function useContactsPipeline() {
 
   const flow = useFlowIntelligence(businessId);
   const { loadFlowData } = flow;
+
+  // FU-CONTACT-SEND-QUOTE-DOOR (SEC-SQD-1, SEC-SQD-4): every Send Quote this screen offers (the cards' Quick actions
+  // and the next actions in the Action Center, the pipeline queue and the focus view) follows the member's revenue
+  // level on this screen's business (offersQuote: revenue write or admin; unknown hides nothing).
+  const offerQuote = useOffersQuote(businessId);
+  const nextActions = useMemo(
+    () => (offerQuote ? flow.nextActions : flow.nextActions.filter((a) => a.type !== "send_quote")),
+    [offerQuote, flow.nextActions],
+  );
 
   const actions = useContactActions({
     businessId, contacts, setContacts,
@@ -241,7 +250,8 @@ export function useContactsPipeline() {
     listsCount: contactsData.listsCount, setListsCount: contactsData.setListsCount,
     confirmState: actions.confirmState, setConfirmState: actions.setConfirmState,
     flowIntelligence: flow.flowIntelligence, flowDataLoading: flow.flowDataLoading,
-    nextActions: flow.nextActions,
+    nextActions,
+    offerQuote,
     autopilotActions: flow.autopilotActions, setAutopilotActions: flow.setAutopilotActions,
     autopilotPaused: flow.autopilotPaused, setAutopilotPaused: flow.setAutopilotPaused,
     revenueData: flow.revenueData,
