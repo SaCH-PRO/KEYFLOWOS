@@ -39,6 +39,12 @@
  * outside KeyFlow, through the same route; a Stripe or PayPal payment offers no bookkeeping refund but a link to the
  * existing gateway refund in Money > Money in (/app/payments?tab=refunds); another casing or provider offers neither.
  *
+ * Repair round 2 (RED-R2 cases fail at a1ab2d8a; GUARD-R2 cases pin in-flight guards that are right at a1ab2d8a and
+ * fail under their mutants N2, N4, N5, N6): a mark-paid row written before R0-PL-04 (manual_<invoiceId>_<13-digit ms>)
+ * is offered Refund; the "whole" wording reads cents exactly (a legacy 1.005 payment reads "Refund the TTD 1.01");
+ * while the dialog's read is in flight its confirm is disabled and sends nothing; a read landing after Cancel does
+ * not reopen it; a failed read closes it with the error; of two quick presses only the last read opens its amount.
+ *
  * The page is mounted as the route renders it; its data doors (@/lib/client), the workspace, the router and the
  * composer are stubbed with server-shaped answers.
  */
@@ -430,6 +436,76 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
       expect(within(rowOf(id)).queryByRole("button", { name: /refund/i }), `${id}: fail closed`).toBeNull();
       expect(within(rowOf(id)).queryByRole("link", { name: /refund/i }), `${id}: fail closed`).toBeNull();
     }
+  });
+
+  it("RED-R2 (legacy mark-paid): a mark-paid row written before R0-PL-04 (manual_<invoiceId>_<ms>) offers Refund", async () => {
+    const legacy = pay("pay_legacy_mp", 300, { provider: "manual", method: "MANUAL", providerPaymentId: `manual_${INV}_1731000000000` });
+    await openPayments(invoice("PAID", [legacy], 300, 0), [legacy]);
+    pressRefund("pay_legacy_mp");
+    await confirmFor(300);
+  });
+
+  it("RED-R2 (exact cents in the wording): a legacy 1.005 payment reads as the whole TTD 1.01", async () => {
+    const odd = pay("pay_odd", 1.005);
+    await openPayments(invoice("PARTIALLY_PAID", [odd], 1.01, 298.99), [odd]);
+    pressRefund("pay_odd");
+    await confirmFor(1.01);
+    expect(dialog()!.textContent).toContain(`Refund the ${TTD(1.01)} paid by Cash on`);
+  });
+
+  /** Makes the next read of the payments wait until the returned function is called with its answer. */
+  function holdNextRead(): (answer: unknown) => void {
+    let release: (v: unknown) => void = () => {};
+    listInvoicePayments.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    return (answer) => release(answer);
+  }
+
+  it("GUARD-R2 (N2): while the read is in flight the confirm is disabled, and pressing it sends nothing", async () => {
+    await openPayments(invoice("PARTIALLY_PAID", [CASH], 100, 200), [CASH]);
+    const release = holdNextRead();
+    pressRefund("pay_cash");
+    const confirm = await waitFor(() => within(dialog()!).getByRole("button", { name: /^refund/i }));
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(refundPayment).not.toHaveBeenCalled();
+    release(listed([CASH], 100, 200));
+    await confirmFor(100);
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it("GUARD-R2 (N4): a read that lands after Cancel does not reopen the dialog", async () => {
+    await openPayments(invoice("PARTIALLY_PAID", [CASH], 100, 200), [CASH]);
+    const release = holdNextRead();
+    pressRefund("pay_cash");
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    fireEvent.click(within(dialog()!).getByRole("button", { name: /^cancel$/i }));
+    expect(dialog()).toBeNull();
+    release(listed([CASH], 100, 200));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dialog(), "cancelled stays cancelled").toBeNull();
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it("GUARD-R2 (N5): a failed read closes the dialog, shows the error and posts nothing", async () => {
+    await openPayments(invoice("PARTIALLY_PAID", [CASH], 100, 200), [CASH]);
+    listInvoicePayments.mockResolvedValueOnce({ data: null, error: "Payments could not be read: connection reset" });
+    pressRefund("pay_cash");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Payments could not be read: connection reset"));
+    expect(dialog()).toBeNull();
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it("GUARD-R2 (N6): of two quick Refund presses, only the last one's read opens its amount", async () => {
+    const other = pay("pay_other", 50);
+    await openPayments(invoice("PARTIALLY_PAID", [CASH, other], 150, 150), [CASH, other]);
+    const releaseFirst = holdNextRead();
+    pressRefund("pay_cash");
+    pressRefund("pay_other");
+    await confirmFor(50);
+    releaseFirst(listed([CASH, other], 150, 150));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(within(dialog()!).queryByRole("button", { name: `Refund ${TTD(100)}` }), "the stale read is ignored").toBeNull();
+    expect(within(dialog()!).getByRole("button", { name: `Refund ${TTD(50)}` })).toBeInTheDocument();
   });
 
   it("CONTROL: a payment recorded on a paid invoice is listed with its amount in the invoice's currency", async () => {

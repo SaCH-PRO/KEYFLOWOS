@@ -46,6 +46,19 @@ describe("isManualPayment: the hand-recording door's rows only (fail closed)", (
   });
 });
 
+describe("isManualPayment: legacy mark-paid rows (repair round 2)", () => {
+  it("RED-R2: manual_<invoiceId>_<13-digit ms> (markInvoicePaid before R0-PL-04) is the hand-recording door's", () => {
+    expect(isManualPayment(row(`manual_${INV}_1731000000000`, { provider: "manual" }))).toBe(true);
+  });
+
+  it("CONTROL-R2: a 12- or 14-digit tail, another invoice's id and a PENDING row are not", () => {
+    expect(isManualPayment(row(`manual_${INV}_173100000000`, { provider: "manual" })), "12 digits").toBe(false);
+    expect(isManualPayment(row(`manual_${INV}_17310000000000`, { provider: "manual" })), "14 digits").toBe(false);
+    expect(isManualPayment(row("manual_cmotherinvoice_1731000000000", { provider: "manual" })), "another invoice").toBe(false);
+    expect(isManualPayment(row(`manual_${INV}_1731000000000`, { provider: "manual", status: "PENDING" })), "not money").toBe(false);
+  });
+});
+
 describe("isOutOfBandRefundable: a WiPay payment (no refund API) is recorded as refunded outside KeyFlow", () => {
   it("RED-R1B: provider exactly 'wipay' (only the WiPay door writes it; D-55 stores a typed gateway name as 'manual')", () => {
     expect(isOutOfBandRefundable(row("wipay_txn_77", { provider: "wipay" }))).toBe(true);

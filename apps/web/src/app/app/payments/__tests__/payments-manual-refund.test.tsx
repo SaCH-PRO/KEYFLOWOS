@@ -20,6 +20,10 @@
  * does not read the payments again; of two quick Refund presses only the last one's lookup opens its dialog; and
  * (CONTROL-R1, a test gap) a 409 reads the payments again and the row then reads Refunded.
  *
+ * Repair round 2 (GUARD-R2: right at a1ab2d8a, failing under mutants N2, N4, N5): while the dialog's read is in flight
+ * its confirm is disabled and sends nothing; a read landing after Cancel does not reopen it; a failed read closes it
+ * with the error and posts nothing.
+ *
  * The page is mounted with its shell reduced to its children and its data doors (@/lib/client) stubbed with
  * server-shaped answers.
  */
@@ -303,6 +307,48 @@ describe("SWP-INV-REFUND-UI: refund a manual payment from Money > Money in (BUG-
     await new Promise((r) => setTimeout(r, 50));
     expect(within(dialog()!).queryByRole("button", { name: `Refund ${USD(120)}` }), "the stale lookup is ignored").toBeNull();
     expect(within(dialog()!).getByRole("button", { name: `Refund ${USD(70)}` })).toBeInTheDocument();
+  });
+
+  /** Makes the next read of an invoice's payments wait until the returned function is called with its answer. */
+  function holdNextRead(): (answer: unknown) => void {
+    let release: (v: unknown) => void = () => {};
+    listInvoicePayments.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    return (answer) => release(answer);
+  }
+
+  it("GUARD-R2 (N2): while the read is in flight the confirm is disabled, and pressing it sends nothing", async () => {
+    await mount([CASH]);
+    const release = holdNextRead();
+    pressRefund("pay_cash");
+    const confirm = await waitFor(() => within(dialog()!).getByRole("button", { name: /^refund/i }));
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(refundPayment).not.toHaveBeenCalled();
+    release(listedFor([CASH], 120));
+    await confirmFor(120);
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it("GUARD-R2 (N4): a read that lands after Cancel does not reopen the dialog", async () => {
+    await mount([CASH]);
+    const release = holdNextRead();
+    pressRefund("pay_cash");
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    fireEvent.click(within(dialog()!).getByRole("button", { name: /^cancel$/i }));
+    expect(dialog()).toBeNull();
+    release(listedFor([CASH], 120));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dialog(), "cancelled stays cancelled").toBeNull();
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it("GUARD-R2 (N5): a failed read closes the dialog, shows the error and posts nothing", async () => {
+    await mount([CASH]);
+    listInvoicePayments.mockResolvedValueOnce({ data: null, error: "Payments could not be read: connection reset" });
+    pressRefund("pay_cash");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Payments could not be read: connection reset"));
+    expect(dialog()).toBeNull();
+    expect(refundPayment).not.toHaveBeenCalled();
   });
 
   it("CONTROL (D-100): when the payments cannot be read (no revenue read), no amount is shown", async () => {
