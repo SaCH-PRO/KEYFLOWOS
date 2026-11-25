@@ -55,7 +55,7 @@ export function e2eBaseURL(): string {
  * real API (e2e/journeys/). A signed-in session stored the way the web app
  * stores one (lib/workspace.ts setStoredToken / setStoredBusinessId:
  * localStorage kf_token and kf_business_id, plus the cookies of the same names
- * the edge proxy gates /app/* on), as a Playwright storageState. A context
+ * the edge middleware, src/middleware.ts, gates /app/* on), as a Playwright storageState. A context
  * starts from it once, so the app is free to change or clear the session
  * afterwards: sign-out really signs out, which an init script would undo.
  */
@@ -102,7 +102,7 @@ export function liveSessionState(
  * localStorage to call `/identity/me`) treat the visitor as a signed-in,
  * onboarded user with an active workspace. Must be called before navigation.
  *
- * Without the cookie the edge proxy redirects every `/app/*` request to
+ * Without the cookie the edge middleware redirects every `/app/*` request to
  * `/auth/login` before the page hydrates, so localStorage alone is not
  * enough — that was the cause of the e2e suite flaking out wholesale.
  */

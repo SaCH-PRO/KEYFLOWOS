@@ -8,12 +8,13 @@ import { e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspace } from "./helpe
  * through only with a JWT-shaped kf_token cookie (three parts, not expired), so every mocked spec that relied on
  * seedWorkspace alone was sent to /auth/login before the page loaded.
  *
- *   SWS-01 seedWorkspace alone (with the mocked layout and catch-all) reaches /app/crm/contacts (RED at the base:
- *          lands on /auth/login).
+ *   SWS-01 seedWorkspace alone (with the mocked layout and catch-all) reaches /app/crm/contacts and renders it, and the
+ *          onboarding gate's read answers onboarded (RED at the base: lands on /auth/login).
  *   SWS-02 the seeded cookie and localStorage hold the same token: three base64url parts, a payload whose exp is in
  *          the future, unsigned (RED at the base: one part).
  *   SWS-03 guard, green at base and head: the middleware is not loosened. Over a seeded workspace, a kf_token cookie
- *          that is malformed, or JWT-shaped but expired, is still sent to /auth/login.
+ *          that is malformed, or JWT-shaped but expired, is still sent to /auth/login by the middleware itself: a 307
+ *          from /app/crm/contacts, with ?from= and the cookie cleared.
  *
  * Mocked: every API call is answered by page.route on api.test.local; skipped under E2E_LIVE.
  *   pnpm run build (NEXT_PUBLIC_API_BASE_URL=http://api.test.local), then
@@ -38,10 +39,20 @@ async function seededCookie(context: BrowserContext): Promise<string | undefined
 
 test("SWS-01 seedWorkspace alone reaches /app/crm/contacts", async ({ page }) => {
   await signIn(page);
+  // The onboarding gate (hooks/use-genome-gate.ts) reads this on every /app navigation; an unfinished answer sends the
+  // page to /app/onboarding. Waiting on it and reading its body pins mockBaseLayout's answer deterministically.
+  const onboardingState = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith("/onboarding-state"));
   const response = await page.goto("/app/crm/contacts");
   expect(new URL(response!.url()).pathname, "the middleware redirected the seeded session").toBe("/app/crm/contacts");
+  expect(response!.request().redirectedFrom(), "no redirect on the way in").toBeNull();
+
+  const state = (await (await onboardingState).json()) as Record<string, unknown>;
+  expect(state.onboardingComplete, "the seeded business reads as onboarded").toBe(true);
+
+  await expect(page.getByRole("heading", { name: "Contacts", exact: true })).toBeVisible();
   await page.waitForLoadState("networkidle");
-  expect(new URL(page.url()).pathname).toBe("/app/crm/contacts");
+  await expect(page).toHaveURL((u) => u.pathname === "/app/crm/contacts");
+  await expect(page.getByRole("heading", { name: "Contacts", exact: true })).toBeVisible();
 });
 
 test("SWS-02 the seeded token is JWT-shaped, unexpired and unsigned, in the cookie and in localStorage", async ({ page }) => {
@@ -72,7 +83,16 @@ for (const [name, token] of [
   test(`SWS-03 guard: a ${name} kf_token cookie is still sent to /auth/login`, async ({ page }) => {
     await signIn(page);
     await page.context().addCookies([{ name: "kf_token", value: token, url: e2eBaseURL(), sameSite: "Lax" }]);
-    await page.goto("/app/crm/contacts");
-    expect(new URL(page.url()).pathname).toBe("/auth/login");
+    const response = await page.goto("/app/crm/contacts?tab=all");
+    // The middleware's own redirect: the login document was reached from /app/crm/contacts, carries it in ?from=, and
+    // the stale cookie was cleared (src/middleware.ts). A client-side bounce would have none of these.
+    const landed = new URL(response!.url());
+    expect(landed.pathname).toBe("/auth/login");
+    expect(landed.searchParams.get("from")).toBe("/app/crm/contacts?tab=all");
+    const from = response!.request().redirectedFrom();
+    expect(from, "a server redirect led here").not.toBeNull();
+    expect(new URL(from!.url()).pathname).toBe("/app/crm/contacts");
+    expect((await from!.response())?.status()).toBe(307);
+    expect(await seededCookie(page.context()), "the middleware cleared the kf_token cookie").toBeUndefined();
   });
 }
