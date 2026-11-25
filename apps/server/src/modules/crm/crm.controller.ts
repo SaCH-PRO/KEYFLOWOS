@@ -1694,8 +1694,12 @@ export class CrmController {
     // stays the unchanged ContactEvent[] array; supplying limit, cursor, or
     // paged=true returns { events, nextCursor, hasMore }.
     if (limit !== undefined || cursor !== undefined || paged !== undefined) {
-      if (Array.isArray(limit) || Array.isArray(cursor) || Array.isArray(paged)) {
-        throw new BadRequestException('Duplicate pagination query parameters are not allowed');
+      if (
+        (limit !== undefined && typeof limit !== 'string') ||
+        (cursor !== undefined && typeof cursor !== 'string') ||
+        (paged !== undefined && typeof paged !== 'string')
+      ) {
+        throw new BadRequestException('Invalid pagination query parameters');
       }
       if (paged !== undefined && paged !== 'true' && paged !== '1') {
         throw new BadRequestException('paged must be true or 1');
