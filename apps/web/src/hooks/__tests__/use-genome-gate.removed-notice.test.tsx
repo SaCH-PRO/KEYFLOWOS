@@ -6,6 +6,8 @@
  *                       remaining business has not finished onboarding
  *   RBN-06  control     with no notice, the gate still sends an unfinished business to /app/onboarding
  *   RBN-07  RED-BEFORE  with no business left and the notice pending, the gate does not redirect either
+ *   RBN-08  RED-AT-1be13828  security review MINOR-3: once the member dismisses the notice, the gate applies again at
+ *                       once (an unfinished business is sent to onboarding without waiting for a navigation)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, cleanup, waitFor, act } from "@testing-library/react";
@@ -74,5 +76,18 @@ describe("SWP-REMOVED-MEMBER-NOTICE: the Business Genome gate", () => {
     const { result } = renderHook(() => useGenomeGate());
     await gateSettled(result);
     expect(nav.replace).not.toHaveBeenCalledWith("/app/onboarding");
+  });
+
+  it("RBN-08 RED-AT-1be13828: dismissing the notice lets the gate apply again at once", async () => {
+    ws.notice = { id: "biz-owners-salon", name: "Owner's Salon" };
+    const { result } = renderHook(() => useGenomeGate());
+    await gateSettled(result);
+    expect(nav.replace).not.toHaveBeenCalledWith("/app/onboarding");
+
+    act(() => {
+      ws.notice = null;
+      window.dispatchEvent(new CustomEvent("kf:business-removed", { detail: null }));
+    });
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith("/app/onboarding"));
   });
 });

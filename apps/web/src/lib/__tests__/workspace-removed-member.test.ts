@@ -20,6 +20,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *   RMN-06  RED-BEFORE  the cache describes another business: the notice carries no name rather than a wrong one
  *   RMN-07  pin         a stale id under a different signed-in user (shared device): no notice
  *   RMN-08  RED-BEFORE  dismissing clears the notice; signing out clears it too
+ * Security review round (1be13828):
+ *   RMN-09  RED-AT-1be13828  MAJOR-1: another account signing in on the same browser never sees the notice (it is
+ *                       cleared at sign-in, and dropped when the resolved user is not the one it was raised for)
+ *   RMN-10  RED-AT-1be13828  MINOR-1: leftover state from another account (its business, cache and user cache) is
+ *                       never raised as a notice to the signed-in user, even after a failed list read overwrote the
+ *                       cached user; the leftover business is forgotten
+ *   RMN-11  pin         MINOR-2: access given back (the business is in the list again) clears the notice
  */
 
 const { bootstrapIdentity } = vi.hoisted(() => ({ bootstrapIdentity: vi.fn() }));
@@ -149,5 +156,51 @@ describe("SWP-REMOVED-MEMBER-NOTICE: a removed member is told, by name", () => {
     expect(ws.getRemovedBusinessNotice()).not.toBeNull();
     ws.clearStoredBusinessId();
     expect(ws.getRemovedBusinessNotice()).toBeNull();
+  });
+
+  it("RMN-09 RED-AT-1be13828: another account signing in on the same browser never sees the notice", async () => {
+    workingIn(OWNERS);
+    serve({ businesses: [OWN] });
+    const ws = await import("../workspace");
+    await ws.refreshWorkspace();
+    expect(ws.getRemovedBusinessNotice(), "A's notice is raised").not.toBeNull();
+
+    // A closes the browser without signing out; B signs in (login form, OAuth callback and signup all do this).
+    ws.clearAdminSession();
+    ws.setStoredToken("token-b");
+    expect(ws.getRemovedBusinessNotice(), "B's sign-in starts with no notice of A's").toBeNull();
+
+    // Even a notice written back by an older tab is dropped once B is resolved.
+    window.localStorage.setItem("kf_removed_business", JSON.stringify({ id: OWNERS.id, name: OWNERS.name, userId: MEMBER.id }));
+    serve({ businesses: [{ id: "biz-b-own", name: "B Own" }], me: { id: "user-b", email: "b@rmn.test" } });
+    await ws.refreshWorkspace();
+    expect(ws.getRemovedBusinessNotice(), "a notice raised for A is never kept for B").toBeNull();
+  });
+
+  it("RMN-10 RED-AT-1be13828: another account's leftover business is never raised to the signed-in user", async () => {
+    // A's state is left behind; B's token is stored (B's sign-in failed after storing it).
+    workingIn(OWNERS);
+    window.localStorage.setItem("kf_token", "token-b");
+    const B = { id: "user-b", email: "b@rmn.test" };
+    serve({ businessesStatus: 503, me: B });
+    const ws = await import("../workspace");
+    await ws.refreshWorkspace();
+
+    serve({ businesses: [{ id: "biz-b-own", name: "B Own" }], me: B });
+    await expect(ws.refreshWorkspace()).resolves.toBe("biz-b-own");
+    expect(ws.getRemovedBusinessNotice(), "A's business is never named to B").toBeNull();
+    expect(window.localStorage.getItem("kf_business_cache") ?? "", "A's business cache is gone").not.toContain(OWNERS.name);
+  });
+
+  it("RMN-11 pin: access given back clears the notice", async () => {
+    workingIn(OWNERS);
+    serve({ businesses: [OWN] });
+    const ws = await import("../workspace");
+    await ws.refreshWorkspace();
+    expect(ws.getRemovedBusinessNotice()).not.toBeNull();
+
+    serve({ businesses: [OWN, OWNERS] });
+    await ws.refreshWorkspace();
+    expect(ws.getRemovedBusinessNotice(), "re-invited: the notice no longer holds").toBeNull();
   });
 });
