@@ -31,6 +31,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *   RMN-12  pin         with no cached user to confirm the person (a switch via selectBusiness drops it, and the
  *                       removal lands before the shell re-resolves), no notice is raised: the same-person guard fails
  *                       quiet rather than name a business to someone it cannot confirm (correctness MINOR-2/3)
+ * Security re-review (096b9a20):
+ *   RMN-13  pin         m1: a notice raised for another person is dropped when this person is resolved, even when
+ *                       the caches are already this person's (a fresh OAuth-callback page load)
+ *   RMN-14  pin         m2 / correctness R-MINOR-2: when /identity/me fails (and the list too), the stored choice and
+ *                       its cache are kept: the forget needs a resolved user to compare
+ *   RMN-15  RED-AT-096b9a20  correctness R-MINOR-1: signing out (or in) clears a pending notice without announcing it,
+ *                       so the Business Genome gate, which re-checks on the announcement, does not redirect a member
+ *                       who is signing out to /app/onboarding
  */
 
 const { bootstrapIdentity } = vi.hoisted(() => ({ bootstrapIdentity: vi.fn() }));
@@ -218,5 +226,52 @@ describe("SWP-REMOVED-MEMBER-NOTICE: a removed member is told, by name", () => {
     serve({ businesses: [OWNERS] });
     await expect(ws.refreshWorkspace()).resolves.toBe(OWNERS.id);
     expect(ws.getRemovedBusinessNotice()).toBeNull();
+  });
+
+  it("RMN-13 pin: a notice raised for another person is dropped once this person is resolved", async () => {
+    // B's own caches (as the OAuth callback writes them), and a notice A's session left behind.
+    const B = { id: "user-b", email: "b@rmn.test" };
+    const BOWN = { id: "biz-b-own", name: "B Own" };
+    workingIn(BOWN, BOWN, B);
+    window.localStorage.setItem("kf_removed_business", JSON.stringify({ id: OWNERS.id, name: OWNERS.name, userId: MEMBER.id }));
+    serve({ businesses: [BOWN], me: B });
+    const ws = await import("../workspace");
+
+    await expect(ws.refreshWorkspace()).resolves.toBe(BOWN.id);
+    expect(ws.getRemovedBusinessNotice(), "A's notice is never kept for B").toBeNull();
+  });
+
+  it("RMN-14 pin: when /identity/me fails, the stored choice and its cache are kept", async () => {
+    workingIn(OWNERS);
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith("/identity/businesses")) return json(503, {});
+      if (String(url).endsWith("/identity/me")) return json(503, {});
+      if (String(url).endsWith("/identity/refresh")) return json(401, {});
+      return json(404, {});
+    });
+    const ws = await import("../workspace");
+
+    await expect(ws.refreshWorkspace()).resolves.toBe(OWNERS.id);
+    expect(window.localStorage.getItem("kf_business_id")).toBe(OWNERS.id);
+    expect(window.localStorage.getItem("kf_business_cache") ?? "").toContain(OWNERS.name);
+  });
+
+  it("RMN-15 RED-AT-096b9a20: signing out clears a pending notice without announcing it", async () => {
+    workingIn(OWNERS);
+    serve({ businesses: [OWN] });
+    const ws = await import("../workspace");
+    await ws.refreshWorkspace();
+    expect(ws.getRemovedBusinessNotice()).not.toBeNull();
+
+    const announced: unknown[] = [];
+    const listen = (e: Event) => announced.push((e as CustomEvent).detail);
+    window.addEventListener("kf:business-removed", listen);
+    try {
+      ws.clearStoredBusinessId();
+      expect(ws.getRemovedBusinessNotice()).toBeNull();
+      expect(announced, "nothing is announced while the session ends").toEqual([]);
+    } finally {
+      window.removeEventListener("kf:business-removed", listen);
+    }
   });
 });
