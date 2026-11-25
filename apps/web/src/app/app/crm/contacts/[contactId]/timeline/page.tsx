@@ -250,8 +250,12 @@ export default function ContactTimelinePage() {
 
   const dates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
 
+  // Below md the phone's fixed bottom bar covers the viewport's bottom edge. The app scroll root's pb-28 should keep
+  // the end of a page clear of it, but PageTransition's h-full wrapper is shorter than a long page, so that padding
+  // ends where the wrapper does and the page's last ~80px stay under the bar, out of reach (live sweep at 375). Load
+  // older is the last thing on this page, so the page keeps its own clearance below md.
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 md:pb-0">
       <div className="flex items-center gap-2">
         <Clock className="h-5 w-5 text-muted-foreground" />
         <h3 className="text-lg font-semibold">Timeline</h3>
