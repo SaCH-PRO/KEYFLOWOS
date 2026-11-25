@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactEvents } from "@/lib/client";
 import { eventLabel, plainLabel, statusLabel } from "@/lib/status-labels";
 import { Card } from "@keyflow/ui";
-import { Clock, Mail, Phone, MessageSquare, Calendar, DollarSign, FileText, Star, User, Zap, AlertTriangle, CheckCircle, Info } from "lucide-react";
+import { Clock, Mail, Phone, MessageSquare, MessageCircle, Calendar, DollarSign, FileText, Star, User, Zap, AlertTriangle, CheckCircle, Info } from "lucide-react";
+import {
+  CHANNEL_FILTERS,
+  channelCounts,
+  conversationTitle,
+  eventChannel,
+  foldPastedNotes,
+  type ChannelFilter,
+  type TimelineChannel,
+} from "./timeline-channels";
 
 interface ContactEvent {
   id: string;
@@ -34,9 +43,26 @@ const typeConfig: Record<string, { icon: React.ElementType; color: string; bg: s
   default: { icon: Info, color: "text-gray-600", bg: "bg-gray-100" },
 };
 
-function getEventConfig(type: string) {
-  const key = Object.keys(typeConfig).find((k) => type.toLowerCase().includes(k));
+/** A channel's own look, so a pasted WhatsApp message (or its note) reads as WhatsApp, not as a note. */
+const channelConfig: Record<TimelineChannel, { icon: React.ElementType; color: string; bg: string }> = {
+  whatsapp: { icon: MessageCircle, color: "text-green-700", bg: "bg-green-100" },
+  email: typeConfig.email,
+  sms: typeConfig.sms,
+  call: typeConfig.call,
+  note: typeConfig.note,
+};
+
+function getEventConfig(ev: ContactEvent) {
+  const channel = eventChannel(ev);
+  if (channel) return channelConfig[channel];
+  const key = Object.keys(typeConfig).find((k) => ev.type.toLowerCase().includes(k));
   return typeConfig[key || "default"];
+}
+
+/** The event in plain words: a logged conversation by its channel ("Call logged"), anything else by eventLabel. */
+function eventTitle(ev: ContactEvent): string {
+  // BUG-129: never the code ("Note.Created"); "SMS" keeps its capitals (eventLabel would say "Sms sent").
+  return conversationTitle(ev) ?? eventLabel(ev.type).replace(/^Sms\b/, "SMS");
 }
 
 function formatEventData(data: unknown): string {
@@ -47,6 +73,8 @@ function formatEventData(data: unknown): string {
   if (d.description && typeof d.description === "string") return d.description;
   if (d.body && typeof d.body === "string") return d.body;
   if (d.message && typeof d.message === "string") return d.message;
+  // A logged call, email, SMS or meeting keeps its words in notes (log-communication).
+  if (d.notes && typeof d.notes === "string") return d.notes;
   // A stored status in the owner's words ("Part-paid", not "PARTIALLY_PAID"; review CDC-4).
   if (d.status && typeof d.status === "string") return plainLabel(d.status);
   return "";
@@ -77,6 +105,7 @@ export default function ContactTimelinePage() {
   const { contactId } = useParams();
   const [events, setEvents] = useState<ContactEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<ChannelFilter>("all");
 
   useEffect(() => {
     const load = async () => {
@@ -89,11 +118,17 @@ export default function ContactTimelinePage() {
     load();
   }, [contactId]);
 
+  // D-277: one item per pasted WhatsApp message; the filter and its counts work on what the events read served only.
+  const items = useMemo(() => foldPastedNotes(events), [events]);
+  const counts = useMemo(() => channelCounts(items), [items]);
+  const shown = filter === "all" ? items : items.filter((ev) => eventChannel(ev) === filter);
+  const emptyText = CHANNEL_FILTERS.find((f) => f.id === filter)?.empty ?? CHANNEL_FILTERS[0].empty;
+
   if (loading) return <div className="p-4">Loading timeline...</div>;
 
   // Group by date
   const groups: Record<string, ContactEvent[]> = {};
-  events.forEach((ev) => {
+  shown.forEach((ev) => {
     const date = new Date(ev.createdAt).toISOString().slice(0, 10);
     if (!groups[date]) groups[date] = [];
     groups[date].push(ev);
@@ -106,12 +141,33 @@ export default function ContactTimelinePage() {
       <div className="flex items-center gap-2">
         <Clock className="h-5 w-5 text-muted-foreground" />
         <h3 className="text-lg font-semibold">Timeline</h3>
-        <span className="ml-auto text-sm text-muted-foreground">{events.length} events</span>
+        <span className="ml-auto text-sm text-muted-foreground">
+          {filter === "all" ? items.length : `${shown.length} of ${items.length}`} {items.length === 1 ? "event" : "events"}
+        </span>
       </div>
 
-      {events.length === 0 ? (
+      <div role="group" aria-label="Filter by channel" className="flex flex-wrap gap-2">
+        {CHANNEL_FILTERS.map((f) => {
+          const on = filter === f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setFilter(f.id)}
+              className={`min-h-9 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {f.label} <span className="tabular-nums opacity-80">({counts[f.id]})</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {shown.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-          No timeline events yet.
+          {items.length === 0 ? CHANNEL_FILTERS[0].empty : emptyText}
         </div>
       ) : (
         <div className="relative space-y-6 pl-4">
@@ -130,9 +186,11 @@ export default function ContactTimelinePage() {
               </div>
               <div className="space-y-2 pl-7">
                 {groups[date].map((ev) => {
-                  const cfg = getEventConfig(ev.type);
+                  const cfg = getEventConfig(ev);
                   const Icon = cfg.icon;
                   const detail = formatEventData(ev.data);
+                  // A message is shown whole, as typed: third-party text, rendered as text only (never markup).
+                  const isMessage = eventChannel(ev) !== null && eventChannel(ev) !== "note";
                   return (
                     <Card key={ev.id} className="border-l-4 border-l-transparent hover:border-l-primary/50 transition-colors">
                       <div className="flex items-start gap-3 p-3">
@@ -140,16 +198,24 @@ export default function ContactTimelinePage() {
                           <Icon className={`h-4 w-4 ${cfg.color}`} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             {/* BUG-129: the event in plain words ("Note added"), never its code ("Note.Created"). */}
-                            <span className="text-sm font-medium">{eventLabel(ev.type)}</span>
+                            <span className="text-sm font-medium">{eventTitle(ev)}</span>
                             {ev.source && (
                               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                                 {ev.source}
                               </span>
                             )}
                           </div>
-                          {detail && <p className="mt-0.5 text-sm text-muted-foreground line-clamp-2">{detail}</p>}
+                          {detail && (
+                            <p
+                              className={`mt-0.5 text-sm text-muted-foreground ${
+                                isMessage ? "whitespace-pre-wrap break-words" : "line-clamp-2"
+                              }`}
+                            >
+                              {detail}
+                            </p>
+                          )}
                           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                             <span>{timeAgo(ev.createdAt)}</span>
                             {ev.actorType && (
