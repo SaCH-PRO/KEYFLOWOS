@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "977a265cca37926a6d11f3c2f3afae8287aeb5a4",
-  "main_commit_date": "2026-11-25T18:01:10+00:00",
+  "main_sha": "b330adfc3d537b6fb34ce662c16c82ed65e22228",
+  "main_commit_date": "2026-11-25T20:09:13+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 568.5,
   "by_status": {
    "done": {
-    "packets": 170,
-    "points": 252.5,
-    "pct_by_points": 44.4
+    "packets": 172,
+    "points": 258.5,
+    "pct_by_points": 45.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 225,
-    "points": 316,
-    "pct_by_points": 55.6
+    "packets": 223,
+    "points": 310,
+    "pct_by_points": 54.5
    }
   },
   "by_step": {
@@ -72,9 +72,9 @@
     "total": 149
    },
    "4": {
-    "done": 23,
+    "done": 24,
     "in-progress": 0,
-    "todo": 30,
+    "todo": 29,
     "total": 53
    },
    "5": {
@@ -84,9 +84,9 @@
     "total": 91
    },
    "6": {
-    "done": 13,
+    "done": 14,
     "in-progress": 0,
-    "todo": 27,
+    "todo": 26,
     "total": 40
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 82,
+    "done": 84,
     "in-progress": 0,
-    "todo": 172,
+    "todo": 170,
     "total": 254
    },
    "follow-on": {
@@ -123,9 +123,9 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 107,
+   "prior-status-file": 105,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 60,
+   "code-commit-subject": 62,
    "compacted-commit": 63,
    "no-evidence": 137
   },
@@ -144,6 +144,7 @@
    "W11-GENOME-RECS-DOMAIN",
    "W11-PROPOSAL-RESULT-READER-SCOPE",
    "W11-GENOME-RUNWAY",
+   "SWP-CENSUS-GENOME",
    "W11-RUNWAY-BURN-CURRENCY",
    "TOF-PAYROLL-DISCARD",
    "SWP-FIN-OVERVIEW-TRUTH",
@@ -157,6 +158,7 @@
    "W11-STOREFRONT-FULFIL-STEPS",
    "W11-PLANTED-STOCK-CENSUS",
    "SWP-INV-SKU-COUNT",
+   "QUICK-SALE-SERVER",
    "SWP-CENSUS-OPEN-WRITES",
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
@@ -302,16 +304,6 @@
    "unblocks": 18
   },
   {
-   "id": "QUICK-SALE-SERVER",
-   "step": 6,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 15
-  },
-  {
    "id": "EXPENSES-HUB-1",
    "step": 4,
    "priority": "P1",
@@ -327,16 +319,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
-   "id": "SWP-CENSUS-GENOME",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
@@ -380,6 +362,26 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
+  },
+  {
+   "id": "SWP-CENSUS-V1-A",
+   "step": 6,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
+   "id": "SWP-CENSUS-MARKETPLACE",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
   },
   {
    "id": "RR-OWNER-RULINGS-RECORD",
@@ -1574,16 +1576,6 @@
    "unblocks": 18
   },
   {
-   "id": "QUICK-SALE-SERVER",
-   "step": 6,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 15
-  },
-  {
    "id": "EXPENSES-HUB-1",
    "step": 4,
    "priority": "P1",
@@ -1599,16 +1591,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
-   "id": "SWP-CENSUS-GENOME",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
@@ -1652,6 +1634,26 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
+  },
+  {
+   "id": "SWP-CENSUS-V1-A",
+   "step": 6,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
+   "id": "SWP-CENSUS-MARKETPLACE",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7
   },
   {
    "id": "RR-OWNER-RULINGS-RECORD",
@@ -4155,13 +4157,15 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "d724328a"
+   ],
    "depends_on": [],
    "title": "REST scope census, KEY batch C: genome, genesis, blueprint, keyflow command, momentum, growth intelligence (70 open rows, 9 controllers)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWEEP-RERUN-S4",
@@ -4945,16 +4949,18 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "da3b6c0f"
+   ],
    "depends_on": [
     "SWP-INV-SKU-COUNT",
     "SWP-STORE-OVERSELL"
    ],
    "title": "Quick counter sale on the store-order path: owner-created, paid in cash or bank transfer, optional customer, stock and COGS post",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-MARKETPLACE",
@@ -4972,7 +4978,7 @@
     "W11-INV-SET-MOVEMENT"
    ],
    "title": "REST scope census, Marketplace batch: operator order create, post-purchase jobs, promote to content (3 open rows, 1 controllers)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "QUICK-SALE-WEB",
@@ -5176,7 +5182,7 @@
     "CATALOG-1"
    ],
    "title": "REST scope census, v1 hubs batch A: bookings, calendar, catalog, document templates, commerce insights, lead forms (47 open rows, 6 controllers)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-CENSUS-V1-B",

@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~18:20 UTC by the acting orchestrator (second-lane account, Claude Code), after M16 (PR #248)
-merged as `977a265c`. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~20:20 UTC by the acting orchestrator (second-lane account, Claude Code), while M18 opens its
+PR; main `0d75cd02`. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -77,88 +77,136 @@ referred to on the board but is not yet a row.
   session, GraphQL is refused: enqueue with `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f
   merge_method=merge` (M16 went in this way).
 
-## 0. Next session starts here (2026-11-25 ~18:20 UTC)
+## 0. Next session starts here (2026-11-25 ~20:15 UTC)
 
-Main is `977a265c`. Merges today, in order:
-- M15 (Antigravity, `9011550b`)
-- M17 (`8866740b`)
-- M19 (`9ea7c223`)
-- M21 (`aaaec51a`): CLAIM-LOOP server, SWP-INV-SKU-COUNT, CATALOG-1 server, TODAY-AGGREGATE
-- **M16** (Claude, PR #248, head `8dd17b18`): P41 FU-CONTACT-TIMELINE-CHANNELS, P61 FU-REQUIRE-AUTH-REMOUNT, P55
-  WEDGE-WA-INBOUND-CAPTURE web half, docs.
+Main is `0d75cd02` (M23 merged ~20:10: P82, P83, P84). V1-STATUS: 172 of 395 done, 45.5% of points; launch 84 done of 254.
 
-V1-STATUS at `977a265c`: 170 of 395 packets done (44.4% of points).
+**The owner's standing instruction (2026-11-25):**
+- Keep both lanes as full as possible.
+- Coordinate with Antigravity on #80.
+- Keep everything resumable by any account or AI at all times.
 
-**M18 (next Claude wave): returned, assemble now**, compacting each with `scripts/agent-memory/compact.sh` on main:
+The throughput plan is on #80 7172896636. Server lane (Antigravity), in order:
+1. TOF-KEY-SELF-MODEL, which starts the chain TOF-KEY-SELF-MODEL → TOF-KNOWLEDGE-UPLOAD → KEY-TOOL-ALLOWLIST → DECIMALS-SERVER → CLAIM-LOOP web.
+2. DEMO-PREVIEW.
+3. FU-REFUND-GATEWAY-REFUSE (S-1): **held for the owner** (question 51). Antigravity found that Release 0 RF-10/RF-12 and D-121 use this door on purpose (#80 7172026342).
+4. The server halves of EXPENSES-HUB-1 and VAT-BASICS.
+5. The census and RR packets.
+6. FU-TEST-FLAKES.
 
-| Packet | Branch head | Files |
-| --- | --- | --- |
-| P62 FU-PUSH-OPTIN-MY-ACCOUNT | `53737d90` | 11 |
-| FU-SIDESHEET-MOBILE-OFFSET | `98a12002` | 3 |
-| FU-STUDIO-PAGE-SCOPE | `de2772b6` | 4 |
-| SWP-FIN-CASH-SOURCES web | `45418379` | 6 |
-| SWP-SERVICE-DEPOSIT web | `3c9554bc` | 11 |
-| SWP-FIN-OVERVIEW-TRUTH web | `c93bc4f2` | 4 |
+**M18 (Claude): proof green, PR opening.** Branch `wave/v1-wave-m18`, rebuilt at `19264b26` on main `977a265c`, then main `0d75cd02` (M23) merged in. M23 is server, scripts and docs only, with no web overlap. Packets:
 
-Notes before compacting:
-- Merge main into each pkt branch first, keeping main's copies of the files main now owns.
-- Watch the 50-file gate: about 39 files plus about 6 for docs.
-- `lib/client.ts` is changed by both deposit and cash: check the 3-way merge.
+| Packet | Head |
+| --- | --- |
+| P62 FU-PUSH-OPTIN-MY-ACCOUNT | `53737d90` |
+| FU-SIDESHEET-MOBILE-OFFSET | `98a12002` |
+| FU-STUDIO-PAGE-SCOPE | **`79835e6b`** |
+| SWP-FIN-CASH-SOURCES web | `45418379` |
+| SWP-FIN-OVERVIEW-TRUTH web | `c93bc4f2` |
+| SWP-SERVICE-DEPOSIT web | `3c9554bc` |
 
-**Building:**
-- SWP-INV-REFUND-UI: critical path #1, unblocks 39. `wt-refund`, ports 3101/5300, claim `422286e5`.
-- CATALOG-1 web half: P0, L. `wt-catalog`, ports 3201/5400, claim `67741f84`.
+Plus docs.
+- The first head, `ecca24c5`, found one cross-packet test clash. P62's My account description now says "push notifications", and the /studio tests' name matcher counted that link as a settings entry.
+- It was fixed by two tests-only commits on the studio branch: 85a19ce8 (unit) and 79835e6b (e2e). Both lenses CONFIRMED both commits.
+- Rebuilt at `19264b26` (diff from `ecca24c5`: the two studio test files only). Proof there: web tsc 0, vitest 2361/2361, lint 0 errors, mocked build 0, CI e2e 25/25, mocked sweeps 37/37.
+- Proof at `ecca24c5`:
+  - server: tsc 0, build 0, 15,872 passed;
+  - 1 flake, WAH-R8 in `whatsapp.connector.spec`, which passes alone (59/59 twice);
+  - R0 MET; web tsc 0; lint 0 errors;
+  - CI e2e 25/25; live release0 2/2; live cash and deposit sweeps 8/8.
+- Journeys B, F and H: 51 of 56 failed at the M18 head. These look like tracked gaps: B2 has no New service dialog, Sales > Products is missing (CATALOG-1 web), and catalog items are missing from the invoice and quote pickers.
+- **A base run of B, F and H on main `977a265c`** (scratchpad `wt-m18base`, logs `m18base-*`) proves pre-existing failures step by step.
+- **Then:** the PR (look up `head=KEYFLOWOS:wave/v1-wave-m18` in the pulls API), two wave confirmations at the exact head, CI green, enqueue via ccr/auto_merge, subscribe to the PR.
 
-**Queue after that:**
-- P67 FU-TIMELINE-LOAD-OLDER (P41 and P66 are now on main).
-- OWNER-ALERTS-WEB: same files as P62, so after M18.
-- CLAIM-LOOP web half, once DECIMALS-SERVER (server lane) is done.
-- TODAY-4BLOCK, after OWNER-ALERTS-WEB, DEMO-PREVIEW (server lane) and SWP-KEY-SHELL-SMOKE.
-- The rest of the D-283 six: FU-NOTIFICATIONS-PAGE-REFUSED, FU-UNDO-TOAST-SIGNOUT and FU-CONTACT-SEND-QUOTE-DOOR are now
-  free, plus FU-E2E-MOCKED-SESSION-TOKEN.
+**Other packets in flight:**
+- **SWP-INV-REFUND-UI**, critical path #1, unblocks 39.
+  - Branch `pkt/V1-SWP-INV-REFUND-UI` @ `58423afe`; E10 passes at head.
+  - Both lenses ACCEPTED with minors. Repair round 1 is in progress:
+    - an allowlist of manual providers;
+    - re-read the amount before confirming;
+    - sub-cent parity;
+    - wording;
+    - pins for paypal, wipay and the unlinked refund;
+    - the /app/payments search re-read.
+  - Then two confirmations, then RETURN.
+- **CATALOG-1 web half**, P0, L. Branch `pkt/V1-CATALOG-1-WEB`, claim `67741f84`. Building. The worker may propose a split.
 
-**Follow-ups found by today's reviews (not yet in the plan):**
-- Close menus and sheets on a pathname change (now that the shell mounts once).
-- Fix the stale comments P61 left in new-from-whatsapp.tsx, commerce/page.tsx and timeline-channels.ts.
-- record-detail-drawer and booking-side-sheet have the same mount offset.
-- The shared SideSheet has no focus trap.
-- Other Bookings tabs show TTD.
-- The contactId door may lose its prefill on a replaceState remount.
-- The email compose preview uses `dangerouslySetInnerHTML`: check whether KEY drafts can carry pasted text into it.
+**Queue after those:**
+- **In cloud sessions (claimed 19:55 UTC on main `977a265c`, #80 7172995787):**
+  - P67 FU-TIMELINE-LOAD-OLDER: claim `ecf7a0e1`, session_01TnVBvEKF6S66iYNwT5nAqe.
+  - FU-CONTACT-SEND-QUOTE-DOOR: claim `c067bf97`, session_01TnVBvEZbY4vXtvn1Rwe3fk.
+  - FU-UNDO-TOAST-SIGNOUT: claim `0022c0bf`, session_01TnVBvDxNUYEcwZ9waPUH4z.
+  - FU-E2E-MOCKED-SESSION-TOKEN: claim `7afe87e0`, session_01TnVBvHC6oFPFsYMTGeubVV (claimed 20:00).
+  - P94 SWP-CRM-WEB-POLISH: claim `68aafd49`, session_01TnVBvErbVSNdzvspLGA6vB (claimed 20:00).
+  - Each worker posts "PACKET REPORT (pre-review)" on #80. Then the orchestrator runs two reviews and posts RETURN.
+  - If a session is gone, resume from its pkt branch: every commit is pushed.
+- **Owner-gated:** RR-OWNER-RULINGS-RECORD (docs; it records the owner's answers to OQ-5/13/19/30 and two RR migrations, so ask in the owner batch).
+- **After M18:** OWNER-ALERTS-WEB and FU-NOTIFICATIONS-PAGE-REFUSED.
+- **After the server lane:** SWP-KEY-SHELL-SMOKE web (after P89), EXPENSES-HUB-1 web, CLAIM-LOOP web (after DECIMALS-SERVER), TODAY-4BLOCK.
 
-**Server follow-ups handed to Antigravity on #80:**
-- `invoice-status-events` A9-R2 flake (ECONNRESET on supertest keep-alive; FU-TEST-FLAKES).
-- A cash forecast failure signal (`available:false`, not zeros).
-- A stable `PUSH_DEVICE_OTHER_MEMBER` code.
-- Deposits with fractions of a cent stored on the server.
-- Runs list `isPosted` and `hasForeignItems`.
-- The customer-referral privacy leak (hold until the owner rules).
-
-**An hourly scheduled check of #80 runs in the orchestrator session.**
+**Resume recipe for the Claude lane (any account or AI):**
+1. **Read the live state.**
+   - #80 since this file's time.
+   - The board (`git show origin/coord/board:BOARD.md`).
+   - `git ls-remote origin 'refs/heads/pkt/V1-*' 'refs/heads/wave/*'`.
+   - Every branch named above is pushed after every commit. Worktrees and logs in a scratchpad do not survive, and are not needed.
+2. **Finish a packet:** read its RETURN on #80. If it has not returned yet, check out the pkt branch and follow PACKET-WORKER-BRIEF.md. Reviews follow ACCEPTANCE-REVIEW-BRIEF.md and CONFIRMATION-REVIEW-BRIEF.md.
+3. **Assemble a wave:**
+   1. Create `git worktree add -b wave/v1-wave-<N> <dir> origin/main`.
+   2. Copy the main checkout's `.env` in (three local DB/Redis URLs; no secrets).
+   3. For each packet: `COMMIT_TRAILER=... scripts/agent-memory/compact.sh pkt/V1-<branch> <PACKET-ID> web`.
+   4. Run `git merge --squash origin/wave/v1-docs-p19` and commit it as `docs: wave/v1-docs-p19 (compacted) at <sha>`.
+   5. Verify every packet file equals its pkt tip, or a clean 3-way merge you inspect.
+   6. Run `scripts/check-branch-divergence.sh origin/main HEAD --max-commits 25 --max-files 50`.
+4. **Wave proof:**
+   - Server:
+     - `pnpm install --frozen-lockfile`
+     - prisma generate
+     - build the packages
+     - server `tsc --noEmit`
+     - `NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter server build`
+     - `vitest run` (with `.env`)
+     - `pnpm proof:release0 -- --skip-build`
+   - Web: `next typegen` + `tsc --noEmit`, `vitest run --minWorkers=1 --maxWorkers=2`, `pnpm lint --max-warnings 26`.
+   - Mocked build (`NEXT_PUBLIC_API_BASE_URL=http://api.test.local`), then the 3 CI e2e specs and any mocked sweeps.
+   - Live per LIVE-PROOF-RUNBOOK §3, with the API on 3001 and keyflowos_e2e: release0-live, the touched journeys and sweeps. Always run a base run on main for comparison.
+5. **PR and merge:**
+   - Open the PR with `gh api -X POST repos/KEYFLOWOS/KEYFLOWOS/pulls`, mirroring the M16 PR #248 body.
+   - Get two wave confirmations.
+   - When every required check is green at the exact head and the PR is mergeable/clean, ENQUEUE with `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f merge_method=merge`. GraphQL is refused from cloud sessions.
+   - A failed job gets one re-run, after its run completes.
+6. **After a merge or return:**
+   - `node scripts/agent-memory/status.mjs`
+   - rewrite this file in place
+   - update the board
+   - post on #80
+7. **Recreate session-only things:**
+   - The hourly #80 check, a scheduled task in the orchestrator session.
+   - The PR subscriptions.
+   - After a container restart, run `service postgresql start` (and redis if needed).
 
 **Lessons this session:**
-- A container restart kills agents: read their transcripts' last report and use fresh reviewers. Postgres needs
-  `service postgresql start` after a restart.
-- A new wave worktree needs the local `.env` copied from the main checkout before the server suite runs. Without
-  it, SUITE and R0 fail in seconds.
-- The server build needs `NODE_OPTIONS=--max-old-space-size=8192` here (4096 aborts with 134).
-- The web suite under load: `--minWorkers=1 --maxWorkers=2`.
-- Main moving while a wave PR waits fails "Check divergence vs main": merge main in. A push cancels the old head's
-  CI, whose verdict then fails closed; that is expected.
-- One re-run per failed job, and only after the run completes.
+- Two packets confirmed alone can still clash in a wave (P62 + studio). The wave proof is the safety net, so never skip it.
+- A test that matches on link text is fragile; match on href or exact names.
+- A container restart kills agents: read their transcripts' last report and use fresh reviewers.
+- The server build needs an 8 GB heap.
+- Use 2 vitest workers under load.
+- A new wave worktree needs `.env` copied in.
+- When main moves while a wave PR waits, merge main in. A push cancels the old CI run, whose verdict then fails closed.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `977a265c`. Production runs `f5d58ef7` (16 Nov), far behind; the owner redeploys (D-266).
+Main is at `0d75cd02`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **M18 candidates (Claude)** | the six pkt branches in section 0 | All returned, both lenses CONFIRMED | Assemble M18 |
-| **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 422286e5 (claim) | Building | Reviews |
-| **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Reviews |
-| **Antigravity** | P82 FU-KEY-GENOME-READS-RESIDUAL, P83 QUICK-SALE-SERVER (#80) | Building | Their next wave |
-| **Owner** | - | - | Section 4 batch (40-48 plus payroll D-100); production redeploy (D-266) |
-| `wave/v1-docs-p19` | main 977a265c merged in | This file, V1-STATUS | Squashed into M18 |
+| **M18 (Claude)** | `wave/v1-wave-m18` (rebuild from the six pkt heads in section 0) | Proof green at `19264b26`, main `0d75cd02` merged in; base run of journeys B/F/H on main in progress | PR, wave confirmations, enqueue |
+| **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 58423afe (+ repair) | Repair round 1 | Two confirmations, RETURN |
+| **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Two reviews |
+| **Claude cloud sessions** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` (ecf7a0e1), `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` (c067bf97), `pkt/V1-FU-UNDO-TOAST-SIGNOUT` (0022c0bf), `pkt/V1-FU-E2E-MOCKED-SESSION-TOKEN` (7afe87e0), `pkt/V1-SWP-CRM-WEB-POLISH` (68aafd49) | Building (#80 7172995787) | Wait for each PACKET REPORT, then two reviews, RETURN, next Claude wave |
+| **Antigravity** | M23 (P82-P84) in the merge queue; M25 gathering P87, P88, P89, P91, P92; P90 blocked (question 52) | Building | Their next wave |
+| **Owner** | - | - | Section 4 questions 40-52 (51 = refund door S-1, 52 = P90 Release 0 contradiction, P0); production redeploy (D-266) |
+| `wave/v1-docs-p19` | main 0d75cd02 merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -286,6 +334,22 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 
 49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
+
+51. **Bookkeeping refunds on gateway payments (S-1, server, money).** `POST /commerce/businesses/:b/payments/:p/refund` (markPaymentRefunded) checks no provider. A member with revenue write can mark a Stripe payment refunded: the invoice reopens and the posting reverses while Stripe keeps the money. `StoreOrderService.refundCheckoutPayments` does the same for storefront orders. But Release 0 RF-10/RF-12 and D-121 use this door on purpose, for out-of-band provider refunds (WiPay has no refund API; PayPal pairs the webhook). Options:
+    - (a) refuse gateway rows with 409, keeping an explicit "refunded outside KEYFLOWOS" mode for providers without a refund API, and supersede RF-10/RF-12;
+    - (b) keep as is.
+
+    Also: should storefront refunds of gateway orders go through the gateway refund? (Default: hold, as today; #80 7171899154, 7172026342.)
+52. **P90 SWP-CENSUS-V1-B (P0) Release 0 contradiction.** 10 of the 46 open write rows are pinned by Release 0 cases in which a STAFF member on role defaults writes them:
+    - presence saveDraft and publish: D11-S02/S04/S05/S09/S13/S14/S15;
+    - onboarding concierge chat, dismiss, snooze and resume: D11-C07/C09;
+    - connector test, smoke, sync and inbox-config: R0-CMF6-K04/K05/M02, V94D-F02.
+
+    Options:
+    - **Option A:** gate all 46 and supersede those cases (the test actors get the scope, or expect 403).
+    - **Option B:** mark the 10 exempt-ruled in the census and gate the other 36.
+
+    (No default for Release 0 evidence: Antigravity holds P90 until you rule; #80 7172637493.)
 
 ## 5. How to work here (learned the hard way)
 
