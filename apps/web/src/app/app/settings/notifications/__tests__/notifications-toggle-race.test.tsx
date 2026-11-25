@@ -13,6 +13,10 @@
  *   NPR-08e RED-BEFORE  the PATCH's write landed (a reload reads it) but its answer is lost (500), and the re-read fails:
  *                       a load has happened since the click, so nothing is reverted; the switch shows the reload's value
  *   NPR-08f RED-BEFORE  (re-read count only) no load since the click, the PATCH is refused and the re-read fails: the switch is put back
+ *   NPR-08g RED-BEFORE  (mutant R4) Booking Confirmation's PATCH waits; Payment Receipt's succeeds and its answer (the
+ *                       server's preferences, Booking Confirmation still on) is put on the page; then Booking
+ *                       Confirmation's PATCH is refused and the re-read fails: it is put back to its pre-click value (on),
+ *                       not flipped from what the page now holds
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
  *                       no switch, no log row, no "(n)" count
  *   NPR-09b guard       the same with the switches showing and the log failed: after the refused Retry, no switch, no
@@ -67,19 +71,22 @@ function queue(...answers: Array<() => Response>): () => Response {
 
 interface Server {
   prefsGets: () => number;
-  /** Decides the PATCH that is waiting. */
-  answerPatch: (res: Response) => void;
+  /** Decides a waiting PATCH: the one whose body sets `key`, or the oldest. */
+  answerPatch: (res: Response, key?: string) => void;
 }
 
 function serve(prefs: () => Response, log: () => Response): Server {
   let gets = 0;
-  let pending: ((res: Response) => void) | null = null;
+  const pending: Array<{ keys: string[]; resolve: (res: Response) => void }> = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(url, "http://web.origin.invalid");
     const method = (init?.method ?? "GET").toUpperCase();
     if (pathname.endsWith(`/notifications/businesses/${BIZ}/customer-preferences`)) {
-      if (method === "PATCH") return new Promise<Response>((resolve) => { pending = resolve; });
+      if (method === "PATCH") {
+        const keys = Object.keys(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return new Promise<Response>((resolve) => { pending.push({ keys, resolve }); });
+      }
       gets += 1;
       return prefs();
     }
@@ -88,10 +95,11 @@ function serve(prefs: () => Response, log: () => Response): Server {
   }));
   return {
     prefsGets: () => gets,
-    answerPatch: (res) => {
-      if (!pending) throw new Error("no PATCH is waiting");
-      pending(res);
-      pending = null;
+    answerPatch: (res, key) => {
+      const at = key === undefined ? 0 : pending.findIndex((p) => p.keys.includes(key));
+      if (at < 0 || !pending[at]) throw new Error(`no PATCH is waiting${key ? ` for ${key}` : ""}`);
+      const [next] = pending.splice(at, 1);
+      next.resolve(res);
     },
   };
 }
@@ -201,6 +209,29 @@ describe("D-283 repair round 1: a toggle's answer comes from the server", () => 
     expect(server.prefsGets()).toBe(2);
     expect(checked(BOOKING)).toBe("true");
     expect(checked(RECEIPT)).toBe("false");
+  });
+});
+
+describe("D-283 repair round 1: two toggles", () => {
+  it("NPR-08g RED-BEFORE: a refused toggle is put back to its pre-click value after another toggle's answer", async () => {
+    const server = serve(queue(() => json(200, PREFS), fail500), () => json(200, LOG));
+    await renderPage();
+    await clickBookingOff();
+    fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
+    expect(checked(RECEIPT)).toBe("true");
+
+    // Payment Receipt's PATCH goes through: the server's preferences, with Booking Confirmation still on.
+    server.answerPatch(json(200, { ...PREFS, payment_receipt: true }), "payment_receipt");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
+    expect(checked(BOOKING)).toBe("true");
+    expect(checked(RECEIPT)).toBe("true");
+
+    // Booking Confirmation's PATCH is refused, and the re-read fails; no load has run since the click.
+    server.answerPatch(json(400, { statusCode: 400, message: "Bad request" }), "booking_confirmed");
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(server.prefsGets()).toBe(2);
+    expect(checked(BOOKING)).toBe("true");
+    expect(checked(RECEIPT)).toBe("true");
   });
 });
 
