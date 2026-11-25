@@ -13,6 +13,7 @@ import {
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { GmailConnector } from '../../core/connectors/implementations/gmail.connector';
 import { decryptToken, encryptToken } from '../../core/crypto/token-crypto';
 import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
@@ -305,19 +306,7 @@ export class GmailService {
   private async connectStanding(businessId: string, actor: GmailConnectActor | undefined): Promise<ConnectStanding> {
     if (!actor?.id) throw new UnauthorizedException('Authentication required');
     if (actor.role === 'SUPER_ADMIN') return 'SUPER_ADMIN';
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return 'OWNER';
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
-      // ADMIN or STAFF, the recorded owner is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    if (owned) return 'OWNER';
+    if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
     throw new ForbiddenException({ code: GMAIL_OWNER_ONLY, message: GMAIL_OWNER_ONLY_MESSAGE });
   }
 

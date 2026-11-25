@@ -1,4 +1,5 @@
-import { IsArray, IsNumber, IsObject, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class ProposedActionDto {
   @IsString()
@@ -64,11 +65,11 @@ export class ListIngestionItemsQuery {
   @IsOptional()
   intentType?: string;
 
-  @IsString()
+  @IsIn(['createdAt', 'updatedAt', 'confidence'])
   @IsOptional()
   sortBy?: 'createdAt' | 'updatedAt' | 'confidence' = 'createdAt';
 
-  @IsString()
+  @IsIn(['asc', 'desc'])
   @IsOptional()
   sortOrder?: 'asc' | 'desc' = 'desc';
 
@@ -76,7 +77,8 @@ export class ListIngestionItemsQuery {
   @IsOptional()
   cursor?: string;
 
-  @IsNumber()
+  @Type(() => Number)
+  @IsInt()
   @Min(1)
   @Max(100)
   @IsOptional()

@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsString,
   IsOptional,
@@ -25,11 +26,13 @@ export class ListAssetsQueryDto {
   @IsOptional()
   search?: string;
 
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @IsOptional()
   limit?: number;
 
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   @IsOptional()

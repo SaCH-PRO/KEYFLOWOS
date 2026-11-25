@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
@@ -10,6 +10,8 @@ import {
 } from '../../core/authority/module-vocabulary';
 import { visibilityClause } from '../crm/crm-permissions.helper';
 import { activityPrefilter, readVisibleActivityPage, type TimelineViewer } from '../timeline/timeline-visibility';
+import { CashPositionService, otherCurrencyCash } from '../finance/cash-position.service';
+import { namedCashCurrency, notCountedCash } from '../finance/finance-overview.service';
 import { AiUsageService } from './ai-usage.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -43,13 +45,20 @@ interface AdvisorReads {
 @Injectable()
 export class AiAdvisorService {
   private readonly logger = new Logger(AiAdvisorService.name);
+  private readonly cashPosition: CashPositionService;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(forwardRef(() => StrategicIntelligenceService)) private readonly strategic: StrategicIntelligenceService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
-  ) {}
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition =
+      cashPosition && typeof cashPosition.getCashPosition === 'function'
+        ? cashPosition
+        : new CashPositionService(prisma);
+  }
 
   async getBusinessContext(businessId: string) {
     const now = new Date();
@@ -631,43 +640,75 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
         currentBalance: 0, projectedBalance: 0, daysUntilNegative: null,
         trend: 'stable', alerts: ['Cash flow data unavailable — service initializing.'],
         dailyRevenueRate: 0, dailyExpenseRate: 0, projectionDays: days,
+        cashBasis: 'ledger' as const,
+        otherCurrencyCash: [],
       };
     }
     try {
     const now = new Date();
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-    const [paidInvoices, expenses] = await Promise.all([
+    // SWP-FIN-CASH-SOURCES (D-135, SEC-W10LR-1): opening balance comes from
+    // CashPositionService (booked ledger cash up to `now` in the business
+    // currency, including partial payments and unposted openings), never from
+    // `PAID invoices - expenses`. Other currencies stay unconverted and
+    // non-code labels are counted, never echoed.
+    const [position, paidInvoices, expenses, outstandingInvoices] = await Promise.all([
+      this.cashPosition.getCashPosition(businessId, now),
       this.prisma.client.invoice.findMany({
         where: {
           businessId,
           deletedAt: null,
           status: 'PAID',
-          paidAt: { gte: ninetyDaysAgo },
+          paidAt: { gte: ninetyDaysAgo, lte: now },
         },
-        select: { total: true, paidAt: true },
-        orderBy: { paidAt: 'asc' },
+        select: { total: true, currency: true, paidAt: true },
+        orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
       }),
       this.prisma.client.expense.findMany({
         where: {
           businessId,
           deletedAt: null,
-          date: { gte: ninetyDaysAgo },
+          status: { not: 'VOID' },
+          date: { gte: ninetyDaysAgo, lte: now },
         },
-        select: { amount: true, date: true },
-        orderBy: { date: 'asc' },
+        select: { amount: true, currency: true, date: true },
+        orderBy: [{ date: 'asc' }, { id: 'asc' }],
+      }),
+      this.prisma.client.invoice.aggregate({
+        where: {
+          businessId,
+          deletedAt: null,
+          status: { in: ['SENT', 'DRAFT'] },
+        },
+        _sum: { total: true },
+        _count: true,
       }),
     ]);
 
-    const totalRevenue90d = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
-    const totalExpenses90d = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+    const bizCurrency = position.currency;
+    const isBizCurrency = (c: string | null | undefined) => {
+      const normalized = (c ?? '').trim().toUpperCase();
+      return !normalized || normalized === bizCurrency;
+    };
+
+    const totalRevenue90d = paidInvoices
+      .filter((inv) => isBizCurrency(inv.currency))
+      .reduce((sum, inv) => sum + inv.total, 0);
+    const totalExpenses90d = expenses
+      .filter((exp) => isBizCurrency(exp.currency))
+      .reduce((sum, exp) => sum + exp.amount, 0);
 
     const dailyRevenueRate = totalRevenue90d / 90;
     const dailyExpenseRate = totalExpenses90d / 90;
     const dailyNetRate = dailyRevenueRate - dailyExpenseRate;
 
-    const currentBalance = totalRevenue90d - totalExpenses90d;
+    const currentBalance = position.cashBalance;
     const projectedBalance = currentBalance + dailyNetRate * days;
+    const cashCurrency = namedCashCurrency(bizCurrency);
+    const { listed: listedOtherCash, notListed: otherCurrencyCashNotListed } = notCountedCash(
+      otherCurrencyCash(position),
+    );
 
     let daysUntilNegative: number | null = null;
     if (dailyNetRate < 0 && currentBalance > 0) {
@@ -685,18 +726,9 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
       alerts.push('Expenses are consuming more than 90% of revenue.');
     }
 
-    const outstandingInvoices = await this.prisma.client.invoice.aggregate({
-      where: {
-        businessId,
-        deletedAt: null,
-        status: { in: ['SENT', 'DRAFT'] },
-      },
-      _sum: { total: true },
-      _count: true,
-    });
-
     if ((outstandingInvoices._count ?? 0) > 5) {
-      alerts.push(`${outstandingInvoices._count} outstanding invoices totaling $${(outstandingInvoices._sum.total ?? 0).toLocaleString()} TTD.`);
+      const unit = cashCurrency ? ` ${cashCurrency}` : '';
+      alerts.push(`${outstandingInvoices._count} outstanding invoices totaling $${(outstandingInvoices._sum.total ?? 0).toLocaleString()}${unit}.`);
     }
 
     return {
@@ -708,6 +740,10 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
       dailyRevenueRate: Math.round(dailyRevenueRate * 100) / 100,
       dailyExpenseRate: Math.round(dailyExpenseRate * 100) / 100,
       projectionDays: days,
+      cashBasis: position.basis,
+      ...(cashCurrency ? { currency: cashCurrency } : {}),
+      otherCurrencyCash: listedOtherCash,
+      ...(otherCurrencyCashNotListed > 0 ? { otherCurrencyCashNotListed } : {}),
     };
     } catch (e) {
       this.logger.error(`predictCashFlow failed: ${(e as Error).message}`);
@@ -715,6 +751,8 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
         currentBalance: 0, projectedBalance: 0, daysUntilNegative: null,
         trend: 'stable', alerts: ['Unable to compute cash flow forecast at this time.'],
         dailyRevenueRate: 0, dailyExpenseRate: 0, projectionDays: days,
+        cashBasis: 'ledger' as const,
+        otherCurrencyCash: [],
       };
     }
   }
