@@ -3,7 +3,6 @@
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { CalendarPlus, CheckCircle2, FileText, UserRound } from "lucide-react";
 import { SideSheet } from "@/components/ui/side-sheet";
 import { apiPost } from "@/lib/api";
@@ -61,6 +60,19 @@ export function mayCaptureFromWhatsApp(levels: ModuleLevels): boolean {
   return !levels || writes(levels.crm);
 }
 
+/**
+ * How New quote and New booking leave the sheet: a full page load, not router.push. RequireAuth
+ * (components/require-auth.tsx) verifies again on every pathname change and shows its spinner in place of the whole
+ * app shell, so a client navigation mounts the destination page twice: the first instance reads and strips the
+ * one-shot ?contactId, and the second, mounted after the shell comes back, opens no form. A direct load mounts the
+ * page once, after the check. An object so the unit tests can watch it.
+ */
+export const newFromWhatsAppNavigation = {
+  assign(href: string): void {
+    window.location.assign(href);
+  },
+};
+
 /** The customer's name, else their number. */
 function customerName(capture: WhatsAppCapture): string {
   const c = capture.contact;
@@ -78,7 +90,6 @@ export interface NewFromWhatsAppSheetProps {
 }
 
 export function NewFromWhatsAppSheet({ open, onClose, levels = null, sells = null }: NewFromWhatsAppSheetProps) {
-  const router = useRouter();
   const { refused, message: refusal, clear } = useRefusal();
   const [phone, setPhone] = useState("");
   const [text, setText] = useState("");
@@ -128,9 +139,9 @@ export function NewFromWhatsAppSheet({ open, onClose, levels = null, sells = nul
   const go = useCallback(
     (href: string) => {
       onClose();
-      router.push(href);
+      newFromWhatsAppNavigation.assign(href);
     },
-    [onClose, router],
+    [onClose],
   );
 
   // Mounted only in the browser (the New menu renders after a click); the guard keeps a server render safe.
