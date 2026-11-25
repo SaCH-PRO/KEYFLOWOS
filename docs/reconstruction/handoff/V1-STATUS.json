@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "075c5297bffaf048b6d3911bc0d8cfacf5fccb2d",
-  "main_commit_date": "2026-11-25T00:01:14+00:00",
+  "main_sha": "ba1149b8f8510693825eaa215157682ceca51f97",
+  "main_commit_date": "2026-11-25T00:03:03+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
