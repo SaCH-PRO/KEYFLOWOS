@@ -27,6 +27,12 @@
  *   TCH-12  pin      a copied message and a campaign read their data.channel, else WhatsApp and email (mutation pin)
  *   TCH-13  pin      only a pasted message's own note (source whatsapp_inbound) folds into it (mutation pin)
  *
+ * Review round 1 (correctness review of 63af799e):
+ *   TCH-14  RED      COR-TCH-1: the events read serves at most 20 (listContactEvents' default; the page sends no
+ *                    limit). A full read says so ("Showing the latest 20 events"), and its counts, header and empty
+ *                    texts speak of the latest 20, never of the whole history ("No calls yet.")
+ *   TCH-15  control  COR-TCH-1: a read of 19 is the whole history: today's wording, no "latest" line, plain counts
+ *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -123,9 +129,9 @@ async function renderTimeline() {
 function choose(label: string) {
   fireEvent.click(filterButton(label));
 }
-/** The count a filter button states, as "(n)". */
+/** The count a filter button states, as "(n)" (or "(n+)" when the read came back full: COR-TCH-1). */
 function countOf(label: string): number {
-  const m = filterButton(label).textContent?.match(/\((\d+)\)/);
+  const m = filterButton(label).textContent?.match(/\((\d+)\+?\)/);
   if (!m) throw new Error(`filter ${label} states no count: "${filterButton(label).textContent}"`);
   return Number(m[1]);
 }
@@ -322,5 +328,37 @@ describe("D-277: the Timeline has a channel filter", () => {
     expect(countOf("All")).toBe(2);
     expect(countOf("Notes")).toBe(1);
     expect(countOf("WhatsApp")).toBe(1);
+  });
+
+  it("TCH-14 RED: a full read (20 events) says it shows the latest 20, and its counts and empty texts say so too", async () => {
+    // Ten pasted messages, as captureInboundWhatsApp writes them: twenty events, ten items. An older call is not read.
+    served = Array.from({ length: 10 }, (_, i) => [
+      { ...PASTED[0], id: `ev_wa_note_${i}`, createdAt: at(2 * i), data: { noteId: `n_wa_${i}` } },
+      { ...PASTED[1], id: `ev_wa_${i}`, createdAt: at(2 * i + 1), data: { ...PASTED[1].data, body: `Message ${i}`, noteId: `n_wa_${i}` } },
+    ]).flat();
+    expect(served).toHaveLength(20);
+    await renderTimeline();
+    expect(screen.getByText(/showing the latest 20 events/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Latest 10 events$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^10 events$/)).not.toBeInTheDocument();
+    expect(filterButton("WhatsApp")).toHaveTextContent("(10+)");
+    expect(filterButton("Calls")).toHaveTextContent("(0+)");
+    choose("Calls");
+    expect(screen.getByText("No calls in the latest 20 events.")).toBeInTheDocument();
+    expect(screen.queryByText("No calls yet.")).not.toBeInTheDocument();
+    expect(screen.getByText(/^0 of the latest 10 events$/)).toBeInTheDocument();
+    choose("Notes");
+    expect(screen.getByText("No notes in the latest 20 events.")).toBeInTheDocument();
+  });
+
+  it("TCH-15 control: a read of 19 events is the whole history: today's wording", async () => {
+    served = Array.from({ length: 19 }, (_, i) => ({ ...PASTED[1], id: `ev_wa_${i}`, createdAt: at(i), data: { ...PASTED[1].data, body: `Message ${i}`, noteId: `n_${i}` } }));
+    await renderTimeline();
+    expect(screen.queryByText(/showing the latest/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^19 events$/)).toBeInTheDocument();
+    expect(filterButton("WhatsApp")).toHaveTextContent("(19)");
+    expect(filterButton("WhatsApp")).not.toHaveTextContent("+");
+    choose("Calls");
+    expect(screen.getByText("No calls yet.")).toBeInTheDocument();
   });
 });
