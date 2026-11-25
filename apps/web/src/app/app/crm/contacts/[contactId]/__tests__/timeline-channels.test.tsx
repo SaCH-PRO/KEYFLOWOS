@@ -29,8 +29,9 @@
  *
  * Review round 1 (correctness review of 63af799e):
  *   TCH-14  RED      COR-TCH-1: the events read serves at most 20 (listContactEvents' default; the page sends no
- *                    limit). A full read says so ("Showing the latest 20 events"), and its counts, header and empty
- *                    texts speak of the latest 20, never of the whole history ("No calls yet.")
+ *                    limit). A full read says so ("Only the latest 20 timeline records were loaded"), and its counts,
+ *                    header ("10 items from the latest 20 records": N-1, round 2) and empty texts ("No calls in the
+ *                    latest 20 records.") speak of those, never of the whole history ("No calls yet.")
  *   TCH-15  control  COR-TCH-1: a read of 19 is the whole history: today's wording, no "latest" line, plain counts
  *   TCH-16  RED      MIN-1: an inbound message the omnichannel processor logs (type message_received, source the
  *                    channel: omnichannel-processor.service.ts) is that channel's, "Email received" / "SMS received";
@@ -362,23 +363,26 @@ describe("D-277: the Timeline has a channel filter", () => {
     ]).flat();
     expect(served).toHaveLength(20);
     await renderTimeline();
-    expect(screen.getByText(/showing the latest 20 events/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Latest 10 events$/)).toBeInTheDocument();
-    expect(screen.queryByText(/^10 events$/)).not.toBeInTheDocument();
+    // N-1 (review round 2): the line speaks of the records the read loaded, the header of the items those make (a
+    // pasted message is two records, one item), and each says which, so they never read as two different counts.
+    expect(screen.getByText("Only the latest 20 timeline records were loaded; older ones are not listed or counted.")).toBeInTheDocument();
+    expect(screen.getByText(/^10 items from the latest 20 records$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^(Latest )?10 events$/)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/latest 20 events/i);
     expect(filterButton("WhatsApp")).toHaveTextContent("(10+)");
     expect(filterButton("Calls")).toHaveTextContent("(0+)");
     choose("Calls");
-    expect(screen.getByText("No calls in the latest 20 events.")).toBeInTheDocument();
+    expect(screen.getByText("No calls in the latest 20 records.")).toBeInTheDocument();
     expect(screen.queryByText("No calls yet.")).not.toBeInTheDocument();
-    expect(screen.getByText(/^0 of the latest 10 events$/)).toBeInTheDocument();
+    expect(screen.getByText(/^0 of 10 items from the latest 20 records$/)).toBeInTheDocument();
     choose("Notes");
-    expect(screen.getByText("No notes in the latest 20 events.")).toBeInTheDocument();
+    expect(screen.getByText("No notes in the latest 20 records.")).toBeInTheDocument();
   });
 
   it("TCH-15 control: a read of 19 events is the whole history: today's wording", async () => {
     served = Array.from({ length: 19 }, (_, i) => ({ ...PASTED[1], id: `ev_wa_${i}`, createdAt: at(i), data: { ...PASTED[1].data, body: `Message ${i}`, noteId: `n_${i}` } }));
     await renderTimeline();
-    expect(screen.queryByText(/showing the latest/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/latest 20/i)).not.toBeInTheDocument();
     expect(screen.getByText(/^19 events$/)).toBeInTheDocument();
     expect(filterButton("WhatsApp")).toHaveTextContent("(19)");
     expect(filterButton("WhatsApp")).not.toHaveTextContent("+");
