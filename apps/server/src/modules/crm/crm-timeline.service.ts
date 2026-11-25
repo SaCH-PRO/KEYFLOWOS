@@ -4,6 +4,11 @@ import { CONTACT_EVENT_TYPES_BY_CATEGORY, normalizeContactEventType, getContactE
 import type { ContactEvent, Invoice, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase } from './crm.helpers';
+import {
+  WHATSAPP_INBOUND_SOURCE,
+  isInboundWhatsAppEvent,
+  stripInboundWhatsAppBody,
+} from './whatsapp-inbound-exclusion';
 import { TimelineService } from '../timeline/timeline.service';
 import {
   TIMELINE_SCAN_LIMIT,
@@ -13,6 +18,73 @@ import {
 } from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
+
+export const CONTACT_EVENTS_DEFAULT_LIMIT = 20;
+export const CONTACT_EVENTS_MAX_LIMIT = 200;
+const MAX_CONTACT_EVENT_CURSOR_LENGTH = 512;
+
+export function encodeContactEventCursor(event: { createdAt: Date; id: string }): string {
+  return Buffer.from(
+    JSON.stringify({ createdAt: event.createdAt.toISOString(), id: event.id }),
+    'utf8',
+  ).toString('base64url');
+}
+
+export function decodeContactEventCursor(raw: string): { createdAt: Date; id: string } {
+  if (
+    typeof raw !== 'string' ||
+    raw.length === 0 ||
+    raw.length > MAX_CONTACT_EVENT_CURSOR_LENGTH ||
+    !/^[A-Za-z0-9_-]+$/.test(raw)
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+  } catch {
+    throw new BadRequestException('Invalid cursor');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  const obj = parsed as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  if (keys.length !== 2 || !Object.prototype.hasOwnProperty.call(obj, 'createdAt') || !Object.prototype.hasOwnProperty.call(obj, 'id')) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  if (typeof obj.createdAt !== 'string' || typeof obj.id !== 'string') {
+    throw new BadRequestException('Invalid cursor');
+  }
+  // SEC-P66-2: reject empty/oversized IDs, ASCII C0/DEL control characters, and unpaired UTF-16 surrogates.
+  if (
+    obj.id.length === 0 ||
+    obj.id.length > 128 ||
+    // eslint-disable-next-line no-control-regex
+    /[\x00-\x1f\x7f]/.test(obj.id) ||
+    Buffer.from(obj.id, 'utf8').toString('utf8') !== obj.id
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  // SEC-P66-1 / COR-P66-1: require strict 4-digit positive UTC ISO-8601 timestamp (reject ±YYYYYY and year 0000).
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(obj.createdAt)) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  const createdAt = new Date(obj.createdAt);
+  if (
+    Number.isNaN(createdAt.getTime()) ||
+    createdAt.getUTCFullYear() < 1 ||
+    createdAt.getUTCFullYear() > 9999 ||
+    createdAt.toISOString() !== obj.createdAt
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  // COR-P66-2: require exact canonical base64url + JSON framing (rejects len%4===1, non-zero trailing bits, invalid UTF-8, whitespace/reordered JSON).
+  if (encodeContactEventCursor({ createdAt, id: obj.id }) !== raw) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  return { createdAt, id: obj.id };
+}
 
 type TimelineEntry = {
   id: string;
@@ -174,7 +246,21 @@ export class CrmTimelineService {
 
     // Also write to unified Activity ledger (Wave 1), unless the caller says
     // another writer puts this event's feed row there (V1-55b, meta.feedCopy).
+    // D-280 (SEC-WAW-1): never mirror pasted WhatsApp message body text into the
+    // secondary Activity ledger; keep non-body metadata only.
     if (meta?.feedCopy !== false) {
+      const stripBody = isInboundWhatsAppEvent({
+        source: meta?.source,
+        type: normalized.canonical,
+        data,
+      });
+      const activityData = stripBody ? stripInboundWhatsAppBody(data) : (data ?? {});
+      const activityDetail =
+        stripBody
+          ? JSON.stringify(activityData)
+          : typeof data === 'string'
+            ? data
+            : JSON.stringify(data ?? {});
       this.timeline.recordEvent({
         businessId,
         module: 'crm',
@@ -182,13 +268,13 @@ export class CrmTimelineService {
         entityType: 'contact',
         entityId: contactId,
         title: normalized.canonical,
-        detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
+        detail: activityDetail,
         contactId,
-        category: contactEventCopyCategory(normalized.canonical, data),
+        category: contactEventCopyCategory(normalized.canonical, activityData),
         type: normalized.canonical,
         actorType: (meta?.actorType as any) ?? 'SYSTEM',
         actorId: meta?.actorId,
-        data: data ?? {},
+        data: activityData,
         occurredAt: new Date(),
       }).catch((err) => {
         this.logger.warn(`[UnifiedLedger] failed to record activity for contactEvent: ${(err as Error).message}`);
@@ -252,7 +338,7 @@ export class CrmTimelineService {
     if (!params.viewerUserId) throw new ForbiddenException('Contact events are read for a member');
     const viewer = await resolveTimelineViewer(this.prisma, params.businessId, params.viewerUserId);
     const where = { businessId: params.businessId, contactId: params.contactId };
-    const page = await readVisibleActivityPage(this.prisma, viewer, params.limit ?? 20, async (skip, take) => {
+    const page = await readVisibleActivityPage(this.prisma, viewer, params.limit ?? CONTACT_EVENTS_DEFAULT_LIMIT, async (skip, take) => {
       const events = await this.prisma.client.contactEvent.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -262,6 +348,57 @@ export class CrmTimelineService {
       return events.map((event) => ({ ...contactEventActivityRow(event), event }));
     });
     return page.map((row) => row.event);
+  }
+
+  /**
+   * FU-TIMELINE-EVENTS-PAGING (D-284, D-100): keyset-paginated read of a
+   * contact's events. Requests `limit + 1` visible rows via
+   * `readVisibleActivityPage` over the `(createdAt DESC, id DESC)` keyset
+   * window strictly older than the opaque cursor. Because the lookahead counts
+   * visible rows only and the cursor encodes only the last returned visible
+   * row's `(createdAt, id)`, neither `nextCursor` nor page sizes reveal how
+   * many money rows were withheld from a member without revenue read.
+   */
+  async listContactEventsPage(params: {
+    businessId: string;
+    contactId: string;
+    limit?: number;
+    cursor?: string;
+    viewerUserId?: string | null;
+  }): Promise<{ events: ContactEvent[]; nextCursor: string | null; hasMore: boolean }> {
+    await this.assertContact(params.businessId, params.contactId);
+    if (!params.viewerUserId) throw new ForbiddenException('Contact events are read for a member');
+    const limit = params.limit ?? CONTACT_EVENTS_DEFAULT_LIMIT;
+    if (!Number.isInteger(limit) || limit < 1 || limit > CONTACT_EVENTS_MAX_LIMIT) {
+      throw new BadRequestException(`limit must be an integer between 1 and ${CONTACT_EVENTS_MAX_LIMIT}`);
+    }
+    const decodedCursor = params.cursor !== undefined ? decodeContactEventCursor(params.cursor) : null;
+    const viewer = await resolveTimelineViewer(this.prisma, params.businessId, params.viewerUserId);
+    const where: Prisma.ContactEventWhereInput = {
+      businessId: params.businessId,
+      contactId: params.contactId,
+      ...(decodedCursor
+        ? {
+            OR: [
+              { createdAt: { lt: decodedCursor.createdAt } },
+              { createdAt: decodedCursor.createdAt, id: { lt: decodedCursor.id } },
+            ],
+          }
+        : {}),
+    };
+    const visible = await readVisibleActivityPage(this.prisma, viewer, limit + 1, async (skip, take) => {
+      const events = await this.prisma.client.contactEvent.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      });
+      return events.map((event) => ({ ...contactEventActivityRow(event), event }));
+    });
+    const hasMore = visible.length > limit;
+    const events = (hasMore ? visible.slice(0, limit) : visible).map((row) => row.event);
+    const nextCursor = hasMore && events.length > 0 ? encodeContactEventCursor(events[events.length - 1]) : null;
+    return { events, nextCursor, hasMore };
   }
 
   async listContactNotes(params: { businessId: string; contactId: string }) {
@@ -426,7 +563,12 @@ export class CrmTimelineService {
     });
     if (!note) throw new NotFoundException('Note not found');
     await this.prisma.client.contactNote.delete({ where: { id: input.noteId } });
-    await this.logEvent(input.businessId, note.contactId, 'note.deleted', { noteId: note.id, body: note.body?.slice(0, 100) });
+    // D-280 (SEC-WAW-1): deleting a pasted WhatsApp note must not copy its body into ContactEvent / Activity.
+    const deleteData =
+      note.source === WHATSAPP_INBOUND_SOURCE
+        ? { noteId: note.id }
+        : { noteId: note.id, body: note.body?.slice(0, 100) };
+    await this.logEvent(input.businessId, note.contactId, 'note.deleted', deleteData);
     return { deleted: true };
   }
 

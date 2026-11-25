@@ -137,7 +137,9 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
     const entry = await this.get(businessId, id);
     if (!entry.isActive) throw new BadRequestException('Entry is not active');
     if (entry.endDate && now > entry.endDate) throw new BadRequestException('Entry has passed its end date');
-    return this.emitEntry(entry, now);
+    // SWP-FIN-CASH-SOURCES (BUG-110): manual "Run now" posts dated today (`now`),
+    // never a future `nextRunDate`, so cash position and Balance Sheet match immediately.
+    return this.emitEntry(entry, now, now);
   }
 
   private async processDueEntries() {
@@ -154,7 +156,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
 
     for (const entry of due) {
       try {
-        await this.emitEntry(entry, now);
+        await this.emitEntry(entry, now, entry.nextRunDate);
       } catch (err: any) {
         const nextRunDate = this.computeNext(entry.frequency, entry.nextRunDate);
         const failureCount = entry.failureCount + 1;
@@ -175,6 +177,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
   private async emitEntry(
     entry: { id: string; businessId: string; name: string; description: string | null; entries: Prisma.JsonValue; frequency: string; nextRunDate: Date },
     now: Date,
+    postDate: Date = now,
   ) {
     const items = Array.isArray(entry.entries) ? entry.entries as Array<{ accountId: string; debit?: number; credit?: number; memo?: string }> : [];
     if (items.length < 2) {
@@ -186,7 +189,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
     await this.posting.post({
       businessId: entry.businessId,
       type: 'ADJUSTMENT',
-      date: entry.nextRunDate,
+      date: postDate,
       amount: totalDebit,
       description: entry.name,
       notes: entry.description,

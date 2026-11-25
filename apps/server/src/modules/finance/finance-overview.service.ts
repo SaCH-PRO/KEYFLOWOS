@@ -475,8 +475,12 @@ export class FinanceOverviewService {
         where: { businessId, createdAt: { gte: monthStart }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
+      // V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-021): exclude VOID and soft-deleted
+      // expenses/bills so voided bills never inflate expensesThisMonth or skew
+      // netProfitThisMonth away from the ledger P&L (Prisma soft-delete
+      // middleware does not inject deletedAt: null into aggregate/groupBy).
       this.prisma.client.expense.aggregate({
-        where: { businessId, date: { gte: monthStart } },
+        where: { businessId, deletedAt: null, status: { not: 'VOID' }, date: { gte: monthStart } },
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
@@ -504,15 +508,18 @@ export class FinanceOverviewService {
         where: {
           businessId,
           deletedAt: null,
+          status: { not: 'VOID' },
           date: { gte: sixMonthsAgo, lt: monthStart },
         },
         _sum: { amount: true },
       }),
+      // V1-65 (SWP-FIN-OVERVIEW-TRUTH, BUG-112): bills due are unpaid BILL rows
+      // (status = 'BILL', deletedAt = null), never already-PAID recurring expenses.
       this.prisma.client.expense.aggregate({
         where: {
           businessId,
-          isRecurring: true,
-          date: { gte: monthStart },
+          deletedAt: null,
+          status: 'BILL',
         },
         _sum: { amount: true },
         _count: true,
@@ -521,26 +528,26 @@ export class FinanceOverviewService {
       // (categorisation, receipts, overdue invoices, bills due) so the
       // queue isn't only commerce-driven.
       this.prisma.client.expense.findMany({
-        where: { businessId, categoryId: null },
-        orderBy: [{ amount: 'desc' }],
+        where: { businessId, deletedAt: null, status: { not: 'VOID' }, categoryId: null },
+        orderBy: [{ amount: 'desc' }, { id: 'asc' }],
         take: 5,
         select: { id: true, amount: true, vendor: true, date: true },
       }),
       this.prisma.client.expense.findMany({
-        where: { businessId, receiptUrl: null, amount: { gte: 100 } },
-        orderBy: [{ amount: 'desc' }],
+        where: { businessId, deletedAt: null, status: { not: 'VOID' }, receiptUrl: null, amount: { gte: 100 } },
+        orderBy: [{ amount: 'desc' }, { id: 'asc' }],
         take: 5,
         select: { id: true, amount: true, vendor: true, date: true },
       }),
       this.prisma.client.invoice.findMany({
         where: { businessId, deletedAt: null, status: 'OVERDUE' },
-        orderBy: [{ total: 'desc' }],
+        orderBy: [{ total: 'desc' }, { id: 'asc' }],
         take: 5,
         select: { id: true, total: true, invoiceNumber: true, dueDate: true },
       }),
       this.prisma.client.expense.findMany({
-        where: { businessId, isRecurring: true, date: { gte: monthStart } },
-        orderBy: [{ amount: 'desc' }],
+        where: { businessId, deletedAt: null, status: 'BILL' },
+        orderBy: [{ amount: 'desc' }, { id: 'asc' }],
         take: 5,
         select: { id: true, amount: true, vendor: true, description: true, date: true },
       }),
@@ -560,8 +567,8 @@ export class FinanceOverviewService {
     }
 
     const revenueThisMonth = roundMoney(Number(paidInvoices._sum.amount ?? 0));
-    const expensesThisMonth = Number(monthExpenses._sum.amount ?? 0);
-    const netProfitThisMonth = revenueThisMonth - expensesThisMonth;
+    const expensesThisMonth = roundMoney(Number(monthExpenses._sum.amount ?? 0));
+    const netProfitThisMonth = roundMoney(revenueThisMonth - expensesThisMonth);
 
     // Cash runway = cashBalance / (avg monthly business-currency burn over last 6 months, D-135).
     const { businessTotal: sixMonthBurn, otherExpenses } = splitExpensesByCurrency(
@@ -616,7 +623,7 @@ export class FinanceOverviewService {
         type: 'BILL_DUE',
         relatedType: 'expense',
         relatedId: b.id,
-        title: `Bill due: ${b.description ?? b.vendor ?? 'Recurring expense'}`,
+        title: `Bill due: ${b.description ?? b.vendor ?? 'Unpaid bill'}`,
         detail: b.vendor ?? null,
         amountAtRisk: Number(b.amount ?? 0),
         priority: 2,
@@ -669,6 +676,51 @@ export class FinanceOverviewService {
       ));
     }
 
+    // V1-65 (SWP-FIN-OVERVIEW-TRUTH): remove stale open (PENDING/SNOOZED) synthetic
+    // expense actions whose underlying expense was voided, soft-deleted, paid (for
+    // BILL_DUE), categorised, or received a receipt. COMPLETED/DISMISSED rows are
+    // the operator's record and stay.
+    const openExpenseActions = await this.prisma.client.revenueAction.findMany({
+      where: {
+        businessId,
+        relatedType: 'expense',
+        type: { in: ['BILL_DUE', 'UNCATEGORISED_EXPENSE', 'MISSING_RECEIPT'] },
+        status: { in: ['PENDING', 'SNOOZED'] },
+      },
+      select: { id: true, type: true, relatedId: true },
+    });
+    if (openExpenseActions.length > 0) {
+      const expenseIds = Array.from(
+        new Set(openExpenseActions.map((a) => a.relatedId).filter((id): id is string => Boolean(id))),
+      );
+      const liveExpenses = expenseIds.length > 0
+        ? await this.prisma.client.expense.findMany({
+            where: { businessId, id: { in: expenseIds }, deletedAt: null },
+            select: { id: true, status: true, categoryId: true, receiptUrl: true, amount: true },
+          })
+        : [];
+      const byId = new Map(liveExpenses.map((e) => [e.id, e]));
+      const staleActionIds = openExpenseActions
+        .filter((a) => {
+          const exp = a.relatedId ? byId.get(a.relatedId) : undefined;
+          if (!exp || exp.status === 'VOID') return true;
+          if (a.type === 'BILL_DUE') return exp.status !== 'BILL';
+          if (a.type === 'UNCATEGORISED_EXPENSE') return exp.categoryId != null;
+          if (a.type === 'MISSING_RECEIPT') return exp.receiptUrl != null || Number(exp.amount) < 100;
+          return false;
+        })
+        .map((a) => a.id);
+      if (staleActionIds.length > 0) {
+        await this.prisma.client.revenueAction.deleteMany({
+          where: {
+            businessId,
+            id: { in: staleActionIds },
+            status: { in: ['PENDING', 'SNOOZED'] },
+          },
+        });
+      }
+    }
+
     // Re-read after upserts so the response and KEYFLOW Today / R3 share
     // the same row set. Cap at 25 highest-risk pending items.
     const blendedItems = await this.prisma.client.revenueAction.findMany({
@@ -695,7 +747,7 @@ export class FinanceOverviewService {
       outstandingInvoiceCount: outstandingAgg._count,
       overdueInvoices: receivablesAging ? receivablesAging.totalOverdue : Number(overdueAgg._sum.total ?? 0),
       overdueInvoiceCount: overdueAgg._count,
-      billsDue: Number(billsDueAgg._sum.amount ?? 0),
+      billsDue: roundMoney(Number(billsDueAgg._sum.amount ?? 0)),
       billsDueCount: billsDueAgg._count,
       taxReserved,
       cashRunwayMonths: cashRunwayMonths != null ? Math.round(cashRunwayMonths * 10) / 10 : null,

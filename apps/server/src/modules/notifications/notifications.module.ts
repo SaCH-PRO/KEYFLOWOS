@@ -4,6 +4,8 @@ import { NotificationsService } from './notifications.service';
 import { TransactionalEmailService } from './transactional-email.service';
 import { SystemEmailService } from './system-email.service';
 import { NotificationsRevenueListener } from './notifications-revenue.listener';
+import { OwnerAlertsListener } from './owner-alerts.listener';
+import { PushNotificationModule } from '../push-notifications/push-notification.module';
 // CommerceModule is intentionally NOT statically imported here. The dependency
 // chain notifications -> commerce -> crm -> connector -> notifications is a
 // circular cycle, and a static `import { CommerceModule }` triggers eager
@@ -16,13 +18,14 @@ import type { CommerceModule as CommerceModuleType } from '../commerce/commerce.
 
 @Module({
   imports: [
+    PushNotificationModule,
     forwardRef(
       async () =>
         (await import('../commerce/commerce.module')).CommerceModule,
     ),
   ],
   controllers: [NotificationsController],
-  providers: [NotificationsService, TransactionalEmailService, SystemEmailService, NotificationsRevenueListener],
+  providers: [NotificationsService, TransactionalEmailService, SystemEmailService, NotificationsRevenueListener, OwnerAlertsListener],
   exports: [NotificationsService, TransactionalEmailService, SystemEmailService],
 })
 export class NotificationsModule {}

@@ -320,7 +320,7 @@ export class CallLogService {
     const [items, total] = await Promise.all([
       this.prisma.client.callLog.findMany({
         where,
-        orderBy: { scheduledAt: 'asc' },
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
         skip: filters?.offset ?? 0,
         take: filters?.limit ?? 50,
       }),
@@ -440,7 +440,7 @@ export class CallLogService {
         },
         completedAt: null,
       },
-      orderBy: { scheduledAt: 'asc' },
+      orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
     });
     if (!viewer || !access) return calls;
     const canOpen = await contactVisibilityFilter(

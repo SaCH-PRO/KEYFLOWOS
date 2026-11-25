@@ -184,14 +184,14 @@ function openingCurrency(stored: string | null | undefined, businessCurrency: st
 export class CashPositionService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async getCashPosition(businessId: string): Promise<CashPosition> {
+  async getCashPosition(businessId: string, asOf: Date = new Date()): Promise<CashPosition> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { currency: true },
     });
     const currency = normalizeCurrency(business?.currency) || DEFAULT_CURRENCY;
     const [ledgerAccounts, unposted] = await Promise.all([
-      this.ledgerAccounts(businessId, currency),
+      this.ledgerAccounts(businessId, currency, asOf),
       this.unpostedOpenings(businessId, currency),
     ]);
 
@@ -227,10 +227,11 @@ export class CashPositionService {
 
   /**
    * The booked net (debit - credit) of each of the business's cash-class chart
-   * rows, per normalized currency (V1-37c). An idle row reads one zero in the
-   * business currency.
+   * rows, per normalized currency (V1-37c), up to `asOf` (SWP-FIN-CASH-SOURCES,
+   * BUG-023: future-dated entries are excluded so cash matches today's Balance
+   * Sheet). An idle row reads one zero in the business currency.
    */
-  private async ledgerAccounts(businessId: string, businessCurrency: string) {
+  private async ledgerAccounts(businessId: string, businessCurrency: string, asOf: Date) {
     const cashAccounts = await this.prisma.client.chartOfAccount.findMany({
       where: { businessId, systemKey: { in: [...CASH_POSITION_SYSTEM_KEYS] } },
       select: { id: true, name: true, systemKey: true },
@@ -242,7 +243,10 @@ export class CashPositionService {
       where: {
         businessId,
         accountId: { in: cashAccounts.map((a) => a.id) },
-        transaction: { status: { in: BOOKED_TRANSACTION_STATUSES } },
+        transaction: {
+          status: { in: BOOKED_TRANSACTION_STATUSES },
+          date: { lte: asOf },
+        },
       },
       _sum: { debit: true, credit: true },
     });

@@ -1579,11 +1579,22 @@ export class CommerceService {
     // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
     // V1-29 (CF-17): computeBalance's net and remaining, so a refund row counts;
     // a row flipped before V1-29 is read as its payment plus its refund (CR-V29-4).
-    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
+    // FU-INVOICE-REMAINING-CREDITS (P65): net own-tenant APPLIED credit notes
+    // (same credit-aware contract as getInvoicePublicView / payment reconcile)
+    // and clamp VOID & FULLY_CREDITED remaining to 0.
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
+    const balance = creditAwareBalance(
+      balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency),
+      credited,
+    );
+    const remaining =
+      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED'
+        ? 0
+        : balance.remaining;
     return {
       ...withLegacySubtotal(invoice),
       paidAmount: balance.net,
-      remaining: balance.remaining,
+      remaining,
     };
   }
 

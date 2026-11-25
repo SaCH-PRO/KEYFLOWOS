@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { PLANS, TRIAL_DURATION_DAYS, PlanDefinition, FEATURE_REGISTRY, FEATURE_CATEGORIES, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from './plans';
 
 /** The authenticated user changing a plan, as AuthMiddleware attaches it. */
@@ -73,19 +74,7 @@ export class SubscriptionsService {
   async assertPlanChangeAuthority(businessId: string, actor: SubscriptionActor | undefined): Promise<PlanChangeAuthority> {
     if (!actor?.id) throw new UnauthorizedException('Authentication required');
     if (actor.role === 'SUPER_ADMIN') return { actor, standing: 'SUPER_ADMIN' };
-    const membership = await this.db.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return { actor, standing: 'OWNER' };
-    const owned = await this.db.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
-      // ADMIN or STAFF, the recorded owner is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    if (owned) return { actor, standing: 'OWNER' };
+    if (await isBusinessOwnerMember(this.db, businessId, actor.id)) return { actor, standing: 'OWNER' };
     throw new ForbiddenException({ code: SUBSCRIPTION_OWNER_ONLY, message: SUBSCRIPTION_OWNER_ONLY_MESSAGE });
   }
 

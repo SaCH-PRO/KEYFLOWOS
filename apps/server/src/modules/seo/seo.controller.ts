@@ -9,6 +9,7 @@ import { SeoGoogleAnalyticsService } from './seo-ga4.service';
 import { SeoContentService } from './seo-content.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { SeoAdminGuard } from './seo-admin.guard';
 
 /**
@@ -35,36 +36,16 @@ export class SeoController {
   ) {}
 
   /**
-   * W4-D94-SEO-OWNER (owner ruling D-94; review D12b-ST-2, case MW-27): who
-   * may connect, sync or disconnect the GA4 and Search Console connectors.
-   * These connections hold the business's Google OAuth tokens (metaData.ga4,
-   * metaData.gsc), so, as for the business mailbox, the business owner only:
-   * the OWNER membership or the distinguished owner (Business.ownerId) while
-   * it holds that OWNER membership (owner rulings D-116, D-125: holding ADMIN
-   * or STAFF it is that role), with the SUPER_ADMIN bypass BusinessGuard
-   * already grants. The rule is
-   * GmailService.assertConnectAuthority's (D-11), restated rather than
-   * imported, as WhatsAppService.isConfigOwner also restates it: SeoModule
-   * does not import CommerceModule. Anyone else (an ADMIN or STAFF member) gets 403
-   * SEO_CONNECTOR_OWNER_ONLY before anything is read or written. The status
-   * reads (GET .../connectors/ga4, .../gsc) stay open to members.
+   * W4-D94-SEO-OWNER (owner ruling D-94) / W11-OWNER-HELPER-REST (D-116, D-125):
+   * who may connect, sync or disconnect the GA4 and Search Console connectors
+   * via `isBusinessOwnerMember` (OWNER membership of this business, plus
+   * SUPER_ADMIN bypass). Anyone else gets 403 SEO_CONNECTOR_OWNER_ONLY before
+   * anything is read or written. Status reads stay open to members.
    */
   private async assertConnectorOwner(businessId: string, actor: SeoConnectorActor | undefined): Promise<void> {
     if (!actor?.id) throw new UnauthorizedException('Authentication required');
     if (actor.role === 'SUPER_ADMIN') return;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
-      // ADMIN or STAFF, the recorded owner is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    if (owned) return;
+    if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return;
     throw new ForbiddenException({ code: SEO_CONNECTOR_OWNER_ONLY, message: SEO_CONNECTOR_OWNER_ONLY_MESSAGE });
   }
 
