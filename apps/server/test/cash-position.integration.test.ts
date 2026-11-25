@@ -2242,13 +2242,19 @@ describe('W11-RUNWAY-BURN-CURRENCY (D-135): runway burn counts business-currency
 
   beforeAll(async () => {
     const { FinanceIntelligenceService } = await import('../src/modules/finance/finance-intelligence.service');
-    const mirrorStub = {
-      upsertFromSource: async (input: any) => {
+    const revenueActionsStub = {
+      upsertExternal: async (input: any) => {
         mirrored.push(input);
-        return { id: null };
+        return { actionId: null };
       },
     };
-    intel = new FinanceIntelligenceService(financePrisma, cashPositionService, mirrorStub as any);
+    intel = new (FinanceIntelligenceService as any)(
+      financePrisma,
+      {},
+      revenueActionsStub,
+      {},
+      cashPositionService,
+    );
 
     for (const [user, biz, name, email] of [
       [ownerN, bizN, 'V34A Biz N', `${P}owner_n@test.local`],
@@ -2366,6 +2372,10 @@ describe('W11-RUNWAY-BURN-CURRENCY (D-135): runway burn counts business-currency
       cashCurrency: 'TTD',
       otherCurrencyExpenses: [{ currency: 'USD', amount: 12000 }],
     });
+    const mirrorN2 = mirrored.filter((m) => m.businessId === bizN2 && m.type === 'FIN_CASHFLOW_RISK');
+    expect(mirrorN2.map((m) => [m.title, m.detail, m.amountAtRisk, m.priority])).toEqual([
+      ['Low cash runway — ~13 days', riskRows[0].body, 1000, 1],
+    ]);
     // Command-spine copy (read outside revenue:read) never leaks other-currency figures or codes.
     const cmds = await commandRows(bizN2);
     expect(cmds.length).toBe(1);

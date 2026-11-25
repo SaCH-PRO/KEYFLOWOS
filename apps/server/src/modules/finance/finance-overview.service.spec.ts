@@ -179,6 +179,19 @@ describe('W11-RUNWAY-BURN-CURRENCY (D-135): business-currency burn split and oth
       { currency: 'USD', amount: 2000 },
       { currency: sentence, amount: 50 },
     ]);
+
+    // Sub-cent case variants accumulate before rounding once (sumMoney).
+    const subCent = m.splitExpensesByCurrency(
+      [
+        { currency: 'TTD', _sum: { amount: 0.004 } },
+        { currency: 'ttd', _sum: { amount: 0.004 } },
+        { currency: 'USD', _sum: { amount: 10.004 } },
+        { currency: 'usd', _sum: { amount: 10.004 } },
+      ],
+      'TTD',
+    );
+    expect(subCent.businessTotal).toBe(0.01);
+    expect(subCent.otherExpenses).toEqual([{ currency: 'USD', amount: 20.01 }]);
   });
 
   it('notCountedExpenseNote and otherCurrencyExpensesWithheldNote enforce SEC-W10LR-1 (codes only, bounded, never echoing labels)', () => {

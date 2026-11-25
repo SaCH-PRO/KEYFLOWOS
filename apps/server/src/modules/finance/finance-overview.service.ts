@@ -8,7 +8,7 @@ import { FinancialAccountSeederService } from './financial-account-seeder.servic
 import { D13_CURRENCIES, normalizeCurrency } from './posting.service';
 import { ReceivablesService } from './receivables.service';
 import { CASH_NET_PAYMENT_WHERE } from '../commerce/invoice-workflow.service';
-import { roundMoney } from '../commerce/money';
+import { roundMoney, sumMoney } from '../commerce/money';
 import { REVENUE_ACTION_SCAN_LIMIT, servedRevenueActions } from '../commerce/revenue-action.controller';
 import { visibilityClause } from '../crm/crm-permissions.helper';
 import type { TimelineViewer } from '../timeline/timeline-visibility';
@@ -257,31 +257,34 @@ export function splitExpensesByCurrency(
   businessCurrency: string,
 ): { businessTotal: number; otherExpenses: OtherCurrencyCash[] } {
   const target = normalizeCurrency(businessCurrency) || 'TTD';
-  let businessTotal = 0;
-  const coded = new Map<string, number>();
+  const businessParts: number[] = [];
+  const codedParts = new Map<string, number[]>();
   const unlabelled: OtherCurrencyCash[] = [];
 
   for (const row of rows) {
-    const amount = roundMoney(Number(row._sum.amount ?? 0));
-    if (!Number.isFinite(amount) || amount === 0) continue;
+    const rawAmount = Number(row._sum.amount ?? 0);
+    if (!Number.isFinite(rawAmount) || rawAmount === 0) continue;
     const raw = typeof row.currency === 'string' ? row.currency : '';
     const norm = normalizeCurrency(raw);
     if (norm === target) {
-      businessTotal += amount;
+      businessParts.push(rawAmount);
     } else if (LOW_RUNWAY_CURRENCY_CODE.test(norm)) {
-      coded.set(norm, roundMoney((coded.get(norm) ?? 0) + amount));
+      const bucket = codedParts.get(norm);
+      if (bucket) bucket.push(rawAmount);
+      else codedParts.set(norm, [rawAmount]);
     } else {
-      unlabelled.push({ currency: raw, amount });
+      const rounded = roundMoney(rawAmount);
+      if (rounded !== 0) unlabelled.push({ currency: raw, amount: rounded });
     }
   }
 
-  const sortedCoded: OtherCurrencyCash[] = [...coded.entries()]
-    .filter(([, amount]) => amount !== 0)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([currency, amount]) => ({ currency, amount }));
+  const sortedCoded: OtherCurrencyCash[] = [...codedParts.entries()]
+    .map(([currency, parts]) => ({ currency, amount: sumMoney(parts) }))
+    .filter(({ amount }) => amount !== 0)
+    .sort((a, b) => a.currency.localeCompare(b.currency));
 
   return {
-    businessTotal: roundMoney(businessTotal),
+    businessTotal: sumMoney(businessParts),
     otherExpenses: [...sortedCoded, ...unlabelled],
   };
 }
