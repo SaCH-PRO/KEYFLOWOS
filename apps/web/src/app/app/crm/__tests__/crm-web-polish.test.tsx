@@ -27,6 +27,9 @@
  *                         (its own debounce called .trim() on undefined; the bug was on main already)
  *   CWP-R2    RED-AT-769f8933  (COR-CWP-1) a table mounted while the screen searches "Kwame" sends exactly one read,
  *                         with that search, and never shows the unfiltered count ("3 of 3")
+ *   CWP-R3    control (orchestrator ruling on COR-CWP-3: option a) "My Book" applied, then a search from the
+ *                         screen or the table's box: the read stays the user's own customers, with the search added
+ *                         (applied means the view's filters stay in force; the search refines them)
  *   CWP-R4    RED-AT-769f8933  (COR-CWP-5) the dashboard's Next actions widget, mounted nowhere since the fix, is gone
  *
  * Components render for real on the real client; only fetch, the Next router hooks and toasts are stubbed.
@@ -73,9 +76,12 @@ function json(status: number, body: unknown): Response {
 
 /** The searches the table's reads sent, in order ("" for none). */
 let searches: string[] = [];
+/** Each read's search and whether it asked for the signed-in user's own customers only. */
+let reads: Array<{ search: string; ownedByMe: boolean }> = [];
 
 beforeEach(() => {
   searches = [];
+  reads = [];
   // The dashboard restores its scroll on mount (useReturnNavigation); jsdom has no window.scrollTo.
   window.scrollTo = vi.fn() as unknown as typeof window.scrollTo;
   window.localStorage.clear();
@@ -88,6 +94,7 @@ beforeEach(() => {
         // The server's search: a case-insensitive match on the name, as crm.service.ts listContacts does.
         const q = (url.searchParams.get("search") ?? "").toLowerCase();
         searches.push(q);
+        reads.push({ search: q, ownedByMe: url.searchParams.get("ownedByMe") === "true" });
         const rows = PEOPLE.filter((p) => !q || `${p.firstName} ${p.lastName}`.toLowerCase().includes(q));
         return json(200, { contacts: rows, nextCursor: null, hasMore: false });
       }
@@ -320,6 +327,19 @@ describe("Repair round 1: the table's saved views and first read", () => {
     expect(searches).toEqual(["kwame"]);
     expect(counts).not.toContain("3 of 3");
     expect(screen.getByText("1 of 1")).toBeInTheDocument();
+  });
+
+  it("CWP-R3 control: My Book stays in force when a search is added, from the screen or the table's box", async () => {
+    window.localStorage.setItem("kf_user_cache", JSON.stringify({ id: "u_cwp", email: "owner@cwp.test" }));
+    const { rerenderWith } = renderTable({ search: "" });
+    await waitFor(() => expect(tableNames()).toEqual(["Kwame", "Ama", "Kofi"]), { timeout: 3_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Saved views" }));
+    fireEvent.click(screen.getByText("My Book").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(reads.at(-1)).toEqual({ search: "", ownedByMe: true }), { timeout: 3_000 });
+    rerenderWith({ search: "Kwame" });
+    await waitFor(() => expect(reads.at(-1)).toEqual({ search: "kwame", ownedByMe: true }), { timeout: 3_000 });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search contacts database" }), { target: { value: "Ama" } });
+    await waitFor(() => expect(reads.at(-1)).toEqual({ search: "ama", ownedByMe: true }), { timeout: 3_000 });
   });
 
   it("CWP-R4 RED-AT-769f8933: the dashboard's unmounted Next actions widget is deleted", () => {
