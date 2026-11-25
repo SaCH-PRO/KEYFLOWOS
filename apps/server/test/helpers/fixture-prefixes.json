@@ -1193,6 +1193,11 @@
       "packet": "V1-66 (SWP-INV-SKU-COUNT)"
     },
     {
+      "prefix": "v66e_",
+      "owner": "apps/server/test/quick-sale.integration.test.ts",
+      "packet": "V1-66 (QUICK-SALE-SERVER)"
+    },
+    {
       "prefix": "v66g_",
       "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
       "packet": "V1-66 (SWP-FIN-LEDGER)"
