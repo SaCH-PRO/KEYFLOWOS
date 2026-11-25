@@ -79,6 +79,13 @@ const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string
   { key: "catalog", label: "Setup", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
 ];
 
+/**
+ * SWP-SERVICE-DEPOSIT: the service a deposit tip's door named, until Setup has opened it. Held outside the page
+ * because taking serviceId out of the URL changes the page's search params, and after a client navigation (Presence's
+ * tip is a Link) the App Router then mounts the page afresh: page state would lose the door.
+ */
+let pendingDoorServiceId: string | null = null;
+
 export default function BookingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -153,7 +160,7 @@ export default function BookingsPage() {
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
   const [businessCurrency, setBusinessCurrency] = useState<string | null>(null);
   // SWP-SERVICE-DEPOSIT: the service the deposit tip's door names (?serviceId=), until Setup has opened it.
-  const [focusServiceId, setFocusServiceId] = useState<string | null>(null);
+  const [focusServiceId, setFocusServiceId] = useState<string | null>(() => pendingDoorServiceId);
   const [pendingWaitlistData, setPendingWaitlistData] = useState<{
     contactId: string;
     serviceId: string;
@@ -228,6 +235,7 @@ export default function BookingsPage() {
     // stays on Setup), and Setup opens that service's deposit editor.
     const serviceIdParam = searchParams?.get("serviceId");
     if (serviceIdParam) {
+      pendingDoorServiceId = serviceIdParam;
       setTab("catalog");
       setFocusServiceId(serviceIdParam);
       const url = new URL(window.location.href);
@@ -236,7 +244,10 @@ export default function BookingsPage() {
     }
   }, [searchParams, businessSlug]);
 
-  const handleFocusServiceHandled = useCallback(() => setFocusServiceId(null), []);
+  const handleFocusServiceHandled = useCallback(() => {
+    pendingDoorServiceId = null;
+    setFocusServiceId(null);
+  }, []);
   const handleServiceUpdated = useCallback((updated: Service) => {
     setServices((prev) => prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)));
   }, []);
