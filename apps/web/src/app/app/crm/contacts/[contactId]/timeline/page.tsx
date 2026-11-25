@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactEvents } from "@/lib/client";
+import { readState } from "@/lib/failure-kit";
 import { eventLabel, plainLabel, statusLabel } from "@/lib/status-labels";
 import { Card } from "@keyflow/ui";
 import { Clock, Mail, Phone, MessageSquare, MessageCircle, Calendar, DollarSign, FileText, Star, User, Zap, AlertTriangle, CheckCircle, Info } from "lucide-react";
@@ -110,17 +111,20 @@ export default function ContactTimelinePage() {
   const [events, setEvents] = useState<ContactEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ChannelFilter>("all");
-  // MIN-4: a failed read is said as such (with Retry), never shown as an empty history.
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // MIN-4: a failed read is said as such (with Retry), never shown as an empty history. failure-kit's readState judges
+  // it, so an empty error (a proxy 502 over HTTP/2, a non-JSON body: apiGet's error is "") is a failure too (FK-SEC-1).
+  const [loadError, setLoadError] = useState<{ message: string; retry: boolean } | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       const res = await fetchContactEvents(contactId as string);
-      if (res.error) {
+      const state = readState(res, { what: "the timeline" });
+      if (state.kind !== "ok") {
         setEvents([]);
-        setLoadError(res.error);
+        // No access is not fixed by trying again; a failed load may be.
+        setLoadError({ message: state.message, retry: state.kind === "failed" });
       } else {
         const list = (res.data ?? []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setEvents(list);
@@ -159,14 +163,16 @@ export default function ContactTimelinePage() {
         </div>
         <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
           <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-          <span className="min-w-0 flex-1 break-words">Could not load the timeline: {loadError}</span>
-          <button
-            type="button"
-            onClick={() => setAttempt((n) => n + 1)}
-            className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Retry
-          </button>
+          <span className="min-w-0 flex-1 break-words">{loadError.message}</span>
+          {loadError.retry && (
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Retry
+            </button>
+          )}
         </div>
       </div>
     );
