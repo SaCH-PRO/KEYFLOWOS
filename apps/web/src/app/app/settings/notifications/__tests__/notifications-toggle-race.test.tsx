@@ -7,8 +7,10 @@
  *
  *   NPR-08b RED-BEFORE  (re-read count only) the reload reads the pre-click value, then the PATCH is refused: the switch shows the pre-click
  *                       value (the server's, re-read), not a flip of what the page holds
- *   NPR-08c RED-BEFORE  a refused PATCH: the page re-reads the preferences and shows the server's (Payment Receipt
- *                       changed elsewhere), not a local revert of the click-time object
+ *   NPR-08c RED-BEFORE  a refused PATCH: the page re-reads the preferences and the refused switch shows the server's
+ *                       value. Round 3: only that switch is taken from the re-read (Payment Receipt, changed elsewhere,
+ *                       is left for a load to show), the same rule as a PATCH answer: every other switch is decided by
+ *                       its own answer or by a load, so no re-read can flip a switch another answer has decided
  *   NPR-08d RED-BEFORE  the PATCH succeeds after a Retry read the old value: the switch shows the PATCH's answer
  *   NPR-08e RED-BEFORE  the PATCH's write landed (a reload reads it) but its answer is lost (500), and the re-read fails:
  *                       a load has happened since the click, so nothing is reverted; the switch shows the reload's value
@@ -22,12 +24,14 @@
  *   NPR-08i RED-BEFORE  (round 2) two PATCHes answered out of order: Payment Receipt commits first but its answer comes
  *                       last; the page ends as the server holds both switches
  *   NPR-08j RED-BEFORE  (round 2, the same race on the failure path) Booking Confirmation's PATCH waits; Payment
- *                       Receipt's is refused and its re-read (Booking still on at the server, Invoice Sent changed
- *                       elsewhere) is put on the page except for the switch still saving: Booking stays off
+ *                       Receipt's is refused and only Payment Receipt is taken from its re-read (Booking still on at the
+ *                       server, Invoice Sent changed elsewhere): Booking stays off, Invoice Sent as the page had it
  *   NPR-08k RED-BEFORE  (round 3 review) the same, but Booking Confirmation's PATCH succeeds while the re-read is in
  *                       flight (the re-read was read before Booking committed): Booking stays as its answer set it
  *   NPR-08m guard       (mutant T2) a switch clicked after the re-read was sent, still saving when it answers, keeps
  *                       its own value
+ *   NPR-08n RED-BEFORE  (round 3 confirm review) a switch clicked after the re-read was sent and answered before it: the
+ *                       older re-read does not overwrite its answer
  *   NPR-08l RED-BEFORE  (round 3 review) a re-read refused by ModuleScopeGuard also takes the log off the page: no row,
  *                       no "(n)" count, no access on the Log tab
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
@@ -184,7 +188,7 @@ describe("D-283 repair round 1: a toggle's answer comes from the server", () => 
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
     expect(server.prefsGets()).toBe(2);
     expect(checked(BOOKING)).toBe("true");
-    expect(checked(RECEIPT)).toBe("true");
+    expect(checked(RECEIPT)).toBe("false"); // only the refused switch is taken from the re-read
   });
 
   it("NPR-08d RED-BEFORE: the PATCH succeeds after a Retry read the old value: the switch shows the PATCH's answer", async () => {
@@ -284,7 +288,7 @@ describe("D-283 repair round 2: a re-read does not overwrite a switch still savi
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
     expect(server.prefsGets()).toBe(2);
     expect(checked(RECEIPT)).toBe("false");
-    expect(checked(/toggle invoice sent/i)).toBe("false");
+    expect(checked(/toggle invoice sent/i)).toBe("true"); // not the refused switch: left for a load
     expect(checked(BOOKING)).toBe("false"); // still saving: its own answer decides it
 
     server.answerPatch(json(200, { ...PREFS, booking_confirmed: false, invoice_sent: false }), "booking_confirmed");
@@ -345,6 +349,32 @@ describe("D-283 repair round 3: a switch clicked while the re-read is in flight"
     server.answerPatch(json(200, { ...PREFS, invoice_sent: false }), "invoice_sent");
     await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
     expect(checked(/toggle invoice sent/i)).toBe("false");
+  });
+});
+
+describe("D-283 repair round 3: a switch clicked and answered while the re-read is in flight", () => {
+  it("NPR-08n RED-BEFORE: an older re-read does not overwrite a switch answered while it was in flight", async () => {
+    let releaseReread!: () => void;
+    const reread = () =>
+      new Promise<Response>((resolve) => {
+        releaseReread = () => resolve(json(200, PREFS)); // read before Invoice Sent's commit: still on
+      });
+    const server = serve(queue(() => json(200, PREFS), reread), () => json(200, LOG));
+    await renderPage();
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(6));
+    fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
+
+    server.answerPatch(json(400, { statusCode: 400, message: "Bad request" }), "payment_receipt");
+    await waitFor(() => expect(server.prefsGets()).toBe(2)); // the re-read is out, and held
+    fireEvent.click(screen.getByRole("switch", { name: /toggle invoice sent/i }));
+    server.answerPatch(json(200, { ...PREFS, invoice_sent: false }), "invoice_sent");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
+    expect(checked(/toggle invoice sent/i)).toBe("false");
+
+    releaseReread();
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(checked(/toggle invoice sent/i)).toBe("false");
+    expect(checked(RECEIPT)).toBe("false");
   });
 });
 
