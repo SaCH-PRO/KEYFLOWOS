@@ -1297,6 +1297,11 @@
       "packet": "V1-65 (READY-TO-SEND)"
     },
     {
+      "prefix": "v65g_",
+      "owner": "apps/server/test/payroll-discard.integration.test.ts",
+      "packet": "V1-65 (TOF-PAYROLL-DISCARD)"
+    },
+    {
 "prefix": "v91r_",
       "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
       "packet": "V1-91 (FU-BULK-DELETE-UNDO, P37)"
