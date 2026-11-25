@@ -118,7 +118,8 @@ for (const viewport of WIDTHS) {
       await expect.soft(row("Boateng"), "no row for Kofi").toHaveCount(0);
       // The tenant holds the three customers and the harness's own sample one; only Kwame matches.
       await expect.soft(page.getByText("1 of 1", { exact: true }).first(), "the table's count says 1 of 1").toBeVisible();
-      await expect.soft(page.getByText(/^Showing 1-1 of 1$/).first(), "the table's pager says 1 of 1").toBeVisible();
+      // The pager's "Showing" line is hidden below 640px by design (hidden sm:inline), so its text is checked, not shown.
+      await expect.soft(page.getByText(/^Showing 1-1 of 1$/), "the table's pager says 1 of 1").toHaveCount(1);
     });
   }
 }
