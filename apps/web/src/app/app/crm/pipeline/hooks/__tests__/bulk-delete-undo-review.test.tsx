@@ -12,6 +12,8 @@
  *   COR-P37-2  (pins) deletedIds that outnumber `deleted` offer no Undo; the table re-reads its own read after the
  *              delete; a refused restore does not re-read the list; failedCount > 0 is never "all restored".
  *   COR-P37-4  (RED) never "0 could not be restored".
+ *   CONF-P37-1 (pin, correctness confirmation of be3d7a44) the person is recorded before the delete is sent: a
+ *              different person signed in while the delete is in flight cannot Undo it.
  *
  * The real hooks and client run; fetch is stubbed at the network edge with a server that keeps which customers
  * are live, and sonner is replaced by spies so the toast's Undo can be pressed.
@@ -78,7 +80,7 @@ function jsonResponse(status: number, body: unknown): Response {
  * A server holding which customers are live. The delete removes `removes` (default: every id sent) and answers
  * `del`; the restore brings back what it names and answers `restore` (default: all restored).
  */
-function installServer(opts: { del: Answer; removes?: string[]; restore?: Answer }) {
+function installServer(opts: { del: Answer; removes?: string[]; restore?: Answer; onDelete?: () => void }) {
   const sent: Sent[] = [];
   const live = new Set(IDS);
   vi.stubGlobal(
@@ -92,6 +94,7 @@ function installServer(opts: { del: Answer; removes?: string[]; restore?: Answer
       if (method === "DELETE" && url.pathname.endsWith(DELETE_PATH)) {
         const ids = (body as { contactIds?: string[] })?.contactIds ?? [];
         if (opts.del.status < 300) (opts.removes ?? ids).forEach((id) => live.delete(id));
+        opts.onDelete?.();
         return jsonResponse(opts.del.status, opts.del.body);
       }
       if (method === "POST" && url.pathname.endsWith(RESTORE_SUFFIX)) {
@@ -308,6 +311,15 @@ describe.each([listView, tableView])("FU-BULK-DELETE-UNDO review repair: $name",
     signInAs("user_a", 2);
     await pressUndo();
     expect(server.restores().map((r) => r.body)).toEqual([{ ids: IDS }]);
+  });
+
+  it("CONF-P37-1 pin: the person is recorded before the delete is sent: another person signed in mid-request cannot Undo", async () => {
+    const server = installServer({ del: { status: 200, body: { deleted: 3 } }, onDelete: () => signInAs("user_b") });
+    const screen = driver.mount(server);
+    await screen.deleteSelected(IDS);
+    await pressUndo();
+    expect(server.restores(), "the Undo belongs to the person who sent the delete, not the one signed in when it answered").toHaveLength(0);
+    expect(shownWords().some((w) => /earlier session/i.test(w)), JSON.stringify(shownWords())).toBe(true);
   });
 
   it("SEC-P37W-2 pin: after a business switch, Undo restores in the delete's business", async () => {
