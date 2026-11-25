@@ -610,4 +610,37 @@ describe('CallLogService', () => {
       expect(completedEvents(emitter)).toEqual([]);
     });
   });
+
+  describe('W11-CALLS-LIST-PAGING (F-31): total order with id tie-break', () => {
+    it('listCalls passes orderBy [{ scheduledAt: "asc" }, { id: "asc" }] with numeric skip and take', async () => {
+      const prisma = createMockPrisma();
+      const emitter = createMockEmitter();
+      const svc = new CallLogService(prisma as any, emitter as any);
+
+      await svc.listCalls('biz_1', { limit: 10, offset: 20 });
+
+      expect(prisma.client.callLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { businessId: 'biz_1' },
+          orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+          skip: 20,
+          take: 10,
+        }),
+      );
+    });
+
+    it('getScheduledCalls passes orderBy [{ scheduledAt: "asc" }, { id: "asc" }]', async () => {
+      const prisma = createMockPrisma();
+      const emitter = createMockEmitter();
+      const svc = new CallLogService(prisma as any, emitter as any);
+
+      await svc.getScheduledCalls('biz_1', 'user_1', '2026-06-15T12:00:00Z');
+
+      expect(prisma.client.callLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+        }),
+      );
+    });
+  });
 });

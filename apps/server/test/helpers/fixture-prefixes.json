@@ -1178,6 +1178,11 @@
       "packet": "V1-66 (SWP-CENSUS-OPEN-WRITES)"
     },
     {
+      "prefix": "v66i_",
+      "owner": "apps/server/test/call-log-list-paging.integration.test.ts",
+      "packet": "V1-66 (W11-CALLS-LIST-PAGING)"
+    },
+    {
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
