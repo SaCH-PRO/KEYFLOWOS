@@ -88,7 +88,7 @@ export function ContactsDatabase({
   search,
   onSearchChange,
 }: ContactsDatabaseProps) {
-  const db = useDatabaseState({ businessId, contacts, onRefresh });
+  const db = useDatabaseState({ businessId, contacts, onRefresh, initialSearch: search });
 
   const exportDialogRef = useRef<HTMLDivElement>(null);
   const exportTriggerRef = useRef<HTMLButtonElement>(null);
@@ -279,7 +279,9 @@ export function ContactsDatabase({
                         onClick={() => {
                           db.applyView(view.id);
                           // The view's search is the screen's search too (BUG-080), so the two never disagree.
-                          onSearchChange?.(view.config.search);
+                          // A view with no string search searches for nothing (use-database-state applyView), so
+                          // the screen is handed "" too, never undefined (review SEC-CWP-1).
+                          onSearchChange?.(typeof view.config.search === "string" ? view.config.search : "");
                         }}
                         className="flex-1 text-left flex items-center gap-2 min-w-0"
                       >
