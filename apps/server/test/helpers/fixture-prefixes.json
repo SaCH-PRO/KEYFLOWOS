@@ -1213,6 +1213,11 @@
       "packet": "V1-66 (W11-CALLS-LIST-PAGING)"
     },
     {
+      "prefix": "v66k_",
+      "owner": "apps/server/test/census-v1-a.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-V1-A)"
+    },
+    {
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
