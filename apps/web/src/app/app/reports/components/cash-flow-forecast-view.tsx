@@ -83,6 +83,9 @@ export function CashFlowForecastView({ businessId }: CashFlowForecastViewProps) 
   const [loading, setLoading] = useState(false);
   // W11-AI-CASHFLOW-REVENUE (D-57, D-100): the forecast needs revenue read; the server answers 403 otherwise.
   const [denied, setDenied] = useState(false);
+  // SWP-FIN-CASH-SOURCES review SEC-CFW-2: any other failure (a 5xx, a network error) is said, with Retry,
+  // and the earlier figures are cleared, so a failed Refresh never leaves them up as if they were current.
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -92,11 +95,18 @@ export function CashFlowForecastView({ businessId }: CashFlowForecastViewProps) 
       if (res.data) {
         setForecast(res.data);
         setDenied(false);
+        setFailed(false);
       } else if ((res as { status?: number }).status === 403) {
         setForecast(null);
         setDenied(true);
+        setFailed(false);
+      } else {
+        setForecast(null);
+        setFailed(true);
       }
     } catch {
+      setForecast(null);
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -109,6 +119,20 @@ export function CashFlowForecastView({ businessId }: CashFlowForecastViewProps) 
     return (
       <div role="status" className="p-4 text-center">
         <p className="text-xs text-muted-foreground">Cash flow forecast needs revenue access.</p>
+      </div>
+    );
+  }
+
+  if (failed && !loading) {
+    return (
+      <div role="alert" className="p-4 text-center space-y-2">
+        <p className="text-xs text-muted-foreground">The cash flow forecast could not be loaded.</p>
+        <button
+          onClick={load}
+          className="text-xs px-3 min-h-[44px] rounded-xl border border-border/60 hover:border-border transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -161,6 +185,7 @@ export function CashFlowForecastView({ businessId }: CashFlowForecastViewProps) 
         <button
           onClick={load}
           disabled={loading}
+          aria-label="Refresh forecast"
           className="text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 min-w-[44px] min-h-[44px] justify-center"
         >
           <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
@@ -207,7 +232,9 @@ export function CashFlowForecastView({ businessId }: CashFlowForecastViewProps) 
             {forecast.cashBasis === "ledger"
               ? `Current balance is booked ledger cash in ${code ?? "the business currency"} up to today; future-dated entries are not counted.`
               : `Amounts in ${code ?? "the business currency"}.`}
-            {forecast.cashBasis === "ledger" && !code ? " Your business currency is not set as a three-letter code, so no code is shown." : ""}
+            {/* Review COR-1 / SEC-CFW-1: no cause is stated. The web cannot tell a business whose currency is
+                free text from a forecast the server failed to compute (200, zeros, no currency). */}
+            {!code ? " No currency code was given, so amounts carry no code." : ""}
           </p>
 
           {figures && (figures.otherCash.length > 0 || figures.notListed > 0) && (
