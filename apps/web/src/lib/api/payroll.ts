@@ -50,6 +50,9 @@ export async function listRates(
 export async function listRuns(
   businessId: string,
   filters?: { status?: string; limit?: number },
+  // V1-65 review COR-FO-1: a caller that passes a signal gets its own request, never one joined to an identical read
+  // already in flight (lib/api coalesces unsignalled GETs), so a re-read after a change sees the change.
+  opts?: { signal?: AbortSignal },
 ): Promise<{ data: PayrollRunListItem[] | null; error: string | null; status?: number }> {
   const params = new URLSearchParams();
   if (filters?.status) params.set("status", filters.status);
@@ -57,6 +60,7 @@ export async function listRuns(
   const qs = params.toString();
   return apiGet<PayrollRunListItem[]>(
     `/payroll/businesses/${encodeURIComponent(businessId)}/runs${qs ? `?${qs}` : ""}`,
+    opts,
   );
 }
 

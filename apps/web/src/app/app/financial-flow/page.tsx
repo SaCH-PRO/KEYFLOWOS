@@ -46,12 +46,24 @@ interface SafeToSpend {
  * V1-65 (SWP-FIN-OVERVIEW-TRUTH; D-144): the runs safe-to-spend reserves are the DRAFT and APPROVED ones
  * (SafeToSpendService), never PAID or VOID. Read with operations read (GET payroll runs); a refusal is said as one.
  */
-type ReservingRuns = { runs: PayrollRunListItem[] } | { refusal: string } | { error: string };
+type ReservingRuns = { runs: PayrollRunListItem[]; truncated: boolean } | { refusal: string } | { error: string };
 
 const RESERVING_STATUSES = ["DRAFT", "APPROVED"] as const;
 
+/** The most runs one status read lists (review COR-FO-2): a full page means there may be more than are listed. */
+const RUNS_PAGE = 100;
+
+/**
+ * Review COR-FO-1: a read of its own, never joined to an identical GET already in flight. lib/api coalesces unsignalled
+ * GETs, so a re-read made after a change could otherwise be answered by a read the server made before it. The signal
+ * is never aborted; passing one is lib/api's opt-out of coalescing.
+ */
+const freshRead = () => ({ signal: new AbortController().signal });
+
 async function readReservingRuns(businessId: string): Promise<ReservingRuns> {
-  const answers = await Promise.all(RESERVING_STATUSES.map((status) => listRuns(businessId, { status, limit: 100 })));
+  const answers = await Promise.all(
+    RESERVING_STATUSES.map((status) => listRuns(businessId, { status, limit: RUNS_PAGE }, freshRead())),
+  );
   for (const res of answers) {
     const refusal = moduleReadRefusal(res, "operations", "the payroll runs");
     if (refusal) return { refusal };
@@ -61,7 +73,8 @@ async function readReservingRuns(businessId: string): Promise<ReservingRuns> {
     .flatMap((res) => (Array.isArray(res.data) ? res.data : []))
     .filter((run) => (RESERVING_STATUSES as readonly string[]).includes(run.status))
     .sort((a, b) => String(a.periodStart).localeCompare(String(b.periodStart)));
-  return { runs };
+  const truncated = answers.some((res) => Array.isArray(res.data) && res.data.length >= RUNS_PAGE);
+  return { runs, truncated };
 }
 
 /** A currency code as the server compares it (posting.service normalizeCurrency): trimmed, upper case. */
@@ -95,7 +108,9 @@ export default function FinancialFlowPage() {
   // V1-65 (D-144): the payroll runs safe-to-spend reserves, the member's module levels (Discard needs operations
   // write), and the Discard dialog.
   const [reservingRuns, setReservingRuns] = useState<ReservingRuns | null>(null);
-  const [moduleLevels, setModuleLevels] = useState<ModuleLevels>(null);
+  // Review SEC-FINOV-2: the answer is kept with the business it was asked for, and used only while that business is
+  // still the one shown: a switch never offers Discard on the last business's level.
+  const [levelsAnswer, setLevelsAnswer] = useState<{ businessId: string; levels: ModuleLevels } | null>(null);
   const [discardTarget, setDiscardTarget] = useState<PayrollRunListItem | null>(null);
   const [discardReason, setDiscardReason] = useState("");
   const [discarding, setDiscarding] = useState(false);
@@ -104,6 +119,7 @@ export default function FinancialFlowPage() {
   // The latest read wins: an older answer landing after a newer one never overwrites it.
   const safeSeq = useRef(0);
   const runsSeq = useRef(0);
+  const bucketsSeq = useRef(0);
 
   // KEY FLOWS: AR Clerk proof-of-concept queue
   const [roleKey] = useState("ACCOUNTS_RECEIVABLE_CLERK");
@@ -172,17 +188,37 @@ export default function FinancialFlowPage() {
    * discarded), so the figure shown is the server's after the change. A failed read is said in the load banner and
    * no figure from before the change is kept as if current.
    */
-  const refreshSafeToSpend = useCallback(async () => {
-    if (!businessId) return;
+  const refreshSafeToSpend = useCallback(async (): Promise<boolean> => {
+    if (!businessId) return false;
     const seq = ++safeSeq.current;
-    const res = await apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`);
-    if (seq !== safeSeq.current) return;
+    const res = await apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`, freshRead());
+    if (seq !== safeSeq.current) return Boolean(res.data);
     if (res.data) {
       setSafe(res.data);
       setLoadErrors((prev) => prev.filter((label) => label !== "Safe-to-spend"));
     } else {
       setSafe(null);
       setLoadErrors((prev) => (prev.includes("Safe-to-spend") ? prev : [...prev, "Safe-to-spend"]));
+    }
+    return Boolean(res.data);
+  }, [businessId]);
+
+  /**
+   * Review COR-FO-1 (the mirror case): after a bucket is added or deleted, the list is read again as well, and a load
+   * answer read before the change is not applied over it. A failed re-read keeps the list as the write left it.
+   */
+  const refreshBuckets = useCallback(async () => {
+    if (!businessId) return;
+    const seq = ++bucketsSeq.current;
+    const res = await apiGet<{ items: ReserveBucket[] }>(`/finance/businesses/${businessId}/reserves`, freshRead());
+    if (seq !== bucketsSeq.current) return;
+    const refusal = moduleReadRefusal(res, "revenue", "the reserve buckets");
+    if (refusal) {
+      setBucketsRefusal(refusal);
+      setBuckets([]);
+    } else if (!res.error && Array.isArray(res.data?.items)) {
+      setBucketsRefusal(null);
+      setBuckets(res.data.items);
     }
   }, [businessId]);
 
@@ -195,7 +231,7 @@ export default function FinancialFlowPage() {
       .then((res) => (res.error ? null : memberModuleLevelsOf(res.data)))
       .catch(() => null)
       .then((levels) => {
-        if (!disposed) setModuleLevels(levels);
+        if (!disposed) setLevelsAnswer({ businessId, levels });
       });
     return () => {
       disposed = true;
@@ -208,6 +244,7 @@ export default function FinancialFlowPage() {
     setLoadErrors([]);
     void loadReservingRuns();
     const safeLoad = ++safeSeq.current;
+    const bucketsLoad = ++bucketsSeq.current;
     // Each call races a 12s timeout and all settle independently — one slow or
     // failing endpoint must never hang the whole page (audit P0).
     const withTimeout = <T,>(p: Promise<{ data: T | null; error: string | null }>, label: string) =>
@@ -236,16 +273,20 @@ export default function FinancialFlowPage() {
         if (safeRes.data) setSafe(safeRes.data); else failed.push(safeRes.label);
       }
       if (fcRes.data) setForecast(fcRes.data); else failed.push(fcRes.label);
-      const refusal = moduleReadRefusal(bucketRes, "revenue", "the reserve buckets");
-      setBucketsRefusal(refusal);
-      if (bucketRes.data) setBuckets(bucketRes.data);
-      else {
-        setBuckets([]);
-        if (!refusal) failed.push(bucketRes.label);
+      // A bucket write since this load began has read the list again: its answer is newer than this one.
+      if (bucketsLoad === bucketsSeq.current) {
+        const refusal = moduleReadRefusal(bucketRes, "revenue", "the reserve buckets");
+        setBucketsRefusal(refusal);
+        if (bucketRes.data) setBuckets(bucketRes.data);
+        else {
+          setBuckets([]);
+          if (!refusal) failed.push(bucketRes.label);
+        }
       }
-      if (failed.length > 0) setLoadErrors(failed);
+      // Review COR-FO-4: merged, never written over, so a re-read's failure said while this load ran stays said.
+      if (failed.length > 0) setLoadErrors((prev) => [...prev, ...failed.filter((label) => !prev.includes(label))]);
     } catch {
-      setLoadErrors(['financial data']);
+      setLoadErrors((prev) => (prev.includes("financial data") ? prev : [...prev, "financial data"]));
     } finally {
       setLoading(false);
     }
@@ -254,6 +295,23 @@ export default function FinancialFlowPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const currency = overview?.currency ?? "TTD";
+
+  // V1-65 (D-144): the payroll reserve line. Money is shown only with the safe-to-spend read, which needs revenue
+  // read (D-100): a member refused it sees no line and no run amount.
+  const businessCurrency = currencyCode(safe?.currency) || currencyCode(currency);
+  const payrollReserved = Number(safe?.payrollReserved ?? 0);
+  const listedRuns = reservingRuns && "runs" in reservingRuns ? reservingRuns.runs : [];
+  const showPayrollReserve = Boolean(safe) && (payrollReserved > 0 || listedRuns.length > 0);
+  const moduleLevels: ModuleLevels = levelsAnswer && levelsAnswer.businessId === businessId ? levelsAnswer.levels : null;
+  const operationsLevel = moduleLevels?.operations;
+  const mayDiscard = operationsLevel === "write" || operationsLevel === "admin";
+  const runCurrency = (run: PayrollRunListItem) => currencyCode(run.currency) || businessCurrency;
+  // Where PayrollService.discardRun accepts a run: DRAFT, or APPROVED in a currency other than the business's. (A
+  // posted run is refused 409, and said so; the list does not tell a posted run apart.)
+  const serverWouldDiscard = (run: PayrollRunListItem) =>
+    run.status === "DRAFT" || (run.status === "APPROVED" && runCurrency(run) !== businessCurrency);
 
   const handleAdd = async () => {
     if (!businessId || !newName.trim()) return;
@@ -279,8 +337,8 @@ export default function FinancialFlowPage() {
         setNewCurrent("");
         setShowAdd(false);
       }
-      // V1-65: an active bucket is subtracted from Safe to Spend; read the figure again.
-      await refreshSafeToSpend();
+      // V1-65: an active bucket is subtracted from Safe to Spend; read the figure (and the list) again.
+      await Promise.all([refreshSafeToSpend(), refreshBuckets()]);
     } finally {
       setSaving(false);
     }
@@ -297,7 +355,7 @@ export default function FinancialFlowPage() {
       return;
     }
     setBuckets((prev) => prev.filter((b) => b.id !== id));
-    await refreshSafeToSpend();
+    await Promise.all([refreshSafeToSpend(), refreshBuckets()]);
   };
 
   const openDiscard = (run: PayrollRunListItem) => {
@@ -335,28 +393,20 @@ export default function FinancialFlowPage() {
         return;
       }
       setDiscardTarget(null);
-      setDiscardNotice(`The payroll run ${runPeriod(run)} was discarded: Safe to Spend no longer reserves it.`);
-      await Promise.all([refreshSafeToSpend(), loadReservingRuns()]);
+      // Review SEC-FINOV-1: a run in another currency was never counted in Safe to Spend; say only that it is void.
+      const runCode = currencyCode(run.currency) || businessCurrency;
+      const said =
+        runCode === businessCurrency
+          ? `The payroll run ${runPeriod(run)} was discarded and is now void: Safe to Spend no longer reserves it.`
+          : `The payroll run ${runPeriod(run)} (${runCode}) was discarded and is now void. It was not counted in Safe to Spend, which is in ${businessCurrency}.`;
+      setDiscardNotice(said);
+      const [refreshed] = await Promise.all([refreshSafeToSpend(), loadReservingRuns()]);
+      // Review COR-FO-4: the discard happened whatever the re-read did; say so, and that the figure is not current.
+      if (!refreshed) setDiscardNotice(`${said} Safe to Spend could not be refreshed: no figure is shown until it can be read again.`);
     } finally {
       setDiscarding(false);
     }
   };
-
-  const currency = overview?.currency ?? "TTD";
-
-  // V1-65 (D-144): the payroll reserve line. Money is shown only with the safe-to-spend read, which needs revenue
-  // read (D-100): a member refused it sees no line and no run amount.
-  const businessCurrency = currencyCode(safe?.currency) || currencyCode(currency);
-  const payrollReserved = Number(safe?.payrollReserved ?? 0);
-  const listedRuns = reservingRuns && "runs" in reservingRuns ? reservingRuns.runs : [];
-  const showPayrollReserve = Boolean(safe) && (payrollReserved > 0 || listedRuns.length > 0);
-  const operationsLevel = moduleLevels?.operations;
-  const mayDiscard = operationsLevel === "write" || operationsLevel === "admin";
-  const runCurrency = (run: PayrollRunListItem) => currencyCode(run.currency) || businessCurrency;
-  // Where PayrollService.discardRun accepts a run: DRAFT, or APPROVED in a currency other than the business's. (A
-  // posted run is refused 409, and said so; the list does not tell a posted run apart.)
-  const serverWouldDiscard = (run: PayrollRunListItem) =>
-    run.status === "DRAFT" || (run.status === "APPROVED" && runCurrency(run) !== businessCurrency);
 
   const launcherSections: ModuleLauncherSection[] = [
     {
@@ -425,6 +475,12 @@ export default function FinancialFlowPage() {
           </button>
         </div>
       )}
+      {discardNotice && (
+        // Review COR-FO-4: outside the breakdown, so a re-read that fails after the discard never hides it.
+        <p className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-500" role="status">
+          {discardNotice}
+        </p>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />)
@@ -434,7 +490,15 @@ export default function FinancialFlowPage() {
               <MetricCard label="Cash Balance" value={`${currency} ${(overview?.cashBalance ?? 0).toLocaleString()}`} icon={Wallet} />
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, type: "spring", stiffness: 300, damping: 24 }}>
-              <MetricCard label="Safe to Spend" value={`${currency} ${(safe?.safeToSpend ?? 0).toLocaleString()}`} icon={ShieldCheck} iconColor="#10b981" />
+              <MetricCard
+                label="Safe to Spend"
+                // Review COR-FO-4: with no safe-to-spend answer (refused, failed, or a re-read that failed) no figure is
+                // shown: never 0, never the figure from before a change.
+                value={safe ? `${currency} ${(safe.safeToSpend ?? 0).toLocaleString()}` : "—"}
+                sub={safe ? undefined : "Not available"}
+                icon={ShieldCheck}
+                iconColor="#10b981"
+              />
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, type: "spring", stiffness: 300, damping: 24 }}>
               <MetricCard label="Overdue" value={`${currency} ${(overview?.overdueInvoices ?? 0).toLocaleString()}`} icon={Receipt} iconColor="#ef4444" />
@@ -492,6 +556,12 @@ export default function FinancialFlowPage() {
               {reservingRuns && "error" in reservingRuns && (
                 <p className="text-xs text-amber-500" role="alert">The runs could not be listed: {reservingRuns.error}</p>
               )}
+              {reservingRuns && "runs" in reservingRuns && reservingRuns.truncated && (
+                <p className="text-xs text-amber-500">
+                  More runs are reserved than are listed here: at most {RUNS_PAGE} draft and {RUNS_PAGE} approved runs are
+                  shown. The amount above counts them all.
+                </p>
+              )}
               {listedRuns.length > 0 && (
                 <ul className="space-y-1.5">
                   {listedRuns.map((run) => {
@@ -522,9 +592,6 @@ export default function FinancialFlowPage() {
                 </ul>
               )}
             </section>
-          )}
-          {discardNotice && (
-            <p className="mx-4 mb-4 text-xs text-emerald-500" role="status">{discardNotice}</p>
           )}
         </SectionCard>
       )}
