@@ -45,6 +45,11 @@
  *   TCH-20  pin      MIN-2: outcome "received" reads "Call received", "Email received", "SMS received"
  *   TCH-21  pin      MIN-2: a long message is shown whole (whitespace-pre-wrap, no line clamp); other details clamp
  *
+ * Review round 2 (confirmations of fc7295dc):
+ *   TCH-18b RED      MIN-4: a failure with an empty error (a proxy 502 with an HTML body and no status text, as
+ *                    over HTTP/2: apiGet answers error "") is a failure too (failure-kit FK-SEC-1), never an empty
+ *                    history
+ *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -431,7 +436,7 @@ describe("D-277: the Timeline has a channel filter", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await renderTimeline();
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(/could not load the timeline/i);
+    expect(alert).toHaveTextContent(/(could not|couldn['’]t) load the timeline/i);
     expect(screen.queryByText(/no timeline events yet/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^0 events$/)).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: /filter by channel/i })).not.toBeInTheDocument();
@@ -473,5 +478,28 @@ describe("D-277: the Timeline has a channel filter", () => {
     expect(message).toHaveClass("whitespace-pre-wrap");
     expect(message).not.toHaveClass("line-clamp-2");
     expect(screen.getByText("Call back Monday")).toHaveClass("line-clamp-2");
+  });
+
+  it("TCH-18b RED: a 502 with an HTML body and no status text is a failure with Retry, not an empty history", async () => {
+    let failing = true;
+    const reads = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(url, "http://localhost");
+      if (!pathname.endsWith(`/contacts/${C}/events`)) return json(404, { message: "Not stubbed" });
+      if (failing) return new Response("<html><body>Bad gateway</body></html>", { status: 502, statusText: "", headers: { "content-type": "text/html" } });
+      return json(200, [NOTE, ...PASTED]);
+    });
+    vi.stubGlobal("fetch", reads);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await renderTimeline();
+    expect(screen.queryByText(/no timeline events yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^0 events$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /filter by channel/i })).not.toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/(could not|couldn['’]t) load the timeline/i);
+    failing = false;
+    fireEvent.click(within(alert).getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText(PASTED_TEXT)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
