@@ -7,6 +7,7 @@ import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } 
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
@@ -120,7 +121,8 @@ export class BookingsController {
    * customer cancel forfeits a paid deposit (D-26); a CANCELLED sent without
    * an initiator is a customer cancel (D-65), as before the field existed.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/bookings/:bookingId/status')
   updateBookingStatus(
     @Param('businessId') businessId: string,
@@ -130,7 +132,8 @@ export class BookingsController {
     return this.bookings.updateBookingStatus(businessId, bookingId, body?.status as BookingStatus, body?.cancelledBy ?? 'CUSTOMER');
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/bookings/:bookingId/create-invoice')
   createInvoiceFromBooking(
     @Param('businessId') businessId: string,
@@ -139,7 +142,8 @@ export class BookingsController {
     return this.bookings.createInvoiceFromBooking(businessId, bookingId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/bookings/:bookingId/reschedule')
   rescheduleBooking(
     @Param('businessId') businessId: string,
@@ -149,7 +153,8 @@ export class BookingsController {
     return this.bookings.rescheduleBooking(businessId, bookingId, new Date(startTime));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/bookings/:bookingId/notes')
   updateBookingNotes(
     @Param('businessId') businessId: string,
@@ -159,7 +164,8 @@ export class BookingsController {
     return this.bookings.updateBookingNotes(businessId, bookingId, notes);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Patch('businesses/:businessId/bookings/:bookingId')
   async updateBooking(
     @Param('businessId') businessId: string,
@@ -181,7 +187,8 @@ export class BookingsController {
     return updated;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @RequireModuleScope('bookings', 'write')
   @RequirePlanLimit('bookings')
   @Post('businesses/:businessId')
   createBooking(
@@ -367,7 +374,8 @@ export class BookingsController {
    * @deprecated Use Catalog endpoint. Pass-through to CatalogService.createService.
    * V1-64: a body the catalog cannot store is a 400 (assertServiceCreateBody), not a 500.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
@@ -397,7 +405,8 @@ export class BookingsController {
   }
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.updateService. */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Patch('businesses/:businessId/services/:serviceId')
   async updateService(
     @Param('businessId') businessId: string,
@@ -418,7 +427,8 @@ export class BookingsController {
   }
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.deleteService. */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Delete('businesses/:businessId/services/:serviceId')
   async deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
     await this.catalog.deleteService(businessId, serviceId);
@@ -426,7 +436,8 @@ export class BookingsController {
   }
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.batchServices. */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/services/batch')
   async batchServices(
     @Param('businessId') businessId: string,
@@ -453,7 +464,8 @@ export class BookingsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/staff')
   createStaff(
     @Param('businessId') businessId: string,
@@ -467,7 +479,8 @@ export class BookingsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Delete('businesses/:businessId/staff/:staffId')
   async deleteStaff(@Param('businessId') businessId: string, @Param('staffId') staffId: string) {
     const existing = await this.prisma.client.staffMember.findFirst({ where: { id: staffId, businessId } });
@@ -491,7 +504,8 @@ export class BookingsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/staff/:staffId/availability')
   async setStaffAvailability(
     @Param('businessId') businessId: string,
@@ -530,7 +544,8 @@ export class BookingsController {
     return this.waitlist.listWaitlist(businessId, query);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/waitlist')
   addToWaitlist(
     @Param('businessId') businessId: string,
@@ -548,7 +563,8 @@ export class BookingsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/waitlist/:entryId/offer')
   offerWaitlistSlot(
     @Param('businessId') businessId: string,
@@ -567,7 +583,8 @@ export class BookingsController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/waitlist/:entryId/convert')
   convertWaitlistEntry(
     @Param('businessId') businessId: string,
@@ -576,7 +593,8 @@ export class BookingsController {
     return this.waitlist.convertWaitlistEntry(businessId, entryId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/waitlist/:entryId/cancel')
   cancelWaitlistEntry(
     @Param('businessId') businessId: string,
@@ -683,7 +701,8 @@ export class BookingsController {
     return this.calendar.listCalendarEvents(businessId, timeMin, timeMax);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/calendar/events')
   async createExternalCalendarEvent(
     @Param('businessId') businessId: string,
@@ -750,7 +769,8 @@ export class BookingsController {
     return { id: eventId };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Patch('businesses/:businessId/calendar/events/:eventId')
   async updateExternalCalendarEvent(
     @Param('businessId') businessId: string,
@@ -849,7 +869,8 @@ export class BookingsController {
     return { id: eventId, success: true };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Delete('businesses/:businessId/calendar/events/:eventId')
   async deleteExternalCalendarEvent(
     @Param('businessId') businessId: string,
@@ -907,13 +928,15 @@ export class BookingsController {
     return this.calendar.listConflicts(businessId, status || 'open');
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/calendar/conflicts/scan')
   async scanCalendarConflicts(@Param('businessId') businessId: string) {
     return this.calendar.scanForConflicts(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/calendar/conflicts/:conflictId/resolve')
   async resolveCalendarConflict(
     @Param('businessId') businessId: string,
@@ -926,7 +949,8 @@ export class BookingsController {
     return this.calendar.resolveConflict(businessId, conflictId, body.resolution);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Post('businesses/:businessId/bookings/:bookingId/sync-calendar')
   async syncBookingToCalendar(
     @Param('businessId') businessId: string,
@@ -966,7 +990,8 @@ export class BookingsController {
     return this.bookings.getReminderSettings(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('bookings', 'write')
   @Patch('businesses/:businessId/reminder-settings')
   async updateReminderSettings(
     @Param('businessId') businessId: string,

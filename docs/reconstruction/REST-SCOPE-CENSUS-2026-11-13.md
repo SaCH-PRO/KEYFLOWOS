@@ -1146,32 +1146,32 @@ ModuleScopeGuard at class level).
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `BookingsController.getCalendarAuthUrl` | GET | `/bookings/businesses/:businessId/calendar/auth-url` | exempt-check | check:assertGoogleConnectOwner (a credential-binding start, CEN-09; the Google Calendar consent is the owner's, D-99) |
-| `BookingsController.addToWaitlist` | POST | `/bookings/businesses/:businessId/waitlist` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.cancelWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/cancel` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.convertWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/convert` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.createBooking` | POST | `/bookings/businesses/:businessId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.createExternalCalendarEvent` | POST | `/bookings/businesses/:businessId/calendar/events` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.createInvoiceFromBooking` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/create-invoice` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.createService` | POST | `/bookings/businesses/:businessId/services` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.createStaff` | POST | `/bookings/businesses/:businessId/staff` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.deleteExternalCalendarEvent` | DELETE | `/bookings/businesses/:businessId/calendar/events/:eventId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.deleteService` | DELETE | `/bookings/businesses/:businessId/services/:serviceId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.deleteStaff` | DELETE | `/bookings/businesses/:businessId/staff/:staffId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
+| `BookingsController.addToWaitlist` | POST | `/bookings/businesses/:businessId/waitlist` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.cancelWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/cancel` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.convertWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/convert` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createBooking` | POST | `/bookings/businesses/:businessId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createExternalCalendarEvent` | POST | `/bookings/businesses/:businessId/calendar/events` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createInvoiceFromBooking` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/create-invoice` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createService` | POST | `/bookings/businesses/:businessId/services` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createStaff` | POST | `/bookings/businesses/:businessId/staff` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.deleteExternalCalendarEvent` | DELETE | `/bookings/businesses/:businessId/calendar/events/:eventId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.deleteService` | DELETE | `/bookings/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.deleteStaff` | DELETE | `/bookings/businesses/:businessId/staff/:staffId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.disconnectCalendar` | POST | `/bookings/businesses/:businessId/calendar/disconnect` | exempt-check | check:assertGoogleConnectOwner (D-99) |
-| `BookingsController.offerWaitlistSlot` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/offer` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.rescheduleBooking` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/reschedule` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.resolveCalendarConflict` | POST | `/bookings/businesses/:businessId/calendar/conflicts/:conflictId/resolve` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.scanCalendarConflicts` | POST | `/bookings/businesses/:businessId/calendar/conflicts/scan` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.setStaffAvailability` | POST | `/bookings/businesses/:businessId/staff/:staffId/availability` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.syncBookingToCalendar` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/sync-calendar` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.updateBooking` | PATCH | `/bookings/businesses/:businessId/bookings/:bookingId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.updateBookingNotes` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/notes` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.updateBookingStatus` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/status` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
+| `BookingsController.offerWaitlistSlot` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/offer` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.rescheduleBooking` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/reschedule` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.resolveCalendarConflict` | POST | `/bookings/businesses/:businessId/calendar/conflicts/:conflictId/resolve` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.scanCalendarConflicts` | POST | `/bookings/businesses/:businessId/calendar/conflicts/scan` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.setStaffAvailability` | POST | `/bookings/businesses/:businessId/staff/:staffId/availability` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.syncBookingToCalendar` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/sync-calendar` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateBooking` | PATCH | `/bookings/businesses/:businessId/bookings/:bookingId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateBookingNotes` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/notes` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateBookingStatus` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/status` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.updateCalendarSettings` | PATCH | `/bookings/businesses/:businessId/calendar/settings` | exempt-check | check:assertGoogleConnectOwner (D-99) |
-| `BookingsController.updateExternalCalendarEvent` | PATCH | `/bookings/businesses/:businessId/calendar/events/:eventId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.updateReminderSettings` | PATCH | `/bookings/businesses/:businessId/reminder-settings` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
-| `BookingsController.updateService` | PATCH | `/bookings/businesses/:businessId/services/:serviceId` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
+| `BookingsController.updateExternalCalendarEvent` | PATCH | `/bookings/businesses/:businessId/calendar/events/:eventId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateReminderSettings` | PATCH | `/bookings/businesses/:businessId/reminder-settings` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateService` | PATCH | `/bookings/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 
 ### BusinessAssetsController (`business-assets/business-assets.controller.ts`)
 
@@ -1266,8 +1266,8 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `CalendarController.keyExecuteCalendar` | POST | `/calendar/businesses/:businessId/key/execute` | open | membership only; follow-up SWEEP-CENSUS: bookings write |
-| `CalendarController.keyInterpretCalendar` | POST | `/calendar/businesses/:businessId/key/interpret` | open | membership only; follow-up SWEEP-CENSUS: bookings write; requireUser only |
+| `CalendarController.keyExecuteCalendar` | POST | `/calendar/businesses/:businessId/key/execute` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CalendarController.keyInterpretCalendar` | POST | `/calendar/businesses/:businessId/key/interpret` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `CalendarController.patchSyncSettings` | PATCH | `/calendar/businesses/:businessId/sync/settings` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `CalendarController.syncConnect` | POST | `/calendar/businesses/:businessId/sync/google/connect` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `CalendarController.syncDisconnect` | POST | `/calendar/businesses/:businessId/sync/google/disconnect` | exempt-check | check:assertGoogleConnectOwner (D-99) |
@@ -1278,14 +1278,14 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `CatalogController.batchServices` | POST | `/catalog/businesses/:businessId/services/batch` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.bulkUpdateProducts` | PATCH | `/catalog/businesses/:businessId/products/bulk` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.createProduct` | POST | `/catalog/businesses/:businessId/products` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.createService` | POST | `/catalog/businesses/:businessId/services` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.deleteProduct` | DELETE | `/catalog/businesses/:businessId/products/:productId` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.deleteService` | DELETE | `/catalog/businesses/:businessId/services/:serviceId` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.updateProduct` | PATCH | `/catalog/businesses/:businessId/products/:productId` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
-| `CatalogController.updateService` | PATCH | `/catalog/businesses/:businessId/services/:serviceId` | open | membership only; follow-up SWEEP-CENSUS: revenue write (products, as CommerceController) / bookings write (services); withdrawn from this packet: gating the product writes moves commerce_create_product, commerce_update_product and apply_storefront_recommendation out of the legacy commerce job-role family, pinned as an owner decision in job-role-policy.service.spec.ts (owner question) |
+| `CatalogController.batchServices` | POST | `/catalog/businesses/:businessId/services/batch` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.bulkUpdateProducts` | PATCH | `/catalog/businesses/:businessId/products/bulk` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.createProduct` | POST | `/catalog/businesses/:businessId/products` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.createService` | POST | `/catalog/businesses/:businessId/services` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.deleteProduct` | DELETE | `/catalog/businesses/:businessId/products/:productId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.deleteService` | DELETE | `/catalog/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.updateProduct` | PATCH | `/catalog/businesses/:businessId/products/:productId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.updateService` | PATCH | `/catalog/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 
 ### ChangeOrderController (`change-orders/change-order.controller.ts`)
 
@@ -1299,11 +1299,11 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `CommerceInsightsController.captureMarginSnapshot` | POST | `/commerce/businesses/:businessId/products/:productId/insights/snapshot` | open | membership only; follow-up SWEEP-CENSUS: revenue read; AI insights (POST, compute only) |
-| `CommerceInsightsController.identifyOpportunities` | POST | `/commerce/businesses/:businessId/ai-product-opportunities` | open | membership only; follow-up SWEEP-CENSUS: revenue read; AI insights (POST, compute only) |
-| `CommerceInsightsController.recommendFulfillmentStrategy` | POST | `/commerce/businesses/:businessId/products/:productId/ai-fulfillment-strategy` | open | membership only; follow-up SWEEP-CENSUS: revenue read; AI insights (POST, compute only) |
-| `CommerceInsightsController.recommendPricing` | POST | `/commerce/businesses/:businessId/products/:productId/ai-pricing-recommendation` | open | membership only; follow-up SWEEP-CENSUS: revenue read; AI insights (POST, compute only) |
-| `CommerceInsightsController.rewriteProductCopy` | POST | `/commerce/businesses/:businessId/products/:productId/ai-copy` | open | membership only; follow-up SWEEP-CENSUS: revenue read; AI insights (POST, compute only) |
+| `CommerceInsightsController.captureMarginSnapshot` | POST | `/commerce/businesses/:businessId/products/:productId/insights/snapshot` | applied | revenue:read (P87 SWP-CENSUS-V1-A) |
+| `CommerceInsightsController.identifyOpportunities` | POST | `/commerce/businesses/:businessId/ai-product-opportunities` | applied | revenue:read (P87 SWP-CENSUS-V1-A) |
+| `CommerceInsightsController.recommendFulfillmentStrategy` | POST | `/commerce/businesses/:businessId/products/:productId/ai-fulfillment-strategy` | applied | revenue:read (P87 SWP-CENSUS-V1-A) |
+| `CommerceInsightsController.recommendPricing` | POST | `/commerce/businesses/:businessId/products/:productId/ai-pricing-recommendation` | applied | revenue:read (P87 SWP-CENSUS-V1-A) |
+| `CommerceInsightsController.rewriteProductCopy` | POST | `/commerce/businesses/:businessId/products/:productId/ai-copy` | applied | revenue:read (P87 SWP-CENSUS-V1-A) |
 
 ### CommerceController (`commerce/commerce.controller.ts`)
 
@@ -1318,10 +1318,10 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `DocumentTemplateController.create` | POST | `/commerce/document-templates/businesses/:businessId` | open | membership only; follow-up SWEEP-CENSUS: revenue write |
-| `DocumentTemplateController.delete` | DELETE | `/commerce/document-templates/businesses/:businessId/:id` | open | membership only; follow-up SWEEP-CENSUS: revenue write |
-| `DocumentTemplateController.setDefault` | POST | `/commerce/document-templates/businesses/:businessId/:id/set-default` | open | membership only; follow-up SWEEP-CENSUS: revenue write |
-| `DocumentTemplateController.update` | PATCH | `/commerce/document-templates/businesses/:businessId/:id` | open | membership only; follow-up SWEEP-CENSUS: revenue write |
+| `DocumentTemplateController.create` | POST | `/commerce/document-templates/businesses/:businessId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `DocumentTemplateController.delete` | DELETE | `/commerce/document-templates/businesses/:businessId/:id` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `DocumentTemplateController.setDefault` | POST | `/commerce/document-templates/businesses/:businessId/:id/set-default` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
+| `DocumentTemplateController.update` | PATCH | `/commerce/document-templates/businesses/:businessId/:id` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
 
 ### DriveIntakeController (`commerce/drive-intake.controller.ts`)
 
@@ -1923,10 +1923,10 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `LeadFormsController.createForm` | POST | `/businesses/:businessId/lead-forms` | open | membership only; follow-up SWEEP-CENSUS: crm write |
-| `LeadFormsController.deleteForm` | DELETE | `/businesses/:businessId/lead-forms/:id` | open | membership only; follow-up SWEEP-CENSUS: crm write |
-| `LeadFormsController.toggleActive` | POST | `/businesses/:businessId/lead-forms/:id/toggle` | open | membership only; follow-up SWEEP-CENSUS: crm write |
-| `LeadFormsController.updateForm` | PATCH | `/businesses/:businessId/lead-forms/:id` | open | membership only; follow-up SWEEP-CENSUS: crm write |
+| `LeadFormsController.createForm` | POST | `/businesses/:businessId/lead-forms` | applied | crm:write (P87 SWP-CENSUS-V1-A) |
+| `LeadFormsController.deleteForm` | DELETE | `/businesses/:businessId/lead-forms/:id` | applied | crm:write (P87 SWP-CENSUS-V1-A) |
+| `LeadFormsController.toggleActive` | POST | `/businesses/:businessId/lead-forms/:id/toggle` | applied | crm:write (P87 SWP-CENSUS-V1-A) |
+| `LeadFormsController.updateForm` | PATCH | `/businesses/:businessId/lead-forms/:id` | applied | crm:write (P87 SWP-CENSUS-V1-A) |
 
 ### LivekitController (`livekit/livekit.controller.ts`)
 
