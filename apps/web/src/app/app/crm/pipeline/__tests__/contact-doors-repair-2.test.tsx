@@ -89,7 +89,7 @@ function stubAccess(answers: Record<string, Answer>, held: Record<string, Promis
     if (m) {
       const biz = decodeURIComponent(m[1]);
       asked.push(biz);
-      if (held[biz]) await held[biz];
+      if (biz in held) await held[biz];
       const a = answers[biz] ?? { status: 404, body: { message: "Not stubbed" } };
       return jsonResponse(a.status, a.body);
     }
