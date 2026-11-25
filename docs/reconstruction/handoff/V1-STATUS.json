@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "293d7f39186d0db5d427c46e6ede479cc28934f9",
-  "main_commit_date": "2026-11-24T23:33:36-04:00",
+  "main_sha": "8dbcb03cb92de776a201b6c1da360493d957e853",
+  "main_commit_date": "2026-11-25T00:25:22-04:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 558.5,
   "by_status": {
    "done": {
-    "packets": 137,
-    "points": 197.5,
-    "pct_by_points": 35.4
+    "packets": 145,
+    "points": 210.5,
+    "pct_by_points": 37.7
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 248,
-    "points": 361,
-    "pct_by_points": 64.6
+    "packets": 240,
+    "points": 348,
+    "pct_by_points": 62.3
    }
   },
   "by_step": {
@@ -66,21 +66,21 @@
     "total": 7
    },
    "3": {
-    "done": 77,
+    "done": 78,
     "in-progress": 0,
-    "todo": 72,
+    "todo": 71,
     "total": 149
    },
    "4": {
-    "done": 15,
+    "done": 20,
     "in-progress": 0,
-    "todo": 38,
+    "todo": 33,
     "total": 53
    },
    "5": {
-    "done": 24,
+    "done": 26,
     "in-progress": 0,
-    "todo": 63,
+    "todo": 61,
     "total": 87
    },
    "6": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 50,
+    "done": 58,
     "in-progress": 0,
-    "todo": 193,
+    "todo": 185,
     "total": 243
    },
    "follow-on": {
@@ -123,19 +123,25 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 132,
+   "prior-status-file": 126,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 33,
+   "code-commit-subject": 41,
    "compacted-commit": 57,
-   "no-evidence": 135
+   "no-evidence": 133
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
    "W11-KEY-TRANSFER-INTEGER",
+   "TOF-FINANCE-CANONICAL-TOOLS",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
+   "SWP-INV-DETAIL",
+   "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
    "SWP-STORE-OVERSELL",
+   "W11-PROPOSAL-RESULT-READER-SCOPE",
+   "W11-GENOME-RUNWAY",
+   "READY-TO-SEND",
    "SWP-CENSUS-OPEN-WRITES",
    "FU-IDENTITY-FINANCE-COLUMNS",
    "FU-PROVIDER-ERROR-HYGIENE",
@@ -159,20 +165,20 @@
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
    "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "WEDGE-WA-INBOUND-CAPTURE",
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL",
    "FU-NOTIFICATIONS-PREFS-GUARD",
-   "FU-CI-PG-NO-PASSWORD"
+   "FU-CI-PG-NO-PASSWORD",
+   "FU-BULK-DELETE-UNDO"
   ],
-  "todo_with_dependencies_met": 125,
-  "todo_with_dependencies_met_launch": 95
+  "todo_with_dependencies_met": 124,
+  "todo_with_dependencies_met_launch": 94
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "SWP-INV-DETAIL",
    "SWP-INV-REFUND-UI",
    "CLAIM-LOOP",
-   "READY-TO-SEND",
    "TODAY-AGGREGATE",
    "DEMO-PREVIEW",
    "TODAY-4BLOCK",
@@ -188,16 +194,14 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 44,
+   "weight": 40,
    "chain": [
-    "TOF-FINANCE-CANONICAL-TOOLS",
     "W11-OWNER-HELPER-REST",
     "TOF-KEY-SELF-MODEL",
     "TOF-KNOWLEDGE-UPLOAD",
     "KEY-TOOL-ALLOWLIST",
     "DECIMALS-SERVER",
     "CLAIM-LOOP",
-    "READY-TO-SEND",
     "TODAY-AGGREGATE",
     "DEMO-PREVIEW",
     "TODAY-4BLOCK",
@@ -215,34 +219,24 @@
  },
  "ready": [
   {
-   "id": "SWP-INV-DETAIL",
+   "id": "SWP-INV-REFUND-UI",
    "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": true,
-   "unblocks": 44
-  },
-  {
-   "id": "TOF-FINANCE-CANONICAL-TOOLS",
-   "step": 3,
    "priority": "P2",
    "size": "M",
-   "lane": "server",
+   "lane": "web",
    "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 56
+   "on_critical_path": true,
+   "unblocks": 42
   },
   {
-   "id": "MIGRATION-SET-A",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
+   "id": "W11-OWNER-HELPER-REST",
+   "step": 3,
+   "priority": "P2",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 44
+   "unblocks": 54
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -262,7 +256,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 28
+   "unblocks": 26
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -280,6 +274,16 @@
    "priority": "P0",
    "size": "L",
    "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 23
+  },
+  {
+   "id": "OWNER-ALERTS-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 23
@@ -393,16 +397,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
-  },
-  {
-   "id": "WEDGE-WA-INBOUND-CAPTURE",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 6
   },
   {
    "id": "S0-SEC-LANE-DEPLOY",
@@ -566,6 +560,16 @@
   },
   {
    "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACT-TIMELINE-CHANNELS",
    "step": 5,
    "priority": "P1",
    "size": "M",
@@ -786,16 +790,6 @@
   },
   {
    "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-BULK-DELETE-UNDO",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -1467,34 +1461,24 @@
  ],
  "ready_launch": [
   {
-   "id": "SWP-INV-DETAIL",
+   "id": "SWP-INV-REFUND-UI",
    "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": true,
-   "unblocks": 44
-  },
-  {
-   "id": "TOF-FINANCE-CANONICAL-TOOLS",
-   "step": 3,
    "priority": "P2",
    "size": "M",
-   "lane": "server",
+   "lane": "web",
    "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 56
+   "on_critical_path": true,
+   "unblocks": 42
   },
   {
-   "id": "MIGRATION-SET-A",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
+   "id": "W11-OWNER-HELPER-REST",
+   "step": 3,
+   "priority": "P2",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 44
+   "unblocks": 54
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -1514,7 +1498,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 28
+   "unblocks": 26
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -1532,6 +1516,16 @@
    "priority": "P0",
    "size": "L",
    "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 23
+  },
+  {
+   "id": "OWNER-ALERTS-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 23
@@ -1645,16 +1639,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
-  },
-  {
-   "id": "WEDGE-WA-INBOUND-CAPTURE",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 6
   },
   {
    "id": "S0-SEC-LANE-DEPLOY",
@@ -1808,6 +1792,16 @@
   },
   {
    "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACT-TIMELINE-CHANNELS",
    "step": 5,
    "priority": "P1",
    "size": "M",
@@ -2028,16 +2022,6 @@
   },
   {
    "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-BULK-DELETE-UNDO",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -2875,15 +2859,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b602b186"
+   ],
    "depends_on": [
     "W11-KEY-TRANSFER-INTEGER"
    ],
    "title": "KEY canonical finance intelligence tools (#161) under revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-OWNER-HELPER-REST",
@@ -2902,7 +2888,7 @@
     "W11-PROVIDER-OUTAGE-503"
    ],
    "title": "One owner rule for the remaining owner checks, with a census that keeps Business.ownerId out of owner checks",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "TOF-KEY-SELF-MODEL",
@@ -3603,16 +3589,18 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f7ecee50"
+   ],
    "depends_on": [
     "SWP-REMOVED-MEMBER-NOTICE",
     "SWP-INV-PUBLIC-LINK"
    ],
    "title": "Invoice detail: payments list refreshes, Amount due is the remaining balance, no Mark paid on drafts, sent is recorded, Print prints the invoice",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-INV-REFUND-UI",
@@ -3629,7 +3617,7 @@
     "SWP-INV-DETAIL"
    ],
    "title": "Refund a manual payment from the invoice and the Payments hub",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "DECIMALS-WEB",
@@ -3874,16 +3862,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "7be077aa"
+   ],
    "depends_on": [
     "SWP-INV-PUBLIC-LINK",
     "S1-RULINGS-RECORD"
    ],
    "title": "The v1 hold migration set, authored once and proven on a fresh database: part quantities, Business VAT number, tier pricing tables",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "DECIMALS-SERVER",
@@ -4003,15 +3993,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b58bc4e3"
+   ],
    "depends_on": [
     "W11-GENOME-RECS-DOMAIN"
    ],
    "title": "An approved KEY proposal's stored result is projected for the member who reads it (SEC-SR-2)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-GENOME-RUNWAY",
@@ -4020,15 +4012,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "06d87459"
+   ],
    "depends_on": [
     "W11-PROPOSAL-RESULT-READER-SCOPE"
    ],
    "title": "Finance genome LOW_RUNWAY: business currency instead of hard-coded TTD, and the cash it reads",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-KEY-A",
@@ -4300,16 +4294,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "345eb467"
+   ],
    "depends_on": [
     "CLAIM-LOOP",
     "WA-E164-SERVER"
    ],
    "title": "'Ready to send' reminders: overdue invoices and tomorrow's bookings as rows with WhatsApp text and the token link; email only when Gmail is connected",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "OWNER-ALERTS-SERVER",
@@ -4326,7 +4322,7 @@
     "READY-TO-SEND"
    ],
    "title": "Owner alerts: a new booking, a paid invoice or order, or a bank-transfer claim pushes to the owner's phone, with an email to the owner as fallback",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "OWNER-ALERTS-WEB",
@@ -8866,17 +8862,19 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "5dd5e44e"
+   ],
    "depends_on": [
     "WA-E164-SERVER",
     "WA-HELPER",
     "MOUNT-QUOTES"
    ],
    "title": "New from WhatsApp: paste a customer's WhatsApp message and number; KEYFLOWOS finds or creates the customer by E.164, keeps the message on their timeline, and opens New quote or New booking for them",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "WEDGE-HIDE-STORE",
@@ -9151,13 +9149,15 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e31c0679"
+   ],
    "depends_on": [],
    "title": "A bulk delete of customers is sent at once and Undo restores exactly those ids from Trash in one call",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CI-MERGE-QUEUE",
@@ -9223,7 +9223,7 @@
     "WEDGE-WA-INBOUND-CAPTURE"
    ],
    "title": "The contact Timeline gets a channel filter, where pasted WhatsApp messages land",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",

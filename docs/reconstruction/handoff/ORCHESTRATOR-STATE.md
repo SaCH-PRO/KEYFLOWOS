@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~03:40 UTC by the acting orchestrator (second-lane account, Claude Code), after M11 (PR #240) merged as 293d7f39. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~04:45 UTC by the acting orchestrator (second-lane account, Claude Code), after M12 (Antigravity) merged as 8dbcb03c and M13 was cut. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -80,29 +80,30 @@ in BUILD-MAP-001: Antigravity to record it with M10.
 - **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
   its Release 0 suite's setup only; assertions unchanged.
 
-## 0. Next session starts here (2026-11-25 ~03:40 UTC)
+## 0. Next session starts here (2026-11-25 ~04:45 UTC)
 
-**M11 merged** (PR #240, merge commit `293d7f39`, head pinned `89100f86`): P27, P29, P32, P35, SWP-REMOVED-MEMBER-NOTICE
-(P48), P40 and the docs batch. CI's mocked e2e job caught one real defect at the first head (`414add8d`): the
-R0-06 spec `e2e/onboarding-loop-regression.spec.ts` pins the text of use-genome-gate.ts's redirects, which
-SWP-REMOVED-MEMBER-NOTICE had changed; fixed on the packet (`1352e62d`, both reviewers CONFIRMED) without touching
-the spec. Lesson for every web packet that edits a file a static spec reads: run `E2E_NO_SERVER=1 npx playwright
-test e2e/onboarding-loop-regression.spec.ts e2e/auth-helpers.spec.ts e2e/public-flows.spec.ts --project=chromium`
-(the mocked CI job's specs) before the RETURN.
+Main is `8dbcb03c`: M11 (Claude, `293d7f39`) then M12 (Antigravity, PR #241: P43, P44, P45 = SWP-INV-DETAIL server,
+P46 = WEDGE-WA-INBOUND-CAPTURE server, P52 READY-TO-SEND, P38 FU-CI-MERGE-QUEUE, P37 server, P51, P53).
 
-GitHub from a cloud session: REST works (`gh api repos/KEYFLOWOS/KEYFLOWOS/...`); GraphQL (`gh issue view`, `gh pr
-view`) is refused. Subagents spawned here cannot spawn reviewers; the orchestrator runs each worker's two reviews.
+**M13 (Claude, wave 3r)** is being assembled on `wave/v1-wave-m13` from `8dbcb03c`: P37 web half
+(`pkt/V1-FU-BULK-DELETE-UNDO-WEB` @ `39364399` = reviewed `3e0ef2ad` + main merged in), P39
+(`pkt/V1-FU-CI-WINDOWS-INPUT-GATE` @ `e497786e` = reviewed `8743e437` + main), P54 SWP-INV-DETAIL web half
+(`pkt/V1-SWP-INV-DETAIL-WEB` @ `90276ed0` = reviewed `c8f9a24f` + main), and this docs branch. Each packet branch got main
+merged in first (keeping main's copy of files main now owns: the server halves, P38's ci-cd.yml), so each compacts to
+its own files only; the wave confirmations must check the 3-way results in `use-contact-actions.ts` and `client.ts`
+(P37 over M11's P27/P35). Then: wave-head proof (real install from the head's lockfile, never symlinked deps), live
+journeys E (invoice detail) and C, the mocked CI specs **as CI runs them** (a mocked production build:
+`NEXT_PUBLIC_API_BASE_URL=http://api.test.local`, `E2E_WEB_COMMAND=standalone`; `E2E_NO_SERVER=1` cannot serve
+public-flows), PR, CI, two wave confirmations, merge (D-239).
 
-Next, in order:
-1. **The next Claude wave**: P37 FU-BULK-DELETE-UNDO web half (`pkt/V1-FU-BULK-DELETE-UNDO-WEB` @ `3e0ef2ad`, with
-   Antigravity's server half `61e50c0f`, which is not merged yet: carry it, or wait for Antigravity's wave), plus
-   the docs branch (`wave/v1-docs-p19`). Before the RETURN-to-wave step, run the mocked CI specs above.
-2. **P39 FU-CI-WINDOWS-INPUT-GATE** (`8743e437`) is stacked on Antigravity's **P38** (`b5a3c63a`): proposed on #80
-   that they ride one wave, P38 then P39. Only that PR's CI proves the Windows legs.
-3. Claude packets on the board: the web halves of SWP-INV-DETAIL (on P48 + Antigravity's `1974321a`) and
-   WEDGE-WA-INBOUND-CAPTURE (server `7a575847`), P41 FU-CONTACT-TIMELINE-CHANNELS, P34 FU-KEY-CTRLJ-OWNERS (live
-   check first), P28, P31, P18a, P17(a-c). P42 is moot (folded into TODAY-4BLOCK).
-4. The owner question batch (section 4, questions 1-38).
+**Held: P55 WEDGE-WA-INBOUND-CAPTURE web half** (`pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB`, repair round in progress at
+the time of writing). It stays out of every wave until the server-side **SEC-WAW-1** fix is on main: KEY's hourly
+intuition scan reads every ContactNote body, so pasted third-party WhatsApp text would reach an LLM prompt (#80
+7153059391, 7153185403; asked of Antigravity as FU-WA-INBOUND-KEY-EXCLUDE). Its live journey C/D step is part of the
+repair round.
+
+GitHub from a cloud session: REST works; GraphQL is refused. Subagents spawned here cannot spawn reviewers; the
+orchestrator runs each worker's two reviews.
 
 ## 3. Work in flight (what git on main cannot show)
 
