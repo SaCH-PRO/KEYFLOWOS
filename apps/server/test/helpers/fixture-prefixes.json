@@ -835,7 +835,7 @@
     {
       "prefix": "v95e_",
       "owner": "apps/server/test/contact-events-paging.integration.test.ts",
-      "packet": "FU-TIMELINE-EVENTS-PAGING (D-284)"
+      "packet": "V1-95 (FU-TIMELINE-EVENTS-PAGING, D-284)"
     },
     {
       "prefix": "v95p_",

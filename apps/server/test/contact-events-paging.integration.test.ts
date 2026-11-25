@@ -44,6 +44,7 @@ import { CrmController } from '../src/modules/crm/crm.controller';
 import { CrmService } from '../src/modules/crm/crm.service';
 import { CrmTimelineService } from '../src/modules/crm/crm-timeline.service';
 import { CrmCacheService } from '../src/modules/crm/crm-cache.service';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 const P = 'v95e_';
 const HEADER = 'x-test-user-id';
@@ -65,9 +66,9 @@ const ID = {
 async function cleanup() {
   await db.contactEvent.deleteMany({ where: { id: { startsWith: P } } });
   await db.contactNote.deleteMany({ where: { id: { startsWith: P } } });
-  await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id LIKE $1`, `${P}%`);
+  await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)}`);
   await db.membership.deleteMany({ where: { id: { startsWith: P } } });
-  await db.$executeRawUnsafe(`DELETE FROM businesses WHERE id LIKE $1`, `${P}%`);
+  await db.$executeRawUnsafe(`DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`);
   await db.user.deleteMany({ where: { id: { startsWith: P } } });
 }
 
