@@ -1,5 +1,5 @@
 import type { APIRequestContext, Page } from "@playwright/test";
-import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-helpers";
+import { test, expect, API_URL, mintToken, settle, type Tenant } from "./journeys/journey-helpers";
 
 /**
  * FU-REQUIRE-AUTH-REMOUNT, the browser half (owner ruling D-281; journeys C, D, F). The jsdom half is
@@ -26,6 +26,14 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  * Not here: the contacts' Create quote door (/app/commerce?tab=billing&segment=quotes&contactId=) opens no New quote
  * form on main even on a full page load (the URL becomes ?tab=snapshot), so it cannot show a remount; it is a defect
  * of its own (the WhatsApp capture web branch carries a fix for its ?tab=quotes form).
+ *
+ * Review repair round 1 (correctness MAJOR-1): a rotation of the same user's token (refreshAccessToken, on a 401 or
+ * at access-token expiry) must not tear the shell down either. The rotation is produced live by writing a token
+ * minted for the same `sub` (journey-helpers mintToken, the harness's own signing secret) into kf_token:
+ *
+ *   3. in this tab (no storage event), then the Book appointment door: one shell, no spinner, the sheet opens, and
+ *      /identity/me is asked in the background with the rotated bearer;
+ *   4. from another tab of the same browser (the storage event): this tab keeps its shell and the open booking sheet.
  *
  * router.push is the app router's own (window.next.router, which Next sets in the browser), so the navigation is the
  * one every <Link> and useRouter().push makes. Live only (E2E_LIVE=1, the journey harness's fixtures, README in
@@ -68,6 +76,11 @@ async function shellState(page: Page) {
   });
 }
 
+/** Writes kf_token as refreshAccessToken does (localStorage; in this tab no storage event fires). */
+async function storeToken(page: Page, token: string) {
+  await page.evaluate((t) => window.localStorage.setItem("kf_token", t), token);
+}
+
 async function routerPush(page: Page, href: string) {
   await page.evaluate((to) => {
     const next = (window as unknown as { next?: { router?: { push: (href: string) => void } } }).next;
@@ -80,7 +93,7 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 
   test.describe(`FU-REQUIRE-AUTH-REMOUNT the shell is not torn down on a page change (${viewport.width}x${viewport.height})`, () => {
     test.use(viewport.width < 600 ? { viewport, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { viewport });
 
-    test("a client navigation keeps the shell, and the Book appointment door's ?contactId opens the booking sheet", async ({ page, request, owner }) => {
+    test("a client navigation or a same-user token rotation keeps the shell, and the Book appointment door's ?contactId opens the booking sheet", async ({ page, request, owner }) => {
       test.setTimeout(4 * 60_000);
       const lastName = `Shell${stamp()}`;
       const contactId = await seedContact(request, owner, lastName);
@@ -111,6 +124,44 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 
         const state = await shellState(page);
         expect.soft(state.spinnerSeen, "RequireAuth's spinner showed during the door's navigation").toBe(false);
         expect.soft(state.sameShell, "the shell element is the same one after the door's navigation").toBe(true);
+      });
+
+      await test.step("a same-user token rotation in this tab, then the Book appointment door: one shell, the sheet opens", async () => {
+        await routerPush(page, "/app/crm/contacts");
+        await page.waitForURL(/\/app\/crm\/contacts(?:[/?#]|$)/, { timeout: 30_000 });
+        await settle(page, 2_000);
+        await watchShell(page);
+        const rotated = mintToken(owner.sub, owner.email, 4 * 3600 + 120);
+        expect(rotated, "a token other than the one the session started with").not.toBe(owner.token);
+        const askedWithRotated = page
+          .waitForRequest((r) => new URL(r.url()).pathname === "/identity/me" && r.headers()["authorization"] === `Bearer ${rotated}`, { timeout: 20_000 })
+          .then(() => true, () => false);
+        await storeToken(page, rotated);
+        await routerPush(page, `/app/bookings?contactId=${encodeURIComponent(contactId)}`);
+        await page.waitForURL(/\/app\/bookings(?:[/?#]|$)/, { timeout: 30_000 });
+        await expect
+          .soft(page.getByRole("heading", { name: new RegExp(`New Booking · Remy ${lastName}`) }), "the New booking sheet after a same-user rotation")
+          .toBeVisible({ timeout: 20_000 });
+        expect.soft(await askedWithRotated, "/identity/me asked with the rotated bearer (the background re-verify)").toBe(true);
+        const state = await shellState(page);
+        expect.soft(state.spinnerSeen, "RequireAuth's spinner showed after a same-user rotation").toBe(false);
+        expect.soft(state.sameShell, "the shell element is the same one after a same-user rotation and the door").toBe(true);
+      });
+
+      await test.step("another tab rotates the same user's token: this tab keeps its shell and the open booking sheet", async () => {
+        await watchShell(page);
+        const rotatedAgain = mintToken(owner.sub, owner.email, 4 * 3600 + 240);
+        const other = await page.context().newPage();
+        await other.goto("/");
+        await storeToken(other, rotatedAgain); // this tab receives the storage event
+        await settle(page, 3_000);
+        await other.close();
+        await expect
+          .soft(page.getByRole("heading", { name: new RegExp(`New Booking · Remy ${lastName}`) }), "the open booking sheet survives another tab's rotation")
+          .toBeVisible({ timeout: 5_000 });
+        const state = await shellState(page);
+        expect.soft(state.spinnerSeen, "RequireAuth's spinner showed after another tab's same-user rotation").toBe(false);
+        expect.soft(state.sameShell, "the shell element is the same one after another tab's same-user rotation").toBe(true);
       });
     });
   });
