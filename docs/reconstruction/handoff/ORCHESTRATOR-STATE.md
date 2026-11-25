@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~15:45 UTC by the acting orchestrator (second-lane account, Claude Code), while assembling
-M16 (main `9ea7c223`, after Antigravity's M15, M17 and M19). Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~18:20 UTC by the acting orchestrator (second-lane account, Claude Code), after M16 (PR #248)
+merged as `977a265c`. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -70,92 +70,95 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-Every ruling to D-272 is on main (PR #230). **D-274 to D-285 are rows in BUILD-MAP-001 on `wave/v1-docs-p19`** and
-reach main with the next Claude wave (M16). Since the last checkpoint:
-- D-280 pasted WhatsApp text stays out of KEY's automatic prompts (Antigravity's P60, in M15);
-- D-281 FU-REQUIRE-AUTH-REMOUNT on launch;
-- D-282 push opt-in on My account for every member;
-- D-283 the six parked follow-ups go to the Claude lane after P41;
-- D-284 the contact Timeline pages back through the whole history at launch (P66 FU-TIMELINE-EVENTS-PAGING, server,
-  offered to Antigravity; P67 FU-TIMELINE-LOAD-OLDER, web, Claude);
-- D-285 form submissions stay under All on the Timeline.
-D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is referred to on the board but is not yet a row.
-- **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
-  its Release 0 suite's setup only; assertions unchanged.
-- **The merge queue is on for main** (D-278, ruleset 28066634): lanes ENQUEUE, never merge directly.
+Every ruling to D-285 is on main (M16, PR #248). D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is
+referred to on the board but is not yet a row.
+- **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457).
+- **The merge queue is on for main** (D-278, ruleset 28066634). Lanes enqueue and never merge directly. From a cloud
+  session, GraphQL is refused: enqueue with `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f
+  merge_method=merge` (M16 went in this way).
 
-## 0. Next session starts here (2026-11-25 ~15:45 UTC)
+## 0. Next session starts here (2026-11-25 ~18:20 UTC)
 
-Main is `9ea7c223`. Since `08170696`, Antigravity merged three waves through the merge queue:
-- M15: P58 owner alerts, P60 WhatsApp text out of KEY, P59 payroll discard;
-- M17: P64, P65, P66 Timeline paging, P68, P69 deposit server, P70 finance overview server;
-- M19: P71 push endpoint allowlist, P72 cash sources server, P73 owner helper, P75 query DTO coercion.
+Main is `977a265c`. Merges today, in order:
+- M15 (Antigravity, `9011550b`)
+- M17 (`8866740b`)
+- M19 (`9ea7c223`)
+- M21 (`aaaec51a`): CLAIM-LOOP server, SWP-INV-SKU-COUNT, CATALOG-1 server, TODAY-AGGREGATE
+- **M16** (Claude, PR #248, head `8dd17b18`): P41 FU-CONTACT-TIMELINE-CHANNELS, P61 FU-REQUIRE-AUTH-REMOUNT, P55
+  WEDGE-WA-INBOUND-CAPTURE web half, docs.
 
-Their M21 (CLAIM-LOOP server, SWP-INV-SKU-COUNT, CATALOG-1 server, TODAY-AGGREGATE) is in progress.
+V1-STATUS at `977a265c`: 170 of 395 packets done (44.4% of points).
 
-**Claude M16** is `wave/v1-wave-m16` @ `0360fd09` on `9011550b`. It holds, compacted:
-- P41 FU-CONTACT-TIMELINE-CHANNELS;
-- P61 FU-REQUIRE-AUTH-REMOUNT;
-- P55 WEDGE-WA-INBOUND-CAPTURE web half (main merged in, both lenses re-confirmed).
+**M18 (next Claude wave): returned, assemble now**, compacting each with `scripts/agent-memory/compact.sh` on main:
 
-Next steps for M16:
-1. Squash this docs branch into M16.
-2. Merge main `9ea7c223` (server-only since, no overlap).
-3. Run the wave-head proof (server suite + `proof:release0`, web typecheck, vitest, lint, live journeys).
-4. Open the PR and get two wave confirmations.
-5. ENQUEUE (merge queue; never merge directly).
+| Packet | Branch head | Files |
+| --- | --- | --- |
+| P62 FU-PUSH-OPTIN-MY-ACCOUNT | `53737d90` | 11 |
+| FU-SIDESHEET-MOBILE-OFFSET | `98a12002` | 3 |
+| FU-STUDIO-PAGE-SCOPE | `de2772b6` | 4 |
+| SWP-FIN-CASH-SOURCES web | `45418379` | 6 |
+| SWP-SERVICE-DEPOSIT web | `3c9554bc` | 11 |
+| SWP-FIN-OVERVIEW-TRUTH web | `c93bc4f2` | 4 |
 
-M16 is 35 files plus 6 docs files, under the 50-file gate.
-
-**M18 (next Claude wave), returned and waiting:**
-- P62 FU-PUSH-OPTIN-MY-ACCOUNT @ `53737d90` (3 rounds, both CONFIRMED);
-- FU-SIDESHEET-MOBILE-OFFSET @ `98a12002` (both ACCEPT);
-- FU-STUDIO-PAGE-SCOPE @ `de2772b6` (both ACCEPT).
-
-**In review:** SWP-SERVICE-DEPOSIT web half @ `2c3aa465` (P0).
+Notes before compacting:
+- Merge main into each pkt branch first, keeping main's copies of the files main now owns.
+- Watch the 50-file gate: about 39 files plus about 6 for docs.
+- `lib/client.ts` is changed by both deposit and cash: check the 3-way merge.
 
 **Building:**
-- SWP-FIN-OVERVIEW-TRUTH web (`wt-finov`, ports 3201/5400);
-- SWP-FIN-CASH-SOURCES web (`wt-cash`, ports 3101/5300).
+- SWP-INV-REFUND-UI: critical path #1, unblocks 39. `wt-refund`, ports 3101/5300, claim `422286e5`.
+- CATALOG-1 web half: P0, L. `wt-catalog`, ports 3201/5400, claim `67741f84`.
 
-**Queue after these:**
-1. P67 FU-TIMELINE-LOAD-OLDER (after M16 is on main).
-2. CLAIM-LOOP web half and TODAY-4BLOCK (after Antigravity's M21).
-3. The D-283 follow-ups that wait on files now in waves: FU-NOTIFICATIONS-PAGE-REFUSED (after P62), FU-UNDO-TOAST-SIGNOUT (after P61), FU-CONTACT-SEND-QUOTE-DOOR (after P55), and FU-E2E-MOCKED-SESSION-TOKEN.
+**Queue after that:**
+- P67 FU-TIMELINE-LOAD-OLDER (P41 and P66 are now on main).
+- OWNER-ALERTS-WEB: same files as P62, so after M18.
+- CLAIM-LOOP web half, once DECIMALS-SERVER (server lane) is done.
+- TODAY-4BLOCK, after OWNER-ALERTS-WEB, DEMO-PREVIEW (server lane) and SWP-KEY-SHELL-SMOKE.
+- The rest of the D-283 six: FU-NOTIFICATIONS-PAGE-REFUSED, FU-UNDO-TOAST-SIGNOUT and FU-CONTACT-SEND-QUOTE-DOOR are now
+  free, plus FU-E2E-MOCKED-SESSION-TOKEN.
 
-An hourly scheduled check of #80 runs in the orchestrator session.
+**Follow-ups found by today's reviews (not yet in the plan):**
+- Close menus and sheets on a pathname change (now that the shell mounts once).
+- Fix the stale comments P61 left in new-from-whatsapp.tsx, commerce/page.tsx and timeline-channels.ts.
+- record-detail-drawer and booking-side-sheet have the same mount offset.
+- The shared SideSheet has no focus trap.
+- Other Bookings tabs show TTD.
+- The contactId door may lose its prefill on a replaceState remount.
+- The email compose preview uses `dangerouslySetInnerHTML`: check whether KEY drafts can carry pasted text into it.
 
-Lessons this session (for every lane):
-- Count files before compacting the last packet into a wave. Docs add about 6, and the gate is 50. M16 briefly reached 52; P62 was taken off before any PR existed.
-- The machine is 16 GB and shared. Run the web suite with `--minWorkers=1 --maxWorkers=2` under load. Retry a build that is SIGKILLed only once no other `next build` runs.
-- After a container restart, agents cannot be messaged; read their transcripts' last report and use fresh reviewers.
-- A worker's open questions often name another lane's gap. Relay it on #80 with the exact file and line.
-- Earlier lessons:
-  - check the board's last row number before adding rows;
-  - prove a one-shot URL door live;
-  - commit the plan, then `status.mjs --ref HEAD`, then amend;
-  - run CI's mocked e2e as CI runs them;
-  - merge main into stale packet branches before compacting;
-  - never merge into a worktree a run uses;
-  - use REST, not GraphQL;
-  - the orchestrator runs the reviews.
+**Server follow-ups handed to Antigravity on #80:**
+- `invoice-status-events` A9-R2 flake (ECONNRESET on supertest keep-alive; FU-TEST-FLAKES).
+- A cash forecast failure signal (`available:false`, not zeros).
+- A stable `PUSH_DEVICE_OTHER_MEMBER` code.
+- Deposits with fractions of a cent stored on the server.
+- Runs list `isPosted` and `hasForeignItems`.
+- The customer-referral privacy leak (hold until the owner rules).
+
+**An hourly scheduled check of #80 runs in the orchestrator session.**
+
+**Lessons this session:**
+- A container restart kills agents: read their transcripts' last report and use fresh reviewers. Postgres needs
+  `service postgresql start` after a restart.
+- A new wave worktree needs the local `.env` copied from the main checkout before the server suite runs. Without
+  it, SUITE and R0 fail in seconds.
+- The server build needs `NODE_OPTIONS=--max-old-space-size=8192` here (4096 aborts with 134).
+- The web suite under load: `--minWorkers=1 --maxWorkers=2`.
+- Main moving while a wave PR waits fails "Check divergence vs main": merge main in. A push cancels the old head's
+  CI, whose verdict then fails closed; that is expected.
+- One re-run per failed job, and only after the run completes.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `9ea7c223`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `977a265c`. Production runs `f5d58ef7` (16 Nov), far behind; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **M16 (Claude)** | `wave/v1-wave-m16` @ 0360fd09 | P41 + P61 + P55 compacted | Docs, merge main, proof, PR, confirmations, enqueue |
-| **P62 (Claude)** | `pkt/V1-FU-PUSH-OPTIN-MY-ACCOUNT` @ 53737d90 | Returned (#80 7167069942) | M18 |
-| **FU-SIDESHEET-MOBILE-OFFSET** | `pkt/V1-FU-SIDESHEET-MOBILE-OFFSET` @ 98a12002 | Returned (#80 7166920997) | M18 |
-| **FU-STUDIO-PAGE-SCOPE** | `pkt/V1-FU-STUDIO-PAGE-SCOPE` @ de2772b6 | Returned (#80 7164744072) | M18 |
-| **SWP-SERVICE-DEPOSIT web** | `pkt/V1-SWP-SERVICE-DEPOSIT-WEB` @ 2c3aa465 | Two acceptance reviews | RETURN, M18 |
-| **SWP-FIN-OVERVIEW-TRUTH web** | `pkt/V1-SWP-FIN-OVERVIEW-TRUTH-WEB` @ 12921c65 (claim) | Building | Reviews |
-| **SWP-FIN-CASH-SOURCES web** | `pkt/V1-SWP-FIN-CASH-SOURCES-WEB` @ aa873850 (claim) | Building | Reviews |
-| **Antigravity** | M21 in progress (#80) | CLAIM-LOOP, SKU count, CATALOG-1, TODAY-AGGREGATE servers | Their wave |
-| **Owner** | - | - | Section 4 batch (40-48); production redeploy (D-266) |
-| `wave/v1-docs-p19` | main 9ea7c223 merged in | This file, V1-STATUS, D-284/D-285, HARNESS-REMOVAL note | Squashed into M16 |
+| **M18 candidates (Claude)** | the six pkt branches in section 0 | All returned, both lenses CONFIRMED | Assemble M18 |
+| **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 422286e5 (claim) | Building | Reviews |
+| **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Reviews |
+| **Antigravity** | P82 FU-KEY-GENOME-READS-RESIDUAL, P83 QUICK-SALE-SERVER (#80) | Building | Their next wave |
+| **Owner** | - | - | Section 4 batch (40-48 plus payroll D-100); production redeploy (D-266) |
+| `wave/v1-docs-p19` | main 977a265c merged in | This file, V1-STATUS | Squashed into M18 |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -280,6 +283,9 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 46. **Shell bottom padding (BUG-004 family).** The scroll root's `pb-28` is not effective inside the `h-full` page box, so a phone page's last control can sit under the bottom nav. P62 and the deposit half added local `pb-24 md:pb-0`. Fix the whole shell in one packet? (Default: yes, follow-up web packet.)
 47. **Same mount pattern as the SideSheet fix.** `record-detail-drawer.tsx` and `booking-side-sheet.tsx` have the same pattern, and the shared SideSheet has no focus trap (the commerce sheet does). Follow-up web packets? (Default: yes, follow-on.)
 48. **Deposit journeys.** Journey B2 needs a "New service" dialog in Schedule > Services, and F4 needs the deposit shown at the customer checkout (`/book/<slug>`). Neither is in SWP-SERVICE-DEPOSIT's write set. Which packets own them? (Default: find or add them in the plan.)
+
+49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
+50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
 
 ## 5. How to work here (learned the hard way)
 
