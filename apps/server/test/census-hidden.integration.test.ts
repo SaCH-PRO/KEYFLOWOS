@@ -656,7 +656,7 @@ describe('CH-01: a member below the scope is refused one representative write of
 /** Real writes: [controller, url, body, table]. */
 const REAL_WRITES: Array<[string, string, () => Record<string, unknown>, string]> = [
   ['HelpdeskController', `/helpdesk/businesses/${ID.bizA}/tickets`, () => ({ title: `${P}ticket` }), 'support_tickets'],
-  ['GovernanceController', `/governance/businesses/${ID.bizA}/risks`, () => ({ title: `${P}risk`, category: 'OPERATIONAL', severity: 'LOW', likelihood: 'LOW' }), 'business_risks'],
+  ['GovernanceController', `/governance/businesses/${ID.bizA}/risks`, () => ({ title: `${P}risk`, category: 'OPERATIONAL', severity: 'LOW', likelihood: 'UNLIKELY' }), 'business_risks'],
   ['SopController', `/sop/businesses/${ID.bizA}/sops`, () => ({ title: `${P}sop`, body: 'Open the shop.' }), 'sop_documents'],
   ['RetainerController', `/retainers/businesses/${ID.bizA}`, () => ({ contactId: ID.contact, name: `${P}retainer`, monthlyAmount: 100, startDate: '2026-11-01' }), 'retainer_agreements'],
   ['EventsController', `/businesses/${ID.bizA}/events`, () => ({ name: `${P}event`, startsAt: '2026-12-01T10:00:00.000Z' }), 'events'],

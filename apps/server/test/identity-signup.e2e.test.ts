@@ -90,7 +90,7 @@ describe('Identity signup endpoints', () => {
     });
     const res = await request(app.getHttpServer())
       .post('/identity/signup')
-      .send({ email: 'a@b.com', password: 'StrongPass1' })
+      .send({ email: 'a@b.com', password: 'StrongPass123' })
       .expect(201);
     expect(res.body.status).toBe('authenticated');
     expect(res.body.verificationRequired).toBe(false);
@@ -106,7 +106,7 @@ describe('Identity signup endpoints', () => {
     });
     const res = await request(app.getHttpServer())
       .post('/identity/signup')
-      .send({ email: 'c@d.com', password: 'StrongPass1' })
+      .send({ email: 'c@d.com', password: 'StrongPass123' })
       .expect(201);
     expect(res.body.status).toBe('verification_sent');
     expect(res.body.verificationRequired).toBe(true);
@@ -121,7 +121,7 @@ describe('Identity signup endpoints', () => {
     );
     const res = await request(app.getHttpServer())
       .post('/identity/signup')
-      .send({ email: 'dup@d.com', password: 'StrongPass1' })
+      .send({ email: 'dup@d.com', password: 'StrongPass123' })
       .expect(400);
     expect(res.body.code).toBe('email_taken');
     expect(res.body.message).toMatch(/already registered/i);
