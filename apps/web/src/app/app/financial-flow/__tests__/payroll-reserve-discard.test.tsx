@@ -27,6 +27,17 @@
  *                       again, so the paid run leaves the line (added after the fix, to kill the 'no re-read after a
  *                       409' mutant; it passes at the fix head and fails with the re-read removed)
  *
+ * Repair round 1 (reviews COR-FO-1, COR-FO-2, COR-FO-4, SEC-FINOV-1, SEC-FINOV-2), RED at cfa1d960:
+ *   PRD-11  a discard that succeeds and a safe-to-spend re-read that fails: the confirmation stays, says the figure
+ *           could not be refreshed, and Safe to Spend shows no figure (not the old one, not TTD 0)
+ *   PRD-12  discarding a run in another currency says it is void, never that Safe to Spend "no longer reserves" it
+ *           (it was never counted)
+ *   PRD-13  a status read that returns the full page (100 runs) says more runs are reserved than are listed
+ *   PRD-14  (mutant pin, passes at cfa1d960) run currencies are compared as the server compares them (trimmed, upper
+ *           case): " ttd " is the business currency, "usd" is not
+ *   PRD-15  the member's module levels are dropped when the business changes: no Discard on the strength of the last
+ *           business's answer
+ *
  * Mounted on the real page and the real api client (lib/api.ts, lib/api/payroll.ts, lib/api/finance.ts); only
  * `fetch`, next/navigation and the stored business are stubbed. The stub is a small stateful server: safe-to-spend
  * reserves the DRAFT and APPROVED runs in the business currency, as SafeToSpendService does.
@@ -43,9 +54,10 @@ vi.mock("next/navigation", () => ({
   notFound: vi.fn(),
 }));
 
+const selected = vi.hoisted(() => ({ businessId: "biz_prd" }));
 vi.mock("@/lib/workspace", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getStoredBusinessId: () => "biz_prd",
+  getStoredBusinessId: () => selected.businessId,
 }));
 
 import FinancialFlowPage from "../page";
@@ -90,15 +102,20 @@ interface Opts {
   revenueRefused?: boolean;
   /** The discard route's answer; by default the server's rule (PayrollService.discardRun). */
   discard?: (r: Run | undefined) => Response;
+  /** Safe-to-spend reads after a discard has been answered fail 503. */
+  safeFailsAfterDiscard?: boolean;
 }
+
+const code = (c: string) => c.trim().toUpperCase();
 
 function stubServer(opts: Opts) {
   const runs = opts.runs.map((r) => ({ ...r }));
+  let discarded = false;
   const calls: { method: string; pathname: string; search: string; body?: unknown }[] = [];
   const safe = () => {
     const committed = runs.filter((r) => r.status === "DRAFT" || r.status === "APPROVED");
-    const payrollReserved = committed.filter((r) => r.currency === "TTD").reduce((s, r) => s + r.totalGross, 0);
-    const otherCurrencyPayroll = committed.filter((r) => r.currency !== "TTD").map((r) => ({ currency: r.currency, amount: r.totalGross }));
+    const payrollReserved = committed.filter((r) => code(r.currency) === "TTD").reduce((s, r) => s + r.totalGross, 0);
+    const otherCurrencyPayroll = committed.filter((r) => code(r.currency) !== "TTD").map((r) => ({ currency: code(r.currency), amount: r.totalGross }));
     return {
       safeToSpend: Math.round((5_000 - payrollReserved) * 100) / 100,
       cashBalance: 10_000, cashBasis: "ledger", otherCurrencyCash: [], otherCurrencyPayroll,
@@ -109,7 +126,7 @@ function stubServer(opts: Opts) {
   const serverDiscard = (r: Run | undefined): Response => {
     if (!r) return jsonResponse(404, { statusCode: 404, message: "Payroll run not found", error: "Not Found" }, "Not Found");
     if (r.status === "PAID") return jsonResponse(409, { statusCode: 409, message: `Paid payroll run ${r.id} cannot be discarded`, error: "Conflict" }, "Conflict");
-    if (r.status === "APPROVED" && r.currency === "TTD") {
+    if (r.status === "APPROVED" && code(r.currency) === "TTD") {
       return jsonResponse(409, { statusCode: 409, message: `Payroll run ${r.id} is APPROVED in TTD; only DRAFT runs or unposted runs in a non-business currency can be discarded (D-144)`, error: "Conflict" }, "Conflict");
     }
     r.status = "VOID";
@@ -133,9 +150,11 @@ function stubServer(opts: Opts) {
     const discard = new RegExp(`${PAY}/runs/([^/]+)/discard$`).exec(pathname);
     if (method === "POST" && discard) {
       const target = runs.find((r) => r.id === discard[1]);
+      discarded = true;
       return (opts.discard ?? serverDiscard)(target);
     }
     if (method === "GET" && pathname.endsWith(`${FIN}/safe-to-spend`)) {
+      if (opts.safeFailsAfterDiscard && discarded) return jsonResponse(503, { statusCode: 503, message: "Service Unavailable" }, "Service Unavailable");
       return opts.revenueRefused
         ? jsonResponse(403, { statusCode: 403, message: REVENUE_REFUSAL, error: "Forbidden" }, "Forbidden")
         : jsonResponse(200, safe());
@@ -165,6 +184,7 @@ function safeMetric(): string {
 const reserveLine = () => screen.findByRole("region", { name: /payroll reserve/i });
 
 afterEach(() => {
+  selected.businessId = BIZ;
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -347,5 +367,102 @@ describe("V1-65 Money > Overview: the payroll reserve line with Discard (D-144)"
     // The paid run is no longer reserved: the line goes, and the figure is the server's (5,000).
     await waitFor(() => expect(screen.queryByRole("region", { name: /payroll reserve/i })).not.toBeInTheDocument());
     await waitFor(() => expect(safeMetric()).toMatch(/TTD 5,000\b/));
+  });
+
+  async function discardWithReason(line: HTMLElement, name: RegExp, reason: string) {
+    fireEvent.click(await within(line).findByRole("button", { name }));
+    const dialog = await screen.findByRole("dialog", { name: /discard payroll run/i });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /reason/i }), { target: { value: reason } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^discard run$/i }));
+  }
+
+  it("PRD-11 RED-BEFORE: a failed re-read after a discard keeps the confirmation, says so, and shows no figure", async () => {
+    const server = stubServer({ runs: [DRAFT], safeFailsAfterDiscard: true });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    await waitFor(() => expect(safeMetric()).toMatch(/TTD 3,749\.5\b/));
+    await discardWithReason(line, /discard/i, "Created by mistake");
+
+    await waitFor(() => expect(server.discards()).toHaveLength(1));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(/void|discarded/i);
+    expect(notice).toHaveTextContent(/could not be refreshed/i);
+    await waitFor(() => expect(screen.getByText(/Some data failed to load/)).toHaveTextContent(/Safe-to-spend/));
+    expect(safeMetric()).not.toMatch(/3,749\.5/);
+    expect(safeMetric()).not.toMatch(/TTD 0\b/);
+  });
+
+  it("PRD-12 RED-BEFORE: discarding a run in another currency says it is void, not that Safe to Spend no longer reserves it", async () => {
+    stubServer({ runs: [APPROVED_USD] });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    await discardWithReason(line, /discard the approved payroll run 2026-09-01 to 2026-09-15/i, "Legacy USD run");
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(/2026-09-01 to 2026-09-15/);
+    expect(notice).toHaveTextContent(/void/i);
+    expect(notice).not.toHaveTextContent(/no longer reserves/i);
+  });
+
+  it("PRD-13 RED-BEFORE: a status read that fills the page (100 runs) says more runs are reserved than are listed", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => run(`run_${i}`, "DRAFT", 10, "TTD", `2026-0${1 + (i % 9)}-01`, `2026-0${1 + (i % 9)}-15`));
+    stubServer({ runs: many });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    await waitFor(() => expect(within(line).getAllByRole("listitem")).toHaveLength(100));
+    expect(line).toHaveTextContent(/more runs are reserved than are listed/i);
+  });
+
+  it("PRD-13b control: 99 runs are all listed, with no such note", async () => {
+    const some = Array.from({ length: 99 }, (_, i) => run(`run_${i}`, "DRAFT", 10));
+    stubServer({ runs: some });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    await waitFor(() => expect(within(line).getAllByRole("listitem")).toHaveLength(99));
+    expect(line).not.toHaveTextContent(/more runs are reserved than are listed/i);
+  });
+
+  it("PRD-14 (mutant pin): run currencies are compared as the server compares them", async () => {
+    const approvedTtd = run("run_appr_lc", "APPROVED", 2_000, " ttd ", "2026-10-16", "2026-10-31");
+    const draftUsd = run("run_usd_lc", "DRAFT", 300, "usd", "2026-09-01", "2026-09-15");
+    stubServer({ runs: [approvedTtd, draftUsd] });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    await waitFor(() => expect(within(line).getAllByRole("listitem")).toHaveLength(2));
+    const items = within(line).getAllByRole("listitem");
+    const ttd = items.find((li) => li.textContent?.includes("2026-10-16 to 2026-10-31"))!;
+    const usd = items.find((li) => li.textContent?.includes("2026-09-01 to 2026-09-15"))!;
+    await waitFor(() => expect(within(usd).getByRole("button", { name: /discard/i })).toBeInTheDocument());
+    // " ttd " is the business currency: counted, and APPROVED in it is not discardable (the server answers 409).
+    expect(ttd).toHaveTextContent("TTD 2,000.00");
+    expect(ttd).not.toHaveTextContent(/not counted/i);
+    expect(within(ttd).queryByRole("button", { name: /discard/i })).not.toBeInTheDocument();
+    expect(usd).toHaveTextContent("USD 300.00");
+    expect(usd).toHaveTextContent(/not counted in safe to spend/i);
+  });
+
+  it("PRD-15 RED-BEFORE: after a switch to another business, the last business's operations level offers no Discard", async () => {
+    const OTHER = "biz_other";
+    // Any business: one DRAFT run reserved. my-access: admin in biz_prd; never answered in biz_other.
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname, searchParams } = new URL(url, "http://localhost");
+      if (pathname.endsWith(`/identity/businesses/${BIZ}/my-access`)) return jsonResponse(200, { modules: { revenue: "admin", operations: "admin" } });
+      if (pathname.endsWith(`/identity/businesses/${OTHER}/my-access`)) return new Promise<Response>(() => {});
+      if (/\/payroll\/businesses\/[^/]+\/runs$/.test(pathname)) return jsonResponse(200, searchParams.get("status") === "DRAFT" ? [DRAFT] : []);
+      if (pathname.endsWith("/safe-to-spend")) {
+        return jsonResponse(200, { safeToSpend: 3_749.5, cashBalance: 10_000, taxReserved: 0, billsDueNext30Days: 0, payrollReserved: 1_250.5, operatingBuffer: 5_000, otherReserves: 0, currency: "TTD" });
+      }
+      if (pathname.endsWith("/overview")) return jsonResponse(200, OVERVIEW);
+      if (pathname.endsWith("/cashflow-forecast")) return jsonResponse(200, FORECAST);
+      return jsonResponse(200, { items: [] });
+    }));
+    const { rerender } = render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    await waitFor(() => expect(within(line).getByRole("button", { name: /discard/i })).toBeInTheDocument());
+
+    selected.businessId = OTHER;
+    rerender(<FinancialFlowPage />);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(screen.queryByRole("button", { name: /discard/i })).not.toBeInTheDocument();
   });
 });
