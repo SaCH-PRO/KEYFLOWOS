@@ -1,5 +1,5 @@
 import type { APIRequestContext, Page } from "@playwright/test";
-import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-helpers";
+import { test, expect, API_URL, settle, memberOf, signedInContext, type Tenant } from "./journeys/journey-helpers";
 
 /**
  * OWNER-ALERTS-WEB, the browser half (D-154; the alert setup steps of journeys E and F). The jsdom half is
@@ -10,12 +10,15 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  * For a fresh owner on a real API and database (live only: E2E_LIVE=1, a production build; the journey harness's
  * fixtures, README in e2e/journeys; without E2E_LIVE every case is skipped), at 375x812, 768x1024, 1024x900 and
  * 1440x900, on /app/settings/notifications:
- *   OAB-01 a "Your alerts" tab shows "Install KEYFLOWOS on your phone" and the three alert switches, all on for a
+ *   OAB-01 an "Owner alerts" tab shows "Install KEYFLOWOS on your phone" and the three alert switches, all on for a
  *          fresh business; the tab strip and the page do not scroll sideways
  *   OAB-02 turning an alert off is saved on the server (GET customer-preferences answers owner_alert_<x>: false, which
  *          OwnerAlertsListener reads), stays off after a reload, and turns back on. At 375 all three are turned off
  *          and on (journey E: payments and "I've paid" claims; journey F: bookings); at the wider widths, bookings.
  *   OAB-03 (375, iPhone Safari) the install step says Share, then Add to Home Screen
+ *   OAB-04 (repair round 1, SEC-OAW-1) an ADMIN of the business (settings admin) sees the three alerts read-only, with
+ *          "Only the business owner can change these."; the API refuses their PATCH of an owner alert (403
+ *          OWNER_ALERTS_OWNER_ONLY) and the stored value does not move
  *
  * No push or provider traffic: the page reads and writes preferences only; push on this device is My account's
  * (sweep-push-optin.spec.ts). Real delivery is the @staging legs E8c and F5 (GATE-STAGING-RUN).
@@ -43,8 +46,8 @@ async function serverPrefs(request: APIRequestContext, owner: Tenant): Promise<R
 async function openAlerts(page: Page) {
   await page.goto("/app/settings/notifications");
   await expect(page.getByRole("heading", { name: /customer notifications/i })).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: /^your alerts$/i }).click();
-  const region = page.getByRole("region", { name: /your alerts/i });
+  await page.getByRole("button", { name: /^owner alerts$/i }).click();
+  const region = page.getByRole("region", { name: /owner alerts/i });
   await expect(region).toBeVisible();
   await expect(region.getByRole("switch", { name: SWITCHES[0].name })).toBeVisible({ timeout: 20_000 });
   return region;
@@ -59,7 +62,7 @@ for (const [width, height] of [[375, 812], [768, 1024], [1024, 900], [1440, 900]
   test.describe(`at ${width}px`, () => {
     test.use({ viewport: { width, height } });
 
-    test(`OAB-01 Your alerts: the install step and three switches, on by default (${width})`, async ({ page }) => {
+    test(`OAB-01 Owner alerts: the install step and three switches, on by default (${width})`, async ({ page }) => {
       const region = await openAlerts(page);
       await expect(region.getByRole("heading", { name: /install keyflowos on your phone/i })).toBeVisible();
       for (const s of SWITCHES) {
@@ -68,9 +71,9 @@ for (const [width, height] of [[375, 812], [768, 1024], [1024, 900], [1440, 900]
         await expect(sw).toHaveAttribute("aria-checked", "true");
       }
       await expect(region.getByRole("switch")).toHaveCount(3);
-      const tab = page.getByRole("button", { name: /^your alerts$/i });
+      const tab = page.getByRole("button", { name: /^owner alerts$/i });
       const box = await tab.boundingBox();
-      expect(box && box.x + box.width <= width, "the Your alerts tab is inside the viewport").toBe(true);
+      expect(box && box.x + box.width <= width, "the Owner alerts tab is inside the viewport").toBe(true);
       await noSidewaysScroll(page);
     });
 
@@ -104,6 +107,29 @@ for (const [width, height] of [[375, 812], [768, 1024], [1024, 900], [1440, 900]
       const prefs = await serverPrefs(request, owner);
       for (const s of which) expect(prefs[s.key], `${s.key} saved on`).toBe(true);
       await settle(page, 500);
+    });
+
+    test(`OAB-04 an ADMIN sees the owner's alerts read-only and the API refuses their change (${width})`, async ({ browser, request, owner }) => {
+      const admin = await memberOf(request, owner, `admin ${width}`, { role: "ADMIN" });
+      const context = await signedInContext(browser, admin, { viewport: { width, height } });
+      const page = await context.newPage();
+      const region = await openAlerts(page);
+      await expect(region.getByText("Only the business owner can change these.")).toBeVisible();
+      for (const s of SWITCHES) {
+        const sw = region.getByRole("switch", { name: s.name });
+        await expect(sw).toBeVisible();
+        await expect(sw).toBeDisabled();
+        await expect(sw).toHaveAttribute("aria-checked", "true");
+      }
+      await noSidewaysScroll(page);
+
+      const refused = await request.patch(`${API_URL}/notifications/businesses/${owner.businessId}/customer-preferences`, {
+        headers: { Authorization: `Bearer ${admin.token}` },
+        data: { owner_alert_claims: false },
+      });
+      expect(refused.status(), await refused.text()).toBe(403);
+      expect(await refused.text()).toContain("OWNER_ALERTS_OWNER_ONLY");
+      expect((await serverPrefs(request, owner)).owner_alert_claims).not.toBe(false);
     });
   });
 }
