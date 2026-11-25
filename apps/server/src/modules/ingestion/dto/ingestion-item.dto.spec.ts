@@ -3,21 +3,18 @@
  * Verifies ListIngestionItemsQuery under the exact production ValidationPipe
  * options (`GLOBAL_VALIDATION_PIPE_OPTIONS` = `{ whitelist: true, transform: true }`):
  *   - `{ limit: '25' }` (what Data Inbox sends) coerces to number `25` (RED before: 400).
+ *   - `{ limit: '2.5' }`, `'NaN'`, `'Infinity'`, `''`, `'0'`, `'101'` fail with 400.
  *   - `{ sortOrder: 'sideways' }` and `{ sortBy: 'id' }` fail with 400 (RED before: accepted -> Prisma 500).
  *   - `{}` yields defaults `sortBy: 'createdAt'`, `sortOrder: 'desc'`, `limit: 25`.
  */
 import 'reflect-metadata';
 import { describe, it, expect } from 'vitest';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
-import * as appBootstrap from '../../../app-bootstrap';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../../../app-bootstrap';
 import { ListIngestionItemsQuery } from './ingestion-item.dto';
 
 function makeProductionPipe() {
-  const opts =
-    ((appBootstrap as Record<string, unknown>).GLOBAL_VALIDATION_PIPE_OPTIONS as
-      | { whitelist: true; transform: true }
-      | undefined) ?? { whitelist: true, transform: true };
-  return new ValidationPipe(opts);
+  return new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
 }
 
 describe('ListIngestionItemsQuery under production ValidationPipe (W11-QUERY-DTO-COERCION, BUG-011)', () => {
@@ -30,6 +27,16 @@ describe('ListIngestionItemsQuery under production ValidationPipe (W11-QUERY-DTO
     expect(out).toBeInstanceOf(ListIngestionItemsQuery);
     expect(out.limit).toBe(25);
     expect(typeof out.limit).toBe('number');
+  });
+
+  it('rejects float, NaN, Infinity, empty, and out-of-range limit query strings with 400 BadRequestException', async () => {
+    const pipe = makeProductionPipe();
+    for (const badLimit of ['2.5', 'NaN', 'Infinity', '', '0', '101']) {
+      await expect(
+        pipe.transform({ limit: badLimit }, { type: 'query', metatype: ListIngestionItemsQuery }),
+        `limit="${badLimit}" must be rejected with 400`,
+      ).rejects.toThrow(BadRequestException);
+    }
   });
 
   it('RED-BEFORE: rejects invalid sortOrder="sideways" and invalid sortBy="id" with 400 BadRequestException', async () => {
