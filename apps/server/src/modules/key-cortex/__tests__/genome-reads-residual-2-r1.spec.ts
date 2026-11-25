@@ -138,9 +138,23 @@ describe('P82 R1-2 & R1-6: FlowOrchestratorService buildBlueprintSection real su
       })),
     };
     svc.genomeFacts = { listTopFacts: vi.fn(async () => []) };
+    const realSetupStatus = {
+      percentage: 75,
+      completedCount: 6,
+      totalSteps: 8,
+      financeModel: true,
+      payments: true,
+      storefront: true,
+      contacts: true,
+    };
     svc.getOnboardingConcierge = () => ({
-      getSetupStatus: vi.fn(async () => ({ percentage: 75, payments: true, storefront: true, contacts: true })),
-      getConciergeState: vi.fn(async () => ({ onboardingComplete: false, templateId: 'tpl_1' })),
+      getSetupStatus: vi.fn(async () => ({ ...realSetupStatus })),
+      getConciergeState: vi.fn(async () => ({
+        onboardingComplete: false,
+        templateId: 'tpl_1',
+        dismissed: false,
+        setupStatus: { ...realSetupStatus },
+      })),
     });
     svc.getBusinessGenesis = () => ({});
     return svc;
@@ -175,7 +189,7 @@ describe('P82 R1-2 & R1-6: FlowOrchestratorService buildBlueprintSection real su
     expect(ownerDir).toContain('68%');
   });
 
-  it('projects buildOnboardingCard (present_onboarding_card) and restricts financials card for non-revenue STAFF', async () => {
+  it('projects buildOnboardingCard (present_onboarding_card) including conciergeState.setupStatus and restricts financials card for non-revenue STAFF', async () => {
     const staffSvc = makeOrchestrator('STAFF', { settings: 'read', revenue: 'none' });
 
     const finCard = await staffSvc.buildOnboardingCard('biz_A', 'financials', undefined, 'u1');
@@ -183,7 +197,15 @@ describe('P82 R1-2 & R1-6: FlowOrchestratorService buildBlueprintSection real su
 
     const nextCard = await staffSvc.buildOnboardingCard('biz_A', 'next', undefined, 'u1');
     const json = JSON.stringify(nextCard.data);
-    expect(nextCard.data.setupStatus.percentage).toBeUndefined();
+    for (const st of [nextCard.data.setupStatus, nextCard.data.conciergeState.setupStatus]) {
+      expect(st.percentage).toBeUndefined();
+      expect(st.completedCount).toBeUndefined();
+      expect(st.totalSteps).toBeUndefined();
+      expect(st.financeModel).toBeUndefined();
+      expect(st.payments).toBeUndefined();
+      expect(st.storefront).toBe(true);
+      expect(st.contacts).toBe(true);
+    }
     expect(nextCard.data.blueprintCtx.financials).toBeUndefined();
     expect(nextCard.data.blueprintCtx.summary).toBeUndefined();
     expect(nextCard.data.genomeIntegrity.genomeStage).toBeUndefined();
@@ -191,6 +213,9 @@ describe('P82 R1-2 & R1-6: FlowOrchestratorService buildBlueprintSection real su
     expect(json).not.toContain('REVENUE_ENGINE');
     expect(json).not.toContain('Retainer + VIP packages');
     expect(json).not.toContain('TTD 850');
+    expect(json).not.toContain('financeModel');
+    expect(json).not.toContain('completedCount');
+    expect(json).not.toContain('totalSteps');
   });
 });
 
@@ -300,5 +325,89 @@ describe('P82 R1-3, R1-4, R1-5, R1-7: blueprintForReader, moduleReadinessForRead
     expect(bizSection.missingFields).toEqual(['deliveryMode']);
     expect(bizSection.summary).toBe('');
     expect(bizSection.recommendation).toBe('');
+  });
+
+  it('R2-2: v2ContextForReader strips real receipt captures (no summary), crm.conversionRateThisMonth, temporal.patternsDetected, and object genome.recommendations with money in diagnosis', () => {
+    const raw = {
+      crm: { totalContacts: 25, conversionRateThisMonth: 0.42, recentActivity: [], overdueTasks: [] },
+      temporal: {
+        recentMemories: [],
+        patternsDetected: [
+          { pattern: 'Overdue invoice spike $8,400', confidence: 0.9 },
+          { pattern: 'Friday booking cluster', confidence: 0.85 },
+        ],
+      },
+      genome: {
+        recommendations: [
+          { domain: 'operations', title: 'Review studio schedule', diagnosis: 'Monthly rent is $4,200 and needs reduction' },
+          { domain: 'operations', title: 'Standardize intake forms', diagnosis: 'Paper forms slow check-in by 5 minutes' },
+        ],
+      },
+      device: {
+        recentCaptures: [
+          { id: 'cap_r1', mediaType: 'image', detectedType: 'receipt', status: 'COMPLETED', createdAt: '2026-11-25', publicUrl: 'https://cdn.example/receipt-secret.jpg' },
+          { id: 'cap_ok', mediaType: 'image', detectedType: 'business_card', status: 'COMPLETED', createdAt: '2026-11-25', publicUrl: 'https://cdn.example/card.jpg' },
+        ],
+        linkedCommandItems: [],
+      },
+    };
+
+    const out = v2ContextForReader(raw, false) as any;
+    expect(out.crm.conversionRateThisMonth).toBeUndefined();
+    expect(out.crm.totalContacts).toBe(25);
+    expect(out.temporal.patternsDetected).toHaveLength(1);
+    expect(out.temporal.patternsDetected[0].pattern).toBe('Friday booking cluster');
+    expect(out.genome.recommendations).toHaveLength(1);
+    expect(out.genome.recommendations[0].title).toBe('Standardize intake forms');
+    expect(out.device.recentCaptures).toHaveLength(1);
+    expect(out.device.recentCaptures[0].id).toBe('cap_ok');
+    expect(JSON.stringify(out)).not.toContain('receipt-secret.jpg');
+  });
+
+  it('R2-3 & depth>8: genomeFactsForReader strips backfilled ownershipProfile/registration/workflow/offerArchitecture facts and field=value domain-leaf figure words; blueprintForReader fails closed past depth 8', () => {
+    const facts = [
+      { id: 'f_own', section: 'LEGAL_GOVERNANCE_COMPLIANCE', domain: 'ownershipProfile.owners', field: 'values', value: { raw: [{ name: 'Maria', sharePct: 60 }] } },
+      { id: 'f_bir', section: 'LEGAL_GOVERNANCE_COMPLIANCE', domain: 'registrationProfile.birStatus', field: 'value', value: { raw: 'ACTIVE' } },
+      { id: 'f_bank', section: 'LEGAL_GOVERNANCE_COMPLIANCE', domain: 'registrationProfile.businessBankStatus', field: 'value', value: { raw: 'OPEN' } },
+      { id: 'f_comp', section: 'LEGAL_GOVERNANCE_COMPLIANCE', domain: 'complianceProfile.complianceScore', field: 'value', value: { raw: 80 } },
+      { id: 'f_wf', section: 'OPERATIONS_DELIVERY', domain: 'workflowModel.retainerCycle', field: 'value', value: { raw: true } },
+      { id: 'f_offer', section: 'OFFER_PRODUCT', domain: 'offerArchitecture.tiers', field: 'values', value: { raw: ['VIP'] } },
+      { id: 'f_leaf_rate', section: 'OPERATIONS_DELIVERY', domain: 'operationsSystem.hourlyRate', field: 'value', value: { raw: 250 } },
+      { id: 'f_keep', section: 'OPERATIONS_DELIVERY', domain: 'operationsSystem.openingHours', field: 'value', value: { raw: '9am-5pm' } },
+    ];
+    const out = genomeFactsForReader(facts, false);
+    expect(out.map((f) => f.id)).toEqual(['f_keep']);
+
+    // Depth > 8 fails closed instead of returning nested payload verbatim
+    let deep: Record<string, unknown> = { secret: '$99,000 balance' };
+    for (let i = 0; i < 10; i++) deep = { nested: deep };
+    const bpOut = blueprintForReader({ identity: { name: 'Maria', deep } }, false) as any;
+    expect(JSON.stringify(bpOut)).not.toContain('$99,000');
+  });
+
+  it('R2-4: moduleReadinessForReader strips RISK_RESILIENCE missing facts from blockedReasons and recommendedSetupActions', () => {
+    const entry = {
+      module: 'key_autonomy',
+      readinessScore: 50,
+      automationAllowed: true,
+      riskLevel: 'MEDIUM',
+      requiredFacts: [
+        { section: 'OPERATIONS', domain: 'ops', field: 'hours', impact: 'BLOCKING', reason: 'Missing hours' },
+        { section: 'RISK_RESILIENCE', domain: 'risk', field: 'top_risks', impact: 'DEGRADED', reason: 'Missing degraded fact: risk.top_risks' },
+      ],
+      missingFacts: [
+        { section: 'RISK_RESILIENCE', domain: 'risk', field: 'top_risks', impact: 'DEGRADED', reason: 'Missing degraded fact: risk.top_risks' },
+      ],
+      optionalFacts: [],
+      blockedReasons: ['Missing degraded fact: risk.top_risks'],
+      recommendedSetupActions: ['Provide degraded fact: risk.top_risks', 'Confirm booking hours'],
+    };
+
+    const out = moduleReadinessForReader(entry, false) as any;
+    expect(out.readinessScore).toBe(100);
+    expect(out.riskLevel).toBe('LOW');
+    expect(out.missingFacts).toEqual([]);
+    expect(out.blockedReasons).toEqual([]);
+    expect(out.recommendedSetupActions).toEqual(['Confirm booking hours']);
   });
 });

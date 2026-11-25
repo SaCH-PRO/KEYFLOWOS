@@ -1836,7 +1836,7 @@ export class FlowOrchestratorService {
     const genesis = this.getBusinessGenesis();
     void genesis;
 
-    const [rawSetupStatus, conciergeState, business, rawBlueprintCtx, rawGenomeIntegrity] = await Promise.all([
+    const [rawSetupStatus, rawConciergeState, business, rawBlueprintCtx, rawGenomeIntegrity] = await Promise.all([
       concierge.getSetupStatus(businessId),
       concierge.getConciergeState(businessId),
       this.prisma.client.business.findUnique({
@@ -1853,13 +1853,33 @@ export class FlowOrchestratorService {
     const genomeIntegrity = rawGenomeIntegrity
       ? genomeIntegrityForReader(rawGenomeIntegrity as unknown as Record<string, unknown>, readsRevenue)
       : null;
-    const setupStatus = readsRevenue
-      ? rawSetupStatus
-      : (() => {
-          const copy = { ...(rawSetupStatus as unknown as Record<string, unknown>) };
-          delete copy.percentage;
-          return copy;
-        })();
+    const projectSetupStatus = (raw: unknown): unknown => {
+      if (readsRevenue || !raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (
+          k === 'percentage' ||
+          k === 'completedCount' ||
+          k === 'totalSteps' ||
+          k === 'financeModel' ||
+          isMoneyLabel(k)
+        ) {
+          continue;
+        }
+        out[k] = v;
+      }
+      return out;
+    };
+    const setupStatus = projectSetupStatus(rawSetupStatus);
+    const conciergeState =
+      readsRevenue || !rawConciergeState || typeof rawConciergeState !== 'object'
+        ? rawConciergeState
+        : {
+            ...rawConciergeState,
+            ...('setupStatus' in (rawConciergeState as unknown as Record<string, unknown>)
+              ? { setupStatus: projectSetupStatus((rawConciergeState as unknown as Record<string, unknown>).setupStatus) }
+              : {}),
+          };
 
     if (cardType !== 'next') {
       return {
@@ -1871,7 +1891,7 @@ export class FlowOrchestratorService {
 
     const baseData = { setupStatus, conciergeState, business, blueprintCtx, genomeIntegrity };
 
-    if (conciergeState.onboardingComplete || rawSetupStatus.percentage === 100) {
+    if (rawConciergeState.onboardingComplete || rawSetupStatus.percentage === 100) {
       return {
         type: 'completion-gate',
         title: this.onboardingCardTitle('completion-gate'),
@@ -1893,7 +1913,7 @@ export class FlowOrchestratorService {
     }
 
     // 2) Pick and auto-configure the best concierge template.
-    if (!conciergeState.templateId) {
+    if (!rawConciergeState.templateId) {
       return {
         type: 'template-picker',
         title: this.onboardingCardTitle('template-picker'),
