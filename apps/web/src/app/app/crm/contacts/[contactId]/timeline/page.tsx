@@ -14,6 +14,7 @@ import {
   emptyText,
   eventChannel,
   foldPastedNotes,
+  pastedNoteIds,
   readIsFull,
   type ChannelFilter,
   type TimelineChannel,
@@ -55,8 +56,8 @@ const channelConfig: Record<TimelineChannel, { icon: React.ElementType; color: s
   note: typeConfig.note,
 };
 
-function getEventConfig(ev: ContactEvent) {
-  const channel = eventChannel(ev);
+function getEventConfig(ev: ContactEvent, pasted: ReadonlySet<string>) {
+  const channel = eventChannel(ev, pasted);
   if (channel) return channelConfig[channel];
   const key = Object.keys(typeConfig).find((k) => ev.type.toLowerCase().includes(k));
   return typeConfig[key || "default"];
@@ -123,8 +124,10 @@ export default function ContactTimelinePage() {
 
   // D-277: one item per pasted WhatsApp message; the filter and its counts work on what the events read served only.
   const items = useMemo(() => foldPastedNotes(events), [events]);
-  const counts = useMemo(() => channelCounts(items), [items]);
-  const shown = filter === "all" ? items : items.filter((ev) => eventChannel(ev) === filter);
+  // MIN-3: the notes the read shows to be pasted messages, so that their edits and deletes are WhatsApp too.
+  const pasted = useMemo(() => pastedNoteIds(events), [events]);
+  const counts = useMemo(() => channelCounts(items, pasted), [items, pasted]);
+  const shown = filter === "all" ? items : items.filter((ev) => eventChannel(ev, pasted) === filter);
   // COR-TCH-1: a full read may have left older events out; then everything below speaks of the latest events only.
   const full = readIsFull(events.length);
   const plural = items.length === 1 ? "event" : "events";
@@ -202,11 +205,12 @@ export default function ContactTimelinePage() {
               </div>
               <div className="space-y-2 pl-7">
                 {groups[date].map((ev) => {
-                  const cfg = getEventConfig(ev);
+                  const cfg = getEventConfig(ev, pasted);
                   const Icon = cfg.icon;
                   const detail = formatEventData(ev.data);
                   // A message is shown whole, as typed: third-party text, rendered as text only (never markup).
-                  const isMessage = eventChannel(ev) !== null && eventChannel(ev) !== "note";
+                  const channel = eventChannel(ev, pasted);
+                  const isMessage = channel !== null && channel !== "note";
                   return (
                     <Card key={ev.id} className="border-l-4 border-l-transparent hover:border-l-primary/50 transition-colors">
                       <div className="flex items-start gap-3 p-3">

@@ -84,10 +84,38 @@ function namedChannel(data: unknown): MessageChannel | null {
   return MESSAGE_CHANNELS.has(channel) ? (channel as MessageChannel) : null;
 }
 
-/** The channel an event belongs to, or null for an event of no channel (it is in All only). */
-export function eventChannel(event: ChannelEvent): TimelineChannel | null {
+/**
+ * MIN-3: the ids of the notes the page shows to be pasted WhatsApp messages: the noteId a communication.whatsapp
+ * event carries, and that of a note.created written with source whatsapp_inbound (captureInboundWhatsApp writes
+ * both). A note's later note.updated / note.deleted carry only { noteId } (source system), so they are known to be a
+ * pasted message's only through this; a pasted note whose two events are both off the page is not known, and its
+ * edit stays under Notes.
+ */
+export function pastedNoteIds(events: readonly ChannelEvent[]): Set<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    const { type } = code(event.type);
+    const noteId = field(event.data, "noteId");
+    if (typeof noteId !== "string" || !noteId) continue;
+    if (type === "communication.whatsapp" || (type === "note.created" && event.source === PASTED_WHATSAPP_SOURCE)) ids.add(noteId);
+  }
+  return ids;
+}
+
+/**
+ * The channel an event belongs to, or null for an event of no channel (it is in All only). `pasted`: the ids of the
+ * notes that are pasted WhatsApp messages (pastedNoteIds), so that such a note's edit or delete is WhatsApp too.
+ */
+export function eventChannel(event: ChannelEvent, pasted: ReadonlySet<string> = new Set()): TimelineChannel | null {
   const { type, subject, action } = code(event.type);
-  if (subject === "note") return event.source === PASTED_WHATSAPP_SOURCE ? "whatsapp" : "note";
+  if (subject === "note") {
+    if (event.source === PASTED_WHATSAPP_SOURCE) return "whatsapp";
+    // A note.created says what it is by its own source (captureInboundWhatsApp writes whatsapp_inbound): only a later
+    // edit or delete, which carries no such source, is known by its noteId.
+    if (action === "created" || action === "added") return "note";
+    const noteId = field(event.data, "noteId");
+    return typeof noteId === "string" && pasted.has(noteId) ? "whatsapp" : "note";
+  }
   // communication.meeting (or any other) is no channel of the filter's.
   if (subject === "communication") return MESSAGE_CHANNELS.has(action) ? (action as MessageChannel) : null;
   if (MESSAGE_CHANNELS.has(subject)) return subject as MessageChannel;
@@ -117,10 +145,10 @@ export function foldPastedNotes<T extends ChannelEvent>(events: readonly T[]): T
 }
 
 /** How many items each filter holds: All is every item, each channel its own. */
-export function channelCounts(events: readonly ChannelEvent[]): Record<ChannelFilter, number> {
+export function channelCounts(events: readonly ChannelEvent[], pasted: ReadonlySet<string> = new Set()): Record<ChannelFilter, number> {
   const counts: Record<ChannelFilter, number> = { all: events.length, whatsapp: 0, email: 0, sms: 0, call: 0, note: 0 };
   for (const event of events) {
-    const channel = eventChannel(event);
+    const channel = eventChannel(event, pasted);
     if (channel) counts[channel] += 1;
   }
   return counts;
