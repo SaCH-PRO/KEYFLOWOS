@@ -221,11 +221,11 @@ export default function CommercePage() {
   // WEDGE-WA-INBOUND-CAPTURE (D-263): New quote for a customer from another screen ("+ New > From WhatsApp") is the
   // Quotes door with ?contactId=<id>: the Quotes tab opens the New quote form with that customer chosen, as a
   // contact's "Create quote" event does. It follows the URL while the page is mounted; the id then leaves the URL, so a
-  // reload or Back does not open a second form. A contactId on any other tab is left alone. The sheet reaches this
-  // with a full page load: a client navigation (router.push) mounts this page twice, because RequireAuth remounts the
-  // shell on every pathname change, and the first instance strips the id, so the contacts screens' router.push doors
-  // (?tab=quotes&contactId=, use-contacts-pipeline.ts) still open no form in a browser (review COR-1; follow-ups
-  // FU-REQUIRE-AUTH-REMOUNT and FU-CONTACT-SEND-QUOTE-DOOR).
+  // reload or Back does not open a second form. A contactId on any other tab is left alone. Every door here is this
+  // URL: the WhatsApp sheet (a full page load), a contact's Send quote (use-contact-actions.ts) and the next-action
+  // Send quote (use-contacts-pipeline.ts), both router.push. A client navigation mounts this page once since
+  // FU-REQUIRE-AUTH-REMOUNT (RequireAuth no longer remounts the shell on a pathname change), so it reads the id
+  // (FU-CONTACT-SEND-QUOTE-DOOR).
   const paramContactId = searchParams.get("contactId");
   useEffect(() => {
     if (!paramContactId || !paramTab || landingFor(paramTab, paramView) !== "quotes") return;

@@ -505,8 +505,12 @@ export function useContactActions({
         break;
       case "book-appointment": router.push(`/app/bookings?contactId=${contactId}`); break;
       case "send-quote":
-        moduleEvents.emit("commerce:create_quote_for_contact", "crm", { contactId });
-        router.push(`/app/commerce?tab=billing&segment=quotes&contactId=${contactId}`);
+        // FU-CONTACT-SEND-QUOTE-DOOR: the Quotes door for this customer, which the commerce page reads and turns into
+        // an open New quote form with them chosen (page.tsx, ?tab=quotes&contactId=). ?tab=billing landed on the
+        // Snapshot and opened nothing; the event it also sent had no listener, as the commerce page is not mounted
+        // here. A client navigation is enough: the shell no longer remounts on a pathname change
+        // (FU-REQUIRE-AUTH-REMOUNT), so the page mounts once and reads the one-shot id.
+        router.push(`/app/commerce?tab=quotes&contactId=${encodeURIComponent(contactId)}`);
         break;
       case "refer":
         router.push(`/app/crm/contacts/${contactId}?action=refer`);
