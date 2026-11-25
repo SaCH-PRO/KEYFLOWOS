@@ -31,6 +31,7 @@ import {
   type CommerceInvoiceReminder,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { OWED_STATUSES, canRemindInvoice, invoiceRemainingOwed } from "@/lib/commerce-status";
 import { getStatusBadge } from "../components/commerce-types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerBadge } from "../components/customer-badge";
@@ -60,7 +61,7 @@ interface OverdueItem {
 }
 
 function computePriority(inv: Invoice, daysOverdue: number): RecoveryPriority {
-  const amount = Number(inv.total ?? 0);
+  const amount = invoiceRemainingOwed(inv);
   if (daysOverdue > 60 || amount > 5000) return "critical";
   if (daysOverdue > 30 || amount > 2000) return "high";
   if (daysOverdue > 14 || amount > 500) return "medium";
@@ -127,11 +128,11 @@ export default function CollectionsPanel({
 
   const overdueQueue = useMemo<OverdueItem[]>(() => {
     return invoices
-      .filter((inv) => inv.status === "OVERDUE" || (inv.status === "SENT" && inv.dueDate && new Date(inv.dueDate) < new Date()))
+      .filter((inv) => inv.status === "OVERDUE" || (OWED_STATUSES.has(inv.status) && inv.dueDate && new Date(inv.dueDate) < new Date()))
       .map((inv) => {
         const days = getDaysOverdue(inv.dueDate);
         const priority = computePriority(inv, days);
-        const amount = Number(inv.total ?? 0);
+        const amount = invoiceRemainingOwed(inv);
         return {
           invoice: inv,
           daysOverdue: days,
@@ -148,7 +149,7 @@ export default function CollectionsPanel({
   }, [invoices]);
 
   const summaryStats = useMemo(() => {
-    const totalOverdue = overdueQueue.reduce((sum, item) => sum + Number(item.invoice.total ?? 0), 0);
+    const totalOverdue = overdueQueue.reduce((sum, item) => sum + invoiceRemainingOwed(item.invoice), 0);
     const totalRecoverable = overdueQueue.reduce((sum, item) => sum + item.estimatedRecovery, 0);
     const criticalCount = overdueQueue.filter((i) => i.priority === "critical").length;
     const avgDaysOverdue = overdueQueue.length > 0
@@ -159,6 +160,8 @@ export default function CollectionsPanel({
 
   const handleGenerateReminder = useCallback(async (invoiceId: string) => {
     if (!businessId) return;
+    const target = invoices.find((i) => i.id === invoiceId);
+    if (!canRemindInvoice(target?.status)) return;
     setSelectedInvoiceId(invoiceId);
     setReminderLoading(true);
     setReminderData(null);
@@ -170,7 +173,7 @@ export default function CollectionsPanel({
     } finally {
       setReminderLoading(false);
     }
-  }, [businessId, selectedTone]);
+  }, [businessId, invoices, selectedTone]);
 
   const handleCopyReminder = useCallback(async (text: string) => {
     try {
@@ -208,6 +211,8 @@ export default function CollectionsPanel({
   // nothing on the invoice, so the row is left as it is.
   const handleSendReminder = useCallback(async (invoiceId: string) => {
     if (actionLoading[invoiceId]) return;
+    const target = invoices.find((i) => i.id === invoiceId);
+    if (!canRemindInvoice(target?.status)) return;
     if (!businessId) {
       toast.error("Select a workspace to send a reminder");
       return;
@@ -225,7 +230,7 @@ export default function CollectionsPanel({
     } finally {
       setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
     }
-  }, [actionLoading, businessId]);
+  }, [actionLoading, businessId, invoices]);
 
   const recordContactAttempt = useCallback((invoiceId: string) => {
     setContactAttempts((prev) => ({
@@ -277,7 +282,7 @@ export default function CollectionsPanel({
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Est. Recoverable</span>
           </div>
           <p className="text-lg font-bold text-emerald-400">{formatCurrency(summaryStats.totalRecoverable, currency)}</p>
-          <p className="text-[10px] text-muted-foreground/50">{Math.round((summaryStats.totalRecoverable / summaryStats.totalOverdue) * 100)}% recovery rate</p>
+          <p className="text-[10px] text-muted-foreground/50">{summaryStats.totalOverdue > 0 ? Math.round((summaryStats.totalRecoverable / summaryStats.totalOverdue) * 100) : 0}% recovery rate</p>
         </div>
         <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3">
           <div className="flex items-center gap-1.5 mb-1">
@@ -366,15 +371,17 @@ export default function CollectionsPanel({
                           )}
                         </div>
                         <div className="text-right shrink-0">
-                          <span className="text-sm font-bold">{formatCurrency(Number(inv.total), currency)}</span>
+                          <span className="text-sm font-bold">{formatCurrency(invoiceRemainingOwed(inv), currency)}</span>
                           <div className="flex items-center gap-1 mt-1.5 justify-end">
-                            <button
-                              onClick={() => handleGenerateReminder(inv.id)}
-                              className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
-                              title="AI Reminder"
-                            >
-                              <Bot className="w-3 h-3" />
-                            </button>
+                            {canRemindInvoice(inv.status) && (
+                              <button
+                                onClick={() => handleGenerateReminder(inv.id)}
+                                className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+                                title="AI Reminder"
+                              >
+                                <Bot className="w-3 h-3" />
+                              </button>
+                            )}
                             <button
                               onClick={() => recordContactAttempt(inv.id)}
                               className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
@@ -389,14 +396,16 @@ export default function CollectionsPanel({
                             >
                               <CreditCard className="w-3 h-3" />
                             </button>
-                            <button
-                              onClick={() => handleSendReminder(inv.id)}
-                              disabled={!!isLoading}
-                              className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
-                              title="Send Reminder"
-                            >
-                              {isLoading === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                            </button>
+                            {canRemindInvoice(inv.status) && (
+                              <button
+                                onClick={() => handleSendReminder(inv.id)}
+                                disabled={!!isLoading}
+                                className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                                title="Send Reminder"
+                              >
+                                {isLoading === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleMarkPaid(inv.id)}
                               disabled={!!isLoading}
@@ -421,8 +430,8 @@ export default function CollectionsPanel({
                               <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold">Suggested Payment Plans</span>
                               <div className="grid grid-cols-3 gap-2 mt-2">
                                 {PAYMENT_PLAN_SUGGESTIONS.map((plan) => {
-                                  const total = Number(inv.total ?? 0);
-                                  const perInstallment = plan.months > 1 ? total / plan.months : total * 0.5;
+                                  const remaining = invoiceRemainingOwed(inv);
+                                  const perInstallment = plan.months > 1 ? remaining / plan.months : remaining * 0.5;
                                   return (
                                     <button
                                       key={plan.label}

@@ -1,7 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
-  IsISO8601,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -11,6 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { sanitize } from '../../../core/utils/sanitize';
+import { IsIsoDate } from './iso-date.decorator';
 
 export class CreateTicketTypeDto {
   @IsString()
@@ -43,13 +43,11 @@ export class CreateTicketTypeDto {
   quantity?: number;
 
   @IsOptional()
-  @IsISO8601()
-  @Type(() => Date)
+  @IsIsoDate()
   salesStartAt?: Date;
 
   @IsOptional()
-  @IsISO8601()
-  @Type(() => Date)
+  @IsIsoDate()
   salesEndAt?: Date;
 
   @IsOptional()

@@ -305,7 +305,13 @@ function collectText(res: any, cb: (err: Error | null, body: string) => void) {
 function expectRefused(route: RouteCase, res: { status: number; body: unknown }) {
   const where = `${route.method} ${route.path} ${res.status} ${typeof res.body === 'string' ? res.body : JSON.stringify(res.body)}`;
   if (route.sse && res.status === 200) {
-    expect(String(res.body), where).toMatch(/event: error\n(?:id: [^\n]*\n)?data: [^\n]*businessId[^\n]*required/);
+    // D-273 AMEND (FU-VITEST-DECORATOR-METADATA, Q20): with decorator metadata
+    // emitted as in production, ValidationPipe refuses the missing query DTO
+    // before the @Sse handler runs, emitting a Bad Request error event (still
+    // refused, zero service calls).
+    expect(String(res.body), where).toMatch(
+      /event: error\n(?:id: [^\n]*\n)?data: [^\n]*(?:businessId[^\n]*required|Bad Request)/,
+    );
     return;
   }
   expect([400, 403], where).toContain(res.status);

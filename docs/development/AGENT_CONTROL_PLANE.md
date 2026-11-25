@@ -474,7 +474,7 @@ The rule:
   account. First run the same evaluator without `--merge` against the current
   head:
   ```sh
-  GITHUB_TOKEN=... GITHUB_REPOSITORY=SaCH-PRO/KEYFLOWOS PR_NUMBER=<n> \
+  GITHUB_TOKEN=... GITHUB_REPOSITORY=KEYFLOWOS/KEYFLOWOS PR_NUMBER=<n> \
     node scripts/agent-control/auto-merge-admitted.mjs
   ```
   Merge only on exit 0, only at the `head_sha` it printed, and only at once.

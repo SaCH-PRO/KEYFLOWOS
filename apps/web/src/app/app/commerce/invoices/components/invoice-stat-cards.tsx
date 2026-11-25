@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { FileText, Clock, AlertCircle, CheckCircle } from "lucide-react";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { Invoice } from "@/lib/client";
+import { OWED_STATUSES, safeInvoiceAmount } from "@/lib/commerce-status";
 import { formatAmount } from "../../utils/commerce-utils";
 
 interface InvoiceStatCardsProps {
@@ -27,9 +28,14 @@ export function InvoiceStatCards({ invoices, currency, onFilterClick }: InvoiceS
     let draftsCount = 0;
 
     for (const inv of invoices) {
-      const total = Number(inv.total);
+      const total = safeInvoiceAmount(inv.total);
       // V1-36 (CF-17): what is still owed, net of refunds (the shared balance contract).
-      const { remaining } = invoiceBalanceOfStoredRows(total, inv.payments ?? [], inv.currency);
+      const { remaining } = invoiceBalanceOfStoredRows(
+        total,
+        inv.payments ?? [],
+        inv.currency ?? undefined,
+      );
+      const owed = Math.max(0, Math.min(total, remaining));
 
       if (inv.status === "DRAFT") {
         draftsTotal += total;
@@ -40,10 +46,10 @@ export function InvoiceStatCards({ invoices, currency, onFilterClick }: InvoiceS
           paidMonthCount++;
         }
       } else if (inv.status === "OVERDUE") {
-        overdueTotal += remaining;
+        overdueTotal += owed;
         overdueCount++;
-      } else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
-        unpaidTotal += remaining;
+      } else if (OWED_STATUSES.has(inv.status)) {
+        unpaidTotal += owed;
         unpaidCount++;
       }
     }

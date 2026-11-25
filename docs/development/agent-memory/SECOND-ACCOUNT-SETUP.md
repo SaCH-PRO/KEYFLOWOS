@@ -6,16 +6,16 @@ orchestrator's sessions, and the orchestrator cannot message it. Issue #80 and t
 ## 1. Give the account GitHub access
 
 1. Sign in to claude.ai with the second account.
-2. Open https://claude.ai/connect-github and connect a GitHub user that can push to `SaCH-PRO/KEYFLOWOS`.
-3. On that page, check the Claude GitHub App is installed on `SaCH-PRO/KEYFLOWOS` (install it if not; an owner of
-   the SaCH-PRO organization must approve).
+2. Open https://claude.ai/connect-github and connect a GitHub user that can push to `KEYFLOWOS/KEYFLOWOS`.
+3. On that page, check the Claude GitHub App is installed on `KEYFLOWOS/KEYFLOWOS` (install it if not; an owner of
+   the KEYFLOWOS organization must approve).
 
 ## 2. Create its cloud environment
 
 In claude.ai/code, open the cloud environment menu in a new session's title bar, choose to add an environment, and set:
 
 - Name: `keyflowos`
-- Repositories: `SaCH-PRO/KEYFLOWOS`
+- Repositories: `KEYFLOWOS/KEYFLOWOS`
 - Network: limited, package managers allowed, MCP servers allowed, extra allowed host `nodejs.org`
 - Environment variables: none. Secrets: none (the lane never needs production or provider keys).
 - Setup script: the script below, unchanged (it installs pgvector, starts a local Postgres 16 and Redis, installs the
@@ -55,13 +55,13 @@ it.
 
 ## 3. Start the session
 
-Start a new claude.ai/code session in that environment with `SaCH-PRO/KEYFLOWOS` selected, and paste the prompt in
+Start a new claude.ai/code session in that environment with `KEYFLOWOS/KEYFLOWOS` selected, and paste the prompt in
 section 4 as the first message. Prefer an Opus or Fable model; a session can run several packets in a row.
 
 ## 4. First message for the second account
 
 ```
-You are a packet-worker lane for the KEYFLOWOS v1 programme (repo SaCH-PRO/KEYFLOWOS). Another session is the orchestrator; you cannot message it, so coordinate only through GitHub (issue #80 and the branch coord/board).
+You are a packet-worker lane for the KEYFLOWOS v1 programme (repo KEYFLOWOS/KEYFLOWOS). Another session is the orchestrator; you cannot message it, so coordinate only through GitHub (issue #80 and the branch coord/board).
 
 The plan ref: origin/main once PR #230 (the rulings and the wedge re-cut) is merged; until then origin/wave/v1-rulings-3n. ORCHESTRATOR-STATE.md on that ref names the ref if it has changed.
 

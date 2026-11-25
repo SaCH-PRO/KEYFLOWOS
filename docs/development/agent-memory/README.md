@@ -73,7 +73,7 @@ Append-only and authoritative. **Never loaded whole.** Search it:
 git log --oneline origin/main --grep 'pkt/V1-<ID>'            # a packet's commits on main
 git log --oneline origin/main -- <path>                       # what touched a file
 git log origin/main --format='%h %s' --grep 'D-2[0-9][0-9]'   # commits that record rulings
-gh api 'repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?since=2026-11-22T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-249")) | {id, body}'   # one ruling on #80
+gh api 'repos/KEYFLOWOS/KEYFLOWOS/issues/80/comments?since=2026-11-22T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-249")) | {id, body}'   # one ruling on #80
 ```
 
 (`gh issue view 80 --comments`, as `CLAUDE.md` gives it, was refused with HTTP 403 in the cloud sessions on
@@ -113,6 +113,7 @@ procedure is not permission. Each file below restates rules the owner already ru
 | `CONFIRMATION-REVIEW-BRIEF.md` | A small repair delta needs confirming |
 | `WAVE-RUNBOOK.md` | Compacting packets into a wave, proving it, the PR, merge conditions |
 | `CHECKLISTS.md` | The repeatable checklists every lane ticks: session start, packet, wave, merge, handoff, advisory review |
+| `WORKFLOW-IMPROVEMENTS.md` | D-274: how we speed up with no compromise: the adopted rules every lane follows, owner proposals, research in progress and an experiments log. Read it at session start |
 | `LIVE-PROOF-RUNBOOK.md` | Exactly how to run the server proof at one head, the web proof, live journeys and browser sweeps (with RED at the base), and reviews in detached worktrees, on any machine |
 | `OWNER-QUESTION-FORMAT.md` | Asking the owner, and recording the answer as D-nnn |
 | `MEASUREMENT.md` | Checking what this layer saves, and the resume test |

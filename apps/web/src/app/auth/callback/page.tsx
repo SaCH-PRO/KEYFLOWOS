@@ -53,7 +53,7 @@ export function deriveOAuthName(meta: Record<string, unknown> | null | undefined
   return { firstName: parts[0], lastName: parts.slice(1).join(" "), fullName };
 }
 
-type CallbackErrorKind = "generic" | "account_email_conflict";
+type CallbackErrorKind = "generic" | "account_email_conflict" | "owner_membership_required";
 
 function AuthCallbackInner() {
   const router = useRouter();
@@ -224,6 +224,12 @@ function AuthCallbackInner() {
           setError(bootstrap.error);
           setStatus("error");
           return;
+        } else if (bootstrap.errorCode === "owner_membership_required") {
+          // Recorded as an owner, a member nowhere (D-104): an administrator restores access. Nothing opens.
+          setErrorKind("owner_membership_required");
+          setError(bootstrap.error);
+          setStatus("error");
+          return;
         } else if (bootstrap.error) {
           throw new Error(bootstrap.error);
         } else {
@@ -277,6 +283,41 @@ function AuthCallbackInner() {
               </button>
               <a
                 href="mailto:support@keyflow.app?subject=Help%20signing%20in%20with%20Google"
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:brightness-110"
+                style={{ color: "hsl(30 20% 98%)", background: "hsl(20 10% 12%)", border: "1px solid hsl(20 10% 18%)", display: "inline-block" }}
+              >
+                Contact support
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (errorKind === "owner_membership_required") {
+      return (
+        <div className="min-h-screen flex items-center justify-center" style={{ background: "hsl(20 14% 4%)" }}>
+          <div className="w-full max-w-md mx-auto px-4 text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4" style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(173 58% 39%))" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold mb-2" style={{ color: "hsl(30 20% 98%)" }}>Your workspace access needs restoring</h1>
+            <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: "hsl(20 14% 7% / 0.9)", border: "1px solid hsl(20 10% 15%)" }}>
+              <p className="text-sm" style={{ color: "hsl(30 10% 75%)" }}>{error}</p>
+              <button
+                onClick={() => router.push("/auth/login")}
+                className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110"
+                style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(24 95% 45%))" }}
+              >
+                Back to Sign In
+              </button>
+              {/* The same address and style as the account_email_conflict view's link. */}
+              <a
+                href="mailto:support@keyflow.app?subject=Restore%20my%20workspace%20access"
                 className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:brightness-110"
                 style={{ color: "hsl(30 20% 98%)", background: "hsl(20 10% 12%)", border: "1px solid hsl(20 10% 18%)", display: "inline-block" }}
               >

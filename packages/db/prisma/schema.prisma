@@ -200,6 +200,7 @@ model Business {
   primaryColor    String? @default("#F97316") @map("primary_color")
   secondaryColor  String? @default("#14B8A6") @map("secondary_color")
   defaultTaxRate  Float?  @default(0) @map("default_tax_rate")
+  vatNumber       String? @map("vat_number")
   invoiceTemplate String? @default("classic") @map("invoice_template")
   quoteTemplate   String? @default("classic") @map("quote_template")
 
@@ -732,6 +733,7 @@ model Business {
   // KEY FLOWS
   flowSignals           FlowSignal[]
   flowRoleSubscriptions FlowRoleSubscription[]
+  productTierPrices     ProductTierPrice[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -2525,6 +2527,7 @@ model Contact {
   lifecycleStage        String?   @map("lifecycle_stage")
   sourceDetail          String?   @map("source_detail")
   segment               String?
+  pricingTier           String?   @map("pricing_tier")
   language              String?
   marketingOptIn        Boolean?  @map("marketing_opt_in")
   doNotContact          Boolean?  @map("do_not_contact")
@@ -3491,6 +3494,7 @@ model Product {
   preOrders           PreOrder[]
   orderItems          MarketplaceOrderItem[]
   variants            ProductVariant[]
+  tierPrices          ProductTierPrice[]
   sourceLinks         ProductSourceLink[]
   costProfile         ProductCostProfile?
   marginSnapshots     MarginSnapshot[]
@@ -3502,6 +3506,24 @@ model Product {
 
   @@index([businessId])
   @@map("products")
+}
+
+model ProductTierPrice {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  productId  String   @map("product_id")
+  tier       String
+  price      Float
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, tier])
+  @@index([businessId])
+  @@index([businessId, productId])
+  @@map("product_tier_prices")
 }
 
 model Quote {
@@ -3555,7 +3577,7 @@ model Quote {
 model QuoteItem {
   id          String @id @default(cuid())
   description String
-  quantity    Int
+  quantity    Float
   unitPrice   Float  @map("unit_price")
   total       Float
 
@@ -3635,7 +3657,7 @@ model Invoice {
 model InvoiceItem {
   id          String @id @default(cuid())
   description String
-  quantity    Int
+  quantity    Float
   unitPrice   Float  @map("unit_price")
   total       Float
 

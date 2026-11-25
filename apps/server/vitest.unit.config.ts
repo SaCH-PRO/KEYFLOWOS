@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { serverTransform } from './vitest.transform.config';
 
 /**
  * Unit suite. 2.5x faster than it was, and the number came from measuring
@@ -83,6 +84,8 @@ import { defineConfig } from 'vitest/config';
  * guard: test:ci (vitest.config.ts) and the proof runners do not.
  */
 export default defineConfig({
+  // Emits decorator metadata as tsc does, so the ValidationPipe validates. See vitest.transform.config.ts.
+  plugins: [serverTransform()],
   test: {
     include: ['src/**/*.spec.ts'],
     globals: true,

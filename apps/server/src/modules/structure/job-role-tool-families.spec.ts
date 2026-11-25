@@ -1562,6 +1562,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         // the report routes require revenue:read (owner ruling D-57, V1-81 FOLLOW3-A7 item 9)
         finance_balance_sheet: 'read',
         finance_cashflow: 'read',
+        // TOF-FINANCE-CANONICAL-TOOLS (D-57, D-141, D-145): forward finance intelligence reads need revenue:read
+        finance_cashflow_forecast: 'read',
         // PR195-BOOKS-DOORS (SEC-P195JS-1): the statement import and the auto-match need revenue write
         finance_auto_match_bank: 'write',
         // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): POST chart-of-accounts needs revenue write
@@ -1570,10 +1572,12 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         finance_customer_balance: 'read',
         finance_list_action_items: 'read',
         finance_list_bank_accounts: 'read',
+        finance_money_moves: 'read',
         // PR195-JOURNAL-SCOPE (CR-P195-4): POST finance journal-entries needs revenue write
         finance_post_journal_entry: 'write',
         finance_profit_and_loss: 'read',
         finance_revenue_breakdown: 'read',
+        finance_safe_to_spend: 'read',
         finance_tax_summary: 'read',
         // FOLLOW3-A6 (D-57): GET receivables/aging and customers/:contactId/balance need revenue:read
         finance_view_receivables: 'read',
@@ -1929,6 +1933,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
           'CrmService.assertCanCreateContacts',
           'CrmService.assertCanEditContact',
           'CrmService.bulkUpdateContacts',
+          'CrmService.captureInboundWhatsApp',
           'CrmService.createContact',
           'CrmService.findOrCreateContact',
           'CrmService.updateContact',

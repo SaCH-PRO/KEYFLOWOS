@@ -843,7 +843,7 @@ export class InvoiceWorkflowService {
       }
       const existing = await db.invoice.findUnique({
         where: { id: invoiceId },
-        select: { id: true, status: true, businessId: true, total: true, currency: true },
+        select: { id: true, status: true, businessId: true, total: true, currency: true, sentAt: true },
       });
       if (!existing) throw new NotFoundException('Invoice not found');
       const from = existing.status as InvoiceStatus;
@@ -857,6 +857,10 @@ export class InvoiceWorkflowService {
 
       const data: Record<string, unknown> = { status: to };
       if (extra.sentAt) data.sentAt = extra.sentAt;
+      // SWP-INV-DETAIL (BUG-088): moving an invoice to SENT without an explicit
+      // sentAt stamps it once so `sentAt` and the `invoice.sent` activity entry
+      // are recorded without overwriting an earlier sentAt on re-entry.
+      else if (to === 'SENT' && !existing.sentAt) data.sentAt = new Date();
       if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
       if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
 

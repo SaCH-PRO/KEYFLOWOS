@@ -432,7 +432,7 @@ export function buildBundle({ plan, packetId, rulings, statusById, fileExists, m
     schema_version: 1,
     generator: { name: 'scripts/agent-memory/bundle.mjs', version: '1', deterministic: true },
     snapshot: {
-      repository: 'SaCH-PRO/KEYFLOWOS',
+      repository: 'KEYFLOWOS/KEYFLOWOS',
       main_sha: mainSha,
       ref,
       task_head_sha: null,

@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "173481cdefd518199556c53bc1c6d1af4cc4f9e2",
-  "main_commit_date": "2026-11-24T11:13:46+00:00",
+  "main_sha": "45d302ef6568255419f004fe84134a513d67ba1f",
+  "main_commit_date": "2026-11-24T22:11:41-04:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 536.5,
   "by_status": {
    "done": {
-    "packets": 99,
-    "points": 146.5,
-    "pct_by_points": 27.3
+    "packets": 128,
+    "points": 188.5,
+    "pct_by_points": 35.1
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 267,
-    "points": 390,
-    "pct_by_points": 72.7
+    "packets": 238,
+    "points": 348,
+    "pct_by_points": 64.9
    }
   },
   "by_step": {
@@ -66,33 +66,33 @@
     "total": 7
    },
    "3": {
-    "done": 61,
+    "done": 77,
     "in-progress": 0,
-    "todo": 88,
+    "todo": 72,
     "total": 149
    },
    "4": {
-    "done": 7,
+    "done": 13,
     "in-progress": 0,
-    "todo": 46,
+    "todo": 40,
     "total": 53
    },
    "5": {
-    "done": 12,
+    "done": 17,
     "in-progress": 0,
-    "todo": 59,
+    "todo": 54,
     "total": 71
    },
    "6": {
-    "done": 3,
+    "done": 4,
     "in-progress": 0,
-    "todo": 28,
+    "todo": 27,
     "total": 31
    },
    "7": {
-    "done": 0,
+    "done": 1,
     "in-progress": 0,
-    "todo": 34,
+    "todo": 33,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 12,
+    "done": 41,
     "in-progress": 0,
-    "todo": 215,
+    "todo": 186,
     "total": 227
    },
    "follow-on": {
@@ -123,30 +123,50 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 144,
+   "prior-status-file": 134,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 9,
-   "compacted-commit": 43,
-   "no-evidence": 142
+   "code-commit-subject": 31,
+   "compacted-commit": 50,
+   "no-evidence": 123
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
+   "W11-KEY-TRANSFER-INTEGER",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
+   "SWP-STORE-LISTING-SERVER",
+   "SWP-STORE-OVERSELL",
+   "SWP-CENSUS-OPEN-WRITES",
    "FU-IDENTITY-FINANCE-COLUMNS",
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE",
-   "FU-PROPOSAL-REVENUE-SIGHT"
+   "FU-PROPOSAL-REVENUE-SIGHT",
+   "FU-PENDING-OWED-SERVER",
+   "FU-PENDING-OWED-WEB",
+   "FU-RESEARCH-CORPUS-YAML",
+   "RR-UNKNOWN-COST-NOT-ZERO",
+   "RR-STRUCTURED-PARSE-INVALID-STATE",
+   "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
+   "RR-TOOL-EFFECT-CLASS",
+   "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "RR-EVAL-HARNESS-NO-VACUOUS",
+   "RR-LANGFUSE-INGESTION-CUTOVER",
+   "RR-BUSINESS-EVENT-REDACT",
+   "RR-ADMIN-LOGOUT",
+   "RR-RETENTION-EXPIRED-EXPORTS",
+   "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "SEC-KEY-CUSTOM-LOGIC",
+   "FU-OUTBOUND-ATTACHMENT-URL"
   ],
-  "todo_with_dependencies_met": 123,
-  "todo_with_dependencies_met_launch": 100
+  "todo_with_dependencies_met": 114,
+  "todo_with_dependencies_met_launch": 87
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "SWP-CONTACT-QUICKADD",
-   "SWP-INV-LIST",
    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
    "SWP-REMOVED-MEMBER-NOTICE",
    "SWP-INV-DETAIL",
@@ -168,9 +188,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 45,
+   "weight": 44,
    "chain": [
-    "W11-KEY-TRANSFER-INTEGER",
     "TOF-FINANCE-CANONICAL-TOOLS",
     "W11-OWNER-HELPER-REST",
     "TOF-KEY-SELF-MODEL",
@@ -196,34 +215,24 @@
  },
  "ready": [
   {
-   "id": "SWP-CONTACT-QUICKADD",
+   "id": "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
    "step": 4,
-   "priority": "P1",
-   "size": "M",
+   "priority": "P2",
+   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 49
+   "unblocks": 47
   },
   {
-   "id": "W11-KEY-TRANSFER-INTEGER",
+   "id": "TOF-FINANCE-CANONICAL-TOOLS",
    "step": 3,
    "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 58
-  },
-  {
-   "id": "SWP-STORE-LISTING-SERVER",
-   "step": 4,
-   "priority": "P1",
    "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 51
+   "unblocks": 56
   },
   {
    "id": "MIGRATION-SET-A",
@@ -236,24 +245,14 @@
    "unblocks": 44
   },
   {
-   "id": "SWP-KEY-CHAT-WEB",
+   "id": "SWP-KEY-SHELL-SMOKE",
    "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 33
-  },
-  {
-   "id": "NAV-A3",
-   "step": 4,
    "priority": "P1",
    "size": "M",
-   "lane": "web",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 33
+   "unblocks": 32
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -276,14 +275,14 @@
    "unblocks": 26
   },
   {
-   "id": "SWP-CONTACT-DETAIL",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
+   "id": "CATALOG-1",
+   "step": 4,
+   "priority": "P0",
+   "size": "L",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 22
+   "unblocks": 23
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -296,24 +295,34 @@
    "unblocks": 22
   },
   {
-   "id": "NAV-A2",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
+   "id": "SWP-CRM-WEB-POLISH",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 14
+   "unblocks": 21
   },
   {
-   "id": "SWP-CENSUS-OPEN-WRITES",
-   "step": 6,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
+   "id": "SWP-SERVICE-DEPOSIT",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 11
+   "unblocks": 16
+  },
+  {
+   "id": "EXPENSES-HUB-1",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 12
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -330,6 +339,16 @@
    "step": 4,
    "priority": "P1",
    "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "W11-CALLS-LIST-PAGING",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -376,16 +395,6 @@
    "unblocks": 7
   },
   {
-   "id": "RR-TOOL-EFFECT-CLASS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 6
-  },
-  {
    "id": "S0-SEC-LANE-DEPLOY",
    "step": 0,
    "priority": "P0",
@@ -396,31 +405,11 @@
    "unblocks": 5
   },
   {
-   "id": "SEC-KEY-CUSTOM-LOGIC",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 5
-  },
-  {
    "id": "WEDGE-WA-INBOUND-CAPTURE",
    "step": 4,
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 5
-  },
-  {
-   "id": "FU-OUTBOUND-ATTACHMENT-URL",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 5
@@ -456,26 +445,6 @@
    "unblocks": 2
   },
   {
-   "id": "RR-ADMIN-LOGOUT",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "RR-UNKNOWN-COST-NOT-ZERO",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
    "id": "RR-ANTHROPIC-TOOL-PARITY",
    "step": 7,
    "priority": "P3",
@@ -496,12 +465,32 @@
    "unblocks": 1
   },
   {
+   "id": "RR-DISPATCH-NO-BLIND-RETRY",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
    "id": "RR-MODEL-LIFECYCLE-GUARD",
    "step": 3,
    "priority": "P1",
    "size": "S",
    "lane": "server",
    "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-TOOL-WRITES-SEQUENTIAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 1
   },
@@ -516,48 +505,8 @@
    "unblocks": 1
   },
   {
-   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
    "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
    "step": 4,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
-   "step": 3,
    "priority": "P2",
    "size": "S",
    "lane": "server",
@@ -601,36 +550,6 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-SERVER",
-   "step": 5,
-   "priority": "P0",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-WEB",
-   "step": 5,
-   "priority": "P0",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
-   "step": 5,
-   "priority": "P0",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -816,6 +735,16 @@
    "unblocks": 0
   },
   {
+   "id": "W1F-SETTLE-NO-STOCK",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "W1F-STORE-PAYPAL",
    "step": 5,
    "priority": "P1",
@@ -956,26 +885,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-RESEARCH-CORPUS-YAML",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-TEST-FLAKES-2026-11-23",
    "step": 5,
    "priority": "P2",
@@ -1031,26 +940,6 @@
    "priority": "P2",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-BUSINESS-EVENT-REDACT",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1136,16 +1025,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
-   "step": 7,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-RESPONSE-FORMAT-HONEST",
    "step": 3,
    "priority": "P2",
@@ -1156,20 +1035,10 @@
    "unblocks": 0
   },
   {
-   "id": "RR-RETENTION-EXPIRED-EXPORTS",
+   "id": "RR-TOOL-EFFECT-METADATA",
    "step": 3,
    "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
+   "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1186,8 +1055,28 @@
    "unblocks": 0
   },
   {
+   "id": "RR-ADMIN-SHELL-SERVER-GATE",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-AI-CONTRACT-ZOD-FIRST",
    "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-AI-TRACE-ATTEMPTS-CORRELATION",
+   "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "server",
@@ -1270,6 +1159,16 @@
    "step": 7,
    "priority": "P3",
    "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-EVAL-RUN-LINEAGE",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
@@ -1366,11 +1265,31 @@
    "unblocks": 0
   },
   {
+   "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-SELFTUNE-CANDIDATE-ONLY",
    "step": 3,
    "priority": "P3",
    "size": "XS",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SESSION-STORAGE-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1406,6 +1325,16 @@
    "unblocks": 0
   },
   {
+   "id": "RR-TRIAGE-RISK-FLOOR",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-UNUSED-MODEL-CENSUS",
    "step": 3,
    "priority": "P3",
@@ -1428,34 +1357,24 @@
  ],
  "ready_launch": [
   {
-   "id": "SWP-CONTACT-QUICKADD",
+   "id": "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
    "step": 4,
-   "priority": "P1",
-   "size": "M",
+   "priority": "P2",
+   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 49
+   "unblocks": 47
   },
   {
-   "id": "W11-KEY-TRANSFER-INTEGER",
+   "id": "TOF-FINANCE-CANONICAL-TOOLS",
    "step": 3,
    "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 58
-  },
-  {
-   "id": "SWP-STORE-LISTING-SERVER",
-   "step": 4,
-   "priority": "P1",
    "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 51
+   "unblocks": 56
   },
   {
    "id": "MIGRATION-SET-A",
@@ -1468,24 +1387,14 @@
    "unblocks": 44
   },
   {
-   "id": "SWP-KEY-CHAT-WEB",
+   "id": "SWP-KEY-SHELL-SMOKE",
    "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 33
-  },
-  {
-   "id": "NAV-A3",
-   "step": 4,
    "priority": "P1",
    "size": "M",
-   "lane": "web",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 33
+   "unblocks": 32
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -1508,14 +1417,14 @@
    "unblocks": 26
   },
   {
-   "id": "SWP-CONTACT-DETAIL",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
+   "id": "CATALOG-1",
+   "step": 4,
+   "priority": "P0",
+   "size": "L",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 22
+   "unblocks": 23
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -1528,24 +1437,34 @@
    "unblocks": 22
   },
   {
-   "id": "NAV-A2",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
+   "id": "SWP-CRM-WEB-POLISH",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 14
+   "unblocks": 21
   },
   {
-   "id": "SWP-CENSUS-OPEN-WRITES",
-   "step": 6,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
+   "id": "SWP-SERVICE-DEPOSIT",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 11
+   "unblocks": 16
+  },
+  {
+   "id": "EXPENSES-HUB-1",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 12
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -1562,6 +1481,16 @@
    "step": 4,
    "priority": "P1",
    "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "W11-CALLS-LIST-PAGING",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1608,16 +1537,6 @@
    "unblocks": 7
   },
   {
-   "id": "RR-TOOL-EFFECT-CLASS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 6
-  },
-  {
    "id": "S0-SEC-LANE-DEPLOY",
    "step": 0,
    "priority": "P0",
@@ -1628,31 +1547,11 @@
    "unblocks": 5
   },
   {
-   "id": "SEC-KEY-CUSTOM-LOGIC",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 5
-  },
-  {
    "id": "WEDGE-WA-INBOUND-CAPTURE",
    "step": 4,
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 5
-  },
-  {
-   "id": "FU-OUTBOUND-ATTACHMENT-URL",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 5
@@ -1688,26 +1587,6 @@
    "unblocks": 2
   },
   {
-   "id": "RR-ADMIN-LOGOUT",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "RR-UNKNOWN-COST-NOT-ZERO",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
    "id": "RR-ANTHROPIC-TOOL-PARITY",
    "step": 7,
    "priority": "P3",
@@ -1728,6 +1607,26 @@
    "unblocks": 1
   },
   {
+   "id": "RR-DISPATCH-NO-BLIND-RETRY",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-TOOL-WRITES-SEQUENTIAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
    "id": "FU-ARCH-MAP-REFRESH",
    "step": 3,
    "priority": "P2",
@@ -1738,48 +1637,8 @@
    "unblocks": 1
   },
   {
-   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
    "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
    "step": 4,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
-   "step": 3,
    "priority": "P2",
    "size": "S",
    "lane": "server",
@@ -1823,36 +1682,6 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-SERVER",
-   "step": 5,
-   "priority": "P0",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-WEB",
-   "step": 5,
-   "priority": "P0",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
-   "step": 5,
-   "priority": "P0",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2038,6 +1867,16 @@
    "unblocks": 0
   },
   {
+   "id": "W1F-SETTLE-NO-STOCK",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "W1F-STORE-PAYPAL",
    "step": 5,
    "priority": "P1",
@@ -2178,26 +2017,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-RESEARCH-CORPUS-YAML",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-TEST-FLAKES-2026-11-23",
    "step": 5,
    "priority": "P2",
@@ -2213,26 +2032,6 @@
    "priority": "P2",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-BUSINESS-EVENT-REDACT",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2278,31 +2077,21 @@
    "unblocks": 0
   },
   {
-   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "id": "RR-TOOL-EFFECT-METADATA",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-ADMIN-SHELL-SERVER-GATE",
    "step": 7,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-RETENTION-EXPIRED-EXPORTS",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2393,6 +2182,16 @@
    "priority": "P3",
    "size": "XS",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SESSION-STORAGE-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2867,15 +2666,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "d99c34a2"
+   ],
    "depends_on": [
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "KEY's inventory_transfer_stock advertises quantity as a whole number, and the chat validator enforces 'integer' parameters",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "TOF-FINANCE-CANONICAL-TOOLS",
@@ -2892,7 +2693,7 @@
     "W11-KEY-TRANSFER-INTEGER"
    ],
    "title": "KEY canonical finance intelligence tools (#161) under revenue read",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-OWNER-HELPER-REST",
@@ -3347,16 +3148,18 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "fae21e17"
+   ],
    "depends_on": [
     "NAV-A1",
     "SWP-LAYERS"
    ],
    "title": "KEY chat: Send and Deep think send; the drawer loads its session list once; onboarding opens at the manual form",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -3374,7 +3177,7 @@
     "NAV-A1"
    ],
    "title": "KEY shell: no 401 loop from the awareness panel, the drawer never opens by itself, and no KEY UI renders when the server reports KEY disabled",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-BOOKING-SLOTS",
@@ -3531,17 +3334,19 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6cd3b5d7"
+   ],
    "depends_on": [
     "SWP-QUOTE-COMPOSER-CONTACT",
     "FAILURE-KIT",
     "FIX-CONTACT-PARAMS"
    ],
    "title": "Contacts quick add: refusals are shown and the form is kept; Company is sent; no invented 'User' last name",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-INV-LIST",
@@ -3550,16 +3355,18 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "bfcf4d4c"
+   ],
    "depends_on": [
     "SWP-CONTACT-QUICKADD",
     "MOUNT-QUOTES"
    ],
    "title": "Invoices list: business currency, complete Duplicate and search, readable cards, honest Unpaid filter, and Record balance / Remind on part-paid rows",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
@@ -3576,7 +3383,7 @@
     "SWP-INV-LIST"
    ],
    "title": "Web handling of bootstrap 403 OWNER_MEMBERSHIP_REQUIRED: forget the stale workspace id, name the refusal on the OAuth callback",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-REMOVED-MEMBER-NOTICE",
@@ -3655,16 +3462,18 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "705c3ac5"
+   ],
    "depends_on": [
     "NAV-A1",
     "FAILURE-KIT"
    ],
    "title": "Real index pages for Money and Settings, with Settings > Getting paid",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -3682,7 +3491,7 @@
     "FAILURE-KIT"
    ],
    "title": "Expense detail and bills: Delete tells the truth, Void a posted expense with a confirm step, and Approve asks which account and method pay the bill",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "EXPENSES-HUB-2",
@@ -3742,15 +3551,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "b807b924"
+   ],
    "depends_on": [
     "NAV-A1"
    ],
    "title": "Breadcrumbs from the route registry, My account, store tab deep links and the Launch Pad storefront tile",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "CATALOG-1",
@@ -3768,7 +3579,7 @@
     "W11-OWNER-HELPER-D11"
    ],
    "title": "Sales > Products: create, edit and archive products through useProducts; each product listed once on the store; Launch counts once; a template applies once",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-STORE-FRAME",
@@ -3926,15 +3737,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "5dbaceb2"
+   ],
    "depends_on": [
     "SWP-BOOKING-PAYMENT-GATE"
    ],
    "title": "Public store lists only products added to the store; checkout refuses a product not on it",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-STORE-OVERSELL",
@@ -3943,15 +3756,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "63677bf4"
+   ],
    "depends_on": [
     "SWP-STORE-LISTING-SERVER"
    ],
    "title": "Storefront refuses an order for more stock than the business holds; the refusal names the product, not its id",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-SERVICE-DEPOSIT",
@@ -3968,7 +3783,7 @@
     "SWP-STORE-OVERSELL"
    ],
    "title": "Services can require a deposit (fields persisted and edited); the deposit tip links to the editor",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -4385,17 +4200,19 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "143525a0"
+   ],
    "depends_on": [
     "FIX-CONTACT-PARAMS",
     "FAILURE-KIT",
     "NAV-A1"
    ],
    "title": "Contact pages: labels instead of codes, an honest delete dialog, plain timeline events; side-panel tabs retired",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -4412,7 +4229,7 @@
     "SWP-CONTACT-DETAIL"
    ],
    "title": "Contacts web: Table view honours the main search; CRM dashboard readable in dark mode with the right group label",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-TEAM-WEB",
@@ -4932,15 +4749,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f2875f5f"
+   ],
    "depends_on": [
     "SWP-FIN-LEDGER"
    ],
    "title": "Chart-of-accounts writes under Money write (D-146, coawrite) and the census batch plan",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-CALLS-LIST-PAGING",
@@ -4957,7 +4776,7 @@
     "SWP-CENSUS-OPEN-WRITES"
    ],
    "title": "Calls list: ?limit/?offset pass the production pipe, and the list has a total order (scheduledAt asc, id asc)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-QUERY-DTO-COERCION",
@@ -5638,7 +5457,7 @@
     "SWP-STORE-OVERSELL"
    ],
    "title": "A provider settlement whose stock has run out records the money and alerts the business; stock reads are business-scoped everywhere",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W1F-STORE-STRIPE-R0",
@@ -6309,15 +6128,18 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "62a8f8aa",
+    "90a2c4ed"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Every server owed figure counts PENDING invoices (D-256)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-PENDING-OWED-WEB",
@@ -6326,15 +6148,19 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "d645c31f",
+    "357c4f8b",
+    "0a595a17"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Every web owed figure counts PENDING invoices (D-256)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-SEND-REMINDER-SERVER-GATE",
@@ -6702,13 +6528,15 @@
    "size": "S",
    "lane": "docs",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "cc2b7729"
+   ],
    "depends_on": [],
    "title": "The research ledger RESEARCH-CORPUS.yaml parses, and a test keeps it parsing",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
@@ -7051,13 +6879,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "265e5b82"
+   ],
    "depends_on": [],
    "title": "One model price table; an unpriced model's cost is marked unpriced, never written as $0",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
@@ -7074,7 +6904,7 @@
     "RR-UNKNOWN-COST-NOT-ZERO"
    ],
    "title": "Ollama and OpenRouter become two gateway resources with their own identity, health, circuit and cost, not one 'opensource' provider",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-MODEL-SELECTION-ONE-SEAM",
@@ -7193,15 +7023,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "3997a786"
+   ],
    "depends_on": [
     "RR-GATEWAY-TYPED-FAILURES"
    ],
    "title": "Gateway contract violations are typed and costed, never a silent provider failure or a silent pass on empty output",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
@@ -7210,13 +7042,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "aeb4bcc7"
+   ],
    "depends_on": [],
    "title": "KEY tool calls with unparseable arguments never run a tool: that call gets a visible refusal and the rest of the turn proceeds",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-STRICT-TOOL-SCHEMAS",
@@ -7261,15 +7095,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "9394c14c"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "Every FLOW_TOOLS entry declares an effect class: READ only when provably read-only, unknown tools never READ (census spec)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-TOOL-EFFECT-METADATA",
@@ -7286,7 +7122,7 @@
     "RR-TOOL-EFFECT-CLASS"
    ],
    "title": "FLOW_TOOLS declare idempotency, reversibility and contract version, and WRITE is refined into INTERNAL_WRITE, EXTERNAL_EFFECT, MONEY or DESTRUCTIVE (census spec)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-TOOL-WRITES-SEQUENTIAL",
@@ -7303,7 +7139,7 @@
     "RR-TOOL-EFFECT-CLASS"
    ],
    "title": "Flow chat runs the writes of one model turn one at a time in model order; only reads run in parallel",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-DISPATCH-NO-BLIND-RETRY",
@@ -7321,7 +7157,7 @@
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "Plan queue never re-runs a write after a generic error: the step is recorded OUTCOME_UNKNOWN for a person to check",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-DISPATCH-ATOMIC-CLAIM",
@@ -7600,13 +7436,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "c2e02983"
+   ],
    "depends_on": [],
    "title": "One action-intent classifier for KEY: the six divergent action-verb regexes become one exported function, so 'cancel', 'refund', 'pay' and 'remove' open the actions layer on the Cortex path as they do on Flow",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-TRIAGE-RISK-FLOOR",
@@ -7624,7 +7462,7 @@
     "MEM-SALIENCE-SIGHT"
    ],
    "title": "Cognitive triage takes an optional risk context that can only raise the effort tier; a money or destructive request gets the deliberate budget on the tool path and never grants authority",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-SELFTUNE-CANDIDATE-ONLY",
@@ -7665,13 +7503,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f5249ccb"
+   ],
    "depends_on": [],
    "title": "KEY's eval harness cannot pass vacuously: a suite proves it fails on its target defect, NOT_RUN and INDETERMINATE are distinct from PASS, and an empty suite or empty run is not green",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-EVAL-RUN-LINEAGE",
@@ -7688,7 +7528,7 @@
     "RR-EVAL-HARNESS-NO-VACUOUS"
    ],
    "title": "Every eval run records the suite version, a definition hash and the commit it ran on, and a suite whose assertions change without a version bump fails a ratchet",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
@@ -7796,13 +7636,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "17c249e1"
+   ],
    "depends_on": [],
    "title": "AI trace export leaves Langfuse's legacy /api/public/ingestion for OTLP/HTTP traces; exporter failures are counted and visible; business id is no longer sent as the user id",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-AI-TRACE-ATTEMPTS-CORRELATION",
@@ -7819,7 +7661,7 @@
     "RR-LANGFUSE-INGESTION-CUTOVER"
    ],
    "title": "The model gateway traces every attempt, including the failed and fallen-back ones, under one trace id per gateway call, with the caller's correlation id when it has one",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-SLO-AVAILABILITY-LEDGER",
@@ -8109,13 +7951,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "fb17b9e2"
+   ],
    "depends_on": [],
    "title": "BusinessEventService.emit/emitBatch and ContactAuditService redact secret-named fields at the write, as the interceptor already does",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-ERASURE-BUSINESS-EVENTS",
@@ -8141,13 +7985,15 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "462b0509"
+   ],
    "depends_on": [],
    "title": "Platform admin sign-out exists, and no sign-out leaves the admin bearer behind (it outranks every user token)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-ADMIN-SHELL-SERVER-GATE",
@@ -8164,7 +8010,7 @@
     "RR-ADMIN-LOGOUT"
    ],
    "title": "/admin pages are refused at the edge without an unexpired admin session cookie (the API stays the authority)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-SESSION-STORAGE-CENSUS",
@@ -8181,7 +8027,7 @@
     "RR-ADMIN-LOGOUT"
    ],
    "title": "Census of every browser-readable place the web app stores a credential; a spec fails on a new one",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-RETENTION-EXPIRED-EXPORTS",
@@ -8190,13 +8036,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "9a0168a2"
+   ],
    "depends_on": [],
    "title": "Expired or consumed contact export bundles are deleted from storage on the privacy scheduler, not kept forever",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
@@ -8205,13 +8053,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "99bd176c"
+   ],
    "depends_on": [],
    "title": "Diagnostics reports whether the object-storage bucket is public and whether default encryption is on, before any upload header changes",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-SCRIPT-SPECS-IN-CI",
@@ -8237,15 +8087,17 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "49b8dd3d"
+   ],
    "depends_on": [
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "One 'CI verdict' job that is red when any gating CI job failed, was skipped or was cancelled",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-GATE-LEDGER-MONOTONIC",
@@ -8765,15 +8617,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ed87b33f"
+   ],
    "depends_on": [
     "FU-NAV-A1-CODEX-224"
    ],
    "title": "The manual setup step's settings PATCH goes through the write sequence",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
@@ -8782,15 +8636,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "922b755b"
+   ],
    "depends_on": [
     "FU-PAY-LINK-STATUS-GATE"
    ],
    "title": "Invoice panel offers pay-link copy and WhatsApp share only for payable invoices",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
@@ -8870,13 +8726,15 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "72074762"
+   ],
    "depends_on": [],
    "title": "Tenant KEY's execute_custom_logic never runs model-written code on the API host: local child-process execution and the silent fallback to it are removed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-OUTBOUND-ATTACHMENT-URL",
@@ -8885,15 +8743,19 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "ac8dbdb5",
+    "db589aae",
+    "79097109"
+   ],
    "depends_on": [
     "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
    ],
    "title": "No client-supplied URL reaches the document model: chat attachments and contract term extraction read only the business's own uploaded or Drive objects",
-   "deps_met": true
+   "deps_met": null
   }
  ]
 }

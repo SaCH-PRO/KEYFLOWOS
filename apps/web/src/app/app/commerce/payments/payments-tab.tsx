@@ -31,6 +31,10 @@ import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../compo
 import type { DateRange } from "../components/date-range-filter";
 import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 
+import { OWED_STATUSES, canRemindInvoice as canRemind } from "@/lib/commerce-status";
+
+export { OWED_STATUSES };
+
 function getDaysOverdue(dueDate: string | null | undefined): number {
   if (!dueDate) return 0;
   const due = new Date(dueDate);
@@ -38,26 +42,6 @@ function getDaysOverdue(dueDate: string | null | undefined): number {
   const diff = Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
   return Math.max(0, diff);
 }
-
-// FOLLOW3-A8 review (SEC-A8-1 / A8-CR-1): a reminder is only for an invoice that
-// was issued and is still owed, the same set the invoice detail page and the
-// mobile actions offer one for. DRAFT/PENDING were never issued (the public link
-// in the email would be dead), FULLY_CREDITED/VOID/PAID owe nothing, FAILED is
-// not a live invoice: none of them is reminded from this tab.
-const REMINDABLE_STATUSES: ReadonlySet<string> = new Set(["SENT", "OVERDUE", "PARTIALLY_PAID"]);
-
-function canRemind(status: string | null | undefined): boolean {
-  return !!status && REMINDABLE_STATUSES.has(status);
-}
-
-/**
- * The invoices whose remaining balance this tab, the Sales overview hero and
- * the cash-flow summary count as owed (invoiceMoney's owedCents): the web's one
- * list, mirroring the server's OPEN_RECEIVABLE_STATUSES (commerce-stats.service)
- * less PARTIALLY_CREDITED, which the list row cannot net (it carries no credit
- * note). A PENDING invoice counts as owed everywhere (owner ruling D-256).
- */
-export const OWED_STATUSES: ReadonlySet<string> = new Set(["PENDING", "SENT", "OVERDUE", "PARTIALLY_PAID"]);
 
 /**
  * V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024, BUG-020; D-14, D-75): one
