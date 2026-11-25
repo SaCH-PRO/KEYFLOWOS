@@ -38,6 +38,8 @@ interface BookingFormProps {
   defaultTime?: string;
   defaultContactId?: string;
   saving?: boolean;
+  /** The page's contact list is still loading (ContactSelect reads a chosen customer by id only once it has arrived). */
+  contactsLoading?: boolean;
 }
 
 const TIME_SLOTS = (() => {
@@ -87,6 +89,7 @@ export default function BookingForm({
   defaultTime,
   defaultContactId,
   saving = false,
+  contactsLoading = false,
 }: BookingFormProps) {
   const [bookingDate, setBookingDate] = useState(defaultDate ?? "");
   const [bookingTime, setBookingTime] = useState(defaultTime ?? "");
@@ -399,6 +402,7 @@ export default function BookingForm({
               value={bookingContactId}
               onChange={(id) => setBookingContactId(id)}
               contacts={contacts}
+              contactsLoading={contactsLoading}
               label="Client"
               placeholder="Search or add a client..."
             />

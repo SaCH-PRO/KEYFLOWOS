@@ -840,6 +840,7 @@ export default function BookingsPage() {
             defaultDate={prefillDate}
             defaultTime={prefillTime}
             defaultContactId={prefillContactId}
+            contactsLoading={loading}
             showWaitlistOption={!!pendingWaitlistData}
             onAddToWaitlist={handleAddToWaitlistFromConflict}
             saving={bookingSaving}
