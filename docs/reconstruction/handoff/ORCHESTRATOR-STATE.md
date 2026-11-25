@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~00:05 UTC by the acting orchestrator (second-lane account, Claude Code), after M8 (PR #236, 892bb0dd) merged and the owner ruled D-275 to D-279. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~01:10 UTC by the acting orchestrator (second-lane account, Claude Code), after the repository moved to the KEYFLOWOS organization (D-278). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -90,6 +90,41 @@ Every ruling to D-272 is on main (PR #230, merged 2026-11-24 as 05f04f2c). Given
 - **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
   its Release 0 suite's setup only; assertions unchanged.
 
+## 0. Next session starts here (2026-11-25 ~01:10 UTC)
+
+**The repository moved (D-278): it is now `KEYFLOWOS/KEYFLOWOS`** (old `SaCH-PRO/KEYFLOWOS` URLs redirect; issue #80 and
+all PRs moved with it; the owner reinstalled the Claude, GitGuardian and Vercel apps on the organization). The session
+that wrote this could push through the redirect but could no longer reach the GitHub API, so these were NOT posted on
+#80 and must be posted first by the next session (bodies below are summaries; evidence is in git):
+1. **MOVED** note on #80: the new address; Antigravity to use `KEYFLOWOS/KEYFLOWOS` and start **FU-CI-MERGE-QUEUE**
+   (board P38) now that the transfer is done; docs references to `SaCH-PRO/KEYFLOWOS` (CLAUDE.md, AGENTS.md,
+   agent-memory docs, scripts using `gh ... --repo SaCH-PRO/KEYFLOWOS`) to be updated in a docs packet.
+2. **RETURN SWP-REMOVED-MEMBER-NOTICE** (`pkt/V1-SWP-REMOVED-MEMBER-NOTICE` @ `21defe66`, stacked on P35 `2c3ef7ab`):
+   - Commits, tests first: claim cad5a47b; RED c09a8ee7 (RMN-01..08, RBN-01..07, e2e/sweep-removed-member.spec.ts);
+     harness e753a547, 3601a9d6 (the notice mocked as its own module, so the R0-06 proof use-genome-gate.test.ts is
+     untouched); fix 1be13828; security round tests 77c8e356 -> fix b5c7ded8; pins a7a30d02, 096b9a20, ee5ec5e0
+     (RMN-12..14, RMN-15 RED); fix 21defe66 (sign-in/out clear the notice silently).
+   - Files: lib/workspace.ts, lib/removed-business-notice.ts (new), hooks/use-genome-gate.ts,
+     components/layout/removed-business-notice.tsx (new), app/app/layout.tsx; tests workspace-removed-member.test.ts,
+     components/layout/__tests__/removed-business-notice.test.tsx, hooks/__tests__/use-genome-gate.removed-notice.test.tsx,
+     e2e/sweep-removed-member.spec.ts. Write set departure (declared): the notice module and the gate test file.
+   - Suites: full web 214 files / 1,916-1,917 tests at 096b9a20 (mine and both reviewers); tsc 0; eslint clean;
+     the touched set 64/64 at 21defe66.
+   - Live (local e2e DB): base 2c3ef7ab RED (sweep: no notice; J8: "a lasting notice that they were removed",
+     silently in their own empty workspace = BUG-117); head 096b9a20 GREEN: sweep-removed-member 1 passed, journey J8
+     1 passed, release0-live 1 passed. Not re-run at 21defe66 (delta: silent dismissal at sign-in/out + one test).
+   - Reviews: security REJECT at 1be13828 (MAJOR-1 shared-device leak: the notice was not bound to its person) ->
+     ACCEPT WITH MINORS at 096b9a20 (m1, m2 pinned in ee5ec5e0: RMN-13, RMN-14); correctness ACCEPT WITH MINORS at
+     1be13828 and 096b9a20 (R-MINOR-1 sign-out announcing -> fixed 21defe66 with RMN-15; R-MINOR-2 pinned RMN-14;
+     R-MINOR-3 recorded: a sign-in over another account's leftover user cache while the list read fails loses the
+     fresh business id until the next refresh; MINOR-3 recorded: no notice when /identity/me fails at that moment,
+     the deliberate fail-quiet side of the same-person guard). **Both reviewers should confirm 21defe66 (small delta)
+     before the RETURN is final.**
+3. Then: M11 (Claude, wave 3q) after M9 (#238) and M10 merge: P27, P29, P32, P35, SWP-REMOVED-MEMBER-NOTICE.
+
+Local-only state of the old session (scratchpad, NOT needed to continue): live run scripts and logs. Everything needed
+is pushed: packet branches, `coord/board`, this branch.
+
 ## 3. Work in flight (what git on main cannot show)
 
 Main is at `892bb0dd` (2026-11-25): M8 PR #236 (wave 3p: P13, P19, P23/C1, P20, P26) after M7a PR #237 (10e3c97e,
@@ -103,9 +138,9 @@ Wave order: M9 (#238, Antigravity) > M10 (Antigravity) > M11 (Claude, wave 3q).
 | --- | --- | --- | --- |
 | **M9 (Antigravity)** | PR #238 `wave/v1-wave-m9`: P36 FU-CI-PG-NO-PASSWORD, P6a, P4, P17(d), P30, P33 | CI green on its base 10e3c97e (GitGuardian green thanks to P36) | Antigravity merges main 892bb0dd in, re-runs CI, merges (D-239/D-272) |
 | **Claude lane, returned (M11)** | P27 `pkt/V1-FU-CONTACT-DELETE-LEAVE` @ 6f2cf8df; P29 `pkt/V1-FU-C4-FOCUS-OPEN` @ cdf2ac66; P32 `pkt/V1-FU-C4-CMDK-SEARCH` @ d9a436f0; P35 `pkt/V1-W11-WEB-OWNER-MEMBERSHIP-REFUSAL` @ 2c3ef7ab | All returned with two reviews accepted (#80 7140922048, 7142275052, 7144766888, 7144767176). C4 live: list and Cmd/K steps green on P29+P32; it now stops at "from Today" (FU-C4-TODAY-LINK) | Assemble wave 3q after M10 (compaction, divergence gate, wave-head proof) |
-| **Claude lane, next** | - | SWP-REMOVED-MEMBER-NOTICE stacked on P35 (pre-flight: its write set must grow to the shell's notice and the Genome gate's onboarding redirect; P35 review MINOR-3); P37 FU-BULK-DELETE-UNDO web half on Antigravity's server half `61e50c0f`; P42 FU-C4-TODAY-LINK (pre-flight; server half to Antigravity if server-side); P40 FU-ME-NOTIFICATIONS-SCOPE after M9; P39 FU-CI-WINDOWS-INPUT-GATE + C2; P41 FU-CONTACT-TIMELINE-CHANNELS after P46; P34 FU-KEY-CTRLJ-OWNERS (live check first); P28, P31, P18a, P17(a-c) | Claim atomically (CHECKLISTS B1), pre-flight first (A3) |
+| **Claude lane, next** | - | SWP-REMOVED-MEMBER-NOTICE built (section 0: RETURN pending); P37 FU-BULK-DELETE-UNDO web half on Antigravity's server half `61e50c0f`; P42 FU-C4-TODAY-LINK (pre-flight; server half to Antigravity if server-side); P40 FU-ME-NOTIFICATIONS-SCOPE after M9; P39 FU-CI-WINDOWS-INPUT-GATE + C2; P41 FU-CONTACT-TIMELINE-CHANNELS after P46; P34 FU-KEY-CTRLJ-OWNERS (live check first); P28, P31, P18a, P17(a-c) | Claim atomically (CHECKLISTS B1), pre-flight first (A3) |
 | **Antigravity lane** | see #80 and the board | Returned: P43 MIGRATION-SET-A (fcb83115), P37 server half (61e50c0f), P44 TOF-FINANCE-CANONICAL-TOOLS, P45 SWP-INV-DETAIL server half; claimed P46 WEDGE-WA-INBOUND-CAPTURE server half; M10 = P6b + P3 | Their waves M9, M10 |
-| **Owner** | - | D-278: create the free GitHub organization and transfer the repository now that M8 has merged; reinstall the Claude, GitGuardian and Vercel apps there | Then Antigravity's FU-CI-MERGE-QUEUE |
+| **Owner** | - | D-278 done: the repository is `KEYFLOWOS/KEYFLOWOS`; apps reinstalled on the organization | Antigravity's FU-CI-MERGE-QUEUE (P38) |
 | `wave/v1-docs-p19` (Claude lane) | this branch | Plan rows, WORKFLOW-IMPROVEMENTS, this file; status regenerated; over the 25-commit divergence cap, so compact before it ships | Docs PR in M11, compacted |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 
