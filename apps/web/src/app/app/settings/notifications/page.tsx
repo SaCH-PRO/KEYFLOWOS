@@ -175,22 +175,15 @@ export default function NotificationsSettingsPage() {
     const res = await apiPatch<NotificationPreferences>(path, { [key]: newValue });
     if (res.error) {
       // The answer comes from the server (a Retry may have reloaded the page since the click): re-read the preferences
-      // and show them, except a switch whose own PATCH is still in flight. A refused re-read (access revoked) says no
-      // access; only when the re-read fails otherwise, and no load has read the server since the click, is this one
+      // and take this switch from them, as a PATCH answer is taken: every other switch is decided by its own answer or
+      // by a load, so a re-read read before another switch's commit cannot flip it. A refused re-read (access revoked)
+      // says no access; only when the re-read fails otherwise, and no load has read the server since the click, is this
       // switch put back.
-      // A switch saving when the re-read is sent, or still saving when it answers, keeps what its own answer sets: the
-      // re-read may have been read before that switch's PATCH was committed.
-      const savingAtReread = new Set(pending.current);
       const fresh = await apiGet<NotificationPreferences>(path);
       const freshState = readState(fresh, { what: "the customer notification settings" });
-      if (freshState.kind === "ok" && fresh.data) {
-        const server = fresh.data;
-        const stillSaving = [...new Set([...savingAtReread, ...pending.current])].filter((other) => other !== key);
-        setPreferences((current) => {
-          const next = { ...server };
-          if (current) for (const other of stillSaving) next[other] = current[other];
-          return next;
-        });
+      const serverValue = fresh.data?.[key];
+      if (freshState.kind === "ok" && typeof serverValue === "boolean") {
+        setPreferences((current) => (current ? { ...current, [key]: serverValue } : current));
       } else if (freshState.kind === "no-access") {
         // Both reads need settings read: the log goes too.
         setPrefsRead(freshState);
