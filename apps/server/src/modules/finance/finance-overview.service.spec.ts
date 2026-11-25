@@ -155,3 +155,57 @@ describe('W11-RUNWAY-LEDGER-CASH (D-135): the other-currency cash note every run
     for (const text of ['PAY ME NOW', 'ttd', 'US', 'USDT', ' USD', '']) expect(m.namedCashCurrency(text), JSON.stringify(text)).toBeNull();
   });
 });
+
+describe('W11-RUNWAY-BURN-CURRENCY (D-135): business-currency burn split and other-currency expense notes', () => {
+  const m = overviewModule as any;
+  const sentence = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
+
+  it('splitExpensesByCurrency matches legacy lower-case business currency, merges other 3-letter codes case-insensitively, and keeps non-code labels unlabelled', () => {
+    const split = m.splitExpensesByCurrency(
+      [
+        { currency: 'TTD', _sum: { amount: 600 } },
+        { currency: ' ttd ', _sum: { amount: 300 } },
+        { currency: 'usd', _sum: { amount: 1500 } },
+        { currency: 'USD', _sum: { amount: 500 } },
+        { currency: 'EUR', _sum: { amount: 250 } },
+        { currency: sentence, _sum: { amount: 50 } },
+        { currency: 'GBP', _sum: { amount: 0 } },
+      ],
+      'TTD',
+    );
+    expect(split.businessTotal).toBe(900);
+    expect(split.otherExpenses).toEqual([
+      { currency: 'EUR', amount: 250 },
+      { currency: 'USD', amount: 2000 },
+      { currency: sentence, amount: 50 },
+    ]);
+  });
+
+  it('notCountedExpenseNote and otherCurrencyExpensesWithheldNote enforce SEC-W10LR-1 (codes only, bounded, never echoing labels)', () => {
+    expect(m.notCountedExpenseNote('TTD', [])).toBe('');
+    expect(m.notCountedExpenseNote('TTD', [{ currency: 'USD', amount: 12000 }]))
+      .toBe('(TTD burn only). Expenses not counted: USD 12000.00.');
+    expect(m.notCountedExpenseNote('PAY NOW', [{ currency: 'USD', amount: 12000 }]))
+      .toBe('(business-currency burn only). Expenses not counted: USD 12000.00.');
+    const withLabel = m.notCountedExpenseNote('TTD', [
+      { currency: 'USD', amount: 12000 },
+      { currency: sentence, amount: 50 },
+    ]);
+    expect(withLabel).toBe(
+      '(TTD burn only). Expenses not counted: USD 12000.00; 1 amount held under a label that is not a currency code (label not shown).',
+    );
+    expect(withLabel).not.toMatch(/URGENT|WIRE|4242/);
+
+    expect(m.otherCurrencyExpensesWithheldNote('TTD', [])).toBe('');
+    expect(m.otherCurrencyExpensesWithheldNote('TTD', [{ currency: 'USD', amount: 12000 }]))
+      .toBe('(TTD burn only). Expenses in other currencies are not counted (amounts not shown here).');
+    expect(m.otherCurrencyExpensesWithheldNote('PAY NOW', [{ currency: 'USD', amount: 12000 }]))
+      .toBe('(business-currency burn only). Expenses in other currencies are not counted (amounts not shown here).');
+
+    // lowRunwayDetail keeps cash-only wording unchanged and appends expense note when present.
+    expect(lowRunwayDetail(0.8, 'TTD', [], [{ currency: 'USD', amount: 12000 }]))
+      .toBe('~0.8 months at current burn (TTD burn only). Expenses not counted: USD 12000.00.');
+    expect(lowRunwayDetail(0.8, 'TTD', [{ currency: 'USD', amount: 550 }], [{ currency: 'USD', amount: 12000 }]))
+      .toBe('~0.8 months at current burn (TTD cash only). Not counted: USD 550.00. (TTD burn only). Expenses not counted: USD 12000.00.');
+  });
+});
