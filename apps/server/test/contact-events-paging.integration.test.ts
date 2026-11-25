@@ -25,7 +25,7 @@
  *           succeeds; limit=201/0/-1/1.5/abc/empty, malformed/empty/tampered
  *           cursors, and invalid paged flag return 400.
  *   CEP-05: Tenant isolation (403 cross-tenant), PRIVATE contact visibility
- *           (403 for non-owner member), and resilience when the event named
+ *           (404 for non-owner member), and resilience when the event named
  *           by a cursor is deleted before the next page is fetched.
  */
 import 'reflect-metadata';
@@ -428,6 +428,18 @@ describe('FU-TIMELINE-EVENTS-PAGING (P66, D-284, D-100)', () => {
       expect(res.status, `limit=${badLimit} must be 400`).toBe(400);
     }
 
+    const validP1 = await getEvents(ID.owner, ID.c45, '?limit=20');
+    expect(validP1.status).toBe(200);
+    const validCursor = validP1.body.nextCursor as string;
+    const validDecoded = JSON.parse(Buffer.from(validCursor, 'base64url').toString('utf8'));
+    // Pad validCursor to len % 4 === 1 (dangling 6-bit tail) by taking a multiple-of-4 prefix or encoding one
+    const lenMod0Cursor = Buffer.from(JSON.stringify({ createdAt: '2026-10-01T12:00:00.000Z', id: 'abc' })).toString('base64url');
+    // Flip a low unused padding bit on a len % 4 === 3 cursor
+    const lenMod3Cursor = Buffer.from(JSON.stringify({ createdAt: '2026-10-01T12:00:00.000Z', id: 'abcd' })).toString('base64url');
+    const b64Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const lastIdx = b64Alphabet.indexOf(lenMod3Cursor[lenMod3Cursor.length - 1]);
+    const flippedPaddingCursor = lenMod3Cursor.slice(0, -1) + b64Alphabet[lastIdx ^ 1];
+
     const badCursors = [
       '',
       'not-valid-base64!!!',
@@ -435,14 +447,35 @@ describe('FU-TIMELINE-EVENTS-PAGING (P66, D-284, D-100)', () => {
       Buffer.from(JSON.stringify({ createdAt: 'not-a-date', id: 'abc' })).toString('base64url'),
       Buffer.from(JSON.stringify({ createdAt: '2026-10-01T12:00:00.000Z', id: '' })).toString('base64url'),
       Buffer.from(JSON.stringify({ createdAt: '2026-10-01T12:00:00.000Z', id: 'abc', extra: 1 })).toString('base64url'),
+      // SEC-P66-1 / COR-P66-1: extended 6-digit ISO years and year 0000 must answer 400 (never 500)
+      Buffer.from(JSON.stringify({ createdAt: '+010000-01-01T00:00:00.000Z', id: 'abc' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ createdAt: '-000001-01-01T00:00:00.000Z', id: 'abc' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ createdAt: '0000-01-01T00:00:00.000Z', id: 'abc' })).toString('base64url'),
+      // SEC-P66-2: unpaired UTF-16 surrogate and ASCII C0/DEL control chars in id must answer 400 (never 500)
+      Buffer.from('{"createdAt":"2026-10-01T12:00:00.000Z","id":"\\uD800"}').toString('base64url'),
+      Buffer.from(JSON.stringify({ createdAt: '2026-10-01T12:00:00.000Z', id: 'a\u0001b' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ createdAt: '2026-10-01T12:00:00.000Z', id: 'a\u007fb' })).toString('base64url'),
+      // COR-P66-2: non-canonical base64url (len%4===1, flipped padding bits) & non-canonical JSON framing
+      `${lenMod0Cursor}A`,
+      flippedPaddingCursor,
+      Buffer.from(` ${JSON.stringify(validDecoded)} `).toString('base64url'),
+      Buffer.from(JSON.stringify({ id: validDecoded.id, createdAt: validDecoded.createdAt })).toString('base64url'),
     ];
     for (const badCursor of badCursors) {
       const res = await getEvents(ID.owner, ID.c45, `?cursor=${encodeURIComponent(badCursor)}`);
-      expect(res.status, `cursor=${badCursor} must be 400`).toBe(400);
+      expect(res.status, `cursor=${badCursor} must be 400, got ${res.status}`).toBe(400);
     }
 
-    const badPaged = await getEvents(ID.owner, ID.c45, '?paged=bogus');
-    expect(badPaged.status).toBe(400);
+    // Duplicate query params and invalid paged values must answer 400
+    for (const badQuery of [
+      '?paged=bogus',
+      '?limit=10&limit=20',
+      `?cursor=${encodeURIComponent(validCursor)}&cursor=${encodeURIComponent(validCursor)}`,
+      '?paged=true&paged=1',
+    ]) {
+      const res = await getEvents(ID.owner, ID.c45, badQuery);
+      expect(res.status, `query=${badQuery} must be 400, got ${res.status}`).toBe(400);
+    }
   });
 
   it('[CEP-05] RED-BEFORE: cross-tenant (403) and PRIVATE contact visibility (404) stay enforced on paged reads; deleting cursor row mid-walk still returns remaining rows cleanly', async () => {

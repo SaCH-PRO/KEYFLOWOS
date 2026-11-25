@@ -56,11 +56,31 @@ export function decodeContactEventCursor(raw: string): { createdAt: Date; id: st
   if (typeof obj.createdAt !== 'string' || typeof obj.id !== 'string') {
     throw new BadRequestException('Invalid cursor');
   }
-  if (obj.id.length === 0 || obj.id.length > 128 || obj.id.includes('\0')) {
+  // SEC-P66-2: reject empty/oversized IDs, ASCII C0/DEL control characters, and unpaired UTF-16 surrogates.
+  if (
+    obj.id.length === 0 ||
+    obj.id.length > 128 ||
+    // eslint-disable-next-line no-control-regex
+    /[\x00-\x1f\x7f]/.test(obj.id) ||
+    Buffer.from(obj.id, 'utf8').toString('utf8') !== obj.id
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  // SEC-P66-1 / COR-P66-1: require strict 4-digit positive UTC ISO-8601 timestamp (reject ±YYYYYY and year 0000).
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(obj.createdAt)) {
     throw new BadRequestException('Invalid cursor');
   }
   const createdAt = new Date(obj.createdAt);
-  if (Number.isNaN(createdAt.getTime()) || createdAt.toISOString() !== obj.createdAt) {
+  if (
+    Number.isNaN(createdAt.getTime()) ||
+    createdAt.getUTCFullYear() < 1 ||
+    createdAt.getUTCFullYear() > 9999 ||
+    createdAt.toISOString() !== obj.createdAt
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  // COR-P66-2: require exact canonical base64url + JSON framing (rejects len%4===1, non-zero trailing bits, invalid UTF-8, whitespace/reordered JSON).
+  if (encodeContactEventCursor({ createdAt, id: obj.id }) !== raw) {
     throw new BadRequestException('Invalid cursor');
   }
   return { createdAt, id: obj.id };
