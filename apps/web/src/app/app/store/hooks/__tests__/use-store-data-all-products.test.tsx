@@ -48,6 +48,9 @@ beforeEach(() => {
     return new Response(JSON.stringify({ message: "not stubbed" }), { status: 404, headers: { "content-type": "application/json" } });
   }));
   api.apiGet.mockImplementation(async (path: string) => {
+    // Round 2 (SEC-CAT-7): the stock is read only for a member whose revenue level is known and not "none"; this
+    // member is the owner.
+    if (path.endsWith("/my-access")) return { data: { modules: { revenue: "admin", storefront: "admin" } }, error: null };
     if (path === `/marketplace/businesses/${BIZ}/inventory`) {
       return { data: [
         { productId: "p_1", warehouseId: "w1", quantity: 4, reserved: 1 },

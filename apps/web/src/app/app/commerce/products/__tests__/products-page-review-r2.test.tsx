@@ -224,6 +224,9 @@ describe("6. a create in flight across a business switch", () => {
       settle({ data: row("p_a_only", "A only"), error: null, status: 201 });
       await new Promise((r) => setTimeout(r, 20));
     });
+    // The switch closed the form (its exit animation runs first); then nothing names A's product.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getAllByRole("article").filter((a) => within(a).queryByText("A only"))).toHaveLength(0);
     expect(screen.queryByText("A only")).toBeNull();
     expect(await rowEl("Doubles")).toBeInTheDocument();
   });

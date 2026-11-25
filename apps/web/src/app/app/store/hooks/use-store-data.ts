@@ -30,6 +30,7 @@ import { apiGet } from "@/lib/api";
 import { onProductsChanged, hasProductChangedSinceLastFetch, markProductsFetched } from "@/lib/product-sync";
 import { toast } from "sonner";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { useMemberModuleLevels } from "@/hooks/use-app-layout";
 import type { DriftedItem } from "../components/store-types";
 import type { StockByProduct } from "../components/launch-mode";
 import type { BusinessHoursMap } from "../components/hours-editor";
@@ -45,7 +46,13 @@ export function useStoreData() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [commerceProducts, setCommerceProducts] = useState<Product[]>([]);
   // COR-CAT-8: the business's own stock rows summed per product (null until read, or when the read fails).
-  const [stockByProduct, setStockByProduct] = useState<StockByProduct | null>(null);
+  const [stockRead, setStockRead] = useState<StockByProduct | null>(null);
+  const [loadGeneration, setLoadGeneration] = useState(0);
+  // SEC-CAT-7 (D-100): the inventory read answers whole Product rows, prices included, so it is made only for a
+  // member whose revenue level is known and not "none" (the level the app reads everywhere: my-access).
+  const levels = useMemberModuleLevels();
+  const canReadStock = levels !== null && levels.revenue !== undefined && levels.revenue !== "none";
+  const stockByProduct = canReadStock ? stockRead : null;
   const [businessData, setBusinessData] = useState<{
     name?: string;
     slug?: string | null;
@@ -176,24 +183,13 @@ export function useStoreData() {
         setDriftedItems(drifts);
       }
 
-      const [configRes, analyticsRes, deliveryRes, readinessRes, inventoryRes] = await Promise.all([
+      const [configRes, analyticsRes, deliveryRes, readinessRes] = await Promise.all([
         fetchStorefrontConfig(businessId).catch(() => ({ data: null, error: null })),
         fetchStoreAnalytics(businessId, 30).catch(() => ({ data: null, error: null })),
         apiGet<Record<string, { enabled?: boolean }>>(`/marketplace/businesses/${businessId}/delivery-config`).catch(() => ({ data: null })),
         fetchStoreReadiness(businessId).catch(() => ({ data: null, error: null })),
-        apiGet<Array<{ productId?: string; quantity?: number; reserved?: number }>>(`/marketplace/businesses/${businessId}/inventory`).catch(() => ({ data: null })),
       ]);
-      if (Array.isArray(inventoryRes.data)) {
-        const stock: StockByProduct = new Map();
-        for (const r of inventoryRes.data) {
-          if (!r?.productId) continue;
-          const prev = stock.get(r.productId) ?? { quantity: 0, reserved: 0 };
-          stock.set(r.productId, { quantity: prev.quantity + (Number(r.quantity) || 0), reserved: prev.reserved + (Number(r.reserved) || 0) });
-        }
-        setStockByProduct(stock);
-      } else {
-        setStockByProduct(null);
-      }
+      setLoadGeneration((g) => g + 1);
       if (configRes.data) setStorefrontConfig(configRes.data);
       if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
       if (deliveryRes.data) {
@@ -213,6 +209,26 @@ export function useStoreData() {
   useEffect(() => {
     void loadData(true);
   }, [loadData]);
+
+  // The stock, read again with every load, and only when the member may read prices (SEC-CAT-7).
+  useEffect(() => {
+    if (!businessId || !canReadStock) return;
+    let live = true;
+    void apiGet<Array<{ productId?: string; quantity?: number; reserved?: number }>>(`/marketplace/businesses/${businessId}/inventory`)
+      .catch(() => ({ data: null }))
+      .then((res) => {
+        if (!live) return;
+        if (!Array.isArray(res.data)) { setStockRead(null); return; }
+        const stock: StockByProduct = new Map();
+        for (const r of res.data) {
+          if (!r?.productId) continue;
+          const prev = stock.get(r.productId) ?? { quantity: 0, reserved: 0 };
+          stock.set(r.productId, { quantity: prev.quantity + (Number(r.quantity) || 0), reserved: prev.reserved + (Number(r.reserved) || 0) });
+        }
+        setStockRead(stock);
+      });
+    return () => { live = false; };
+  }, [businessId, canReadStock, loadGeneration]);
 
   useEffect(() => {
     if (businessId && hasProductChangedSinceLastFetch()) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -66,6 +66,13 @@ function buildProductPayload(form: ProductForm, mode: "create" | "update" = "cre
   const imageUrl = form.imageUrl.trim();
   // COR-CAT-6: an edit that clears a field clears it on the server (null), not "leave as is" (undefined).
   const cleared = mode === "update" ? null : undefined;
+  // Round 2 (4): a new product is created with the inventory settings the form shows for a product (Tracked, out of
+  // stock: Hide from storefront) even when the owner did not touch them; stored null read as untracked. An edit
+  // sends only what the form holds, so a stored null mode stays null unless the owner picks one.
+  const shownMode = mode === "create" && form.category === "PRODUCT" ? (form.inventoryMode || "tracked") : (form.inventoryMode || undefined);
+  const shownBehavior = mode === "create" && form.category === "PRODUCT"
+    ? (shownMode === "tracked" ? (form.outOfStockBehavior || "hide") : undefined)
+    : (form.outOfStockBehavior || undefined);
   return {
     name: form.name,
     price: Number(form.price),
@@ -75,8 +82,8 @@ function buildProductPayload(form: ProductForm, mode: "create" | "update" = "cre
     imageUrl: imageUrl ? imageUrl : null,
     sku: form.sku.trim() ? form.sku.trim() : cleared,
     isActive: form.isActive,
-    inventoryMode: form.inventoryMode || undefined,
-    outOfStockBehavior: form.outOfStockBehavior || undefined,
+    inventoryMode: shownMode,
+    outOfStockBehavior: shownBehavior,
   };
 }
 
@@ -109,10 +116,18 @@ export function useProducts(
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Round 2 (5): the image link the product had when the form opened; an unchanged one is kept as it is.
+  const [originalImageUrl, setOriginalImageUrl] = useState("");
+  // Round 2 (6): the business a write was asked for; an answer after the business changed is dropped.
+  const businessRef = useRef(businessId);
+  useEffect(() => {
+    businessRef.current = businessId;
+  }, [businessId]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openAddProduct = useCallback(() => {
     setEditingProductId(null);
+    setOriginalImageUrl("");
     setProductForm(blankForm());
     setImagePreview(null);
     setFormError(null);
@@ -133,6 +148,7 @@ export function useProducts(
       inventoryMode: ((product as { inventoryMode?: string }).inventoryMode as "tracked" | "untracked" | "virtual" | undefined) ?? undefined,
       outOfStockBehavior: ((product as { outOfStockBehavior?: string }).outOfStockBehavior as "hide" | "show_oos" | "allow_backorder" | undefined) ?? undefined,
     });
+    setOriginalImageUrl(product.imageUrl || "");
     setImagePreview(product.imageUrl && isHttpsImageLink(product.imageUrl) ? product.imageUrl : null);
     setFormError(null);
     setShowProductForm(true);
@@ -168,17 +184,21 @@ export function useProducts(
       setFormError(LOCAL_IMAGE_REFUSAL);
       return false;
     }
-    if (productForm.imageUrl.trim() && !isHttpsImageLink(productForm.imageUrl)) {
+    // Only a changed link is checked: a legacy http:// link the product already has may be kept as it is.
+    const link = productForm.imageUrl.trim();
+    if (link && link !== originalImageUrl.trim() && !isHttpsImageLink(link)) {
       setFormError(IMAGE_LINK_RULE);
       return false;
     }
     return true;
-  }, [productForm, imagePreview]);
+  }, [productForm, imagePreview, originalImageUrl]);
 
   const create = useCallback(async () => {
     if (!businessId) return null;
     const payload = buildProductPayload(productForm, "create");
+    const askedFor = businessId;
     const res = await createProduct({ businessId, ...payload, description: payload.description ?? undefined, ...(currency ? { currency } : {}) });
+    if (businessRef.current !== askedFor) return null;
     const data = res.data;
     if (res.error || !data) {
       const message = writeError(res as { error?: string | null; status?: number }, "add products", "Failed to create product");
@@ -197,7 +217,9 @@ export function useProducts(
     setSaving(true);
     try {
       if (editingProductId) {
+        const askedFor = businessId;
         const res = await updateProduct({ businessId, productId: editingProductId, ...buildProductPayload(productForm, "update") });
+        if (businessRef.current !== askedFor) return;
         const data = res.data;
         if (res.error || !data) {
           const message = writeError(res, "change products", "Failed to update product");
@@ -310,7 +332,9 @@ export function useProducts(
    */
   const handleDeleteProduct = useCallback(async (productId: string): Promise<ArchiveOutcome> => {
     if (!businessId) return { ok: false, error: "Could not find your workspace. Please sign in again." };
+    const askedFor = businessId;
     const res = (await deleteProduct(productId, businessId)) as { error?: string | null; status?: number };
+    if (businessRef.current !== askedFor) return { ok: true };
     // COR-CAT-12: a 404 is a product already archived (or gone): it leaves the list like an archive.
     const alreadyArchived = !!res.error && res.status === 404;
     if (res.error && !alreadyArchived) {
