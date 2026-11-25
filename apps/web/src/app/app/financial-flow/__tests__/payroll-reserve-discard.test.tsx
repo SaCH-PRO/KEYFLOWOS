@@ -23,6 +23,9 @@
  *   PRD-07  control     a member the server refuses revenue read sees no reserve line and no run amount (D-100)
  *   PRD-08  RED-BEFORE  my-access unknown (the read failed): the line shows, and the destructive Discard is not offered
  *   PRD-09  control     no DRAFT or APPROVED run and nothing reserved: no line
+ *   PRD-10  (mutant)    a 409 because the run was paid since the page read it: the runs and safe-to-spend are read
+ *                       again, so the paid run leaves the line (added after the fix, to kill the 'no re-read after a
+ *                       409' mutant; it passes at the fix head and fails with the re-read removed)
  *
  * Mounted on the real page and the real api client (lib/api.ts, lib/api/payroll.ts, lib/api/finance.ts); only
  * `fetch`, next/navigation and the stored business are stubbed. The stub is a small stateful server: safe-to-spend
@@ -316,5 +319,33 @@ describe("V1-65 Money > Overview: the payroll reserve line with Discard (D-144)"
     await waitFor(() => expect(safeMetric()).toMatch(/TTD 5,000\b/));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByRole("region", { name: /payroll reserve/i })).not.toBeInTheDocument();
+  });
+
+  it("PRD-10: a 409 for a run paid since the page read it reads the runs and safe-to-spend again", async () => {
+    const PAID_SINCE = "Paid payroll run run_draft cannot be discarded";
+    let paidMeanwhile: Run | undefined;
+    const server = stubServer({
+      runs: [DRAFT],
+      discard: (r) => {
+        // Someone marked it paid between the page's read and the discard.
+        if (r) r.status = "PAID";
+        paidMeanwhile = r;
+        return jsonResponse(409, { statusCode: 409, message: PAID_SINCE, error: "Conflict" }, "Conflict");
+      },
+    });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    fireEvent.click(await within(line).findByRole("button", { name: /discard/i }));
+    const dialog = await screen.findByRole("dialog", { name: /discard payroll run/i });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /reason/i }), { target: { value: "Duplicate" } });
+    const safeReadsBefore = server.reads(`${FIN}/safe-to-spend`);
+    fireEvent.click(within(dialog).getByRole("button", { name: /^discard run$/i }));
+
+    expect(await screen.findByText(new RegExp(PAID_SINCE))).toBeInTheDocument();
+    expect(paidMeanwhile?.status).toBe("PAID");
+    await waitFor(() => expect(server.reads(`${FIN}/safe-to-spend`)).toBeGreaterThan(safeReadsBefore));
+    // The paid run is no longer reserved: the line goes, and the figure is the server's (5,000).
+    await waitFor(() => expect(screen.queryByRole("region", { name: /payroll reserve/i })).not.toBeInTheDocument());
+    await waitFor(() => expect(safeMetric()).toMatch(/TTD 5,000\b/));
   });
 });
