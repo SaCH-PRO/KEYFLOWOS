@@ -555,10 +555,42 @@ cancels or ships of those orders from double-releasing sibling reservations.
 Exit status: `0` done, `1` database failure, `2` bad arguments. Not run against
 production by the packet.
 
+## 7. Cross-business planted inventory stock rows (F-39, Z5SEC-2, D-137)
+
+```bash
+cd apps/server
+pnpm cleanup:planted-stock-rows                    # dry run, every business
+pnpm cleanup:planted-stock-rows --business=<id>    # dry run, one business
+pnpm cleanup:planted-stock-rows --apply            # delete unreserved planted rows
+```
+
+**Why.** `inventory_stocks` is uniquely keyed on `(product_id, warehouse_id)` across all businesses and carries its own `business_id`. Earlier cross-business writers (purchase order receipt before W10-Z4, stock transfer before W10-Z5, and `MarketplaceService.upsertInventory` before W11-INV-UPSERT-SCOPE) could plant rows whose `business_id` does not match their product's or warehouse's `business_id`. Production code refuses around them (409) and never deletes them. Those rows cause an unstocked product to read as stock-tracked, block the real owner from creating its own stock row for the pair, and skew stock rollups.
+
+**Predicate.**
+
+```sql
+FROM inventory_stocks s
+JOIN products p ON p.id = s.product_id
+JOIN warehouses w ON w.id = s.warehouse_id
+WHERE (p.business_id <> s.business_id OR w.business_id <> s.business_id)
+```
+
+Soft-deleted products are judged like any other. With `--business=<id>`, a row is in scope when `s.business_id`, `p.business_id`, or `w.business_id` is in the list.
+
+**What `--apply` deletes and leaves (owner ruling D-137).** In one atomic, idempotent statement, `--apply` deletes every planted row with `s.reserved = 0`. It **never** deletes:
+- any row whose `business_id` matches both its product's and warehouse's `business_id`;
+- any planted row with `s.reserved <> 0` (reported under `reserved_rows` / `left_reserved` for manual operator repair);
+- any `stock_movements` row (movements naming a foreign product or warehouse are counted under `movements_naming_foreign_pair` for census only).
+
+**Output (counts only — never an id, name, or value).** Both modes print `planted_rows`, `foreign_product_rows`, `foreign_warehouse_rows`, `other_business_pair_rows`, `mixed_rows`, `planted_quantity`, `reserved_rows`, `businesses_affected`, `products_tracked_only_by_planted`, and `movements_naming_foreign_pair`. `--apply` additionally prints `deleted` and `left_reserved`.
+
+**How to undo.** Deleted `inventory_stocks` rows cannot be un-deleted in place; take a database backup before running `--apply` and restore from that backup if needed.
+
 ## Proof
 
 `apps/server/test/data-cleanup-scripts.integration.test.ts` (prefix `v96o_`)
-runs both scripts' `main()` in process against Postgres. It covers:
+runs the cleanup scripts' `main()` in process against Postgres (sections 1, 2,
+6, and 7 — including `PSC-01..03` for `cleanup-planted-stock-rows.ts`). It covers:
 
 - dry runs that write nothing and print counts only;
 - `--apply` fixing exactly the seeded rows, with same-business controls left

@@ -1681,12 +1681,47 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
+    @Query('limit') limit?: string | string[],
+    @Query('cursor') cursor?: string | string[],
+    @Query('paged') paged?: string | string[],
   ) {
     const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
     // W6-CONTACT-EVENTS-MONEY (SEC-W5FC-1; D-90 / D-63): the reading member,
     // so CrmTimelineService.listContactEvents withholds the money events from a
     // member without revenue read. CrmService.listContactEvents hands these
     // params to it unchanged.
+    // FU-TIMELINE-EVENTS-PAGING (D-284): default call (no limit/cursor/paged)
+    // stays the unchanged ContactEvent[] array; supplying limit, cursor, or
+    // paged=true returns { events, nextCursor, hasMore }.
+    if (limit !== undefined || cursor !== undefined || paged !== undefined) {
+      if (
+        (limit !== undefined && typeof limit !== 'string') ||
+        (cursor !== undefined && typeof cursor !== 'string') ||
+        (paged !== undefined && typeof paged !== 'string')
+      ) {
+        throw new BadRequestException('Invalid pagination query parameters');
+      }
+      if (paged !== undefined && paged !== 'true' && paged !== '1') {
+        throw new BadRequestException('paged must be true or 1');
+      }
+      let parsedLimit: number | undefined;
+      if (limit !== undefined) {
+        if (!/^\d+$/.test(limit)) {
+          throw new BadRequestException('limit must be an integer between 1 and 200');
+        }
+        parsedLimit = Number.parseInt(limit, 10);
+        if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+          throw new BadRequestException('limit must be an integer between 1 and 200');
+        }
+      }
+      return this.crm.listContactEventsPage({
+        businessId,
+        contactId,
+        viewerUserId: actorUserId,
+        ...(parsedLimit !== undefined ? { limit: parsedLimit } : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+    }
     const query: Parameters<CrmTimelineService['listContactEvents']>[0] = { businessId, contactId, viewerUserId: actorUserId };
     return this.crm.listContactEvents(query);
   }
