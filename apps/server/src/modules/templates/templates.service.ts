@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, Logger, Optional } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { isBusinessOwnerMember } from '../../core/auth/business-owner';
@@ -18,7 +18,7 @@ export class TemplatesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
-    @Optional() @Inject(EventEmitter2) private readonly events?: EventEmitter2,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   async listTemplates() {
@@ -218,7 +218,7 @@ export class TemplatesService {
     );
 
     for (const evt of pendingEvents) {
-      this.events?.emit(evt.name, evt.payload);
+      this.events.emit(evt.name, evt.payload);
     }
 
     return result;
