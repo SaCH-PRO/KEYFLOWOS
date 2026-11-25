@@ -69,6 +69,14 @@ function code(type: string): { type: string; subject: string; action: string } {
   return { type: lower, subject, action };
 }
 
+/** An inbound message the omnichannel processor logged (omnichannel-processor.service.ts): its channel is its source. */
+const MESSAGE_RECEIVED = "message_received";
+
+function sourceChannel(source: string | null | undefined): MessageChannel | null {
+  const channel = typeof source === "string" ? source.trim().toLowerCase() : "";
+  return MESSAGE_CHANNELS.has(channel) ? (channel as MessageChannel) : null;
+}
+
 function namedChannel(data: unknown): MessageChannel | null {
   const named = field(data, "channel");
   if (typeof named !== "string") return null;
@@ -83,6 +91,7 @@ export function eventChannel(event: ChannelEvent): TimelineChannel | null {
   // communication.meeting (or any other) is no channel of the filter's.
   if (subject === "communication") return MESSAGE_CHANNELS.has(action) ? (action as MessageChannel) : null;
   if (MESSAGE_CHANNELS.has(subject)) return subject as MessageChannel;
+  if (type === MESSAGE_RECEIVED) return sourceChannel(event.source);
   if (type === "message.copied") return namedChannel(event.data) ?? "whatsapp";
   if (CAMPAIGN_TYPES.has(type)) return namedChannel(event.data) ?? "email";
   return null;
@@ -137,7 +146,11 @@ function received(data: unknown): boolean {
  * generic event words would say "Communication whatsapp"; null for any other event.
  */
 export function conversationTitle(event: ChannelEvent): string | null {
-  const { subject, action } = code(event.type);
+  const { type, subject, action } = code(event.type);
+  if (type === MESSAGE_RECEIVED) {
+    const channel = sourceChannel(event.source);
+    return channel ? RECEIVED[channel] : null;
+  }
   if (subject !== "communication") return null;
   if (action === "meeting") return "Meeting logged";
   if (!MESSAGE_CHANNELS.has(action)) return null;
