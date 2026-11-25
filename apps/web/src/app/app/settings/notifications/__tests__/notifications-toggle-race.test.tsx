@@ -26,6 +26,8 @@
  *                       elsewhere) is put on the page except for the switch still saving: Booking stays off
  *   NPR-08k RED-BEFORE  (round 3 review) the same, but Booking Confirmation's PATCH succeeds while the re-read is in
  *                       flight (the re-read was read before Booking committed): Booking stays as its answer set it
+ *   NPR-08m guard       (mutant T2) a switch clicked after the re-read was sent, still saving when it answers, keeps
+ *                       its own value
  *   NPR-08l RED-BEFORE  (round 3 review) a re-read refused by ModuleScopeGuard also takes the log off the page: no row,
  *                       no "(n)" count, no access on the Log tab
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
@@ -314,6 +316,35 @@ describe("D-283 repair round 3: a re-read in flight while another switch's PATCH
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
     expect(checked(BOOKING)).toBe("false");
     expect(checked(RECEIPT)).toBe("false");
+  });
+});
+
+describe("D-283 repair round 3: a switch clicked while the re-read is in flight", () => {
+  it("NPR-08m guard: a switch clicked after the re-read was sent, still saving when it answers, keeps its value", async () => {
+    let releaseReread!: () => void;
+    const reread = () =>
+      new Promise<Response>((resolve) => {
+        releaseReread = () => resolve(json(200, PREFS)); // Invoice Sent still on at the server
+      });
+    const server = serve(queue(() => json(200, PREFS), reread), () => json(200, LOG));
+    await renderPage();
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(6));
+    fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
+
+    server.answerPatch(json(400, { statusCode: 400, message: "Bad request" }), "payment_receipt");
+    await waitFor(() => expect(server.prefsGets()).toBe(2)); // the re-read is out, and held
+    fireEvent.click(screen.getByRole("switch", { name: /toggle invoice sent/i }));
+    expect(checked(/toggle invoice sent/i)).toBe("false");
+
+    releaseReread();
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(checked(RECEIPT)).toBe("false");
+    expect(checked(/toggle invoice sent/i)).toBe("false"); // its own PATCH decides it
+    expect((screen.getByRole("switch", { name: /toggle invoice sent/i }) as HTMLButtonElement).disabled).toBe(true);
+
+    server.answerPatch(json(200, { ...PREFS, invoice_sent: false }), "invoice_sent");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
+    expect(checked(/toggle invoice sent/i)).toBe("false");
   });
 });
 
