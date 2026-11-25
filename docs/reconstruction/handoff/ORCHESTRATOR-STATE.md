@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~12:45 UTC by the acting orchestrator (second-lane account, Claude Code), after P41 returned
-(`f3d07174`) and owner rulings D-284/D-285. Main is still `08170696`. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~15:45 UTC by the acting orchestrator (second-lane account, Claude Code), while assembling
+M16 (main `9ea7c223`, after Antigravity's M15, M17 and M19). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -84,53 +84,78 @@ D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is referred 
   its Release 0 suite's setup only; assertions unchanged.
 - **The merge queue is on for main** (D-278, ruleset 28066634): lanes ENQUEUE, never merge directly.
 
-## 0. Next session starts here (2026-11-25 ~12:45 UTC)
+## 0. Next session starts here (2026-11-25 ~15:45 UTC)
 
-Main is `08170696` (M13). **Antigravity's M15** (PR #244: P58 OWNER-ALERTS-SERVER, P60 FU-WA-INBOUND-KEY-EXCLUDE,
-P59 TOF-PAYROLL-DISCARD; server only) goes through the merge queue first. **Claude's M16 follows once M15 is on main**
-(agreed on #80 7160484400 / 7160838996): P55 (merge main into its branch first, then re-confirm the delta), P41, P61
-and, if returned by then, P62.
+Main is `9ea7c223`. Since `08170696`, Antigravity merged three waves through the merge queue:
+- M15: P58 owner alerts, P60 WhatsApp text out of KEY, P59 payroll discard;
+- M17: P64, P65, P66 Timeline paging, P68, P69 deposit server, P70 finance overview server;
+- M19: P71 push endpoint allowlist, P72 cash sources server, P73 owner helper, P75 query DTO coercion.
 
-Claude lane state:
-- **P41 FU-CONTACT-TIMELINE-CHANNELS: RETURNED** @ `f3d07174` (#80 7162385058); both lenses CONFIRMED after two repair
-  rounds.
-- **P61 FU-REQUIRE-AUTH-REMOUNT: repair round 1** (worker on `wt-remount`, live ports 3101/5300/5310). Security
-  ACCEPTED `0d629dc7` with minors; correctness REJECTED it (MAJOR-1: a same-user token rotation, about hourly, tore the
-  shell down). Orchestrator decision, meeting both lenses: a same-user rotation (same JWT `sub`) keeps the shell and
-  re-verifies in the background; a different `sub`, a missing session, an admin-bearer change, a 401 or a
-  different /identity/me user id tears down. Also: no entrance transform (base look); pins for mutants M7, M12, M14,
-  M15. The `page-transition.tsx` departure was accepted by both lenses. Then both confirmations.
-- **P62 FU-PUSH-OPTIN-MY-ACCOUNT: building** (`wt-push`, live ports 3201/5400), claimed `2ddddb40`. Antigravity
-  confirmed P58 leaves the subscribe routes and payload unchanged, so it does not wait for M15.
-- Next: the six D-283 follow-ups (FU-CONTACT-SEND-QUOTE-DOOR covers the broken quote door P61 found), then P67 after
-  P66.
-- An hourly scheduled check of #80 runs in the orchestrator session (owner asked for tandem work, 2026-11-25).
+Their M21 (CLAIM-LOOP server, SWP-INV-SKU-COUNT, CATALOG-1 server, TODAY-AGGREGATE) is in progress.
+
+**Claude M16** is `wave/v1-wave-m16` @ `0360fd09` on `9011550b`. It holds, compacted:
+- P41 FU-CONTACT-TIMELINE-CHANNELS;
+- P61 FU-REQUIRE-AUTH-REMOUNT;
+- P55 WEDGE-WA-INBOUND-CAPTURE web half (main merged in, both lenses re-confirmed).
+
+Next steps for M16:
+1. Squash this docs branch into M16.
+2. Merge main `9ea7c223` (server-only since, no overlap).
+3. Run the wave-head proof (server suite + `proof:release0`, web typecheck, vitest, lint, live journeys).
+4. Open the PR and get two wave confirmations.
+5. ENQUEUE (merge queue; never merge directly).
+
+M16 is 35 files plus 6 docs files, under the 50-file gate.
+
+**M18 (next Claude wave), returned and waiting:**
+- P62 FU-PUSH-OPTIN-MY-ACCOUNT @ `53737d90` (3 rounds, both CONFIRMED);
+- FU-SIDESHEET-MOBILE-OFFSET @ `98a12002` (both ACCEPT);
+- FU-STUDIO-PAGE-SCOPE @ `de2772b6` (both ACCEPT).
+
+**In review:** SWP-SERVICE-DEPOSIT web half @ `2c3aa465` (P0).
+
+**Building:**
+- SWP-FIN-OVERVIEW-TRUTH web (`wt-finov`, ports 3201/5400);
+- SWP-FIN-CASH-SOURCES web (`wt-cash`, ports 3101/5300).
+
+**Queue after these:**
+1. P67 FU-TIMELINE-LOAD-OLDER (after M16 is on main).
+2. CLAIM-LOOP web half and TODAY-4BLOCK (after Antigravity's M21).
+3. The D-283 follow-ups that wait on files now in waves: FU-NOTIFICATIONS-PAGE-REFUSED (after P62), FU-UNDO-TOAST-SIGNOUT (after P61), FU-CONTACT-SEND-QUOTE-DOOR (after P55), and FU-E2E-MOCKED-SESSION-TOKEN.
+
+An hourly scheduled check of #80 runs in the orchestrator session.
 
 Lessons this session (for every lane):
-- Check the board's last row number before adding rows: P64/P65 were briefly double-numbered (fixed to P66/P67).
-- A fix to a remount can expose a second remount (PageTransition's AnimatePresence mode="wait" mounted the
-  destination twice); prove a one-shot URL door live, not only in jsdom.
-- Before the plan JSON changes: commit it, then `status.mjs --ref HEAD`, then amend (status reads the ref, not the
-  working tree).
-- Earlier: run CI's mocked e2e as CI runs them; merge main into stale packet branches before compacting; never merge
-  into a worktree a run uses; real installs from the head's lockfile; REST, not GraphQL; the orchestrator runs reviews.
+- Count files before compacting the last packet into a wave. Docs add about 6, and the gate is 50. M16 briefly reached 52; P62 was taken off before any PR existed.
+- The machine is 16 GB and shared. Run the web suite with `--minWorkers=1 --maxWorkers=2` under load. Retry a build that is SIGKILLed only once no other `next build` runs.
+- After a container restart, agents cannot be messaged; read their transcripts' last report and use fresh reviewers.
+- A worker's open questions often name another lane's gap. Relay it on #80 with the exact file and line.
+- Earlier lessons:
+  - check the board's last row number before adding rows;
+  - prove a one-shot URL door live;
+  - commit the plan, then `status.mjs --ref HEAD`, then amend;
+  - run CI's mocked e2e as CI runs them;
+  - merge main into stale packet branches before compacting;
+  - never merge into a worktree a run uses;
+  - use REST, not GraphQL;
+  - the orchestrator runs the reviews.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `08170696`. Production runs `f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). Lanes as on #80
-(Antigravity server and server halves, Claude web and web halves); one owner per row on `coord/board`.
+Main is at `9ea7c223`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **P55 (Claude)** | `pkt/V1-WEDGE-WA-INBOUND-CAPTURE-WEB` @ 36a29edd | Returned, held for P60 (in M15) | Merge main after M15, re-confirm delta, M16 |
-| **P41 (Claude)** | `pkt/V1-FU-CONTACT-TIMELINE-CHANNELS` @ f3d07174 | Returned, both CONFIRMED | M16 |
-| **P61 (Claude)** | `pkt/V1-FU-REQUIRE-AUTH-REMOUNT` @ 0d629dc7 (+ repair) | Repair round 1 | Two confirmations, RETURN, M16 |
-| **P62 (Claude)** | `pkt/V1-FU-PUSH-OPTIN-MY-ACCOUNT` @ 2ddddb40 (claim) | Building | Two reviews, RETURN |
-| **Antigravity M15** | PR #244 @ 7eaa38fd | Wave reviews and CI | Enqueue (merge queue) |
-| **Antigravity** | P64 W11-CALLS-LIST-PAGING returned @ 2c09dd29; P65 FU-INVOICE-REMAINING-CREDITS building | - | Their next wave; P66 offered |
-| **Owner** | - | - | Production redeploy (D-266); the question batch (section 4) |
-| `wave/v1-docs-p19` (Claude lane) | this file, V1-STATUS, D-284/D-285 | - | M16 |
-| First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Not re-verified since | Re-verify each head before it enters a wave |
+| **M16 (Claude)** | `wave/v1-wave-m16` @ 0360fd09 | P41 + P61 + P55 compacted | Docs, merge main, proof, PR, confirmations, enqueue |
+| **P62 (Claude)** | `pkt/V1-FU-PUSH-OPTIN-MY-ACCOUNT` @ 53737d90 | Returned (#80 7167069942) | M18 |
+| **FU-SIDESHEET-MOBILE-OFFSET** | `pkt/V1-FU-SIDESHEET-MOBILE-OFFSET` @ 98a12002 | Returned (#80 7166920997) | M18 |
+| **FU-STUDIO-PAGE-SCOPE** | `pkt/V1-FU-STUDIO-PAGE-SCOPE` @ de2772b6 | Returned (#80 7164744072) | M18 |
+| **SWP-SERVICE-DEPOSIT web** | `pkt/V1-SWP-SERVICE-DEPOSIT-WEB` @ 2c3aa465 | Two acceptance reviews | RETURN, M18 |
+| **SWP-FIN-OVERVIEW-TRUTH web** | `pkt/V1-SWP-FIN-OVERVIEW-TRUTH-WEB` @ 12921c65 (claim) | Building | Reviews |
+| **SWP-FIN-CASH-SOURCES web** | `pkt/V1-SWP-FIN-CASH-SOURCES-WEB` @ aa873850 (claim) | Building | Reviews |
+| **Antigravity** | M21 in progress (#80) | CLAIM-LOOP, SKU count, CATALOG-1, TODAY-AGGREGATE servers | Their wave |
+| **Owner** | - | - | Section 4 batch (40-48); production redeploy (D-266) |
+| `wave/v1-docs-p19` | main 9ea7c223 merged in | This file, V1-STATUS, D-284/D-285, HARNESS-REMOVAL note | Squashed into M16 |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -247,6 +272,14 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 41. P61's security review found an existing race (not in P61's diff): `lib/workspace.ts` refreshAccessToken writes the
     new token even if the user signed out while the refresh was in flight, which can leave a token on the device.
     Proposed follow-up FU-REFRESH-AFTER-SIGNOUT (web, S). (Default: follow-on unless you put it on launch.)
+
+42. **Customer-referral privacy (server; found by FU-STUDIO-PAGE-SCOPE's security review).** `POST /site/storefront/public/:slug/customer-referral` is unauthenticated (10/min/IP). For any email it answers 404 or 200, which tells the caller whether this person is a customer. A 200 returns `stats.completedBookings` and `paidOrders`, and stamps a code on the contact. Verify the email (e.g. a magic link) before minting, and never return stats? Antigravity holds until you rule. (Default: hold.)
+43. **Who may edit services, prices and deposits.** The service routes have only AuthGuard and BusinessGuard, so any member, STAFF included, can change prices and deposits. Require bookings or storefront write? (Default: as today until ruled.)
+44. **Push after sign-out.** Signing out leaves the device's push on. Once owner alerts are live, a shared tablet keeps getting the previous owner's payment alerts. Unsubscribe the device on sign-out? (Default: follow-up web packet in handleLogout.)
+45. **Owners of several businesses.** A device's push row holds one business, so an owner of X and Y gets Y's owner alerts by email, not push. One device for all the member's businesses? (Default: email fallback as today.)
+46. **Shell bottom padding (BUG-004 family).** The scroll root's `pb-28` is not effective inside the `h-full` page box, so a phone page's last control can sit under the bottom nav. P62 and the deposit half added local `pb-24 md:pb-0`. Fix the whole shell in one packet? (Default: yes, follow-up web packet.)
+47. **Same mount pattern as the SideSheet fix.** `record-detail-drawer.tsx` and `booking-side-sheet.tsx` have the same pattern, and the shared SideSheet has no focus trap (the commerce sheet does). Follow-up web packets? (Default: yes, follow-on.)
+48. **Deposit journeys.** Journey B2 needs a "New service" dialog in Schedule > Services, and F4 needs the deposit shown at the customer checkout (`/book/<slug>`). Neither is in SWP-SERVICE-DEPOSIT's write set. Which packets own them? (Default: find or add them in the plan.)
 
 ## 5. How to work here (learned the hard way)
 
