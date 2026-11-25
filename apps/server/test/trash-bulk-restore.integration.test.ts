@@ -24,6 +24,7 @@ import { TrashController } from '../src/modules/trash/trash.controller';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { CatalogService } from '../src/modules/catalog/catalog.service';
 import { CrmCacheService } from '../src/modules/crm/crm-cache.service';
+import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
@@ -286,6 +287,7 @@ beforeAll(async () => {
   const mod = await Test.createTestingModule({
     controllers: [TrashController],
     providers: [
+      AuthGuard,
       BusinessGuard,
       { provide: PrismaService, useValue: prismaService },
       { provide: CatalogService, useValue: catalogStub },

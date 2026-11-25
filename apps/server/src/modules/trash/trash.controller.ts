@@ -18,6 +18,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
@@ -639,6 +640,7 @@ export class TrashController {
    *   - product / service delegate to CatalogService.restoreProduct / restoreService.
    */
   @Post(':model/bulk-restore')
+  @UseGuards(AuthGuard, BusinessGuard)
   @RequireModuleScope('settings')
   async bulkRestore(
     @Param('businessId') businessId: string,

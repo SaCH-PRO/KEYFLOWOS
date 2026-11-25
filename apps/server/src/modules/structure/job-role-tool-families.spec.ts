@@ -1933,6 +1933,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
           'CrmService.assertCanCreateContacts',
           'CrmService.assertCanEditContact',
           'CrmService.bulkUpdateContacts',
+          'CrmService.captureInboundWhatsApp',
           'CrmService.createContact',
           'CrmService.findOrCreateContact',
           'CrmService.updateContact',

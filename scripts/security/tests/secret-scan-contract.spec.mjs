@@ -914,8 +914,8 @@ test('negative controls: restoring any old false-green mechanism makes the contr
   const mutations = [
     ['shallow checkout', inJob((job) => job.replace('          fetch-depth: 0\n', '          fetch-depth: 1\n'))],
     ['default checkout depth', inJob((job) => job.replace('          fetch-depth: 0\n', ''))],
-    ['hardcoded base', inJob((job) => job.replace(versionLine, `          base: main\n${versionLine}`))],
-    ['hardcoded head', inJob((job) => job.replace(versionLine, `          head: HEAD\n${versionLine}`))],
+    ['hardcoded base', inJob((job) => job.replace('          base: ${{ github.event.merge_group.base_sha }}\n', '          base: main\n'))],
+    ['hardcoded head', inJob((job) => job.replace('          head: ${{ github.event.merge_group.head_sha }}\n', '          head: HEAD\n'))],
     ['swallowed scan failure', inJob((job) => job.replace('          extra_args: --only-verified --fail-on-scan-errors\n', '          extra_args: --only-verified --fail-on-scan-errors\n        continue-on-error: true\n'))],
     ['swallowed audit capture failure', inJob((job) => job.replace(auditId, `${auditId}        continue-on-error: true\n`))],
     ['audit failure masked in shell', inJob((job) => job.replace(`${AUDIT} || audit_exit=$?`, `${AUDIT} || true`))],

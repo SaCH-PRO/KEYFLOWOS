@@ -30,7 +30,6 @@ import {
   type GenomeRowFields,
   type ProposalFields,
 } from '../business-genome/key-genome/genome-finance-scope';
-import { graphActionRequirement } from '../ai/graph-actions.controller';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -173,15 +172,28 @@ function extractProposalToolName(
  *   - `{ kind: 'unclassified' }` is returned ONLY when neither `toolName` nor
  *     `proposal.module` is declared.
  */
+type GraphActionRequirementFn = typeof import('../ai/graph-actions.controller').graphActionRequirement;
+let cachedGraphActionRequirement: GraphActionRequirementFn | null = null;
+async function loadGraphActionRequirement(): Promise<GraphActionRequirementFn> {
+  if (!cachedGraphActionRequirement) {
+    // Imported at call time: graph-actions.controller sits on the AiController ->
+    // KeyActionProposalService -> GraphActionsController -> AiOversightService cycle.
+    const mod = await import('../ai/graph-actions.controller');
+    cachedGraphActionRequirement = mod.graphActionRequirement;
+  }
+  return cachedGraphActionRequirement;
+}
+
 function resolveResultScopeRequirement(
   proposal: Pick<KeyActionProposalData, 'toolName' | 'module' | 'payload' | 'inputPayload'>,
+  graphActionReq: GraphActionRequirementFn,
 ): ResultScopeRequirement {
   const modules = new Set<CanonicalModule>();
   let runMemberOrOwner = false;
 
   const tool = extractProposalToolName(proposal);
   if (tool) {
-    const req = graphActionRequirement(tool);
+    const req = graphActionReq(tool);
     if (!req || 'refused' in req || req.ownerOnly) {
       return { kind: 'ownerOnly' };
     }
@@ -484,13 +496,14 @@ function projectExecutionResultForReader<T extends KeyActionProposalData>(
   proposal: T,
   access: ProposalReaderAccess,
   referencesFinanceGenome: boolean,
+  graphActionReq: GraphActionRequirementFn,
 ): T {
   if (proposal.executionResult === null || proposal.executionResult === undefined) return proposal;
   if (access.isSuperAdmin || access.isUnscopedOwner) return proposal;
   if (!access.readsRevenue && referencesFinanceGenome) {
     return { ...proposal, executionResult: null };
   }
-  const req = resolveResultScopeRequirement(proposal);
+  const req = resolveResultScopeRequirement(proposal, graphActionReq);
   if (req.kind === 'ownerOnly') {
     return { ...proposal, executionResult: null };
   }
@@ -608,16 +621,19 @@ export class KeyActionProposalService {
    *   proposal's module is unclassified).
    */
   async listForReader(businessId: string, query: ListKeyActionProposalsQuery, reader: GenomeReader | null): Promise<KeyActionProposalData[]> {
-    const rows = await this.list(businessId, query);
-    const access = await resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined);
+    const [rows, access, graphActionReq] = await Promise.all([
+      this.list(businessId, query),
+      resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined),
+      loadGraphActionRequirement(),
+    ]);
     if (access.readsRevenue) {
-      return rows.map((row) => projectExecutionResultForReader(row, access, false));
+      return rows.map((row) => projectExecutionResultForReader(row, access, false, graphActionReq));
     }
     // One query for the recommendations the rows were bridged from (round-4 correctness minor 5).
     const financial = await financialProposalsWithProvenance(this.prisma, businessId, rows as unknown as ProposalFields[]);
     const visible = rows.filter((_row, i) => !financial[i]).map((row) => nonFinancialProposalForReader(row));
     const refsFin = await executionResultsReferenceFinanceGenome(this.prisma, businessId, visible);
-    return visible.map((row, i) => projectExecutionResultForReader(row, access, refsFin[i]));
+    return visible.map((row, i) => projectExecutionResultForReader(row, access, refsFin[i], graphActionReq));
   }
 
   /**
@@ -626,15 +642,18 @@ export class KeyActionProposalService {
    * proposal's stored `executionResult` is projected for the reader's scope.
    */
   async getForReader(businessId: string, proposalId: string, reader: GenomeReader | null): Promise<KeyActionProposalData> {
-    const proposal = await this.get(businessId, proposalId);
-    const access = await resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined);
+    const [proposal, access, graphActionReq] = await Promise.all([
+      this.get(businessId, proposalId),
+      resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined),
+      loadGraphActionRequirement(),
+    ]);
     if (access.readsRevenue) {
-      return projectExecutionResultForReader(proposal, access, false);
+      return projectExecutionResultForReader(proposal, access, false, graphActionReq);
     }
     if (await this.isFinancial(businessId, proposal)) throw new NotFoundException('Action proposal not found');
     const safe = nonFinancialProposalForReader(proposal);
     const [refsFin] = await executionResultsReferenceFinanceGenome(this.prisma, businessId, [safe]);
-    return projectExecutionResultForReader(safe, access, refsFin);
+    return projectExecutionResultForReader(safe, access, refsFin, graphActionReq);
   }
 
   /**
@@ -649,18 +668,26 @@ export class KeyActionProposalService {
     if (!proposal || typeof proposal !== 'object' || typeof (proposal as { id?: unknown }).id !== 'string') return proposal;
     // The action has committed: a failed read answers the redacted view (fail closed), never an error for an action that
     // took effect (round-4 correctness minor 7).
-    const access = await resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined).catch(
-      () => CLOSED_READER_ACCESS,
-    );
+    const [access, graphActionReq] = await Promise.all([
+      resolveProposalReaderAccess(this.prisma, businessId, reader ?? undefined).catch(
+        () => CLOSED_READER_ACCESS,
+      ),
+      loadGraphActionRequirement().catch(() => null),
+    ]);
     if (!access.readsRevenue) {
       const financial = await this.isFinancial(businessId, proposal).catch(() => true);
       if (financial) return redactedProposalView(proposal);
     }
     const base = access.readsRevenue ? proposal : nonFinancialProposalForReader(proposal);
+    if (!graphActionReq) {
+      return access.isSuperAdmin || access.isUnscopedOwner
+        ? base
+        : { ...base, executionResult: null };
+    }
     const [refsFin] = access.readsRevenue
       ? [false]
       : await executionResultsReferenceFinanceGenome(this.prisma, businessId, [base]).catch(() => [true]);
-    return projectExecutionResultForReader(base, access, refsFin);
+    return projectExecutionResultForReader(base, access, refsFin, graphActionReq);
   }
 
   /** D-238: whether a proposal of `businessId` is financial, by its own fields or the recommendation it was bridged from. */
