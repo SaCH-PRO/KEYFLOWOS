@@ -30,16 +30,23 @@ const ID = {
   wh1: `${P}wh1`,
   wh2: `${P}wh2`,
   wh3: `${P}wh3`,
+  whInactive: `${P}whInactive`,
   whB: `${P}whB`,
   prod1: `${P}prod1`,
   prod2: `${P}prod2`,
+  prodDeleted: `${P}prodDeleted`,
   prodB: `${P}prodB`,
+  costB: `${P}costB`,
   stock1w1: `${P}s_1_w1`,
   stock1w2: `${P}s_1_w2`,
   stock1w3: `${P}s_1_w3`,
   stock2w1: `${P}s_2_w1`,
   stock2w2: `${P}s_2_w2`,
   stockB: `${P}s_b`,
+  stockPlantedForeignProd: `${P}s_planted_fp`,
+  stockPlantedForeignWh: `${P}s_planted_fw`,
+  stockDeletedProd: `${P}s_deleted_p`,
+  stockInactiveWh: `${P}s_inactive_w`,
 };
 
 let db: any;
@@ -62,6 +69,7 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM product_cost_profiles WHERE id LIKE ${sqlLikePrefix(P)} OR product_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -235,5 +243,100 @@ describe('P77 — V1-66 (SWP-INV-SKU-COUNT, BUG-107): inventory summary totalSKU
     expect(res.body.totalProducts).toBe(0);
     expect(res.body.healthScore).toBe(100);
     expect(res.body.warehouseBreakdown).toEqual([]);
+  });
+
+  it('[SKU-05] SEC-P77-1 (D-137): planted cross-tenant stock rows neither leak foreign ProductCostProfile.landedCostEstimate nor inflate totalSKUs/healthScore/warehouseBreakdown', async () => {
+    const before = await getSummary(ID.bizA, ID.ownerA).expect(200);
+
+    // Tenant B has a confidential landedCostEstimate on prodB
+    await db.productCostProfile.create({
+      data: { id: ID.costB, productId: ID.prodB, landedCostEstimate: 9999, currency: 'TTD' },
+    });
+
+    // Plant both cross-tenant shapes under bizA:
+    // 1. Foreign product (prodB) in bizA's warehouse (wh1) with null costPerUnit -> would join bizB's ProductCostProfile
+    // 2. BizA's product (prod1) in Tenant B's warehouse (whB)
+    await db.inventoryStock.createMany({
+      data: [
+        {
+          id: ID.stockPlantedForeignProd,
+          businessId: ID.bizA,
+          productId: ID.prodB,
+          warehouseId: ID.wh1,
+          quantity: 7,
+          costPerUnit: null,
+        },
+        {
+          id: ID.stockPlantedForeignWh,
+          businessId: ID.bizA,
+          productId: ID.prod1,
+          warehouseId: ID.whB,
+          quantity: 12,
+          costPerUnit: 500,
+        },
+      ],
+    });
+
+    const after = await getSummary(ID.bizA, ID.ownerA).expect(200);
+    expect(after.body.totalSKUs).toBe(before.body.totalSKUs);
+    expect(after.body.totalProducts).toBe(before.body.totalProducts);
+    expect(after.body.totalStockValue).toBe(before.body.totalStockValue);
+    expect(after.body.inStockCount).toBe(before.body.inStockCount);
+    expect(after.body.outOfStockCount).toBe(before.body.outOfStockCount);
+    expect(after.body.healthScore).toBe(before.body.healthScore);
+    expect(after.body.warehouseBreakdown).toEqual(before.body.warehouseBreakdown);
+  });
+
+  it('[SKU-06] SEC-P77-2: soft-deleted products and deactivated warehouses are excluded from totalSKUs/value/healthScore/breakdown, and unauthenticated requests get 401', async () => {
+    await request(app.getHttpServer())
+      .get(`/marketplace/businesses/${ID.bizA}/inventory/summary`)
+      .set('x-forwarded-for', nextIp())
+      .expect(401);
+
+    const before = await getSummary(ID.bizA, ID.ownerA).expect(200);
+
+    await db.product.create({
+      data: {
+        id: ID.prodDeleted,
+        businessId: ID.bizA,
+        name: 'Retired Espresso',
+        price: 200,
+        currency: 'TTD',
+        inventoryMode: 'tracked',
+        deletedAt: new Date(),
+      },
+    });
+    await db.warehouse.create({
+      data: { id: ID.whInactive, businessId: ID.bizA, name: 'Closed Storage', isActive: false },
+    });
+    await db.inventoryStock.createMany({
+      data: [
+        {
+          id: ID.stockDeletedProd,
+          businessId: ID.bizA,
+          productId: ID.prodDeleted,
+          warehouseId: ID.wh1,
+          quantity: 25,
+          costPerUnit: 100,
+        },
+        {
+          id: ID.stockInactiveWh,
+          businessId: ID.bizA,
+          productId: ID.prod1,
+          warehouseId: ID.whInactive,
+          quantity: 0,
+          costPerUnit: 50,
+        },
+      ],
+    });
+
+    const after = await getSummary(ID.bizA, ID.ownerA).expect(200);
+    expect(after.body.totalSKUs).toBe(before.body.totalSKUs);
+    expect(after.body.totalSKUs).toBeLessThanOrEqual(after.body.totalProducts);
+    expect(after.body.totalStockValue).toBe(before.body.totalStockValue);
+    expect(after.body.inStockCount).toBe(before.body.inStockCount);
+    expect(after.body.outOfStockCount).toBe(before.body.outOfStockCount);
+    expect(after.body.healthScore).toBe(before.body.healthScore);
+    expect(after.body.warehouseBreakdown).toEqual(before.body.warehouseBreakdown);
   });
 });

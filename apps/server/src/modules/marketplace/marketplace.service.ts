@@ -2751,7 +2751,14 @@ export class MarketplaceService {
   async getInventorySummary(businessId: string) {
     const [inventory, warehouses, products] = await Promise.all([
       this.prisma.client.inventoryStock.findMany({
-        where: { businessId },
+        // SEC-P77-1 / SEC-P77-2 (D-137): exclude planted cross-tenant stock rows,
+        // soft-deleted products, and deactivated warehouses so foreign cost profiles
+        // never leak and totalSKUs stays <= totalProducts.
+        where: {
+          businessId,
+          product: { businessId, deletedAt: null },
+          warehouse: { businessId, isActive: true },
+        },
         include: { product: { include: { costProfile: true } }, warehouse: true },
       }),
       this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } }),
