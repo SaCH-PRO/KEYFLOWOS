@@ -61,6 +61,8 @@ const UNTAGGED_PIN = 'trufflesecurity/trufflehog@69734591624d2afb8e152fcc8f3c232
 const SCANNER_VERSION = '3.99.7@sha256:0d003fc3abc4e1565eca8462b992001314de51451e96e3c44de80d116794d5d1';
 const SCANNER_WITH = {
   path: './',
+  base: '${{ github.event.merge_group.base_sha }}',
+  head: '${{ github.event.merge_group.head_sha }}',
   version: SCANNER_VERSION,
   extra_args: '--only-verified --fail-on-scan-errors',
 };
@@ -95,8 +97,8 @@ const STEP_IF = {
   scan: "${{ !cancelled() && steps.secret_scan_range.outcome == 'success' }}",
 };
 const RANGE_ENV = {
-  SCAN_BASE: '${{ github.event.pull_request.base.sha || github.event.before }}',
-  SCAN_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
+  SCAN_BASE: '${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}',
+  SCAN_HEAD: '${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}',
 };
 const RANGE_FILES = 'git log --format= --name-only "$SCAN_BASE..$SCAN_HEAD"';
 // Set at workflow level, these reach every step of the job.
@@ -670,8 +672,8 @@ function securityContractProblems(workflow, pkg = packageSource) {
   if (scan.with.version !== SCANNER_VERSION) {
     problems.push(`scanner CLI image must be pinned to 3.99.7 by digest (version: '${SCANNER_VERSION}')`);
   }
-  if ('base' in scan.with || 'head' in scan.with) {
-    problems.push('hardcoded TruffleHog refs override event-specific commit SHA discovery');
+  if (scan.with.base !== SCANNER_WITH.base || scan.with.head !== SCANNER_WITH.head) {
+    problems.push('hardcoded TruffleHog refs override event-specific commit SHA discovery (only merge_group base_sha/head_sha event expressions are permitted)');
   }
   if ('image' in scan.with) problems.push('the scanner image may not be overridden (it gets the whole checkout mounted)');
   if (scan.with.path !== SCANNER_WITH.path) problems.push(`the scanner must scan the whole checkout (path: ${SCANNER_WITH.path})`);
