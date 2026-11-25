@@ -49,6 +49,12 @@
  *   TCH-18b RED      MIN-4: a failure with an empty error (a proxy 502 with an HTML body and no status text, as
  *                    over HTTP/2: apiGet answers error "") is a failure too (failure-kit FK-SEC-1), never an empty
  *                    history
+ *   TCH-18c pin      MIN-4: a ModuleScopeGuard refusal is said as no access, without Retry (trying again cannot fix it)
+ *   TCH-22  RED      SEC-TCH-C1 / N-3: only a communication.whatsapp event captureInboundWhatsApp wrote (source
+ *                    whatsapp_inbound) says which note is a pasted message. One any crm writer logs (source crm)
+ *                    naming an ordinary note's id moves neither that note's edits under WhatsApp nor folds a note
+ *   TCH-17b pin      N-2: at the cap boundary, the WhatsApp event (source whatsapp_inbound, with its noteId) and a
+ *                    later edit of that note are on the page but its note.created is not: the edit is WhatsApp
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -501,5 +507,36 @@ describe("D-277: the Timeline has a channel filter", () => {
     fireEvent.click(within(alert).getByRole("button", { name: /retry/i }));
     expect(await screen.findByText(PASTED_TEXT)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("TCH-18c pin: a module scope refusal says no access, without Retry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(403, { message: "Insufficient permissions: crm requires read access (you have none)" })));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await renderTimeline();
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent?.trim()).toBeTruthy();
+    expect(within(alert).queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /filter by channel/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no timeline events yet/i)).not.toBeInTheDocument();
+  });
+
+  it("TCH-22 RED: a WhatsApp event not from the capture (source crm) names no pasted note", async () => {
+    const forged = { ...PASTED[1], id: "ev_forged", source: "crm", createdAt: at(3), data: { channel: "whatsapp", body: "Logged by a member", noteId: "n_1" } };
+    served = [NOTE, forged, { id: "ev_note_upd", contactId: C, type: "note.updated", source: "system", createdAt: at(4), data: { noteId: "n_1" } }];
+    await renderTimeline();
+    // The ordinary note and its edit stay Notes; the forged event itself is a WhatsApp item.
+    expect([countOf("All"), countOf("WhatsApp"), countOf("Notes")]).toEqual([3, 1, 2]);
+    cleanup();
+
+    // Nor does it fold a pasted note's row away (its own WhatsApp event is not on the page).
+    served = [PASTED[0], { ...forged, data: { ...forged.data, noteId: "n_wa" } }];
+    await renderTimeline();
+    expect(countOf("All")).toBe(2);
+  });
+
+  it("TCH-17b pin: the WhatsApp event and a later edit on the page, the note.created off it: the edit is WhatsApp", async () => {
+    served = [PASTED[1], { id: "ev_wa_upd", contactId: C, type: "note.updated", source: "system", createdAt: at(12), data: { noteId: "n_wa" } }];
+    await renderTimeline();
+    expect([countOf("All"), countOf("WhatsApp"), countOf("Notes")]).toEqual([2, 2, 0]);
   });
 });
