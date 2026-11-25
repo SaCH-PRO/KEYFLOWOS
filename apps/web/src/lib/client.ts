@@ -3310,6 +3310,8 @@ export async function getBusinessById(businessId: string) {
     complianceData: z.record(z.boolean()).nullable().optional(),
     lastHealthCheck: z.string().nullable().optional(),
     businessHours: z.record(z.object({ open: z.string(), close: z.string(), closed: z.boolean().optional() })).nullable().optional(),
+    // SWP-SERVICE-DEPOSIT: the business currency, which Bookings > Setup writes its money in.
+    currency: z.string().nullable().optional(),
   });
   return apiGet(
     `/identity/businesses/${encodeURIComponent(businessId)}`,
@@ -3334,6 +3336,10 @@ export type Service = {
   price: number;
   currency?: string;
   description?: string | null;
+  /** SWP-SERVICE-DEPOSIT (BUG-048): the deposit a booking of this service takes (server rule: catalog.service.ts). */
+  depositRequired?: boolean;
+  depositType?: string | null;
+  depositValue?: number | null;
 };
 
 export type StaffMember = {
@@ -3406,6 +3412,11 @@ export async function fetchServices(businessId: string = selectedBusinessId()) {
       description: z.string().nullable().optional(),
       bufferMins: z.number().nullable().optional(),
       leadTimeMins: z.number().nullable().optional(),
+      // SWP-SERVICE-DEPOSIT (BUG-048): kept, so the Setup editor shows the stored deposit. depositType stays a
+      // string here (the column is free text); the editor reads only PERCENT and FIXED.
+      depositRequired: z.boolean().optional(),
+      depositType: z.string().nullable().optional(),
+      depositValue: z.number().nullable().optional(),
     })),
     [],
   );
@@ -3419,7 +3430,21 @@ export async function createService(input: { businessId?: string; name: string; 
   });
 }
 
-export async function updateService(serviceId: string, data: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number | null; leadTimeMins?: number | null }, businessId: string = selectedBusinessId()) {
+export async function updateService(
+  serviceId: string,
+  data: {
+    name?: string;
+    duration?: number;
+    price?: number;
+    description?: string;
+    bufferMins?: number | null;
+    leadTimeMins?: number | null;
+    depositRequired?: boolean;
+    depositType?: "PERCENT" | "FIXED" | null;
+    depositValue?: number | null;
+  },
+  businessId: string = selectedBusinessId(),
+) {
   return apiPatch<Service>(
     `/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`,
     data,
