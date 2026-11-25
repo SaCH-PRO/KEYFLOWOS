@@ -176,7 +176,7 @@ describe('KeyCortexGenomeBridgeService', () => {
     it('[GRD-04] RED-BEFORE (D-128/D-100): withholds crossDomainInsights, opportunities, and finance/sales genome fields when readsRevenue is false', async () => {
       mockPrisma.client.businessGenome.findUnique.mockResolvedValue({
         businessId: 'biz_1',
-        dnaScores: { finance: 30, sales: 40, operations: 80, brand: 70 },
+        dnaScores: { finance: 30, sales: 40, operations: 80, marketing: 70 },
         stage: 'growth',
         executiveReadiness: 55,
       });
@@ -210,7 +210,7 @@ describe('KeyCortexGenomeBridgeService', () => {
       expect(mockCrossDomain.getLatestCrossDomainSnapshot).not.toHaveBeenCalled();
       expect(intel.opportunities).toEqual([]);
       expect(mockOpportunityDetector.detectOpportunities).not.toHaveBeenCalled();
-      expect(intel.dnaScores).toEqual({ operations: 80, brand: 70 });
+      expect(intel.dnaScores).toEqual({ operations: 80, marketing: 70 });
       expect(intel.executiveReadiness).toBe(75);
       expect(intel.genomeStage).toBe('restricted');
       expect(intel.stage).toBe('restricted');

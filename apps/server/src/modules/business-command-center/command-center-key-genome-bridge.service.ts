@@ -10,6 +10,11 @@ import type {
   ModuleReadinessData,
 } from '../business-genome/key-genome/key-genome.types';
 import type { CommandCenterKeyGenomeCrossDomain } from './business-command-center.types';
+import {
+  isFinanceRecommendation,
+  isFinanceSignal,
+  isMoneyLabel,
+} from '../business-genome/key-genome/genome-finance-scope';
 
 const UNSAFE_BLOCK_LIMIT = 3;
 
@@ -27,14 +32,29 @@ export class CommandCenterKeyGenomeBridgeService {
   async buildCrossDomainBrief(
     businessId: string,
     moduleReadiness: ModuleReadinessData[],
+    options: { readsRevenue?: boolean } = {},
   ): Promise<CommandCenterKeyGenomeCrossDomain> {
-    const snapshot =
-      (await this.crossDomain.getLatestCrossDomainSnapshot(businessId)) ??
-      (await this.crossDomain.computeCrossDomainSnapshot(businessId).catch(() => null));
+    const readsRevenue = options.readsRevenue !== false;
 
+    const latestSnapshot = await this.crossDomain.getLatestCrossDomainSnapshot(businessId);
+    const snapshot =
+      latestSnapshot ??
+      (readsRevenue
+        ? await this.crossDomain.computeCrossDomainSnapshot(businessId).catch(() => null)
+        : null);
+
+    // W11-GENOME-RECS-DOMAIN (D-128/D-100): ranker/opportunityDetector/autonomyGate
+    // trigger ensureSnapshot (a finance snapshot write) when no cross-domain snapshot
+    // exists, and opportunities carry monetary values. Without revenue:read, never
+    // trigger a recompute and never surface money domains, recommendations, signals,
+    // or opportunities.
     const [ranked, opportunities, staleFacts, lowConfidenceFacts] = await Promise.all([
-      this.ranker.rankRecommendations(businessId, { limit: 5 }).catch(() => null),
-      this.opportunityDetector.detectOpportunities(businessId, { limit: 5 }).catch(() => null),
+      readsRevenue || snapshot !== null
+        ? this.ranker.rankRecommendations(businessId, { limit: readsRevenue ? 5 : 50 }).catch(() => null)
+        : Promise.resolve(null),
+      readsRevenue
+        ? this.opportunityDetector.detectOpportunities(businessId, { limit: 5 }).catch(() => null)
+        : Promise.resolve(null),
       this.signalService
         .listSignals(businessId, { signalType: 'STALE_FACT', status: 'NEW', limit: 100 })
         .catch(() => []),
@@ -43,41 +63,79 @@ export class CommandCenterKeyGenomeBridgeService {
         .catch(() => []),
     ]);
 
-    const blockedActions = ranked?.blockedActions ?? [];
-    const unsafeBlocks = await this.evaluateUnsafeBlocks(
-      businessId,
-      blockedActions.slice(0, UNSAFE_BLOCK_LIMIT),
-    );
+    const rawTopRecs = ranked?.rankedRecommendations ?? [];
+    const topRecommendations = readsRevenue
+      ? rawTopRecs
+      : rawTopRecs
+          .filter((r) => !isFinanceRecommendation({ domain: r.domain, title: r.title }))
+          .slice(0, 5);
+
+    const rawBlocked = ranked?.blockedActions ?? [];
+    const blockedActions = readsRevenue
+      ? rawBlocked
+      : rawBlocked.filter((r) => !isFinanceRecommendation({ domain: r.domain, title: r.title }));
+    const unsafeBlocks =
+      readsRevenue || snapshot !== null
+        ? await this.evaluateUnsafeBlocks(businessId, blockedActions.slice(0, UNSAFE_BLOCK_LIMIT))
+        : [];
 
     const domainHealth: Record<string, number> = {};
     const domainReadiness: Record<string, number> = {};
+    const visibleDomainScores: number[] = [];
     if (snapshot) {
       for (const score of snapshot.domainScores) {
+        if (!readsRevenue && isMoneyLabel(score.domain)) continue;
         domainHealth[score.domain] = score.healthScore;
         domainReadiness[score.domain] = score.healthScore;
+        visibleDomainScores.push(score.healthScore);
       }
     }
 
     const totalFacts = snapshot?.evidenceSummary?.totalFacts ?? 0;
     const highConfidenceFacts = snapshot?.evidenceSummary?.highConfidenceFacts ?? 0;
-    const confidenceScore = totalFacts > 0 ? Math.round((highConfidenceFacts / totalFacts) * 100) : 0;
+    const confidenceScore =
+      readsRevenue && totalFacts > 0 ? Math.round((highConfidenceFacts / totalFacts) * 100) : 0;
 
-    const criticalMissingFactCount = moduleReadiness.reduce(
+    const visibleModuleReadiness = readsRevenue
+      ? moduleReadiness
+      : moduleReadiness.filter((m) => !isMoneyLabel(m.module));
+
+    const criticalMissingFactCount = visibleModuleReadiness.reduce(
       (count, module) => count + module.missingFacts.filter((fact) => fact.impact === 'BLOCKING').length,
       0,
     );
 
+    const visibleStale = readsRevenue ? staleFacts : staleFacts.filter((s) => !isFinanceSignal(s));
+    const visibleLowConf = readsRevenue
+      ? lowConfidenceFacts
+      : lowConfidenceFacts.filter((s) => !isFinanceSignal(s));
+
+    const healthScore = readsRevenue
+      ? (snapshot?.overallHealthScore ?? 0)
+      : visibleDomainScores.length > 0
+        ? Math.round(visibleDomainScores.reduce((a, b) => a + b, 0) / visibleDomainScores.length)
+        : 0;
+
+    const readinessScore = readsRevenue
+      ? (snapshot?.readinessSummary?.averageReadinessScore ?? 0)
+      : visibleModuleReadiness.length > 0
+        ? Math.round(
+            visibleModuleReadiness.reduce((a, m) => a + (m.readinessScore ?? 0), 0) /
+              visibleModuleReadiness.length,
+          )
+        : 0;
+
     return {
-      healthScore: snapshot?.overallHealthScore ?? 0,
-      readinessScore: snapshot?.readinessSummary?.averageReadinessScore ?? 0,
+      healthScore,
+      readinessScore,
       confidenceScore,
-      overallRiskLevel: snapshot?.overallRiskLevel ?? 'UNKNOWN',
+      overallRiskLevel: readsRevenue ? (snapshot?.overallRiskLevel ?? 'UNKNOWN') : 'UNKNOWN',
       domainHealth,
       domainReadiness,
-      topRecommendations: ranked?.rankedRecommendations ?? [],
-      topOpportunities: opportunities?.prioritizedOpportunities ?? [],
+      topRecommendations,
+      topOpportunities: readsRevenue ? (opportunities?.prioritizedOpportunities ?? []) : [],
       unsafeAutomationBlocks: unsafeBlocks,
-      staleFactCount: staleFacts.length + lowConfidenceFacts.length,
+      staleFactCount: visibleStale.length + visibleLowConf.length,
       criticalMissingFactCount,
     };
   }
