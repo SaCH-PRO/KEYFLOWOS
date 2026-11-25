@@ -19,6 +19,13 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
  *   WAB-04 a member with crm read is not offered the door (the server would refuse the capture); the other doors stay.
  *          A guard: it passes at the base too.
  *
+ * Review round 1:
+ *   SEC-WAW-3 (pin, in WAB-01/02/03): from the sheet opening to its answer, no request goes to a KEY or AI path
+ *          (/ai/, /key/, /flow/, /key-cortex/), as well as none to WhatsApp's hosts.
+ *   WAB-05 (COR-4) a crm-read member's New menu never shows the door, not even for a moment while it opens, and
+ *          opening it asks GET my-access no more (the shell already has the answer). RED at 6c682651 (each open read
+ *          my-access again and showed the door until it answered); a guard at the base (no door at all).
+ *
  * Entry points: at 375 the phone bottom bar's New (it opens the header's New menu), from 768 the header's New button.
  * 375, 768, 1024 and 1440 are run. The flow starts on Settings, which loads cleanly under these mocks (the cockpit's
  * own reads are not mocked and show its error state; the New menu is the shell's, so the screen does not matter).
@@ -80,12 +87,24 @@ const UNREADABLE: Capture = {
 interface Sent {
   captures: Array<Record<string, unknown>>;
   offsite: string[];
+  /** While true (the sheet open, until its answer is read), requests to a KEY or AI path are kept in `keyOrAi`. */
+  watching: boolean;
+  keyOrAi: string[];
+  myAccess: number;
 }
 
+/** A KEY or AI route (SEC-WAW-3): the capture must not reach any. */
+const KEY_OR_AI = /\/(ai|key|flow|key-cortex)\//;
+
 async function signIn(page: Page, access: unknown, capture: Capture = SAVED): Promise<Sent> {
-  const sent: Sent = { captures: [], offsite: [] };
+  const sent: Sent = { captures: [], offsite: [], watching: false, keyOrAi: [], myAccess: 0 };
   page.on("request", (req: Request) => {
     if (/wa\.me|whatsapp\.com|graph\.facebook\.com/.test(req.url())) sent.offsite.push(req.url());
+    const url = new URL(req.url());
+    const path = url.pathname;
+    // API calls only: the web origin's own route prefetches (the sidebar's /app/key/chat link) are not KEY traffic.
+    if (sent.watching && url.host === "api.test.local" && KEY_OR_AI.test(path)) sent.keyOrAi.push(`${req.method()} ${path}`);
+    if (path.endsWith("/my-access")) sent.myAccess += 1;
   });
   await seedWorkspace(page.context());
   await page.context().addCookies([{ name: "kf_token", value: JWT_SHAPED, url: e2eBaseURL(), sameSite: "Lax" }]);
@@ -154,17 +173,26 @@ async function openNewMenu(page: Page, width: number): Promise<void> {
   await expect(page.getByRole("menu")).toBeVisible();
 }
 
-async function captureFromWhatsApp(page: Page, width: number, number: string) {
+async function captureFromWhatsApp(page: Page, width: number, number: string, sent: Sent) {
   await openNewMenu(page, width);
   await page.getByRole("menuitem", { name: /from whatsapp/i }).click();
   const sheet = page.getByRole("dialog", { name: /new from whatsapp/i });
   await expect(sheet).toBeVisible();
+  sent.watching = true;
   await sheet.getByLabel(/whatsapp number/i).fill(number);
   await sheet.getByLabel(/their message/i).fill(MESSAGE);
   await sheet.getByLabel(/first name/i).fill("Keisha");
   await sheet.getByLabel(/last name/i).fill("Ramdial");
   await sheet.getByRole("button", { name: /^save/i }).click();
   return sheet;
+}
+
+/** SEC-WAW-3: once the sheet has answered (and a moment after), nothing it did reached a KEY or AI path. */
+async function noKeyOrAi(page: Page, sent: Sent): Promise<void> {
+  await page.waitForTimeout(1_000);
+  sent.watching = false;
+  expect(sent.keyOrAi, "requests to a KEY or AI path while the sheet was open").toEqual([]);
+  expect(sent.offsite, "requests to WhatsApp").toEqual([]);
 }
 
 for (const width of [375, 768, 1024, 1440]) {
@@ -174,9 +202,10 @@ for (const width of [375, 768, 1024, 1440]) {
     test(`WAB-01 New > From WhatsApp > New quote opens with the customer chosen (${width})`, async ({ page }) => {
       const sent = await signIn(page, OWNER);
       await page.goto("/app/settings");
-      const sheet = await captureFromWhatsApp(page, width, "777 1234");
+      const sheet = await captureFromWhatsApp(page, width, "777 1234", sent);
 
       await expect(sheet.getByText(/saved/i).first()).toBeVisible();
+      await noKeyOrAi(page, sent);
       expect(sent.captures).toEqual([{ phone: "777 1234", message: MESSAGE, firstName: "Keisha", lastName: "Ramdial" }]);
       // The message as text: its markup is shown, not rendered.
       await expect(sheet.getByTestId("wa-saved-message")).toHaveText(MESSAGE);
@@ -195,8 +224,9 @@ for (const width of [375, 768, 1024, 1440]) {
     test(`WAB-02 New > From WhatsApp > New booking opens with the customer chosen (${width})`, async ({ page }) => {
       const sent = await signIn(page, OWNER);
       await page.goto("/app/settings");
-      const sheet = await captureFromWhatsApp(page, width, "+1 868 777 1234");
+      const sheet = await captureFromWhatsApp(page, width, "+1 868 777 1234", sent);
       await expect(sheet.getByText(/saved/i).first()).toBeVisible();
+      await noKeyOrAi(page, sent);
 
       await sheet.getByRole("button", { name: /^new booking$/i }).click();
       await expect(page).toHaveURL(/\/app\/bookings/);
@@ -209,9 +239,10 @@ for (const width of [375, 768, 1024, 1440]) {
     test(`WAB-03 a refusal keeps the sheet open with what was typed and says why (${width})`, async ({ page }) => {
       const sent = await signIn(page, OWNER, UNREADABLE);
       await page.goto("/app/settings");
-      const sheet = await captureFromWhatsApp(page, width, "12");
+      const sheet = await captureFromWhatsApp(page, width, "12", sent);
 
       await expect(sheet.getByRole("alert")).toContainText(/could not be normalised for this business country/i);
+      await noKeyOrAi(page, sent);
       await expect(sheet).toBeVisible();
       await expect(sheet.getByLabel(/whatsapp number/i)).toHaveValue("12");
       await expect(sheet.getByLabel(/their message/i)).toHaveValue(MESSAGE);
@@ -226,6 +257,31 @@ for (const width of [375, 768, 1024, 1440]) {
       await openNewMenu(page, width);
       await expect(page.getByRole("menuitem", { name: /^invoice/i })).toBeVisible();
       await expect(page.getByRole("menuitem", { name: /from whatsapp/i })).toHaveCount(0);
+    });
+
+    test(`WAB-05 a crm-read member's menu never shows the door while opening, and asks my-access no more (${width})`, async ({ page }) => {
+      // Any moment the door is in the page counts, however brief.
+      await page.addInitScript(() => {
+        const w = window as unknown as { __waDoorSeen?: boolean };
+        new MutationObserver(() => {
+          if (Array.from(document.querySelectorAll("[role=menuitem]")).some((el) => /from whatsapp/i.test(el.textContent ?? ""))) w.__waDoorSeen = true;
+        }).observe(document, { childList: true, subtree: true });
+      });
+      const sent = await signIn(page, CRM_READER);
+      await page.goto("/app/settings");
+      // The shell has asked and been answered before the menu opens.
+      await expect.poll(() => sent.myAccess, { timeout: 20_000 }).toBeGreaterThan(0);
+      await page.waitForTimeout(1_500);
+      const before = sent.myAccess;
+      for (let i = 0; i < 2; i++) {
+        await openNewMenu(page, width);
+        await expect(page.getByRole("menuitem", { name: /^invoice/i })).toBeVisible();
+        await page.waitForTimeout(1_000);
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("menu")).toHaveCount(0);
+      }
+      expect(await page.evaluate(() => (window as unknown as { __waDoorSeen?: boolean }).__waDoorSeen ?? false), "the door showed").toBe(false);
+      expect(sent.myAccess - before, "my-access reads sent by opening the menu").toBe(0);
     });
   });
 }

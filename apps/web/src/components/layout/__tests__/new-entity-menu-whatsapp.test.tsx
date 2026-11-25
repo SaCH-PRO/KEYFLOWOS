@@ -17,15 +17,24 @@
  *   NEM-05 while the sheet is open, the menu's own keys (arrows, Enter) do not move or navigate: typing a message with
  *          line breaks stays in the sheet.
  *   NEM-06 the phone bottom bar's New opens the header's New menu (guard).
+ *
+ * Review repair COR-4: the menu takes the member's levels from the shell (useAppLayout's moduleLevels, handed down by
+ * AppHeader) instead of asking GET my-access again on every open, which started unknown and showed a crm-read member
+ * the door for a moment.
+ *   NEM-07 levels known as crm read: the door is absent from the first render, and opening the menu sends no my-access
+ *          read (nor any other request).
+ *   NEM-08 AppHeader hands the shell's levels to the menu: crm read, no door; crm write, the door.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
 
+type Levels = Partial<Record<string, "none" | "read" | "write" | "admin">> | null;
 const state = vi.hoisted(() => ({
   push: vi.fn(),
   levels: null as Partial<Record<string, "none" | "read" | "write" | "admin">> | null,
 }));
+const fetchMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: state.push, replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
@@ -37,13 +46,23 @@ vi.mock("next/link", () => ({
     <a href={href} {...rest}>{children}</a>
   ),
 }));
-vi.mock("@/hooks/use-app-layout", () => ({ useMemberModuleLevels: () => state.levels }));
-vi.mock("@/lib/business-settings", () => ({
+vi.mock("@/components/key/key-agent", () => ({ openKey: vi.fn() }));
+vi.mock("@/lib/business-settings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/business-settings")>()),
   useBusinessSettings: () => ({ businessId: "biz_nem", status: "ready", error: null, sells: "both" }),
 }));
 
-import { NewEntityMenu } from "../new-entity-menu";
+import { NewEntityMenu as NewEntityMenuUnderTest } from "../new-entity-menu";
 import { MobileBottomNavV2 } from "../mobile-bottom-nav-v2";
+import { AppHeader } from "../app-header";
+
+/** The menu as the header mounts it: with the shell's levels (state.levels). */
+function NewEntityMenu({ onClose }: { onClose: () => void }) {
+  const Menu = NewEntityMenuUnderTest as unknown as (p: { onClose: () => void; levels: Levels }) => React.ReactElement;
+  return <Menu onClose={onClose} levels={state.levels} />;
+}
+
+const myAccessReads = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/my-access"));
 
 const onClose = vi.fn();
 const fromWhatsApp = () => screen.queryByRole("menuitem", { name: /from whatsapp/i });
@@ -54,9 +73,11 @@ beforeEach(() => {
   onClose.mockReset();
   window.localStorage.setItem("kf_business_id", "biz_nem");
   // No API in these tests: the bottom bar's operations probe answers "unknown" (it shows every door).
-  vi.stubGlobal("fetch", vi.fn(async () => {
+  fetchMock.mockReset();
+  fetchMock.mockImplementation(async () => {
     throw new TypeError("offline in test");
-  }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
   cleanup();
@@ -151,4 +172,53 @@ describe("WEDGE-WA-INBOUND-CAPTURE: the New menu's From WhatsApp door", () => {
     const toggle = setAddMenuOpen.mock.calls[0][0] as (open: boolean) => boolean;
     expect(toggle(false)).toBe(true);
   });
+
+  it("NEM-07 levels known as crm read: no door from the first render, and opening sends no my-access read", async () => {
+    state.levels = { crm: "read", revenue: "write" };
+    const seen: boolean[] = [];
+    const Probe = () => {
+      seen.push(screen.queryByRole("menuitem", { name: /from whatsapp/i }) !== null);
+      return null;
+    };
+    render(<><NewEntityMenu onClose={onClose} /><Probe /></>);
+    expect(fromWhatsApp()).toBeNull();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fromWhatsApp()).toBeNull();
+    expect(seen.every((shown) => !shown)).toBe(true);
+    expect(myAccessReads()).toEqual([]);
+  });
+
+  for (const [level, offered] of [["read", false], ["write", true]] as const) {
+    it(`NEM-08 AppHeader hands the shell's levels to the menu: crm ${level} ${offered ? "offers" : "hides"} the door`, async () => {
+      const Header = AppHeader as unknown as (p: Record<string, unknown>) => React.ReactElement;
+      render(
+        <Header
+          setMobileDrawerOpen={vi.fn()}
+          copilotModule="cockpit"
+          addMenuOpen
+          setAddMenuOpen={vi.fn()}
+          notifications={[]}
+          unreadCount={0}
+          notifOpen={false}
+          setNotifOpen={vi.fn()}
+          notifRef={{ current: null }}
+          markAllRead={vi.fn()}
+          displayName="Owner"
+          initials="OW"
+          avatarUrl={null}
+          isAdminUser={false}
+          userMenuOpen={false}
+          setUserMenuOpen={vi.fn()}
+          userMenuRef={{ current: null }}
+          handleLogout={vi.fn()}
+          moduleLevels={{ crm: level }}
+        />,
+      );
+      expect(await screen.findByRole("menu")).toBeInTheDocument();
+      expect(fromWhatsApp() !== null).toBe(offered);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fromWhatsApp() !== null).toBe(offered);
+      expect(myAccessReads()).toEqual([]);
+    });
+  }
 });

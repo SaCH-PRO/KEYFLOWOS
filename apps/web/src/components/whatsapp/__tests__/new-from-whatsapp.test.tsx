@@ -12,6 +12,7 @@
  *          sheet says the customer was already there.
  *   WAW-03 a new customer is created: the optional name is sent, and the sheet says the customer was added.
  *   WAW-04 the message is saved verbatim and shown as plain text: markup in it is text, never HTML.
+ *   WAW-04b (review pin COR-5) what shows is what the server stored (note.body), not what was typed.
  *   WAW-05 New quote opens the Quotes tab with the customer chosen (?tab=quotes&contactId=<id>).
  *   WAW-06 New booking opens Bookings with the customer chosen (?contactId=<id>).
  *          Both doors are a full page load (newFromWhatsAppNavigation.assign), not router.push: RequireAuth
@@ -219,6 +220,16 @@ describe("WEDGE-WA-INBOUND-CAPTURE: + New > From WhatsApp", () => {
     // Text, never HTML: no element came out of the message.
     expect(shown.querySelector("b, img")).toBeNull();
     expect(container.ownerDocument.querySelector("img[src='x']")).toBeNull();
+  });
+
+  it("WAW-04b shows what the server stored (note.body), not the text typed in the sheet", async () => {
+    answer = captured({ body: "Stored on the timeline" });
+    open();
+    fill("7771234", "Typed in the sheet");
+    await save();
+    await within(dialog()).findByText(/saved/i);
+    expect(within(dialog()).getByTestId("wa-saved-message").textContent).toBe("Stored on the timeline");
+    expect(within(dialog()).queryByText("Typed in the sheet")).toBeNull();
   });
 
   it("WAW-05 New quote opens the Quotes tab with the customer chosen, and closes the sheet", async () => {
