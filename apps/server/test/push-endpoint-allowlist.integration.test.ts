@@ -165,6 +165,15 @@ describe('V1-95 (FU-PUSH-ENDPOINT-ALLOWLIST, P71 / MIN-4)', () => {
       ['bare apple apex', `https://push.apple.com/${P}bare_apple`],
       ['bare mozilla apex', `https://push.services.mozilla.com/${P}bare_moz`],
       ['not a url', 'not-even-a-url'],
+      // R1 security review (d2ecf7e9): WHATWG URL vs web-push legacy url.parse() differentials
+      ['single-slash authority', `https:/fcm.googleapis.com/fcm/send/${P}single_slash`],
+      ['no-slash authority', `https:fcm.googleapis.com/fcm/send/${P}no_slash`],
+      ['triple-slash authority', `https:///fcm.googleapis.com/fcm/send/${P}triple_slash`],
+      ['backslash authority', `https://\\fcm.googleapis.com/fcm/send/${P}backslash`],
+      ['empty userinfo', `https://@fcm.googleapis.com/fcm/send/${P}empty_userinfo`],
+      ['colon userinfo', `https://:@fcm.googleapis.com/fcm/send/${P}colon_userinfo`],
+      ['leading-zero 443 port', `https://fcm.googleapis.com:0443/fcm/send/${P}zero_port`],
+      ['subdomain of fcm', `https://evil.fcm.googleapis.com/fcm/send/${P}sub_fcm`],
     ];
 
     for (const [label, endpoint] of blocked) {
