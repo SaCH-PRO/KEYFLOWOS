@@ -1193,6 +1193,11 @@
       "packet": "V1-66 (SWP-INV-SKU-COUNT)"
     },
     {
+      "prefix": "v66e_",
+      "owner": "apps/server/test/quick-sale.integration.test.ts",
+      "packet": "V1-66 (QUICK-SALE-SERVER)"
+    },
+    {
       "prefix": "v66g_",
       "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
       "packet": "V1-66 (SWP-FIN-LEDGER)"
@@ -1325,6 +1330,11 @@
       "prefix": "v64j_",
       "owner": "apps/server/test/service-deposit-settings.integration.test.ts",
       "packet": "V1-64 (SWP-SERVICE-DEPOSIT)"
+    },
+    {
+      "prefix": "v64m_",
+      "owner": "apps/server/test/census-genome.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-GENOME)"
     },
     {
 "prefix": "v64n_",

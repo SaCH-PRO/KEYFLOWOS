@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
@@ -18,7 +19,7 @@ import { GenomeChatService } from './genome-chat.service';
 import { SendMessageDto, ApplyUpdatesDto } from './dto';
 
 @Controller('genome-chat/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class GenomeChatController {
   constructor(@Inject(GenomeChatService) private readonly chat: GenomeChatService) {}
 
@@ -34,6 +35,7 @@ export class GenomeChatController {
     });
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('messages')
   @UseGuards(RateLimitGuard)
   @RateLimit(30, 60_000)
@@ -46,6 +48,7 @@ export class GenomeChatController {
     return this.chat.sendMessage(businessId, userId, body.message);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('apply-updates')
   @UseGuards(GenomeGateGuard)
   async applyUpdates(

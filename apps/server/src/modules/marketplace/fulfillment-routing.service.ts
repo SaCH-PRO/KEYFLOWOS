@@ -469,6 +469,9 @@ export class FulfillmentRoutingService {
     });
 
     if (!order) throw new BadRequestException('Order not found');
+    // V1-66 (QUICK-SALE-SERVER): counter sales decrement stock atomically inside completeCheckout
+    // and are completed at the counter, so fulfillment routing never reserves stock for them.
+    if (order.type === 'QUICK_SALE') return [];
 
     const normalizedStatus = normalizeOrderStatus(order.status);
     // W10-Z4-ROUTE-FIX (SEAMZ4-CR-3; D-112): an order stored PAID is paid. The paid door leaves a storefront order
