@@ -24,6 +24,10 @@
  *   NPR-08j RED-BEFORE  (round 2, the same race on the failure path) Booking Confirmation's PATCH waits; Payment
  *                       Receipt's is refused and its re-read (Booking still on at the server, Invoice Sent changed
  *                       elsewhere) is put on the page except for the switch still saving: Booking stays off
+ *   NPR-08k RED-BEFORE  (round 3 review) the same, but Booking Confirmation's PATCH succeeds while the re-read is in
+ *                       flight (the re-read was read before Booking committed): Booking stays as its answer set it
+ *   NPR-08l RED-BEFORE  (round 3 review) a re-read refused by ModuleScopeGuard also takes the log off the page: no row,
+ *                       no "(n)" count, no access on the Log tab
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
  *                       no switch, no log row, no "(n)" count
  *   NPR-09b guard       the same with the switches showing and the log failed: after the refused Retry, no switch, no
@@ -70,8 +74,10 @@ function json(status: number, body: unknown): Response {
 const fail500 = () => json(500, { statusCode: 500, message: "Internal server error" });
 const refused = () => json(403, { statusCode: 403, message: SETTINGS_REFUSAL, error: "Forbidden" });
 
+type Answer = () => Response | Promise<Response>;
+
 /** Answers in order; the last one repeats. */
-function queue(...answers: Array<() => Response>): () => Response {
+function queue(...answers: Answer[]): Answer {
   let i = 0;
   return () => answers[Math.min(i++, answers.length - 1)]();
 }
@@ -82,7 +88,7 @@ interface Server {
   answerPatch: (res: Response, key?: string) => void;
 }
 
-function serve(prefs: () => Response, log: () => Response): Server {
+function serve(prefs: Answer, log: Answer): Server {
   let gets = 0;
   const pending: Array<{ keys: string[]; resolve: (res: Response) => void }> = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -285,6 +291,32 @@ describe("D-283 repair round 2: a re-read does not overwrite a switch still savi
   });
 });
 
+describe("D-283 repair round 3: a re-read in flight while another switch's PATCH succeeds", () => {
+  it("NPR-08k RED-BEFORE: a switch decided while the re-read was in flight keeps its own answer", async () => {
+    let releaseReread!: () => void;
+    const reread = () =>
+      new Promise<Response>((resolve) => {
+        // Read before Booking Confirmation's commit: the server still had it on.
+        releaseReread = () => resolve(json(200, PREFS));
+      });
+    const server = serve(queue(() => json(200, PREFS), reread), () => json(200, LOG));
+    await renderPage();
+    await clickBookingOff();
+    fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
+
+    server.answerPatch(json(400, { statusCode: 400, message: "Bad request" }), "payment_receipt");
+    await waitFor(() => expect(server.prefsGets()).toBe(2)); // the re-read is out, and held
+    server.answerPatch(json(200, { ...PREFS, booking_confirmed: false, payment_receipt: false }), "booking_confirmed");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
+    expect(checked(BOOKING)).toBe("false");
+
+    releaseReread();
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(checked(BOOKING)).toBe("false");
+    expect(checked(RECEIPT)).toBe("false");
+  });
+});
+
 describe("D-283 repair round 2: access revoked mid-session (SEC-NPR-6)", () => {
   it("NPR-08h RED-BEFORE: a PATCH refused and its re-read refused: no access, no switch on screen", async () => {
     const writeRefused = () =>
@@ -299,6 +331,22 @@ describe("D-283 repair round 2: access revoked mid-session (SEC-NPR-6)", () => {
     await waitFor(() => expect(document.querySelector('[data-state="no-access"]')).not.toBeNull());
     expect(document.querySelector('[data-state="no-access"]')!.textContent).toContain(SETTINGS_REFUSAL);
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
+  });
+
+  it("NPR-08l RED-BEFORE: a re-read refused also takes the log off the page", async () => {
+    const server = serve(queue(() => json(200, PREFS), refused), () => json(200, LOG));
+    await renderPage();
+    expect(screen.getByRole("button", { name: /^log \(1\)$/i })).toBeTruthy();
+    await clickBookingOff();
+
+    server.answerPatch(json(403, { statusCode: 403, message: "Insufficient permissions: settings requires write access (you have none)" }));
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    await waitFor(() => expect(document.querySelector('[data-state="no-access"]')).not.toBeNull());
+    expect(screen.queryByRole("button", { name: /^log \(\d+\)$/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^log$/i }));
+    await waitFor(() => expect(document.querySelector('[data-state="no-access"]')).not.toBeNull());
+    expect(screen.queryByText("Receipt RCPT-9")).toBeNull();
+    expect(screen.queryAllByRole("row")).toHaveLength(0);
   });
 });
 
