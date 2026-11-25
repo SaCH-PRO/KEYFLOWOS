@@ -523,7 +523,10 @@ function storedDepositOf(service: Pick<Service, "depositRequired" | "depositType
   return { required: service.depositRequired === true, type, value };
 }
 
-/** Why the server would refuse this deposit (catalog.service.ts normalizeServiceDeposit), or null when it would store it. */
+/**
+ * Why the server would refuse this deposit (catalog.service.ts normalizeServiceDeposit), or null when it would store
+ * it. One check is the page's own: a FIXED deposit must be whole cents (the server does not check that yet).
+ */
 export function depositProblem(price: number, type: DepositType, raw: string, currency: string): string | null {
   const text = raw.trim();
   const value = text === "" ? Number.NaN : Number(text);
@@ -532,6 +535,8 @@ export function depositProblem(price: number, type: DepositType, raw: string, cu
     return value < 1 || value > 100 ? "A percentage deposit must be between 1 and 100." : null;
   }
   if (value <= 0) return "A fixed deposit must be more than 0.";
+  // SEC-3: money is whole cents. A fraction of a cent (10.005, 1e-3) would be stored as typed and shown rounded.
+  if (roundMoney(value) !== value) return "A fixed deposit can have at most two decimal places (whole cents).";
   if (value > price) return `A fixed deposit must be at most the price (${formatAmount(price, currency)}).`;
   return null;
 }
