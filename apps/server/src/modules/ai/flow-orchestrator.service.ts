@@ -52,6 +52,8 @@ import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.ser
 import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
+import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeFactsForReader } from '../key-cortex/genome-read-projections';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
@@ -1896,9 +1898,25 @@ export class FlowOrchestratorService {
     }
   }
 
-  private async buildBlueprintSection(businessId: string): Promise<string> {
+  private async buildBlueprintSection(businessId: string, userId?: string | null): Promise<string> {
     const ctx = await this.blueprint.getBlueprintContext(businessId);
     if (!ctx) return '';
+    // P82 (D-100 / D-233 / D-234 / D-235): fail closed on financial blueprint fields & facts.
+    let readsRevenue = false;
+    if (userId) {
+      try {
+        const user = await this.prisma.client.user.findUnique({
+          where: { id: userId },
+          select: { role: true },
+        });
+        readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, {
+          id: userId,
+          role: user?.role ?? undefined,
+        });
+      } catch {
+        readsRevenue = false;
+      }
+    }
     // LLM-written blueprint patches don't always preserve array shapes —
     // never let a malformed list field kill the whole turn.
     const asStringList = (v: unknown): string | null => {
@@ -1907,20 +1925,20 @@ export class FlowOrchestratorService {
       return null;
     };
     const lines: string[] = ['', 'Business Blueprint (operating DNA):'];
-    lines.push(`- Completeness: ${ctx.completeness}%`);
+    if (readsRevenue) lines.push(`- Completeness: ${ctx.completeness}%`);
     if (ctx.summary) lines.push(`- Summary: ${ctx.summary}`);
     if (ctx.identity.archetype) lines.push(`- Archetype: ${ctx.identity.archetype}`);
     if (ctx.identity.industry) lines.push(`- Industry: ${ctx.identity.industry}`);
-    if (ctx.operatingModel.revenueModel) lines.push(`- Revenue model: ${ctx.operatingModel.revenueModel}`);
+    if (readsRevenue && ctx.operatingModel.revenueModel) lines.push(`- Revenue model: ${ctx.operatingModel.revenueModel}`);
     if (ctx.operatingModel.deliveryMode) lines.push(`- Delivery mode: ${ctx.operatingModel.deliveryMode}`);
     if (ctx.goals.northStar) lines.push(`- North star: ${ctx.goals.northStar}`);
     const ninetyDayGoals = asStringList(ctx.goals.ninetyDayGoals);
     if (ninetyDayGoals) lines.push(`- 90-day goals: ${ninetyDayGoals}`);
-    if (ctx.constraints.budgetRange) lines.push(`- Budget: ${ctx.constraints.budgetRange}`);
+    if (readsRevenue && ctx.constraints.budgetRange) lines.push(`- Budget: ${ctx.constraints.budgetRange}`);
     if (ctx.constraints.timeCommitment) lines.push(`- Time commitment: ${ctx.constraints.timeCommitment}`);
     if (ctx.brand.voice) lines.push(`- Brand voice: ${ctx.brand.voice}`);
     if (ctx.customerModel.idealCustomer) lines.push(`- Ideal customer: ${ctx.customerModel.idealCustomer}`);
-    if (ctx.financials.avgTicket) lines.push(`- Avg ticket: ${ctx.financials.avgTicket}`);
+    if (readsRevenue && ctx.financials.avgTicket) lines.push(`- Avg ticket: ${ctx.financials.avgTicket}`);
     if (ctx.legalProfile?.recommendedEntityType) {
       lines.push(`- Recommended entity type: ${ctx.legalProfile.recommendedEntityType}`);
     }
@@ -1928,10 +1946,10 @@ export class FlowOrchestratorService {
     if (missingSteps) {
       lines.push(`- Missing registration steps: ${missingSteps}`);
     }
-    if (ctx.projectionProfile?.runwayMonths) {
+    if (readsRevenue && ctx.projectionProfile?.runwayMonths) {
       lines.push(`- Cash runway: ${ctx.projectionProfile.runwayMonths} months`);
     }
-    if (ctx.riskProfile?.riskScore) {
+    if (readsRevenue && ctx.riskProfile?.riskScore) {
       lines.push(`- Business risk score: ${ctx.riskProfile.riskScore}/100`);
     }
     const today = asStringList(ctx.executionRoadmap?.today);
@@ -1945,7 +1963,8 @@ export class FlowOrchestratorService {
     // Genome facts — KEY's working knowledge about the business, synced from
     // every blueprint write. Additive only: never block the prompt on them.
     try {
-      const facts = await this.genomeFacts.listTopFacts(businessId, 30);
+      const rawFacts = await this.genomeFacts.listTopFacts(businessId, readsRevenue ? 30 : 60);
+      const facts = genomeFactsForReader(rawFacts, readsRevenue).slice(0, 30);
       if (facts.length > 0) {
         const factLines = facts.map((f) => {
           const raw = typeof f.value?.raw === 'string' ? f.value.raw : JSON.stringify(f.value?.raw ?? '');
@@ -2413,7 +2432,7 @@ export class FlowOrchestratorService {
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
-    const blueprintSection = await this.buildBlueprintSection(businessId);
+    const blueprintSection = await this.buildBlueprintSection(businessId, userId);
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
@@ -2919,7 +2938,7 @@ ${triage.standingContext}`;
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
-    const blueprintSection = await this.buildBlueprintSection(businessId);
+    const blueprintSection = await this.buildBlueprintSection(businessId, userId);
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
