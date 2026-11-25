@@ -261,6 +261,10 @@ describe('worker proof input gate: the whole tree a Windows checkout writes', ()
     [`docs/${'d'.repeat(200)}.md`, /long/],
     ['apps/web/sub/.git/x', /\.git/],
     ['apps/web/GIT~1/x', /\.git/],
+    // Review (security) MINOR-1: an 8.3 short name can alias a long name, e.g. GITHUB~1 for .github.
+    ['GITHUB~1/workflows/agent-control-worker-proof.yml', /8\.3/],
+    ['docs/DEVELO~1/KEYFLO~1.YAM', /8\.3/],
+    ['docs/a~12.md', /8\.3/],
   ];
 
   it('each kind of path a Windows checkout cannot reproduce runs in full', async () => {
@@ -296,9 +300,30 @@ describe('worker proof input gate: the whole tree a Windows checkout writes', ()
 
   it('ordinary paths raise no hazard', async () => {
     const { checkoutHazards } = await gate();
-    const paths = ['apps/web/src/app/(app)/quotes/[id]/page.tsx', 'docs/reconstruction/V1-STATUS.md', 'apps/server/src/a-b_c.d.ts', 'docs/console.md', 'docs/CONTRIBUTING.md', 'docs/nul-handling.md', 'docs/auxiliary/x.md'];
+    const paths = ['docs/a~b.md', 'docs/~1x.md', 'apps/web/src/app/(app)/quotes/[id]/page.tsx', 'docs/reconstruction/V1-STATUS.md', 'apps/server/src/a-b_c.d.ts', 'docs/console.md', 'docs/CONTRIBUTING.md', 'docs/nul-handling.md', 'docs/auxiliary/x.md'];
     const tree = new Map(paths.map((p) => [p, '100644']));
     assert.deepEqual(checkoutHazards(paths, tree, new Set()), []);
+  });
+});
+
+describe('worker proof input gate: the decision output stays small enough to pass through the environment', () => {
+  // Review (correctness) MINOR-3: one environment string is limited to 128 KiB on Linux; the aggregate reads the
+  // decision (and toJSON(needs), which repeats it) from the environment, so a huge decision would be a false red.
+  it('compact() keeps the decision under 32 KiB whatever changed, and says how many paths there were', async () => {
+    const { compact, DECISION_LIMIT } = await gate();
+    assert.equal(DECISION_LIMIT, 32 * 1024);
+    const long = Array.from({ length: 2000 }, (_, i) => `docs/intelligence/sessions/${'x'.repeat(150)}/${i}.md`);
+    const huge = { schema: 'worker-proof-gate/1', run: true, reason: 'r', event: 'pull_request', base: B, head: H, merge_base: MB, changed: long, inputs_hit: long.map((p) => ({ path: p, pattern: '**/x' })), hazards: long.map((p) => ({ path: p, why: 'a long path' })) };
+    const line = compact(huge);
+    assert.ok(line.length <= DECISION_LIMIT, `${line.length} bytes`);
+    const back = JSON.parse(line);
+    assert.equal(back.changed_count, 2000);
+    assert.equal(back.changed_truncated, true);
+    assert.equal(back.run, true);
+    assert.equal(back.head, H);
+    const small = JSON.parse(compact({ ...huge, changed: ['a.md'], inputs_hit: [], hazards: [] }));
+    assert.deepEqual(small.changed, ['a.md']);
+    assert.equal(small.changed_truncated, false);
   });
 });
 

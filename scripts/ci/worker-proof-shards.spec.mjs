@@ -250,6 +250,24 @@ describe('worker proof aggregate: "Windows worker proof"', () => {
     assert.ok(fewer.problems.some((p) => /NC-6/.test(p)), fewer.problems.join('\n'));
   });
 
+  // Review (correctness) MINOR-1 and MINOR-2: each check is shown by its own message, so deleting any one of them
+  // fails a test even where another check would also have failed the verdict.
+  it('names each problem: a skip for another head or naming no paths, a missing or doubled shard, other assigned or reported controls', async () => {
+    const has = async (over, re) => {
+      const v = await verdict(over);
+      assert.equal(v.ok, false, String(re));
+      assert.ok(v.problems.some((p) => re.test(p)), `${re}: ${JSON.stringify(v.problems)}`);
+    };
+    const all = await reportsFor();
+    await has({ decision: { ...skipDecision, head: 'e'.repeat(40) }, needs: needsAll('skipped'), reports: [] }, /not the head/);
+    const { changed, ...noPaths } = skipDecision;
+    await has({ decision: noPaths, needs: needsAll('skipped'), reports: [] }, /does not name the paths/);
+    await has({ reports: [all[0]] }, /no report from shard 2/);
+    await has({ reports: [all[0], all[1], all[1]] }, /shard 2 reported twice/);
+    await has({ reports: [all[0], { ...all[1], assigned: ['NC-X'] }] }, /shard 2 was assigned other controls/);
+    await has({ reports: [all[0], { ...all[1], results: [...all[1].results].reverse() }] }, /shard 2 reported other controls than it was assigned/);
+  });
+
   it('fails on a report for another commit or another manifest', async () => {
     const all = await reportsFor();
     assert.equal((await verdict({ reports: [all[0], { ...all[1], commit: 'e'.repeat(40) }] })).ok, false, 'commit');
@@ -296,6 +314,12 @@ describe('worker proof shards and aggregate: end to end on a real repository', (
       const red = aggregate(env());
       assert.equal(red.status, 1, red.stdout);
       assert.match(red.stdout + red.stderr, /NC-B/);
+
+      // Review (correctness) MINOR-2: the aggregate itself must stand on the gated head.
+      git(dir, 'commit', '-q', '--allow-empty', '-m', 'moved on');
+      const moved = aggregate(env());
+      assert.equal(moved.status, 1, moved.stdout);
+      assert.match(moved.stdout, /checked out \S+, not the gated head/);
 
       // A vacuous control fails its shard process.
       fs.writeFileSync(path.join(dir, 'manifest.yaml'), ['version: 1', 'negative_controls:', ...control('NC-A'), ...control('NC-V', 'nowhere'), ''].join('\n'));
