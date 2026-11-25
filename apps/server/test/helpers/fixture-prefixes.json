@@ -1133,6 +1133,11 @@
       "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
     },
     {
+      "prefix": "v92m_",
+      "owner": "apps/server/test/memory-expired-not-served.integration.test.ts",
+      "packet": "V1-92 (MEM-EXPIRED-NOT-SERVED)"
+    },
+    {
       "prefix": "v63m_",
       "owner": "apps/server/test/business-profile-save.integration.test.ts",
       "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
