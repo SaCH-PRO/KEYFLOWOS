@@ -12560,9 +12560,10 @@
    "size": "M",
    "priority": "P0",
    "depends_on": [
+    "FU-WA-INBOUND-KEY-EXCLUDE",
+    "MOUNT-QUOTES",
     "WA-E164-SERVER",
-    "WA-HELPER",
-    "MOUNT-QUOTES"
+    "WA-HELPER"
    ],
    "files": [
     "apps/web/src/components/whatsapp/new-from-whatsapp.tsx",
@@ -13217,17 +13218,20 @@
    "size": "S",
    "priority": "P3",
    "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS",
     "FU-ME-NOTIFICATIONS-SCOPE"
    ],
    "files": [
     "apps/web/src/app/app/settings/notifications/page.tsx"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-283"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner: found by FU-ME-NOTIFICATIONS-SCOPE's security review (MINOR-2), outside its write set",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-283: Claude lane, after FU-CONTACT-TIMELINE-CHANNELS",
+   "track_ruling": "D-283",
    "scope": "A settings-none member who reaches /app/settings/notifications by URL or a bookmark gets a blank Preferences tab and 'No customer notifications sent yet' on the Log tab: the page drops the 403 from customer-preferences and customer-log (page.tsx ~118-124, ~320-323). It should say they have no access (FAILURE-KIT's NoAccessState). No data leaks.",
    "definition_of_done": "RED: a refused read shows the no-access state on both tabs, never the empty-log text."
   },
@@ -13242,16 +13246,20 @@
    "lane": "web",
    "size": "S",
    "priority": "P3",
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "files": [
     "apps/web/src/app/studio/page.tsx"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-283"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner: found by FU-ME-NOTIFICATIONS-SCOPE's security review (MINOR-1)",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-283: Claude lane, after FU-CONTACT-TIMELINE-CHANNELS",
+   "track_ruling": "D-283",
    "scope": "/studio lists Notifications, Webhooks and Payment Gateways with no module filter (page.tsx ~132-137). Nothing links to it; a member reaches it only by typing the URL, and the server refuses the reads. Either filter its entries the way HubIndex does or remove the page.",
    "definition_of_done": "RED: a settings-none member sees no settings entries on /studio (or the route is gone and nothing links to it)."
   },
@@ -13266,16 +13274,20 @@
    "lane": "web",
    "size": "S",
    "priority": "P3",
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "files": [
     "apps/web/e2e/helpers/workspace.ts"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-283"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner: found while proving FU-ME-NOTIFICATIONS-SCOPE in a browser",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-283: Claude lane, after FU-CONTACT-TIMELINE-CHANNELS",
+   "track_ruling": "D-283",
    "scope": "seedWorkspace stores kf_token = 'test-token-e2e', which is not three parts, so apps/web/src/middleware.ts isTokenExpiredOrInvalid sends every /app/* request to /auth/login before the page loads. Mocked specs that rely on seedWorkspace alone (connect-*, calendar-event-drawer, inventory-xlsx-import, ...) cannot reach the app. CI's e2e-mocked step runs only onboarding-loop-regression, auth-helpers and public-flows, so CI does not show it. Fix: store an unsigned JWT-shaped token (as sweep-me-notifications.spec.ts does), then check each seedWorkspace spec.",
    "definition_of_done": "RED: a mocked spec using only seedWorkspace reaches /app/crm/contacts (fails at the base: lands on /auth/login)."
   },
@@ -13293,19 +13305,22 @@
    "size": "S",
    "priority": "P3",
    "depends_on": [
-    "FU-BULK-DELETE-UNDO"
+    "FU-BULK-DELETE-UNDO",
+    "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "files": [
     "apps/web/src/hooks/use-app-layout.ts (handleLogout)",
     "apps/web/src/components/require-auth.tsx",
     "apps/web/src/lib/workspace.ts"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-283"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner: found by a review on 2026-11-25",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-283: Claude lane, after FU-CONTACT-TIMELINE-CHANNELS",
+   "track_ruling": "D-283",
    "scope": "From FU-BULK-DELETE-UNDO's security confirmation: the bulk-delete Undo toast lives in the app-wide Toaster and outlives a sign-out (sign-out navigates in place). Since be3d7a44 it can no longer act for another person, but its text ('Deleted N contacts') can stay visible to the next person in the tab. Dismiss session-bound toasts on sign-out and on sign-in.",
    "definition_of_done": "RED: a pending Undo toast is dismissed when the member signs out (and when another person signs in in the tab)."
   },
@@ -13358,12 +13373,14 @@
    "files": [
     "apps/web/src/components/require-auth.tsx"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-281"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner (recommended: launch track; it affects every navigation): found 2026-11-25",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-281: every navigation",
+   "track_ruling": "D-281",
    "scope": "Found by WEDGE-WA-INBOUND-CAPTURE's web half (2026-11-25): components/require-auth.tsx's verify depends on redirectToLogin, which depends on pathname, so every in-app navigation returns RequireAuth to 'checking' and replaces the whole shell with its spinner; the destination page mounts twice, and a page that reads and strips a one-shot URL parameter (?contactId) loses it. The WhatsApp capture doors therefore use full page loads; the contacts screens' Book appointment door (/app/bookings?contactId=) is likely broken by the same mechanism. Verify once per session (and on token change), not per pathname; keep the 401 redirect.",
    "definition_of_done": "RED: a client navigation between two /app pages does not show RequireAuth's spinner or remount the shell, and a one-shot ?contactId survives a router.push; 401 still redirects to sign-in. Then the WhatsApp doors can return to router.push."
   },
@@ -13380,16 +13397,20 @@
    "lane": "web",
    "size": "S",
    "priority": "P2",
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "files": [
     "apps/web/src/components/ui/side-sheet.tsx"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-283"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner: found 2026-11-25",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-283: Claude lane, after FU-CONTACT-TIMELINE-CHANNELS",
+   "track_ruling": "D-283",
    "scope": "Found by WEDGE-WA-INBOUND-CAPTURE's web half: useIsMobile starts false, so every freshly mounted SideSheet starts in its desktop layout and, on switching to the phone layout, leaves the panel offset off the right edge.",
    "definition_of_done": "RED: a SideSheet mounted open at 375px is fully on screen."
   },
@@ -13407,16 +13428,20 @@
    "lane": "web",
    "size": "S",
    "priority": "P2",
-   "depends_on": [],
+   "depends_on": [
+    "FU-CONTACT-TIMELINE-CHANNELS"
+   ],
    "files": [
     "apps/web/src/app/app/crm/pipeline/hooks/use-contact-actions.ts"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-283"
+   ],
    "r0_impact": "KEEP",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "pending the owner: found 2026-11-25",
-   "track_ruling": "orchestrator proposal 2026-11-25",
+   "track": "launch",
+   "track_reason": "owner ruling D-283: Claude lane, after FU-CONTACT-TIMELINE-CHANNELS",
+   "track_ruling": "D-283",
    "scope": "Found by WEDGE-WA-INBOUND-CAPTURE's web half: Send quote pushes ?tab=billing&segment=quotes&contactId=, which the commerce page maps to Snapshot, so it opens no quote. Point it at ?tab=quotes&contactId= (which the commerce page now reads).",
    "definition_of_done": "RED: Send quote from a contact opens the New quote form with that customer chosen."
   },
@@ -13445,6 +13470,64 @@
    "track_ruling": "orchestrator proposal 2026-11-25",
    "scope": "Found by SWP-INV-DETAIL's web-half correctness review: the operator detail's remaining comes from balanceOfStoredRows alone, not net of credit notes (unlike the public reader) and not status-aware, so a FULLY_CREDITED invoice reads 'Amount due TTD 300.00' and its PDF 'Balance due'. The web clamps FULLY_CREDITED and VOID to 0 (SWP-INV-DETAIL repair); PARTIALLY_CREDITED needs the server figure.",
    "definition_of_done": "RED (real DB): a partially credited invoice's operator remaining equals total - payments - applied credits; VOID and FULLY_CREDITED read 0."
+  },
+  {
+   "id": "FU-WA-INBOUND-KEY-EXCLUDE",
+   "title": "Pasted WhatsApp text never reaches KEY's automatic prompts",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/key-cortex/key-cortex-intuition.service.ts",
+    "(every automatic KEY reader of ContactNote / ContactEvent bodies, from the census)"
+   ],
+   "decisions": [
+    "D-280"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "owner ruling D-280",
+   "track_ruling": "D-280",
+   "scope": "D-280. SEC-WAW-1 (WEDGE-WA-INBOUND-CAPTURE web-half security review, 2026-11-25): the hourly scheduledIntuitionScan (collectTextCorpus ~1033, aiSemanticAnalysis ~1116) reads every ContactNote body of the last 14 days into an LLM prompt with no source filter, so pasted third-party WhatsApp text (source whatsapp_inbound, and the communication.whatsapp event body) reaches the model unasked. Census every automatic KEY reader of note/event bodies that feed a prompt (intuition, proactive engine, relationship health, customer journey, best channel) and exclude that text; owner-initiated KEY use is unchanged.",
+   "definition_of_done": "RED (real DB): a whatsapp_inbound note is absent from the intuition corpus and from every other automatic reader the census names; a team-written note is still present; owner-initiated KEY reads are unchanged."
+  },
+  {
+   "id": "FU-PUSH-OPTIN-MY-ACCOUNT",
+   "title": "Every member turns on push for their own device from My account",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "J"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/app/app/settings/profile/page.tsx",
+    "apps/web/src/hooks/use-push-notifications.ts"
+   ],
+   "decisions": [
+    "D-282"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "owner ruling D-282",
+   "track_ruling": "D-282",
+   "scope": "D-282. After D-276 (FU-ME-NOTIFICATIONS-SCOPE) the Push tab of Settings > Notifications is reachable only by settings readers, and it was the only place a member turned on push for their own device; the push routes are every member's own (push-notification.controller.ts: BusinessGuard only). Put the push opt-in on My account (/app/settings/profile) for every member; keep the business's customer-email settings where they are.",
+   "definition_of_done": "RED: a member with settings none can turn push on and off for their device from My account; the business's customer-email settings stay settings-only."
   }
  ],
  "moot": [
