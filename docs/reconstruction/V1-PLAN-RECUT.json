@@ -13028,6 +13028,284 @@
    ],
    "scope": "From the FU-C4-FOCUS-OPEN acceptance review (read only): GET /api/flows/businesses/:b/search (flow.controller.ts ~99-137) has AuthGuard and BusinessGuard only and returns invoice totals, so a member without revenue read sees invoice amounts through Cmd/K (D-100). Strip money fields (or invoice results) for members without revenue read, as the other money readers do.",
    "definition_of_done": "RED (real DB): a member with revenue none gets invoice totals from the search. GREEN: no money figure (shape kept); owner unchanged; Release 0 MET."
+  },
+  {
+   "id": "FU-CI-PG-NO-PASSWORD",
+   "title": "CI's throwaway Postgres containers run password-less",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    ".github/workflows/ci-cd.yml",
+    "scripts/ci/ci-pg-no-password.spec.mjs (new)"
+   ],
+   "decisions": [
+    "D-275"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "every later wave's GitGuardian check (owner ruling)",
+   "track_ruling": "D-275",
+   "scope": "Owner ruling D-275 (2026-11-24, #80 7143988551): CI's Postgres service containers use POSTGRES_HOST_AUTH_METHOD: trust instead of POSTGRES_PASSWORD, and DATABASE_URL drops the password. Remove a false-positive literal; never suppress the detector. Production auth unchanged. Antigravity lane (P36); merged in M9 (eec1e880).",
+   "definition_of_done": "RED: a workflow guard over .github/workflows/*.yml finds no POSTGRES_PASSWORD and no passworded DATABASE_URL/DIRECT_URL; GitGuardian passes on the next wave."
+  },
+  {
+   "id": "FU-BULK-DELETE-UNDO",
+   "title": "A bulk delete of customers is sent at once and Undo restores exactly those ids from Trash in one call",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/trash/trash.controller.ts (bulk-restore)",
+    "apps/server/test/trash-bulk-restore.integration.test.ts (new)",
+    "apps/web (the contacts list's bulk delete and its toast)"
+   ],
+   "decisions": [
+    "D-277"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "journey C (customers) under owner ruling D-277b",
+   "track_ruling": "D-277",
+   "scope": "Owner ruling D-277b (2026-11-24, #80 7144117000): a bulk delete is sent at once, then a toast offers Undo, which restores exactly those customers from Trash in one call; no delayed send, so leaving the page never drops it. Server half (Antigravity, P37, returned at 61e50c0f): POST /api/businesses/:businessId/trash/:model/bulk-restore. Web half (Claude), stacked on the server head.",
+   "definition_of_done": "Server: RED real-DB suite for bulk restore (tenant-bound, only the named ids, only soft-deleted rows). Web: RED that a bulk delete sends at once and Undo calls bulk-restore with exactly those ids; live sweep RED at the base, green at the head."
+  },
+  {
+   "id": "FU-CI-MERGE-QUEUE",
+   "title": "The required workflows run on merge_group, for GitHub's merge queue",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    ".github/workflows/*.yml (merge_group)",
+    "scripts/ci/merge-queue.spec.mjs (new)",
+    "docs (repository references, D-239 wording)"
+   ],
+   "decisions": [
+    "D-278"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "merge throughput under owner ruling D-278",
+   "track_ruling": "D-278",
+   "scope": "Owner ruling D-278 (2026-11-24): after M8 the repository moves into a free GitHub organization (done 2026-11-25: KEYFLOWOS/KEYFLOWOS) for the merge queue. The required workflows gain merge_group; the owner switches the queue on in settings. D-239 then reads: enqueue once both reviews accept and the head checks pass; the queue merges when CI passes on the combined head. Workflow half: Antigravity (P38, returned at b5a3c63a). Docs repository references and the D-239 wording: Claude, on the docs branch.",
+   "definition_of_done": "RED contract spec over the required workflows (merge_group present, event SHAs used for scans); docs name KEYFLOWOS/KEYFLOWOS."
+  },
+  {
+   "id": "FU-CI-WINDOWS-INPUT-GATE",
+   "title": "The Windows worker proof always reports, runs in full only when its inputs changed, and is sharded (C2)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    ".github/workflows/agent-control-worker-proof.yml"
+   ],
+   "decisions": [
+    "D-279"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "CI time under owner ruling D-279",
+   "track_ruling": "D-279",
+   "scope": "Owner ruling D-279 (2026-11-24): the job always runs and reports, so admission keeps its required check. It diffs the PR against its merge base; if no proof input changed (scripts/agent-control/**, its workflow file, the package manifests and lockfile, the Node pin) it reports success naming the diff it checked; otherwise it runs in full, sharded (C2). It also runs in full nightly on main. Claude lane (C1 was Claude's).",
+   "definition_of_done": "RED: a contract spec shows the job skips the full run with no input change and runs it on each listed input; the job name and required-check status are unchanged; the nightly schedule runs it in full."
+  },
+  {
+   "id": "FU-ME-NOTIFICATIONS-SCOPE",
+   "title": "The Me menu offers Notifications only to settings readers",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "J5"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-NOTIFICATIONS-PREFS-GUARD"
+   ],
+   "files": [
+    "apps/web/src/lib/nav-config.ts",
+    "apps/web/src/hooks/use-app-layout.ts",
+    "apps/web/src/hooks/__tests__/use-app-layout-me-notifications.test.ts (new)",
+    "apps/web/src/lib/__tests__/nav-member-scope.spec.ts (NMS-18 covers the Me entries)",
+    "apps/web/e2e/sweep-me-notifications.spec.ts (new)"
+   ],
+   "decisions": [
+    "D-276"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "journey J5 (a member's menu shows only what they may open) under owner ruling D-276",
+   "track_ruling": "D-276",
+   "scope": "Owner ruling D-276 (2026-11-24): the Me menu shows Notifications (the business's customer emails and their log) only to members whose settings access is read or higher, as the Settings index does. Unknown access hides nothing; the server decides (P30). A member's own alerts stay in the header bell. Pre-flight (2026-11-25): the only unfiltered entry point was meNav (the desktop rail's Me drawer); the Settings index, the settings tab strip and the header bell were already right.",
+   "definition_of_done": "RED: MNS-01 (a settings-none member is offered Notifications) and NMS-18 (the Me entries' modules against the server's guards). Browser: sweep-me-notifications MNB-01 RED at the base at 768/1024/1440, green at the head."
+  },
+  {
+   "id": "FU-CONTACT-TIMELINE-CHANNELS",
+   "title": "The contact Timeline gets a channel filter, where pasted WhatsApp messages land",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "WEDGE-WA-INBOUND-CAPTURE"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/[id] (Timeline)"
+   ],
+   "decisions": [
+    "D-277"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "the D-263 wedge (WhatsApp) under owner ruling D-277",
+   "track_ruling": "D-277",
+   "scope": "Owner ruling D-277 (2026-11-24): the conversation thread moves into the contact's Timeline with a channel filter (WhatsApp, email, SMS, calls, notes); that is where WEDGE-WA-INBOUND-CAPTURE's pasted WhatsApp messages land (ContactEvent communication.whatsapp plus a plain-text ContactNote, per the server half at 7a575847). Deals, per-contact Audit and Network go for v1 (FU-CONTACT-PANEL-PRUNE deletes the dead panel files). Claude lane, after the server half.",
+   "definition_of_done": "RED: the Timeline filters by channel; a pasted WhatsApp message shows under WhatsApp and under All; live sweep RED at the base, green at the head."
+  },
+  {
+   "id": "FU-C4-TODAY-LINK",
+   "title": "Today links the customer of the invoice due today (journey C4 'from Today')",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C4"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/app/app/command-center (Today)",
+    "possibly apps/server/src/modules/business-command-center (the aggregate's contact id)"
+   ],
+   "decisions": [
+    "D-263"
+   ],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "journey C4",
+   "track_ruling": "D-263",
+   "scope": "Found live (2026-11-24) once FU-C4-FOCUS-OPEN and FU-C4-CMDK-SEARCH were together: journey C4 stops at 'from Today' because Today does not link the customer of the invoice due today. Root cause unknown: the Today aggregate may leave out the contact id (server half to Antigravity) or the web may show the name without a link. Pre-flight first.",
+   "definition_of_done": "RED: journey C4's 'from Today' step; a unit test on whichever half drops the link; live C4 green."
+  },
+  {
+   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
+   "title": "The customer notifications page says 'no access' on a refused read, not 'nothing sent'",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [
+    "FU-ME-NOTIFICATIONS-SCOPE"
+   ],
+   "files": [
+    "apps/web/src/app/app/settings/notifications/page.tsx"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found by FU-ME-NOTIFICATIONS-SCOPE's security review (MINOR-2), outside its write set",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "A settings-none member who reaches /app/settings/notifications by URL or a bookmark gets a blank Preferences tab and 'No customer notifications sent yet' on the Log tab: the page drops the 403 from customer-preferences and customer-log (page.tsx ~118-124, ~320-323). It should say they have no access (FAILURE-KIT's NoAccessState). No data leaks.",
+   "definition_of_done": "RED: a refused read shows the no-access state on both tabs, never the empty-log text."
+  },
+  {
+   "id": "FU-STUDIO-PAGE-SCOPE",
+   "title": "The orphan /studio setup page offers settings entries only to settings readers, or is removed",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/app/studio/page.tsx"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found by FU-ME-NOTIFICATIONS-SCOPE's security review (MINOR-1)",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "/studio lists Notifications, Webhooks and Payment Gateways with no module filter (page.tsx ~132-137). Nothing links to it; a member reaches it only by typing the URL, and the server refuses the reads. Either filter its entries the way HubIndex does or remove the page.",
+   "definition_of_done": "RED: a settings-none member sees no settings entries on /studio (or the route is gone and nothing links to it)."
+  },
+  {
+   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
+   "title": "The mocked e2e helpers store a session the edge middleware accepts",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [],
+   "files": [
+    "apps/web/e2e/helpers/workspace.ts"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found while proving FU-ME-NOTIFICATIONS-SCOPE in a browser",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "seedWorkspace stores kf_token = 'test-token-e2e', which is not three parts, so apps/web/src/middleware.ts isTokenExpiredOrInvalid sends every /app/* request to /auth/login before the page loads. Mocked specs that rely on seedWorkspace alone (connect-*, calendar-event-drawer, inventory-xlsx-import, ...) cannot reach the app. CI's e2e-mocked step runs only onboarding-loop-regression, auth-helpers and public-flows, so CI does not show it. Fix: store an unsigned JWT-shaped token (as sweep-me-notifications.spec.ts does), then check each seedWorkspace spec.",
+   "definition_of_done": "RED: a mocked spec using only seedWorkspace reaches /app/crm/contacts (fails at the base: lands on /auth/login)."
   }
  ],
  "moot": [
