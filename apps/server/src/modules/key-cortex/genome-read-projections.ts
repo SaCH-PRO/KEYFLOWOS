@@ -83,7 +83,8 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
  * money-worded strings/array items, and drops structured array items that state money.
  */
 function sanitizeBlueprintValue(val: unknown, depth = 0): unknown {
-  if (depth > 8 || val === null || val === undefined) return val;
+  if (depth > 8) return undefined;
+  if (val === null || val === undefined) return val;
   if (typeof val === 'string') {
     return stringStatesMoney(val) ? undefined : val;
   }
@@ -248,6 +249,27 @@ function isRiskLabel(value: string | null | undefined): boolean {
  * - Mirrors `isFinanceSignal` (Codex P1 on #228): wraps `{ [field]: raw }` into `structuredValueStatesMoney`
  *   so figure-word fields paired with numeric values (e.g. `hourlyRate: 250`, `monthlyRent: 4200`) are caught.
  */
+const FINANCIAL_CAPTURE_TYPE_PATTERN =
+  /\b(?:receipt|invoice|bill|expense|bank|statement|tax|payment|payroll|quote|order)s?\b/i;
+
+function domainHasMoneyBlueprintKey(domain: string | null | undefined): boolean {
+  if (typeof domain !== 'string' || !domain.trim()) return false;
+  for (const seg of domain.split('.')) {
+    const trimmed = seg.trim();
+    if (!trimmed) continue;
+    if (
+      BLUEPRINT_MONEY_KEYS.has(trimmed) ||
+      BLUEPRINT_NESTED_MONEY_KEYS.has(trimmed) ||
+      isMoneyLabel(trimmed) ||
+      isRiskLabel(trimmed) ||
+      proposalTextStatesMoney(trimmed)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function genomeFactsForReader<
   T extends {
     section?: string | null;
@@ -272,14 +294,21 @@ export function genomeFactsForReader<
       isMoneyLabel(f.sourceType) ||
       isMoneyLabel(f.sourceEntityType) ||
       isRiskLabel(f.section) ||
-      isRiskLabel(f.domain)
+      isRiskLabel(f.domain) ||
+      domainHasMoneyBlueprintKey(f.domain)
     ) {
       return false;
     }
+    const fieldTrimmed = typeof f.field === 'string' ? f.field.trim() : '';
     if (
-      (typeof f.field === 'string' && proposalTextStatesMoney(f.field)) ||
-      (typeof f.domain === 'string' && proposalTextStatesMoney(f.domain))
+      fieldTrimmed &&
+      (BLUEPRINT_MONEY_KEYS.has(fieldTrimmed) ||
+        BLUEPRINT_NESTED_MONEY_KEYS.has(fieldTrimmed) ||
+        proposalTextStatesMoney(fieldTrimmed))
     ) {
+      return false;
+    }
+    if (typeof f.domain === 'string' && proposalTextStatesMoney(f.domain)) {
       return false;
     }
     const raw = (f.value as { raw?: unknown } | null | undefined)?.raw ?? f.value;
@@ -289,11 +318,18 @@ export function genomeFactsForReader<
     if (structuredValueStatesMoney(raw)) {
       return false;
     }
-    // Check paired `{ [fieldName]: raw }` so figure-word field + bare numeric value cannot bypass.
-    const fieldName = typeof f.field === 'string' && f.field.trim() !== '' ? f.field.trim() : null;
-    if (fieldName && raw !== undefined && raw !== null) {
-      const paired = Object.defineProperty(Object.create(null), fieldName, { value: raw, enumerable: true });
-      if (structuredValueStatesMoney(paired)) return false;
+    // Check paired `{ [key]: raw }` against both `f.field` and the leaf segment of `f.domain`
+    // (KeyGenomeBackfillService writes `domain: "operationsSystem.hourlyRate", field: "value"`).
+    if (raw !== undefined && raw !== null) {
+      const domainLeaf =
+        typeof f.domain === 'string' && f.domain.includes('.')
+          ? f.domain.split('.').pop()?.trim() || null
+          : null;
+      for (const candidateKey of [fieldTrimmed || null, domainLeaf]) {
+        if (!candidateKey) continue;
+        const paired = Object.defineProperty(Object.create(null), candidateKey, { value: raw, enumerable: true });
+        if (structuredValueStatesMoney(paired)) return false;
+      }
     }
     return true;
   });
@@ -308,7 +344,11 @@ function isMoneyReqFact(item: unknown): boolean {
     isMoneyLabel(f.field) ||
     isRiskLabel(f.section) ||
     isRiskLabel(f.domain) ||
-    (typeof f.field === 'string' && proposalTextStatesMoney(f.field)) ||
+    domainHasMoneyBlueprintKey(f.domain) ||
+    (typeof f.field === 'string' &&
+      (BLUEPRINT_MONEY_KEYS.has(f.field.trim()) ||
+        BLUEPRINT_NESTED_MONEY_KEYS.has(f.field.trim()) ||
+        proposalTextStatesMoney(f.field))) ||
     (typeof f.domain === 'string' && proposalTextStatesMoney(f.domain)) ||
     (typeof f.reason === 'string' && stringStatesMoney(f.reason))
   );
@@ -335,12 +375,34 @@ function projectSingleReadiness<T extends Record<string, unknown>>(entry: T): T 
   const visibleMissing = rawMissing ? rawMissing.filter((item) => !isMoneyReqFact(item)) : null;
   const visibleOptional = filterReqFacts(entry.optionalFacts);
 
+  // Collect identifiers (`domain.field`) of withheld facts so blockedReasons / recommendedSetupActions
+  // (e.g. "Missing degraded fact: risk.top_risks") cannot leak them back in prose.
+  const withheldFactRefs: string[] = [];
+  for (const list of [rawMissing, rawRequired]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!isMoneyReqFact(item) || !isPlainObject(item)) continue;
+      const d = typeof item.domain === 'string' ? item.domain.trim() : '';
+      const f = typeof item.field === 'string' ? item.field.trim() : '';
+      if (d && f) withheldFactRefs.push(`${d}.${f}`.toLowerCase());
+    }
+  }
+  const keepsReadinessMessage = (s: unknown): s is string => {
+    if (typeof s !== 'string') return false;
+    if (stringStatesMoney(s) || isRiskLabel(s)) return false;
+    const lower = s.toLowerCase();
+    for (const ref of withheldFactRefs) {
+      if (lower.includes(ref)) return false;
+    }
+    return true;
+  };
+
   const visibleBlockedReasons = Array.isArray(entry.blockedReasons)
-    ? entry.blockedReasons.filter((s): s is string => typeof s === 'string' && !stringStatesMoney(s))
+    ? entry.blockedReasons.filter(keepsReadinessMessage)
     : entry.blockedReasons;
 
   const visibleSetupActions = Array.isArray(entry.recommendedSetupActions)
-    ? entry.recommendedSetupActions.filter((s): s is string => typeof s === 'string' && !stringStatesMoney(s))
+    ? entry.recommendedSetupActions.filter(keepsReadinessMessage)
     : entry.recommendedSetupActions;
 
   const out: Record<string, unknown> = {
@@ -459,7 +521,8 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
                 title: r.title ?? null,
                 diagnosis: r.diagnosis ?? null,
               }) &&
-              !(typeof r.title === 'string' && stringStatesMoney(r.title))
+              !(typeof r.title === 'string' && stringStatesMoney(r.title)) &&
+              !structuredValueStatesMoney(r)
             );
           });
           continue;
@@ -471,11 +534,16 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
     }
 
     if (mod === 'crm' && isPlainObject(val)) {
-      out[mod] = {
-        ...val,
-        ...(Array.isArray(val.recentActivity) ? { recentActivity: filterMoneyItems(val.recentActivity) } : {}),
-        ...(Array.isArray(val.overdueTasks) ? { overdueTasks: filterMoneyItems(val.overdueTasks) } : {}),
-      };
+      const projectedCrm: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val)) {
+        if ((k === 'recentActivity' || k === 'overdueTasks') && Array.isArray(v)) {
+          projectedCrm[k] = filterMoneyItems(v);
+          continue;
+        }
+        if (isMoneyLabel(k)) continue;
+        projectedCrm[k] = v;
+      }
+      out[mod] = projectedCrm;
       continue;
     }
 
@@ -483,6 +551,7 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
       out[mod] = {
         ...val,
         ...(Array.isArray(val.recentMemories) ? { recentMemories: filterMoneyItems(val.recentMemories) } : {}),
+        ...(Array.isArray(val.patternsDetected) ? { patternsDetected: filterMoneyItems(val.patternsDetected) } : {}),
       };
       continue;
     }
@@ -514,7 +583,12 @@ export function v2ContextForReader<T extends Record<string, unknown>>(
           ? {
               recentCaptures: val.recentCaptures.filter((c) => {
                 if (!isPlainObject(c)) return true;
-                if (typeof c.detectedType === 'string' && stringStatesMoney(c.detectedType)) return false;
+                if (
+                  typeof c.detectedType === 'string' &&
+                  (stringStatesMoney(c.detectedType) || FINANCIAL_CAPTURE_TYPE_PATTERN.test(c.detectedType))
+                ) {
+                  return false;
+                }
                 return !structuredValueStatesMoney(c);
               }),
             }
