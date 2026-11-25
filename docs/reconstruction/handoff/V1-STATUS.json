@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "b330adfc3d537b6fb34ce662c16c82ed65e22228",
-  "main_commit_date": "2026-11-25T20:09:13+00:00",
+  "main_sha": "14c3c36e3bcc994228ad0a10f159523ca8758666",
+  "main_commit_date": "2026-11-25T20:58:07+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 568.5,
   "by_status": {
    "done": {
-    "packets": 172,
-    "points": 258.5,
-    "pct_by_points": 45.5
+    "packets": 175,
+    "points": 261.5,
+    "pct_by_points": 46
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 223,
-    "points": 310,
-    "pct_by_points": 54.5
+    "packets": 220,
+    "points": 307,
+    "pct_by_points": 54
    }
   },
   "by_step": {
@@ -78,15 +78,15 @@
     "total": 53
    },
    "5": {
-    "done": 38,
+    "done": 39,
     "in-progress": 0,
-    "todo": 53,
+    "todo": 52,
     "total": 91
    },
    "6": {
-    "done": 14,
+    "done": 16,
     "in-progress": 0,
-    "todo": 26,
+    "todo": 24,
     "total": 40
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 84,
+    "done": 87,
     "in-progress": 0,
-    "todo": 170,
+    "todo": 167,
     "total": 254
    },
    "follow-on": {
@@ -125,9 +125,9 @@
   "by_derivation": {
    "prior-status-file": 105,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 62,
-   "compacted-commit": 63,
-   "no-evidence": 137
+   "code-commit-subject": 59,
+   "compacted-commit": 69,
+   "no-evidence": 134
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -140,15 +140,12 @@
    "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
    "SWP-STORE-OVERSELL",
-   "SWP-SERVICE-DEPOSIT",
    "W11-GENOME-RECS-DOMAIN",
    "W11-PROPOSAL-RESULT-READER-SCOPE",
    "W11-GENOME-RUNWAY",
    "SWP-CENSUS-GENOME",
    "W11-RUNWAY-BURN-CURRENCY",
    "TOF-PAYROLL-DISCARD",
-   "SWP-FIN-OVERVIEW-TRUTH",
-   "SWP-FIN-CASH-SOURCES",
    "TODAY-AGGREGATE",
    "CLAIM-LOOP",
    "READY-TO-SEND",
@@ -193,8 +190,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 127,
-  "todo_with_dependencies_met_launch": 98
+  "todo_with_dependencies_met": 124,
+  "todo_with_dependencies_met_launch": 95
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -694,16 +691,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-PUSH-OPTIN-MY-ACCOUNT",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-SEARCH-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -974,16 +961,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-SIDESHEET-MOBILE-OFFSET",
-   "step": 6,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-TEST-FLAKES-2026-11-23",
    "step": 5,
    "priority": "P2",
@@ -1175,16 +1152,6 @@
   },
   {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-STUDIO-PAGE-SCOPE",
    "step": 6,
    "priority": "P3",
    "size": "S",
@@ -1946,16 +1913,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-PUSH-OPTIN-MY-ACCOUNT",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-SEARCH-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -2226,16 +2183,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-SIDESHEET-MOBILE-OFFSET",
-   "step": 6,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-TEST-FLAKES-2026-11-23",
    "step": 5,
    "priority": "P2",
@@ -2317,16 +2264,6 @@
   },
   {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-STUDIO-PAGE-SCOPE",
    "step": 6,
    "priority": "P3",
    "size": "S",
@@ -4049,10 +3986,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "60f12273"
+    "6f3d2f9f"
    ],
    "depends_on": [
     "SWP-STORE-OVERSELL"
@@ -4300,10 +4237,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "0032051c"
+    "81599559"
    ],
    "depends_on": [
     "W11-RUNWAY-BURN-CURRENCY",
@@ -4321,10 +4258,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "519a2654"
+    "06970560"
    ],
    "depends_on": [
     "SWP-FIN-OVERVIEW-TRUTH"
@@ -9383,15 +9320,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ec454d17"
+   ],
    "depends_on": [
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The orphan /studio setup page offers settings entries only to settings readers, or is removed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-E2E-MOCKED-SESSION-TOKEN",
@@ -9470,15 +9409,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "702d13d1"
+   ],
    "depends_on": [
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The shared SideSheet opens in place on phones",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONTACT-SEND-QUOTE-DOOR",
@@ -9538,13 +9479,15 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "952ba65b"
+   ],
    "depends_on": [],
    "title": "Every member turns on push for their own device from My account",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-TIMELINE-EVENTS-PAGING",

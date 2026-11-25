@@ -3,7 +3,13 @@
 import { useRouter, usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
-import { clearStoredBusinessId, ensureTokenCookieMirror, getStoredToken, refreshAccessToken } from "@/lib/workspace";
+import {
+  clearStoredBusinessId,
+  dismissSessionToasts,
+  ensureTokenCookieMirror,
+  getStoredToken,
+  refreshAccessToken,
+} from "@/lib/workspace";
 
 type Status = "checking" | "authenticated" | "redirecting" | "error";
 
@@ -226,9 +232,19 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
         setErrorMessage(null);
         setStatus("checking");
       };
+      /**
+       * FU-UNDO-TOAST-SIGNOUT (D-283): the shell shown for one session is torn down because the stored session is now
+       * another's (another `sub`, an admin bearer that appeared, changed or went, an undecodable token, or another user
+       * id in the background answer). The toasts above the shell were that session's: they go with it. Not on the
+       * shell's first verification, nor when the same session is kept or ends in the error state.
+       */
+      const tearDownForAnotherSession = () => {
+        if (verifiedRef.current !== null) dismissSessionToasts();
+        tearDown();
+      };
       verifyingRef.current = true;
       redirectingRef.current = false;
-      if (!background) tearDown();
+      if (!background) tearDownForAnotherSession();
 
       for (;;) {
         ensureTokenCookieMirror();
@@ -240,7 +256,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
         }
         if (background && !isSameUserRotation(asking, verifiedRef.current)) {
           background = false;
-          tearDown();
+          tearDownForAnotherSession();
         }
 
         const answer = await askIdentity(stale);
@@ -276,7 +292,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
           const verified = verifiedRef.current;
           if (!verified || answer.userId === null || answer.userId !== verified.userId) {
             background = false;
-            tearDown();
+            tearDownForAnotherSession();
             continue;
           }
           verifiedRef.current = { ...verified, key: answer.session.key };

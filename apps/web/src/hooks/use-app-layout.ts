@@ -7,6 +7,7 @@ import { useThemeColors } from "@/lib/theme-context";
 import { usePlanLimitHandler } from "./use-plan";
 import {
   clearStoredBusinessId,
+  dismissSessionToasts,
   getStoredBusinessId,
   getCachedUser,
   getUserDisplayName,
@@ -406,6 +407,9 @@ export function useAppLayout(): AppLayoutState {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    // FU-UNDO-TOAST-SIGNOUT (D-283): the member chose to leave, so the session's toasts (a pending Undo among them) go
+    // now, not once the server answers; clearStoredBusinessId below dismisses any raised meanwhile.
+    dismissSessionToasts();
     try {
       // apiPost takes ONE options object; apiPatch two lines up is positional.
       // That asymmetry is the whole bug — TS2554, which skipped every downstream

@@ -3,7 +3,11 @@
 import { ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import Link from "next/link";
-import { Badge, Button, Card, CardGrid, ContentContainer, Drawer, Input, PageHeader } from "@keyflow/ui";
+import { LayoutDashboard } from "lucide-react";
+import { Badge, Button, Card, CardGrid, ContentContainer, Drawer, Input } from "@keyflow/ui";
+// The app's header: its title takes the foreground token, so it reads in both themes. @keyflow/ui's PageHeader
+// hard-codes text-slate-900, which on the dark theme's background could not be seen (BUG-130).
+import { PageHeader } from "@/components/ui/page-header";
 import {
   AtRiskContact,
   Contact,
@@ -15,7 +19,6 @@ import {
   fetchDueTasks,
   fetchSegmentSummary,
 } from "@/lib/client";
-import { NextActionsWidget } from "./next-actions-widget";
 import { PresenceAnalyticsWidget } from "./presence-analytics-widget";
 
 type SegmentCounts = { [key: string]: number };
@@ -90,7 +93,7 @@ export default function CrmDashboardPage() {
     [
       { key: "lead", label: "Leads", tone: "info" },
       { key: "prospect", label: "Prospects", tone: "default" },
-      { key: "client", label: "Contacts", tone: "success" },
+      { key: "client", label: "Clients", tone: "success" },
       { key: "lost", label: "Lost", tone: "warning" },
       { key: "unpaid", label: "Unpaid", tone: "danger" },
       { key: "stale", label: "Stale", tone: "warning" },
@@ -117,9 +120,10 @@ export default function CrmDashboardPage() {
   return (
     <ContentContainer>
       <PageHeader
+        icon={LayoutDashboard}
         title="CRM Dashboard"
         subtitle="Highlights, segments, and recent activity for your contacts."
-        actions={
+        rightSlot={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setInsightsOpen(true)}>
               Insights
@@ -212,7 +216,8 @@ export default function CrmDashboardPage() {
         </SectionCard>
       </CardGrid>
 
-      <NextActionsWidget windowDays={7} limit={25} />
+      {/* BUG-082: no Next actions card here. It listed contacts' scheduled next-action dates, another source than
+          the customers screen's Next Actions, and stood empty ("0 contacts") while that screen listed next actions. */}
 
       <PresenceAnalyticsWidget />
 
