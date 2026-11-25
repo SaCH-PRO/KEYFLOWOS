@@ -63,8 +63,25 @@ let ownerAlerts: any;
 
 const pushCalls: Array<{ endpoint: string; payload: any }> = [];
 const emailCalls: Array<{ to: string; subject: string; html: string; text?: string; idempotencyKey?: string }> = [];
+const inflight: Promise<unknown>[] = [];
 let failPushEndpoints = new Set<string>();
 let nowMs = Date.UTC(2026, 10, 25, 12, 0, 0);
+
+async function settle() {
+  for (let round = 0; round < 4; ) {
+    const hadWork = inflight.length > 0;
+    while (inflight.length > 0) {
+      await inflight.shift()!.catch(() => undefined);
+    }
+    await new Promise((r) => setImmediate(r));
+    round = hadWork || inflight.length > 0 ? 0 : round + 1;
+  }
+}
+
+async function emitAndSettle(eventName: string, payload: unknown) {
+  events.emit(eventName, payload);
+  await settle();
+}
 
 const PREVIOUS_VAPID = {
   pub: process.env.VAPID_PUBLIC_KEY,
@@ -92,8 +109,10 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
-  process.env.VAPID_PUBLIC_KEY = 'test-vapid-public-key-v65f';
-  process.env.VAPID_PRIVATE_KEY = 'test-vapid-private-key-v65f';
+  const webpush = await import('web-push');
+  const vapidKeys = webpush.generateVAPIDKeys();
+  process.env.VAPID_PUBLIC_KEY = vapidKeys.publicKey;
+  process.env.VAPID_PRIVATE_KEY = vapidKeys.privateKey;
 
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
@@ -139,6 +158,16 @@ beforeAll(async () => {
   pushService = app.get(PushNotificationService);
   ownerAlerts = app.get(OwnerAlertsListener);
   ownerAlerts.setClock(() => new Date(nowMs));
+
+  for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(ownerAlerts))) {
+    if (!name.startsWith('on') || typeof ownerAlerts[name] !== 'function') continue;
+    const original = ownerAlerts[name].bind(ownerAlerts);
+    ownerAlerts[name] = (...args: unknown[]) => {
+      const work = original(...args);
+      inflight.push(Promise.resolve(work));
+      return work;
+    };
+  }
 
   // Stub ONLY the outbound web-push network call (never hit external push servers in tests).
   vi.spyOn(pushService as any, 'sendPushNotification').mockImplementation(
@@ -233,7 +262,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
       contact: { firstName: 'Maya', lastName: 'Singh', email: EMAIL.customer },
     };
 
-    await events.emitAsync('booking.created', payload);
+    await emitAndSettle('booking.created', payload);
 
     expect(pushCalls).toHaveLength(1);
     expect(pushCalls[0].endpoint).toBe(ENDPOINT.ownerPush);
@@ -243,8 +272,8 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
 
     // Duplicate emit (including concurrent replay) yields zero extra pushes or emails.
     await Promise.all([
-      events.emitAsync('booking.created', payload),
-      events.emitAsync('booking.created', payload),
+      emitAndSettle('booking.created', payload),
+      emitAndSettle('booking.created', payload),
     ]);
     expect(pushCalls).toHaveLength(1);
     expect(emailCalls).toHaveLength(0);
@@ -263,24 +292,24 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
       },
     };
 
-    await events.emitAsync('invoice.paid', payload);
+    await emitAndSettle('invoice.paid', payload);
     expect(pushCalls).toHaveLength(1);
     expect(pushCalls[0].endpoint).toBe(ENDPOINT.ownerPush);
     expect(pushCalls[0].payload.body).toContain('INV-V65F-100');
     expect(emailCalls).toHaveLength(0);
 
-    await events.emitAsync('invoice.paid', payload);
+    await emitAndSettle('invoice.paid', payload);
     expect(pushCalls).toHaveLength(1);
     expect(emailCalls).toHaveLength(0);
   });
 
   it('[OA-03] email fallback when owner has no live PushSubscription: sends one SystemEmailService alert to owner only (never customer) with HTML escaping', async () => {
-    await events.emitAsync('booking.created', {
+    await emitAndSettle('booking.created', {
       businessId: ID.bizNoPush,
       booking: { id: `${P}bk_email_01`, businessId: ID.bizNoPush, startTime: new Date('2026-12-02T10:00:00Z') },
       contact: { firstName: '<script>x</script>', lastName: 'Buyer', email: EMAIL.customer },
     });
-    await events.emitAsync('invoice.paid', {
+    await emitAndSettle('invoice.paid', {
       businessId: ID.bizNoPush,
       invoice: {
         id: `${P}inv_email_01`,
@@ -291,7 +320,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
         contact: { firstName: 'Andre', lastName: 'Charles', email: EMAIL.customer },
       },
     });
-    await events.emitAsync('invoice.payment_claimed', {
+    await emitAndSettle('invoice.payment_claimed', {
       businessId: ID.bizNoPush,
       invoiceId: `${P}inv_claim_email_01`,
       invoice: { id: `${P}inv_claim_email_01`, businessId: ID.bizNoPush, invoiceNumber: 'INV-V65F-201', total: 300, currency: 'TTD' },
@@ -326,7 +355,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
     });
     failPushEndpoints.add(ENDPOINT.ownerFail);
 
-    await events.emitAsync('invoice.paid', {
+    await emitAndSettle('invoice.paid', {
       businessId: ID.bizPushFail,
       invoice: {
         id: `${P}inv_fail_01`,
@@ -353,12 +382,12 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
       data: { notificationPreferences: { owner_alerts: { bookings: false }, owner_alert_payments: false, payment_receipt: false } },
     });
 
-    await events.emitAsync('booking.created', {
+    await emitAndSettle('booking.created', {
       businessId: ID.bizPrefs,
       booking: { id: `${P}bk_pref_01`, businessId: ID.bizPrefs, startTime: new Date('2026-12-03T09:00:00Z') },
       contact: { firstName: 'Ria', lastName: 'Gomes', email: EMAIL.customer },
     });
-    await events.emitAsync('invoice.paid', {
+    await emitAndSettle('invoice.paid', {
       businessId: ID.bizPrefs,
       invoice: { id: `${P}inv_pref_01`, businessId: ID.bizPrefs, invoiceNumber: 'INV-PREF-1', total: 50, currency: 'TTD' },
     });
@@ -371,16 +400,16 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
       data: { notificationPreferences: { owner_alerts: { bookings: true, payments: true, claims: false }, payment_receipt: false } },
     });
 
-    await events.emitAsync('booking.created', {
+    await emitAndSettle('booking.created', {
       businessId: ID.bizPrefs,
       booking: { id: `${P}bk_pref_01`, businessId: ID.bizPrefs, startTime: new Date('2026-12-03T09:00:00Z') },
       contact: { firstName: 'Ria', lastName: 'Gomes', email: EMAIL.customer },
     });
-    await events.emitAsync('invoice.paid', {
+    await emitAndSettle('invoice.paid', {
       businessId: ID.bizPrefs,
       invoice: { id: `${P}inv_pref_01`, businessId: ID.bizPrefs, invoiceNumber: 'INV-PREF-1', total: 50, currency: 'TTD' },
     });
-    await events.emitAsync('invoice.payment_claimed', {
+    await emitAndSettle('invoice.payment_claimed', {
       businessId: ID.bizPrefs,
       invoiceId: `${P}inv_pref_claim`,
       invoice: { id: `${P}inv_pref_claim`, businessId: ID.bizPrefs, invoiceNumber: 'INV-PREF-2', total: 50, currency: 'TTD' },
@@ -404,19 +433,19 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
     });
 
     // 20 concurrent/burst intents inside the 6-hour window -> exactly 1 push attempt, 0 emails.
-    await Promise.all(Array.from({ length: 20 }, (_, i) => events.emitAsync('invoice.payment_claimed', makePushClaim(i + 1))));
+    await Promise.all(Array.from({ length: 20 }, (_, i) => emitAndSettle('invoice.payment_claimed', makePushClaim(i + 1))));
     expect(pushCalls).toHaveLength(1);
     expect(pushCalls[0].endpoint).toBe(ENDPOINT.ownerPush);
     expect(emailCalls).toHaveLength(0);
 
     // 5h59m later: still inside the 6-hour window -> 0 additional alerts.
     nowMs += 6 * 60 * 60 * 1000 - 60_000;
-    await events.emitAsync('invoice.payment_claimed', makePushClaim(21));
+    await emitAndSettle('invoice.payment_claimed', makePushClaim(21));
     expect(pushCalls).toHaveLength(1);
 
     // Past 6 hours (6h01m from window start): new window sends 1 alert showing total coalesced count (21: 20 prior coalesced + 1 new).
     nowMs += 2 * 60_000;
-    await events.emitAsync('invoice.payment_claimed', makePushClaim(22));
+    await emitAndSettle('invoice.payment_claimed', makePushClaim(22));
     expect(pushCalls).toHaveLength(2);
     expect(`${pushCalls[1].payload.title} ${pushCalls[1].payload.body}`).toContain('21');
 
@@ -426,7 +455,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
     const invEmailId = `${P}inv_flood_email`;
     await Promise.all(
       Array.from({ length: 20 }, (_, i) =>
-        events.emitAsync('invoice.payment_claimed', {
+        emitAndSettle('invoice.payment_claimed', {
           businessId: ID.bizNoPush,
           invoiceId: invEmailId,
           claimId: `${P}clm_e_${i + 1}`,
@@ -441,7 +470,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
 
     // Next 6h window on email fallback shows the coalesced count (20: 19 suppressed + 1 new).
     nowMs += 6 * 60 * 60 * 1000 + 1_000;
-    await events.emitAsync('invoice.payment_claimed', {
+    await emitAndSettle('invoice.payment_claimed', {
       businessId: ID.bizNoPush,
       invoiceId: invEmailId,
       claimId: `${P}clm_e_21`,
@@ -453,7 +482,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
   });
 
   it('[OA-07] D-116/D-125 owner resolution & tenant mismatch guard: demoted ownerId does not receive alerts, only OWNER membership does; mismatched businessId ignored', async () => {
-    await events.emitAsync('booking.created', {
+    await emitAndSettle('booking.created', {
       businessId: ID.bizDemoted,
       booking: { id: `${P}bk_demoted_01`, businessId: ID.bizDemoted, startTime: new Date('2026-12-04T11:00:00Z') },
       contact: { firstName: 'Sasha', lastName: 'Lee', email: EMAIL.customer },
@@ -465,7 +494,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
 
     // Mismatched entity businessId -> refused silently, 0 pushes, 0 emails.
     pushCalls.length = 0;
-    await events.emitAsync('invoice.paid', {
+    await emitAndSettle('invoice.paid', {
       businessId: ID.bizPush,
       invoice: { id: `${P}inv_cross`, businessId: ID.bizOther, invoiceNumber: 'INV-CROSS', total: 100, currency: 'TTD' },
     });

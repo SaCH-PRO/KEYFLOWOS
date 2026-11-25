@@ -1081,3 +1081,61 @@ export function invoiceDueSoonTemplate(ctx: TemplateContext & {
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
 }
+
+/**
+ * OWNER-ALERTS-SERVER (V1-65, platform-to-owner fallback email via SystemEmailService).
+ * Escapes all dynamic text so untrusted customer names, references, or invoice numbers
+ * cannot inject HTML into owner alert emails.
+ */
+export function ownerAlertTemplate(ctx: {
+  businessName: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  subject: string;
+  headline: string;
+  summary: string;
+  details: Array<{ label: string; value: string }>;
+  ctaLabel?: string;
+  ctaUrl?: string;
+}): { subject: string; html: string; text: string } {
+  const safeBusinessName = escapeHtml(ctx.businessName);
+  const safeHeadline = escapeHtml(ctx.headline);
+  const safeSummary = escapeHtml(ctx.summary);
+  const safeRows = ctx.details
+    .filter((row) => row.value.trim().length > 0)
+    .map((row) => detailRow(escapeHtml(row.label), escapeHtml(row.value)))
+    .join('');
+
+  const safeCtaUrl =
+    ctx.ctaUrl && /^https?:\/\//i.test(ctx.ctaUrl.trim()) ? escapeHtml(ctx.ctaUrl.trim()) : '';
+
+  const body = [
+    heading(safeHeadline),
+    paragraph(safeSummary),
+    safeRows ? detailTable(safeRows) : '',
+    ctx.ctaLabel && safeCtaUrl ? ctaButton(escapeHtml(ctx.ctaLabel), safeCtaUrl, ctx.primaryColor) : '',
+    paragraph('You received this alert by email because push notifications are not active on your device for this business.'),
+  ].join('');
+
+  const html = baseLayout(
+    {
+      businessName: safeBusinessName,
+      customerName: safeBusinessName,
+      primaryColor: ctx.primaryColor,
+      secondaryColor: ctx.secondaryColor,
+    },
+    escapeHtml(ctx.subject),
+    body,
+  );
+
+  const textLines = [
+    `${ctx.businessName} — ${ctx.headline}`,
+    '',
+    ctx.summary,
+    ...ctx.details.filter((r) => r.value.trim().length > 0).map((r) => `${r.label}: ${r.value}`),
+    ...(safeCtaUrl ? ['', `Open in Keyflow: ${ctx.ctaUrl!.trim()}`] : []),
+  ];
+
+  return { subject: ctx.subject, html, text: textLines.join('\n') };
+}
+
