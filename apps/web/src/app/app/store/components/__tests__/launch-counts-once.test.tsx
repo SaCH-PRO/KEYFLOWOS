@@ -97,6 +97,12 @@ describe("BUG-106 Launch counts each store item once", () => {
     expect(check.parentElement).toHaveTextContent(/required/i);
   });
 
+  it("a product on the store that is no longer active is not counted (the store does not show it)", () => {
+    const pepper = { ...product("prod_pepper", "Pepper sauce"), isActive: false } as Product;
+    mount([service("svc_listing_pepper", "Pepper sauce", pepper.id), service("svc_haircut", "Haircut", null)], [pepper]);
+    expect(catalogItems()).toBe("1");
+  });
+
   it("control: bookable services and no products count each service", () => {
     mount([service("svc_a", "Haircut", null), service("svc_b", "Beard trim", null), service("svc_c", "Shave", null)], []);
     expect(catalogItems()).toBe("3");

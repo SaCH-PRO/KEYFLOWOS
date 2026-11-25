@@ -173,6 +173,18 @@ describe("CATALOG-1 Sales > Products (/app/commerce/products)", () => {
     expect(String(body.imageUrl ?? "")).not.toMatch(/^(data|blob):|__local__/);
   });
 
+  it("a photo given as a browser-only address (data:) is refused with a message, and nothing is created", async () => {
+    await mountPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^new product$/i }));
+    const form = await screen.findByRole("dialog");
+    fireEvent.change(within(form).getByLabelText(/^name/i), { target: { value: "Pepper jelly" } });
+    fireEvent.change(within(form).getByLabelText(/^price/i), { target: { value: "25" } });
+    fireEvent.change(within(form).getByLabelText(/^image link/i), { target: { value: "data:image/png;base64,iVBORw0KGgo=" } });
+    fireEvent.click(within(form).getByRole("button", { name: /^create product$/i }));
+    expect(await within(form).findByText(/only in this browser/i)).toBeInTheDocument();
+    expect(api.apiPost).not.toHaveBeenCalled();
+  });
+
   it("a row's Edit opens the form with the product; Update Product patches the new price and the row shows it", async () => {
     await mountPage();
     await waitFor(() => expect(rowOf("Pepper sauce")).toBeInTheDocument());

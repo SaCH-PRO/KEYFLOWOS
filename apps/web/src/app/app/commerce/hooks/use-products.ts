@@ -24,7 +24,7 @@ const productSchema = z.object({
  * device and the store show the same one. A photo kept in this browser (a data: or blob: address, or the old
  * "__local__" marker of lib/image-store.ts) never reaches another device, so it is refused, not saved.
  */
-export const LOCAL_IMAGE_REFUSAL = "Photo upload is not available yet. Paste a link to a photo that is already online.";
+export const LOCAL_IMAGE_REFUSAL = "That photo is only in this browser, so no other device would see it. Paste a link to a photo that is already online.";
 
 function isBrowserOnlyImage(value: string | null | undefined): boolean {
   return !!value && (/^(data|blob):/i.test(value) || value === "__local__");
