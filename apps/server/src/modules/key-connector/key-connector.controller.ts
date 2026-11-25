@@ -126,16 +126,6 @@ export class KeyConnectorController {
         select: { role: true },
       });
       allowed = !!membership && CONNECTOR_WRITER_ROLES.has(membership.role);
-      if (!allowed) {
-        const owned = await this.prisma.client.business.findFirst({
-          // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-          // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
-          // ADMIN or STAFF, the recorded owner is that role).
-          where: { id: businessId, ownerId: user.id, members: { some: { userId: user.id, role: 'OWNER' } } },
-          select: { id: true },
-        });
-        allowed = !!owned;
-      }
     } catch {
       throw new ForbiddenException('Unable to verify connector authority');
     }

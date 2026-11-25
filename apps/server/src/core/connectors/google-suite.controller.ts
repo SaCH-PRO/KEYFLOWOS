@@ -16,6 +16,7 @@ import {
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { BusinessGuard } from '../auth/business.guard';
+import { isBusinessOwnerMember } from '../auth/business-owner';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleSuiteService, ALL_SERVICES } from './google-suite.service';
 import type { GoogleService } from './google-suite.service';
@@ -35,17 +36,10 @@ const GOOGLE_CONNECT_OWNER_ONLY_MESSAGE =
 export type GoogleConnectActor = { id?: string; role?: string };
 
 /**
- * W8-GOOGLE-CONSENT-OWNER (owner ruling D-99): the owner rule for a Google
- * connection of `businessId`. It is the Gmail rule's shape
- * (GmailService.assertConnectAuthority, D-11), as SeoController restates it
- * for D-94: an OWNER membership of this business or its distinguished owner
- * (Business.ownerId) while it holds that OWNER membership (owner rulings
- * D-116, D-125: holding ADMIN or STAFF it is that role), with the SUPER_ADMIN
- * bypass BusinessGuard already grants. The rule is the route business's own:
- * owning another business does not count. No actor is 401; anyone else 403 GOOGLE_CONNECT_OWNER_ONLY. The
- * routes call it first (after AuthGuard and BusinessGuard), before anything is
- * read or written. Exported for the bookings calendar, Drive and CRM Google
- * contact import doors, whose modules do not import CommerceModule.
+ * W8-GOOGLE-CONSENT-OWNER (owner ruling D-99) / W11-OWNER-HELPER-REST (D-116,
+ * D-125): the owner rule for a Google connection of `businessId` via
+ * `isBusinessOwnerMember` (OWNER membership of this business, plus SUPER_ADMIN
+ * bypass). No actor is 401; anyone else 403 GOOGLE_CONNECT_OWNER_ONLY.
  */
 export async function assertGoogleConnectOwner(
   prisma: PrismaService,
@@ -54,19 +48,7 @@ export async function assertGoogleConnectOwner(
 ): Promise<void> {
   if (!actor?.id) throw new UnauthorizedException('Authentication required');
   if (actor.role === 'SUPER_ADMIN') return;
-  const membership = await prisma.client.membership.findUnique({
-    where: { userId_businessId: { userId: actor.id, businessId } },
-    select: { role: true },
-  });
-  if (membership?.role === 'OWNER') return;
-  const owned = await prisma.client.business.findFirst({
-    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-    // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
-    // ADMIN or STAFF, the recorded owner is that role).
-    where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-    select: { id: true },
-  });
-  if (owned) return;
+  if (await isBusinessOwnerMember(prisma.client, businessId, actor.id)) return;
   throw new ForbiddenException({ code: GOOGLE_CONNECT_OWNER_ONLY, message: GOOGLE_CONNECT_OWNER_ONLY_MESSAGE });
 }
 
