@@ -24,17 +24,24 @@
  *     noReservationRequired nor stockDecrementedAtCheckout set, not marked
  *     untracked/virtual, whose order has a matching checkout 'sale' movement
  *     (same business_id, reference_id = order_number, product_id, quantity_change < 0).
- *   - On --apply (one atomic transaction):
- *     1. Lock affected inventory_stocks rows in global (business_id, product_id,
- *        warehouse_id) order (matching core/inventory/stock-lock-order.ts) so
- *        concurrent routing/ship/cancel transactions never deadlock.
- *     2. Atomically stamp matching fulfillment_routes metadata with
+ *   - On --apply (one atomic transaction following the server's lock hierarchy):
+ *     1. Acquire each candidate order's routing advisory lock
+ *        (pg_advisory_xact_lock(hashtext('marketplace-order-routing:' || business_id || ':' || order_id)))
+ *        in ascending lock-key order so concurrent routeOrder / shipOrderFulfilment /
+ *        releaseOrderFulfilmentForCancel transactions serialize cleanly without
+ *        double-releasing or deadlocking.
+ *     2. Under those held routing claims, re-read the exact eligible route IDs
+ *        (excluding any order just cancelled or shipped while waiting) and lock
+ *        their inventory_stocks rows in global ORDER BY id ASC order (matching
+ *        core/inventory/stock-lock-order.ts).
+ *     3. Atomically stamp those exact fulfillment_routes rows' metadata (normalizing
+ *        SQL NULL / JSON null / non-object JSONB to '{}' before merging) with
  *        noReservationRequired: true, stockDecrementedAtCheckout: true,
  *        inventoryMode: 'tracked', and d137ReservationReleasedAt (keeping the
  *        route's existing status), so future cancels/ships/re-runs never
  *        release the same reservation twice.
- *     3. Decrement inventory_stocks.reserved = GREATEST(0, reserved - qty) for
- *        the routes transitioned in step 2.
+ *     4. Decrement inventory_stocks.reserved = GREATEST(0, reserved - qty) on the
+ *        locked stock rows for the routes transitioned in step 3.
  *
  * SAFETY
  *
@@ -52,6 +59,8 @@
  * Runbook: docs/development/operator-data-cleanup-scripts.md.
  */
 import { db } from '@keyflow/db';
+
+const ROUTING_LOCK_NAMESPACE = 'marketplace-order-routing:';
 
 type RawDb = Pick<typeof db, '$queryRawUnsafe' | '$executeRawUnsafe'>;
 type Db = RawDb & {
@@ -102,6 +111,10 @@ export function parseArgs(argv: string[]): Args {
  * (`o`) and items (`oi`) whose stock was already decremented at checkout
  * (`stock_movements.type = 'sale'` and `quantity_change < 0`) and whose route
  * does not yet carry `noReservationRequired` / `stockDecrementedAtCheckout`.
+ *
+ * JSONB checks guard `jsonb_typeof(r.metadata) = 'object'` and compare text
+ * safely without `::boolean` casts so dirty or non-object metadata (including
+ * JSON `'null'::jsonb`) can never abort a run with Postgres `22P02`.
  */
 function eligibleRoutePredicate(scopedParam: string | null): string {
   return `
@@ -113,9 +126,18 @@ function eligibleRoutePredicate(scopedParam: string | null): string {
     AND r.status IN ('RESERVED', 'PICKING_PACKING')
     AND r.warehouse_id IS NOT NULL
     AND oi.quantity > 0
-    AND COALESCE((r.metadata->>'noReservationRequired')::boolean, false) = false
-    AND COALESCE((r.metadata->>'stockDecrementedAtCheckout')::boolean, false) = false
-    AND LOWER(COALESCE(r.metadata->>'inventoryMode', '')) NOT IN ('untracked', 'virtual')
+    AND NOT (
+      jsonb_typeof(r.metadata) = 'object'
+      AND LOWER(COALESCE(r.metadata->>'noReservationRequired', '')) IN ('true', 't', '1', 'yes', 'y', 'on')
+    )
+    AND NOT (
+      jsonb_typeof(r.metadata) = 'object'
+      AND LOWER(COALESCE(r.metadata->>'stockDecrementedAtCheckout', '')) IN ('true', 't', '1', 'yes', 'y', 'on')
+    )
+    AND NOT (
+      jsonb_typeof(r.metadata) = 'object'
+      AND LOWER(COALESCE(r.metadata->>'inventoryMode', '')) IN ('untracked', 'virtual')
+    )
     AND EXISTS (
       SELECT 1
         FROM stock_movements sm
@@ -163,10 +185,17 @@ export async function countDecrementHeldReservations(
 }
 
 /**
- * Atomically locks affected inventory_stocks rows in global
- * (business_id, product_id, warehouse_id) order, marks eligible routes
- * noReservationRequired + stockDecrementedAtCheckout, and releases the
- * corresponding reserved quantities (clamped at 0). Idempotent on re-run.
+ * Atomically:
+ *   1. Acquires each candidate order's routing claim (`claimOrderRouting`
+ *      advisory lock key) in ascending lock-key order before any stock lock;
+ *   2. Re-reads eligible route IDs strictly under the held routing claims;
+ *   3. Locks their `inventory_stocks` rows in `ORDER BY id ASC FOR UPDATE`
+ *      order (matching `core/inventory/stock-lock-order.ts`);
+ *   4. Safely merges `noReservationRequired: true` + `stockDecrementedAtCheckout: true`
+ *      into those exact routes' metadata (normalizing non-object JSONB to `{}`);
+ *   5. Releases the corresponding `reserved` quantities (clamped at 0).
+ *
+ * Deadlock-free with live routing/ship/cancel, strictly atomic, and idempotent.
  */
 export async function releaseDecrementHeldReservations(
   database: Db,
@@ -177,47 +206,85 @@ export async function releaseDecrementHeldReservations(
 
   return database.$transaction(
     async (tx) => {
-      // 1. Lock candidate inventory_stocks rows in global order matching stock-lock-order.ts.
+      // 1. Discover candidate orders and acquire their routing advisory locks in ascending lock-key order
+      //    (matching claimOrderRouting -> lockStockRowPairsInOrder hierarchy).
+      const candidateOrders = (await tx.$queryRawUnsafe(
+        `SELECT DISTINCT
+                o.id AS order_id,
+                hashtext($1 || o.business_id || ':' || o.id) AS lock_key
+           FROM fulfillment_routes r
+           JOIN marketplace_orders o ON o.id = r.order_id
+           JOIN marketplace_order_items oi ON oi.id = r.order_item_id
+          WHERE ${eligibleRoutePredicate(scoped ? '$2' : null)}
+          ORDER BY lock_key ASC, o.id ASC`,
+        ...(scoped ? [ROUTING_LOCK_NAMESPACE, businessIds] : [ROUTING_LOCK_NAMESPACE]),
+      )) as Array<{ order_id: string; lock_key: number }>;
+
+      if (candidateOrders.length === 0) {
+        return { routesUpdated: 0, unitsReleased: 0, stockRowsUpdated: 0 };
+      }
+
+      const uniqueLockKeys = [...new Set(candidateOrders.map((c) => Number(c.lock_key)))].sort((a, b) => a - b);
+      for (const key of uniqueLockKeys) {
+        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock($1::int)', key);
+      }
+      const claimedOrderIds = [...new Set(candidateOrders.map((c) => c.order_id))];
+
+      // 2. Re-query eligible route IDs strictly under the held order routing claims
+      //    (excluding any order cancelled or shipped while waiting for its claim).
+      const eligibleRoutes = (await tx.$queryRawUnsafe(
+        `SELECT r.id AS route_id
+           FROM fulfillment_routes r
+           JOIN marketplace_orders o ON o.id = r.order_id
+           JOIN marketplace_order_items oi ON oi.id = r.order_item_id
+          WHERE o.id = ANY($1::text[])
+            AND ${eligibleRoutePredicate(scoped ? '$2' : null)}
+          ORDER BY r.id ASC`,
+        ...(scoped ? [claimedOrderIds, businessIds] : [claimedOrderIds]),
+      )) as Array<{ route_id: string }>;
+
+      if (eligibleRoutes.length === 0) {
+        return { routesUpdated: 0, unitsReleased: 0, stockRowsUpdated: 0 };
+      }
+      const routeIds = eligibleRoutes.map((r) => r.route_id);
+
+      // 3. Lock exactly the affected inventory_stocks rows in global ORDER BY s.id ASC
+      //    (matching core/inventory/stock-lock-order.ts).
       await tx.$queryRawUnsafe(
         `SELECT s.id
            FROM inventory_stocks s
           WHERE (s.business_id, s.product_id, s.warehouse_id) IN (
             SELECT DISTINCT r.business_id, oi.product_id, r.warehouse_id
               FROM fulfillment_routes r
-              JOIN marketplace_orders o ON o.id = r.order_id
               JOIN marketplace_order_items oi ON oi.id = r.order_item_id
-             WHERE ${eligibleRoutePredicate(scoped ? '$1' : null)}
+             WHERE r.id = ANY($1::text[])
           )
-          ORDER BY s.business_id ASC, s.product_id ASC, s.warehouse_id ASC
+          ORDER BY s.id ASC
           FOR UPDATE`,
-        ...(scoped ? [businessIds] : []),
+        routeIds,
       );
 
-      // 2. Mark eligible routes idempotently and collect their (business, product, warehouse, qty).
+      // 4. Mark strictly those claimed & locked routes idempotently (normalizing non-object JSONB to '{}').
       const updatedRoutes = (await tx.$queryRawUnsafe(
-        `WITH target AS (
-           SELECT r.id AS route_id,
-                  r.business_id,
-                  oi.product_id,
-                  r.warehouse_id,
-                  oi.quantity
-             FROM fulfillment_routes r
-             JOIN marketplace_orders o ON o.id = r.order_id
-             JOIN marketplace_order_items oi ON oi.id = r.order_item_id
-            WHERE ${eligibleRoutePredicate(scoped ? '$2' : null)}
-         ),
-         marked AS (
+        `WITH marked AS (
            UPDATE fulfillment_routes r
-              SET metadata = COALESCE(r.metadata, '{}'::jsonb) || jsonb_build_object(
+              SET metadata = (
+                    CASE
+                      WHEN jsonb_typeof(r.metadata) = 'object' THEN r.metadata
+                      ELSE '{}'::jsonb
+                    END
+                  ) || jsonb_build_object(
                     'inventoryMode', 'tracked',
                     'noReservationRequired', true,
                     'stockDecrementedAtCheckout', true,
                     'd137ReservationReleasedAt', $1::text
                   ),
                   updated_at = NOW()
-             FROM target t
-            WHERE r.id = t.route_id
-           RETURNING t.route_id, t.business_id, t.product_id, t.warehouse_id, t.quantity
+             FROM marketplace_order_items oi
+            WHERE r.id = ANY($2::text[])
+              AND r.order_item_id = oi.id
+              AND oi.order_id = r.order_id
+           RETURNING r.id AS route_id, r.business_id, oi.product_id, r.warehouse_id, oi.quantity
          )
          SELECT business_id,
                 product_id,
@@ -227,7 +294,8 @@ export async function releaseDecrementHeldReservations(
            FROM marked
           GROUP BY business_id, product_id, warehouse_id
           ORDER BY business_id ASC, product_id ASC, warehouse_id ASC`,
-        ...(scoped ? [releasedAt, businessIds] : [releasedAt]),
+        releasedAt,
+        routeIds,
       )) as Array<{
         business_id: string;
         product_id: string;
@@ -244,7 +312,7 @@ export async function releaseDecrementHeldReservations(
       let unitsReleased = 0;
       let stockRowsUpdated = 0;
 
-      // 3. Decrement reserved on each locked stock row (clamped at 0) and sum exact units released.
+      // 5. Decrement reserved on each locked stock row (clamped at 0) and sum exact units released.
       for (const agg of updatedRoutes) {
         routesUpdated += agg.n_routes;
         const rows = (await tx.$queryRawUnsafe(
