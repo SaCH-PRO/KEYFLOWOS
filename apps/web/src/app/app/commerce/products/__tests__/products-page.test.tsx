@@ -9,8 +9,9 @@
  * and a photo was kept in this browser's IndexedDB only (lib/image-store.ts), so no other device ever saw it.
  *
  * The page is mounted with the real client.ts product calls, the real useProducts hook, the real products panel and
- * the real product form; only lib/api's apiGet/apiPost/apiPatch/apiDelete (the HTTP edge) and the workspace lookup
- * are stubbed. Each case imports the page itself, so before the page exists each case fails on that import.
+ * the real product form; only the HTTP edge is stubbed (lib/api's apiGet/apiPost/apiPatch/apiDelete, and fetch for
+ * client.ts's own list read, fetchProducts) with the workspace lookup. Each case imports the page itself, so before
+ * the page exists each case fails on that import.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -86,6 +87,14 @@ async function rowAction(name: string, action: RegExp) {
 
 beforeEach(() => {
   rows = [PEPPER, SORREL];
+  // fetchProducts reads through client.ts's own apiGet, which calls fetch itself (not lib/api).
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://api.test.local");
+    if (url.pathname.endsWith(PRODUCTS_PATH)) {
+      return new Response(JSON.stringify(envelope(rows)), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ message: "not stubbed" }), { status: 404, headers: { "content-type": "application/json" } });
+  }));
   nav.search = "";
   window.localStorage.clear();
   window.localStorage.setItem("kf_business_id", BUSINESS);
@@ -123,6 +132,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("CATALOG-1 Sales > Products (/app/commerce/products)", () => {
@@ -185,7 +195,8 @@ describe("CATALOG-1 Sales > Products (/app/commerce/products)", () => {
     expect(api.apiDelete).not.toHaveBeenCalled();
     const confirm = await screen.findByRole("button", { name: /^archive$/i });
     fireEvent.click(confirm);
-    await waitFor(() => expect(api.apiDelete).toHaveBeenCalledWith(`${PRODUCTS_PATH}/prod_pepper`));
+    await waitFor(() => expect(api.apiDelete).toHaveBeenCalledTimes(1));
+    expect(api.apiDelete.mock.calls[0][0]).toBe(`${PRODUCTS_PATH}/prod_pepper`);
     await waitFor(() => expect(screen.queryAllByRole("article").filter((a) => within(a).queryByText("Pepper sauce"))).toHaveLength(0));
     expect(rowOf("Sorrel drink")).toBeInTheDocument();
   });

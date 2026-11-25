@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, Upload, LayoutGrid, List, Camera, Sparkles } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, Upload, LayoutGrid, List, Camera, Sparkles, MoreHorizontal, Pencil, Archive } from "lucide-react";
 import { ProductImportModal } from "./product-import-modal";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
@@ -50,6 +50,85 @@ interface ProductsPanelProps {
   slots?: ProductSlots;
   onAiPricing?: (product: Product) => void;
   onAiHealthScan?: () => void;
+  /**
+   * CATALOG-1: what opening a product does. When given, a product's row or card opens it here (Sales > Products
+   * opens the product form); without it the panel's own detail panel opens.
+   */
+  onOpenProduct?: (product: Product) => void;
+  /** CATALOG-1: the row's Archive (behind the row's More actions menu, beside Edit). The host asks to confirm. */
+  onArchive?: (product: Product) => void;
+}
+
+/**
+ * CATALOG-1 (journey B1): each product row's actions, Edit and (when the host offers it) Archive, behind a
+ * "More actions" button that is always shown (a phone has no hover).
+ */
+function ProductRowActions({
+  product,
+  onEdit,
+  onArchive,
+  className = "relative",
+}: {
+  product: Product;
+  onEdit: (product: Product) => void;
+  onArchive?: (product: Product) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent | TouchEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("touchstart", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("touchstart", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const itemClass = "w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-white/[0.06] transition-colors";
+
+  return (
+    // className positions the wrapper (relative in a row, absolute over a card); the menu hangs from it.
+    <div ref={ref} className={className} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`More actions for ${product.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="More actions"
+        className="p-1.5 rounded-lg bg-background/80 backdrop-blur-sm border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <MoreHorizontal className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={`Actions for ${product.name}`}
+          className="absolute right-0 top-full mt-1 z-30 w-[6.5rem] rounded-xl border border-border/60 bg-popover/95 backdrop-blur-xl shadow-xl py-1"
+        >
+          <button type="button" role="menuitem" className={itemClass} onClick={() => { setOpen(false); onEdit(product); }}>
+            <Pencil className="w-3.5 h-3.5 shrink-0" /> Edit
+          </button>
+          {onArchive && (
+            <button type="button" role="menuitem" className={`${itemClass} text-red-400`} onClick={() => { setOpen(false); onArchive(product); }}>
+              <Archive className="w-3.5 h-3.5 shrink-0" /> Archive
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const CATEGORY_FILTERS = [
@@ -94,6 +173,8 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   slots,
   onAiPricing,
   onAiHealthScan,
+  onOpenProduct,
+  onArchive,
 }: ProductsPanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
@@ -286,8 +367,10 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   const handleDetailClose = useCallback(() => setSelectedProduct(null), []);
 
   const handleProductClick = useCallback((p: Product) => {
-    if (!bulkMode) setSelectedProduct(p);
-  }, [bulkMode]);
+    if (bulkMode) return;
+    if (onOpenProduct) onOpenProduct(p);
+    else setSelectedProduct(p);
+  }, [bulkMode, onOpenProduct]);
 
   return (
     <motion.div
@@ -633,7 +716,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
               <AnimatePresence mode="popLayout">
                 {filteredProducts.map((product) => (
-                  <div key={product.id} className="relative">
+                  <article key={product.id} className="relative">
                     {bulkMode && (
                       <button
                         onClick={(e) => { e.stopPropagation(); toggleSelect(product.id); }}
@@ -654,8 +737,11 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                       currency={currency}
                       onAiPricing={onAiPricing}
                     />
+                    {!bulkMode && (
+                      <ProductRowActions product={product} onEdit={onEdit} onArchive={onArchive} className="absolute top-1 right-1 z-10" />
+                    )}
                     {slots?.renderCardBadge?.(product)}
-                  </div>
+                  </article>
                 ))}
               </AnimatePresence>
             </div>
@@ -667,15 +753,14 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                   const displayCurrency = product.currency ?? currency;
                   const img = cachedImages[product.id] || product.imageUrl;
                   return (
-                    <motion.button
+                    <motion.article
                       key={product.id}
                       layout
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -4 }}
                       transition={{ duration: 0.15 }}
-                      onClick={() => handleProductClick(product)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.05] hover:border-border/50 transition-all text-left group ${isInactive ? "opacity-50" : ""}`}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.05] hover:border-border/50 transition-all text-left group ${isInactive ? "opacity-50" : ""}`}
                     >
                       {bulkMode && (
                         <button
@@ -690,7 +775,12 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                           )}
                         </button>
                       )}
-                      <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/[0.04] border border-border/20">
+                      <button
+                        type="button"
+                        onClick={() => handleProductClick(product)}
+                        className="flex-1 min-w-0 flex items-center gap-3 text-left"
+                      >
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/[0.04] border border-border/20">
                         {img ? (
                           <Image src={img} alt="" className="w-full h-full object-cover" loading="lazy"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                         ) : (
@@ -714,6 +804,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                           <p className="text-[10px] text-muted-foreground/50">{product.duration}m</p>
                         )}
                       </div>
+                      </button>
                       {onAiPricing && (
                         <div
                           role="button"
@@ -727,7 +818,8 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                           <Sparkles className="w-3.5 h-3.5" />
                         </div>
                       )}
-                    </motion.button>
+                      {!bulkMode && <ProductRowActions product={product} onEdit={onEdit} onArchive={onArchive} className="relative shrink-0" />}
+                    </motion.article>
                   );
                 })}
               </AnimatePresence>

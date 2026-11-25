@@ -49,6 +49,26 @@ type Props = {
   hasBookingCta?: boolean;
 };
 
+/**
+ * CATALOG-1 (BUG-106): the items a customer sees on /book/<slug>, each once. A bookable service (no sourceProductId)
+ * is one item; a product is one item when 'Add to store' listed it (a listing service names it in sourceProductId)
+ * and it is active, however many listing services name it. A product never added to the store is not an item
+ * (ruling D-185). Services plus all products counted a listed product twice and an unlisted one once.
+ */
+export function countStoreItems(services: Service[], commerceProducts: Product[]): number {
+  const activeProducts = new Set(commerceProducts.filter((p) => p.isActive !== false).map((p) => p.id));
+  const listedProducts = new Set<string>();
+  let bookable = 0;
+  for (const s of services) {
+    if (s.sourceProductId) {
+      if (activeProducts.has(s.sourceProductId)) listedProducts.add(s.sourceProductId);
+    } else {
+      bookable++;
+    }
+  }
+  return bookable + listedProducts.size;
+}
+
 function StorefrontPreview({ slug, previewMode }: { slug: string | null; previewMode: "desktop" | "mobile" }) {
   if (!slug) {
     return (
@@ -242,7 +262,7 @@ export function LaunchMode({
   const pc = businessData?.primaryColor || "#F97316";
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
 
-  const itemCount = services.length + commerceProducts.length;
+  const itemCount = countStoreItems(services, commerceProducts);
   const readinessPercent = readiness?.scores?.overall ?? 0;
   const totalItems = readiness?.items?.length ?? 0;
   const resolvedItems = readiness?.items?.filter((i) => i.resolved).length ?? 0;
@@ -315,7 +335,7 @@ export function LaunchMode({
               hasLogo={!!businessData?.logoUrl}
               hasPrimaryColor={!!businessData?.primaryColor}
               hasContactInfo={!!(businessData?.phone || businessData?.email)}
-              productCount={services.length + commerceProducts.length}
+              productCount={itemCount}
               hasTestimonials={_hasTestimonials}
               hasFaq={hasFaq}
               hasPolicies={hasPolicies}

@@ -5,8 +5,6 @@ import { motion, AnimatePresence, useMotionValue, useTransform, useDragControls 
 import {
   Package,
   X,
-  Upload,
-  Link2,
   Trash2,
   ImageIcon,
   Tag,
@@ -214,14 +212,10 @@ interface ProductFormModalProps {
   formError: string | null;
   saving?: boolean;
   imagePreview: string | null;
-  imageMode: "upload" | "url";
-  setImageMode: (mode: "upload" | "url") => void;
   setImagePreview: (preview: string | null) => void;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
   onClose: () => void;
   onSave: () => void;
   onSaveAndAddAnother?: () => void;
-  onFileSelect: (file: File) => void;
   onRemoveImage: () => void;
   currency?: string;
 }
@@ -239,21 +233,16 @@ export const ProductFormModal = React.memo(function ProductFormModal({
   formError,
   saving = false,
   imagePreview,
-  imageMode,
-  setImageMode,
   setImagePreview,
-  fileInputRef,
   onClose,
   onSave,
   onSaveAndAddAnother,
-  onFileSelect,
   onRemoveImage,
   currency = "TTD",
 }: ProductFormModalProps) {
   const nameRef = useRef<HTMLInputElement>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Set<string>>(new Set());
-  const [isDragging, setIsDragging] = useState(false);
   const dragY = useMotionValue(0);
   const dragOpacity = useTransform(dragY, [0, 200], [1, 0.2]);
   const dragScale = useTransform(dragY, [0, 200], [1, 0.92]);
@@ -482,13 +471,14 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                 />
                 <div className="space-y-3">
                   <div>
-                    <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 flex items-center justify-between">
+                    <label htmlFor="product-form-name" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 flex items-center justify-between">
                       <span>Name <span className="text-red-400">*</span></span>
                       {nameValid && (
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                       )}
                     </label>
                     <input
+                      id="product-form-name"
                       ref={nameRef}
                       type="text"
                       value={productForm.name}
@@ -503,7 +493,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                     <FieldError message={touched.has("name") ? fieldErrors.name : undefined} />
                   </div>
                   <div>
-                    <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 flex items-center justify-between">
+                    <label htmlFor="product-form-description" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 flex items-center justify-between">
                       <span>Description</span>
                       <span
                         className={`text-[10px] tabular-nums ${
@@ -518,6 +508,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                       </span>
                     </label>
                     <textarea
+                      id="product-form-description"
                       value={productForm.description}
                       onChange={(e) => {
                         if (e.target.value.length <= DESC_MAX_LENGTH) {
@@ -576,7 +567,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                 />
                 <div className="space-y-3">
                   <div>
-                    <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 flex items-center justify-between">
+                    <label htmlFor="product-form-price" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 flex items-center justify-between">
                       <span>Price ({currency}) <span className="text-red-400">*</span></span>
                       {priceValid && (
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -584,6 +575,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                     </label>
                     <div className="relative">
                       <input
+                        id="product-form-price"
                         type="number"
                         step="0.01"
                         min="0"
@@ -610,7 +602,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-[11px] font-medium text-muted-foreground/70">
+                        <label htmlFor="product-form-sku" className="text-[11px] font-medium text-muted-foreground/70">
                           SKU
                         </label>
                         <button
@@ -624,6 +616,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                         </button>
                       </div>
                       <input
+                        id="product-form-sku"
                         type="text"
                         value={productForm.sku}
                         onChange={(e) =>
@@ -635,11 +628,12 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                     </div>
                     {productForm.category === "SERVICE" && (
                       <div>
-                        <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
+                        <label htmlFor="product-form-duration" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
                           Duration (min)
                         </label>
                         <div className="relative">
                           <input
+                            id="product-form-duration"
                             type="number"
                             min="0"
                             value={productForm.duration}
@@ -661,10 +655,11 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                   {productForm.category === "PRODUCT" && (
                     <div className="grid grid-cols-2 gap-3 mt-3">
                       <div>
-                        <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
+                        <label htmlFor="product-form-inventory-mode" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
                           Inventory mode
                         </label>
                         <select
+                          id="product-form-inventory-mode"
                           value={productForm.inventoryMode ?? "tracked"}
                           onChange={(e) =>
                             setProductForm((f) => ({
@@ -681,10 +676,11 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                       </div>
                       {(productForm.inventoryMode ?? "tracked") === "tracked" && (
                         <div>
-                          <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
+                          <label htmlFor="product-form-out-of-stock" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
                             When out of stock
                           </label>
                           <select
+                            id="product-form-out-of-stock"
                             value={productForm.outOfStockBehavior ?? "hide"}
                             onChange={(e) =>
                               setProductForm((f) => ({
@@ -710,40 +706,31 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                   icon={<ImageIcon className="w-3.5 h-3.5 text-muted-foreground/60" />}
                   title="Media"
                 />
+                {/*
+                  CATALOG-1 (BUG-005): a photo is a link the server stores with the product, so every device and the
+                  store show it. The file upload kept the photo in this browser only (lib/image-store.ts, IndexedDB)
+                  and is gone until photos upload through the uploads module.
+                */}
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-[11px] font-medium text-muted-foreground/70">
-                      Product Image
-                    </label>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setImageMode("upload")}
-                        className={`px-2 py-0.5 text-[10px] rounded-md transition-colors ${
-                          imageMode === "upload"
-                            ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
-                            : "text-muted-foreground hover:bg-muted/50 border border-transparent"
-                        }`}
-                      >
-                        <Upload className="w-3 h-3 inline mr-1" />
-                        Upload
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setImageMode("url")}
-                        className={`px-2 py-0.5 text-[10px] rounded-md transition-colors ${
-                          imageMode === "url"
-                            ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
-                            : "text-muted-foreground hover:bg-muted/50 border border-transparent"
-                        }`}
-                      >
-                        <Link2 className="w-3 h-3 inline mr-1" />
-                        URL
-                      </button>
-                    </div>
-                  </div>
-                  {imagePreview ? (
-                    <div className="relative rounded-xl border border-border/50 overflow-hidden bg-muted/20 group/img">
+                  <label htmlFor="product-form-image-url" className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
+                    Image link
+                  </label>
+                  <input
+                    id="product-form-image-url"
+                    type="url"
+                    value={productForm.imageUrl === "__local__" ? "" : productForm.imageUrl}
+                    onChange={(e) => {
+                      setProductForm((f) => ({ ...f, imageUrl: e.target.value }));
+                      setImagePreview(e.target.value || null);
+                    }}
+                    placeholder="https://example.com/image.jpg"
+                    className={inputClass}
+                  />
+                  <p className="text-[10px] text-muted-foreground/50 mt-1">
+                    Paste a link to a photo that is already online. Photo upload is not available yet.
+                  </p>
+                  {imagePreview && (
+                    <div className="relative mt-2 rounded-xl border border-border/50 overflow-hidden bg-muted/20">
                       {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied URL with unknown host (cannot pre-configure remotePatterns) */}
                       <img
                         src={imagePreview}
@@ -751,91 +738,17 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                         className="w-full h-44 object-cover"
                         onError={() => setImagePreview(null)}
                       />
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors"
-                          title="Replace image"
-                        >
-                          <Upload className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onRemoveImage}
-                          className="p-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-white transition-colors"
-                          title="Remove image"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : imageMode === "upload" ? (
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      onDragEnter={(e) => {
-                        e.preventDefault();
-                        setIsDragging(true);
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setIsDragging(true);
-                      }}
-                      onDragLeave={(e) => {
-                        e.preventDefault();
-                        setIsDragging(false);
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        setIsDragging(false);
-                        const file = e.dataTransfer.files[0];
-                        if (file) onFileSelect(file);
-                      }}
-                      className={`w-full h-36 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${
-                        isDragging
-                          ? "border-[hsl(var(--kf-accent1))]/60 bg-[hsl(var(--kf-accent1))]/5 scale-[1.02]"
-                          : "border-border/50 bg-white/[0.02] hover:border-[hsl(var(--kf-accent1))]/40 hover:bg-white/[0.04]"
-                      }`}
-                    >
-                      <motion.div
-                        animate={isDragging ? { scale: 1.1, y: -4 } : { scale: 1, y: 0 }}
-                        className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center"
+                      <button
+                        type="button"
+                        onClick={onRemoveImage}
+                        className="absolute top-2 right-2 p-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-white transition-colors"
+                        title="Remove image"
+                        aria-label="Remove image"
                       >
-                        <ImageIcon className={`w-6 h-6 ${isDragging ? "text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/50"}`} />
-                      </motion.div>
-                      <div className="text-center">
-                        <p className="text-xs font-medium text-muted-foreground/70">
-                          {isDragging ? "Drop your image here" : "Click or drag & drop to upload"}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground/50 mt-1">
-                          PNG, JPG, WEBP up to 5 MB
-                        </p>
-                      </div>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                  ) : (
-                    <input
-                      type="url"
-                      value={
-                        productForm.imageUrl === "__local__" ? "" : productForm.imageUrl
-                      }
-                      onChange={(e) => {
-                        setProductForm((f) => ({ ...f, imageUrl: e.target.value }));
-                        setImagePreview(e.target.value || null);
-                      }}
-                      placeholder="https://example.com/image.jpg"
-                      className={inputClass}
-                    />
                   )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) onFileSelect(file);
-                    }}
-                  />
                 </div>
               </section>
 

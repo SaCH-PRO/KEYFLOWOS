@@ -3334,6 +3334,8 @@ export type Service = {
   price: number;
   currency?: string;
   description?: string | null;
+  /** The product this service lists on the store ('Add to store'); null for a bookable service. */
+  sourceProductId?: string | null;
 };
 
 export type StaffMember = {
@@ -3406,6 +3408,8 @@ export async function fetchServices(businessId: string = selectedBusinessId()) {
       description: z.string().nullable().optional(),
       bufferMins: z.number().nullable().optional(),
       leadTimeMins: z.number().nullable().optional(),
+      // CATALOG-1 (BUG-106): kept, so a product's listing service is told from a bookable service.
+      sourceProductId: z.string().nullable().optional(),
     })),
     [],
   );

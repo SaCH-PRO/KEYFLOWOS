@@ -254,13 +254,14 @@ export function CatalogManager({
           <div>
             <h3 className="text-sm font-semibold">Store Catalog</h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">Visibility, ordering, and per-item storefront overrides</p>
+            {/* CATALOG-1: products are created, edited and archived in Sales > Products (this opened the Sales overview). */}
             <Link
-              href="/app/commerce"
+              href="/app/commerce/products"
               className="inline-flex items-center gap-1 text-[10px] mt-0.5 hover:underline"
               style={{ color: "hsl(var(--kf-accent2))" }}
             >
               <ExternalLink className="w-3 h-3" />
-              Manage in Commerce
+              Manage products
             </Link>
           </div>
         </div>

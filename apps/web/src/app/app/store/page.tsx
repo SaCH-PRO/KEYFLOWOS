@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Store } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
@@ -56,6 +56,7 @@ const SLIDE = {
 
 export default function StorePage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const s = useStoreData();
   const ai = useStoreAiHub();
   // NAV-A3 (BUG-078): a linked tab is the first tab drawn, so the page does not flash Overview and slide over.
@@ -228,7 +229,8 @@ export default function StorePage() {
           title="Your storefront is empty"
           description="Add products or services to start selling online. Your customers will see them on your public booking page."
           actionLabel="Add Product"
-          onAction={() => handleTabChange("catalog")}
+          // CATALOG-1: a product is created in Sales > Products (the Catalog tab only lists what exists).
+          onAction={() => router.push("/app/commerce/products?action=add")}
         >
           <div className="mt-4 flex flex-col items-center gap-3">
             <Button variant="soft" onClick={() => handleTabChange("design")}>
