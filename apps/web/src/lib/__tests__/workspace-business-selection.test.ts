@@ -452,3 +452,124 @@ describe("app shell notifications across a business switch", () => {
     unmount();
   });
 });
+
+/**
+ * W11-WEB-OWNER-MEMBERSHIP-REFUSAL: POST /identity/bootstrap refuses a recorded owner who holds no membership (403
+ * OWNER_MEMBERSHIP_REQUIRED, D-104). The membership list was authoritative and empty, so the stored business is not
+ * theirs: the app forgets it (id, cookie, business cache) and keeps the session (tokens, user cache), instead of
+ * addressing a business BusinessGuard refuses on every screen.
+ *
+ *   WS-OMR-1  RED-BEFORE  the refusal forgets the stored business and keeps the session
+ *   WS-OMR-2  pin         concurrent callers still bootstrap exactly once on that path
+ *   WS-OMR-3  pin         a non-empty membership list never bootstraps and never clears
+ * Review round (security review M2):
+ *   WS-OMR-4  RED-AT-38160278  a business written by another tab while the refused bootstrap was in flight is not
+ *                       wiped: the resolution hands over and resolves that choice (from a list of two, so a handover
+ *                       that forgets first and then takes the first listed business fails: security re-review N2)
+ *   WS-OMR-5  pin       a handover re-checks membership: an id another tab wrote that the list still does not hold
+ *                       is forgotten, never answered (security re-review N1)
+ */
+describe("W11-WEB-OWNER-MEMBERSHIP-REFUSAL: bootstrap refuses an owner with no membership", () => {
+  const REFUSAL = {
+    data: null,
+    error: "Your access to this workspace has to be restored by an administrator before you can sign in to it. Contact support.",
+    errorCode: "owner_membership_required",
+    status: 403,
+  };
+  const STALE = "biz-membership-removed";
+
+  function storeSession() {
+    window.localStorage.setItem("kf_business_id", STALE);
+    document.cookie = `kf_business_id=${STALE}; Path=/`;
+    window.localStorage.setItem("kf_business_cache", JSON.stringify({ id: STALE, name: "Removed Co" }));
+    window.localStorage.setItem("kf_refresh_token", "refresh-token-1");
+    window.localStorage.setItem("kf_user_cache", JSON.stringify(USER));
+  }
+
+  it("WS-OMR-1 RED-BEFORE: the refusal forgets the stored business and keeps the session", async () => {
+    storeSession();
+    bootstrapIdentity.mockImplementation(async () => REFUSAL);
+    serve({ businesses: [] });
+    const { refreshWorkspace, getCachedBusiness, getStoredBusinessId } = await import("../workspace");
+    // The shell has read the cached business before (the header shows it): the in-memory copy must go too
+    // (correctness review MINOR-1).
+    expect(getCachedBusiness()?.id).toBe(STALE);
+
+    await expect(refreshWorkspace()).resolves.toBeNull();
+
+    expect(bootstrapIdentity).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("kf_business_id"), "the stored business id is forgotten").toBeNull();
+    expect(getStoredBusinessId()).toBeNull();
+    expect(cookie("kf_business_id"), "its cookie is cleared").toBeNull();
+    expect(window.localStorage.getItem("kf_business_cache"), "the business cache is dropped").toBeNull();
+    expect(getCachedBusiness()).toBeNull();
+    expect(window.localStorage.getItem("kf_token"), "the session stays").toBe(TOKEN);
+    expect(window.localStorage.getItem("kf_refresh_token")).toBe("refresh-token-1");
+    expect(window.localStorage.getItem("kf_user_cache")).not.toBeNull();
+  });
+
+  it("WS-OMR-2 pin: concurrent callers still bootstrap exactly once on that path", async () => {
+    storeSession();
+    bootstrapIdentity.mockImplementation(async () => REFUSAL);
+    serve({ businesses: [] });
+    const { refreshWorkspace } = await import("../workspace");
+
+    // (ensureWorkspace answers the stored id without a round trip while one is stored; refreshWorkspace re-validates.)
+    const ids = await Promise.all([refreshWorkspace(), refreshWorkspace(), refreshWorkspace()]);
+
+    expect(ids).toEqual([null, null, null]);
+    expect(bootstrapIdentity).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("kf_token")).toBe(TOKEN);
+  });
+
+  it("WS-OMR-3 pin: a non-empty membership list never bootstraps and never clears", async () => {
+    storeSession();
+    bootstrapIdentity.mockImplementation(async () => REFUSAL);
+    serve({ businesses: [SECOND] });
+    const { refreshWorkspace } = await import("../workspace");
+
+    await expect(refreshWorkspace()).resolves.toBe(SECOND.id);
+
+    expect(bootstrapIdentity).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("kf_business_id")).toBe(SECOND.id);
+    expect(window.localStorage.getItem("kf_token")).toBe(TOKEN);
+    expect(window.localStorage.getItem("kf_refresh_token")).toBe("refresh-token-1");
+  });
+
+  it("WS-OMR-4 RED-AT-38160278: a choice written by another tab during the refused bootstrap is kept", async () => {
+    storeSession();
+    let listed = 0;
+    // The first list is empty; by the second the other tab's business is a membership again (listed second).
+    serve({ businesses: () => (listed++ === 0 ? [] : [OLDEST_OWNED, SECOND]) });
+    bootstrapIdentity.mockImplementation(async () => {
+      // Another tab (same localStorage) picks a business while this bootstrap is in flight.
+      window.localStorage.setItem("kf_business_id", SECOND.id);
+      return REFUSAL;
+    });
+    const { refreshWorkspace } = await import("../workspace");
+
+    await expect(refreshWorkspace()).resolves.toBe(SECOND.id);
+
+    expect(window.localStorage.getItem("kf_business_id"), "the other tab's choice is not wiped").toBe(SECOND.id);
+    expect(bootstrapIdentity).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("kf_token")).toBe(TOKEN);
+  });
+
+  it("WS-OMR-5 pin: an id another tab wrote that is still no membership is forgotten, never answered", async () => {
+    storeSession();
+    serve({ businesses: [] });
+    let calls = 0;
+    bootstrapIdentity.mockImplementation(async () => {
+      // Only during the first bootstrap: another tab writes an id this caller does not belong to.
+      if (calls++ === 0) window.localStorage.setItem("kf_business_id", "biz-other-tab-not-mine");
+      return REFUSAL;
+    });
+    const { refreshWorkspace } = await import("../workspace");
+
+    await expect(refreshWorkspace()).resolves.toBeNull();
+
+    expect(bootstrapIdentity, "the handover resolves again, and is refused again").toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem("kf_business_id"), "the unchecked id is not kept").toBeNull();
+    expect(window.localStorage.getItem("kf_token")).toBe(TOKEN);
+  });
+});

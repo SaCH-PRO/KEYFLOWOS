@@ -23,6 +23,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { TrashController } from '../src/modules/trash/trash.controller';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { CatalogService } from '../src/modules/catalog/catalog.service';
+import { CrmCacheService } from '../src/modules/crm/crm-cache.service';
+import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
@@ -65,6 +67,7 @@ let db: PrismaClient;
 let app: INestApplication;
 const catalogRestoreProduct = vi.fn();
 const catalogRestoreService = vi.fn();
+const crmCacheInvalidate = vi.fn(async () => undefined);
 
 async function cleanup() {
   await db.$executeRawUnsafe(`DELETE FROM contact_forget_requests WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`);
@@ -240,6 +243,12 @@ function bulkRestore(businessId: string, model: string, body: unknown, actorId: 
     .send(body as Record<string, unknown>);
 }
 
+function singleRestore(businessId: string, model: string, id: string, actorId: string) {
+  return request(app.getHttpServer())
+    .post(`/api/businesses/${businessId}/trash/${model}/${id}/restore`)
+    .set('x-v91r-user', actorId);
+}
+
 async function contactDeletedAt(id: string): Promise<Date | null> {
   const rows = await db.$queryRawUnsafe<Array<{ deleted_at: Date | null }>>(
     `SELECT deleted_at FROM contacts WHERE id = $1`,
@@ -271,13 +280,18 @@ beforeAll(async () => {
     restoreProduct: catalogRestoreProduct,
     restoreService: catalogRestoreService,
   } as unknown as CatalogService;
+  const crmCacheStub = {
+    invalidate: crmCacheInvalidate,
+  } as unknown as CrmCacheService;
 
   const mod = await Test.createTestingModule({
     controllers: [TrashController],
     providers: [
+      AuthGuard,
       BusinessGuard,
       { provide: PrismaService, useValue: prismaService },
       { provide: CatalogService, useValue: catalogStub },
+      { provide: CrmCacheService, useValue: crmCacheStub },
     ],
   }).compile();
 
@@ -296,6 +310,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   catalogRestoreProduct.mockClear();
   catalogRestoreService.mockClear();
+  crmCacheInvalidate.mockClear();
   await seedBase();
 });
 
@@ -462,5 +477,28 @@ describe('P37 (FU-BULK-DELETE-UNDO, D-277b): POST /api/businesses/:businessId/tr
       failedCount: 0,
     });
     expect(catalogRestoreProduct).toHaveBeenCalledWith(ID.bizA, ID.prodA1);
+    expect(crmCacheInvalidate).not.toHaveBeenCalled();
+  });
+
+  it('BDU-07 (COR-P37-3): restoring contacts (bulk or single) invalidates the business CRM cache; zero restored contacts does not', async () => {
+    // 0 contacts restored (missing/live) -> no cache invalidation.
+    const noneRes = await bulkRestore(ID.bizA, 'contact', { ids: [ID.cLive] }, ID.ownerA);
+    expect(noneRes.status, JSON.stringify(noneRes.body)).toBe(201);
+    expect(noneRes.body.restoredCount).toBe(0);
+    expect(crmCacheInvalidate).not.toHaveBeenCalled();
+
+    // Bulk restore of 2 contacts -> invalidates bizA CRM cache once.
+    const bulkRes = await bulkRestore(ID.bizA, 'contact', { ids: [ID.c1, ID.c2] }, ID.ownerA);
+    expect(bulkRes.status, JSON.stringify(bulkRes.body)).toBe(201);
+    expect(bulkRes.body.restoredCount).toBe(2);
+    expect(crmCacheInvalidate).toHaveBeenCalledTimes(1);
+    expect(crmCacheInvalidate).toHaveBeenCalledWith(ID.bizA);
+
+    // Single restore of a contact -> invalidates bizA CRM cache once more.
+    crmCacheInvalidate.mockClear();
+    const singleRes = await singleRestore(ID.bizA, 'contact', ID.c3, ID.ownerA);
+    expect(singleRes.status, JSON.stringify(singleRes.body)).toBe(201);
+    expect(crmCacheInvalidate).toHaveBeenCalledTimes(1);
+    expect(crmCacheInvalidate).toHaveBeenCalledWith(ID.bizA);
   });
 });

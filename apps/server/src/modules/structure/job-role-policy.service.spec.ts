@@ -584,10 +584,10 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     // PR195-KEY-GATES (SEC-P195BW-4/5; D-57, D-146): and the Books reads the FinanceController reads now hold at revenue
     // read: finance_customer_balance, finance_list_action_items, finance_list_bank_accounts (D-35's narrowing)
     expect(lost('finance')).toEqual([
-      'expenses_create', 'expenses_list', 'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_create_bill',
+      'expenses_create', 'expenses_list', 'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_cashflow_forecast', 'finance_create_bill',
       'finance_create_coa_account', 'finance_customer_balance', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
-      'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_tax_summary',
-      'finance_view_payables', 'finance_view_receivables',
+      'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_safe_to_spend',
+      'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
     ]);
     expect(lost('commerce')).toEqual([
       'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',

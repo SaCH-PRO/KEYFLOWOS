@@ -108,7 +108,7 @@
     "POST /crm/businesses/:businessId/contacts — email already held in the tenant the first contact with the email is created and persisted with the normalized email",
     "POST /crm/businesses/:businessId/contacts — email already held in the tenant NEGATIVE CONTROL — the same email again answers 409 contact_email_taken with the existing id; the tenant still has exactly one contact",
     "POST /crm/businesses/:businessId/contacts — email already held in the tenant a case variant of the email is the same identity: 409 contact_email_taken with the existing id, still one contact",
-    "POST /crm/businesses/:businessId/contacts — email already held in the tenant a whitespace-padded email passes the DTO (observed: @IsEmail accepts surrounding whitespace) and the service trims it to the same identity: 409 contact_email_taken with the existing id, still one contact",
+    "POST /crm/businesses/:businessId/contacts — email already held in the tenant a whitespace-padded email is refused at the DTO (@IsEmail rejects surrounding whitespace): 400, still one contact",
     "POST /crm/businesses/:businessId/contacts — email already held in the tenant the service trims and lowercases before writing: a padded, upper-cased email is refused as 409 contact_email_taken with the existing id",
     "POST /crm/businesses/:businessId/contacts — email already held in the tenant a different tenant may create the same email (uniqueness is per business); both tenants keep their own single row",
     "POST /crm/businesses/:businessId/contacts — email already held in the tenant a member of another tenant cannot use the conflict to probe for the email: bizB's owner posting into bizA is refused by the guards (403) with no existing id",

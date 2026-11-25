@@ -37,7 +37,7 @@ ProjectTaskStatus, QuoteStatus, SubscriptionPaymentStatus, SubscriptionStatus
 | Identity & Access | `User`, `UserIdentity`, `Business`, `Membership`, `Session`, `PushSubscription`, `ApiKey` |
 | Business Profile / Genome | `BusinessBlueprint`, `BusinessGenome`, `BusinessProfileVersion`, `BusinessSetting`, `FounderProfile` |
 | CRM | `Contact`, `Account`, `Deal`, `DealStage`, `ContactTag`, `ContactNote`, `ContactTask`, `CrmSequence`, `ContactMomentum`, `MergeOperation` |
-| Commerce | `Product`, `ProductVariant`, `Quote`, `QuoteItem`, `Invoice`, `InvoiceItem`, `Payment`, `PaymentLink`, `RecurringInvoice`, `CreditNote`, `TaxRate` |
+| Commerce | `Product`, `ProductVariant`, `ProductTierPrice`, `Quote`, `QuoteItem`, `Invoice`, `InvoiceItem`, `Payment`, `PaymentLink`, `RecurringInvoice`, `CreditNote`, `TaxRate` |
 | Bookings & Calendar | `Booking`, `BookingWaitlistEntry`, `Service`, `Availability`, `StaffMember`, `Skill`, `CalendarEvent`, `CalendarSyncConflict` |
 | Projects & Time | `Project`, `ProjectTask`, `ProjectMilestone`, `TimeEntry`, `ProjectTemplate`, `ProjectPlan` |
 | Finance / Accounting | `FinancialAccount`, `ChartOfAccount`, `LedgerEntry`, `BankTransaction`, `BankConnection`, `BankRule`, `TaxLiability`, `RecurringExpense`, `RevenueAction` |

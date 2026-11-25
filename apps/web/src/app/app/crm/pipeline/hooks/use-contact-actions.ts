@@ -335,11 +335,21 @@ export function useContactActions({
     setShowAddForm(true);
   }, [setSelectedContactId, setShowMobileDetail]);
 
-  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Single deletes still in their Undo window, by contact id: each has its own timer, toast and send, so a second
+   * delete, an Undo or leaving the page acts on that delete alone (FU-CONTACT-DELETE-LEAVE).
+   */
+  const pendingDeletesRef = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; toastId: string | number; send: () => void }>());
 
   useEffect(() => {
+    const pending = pendingDeletesRef.current;
     return () => {
-      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      // Leaving the page: the owner was told "Contact deleted", so what is pending is sent now, and its Undo goes.
+      for (const entry of [...pending.values()]) {
+        clearTimeout(entry.timer);
+        toast.dismiss(entry.toastId);
+        entry.send();
+      }
     };
   }, []);
 
@@ -347,6 +357,8 @@ export function useContactActions({
     const currentSelectedId = selectedContactIdRef.current;
     const id = contact?.id || currentSelectedId;
     if (!id || !businessId) return;
+    const pending = pendingDeletesRef.current;
+    if (pending.has(id)) return;
     const backup = contactsRef.current.find((c) => c.id === id);
     if (!backup) return;
 
@@ -355,20 +367,46 @@ export function useContactActions({
     if (wasSelected) { setSelectedContactId(null); setContactDetail(null); }
     setShowMobileDetail(false);
 
-    let undone = false;
-    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
-
     const restore = () => {
       setContacts((prev) => [backup, ...prev]);
       if (wasSelected) { setSelectedContactId(id); }
     };
 
-    toast("Contact deleted", {
+    // This delete's own state: its Undo reads only this, never another delete of the same customer.
+    let state: "pending" | "undone" | "sent" | "failed" = "pending";
+
+    // Sent at most once: whichever comes first (the window ends, or the page is left) takes the entry.
+    const send = () => {
+      if (state !== "pending") return;
+      state = "sent";
+      pending.delete(id);
+      void (async () => {
+        try {
+          await deleteContact(id, businessId);
+          void loadFlowData();
+        } catch {
+          // Not deleted: the row is back, so a later Undo has nothing to do (and nothing is in Trash).
+          state = "failed";
+          restore();
+          toast.error("Failed to delete contact — restored");
+        }
+      })();
+    };
+
+    const toastId = toast("Contact deleted", {
       action: {
         label: "Undo",
         onClick: () => {
-          undone = true;
-          if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+          if (state === "sent") {
+            // The window passed while the toast stayed up (hovered): the delete went; Trash can bring it back.
+            toast.info("Already deleted — restore it from Trash");
+            return;
+          }
+          if (state !== "pending") return;
+          state = "undone";
+          const entry = pending.get(id);
+          if (entry) clearTimeout(entry.timer);
+          pending.delete(id);
           restore();
           toast.success("Contact restored");
         },
@@ -376,16 +414,7 @@ export function useContactActions({
       duration: 5000,
     });
 
-    deleteTimerRef.current = setTimeout(async () => {
-      if (undone) return;
-      try {
-        await deleteContact(id, businessId);
-        void loadFlowData();
-      } catch {
-        restore();
-        toast.error("Failed to delete contact — restored");
-      }
-    }, 5500);
+    pending.set(id, { timer: setTimeout(send, 5500), toastId, send });
   }, [businessId, loadFlowData, setContacts, setSelectedContactId, setContactDetail, setShowMobileDetail]);
 
   const handleImportFile = useCallback(async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {

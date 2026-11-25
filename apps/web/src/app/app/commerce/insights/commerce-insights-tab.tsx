@@ -22,6 +22,7 @@ import {
   type Quote,
 } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
+import { OWED_STATUSES } from "@/lib/commerce-status";
 
 const stagger = {
   container: { hidden: {}, visible: { transition: { staggerChildren: 0.05 } } },
@@ -75,7 +76,11 @@ const ActionStrip = React.memo(function ActionStrip({
 
     const outstandingAmount = stats.outstandingAmount ?? 0;
     if (outstandingAmount > 0 && overdueCount === 0) {
-      items.push({ key: "outstanding", priority: 4, icon: DollarSign, label: `${formatCurrencyCompact(outstandingAmount, currency)} outstanding`, sub: `${stats.invoiceStatusBreakdown?.SENT?.count ?? 0} awaiting payment`, variant: "info" });
+      const awaitingCount = [...OWED_STATUSES].reduce(
+        (sum, status) => sum + (stats.invoiceStatusBreakdown?.[status]?.count ?? 0),
+        0,
+      );
+      items.push({ key: "outstanding", priority: 4, icon: DollarSign, label: `${formatCurrencyCompact(outstandingAmount, currency)} outstanding`, sub: `${awaitingCount} awaiting payment`, variant: "info" });
     }
 
     if (stats.quoteConversionRate >= 60) {

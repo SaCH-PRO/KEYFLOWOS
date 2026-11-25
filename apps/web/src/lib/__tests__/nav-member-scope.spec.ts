@@ -82,6 +82,7 @@ vi.mock("next/link", () => ({
 import {
   hubNav,
   buildSections,
+  meNav,
   entryModules,
   hubsFor,
   bottomBarFor,
@@ -284,6 +285,10 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId", "hub:settings"] },
   "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts#GET recommendations", "hub:settings"] },
   "/app/settings/billing": { modules: ["settings"], cite: ["unscoped:modules/subscriptions/subscriptions.controller.ts#GET businesses/:businessId/billing-dashboard", "hub:settings"] },
+  // FU-ME-NOTIFICATIONS-SCOPE (D-276): the Me menu. My account is every member's own (GET identity/me); Notifications
+  // is the business's customer emails and their log, both read under settings (P30's guard).
+  "/app/settings/profile": { modules: [], cite: ["unscoped:modules/identity/identity.controller.ts#GET me"] },
+  "/app/settings/notifications": { modules: ["settings"], cite: [SRV("notifications/notifications.controller.ts", "GET businesses/:businessId/customer-preferences"), SRV("notifications/notifications.controller.ts", "GET businesses/:businessId/customer-log")] },
   "/app/settings/team": { modules: ["team"], cite: [SRV("identity/identity.controller.ts", "GET businesses/:businessId/team/dashboard")] },
   "/app/structure": { modules: ["team"], cite: [SRV("structure/structure.controller.ts", "GET businesses/:businessId/stats")] },
   "/app/settings/ai": { modules: ["operations"], cite: [SRV("ai/ai-settings.controller.ts", "GET businesses/:businessId/ai/settings/workload-config")] },
@@ -344,6 +349,8 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     ...hubNav.map((hub) => ({ href: hub.href, modules: hub.module ? [hub.module] : [] })),
     ...hubNav.flatMap((hub) => hub.items.map((item) => ({ href: item.href, modules: entryModules(item, hub) }))),
     ...buildSections.flatMap((s) => s.items.map((item) => ({ href: item.href, modules: entryModules(item) }))),
+    // FU-ME-NOTIFICATIONS-SCOPE (D-276): the Me menu's entries are checked the same way.
+    ...meNav.map((item) => ({ href: item.href, modules: entryModules(item) })),
   ];
 
   it("NMS-18 a legacy bookkeeper with no operations entry sees none of the operations surfaces", () => {

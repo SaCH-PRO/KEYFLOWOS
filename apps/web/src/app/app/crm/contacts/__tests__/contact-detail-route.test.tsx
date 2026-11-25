@@ -42,9 +42,9 @@
  * page (an open issue for the contact pages).
  *
  * Journey C4 drives the doors in a browser (e2e/journeys/c-customer.spec.ts);
- * its list, Cmd/Ctrl+K (the palette lists the customer as a button; the
- * journey looks for an option or a link), Today and invoice steps need those
- * screens changed, which is not this page.
+ * its list, Cmd/Ctrl+K (the palette lists the customer as an option in its
+ * results listbox, FU-C4-CMDK-SEARCH, as the journey looks for it), Today and
+ * invoice steps need those screens, which are not this page.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -324,7 +324,7 @@ describe("/app/crm/contacts/<id> opens the customer (BUG-038, journey C4)", () =
     const onClose = vi.fn();
     render(<CommandPalette open onClose={onClose} />);
     fireEvent.change(screen.getByPlaceholderText(/search everything/i), { target: { value: "Lovelace" } });
-    fireEvent.click(await screen.findByRole("button", { name: new RegExp(NAME) }));
+    fireEvent.click(await screen.findByRole("option", { name: new RegExp(NAME) }));
     expect(pushed, "the palette navigates to the customer's main page").toEqual([`/app/crm/contacts/${CONTACT_ID}`]);
     expect(onClose).toHaveBeenCalled();
     cleanup();

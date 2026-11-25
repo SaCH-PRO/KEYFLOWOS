@@ -8,6 +8,7 @@ import {
   Param,
   UseGuards,
   Inject,
+  Optional,
   ParseIntPipe,
   DefaultValuePipe,
   BadRequestException,
@@ -17,11 +18,13 @@ import {
   Req,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { CrmCacheService } from '../crm/crm-cache.service';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { contactWhereBase } from '../crm/crm.helpers';
 import { contactIdentityViolation } from '../crm/crm.service';
@@ -310,6 +313,7 @@ export class TrashController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    @Optional() @Inject(CrmCacheService) private readonly crmCache?: CrmCacheService,
   ) {}
 
   // W4-TRASH-D46 review repair SEC-TRASH-D46-1: a revenue model is listed only
@@ -636,6 +640,7 @@ export class TrashController {
    *   - product / service delegate to CatalogService.restoreProduct / restoreService.
    */
   @Post(':model/bulk-restore')
+  @UseGuards(AuthGuard, BusinessGuard)
   @RequireModuleScope('settings')
   async bulkRestore(
     @Param('businessId') businessId: string,
@@ -729,6 +734,12 @@ export class TrashController {
       }
     }
 
+    if (model === 'contact' && restored.length > 0) {
+      // COR-P37-3: bulk-delete invalidates CRM stats/flow caches (60s TTL); clear them
+      // after restoring contacts so Undo immediately reflects restored customers.
+      void this.crmCache?.invalidate(businessId);
+    }
+
     return {
       model,
       restored,
@@ -772,6 +783,7 @@ export class TrashController {
       restored = await this.updateModel(model, id, { deletedAt: null }).catch((err: unknown) =>
         this.rejectContactIdentityTaken(err, businessId, existing!, contactRules.visibility),
       );
+      void this.crmCache?.invalidate(businessId);
       return { restored: true, model, id, item: restored };
     }
     // W6-TRASH-MODULE-SCOPE: CatalogService.updateProduct ignores deletedAt (the

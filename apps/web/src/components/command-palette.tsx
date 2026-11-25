@@ -162,6 +162,10 @@ function fuzzyMatch(text: string, query: string): boolean {
   return qi === lowerQuery.length;
 }
 
+/** The results list and its options, for the search box's aria-controls and aria-activedescendant. */
+const LISTBOX_ID = "kf-palette-results";
+const optionId = (idx: number) => `kf-palette-option-${idx}`;
+
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const { open: openComposer } = useCompose();
@@ -376,6 +380,11 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <input
             ref={inputRef}
             aria-label="Search everything or type a command"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls={LISTBOX_ID}
+            aria-expanded={flatItems.length > 0}
+            aria-activedescendant={flatItems.length > 0 ? optionId(selectedIdx) : undefined}
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             placeholder="Search everything or type a command..."
             value={query}
@@ -388,11 +397,14 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             </button>
           )}
         </div>
-        <div className="max-h-[60vh] overflow-y-auto" ref={listRef}>
-          {hasSearch && searching && (
-            <div className="px-4 py-4 text-sm text-muted-foreground text-center animate-pulse">Searching...</div>
-          )}
-
+        {/* What the search is doing, outside the list: the list holds only options. */}
+        {hasSearch && searching && (
+          <div role="status" className="px-4 py-4 text-sm text-muted-foreground text-center animate-pulse">Searching...</div>
+        )}
+        {hasSearch && !searching && totalSearchResults === 0 && filteredNav.length === 0 && filteredQuick.length === 0 && (
+          <div role="status" className="px-4 py-6 text-sm text-muted-foreground text-center">No results for &ldquo;{query}&rdquo;</div>
+        )}
+        <div className="max-h-[60vh] overflow-y-auto" ref={listRef} role="listbox" id={LISTBOX_ID} aria-label="Results">
           {hasSearch && !searching && totalSearchResults > 0 && (
             <div className="py-1">
               {SEARCH_SECTIONS.map((section) => {
@@ -400,8 +412,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 if (!items || items.length === 0) return null;
                 const Icon = section.icon;
                 return (
-                  <div key={section.key}>
-                    <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <div key={section.key} role="group" aria-label={section.label}>
+                    <div aria-hidden="true" className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                       <Icon className="w-3 h-3" style={{ color: section.color }} />
                       {section.label}
                     </div>
@@ -411,6 +423,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                         <button
                           key={item.id}
                           data-idx={idx}
+                          role="option"
+                          id={optionId(idx)}
+                          aria-selected={selectedIdx === idx}
                           onClick={() => handleNavigate(section.getHref(item), section.getTitle(item))}
                           className={cn(
                             "w-full text-left px-4 py-2.5 flex items-center gap-3 transition-all text-sm group rounded-lg mx-2",
@@ -437,13 +452,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             </div>
           )}
 
-          {hasSearch && !searching && totalSearchResults === 0 && filteredNav.length === 0 && filteredQuick.length === 0 && (
-            <div className="px-4 py-6 text-sm text-muted-foreground text-center">No results for &ldquo;{query}&rdquo;</div>
-          )}
-
           {filteredRecent.length > 0 && (
-            <div>
-              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2">
+            <div role="group" aria-label="Recent">
+              <div aria-hidden="true" className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2">
                 <Clock className="w-3 h-3" />
                 Recent
               </div>
@@ -453,6 +464,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   <button
                     key={item.href}
                     data-idx={idx}
+                    role="option"
+                    id={optionId(idx)}
+                    aria-selected={selectedIdx === idx}
                     onClick={() => handleNavigate(item.href, item.label)}
                     className={cn(
                       "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
@@ -471,8 +485,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           )}
 
           {filteredQuick.length > 0 && (
-            <div>
-              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2">
+            <div role="group" aria-label="Quick Actions">
+              <div aria-hidden="true" className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2">
                 <Plus className="w-3 h-3" />
                 Quick Actions
               </div>
@@ -483,6 +497,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   <button
                     key={action.id}
                     data-idx={idx}
+                    role="option"
+                    id={optionId(idx)}
+                    aria-selected={selectedIdx === idx}
                     onClick={() => {
                       action.onSelect();
                       onClose();
@@ -512,8 +529,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           )}
 
           {filteredNav.length > 0 && (
-            <div>
-              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
+            <div role="group" aria-label="Navigate">
+              <div aria-hidden="true" className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
                 <Zap className="w-3 h-3" />
                 Navigate
               </div>
@@ -524,6 +541,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   <button
                     key={action.id}
                     data-idx={idx}
+                    role="option"
+                    id={optionId(idx)}
+                    aria-selected={selectedIdx === idx}
                     onClick={() => {
                       action.onSelect();
                       onClose();
@@ -553,8 +573,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           )}
 
           {filteredUtility.length > 0 && (
-            <div>
-              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
+            <div role="group" aria-label="Actions">
+              <div aria-hidden="true" className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
                 <Wrench className="w-3 h-3" />
                 Actions
               </div>
@@ -565,6 +585,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   <button
                     key={action.id}
                     data-idx={idx}
+                    role="option"
+                    id={optionId(idx)}
+                    aria-selected={selectedIdx === idx}
                     onClick={() => {
                       action.onSelect();
                       onClose();
@@ -589,8 +612,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           )}
 
           {filteredHelp.length > 0 && (
-            <div>
-              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
+            <div role="group" aria-label="Help">
+              <div aria-hidden="true" className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
                 <HelpCircle className="w-3 h-3" />
                 Help
               </div>
@@ -601,6 +624,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   <button
                     key={action.id}
                     data-idx={idx}
+                    role="option"
+                    id={optionId(idx)}
+                    aria-selected={selectedIdx === idx}
                     onClick={() => {
                       action.onSelect();
                       onClose();

@@ -3062,7 +3062,10 @@ export type BootstrapIdentityResponse = {
   isNewBusiness?: boolean;
 };
 
-export type BootstrapIdentityErrorCode = "account_email_conflict";
+export type BootstrapIdentityErrorCode =
+  | "account_email_conflict"
+  /** 403 OWNER_MEMBERSHIP_REQUIRED: recorded as an owner, a member nowhere (D-104); an administrator restores access. */
+  | "owner_membership_required";
 
 export type BootstrapIdentityResult = {
   data: BootstrapIdentityResponse | null;
@@ -3130,7 +3133,12 @@ export async function bootstrapIdentity(input: {
       return {
         data: null,
         error: message,
-        errorCode: code === "account_email_conflict" ? "account_email_conflict" : null,
+        errorCode:
+          code === "account_email_conflict"
+            ? "account_email_conflict"
+            : code === "OWNER_MEMBERSHIP_REQUIRED"
+              ? "owner_membership_required"
+              : null,
         status: res.status,
       };
     }
