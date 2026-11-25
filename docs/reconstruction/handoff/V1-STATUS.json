@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "14c3c36e3bcc994228ad0a10f159523ca8758666",
-  "main_commit_date": "2026-11-25T20:58:07+00:00",
+  "main_sha": "7fd32bf27f32cf4d6fd872b4b7f73b142cafc974",
+  "main_commit_date": "2026-11-25T23:52:25+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 395,
-  "points": 568.5,
+  "packets": 396,
+  "points": 570.5,
   "by_status": {
    "done": {
     "packets": 175,
     "points": 261.5,
-    "pct_by_points": 46
+    "pct_by_points": 45.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 220,
-    "points": 307,
-    "pct_by_points": 54
+    "packets": 221,
+    "points": 309,
+    "pct_by_points": 54.2
    }
   },
   "by_step": {
@@ -80,8 +80,8 @@
    "5": {
     "done": 39,
     "in-progress": 0,
-    "todo": 52,
-    "total": 91
+    "todo": 53,
+    "total": 92
    },
    "6": {
     "done": 16,
@@ -112,8 +112,8 @@
    "launch": {
     "done": 87,
     "in-progress": 0,
-    "todo": 167,
-    "total": 254
+    "todo": 168,
+    "total": 255
    },
    "follow-on": {
     "done": 1,
@@ -127,7 +127,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 59,
    "compacted-commit": 69,
-   "no-evidence": 134
+   "no-evidence": 135
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -278,7 +278,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
    "id": "OWNER-ALERTS-WEB",
@@ -1520,7 +1520,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
    "id": "OWNER-ALERTS-WEB",
@@ -9523,6 +9523,23 @@
    ],
    "title": "The contact Timeline loads older events",
    "deps_met": true
+  },
+  {
+   "id": "CONTACTS-LIST-FIRST",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CRM-WEB-POLISH"
+   ],
+   "title": "The contacts list comes first on phones; the cards above it move below or collapse",
+   "deps_met": false
   }
  ]
 }

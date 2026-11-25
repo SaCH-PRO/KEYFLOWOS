@@ -77,6 +77,12 @@ referred to on the board but is not yet a row.
   session, GraphQL is refused: enqueue with `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f
   merge_method=merge` (M16 went in this way).
 
+- **Answered by the owner 2026-11-25 ~23:20 UTC, in session.** Recorded as D-286 to D-289 in BUILD-MAP-001.md on `wave/v1-docs-p19`; they reach main with the next Claude wave's docs squash.
+  - **D-286 (question 52):** P90 SWP-CENSUS-V1-B gates all 46 rows (Option A). The ten Release 0-pinned STAFF cases are updated under the ruling. This unblocks Antigravity's P90 (P0).
+  - **D-287 (questions 51 and 55):** refunds stay as built. The bookkeeping route keeps gateway rows (D-121). The web offers WiPay "Record refund" and links Stripe/PayPal to the gateway refund. FU-REFUND-GATEWAY-REFUSE is withdrawn.
+  - **D-288 (question 56):** only an owner may change the owner's alerts. This is what OWNER-ALERTS-WEB built.
+  - **D-289 (question 53):** a new launch packet, CONTACTS-LIST-FIRST (web, M), puts the list first on phones and starts the cards collapsed on desktop (journey C8). The plan row has been added.
+
 ## 0. Next session starts here (2026-11-25 ~21:05 UTC)
 
 Main is `6f67c91e` (M18 merged 20:57, PR #250). V1-STATUS: 175 of 395 done, 46% of points; launch 87 done of 254.
@@ -89,7 +95,7 @@ Main is `6f67c91e` (M18 merged 20:57, PR #250). V1-STATUS: 175 of 395 done, 46% 
 The throughput plan is on #80 7172896636. Server lane (Antigravity), in order:
 1. TOF-KEY-SELF-MODEL, which starts the chain TOF-KEY-SELF-MODEL → TOF-KNOWLEDGE-UPLOAD → KEY-TOOL-ALLOWLIST → DECIMALS-SERVER → CLAIM-LOOP web.
 2. DEMO-PREVIEW.
-3. FU-REFUND-GATEWAY-REFUSE (S-1): **held for the owner** (question 51). Release 0 RF-10/RF-12 and D-121 use this door on purpose (#80 7172026342).
+3. FU-REFUND-GATEWAY-REFUSE (S-1): withdrawn by D-287 (refunds stay as built).
 4. The server halves of EXPENSES-HUB-1 and VAT-BASICS.
 5. The census and RR packets.
 6. FU-TEST-FLAKES.
@@ -205,7 +211,7 @@ Main is at `6f67c91e`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | **M20 (Claude)** | `wave/v1-wave-m20` | Assembled (4 packets) | Wave proof, PR, enqueue |
 | **Claude packets** | the five in section 0 | Repair, confirmation or building | RETURN, then the next wave |
 | **Antigravity** | M25: P87, P88, P89, P91, P92, P93; P90 blocked (question 52) | Building | Their wave |
-| **Owner** | - | - | Section 4 questions 40-56; production redeploy (D-266) |
+| **Owner** | - | - | Section 4 questions 40-50, 54 (51-53, 55, 56 answered: D-286 to D-289); production redeploy (D-266) |
 | `wave/v1-docs-p19` | main 6f67c91e merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -335,39 +341,7 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
 
-51. **Bookkeeping refunds on gateway payments (S-1, server, money).** `POST /commerce/businesses/:b/payments/:p/refund` (markPaymentRefunded) checks no provider. A member with revenue write can mark a Stripe payment refunded: the invoice reopens and the posting reverses while Stripe keeps the money. `StoreOrderService.refundCheckoutPayments` does the same for storefront orders. But Release 0 RF-10/RF-12 and D-121 use this door on purpose, for out-of-band provider refunds (WiPay has no refund API; PayPal pairs the webhook). Options:
-    - (a) refuse gateway rows with 409, keeping an explicit "refunded outside KEYFLOWOS" mode for providers without a refund API, and supersede RF-10/RF-12;
-    - (b) keep as is.
-
-    Also: should storefront refunds of gateway orders go through the gateway refund? (Default: hold, as today; #80 7171899154, 7172026342.)
-52. **P90 SWP-CENSUS-V1-B (P0) Release 0 contradiction.** 10 of the 46 open write rows are pinned by Release 0 cases in which a STAFF member on role defaults writes them:
-    - presence saveDraft and publish: D11-S02/S04/S05/S09/S13/S14/S15;
-    - onboarding concierge chat, dismiss, snooze and resume: D11-C07/C09;
-    - connector test, smoke, sync and inbox-config: R0-CMF6-K04/K05/M02, V94D-F02.
-
-    Options:
-    - **Option A:** gate all 46 and supersede those cases (the test actors get the scope, or expect 403).
-    - **Option B:** mark the 10 exempt-ruled in the census and gate the other 36.
-
-    (No default for Release 0 evidence: Antigravity holds P90 until you rule; #80 7172637493.)
-
-53. **Contacts list in the first phone screen (Journey C8).** At 375×812 the first contact row is at y≈1660 and C8 needs it above 406. Above the list sit:
-    - Pulse;
-    - the Action Center;
-    - the Priority Queue;
-    - a four-row toolbar;
-    - smart chips;
-    - the focus view's "Next actions" and "Contacts requiring action".
-
-    C8 is also red on desktop. Reordering alone gets the row to y≈720 at best. Should a contacts-screen layout packet put the list first on phones (and what on desktop)? (Default: split C8 into its own packet; P94 ships without it; #80 7174372256.)
 54. **Journey B1 asks for Tax and Stock fields when creating a product.** The product model has neither: stock lives in InventoryStock, and there is no tax field. Add them (a server packet), or change B1? (Default: B1 stays red on those two fields until you rule.)
-55. **WiPay refunds and storefront orders (with 51).** The refund screen (P85) lets an owner record a WiPay payment as refunded outside KeyFlow, because WiPay has no refund API (D-121). On a storefront order's checkout invoice this refunds the invoice payment, but the order stays PAID until someone uses the order refund. That is money-safe: the order refund tolerates the 409. The web cannot route this, because the invoice has no structured order link. Options: refuse on checkout invoices (needs a server link), route to the order refund, or keep as is. Also: is "Record refund" for WiPay the v1 door you want? (Default: keep as built.)
-56. **Who may change the owner's alerts (P95 OWNER-ALERTS-WEB).** The alerts cover bookings, payments and "I've paid" claims. They are business-wide settings that today any member with settings write could change, and no audit record is kept. Interim ruling: owner only, enforced on the server (#80). Options:
-    - owner only;
-    - owner and admins, with an audit record;
-    - each owner has their own alerts.
-
-    (Default: owner only.)
 
 ## 5. How to work here (learned the hard way)
 
