@@ -7,6 +7,11 @@ import { Server } from 'http';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
 import { allowedCorsOrigins } from './core/config/runtime-urls';
 
+export const GLOBAL_VALIDATION_PIPE_OPTIONS = {
+  whitelist: true,
+  transform: true,
+} as const;
+
 export function configureNestApp(app: INestApplication): void {
   const expressApp = app.getHttpAdapter().getInstance();
   // Trust-proxy hop count drives Express's `req.ip` derivation from
@@ -24,12 +29,7 @@ export function configureNestApp(app: INestApplication): void {
   app.use(compression());
 
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-    }),
-  );
+  app.useGlobalPipes(new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS));
 
   app.use(
     helmet({
