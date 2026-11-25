@@ -38,6 +38,11 @@
  *   PRD-15  the member's module levels are dropped when the business changes: no Discard on the strength of the last
  *           business's answer
  *
+ * Mutant pin added after the R1 fix (it also fails at cfa1d960):
+ *   PRD-16  a discard while a Retry's runs read (made before the discard) is in flight: the runs re-read after the
+ *           discard is its own read (not joined to the Retry's), and the Retry's older answer, landing last, is not
+ *           shown. (Two discards cannot overlap: the dialog's confirm is disabled until the re-read lands.)
+ *
  * Mounted on the real page and the real api client (lib/api.ts, lib/api/payroll.ts, lib/api/finance.ts); only
  * `fetch`, next/navigation and the stored business are stubbed. The stub is a small stateful server: safe-to-spend
  * reserves the DRAFT and APPROVED runs in the business currency, as SafeToSpendService does.
@@ -104,6 +109,10 @@ interface Opts {
   discard?: (r: Run | undefined) => Response;
   /** Safe-to-spend reads after a discard has been answered fail 500. */
   safeFailsAfterDiscard?: boolean;
+  /** Delay of each runs read, by its index (the load reads DRAFT and APPROVED: 0 and 1). */
+  runsDelays?: number[];
+  /** The cashflow forecast fails (500), so the page offers Retry. */
+  forecastFails?: boolean;
 }
 
 const code = (c: string) => c.trim().toUpperCase();
@@ -145,7 +154,11 @@ function stubServer(opts: Opts) {
     }
     if (method === "GET" && pathname.endsWith(`${PAY}/runs`)) {
       const status = searchParams.get("status");
-      return jsonResponse(200, runs.filter((r) => !status || r.status === status));
+      const i = calls.filter((c) => c.method === "GET" && c.pathname.endsWith(`${PAY}/runs`)).length - 1;
+      const answer = runs.filter((r) => !status || r.status === status).map((r) => ({ ...r }));
+      const delay = opts.runsDelays?.[i];
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      return jsonResponse(200, answer);
     }
     const discard = new RegExp(`${PAY}/runs/([^/]+)/discard$`).exec(pathname);
     if (method === "POST" && discard) {
@@ -165,7 +178,9 @@ function stubServer(opts: Opts) {
         ? jsonResponse(403, { statusCode: 403, message: REVENUE_REFUSAL, error: "Forbidden" }, "Forbidden")
         : jsonResponse(200, OVERVIEW);
     }
-    if (method === "GET" && pathname.endsWith(`${FIN}/cashflow-forecast`)) return jsonResponse(200, FORECAST);
+    if (method === "GET" && pathname.endsWith(`${FIN}/cashflow-forecast`)) {
+      return opts.forecastFails ? jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error") : jsonResponse(200, FORECAST);
+    }
     if (method === "GET" && pathname.endsWith(`${FIN}/reserves`)) return jsonResponse(200, { items: [] });
     return jsonResponse(200, { items: [] });
   }));
@@ -390,7 +405,7 @@ describe("V1-65 Money > Overview: the payroll reserve line with Discard (D-144)"
     expect(notice).toHaveTextContent(/could not be refreshed/i);
     await waitFor(() => expect(screen.getByText(/Some data failed to load/)).toHaveTextContent(/Safe-to-spend/));
     expect(safeMetric()).not.toMatch(/3,749\.5/);
-    expect(safeMetric()).not.toMatch(/TTD 0\b/);
+    expect(safeMetric()).not.toMatch(/TTD 0(?![0-9.,])/);
   });
 
   it("PRD-12 RED-BEFORE: discarding a run in another currency says it is void, not that Safe to Spend no longer reserves it", async () => {
@@ -465,5 +480,20 @@ describe("V1-65 Money > Overview: the payroll reserve line with Discard (D-144)"
     rerender(<FinancialFlowPage />);
     await new Promise((r) => setTimeout(r, 100));
     expect(screen.queryByRole("button", { name: /discard/i })).not.toBeInTheDocument();
+  });
+
+  it("PRD-16 (mutant pin): a discard during a Retry's runs read ends with the run gone", async () => {
+    // The load reads runs 0 and 1 at once; the Retry's reads (2, 3) answer at 400 ms, still listing the run; the
+    // re-reads after the discard (4, 5) answer at once.
+    const server = stubServer({ runs: [DRAFT], forecastFails: true, runsDelays: [0, 0, 400, 400] });
+    render(<FinancialFlowPage />);
+    const line = await reserveLine();
+    fireEvent.click(await screen.findByRole("button", { name: /^retry$/i }));
+    await discardWithReason(line, /discard/i, "Created by mistake");
+    await waitFor(() => expect(server.discards()).toHaveLength(1));
+    // The run is VOID on the server: once every read has landed, no line.
+    await new Promise((r) => setTimeout(r, 800));
+    expect(screen.queryByRole("region", { name: /payroll reserve/i })).not.toBeInTheDocument();
+    expect(safeMetric()).toMatch(/TTD 5,000\b/);
   });
 });

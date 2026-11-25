@@ -19,6 +19,10 @@
  *   RACE-03  a re-read that fails while the load is still running: the load's own errors are merged with it, not
  *            written over it, and Safe to Spend shows no figure (not the old one, not TTD 0)
  *
+ * Mutant pins added after the R1 fix (each also fails at cfa1d960):
+ *   RACE-04  the load's bucket list, answered after a bucket was added and the list read again, is not applied
+ *   RACE-05  two re-reads answered out of order: the older answer, landing last, is not shown
+ *
  * Mounted on the real page and the real api client (lib/api.ts, lib/api/finance.ts); only `fetch`,
  * next/navigation and the stored business are stubbed. The stub is a small stateful server: safe-to-spend is
  * 1,000 less the active buckets, as SafeToSpendService computes it.
@@ -71,6 +75,9 @@ interface StubOpts {
   createAnswer?: () => Response;
   /** Each safe-to-spend and reserves GET is answered with the state at the moment it is read, this many ms later. */
   readDelayMs?: number;
+  /** Per read, by its index (0 = the load's): delays for safe-to-spend and reserves reads (else readDelayMs). */
+  safeDelays?: number[];
+  reservesDelays?: number[];
   /** A DELETE of this bucket commits after commitMs and answers after returnMs. */
   deleteTiming?: Record<string, { commitMs: number; returnMs: number }>;
   /** The cashflow forecast answers this status after this many ms. */
@@ -96,7 +103,9 @@ function stubServer(opts: StubOpts = {}) {
     calls.push({ method, pathname, body });
     if (method === "GET" && pathname.endsWith(`${FIN}/reserves`)) {
       const items = buckets.filter((b) => b.status === "ACTIVE").map((b) => ({ ...b }));
-      if (opts.readDelayMs) await later(opts.readDelayMs);
+      const i = calls.filter((c) => c.method === "GET" && c.pathname.endsWith(`${FIN}/reserves`)).length - 1;
+      const delay = opts.reservesDelays?.[i] ?? opts.readDelayMs;
+      if (delay) await later(delay);
       return jsonResponse(200, { items });
     }
     if (method === "POST" && pathname.endsWith(`${FIN}/reserves`)) {
@@ -121,7 +130,8 @@ function stubServer(opts: StubOpts = {}) {
       const n = calls.filter((c) => c.method === "GET" && c.pathname.endsWith(`${FIN}/safe-to-spend`)).length;
       const answer = safe();
       safeAnswers.push(answer.safeToSpend);
-      if (opts.readDelayMs) await later(opts.readDelayMs);
+      const delay = opts.safeDelays?.[n - 1] ?? opts.readDelayMs;
+      if (delay) await later(delay);
       // 500, which lib/fetch-with-retry does not retry (a 503 is retried three times with backoff).
       if (opts.safeFailsAfter !== undefined && n > opts.safeFailsAfter) return jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error");
       return jsonResponse(200, answer);
@@ -277,6 +287,34 @@ describe("V1-65 Financial Flow: Safe to Spend refreshes after a reserve change",
     expect(banner.textContent).toMatch(/Safe-to-spend/);
     // The figure before the add is not current, and none is invented.
     expect(safeMetric()).not.toMatch(/TTD 1,000\b/);
-    expect(safeMetric()).not.toMatch(/TTD 0\b/);
+    expect(safeMetric()).not.toMatch(/TTD 0(?![0-9.,])/);
+  });
+
+  it("RACE-04 (mutant pin): the load's bucket list, answered after an add and its re-read, is not applied over them", async () => {
+    // The load's reserves read answers at 500 ms with no bucket; every later read answers at once.
+    stubServer({ reservesDelays: [500] });
+    render(<FinancialFlowPage />);
+    fireEvent.click(screen.getAllByRole("button", { name: /add bucket/i })[0]);
+    fireEvent.change(screen.getByPlaceholderText(/Bucket name/), { target: { value: "Tax reserve" } });
+    fireEvent.change(screen.getByPlaceholderText("Current amount"), { target: { value: "300" } });
+    fireEvent.click(screen.getByRole("button", { name: /create bucket/i }));
+    expect(await screen.findByText("Tax reserve")).toBeInTheDocument();
+    await later(700);
+    expect(screen.getByText("Tax reserve")).toBeInTheDocument();
+  });
+
+  it("RACE-05 (mutant pin): two re-reads answered out of order: the older answer, landing last, is not shown", async () => {
+    const A: Bucket = { ...RENT, id: "rb_a", name: "Bucket A", currentAmount: 400 };
+    const B: Bucket = { ...RENT, id: "rb_b", name: "Bucket B", currentAmount: 100 };
+    // Read 0 is the load's; read 1 (after deleting A: 900) answers at 300 ms; read 2 (after deleting B: 1,000) at once.
+    const server = stubServer({ buckets: [A, B], safeDelays: [0, 300, 0] });
+    render(<FinancialFlowPage />);
+    await waitFor(() => expect(safeMetric()).toMatch(/TTD 500\b/));
+    fireEvent.click(deleteButtonOf("Bucket A"));
+    await waitFor(() => expect(screen.queryByText("Bucket A")).not.toBeInTheDocument(), { interval: 5 });
+    fireEvent.click(deleteButtonOf("Bucket B"));
+    await waitFor(() => expect(server.safeAnswers).toEqual([500, 900, 1_000]), { timeout: 2_000 });
+    await later(500);
+    expect(safeMetric()).toMatch(/TTD 1,000\b/);
   });
 });
