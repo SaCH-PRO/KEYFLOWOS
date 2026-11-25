@@ -10,28 +10,81 @@ type Status = "checking" | "authenticated" | "redirecting" | "error";
 const MAX_RETRIES = 3;
 const BACKOFF_MS = 500;
 
-/** The localStorage keys a session lives in: the user token, and the admin bearer getAuthHeaders sends ahead of it. */
-const SESSION_STORAGE_KEYS = new Set(["kf_token", "kf_admin_token"]);
+/** The user token, and the admin bearer getAuthHeaders sends ahead of it (lib/api.ts). */
+const ADMIN_TOKEN_KEY = "kf_admin_token";
+const SESSION_STORAGE_KEYS = new Set(["kf_token", ADMIN_TOKEN_KEY]);
 
 /**
- * The stored session as GET /identity/me is asked about it: the user token (none means signed out) and the bearer
- * getAuthHeaders sends (the admin token when one is stored). Null when there is no user token.
+ * The `sub` claim of a JWT, decoded locally WITHOUT verifying the signature. It only decides whether a changed token
+ * still belongs to the user the shell was verified for (the shell then stays while /identity/me confirms it in the
+ * background); the server verifies every request. Null for anything that is not a JWT with a string `sub`.
  */
-function storedSession(): string | null {
+function tokenSubject(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4))) as { sub?: unknown } | null;
+    return payload && typeof payload.sub === "string" && payload.sub !== "" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The session as it is stored: the user token (none means signed out) and the admin bearer. */
+interface StoredSession {
+  key: string;
+  token: string;
+  sub: string | null;
+  admin: string | null;
+}
+
+function storedSession(): StoredSession | null {
   const token = getStoredToken();
   if (!token) return null;
-  return `${token}\n${getAuthHeaders().Authorization ?? ""}`;
+  let admin: string | null = null;
+  try {
+    admin = window.localStorage.getItem(ADMIN_TOKEN_KEY);
+  } catch {
+    admin = null;
+  }
+  return { key: `${token}\n${admin ?? ""}`, token, sub: tokenSubject(token), admin };
+}
+
+/** The session the shell is shown for: accepted by /identity/me, with the user id that answer named. */
+interface VerifiedSession {
+  key: string;
+  sub: string | null;
+  admin: string | null;
+  userId: string | null;
+}
+
+/**
+ * A change of the stored session that keeps the shell while it is verified in the background: the user token was
+ * rotated for the same `sub` and the admin bearer did not change. Anything else (another `sub`, a token that cannot
+ * be decoded, an admin bearer that appeared, changed or went) tears the shell down until it is verified.
+ */
+function isSameUserRotation(stored: StoredSession, verified: VerifiedSession | null): boolean {
+  return !!verified && verified.sub !== null && stored.sub === verified.sub && stored.admin === verified.admin;
+}
+
+/** What the pages may be rendered for: a stored session with the verified `sub` (or token) and admin bearer. */
+function storedMatchesShown(shown: VerifiedSession | null): boolean {
+  if (!shown) return false;
+  const stored = storedSession();
+  if (!stored || stored.admin !== shown.admin) return false;
+  return shown.sub !== null ? stored.sub === shown.sub : stored.key === shown.key;
 }
 
 type IdentityAnswer =
   | { kind: "stale" }
   | { kind: "unauthorized" }
   | { kind: "error"; message: string }
-  | { kind: "ok"; session: string | null };
+  | { kind: "ok"; session: StoredSession | null; userId: string | null };
 
 /**
  * GET /identity/me for the stored session, retrying a few times on transient non-401 errors and once after a token
- * refresh on a 401. An "ok" answer names the session the successful request was sent with.
+ * refresh on a 401. An "ok" answer names the session the successful request was sent with and the user id it named.
  */
 async function askIdentity(stale: () => boolean): Promise<IdentityAnswer> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -57,7 +110,11 @@ async function askIdentity(stale: () => boolean): Promise<IdentityAnswer> {
       if (stale()) return { kind: "stale" };
 
       if (res.status === 401) return { kind: "unauthorized" };
-      if (res.ok) return { kind: "ok", session: asked };
+      if (res.ok) {
+        const body = (await res.json().catch(() => null)) as { id?: unknown } | null;
+        if (stale()) return { kind: "stale" };
+        return { kind: "ok", session: asked, userId: body && typeof body.id === "string" ? body.id : null };
+      }
 
       const message = `Server returned ${res.status}`;
       if (attempt < MAX_RETRIES) {
@@ -94,25 +151,32 @@ async function askIdentity(stale: () => boolean): Promise<IdentityAnswer> {
  *   4. Renders an explicit error state if the API cannot be reached.
  *
  * FU-REQUIRE-AUTH-REMOUNT (owner ruling D-281): the session is verified once, and again only when the stored session
- * changes, never because the page changed. A client navigation keeps the shell mounted (no spinner, no second
- * /identity/me, no second mount of the destination page, so a one-shot ?contactId survives a router.push). The
- * stored session is compared with the verified one when another tab changes it (the storage event: a sign-in, a
- * sign-out, an admin sign-in) and on each navigation (a token rotated in this tab, which raises no storage event).
- * A changed session is verified before the shell is shown again: the shell is only ever shown for the session that
- * was verified, and a session with no token is sent to sign-in at once.
+ * changes, never because the page changed, so a client navigation keeps the shell mounted (no spinner, no second
+ * /identity/me, no second mount of the destination page; a one-shot ?contactId survives a router.push). The stored
+ * session is compared with the verified one when another tab changes it (the storage event) and on each navigation
+ * (a token rotated in this tab raises no storage event):
+ *   - no user token: sign-in at once;
+ *   - the same user's token rotated (same `sub`, same admin bearer): the shell stays and /identity/me is asked in the
+ *     background; a 401 signs out, an answer naming another user id tears the shell down and verifies again, and a
+ *     network or server error leaves the verified shell (the pages' own 401s, and the next check, still apply);
+ *   - anything else (another `sub`, an undecodable token, an admin bearer that appeared, changed or went): the shell
+ *     is torn down and shown again only once /identity/me accepted the session now stored.
+ * No render shows the pages for a stored session that is missing or names another `sub` or admin bearer than the
+ * one verified: the spinner shows instead, so a destination page never mounts for it.
  */
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [status, setStatus] = useState<Status>("checking");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  /** The session the pages are rendered for (state, read by the render guard). */
+  const [shownFor, setShownFor] = useState<VerifiedSession | null>(null);
   // Read by the callbacks below, which must not change when the page changes (they would re-run the mount effect).
   const routerRef = useRef(router);
   const pathnameRef = useRef(pathname);
-  /** The session the shell is shown for: set only when /identity/me accepted it. */
-  const verifiedSessionRef = useRef<string | null>(null);
-  /** The session the verification in flight is asking about. */
-  const askingSessionRef = useRef<string | null>(null);
+  const verifiedRef = useRef<VerifiedSession | null>(null);
+  /** The stored session the verification in flight is asking about. */
+  const askingKeyRef = useRef<string | null>(null);
   /** The current verification; a newer one, a redirect or the unmount makes an older one stale. */
   const runRef = useRef(0);
   const verifyingRef = useRef(false);
@@ -128,7 +192,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     redirectingRef.current = true;
     runRef.current += 1;
     verifyingRef.current = false;
-    verifiedSessionRef.current = null;
+    verifiedRef.current = null;
+    setShownFor(null);
     clearStoredBusinessId();
     const from = pathnameRef.current || "/app";
     const target = `/auth/login?from=${encodeURIComponent(from)}`;
@@ -137,65 +202,111 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     routerRef.current.replace(target);
   }, []);
 
-  const verify = useCallback(async () => {
-    const run = ++runRef.current;
-    const stale = () => run !== runRef.current;
-    verifyingRef.current = true;
-    redirectingRef.current = false;
-    verifiedSessionRef.current = null;
-    setErrorMessage(null);
-    setStatus("checking");
+  /**
+   * Verify the stored session. In the background (a same-user rotation) the shell stays mounted; otherwise it is
+   * hidden until /identity/me accepts the session now stored.
+   */
+  const verify = useCallback(
+    async (inBackground: boolean) => {
+      const run = ++runRef.current;
+      const stale = () => run !== runRef.current;
+      let background = inBackground;
+      const tearDown = () => {
+        verifiedRef.current = null;
+        setShownFor(null);
+        setErrorMessage(null);
+        setStatus("checking");
+      };
+      verifyingRef.current = true;
+      redirectingRef.current = false;
+      if (!background) tearDown();
 
-    // A session that changes while /identity/me answers is verified again: the shell is shown only for the session
-    // that was accepted.
-    for (;;) {
-      ensureTokenCookieMirror();
-      askingSessionRef.current = storedSession();
-      if (askingSessionRef.current === null) {
-        redirectToLogin("no token in storage");
-        return;
-      }
+      for (;;) {
+        ensureTokenCookieMirror();
+        const asking = storedSession();
+        askingKeyRef.current = asking?.key ?? null;
+        if (asking === null) {
+          redirectToLogin("no token in storage");
+          return;
+        }
+        if (background && !isSameUserRotation(asking, verifiedRef.current)) {
+          background = false;
+          tearDown();
+        }
 
-      const answer = await askIdentity(stale);
-      if (answer.kind === "stale") return;
-      if (answer.kind === "unauthorized") {
-        redirectToLogin("server rejected token (401)");
-        return;
-      }
-      if (answer.kind === "error") {
+        const answer = await askIdentity(stale);
+        if (answer.kind === "stale") return;
+        if (answer.kind === "unauthorized") {
+          redirectToLogin("server rejected token (401)");
+          return;
+        }
+        if (answer.kind === "error") {
+          verifyingRef.current = false;
+          if (background) {
+            // A verified same-user shell is not torn down for an unreachable API: the pages' own 401s, and the next
+            // check, still apply.
+            console.warn(`[RequireAuth] ${answer.message}; keeping the verified session`);
+            return;
+          }
+          setErrorMessage(`${answer.message}. Please check your connection and try again.`);
+          setStatus("error");
+          return;
+        }
+        // The session changed while /identity/me answered: decide again for the session now stored.
+        const now = storedSession();
+        if (answer.session === null || now === null || answer.session.key !== now.key) continue;
+
+        if (background) {
+          const verified = verifiedRef.current;
+          if (!verified || answer.userId === null || answer.userId !== verified.userId) {
+            background = false;
+            tearDown();
+            continue;
+          }
+          verifiedRef.current = { ...verified, key: answer.session.key };
+          verifyingRef.current = false;
+          return;
+        }
+
+        const accepted: VerifiedSession = {
+          key: answer.session.key,
+          sub: answer.session.sub,
+          admin: answer.session.admin,
+          userId: answer.userId,
+        };
+        verifiedRef.current = accepted;
         verifyingRef.current = false;
-        setErrorMessage(`${answer.message}. Please check your connection and try again.`);
-        setStatus("error");
+        setShownFor(accepted);
+        setErrorMessage(null);
+        setStatus("authenticated");
         return;
       }
-      if (answer.session === null || answer.session !== storedSession()) continue;
-
-      verifyingRef.current = false;
-      verifiedSessionRef.current = answer.session;
-      setErrorMessage(null);
-      setStatus("authenticated");
-      return;
-    }
-  }, [redirectToLogin]);
+    },
+    [redirectToLogin],
+  );
 
   /** Verify again only when the stored session is not the one verified (or being verified). */
   const recheck = useCallback(() => {
     if (redirectingRef.current) return;
-    const session = storedSession();
-    const current = verifyingRef.current ? askingSessionRef.current : verifiedSessionRef.current;
-    if (session !== null && session === current) return;
-    void verify();
+    const stored = storedSession();
+    if (stored === null) {
+      void verify(false);
+      return;
+    }
+    const current = verifyingRef.current ? askingKeyRef.current : verifiedRef.current?.key;
+    if (stored.key === current) return;
+    void verify(isSameUserRotation(stored, verifiedRef.current));
   }, [verify]);
 
   // Once per mounted shell, never per page.
   useEffect(() => {
-    void verify();
+    void verify(false);
 
     const onUnauthorized = (e: Event) => {
       const detail = (e as CustomEvent<{ path?: string }>).detail;
       redirectToLogin(`global 401 from ${detail?.path ?? "unknown path"}`);
     };
-    // Another tab signed in, signed out or changed the admin bearer.
+    // Another tab signed in, signed out, rotated the token, changed the admin bearer or cleared the storage.
     const onStorage = (e: StorageEvent) => {
       if (e.storageArea && e.storageArea !== window.localStorage) return;
       if (e.key !== null && !SESSION_STORAGE_KEYS.has(e.key)) return;
@@ -229,7 +340,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={() => {
               setStatus("checking");
-              void verify();
+              void verify(false);
             }}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
           >
@@ -247,7 +358,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (status !== "authenticated") {
+  // The render guard: the pages are rendered only for the session that was verified (a same-user rotation passes).
+  if (status !== "authenticated" || !storedMatchesShown(shownFor)) {
     return (
       <div className="min-h-dvh flex items-center justify-center bg-background">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
