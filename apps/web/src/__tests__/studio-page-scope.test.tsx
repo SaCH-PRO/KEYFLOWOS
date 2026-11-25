@@ -96,10 +96,15 @@ async function renderRoute(route: string) {
 /** The entries /studio listed whose pages' reads need settings (or which the Settings index hides). */
 const SETTINGS_HREF = /^\/app\/settings\/(notifications|developers|webhooks|business|compliance)(\?|$)/;
 const SETTINGS_NAME = /notifications|webhooks|payment gateways|developers|compliance/i;
+/**
+ * "My account" is every member's own page, never a settings entry, whatever its description says: since
+ * FU-PUSH-OPTIN-MY-ACCOUNT (D-282) it reads "… and push notifications", which the name pattern would match.
+ */
+const MY_ACCOUNT_HREF = /^\/app\/settings\/profile(\?|$)/;
 const settingsLinksShown = () =>
   Array.from(document.querySelectorAll("a"))
     .map((a) => ({ name: (a.textContent ?? "").replace(/\s+/g, " ").trim(), href: a.getAttribute("href") ?? "" }))
-    .filter((l) => SETTINGS_HREF.test(l.href) || SETTINGS_NAME.test(l.name));
+    .filter((l) => !MY_ACCOUNT_HREF.test(l.href) && (SETTINGS_HREF.test(l.href) || SETTINGS_NAME.test(l.name)));
 const indexEntries = () =>
   within(screen.getByRole("navigation", { name: /settings/i }))
     .getAllByRole("link")
