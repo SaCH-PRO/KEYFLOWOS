@@ -26,6 +26,13 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
 
 test.skip(process.env.E2E_LIVE === "1", "mocked sweep: runs without a live API");
 
+/**
+ * The full Chromium in its new headless mode, not the default headless shell: the shell reports
+ * Notification.permission "denied" even after grantPermissions(["notifications"]) (navigator.permissions says
+ * "granted"), so the page would show a member who blocked notifications. Probed on Playwright's chromium-1243.
+ */
+test.use({ channel: "chromium" });
+
 const ALL = ["crm", "revenue", "bookings", "projects", "content", "expenses", "automations", "storefront", "settings", "ai", "team", "analytics", "operations", "connect"];
 const FRONT_DESK = { modules: Object.fromEntries(ALL.map((m) => [m, m === "bookings" || m === "crm" ? "read" : "none"])) };
 
@@ -124,10 +131,26 @@ for (const [width, height] of [[375, 812], [768, 1024], [1024, 900], [1440, 900]
       await expect(heading).toBeVisible({ timeout: 20_000 });
       const section = page.locator("section").filter({ has: heading });
       await expect(section.getByText(/off for this device/i)).toBeVisible();
-      await section.scrollIntoViewIfNeeded();
+      // The section is the last on the page. Scrolled to the bottom, its button is not under the phone's fixed bottom
+      // nav (the scroll root's pb-28 clears it): what is at the button's centre is the button.
+      const turnOn = section.getByRole("button", { name: /turn on/i });
+      await page.evaluate(() => {
+        const root = document.querySelector<HTMLElement>('[data-scroll-root="app"]');
+        if (root) root.scrollTop = root.scrollHeight;
+        window.scrollTo(0, document.documentElement.scrollHeight);
+      });
+      await page.waitForTimeout(300);
+      expect(
+        await turnOn.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return !!hit && (hit === el || el.contains(hit));
+        }),
+        "Turn on is not covered at the bottom of the page",
+      ).toBe(true);
       await page.screenshot({ path: info.outputPath(`push-off-${width}.png`) });
 
-      await section.getByRole("button", { name: /turn on/i }).click();
+      await turnOn.click();
       await expect(section.getByText(/on for this device/i)).toBeVisible();
       await expect(section.getByRole("button", { name: /turn off/i })).toBeVisible();
       await page.screenshot({ path: info.outputPath(`push-on-${width}.png`) });
