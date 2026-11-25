@@ -20,6 +20,8 @@ import { CrossModuleAgentService } from './cross-module-agent.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { memberModuleLevel } from '../../core/auth/member-module-level';
+import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FlowEngineService } from './flow-engine.service';
 import { FlowRunnerService } from './flow-runner.service';
@@ -100,6 +102,7 @@ export class FlowController {
   async universalSearch(
     @Param('businessId') businessId: string,
     @Query('q') query: string,
+    @Request() req?: { user?: { id?: string; role?: string } },
   ) {
     if (!query || query.trim().length < 2) {
       return { contacts: [], invoices: [], bookings: [], products: [], projects: [] };
@@ -107,6 +110,9 @@ export class FlowController {
 
     const q = query.trim();
     const containsFilter = { contains: q, mode: 'insensitive' as const };
+    // FU-SEARCH-MONEY-SCOPE (D-100): withhold invoice money figures/rows below revenue:read.
+    const revenueLevel = await memberModuleLevel(this.prisma, businessId, req?.user, 'revenue');
+    const canReadRevenue = LEVEL_RANK[revenueLevel] >= LEVEL_RANK.read;
 
     const [contacts, invoices, bookings, products, projects] = await Promise.all([
       this.prisma.client.contact.findMany({
@@ -124,18 +130,20 @@ export class FlowController {
         select: { id: true, firstName: true, lastName: true, displayName: true, email: true, status: true },
         take: 8,
       }),
-      this.prisma.client.invoice.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          OR: [
-            { invoiceNumber: containsFilter },
-            { contact: { OR: [{ firstName: containsFilter }, { lastName: containsFilter }, { email: containsFilter }] } },
-          ],
-        },
-        select: { id: true, invoiceNumber: true, total: true, currency: true, status: true },
-        take: 8,
-      }),
+      canReadRevenue
+        ? this.prisma.client.invoice.findMany({
+            where: {
+              businessId,
+              deletedAt: null,
+              OR: [
+                { invoiceNumber: containsFilter },
+                { contact: { OR: [{ firstName: containsFilter }, { lastName: containsFilter }, { email: containsFilter }] } },
+              ],
+            },
+            select: { id: true, invoiceNumber: true, total: true, currency: true, status: true },
+            take: 8,
+          })
+        : Promise.resolve([]),
       this.prisma.client.booking.findMany({
         where: {
           businessId,
