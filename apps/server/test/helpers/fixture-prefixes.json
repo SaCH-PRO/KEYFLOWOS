@@ -1407,6 +1407,11 @@
       "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
     },
     {
+      "prefix": "v66l_",
+      "owner": "apps/server/test/census-v1-b.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-V1-B)"
+    },
+    {
       "prefix": "v91s_",
       "owner": "apps/server/test/flow-search-money-scope.integration.test.ts",
       "packet": "V1-91 (FU-SEARCH-MONEY-SCOPE)"
