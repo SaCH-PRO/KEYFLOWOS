@@ -151,14 +151,14 @@ beforeAll(async () => {
         userId: ID.staffRevRead,
         businessId: ID.biz,
         role: 'STAFF',
-        permissionScopes: { revenue: 'read', crm: 'read', settings: 'read', bookings: 'none' },
+        permissionScopes: { revenue: 'read', crm: 'read', settings: 'read', operations: 'read', bookings: 'none' },
       },
       {
         id: `${ID.staffRevNone}_m`,
         userId: ID.staffRevNone,
         businessId: ID.biz,
         role: 'STAFF',
-        permissionScopes: { revenue: 'none', crm: 'read', settings: 'read', bookings: 'none' },
+        permissionScopes: { revenue: 'none', crm: 'read', settings: 'read', operations: 'read', bookings: 'none' },
       },
       {
         id: `${ID.staffCrmNone}_m`,
