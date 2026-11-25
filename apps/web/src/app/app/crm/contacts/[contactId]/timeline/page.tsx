@@ -110,17 +110,26 @@ export default function ContactTimelinePage() {
   const [events, setEvents] = useState<ContactEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ChannelFilter>("all");
+  // MIN-4: a failed read is said as such (with Retry), never shown as an empty history.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       const res = await fetchContactEvents(contactId as string);
-      const list = (res.data ?? []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setEvents(list);
+      if (res.error) {
+        setEvents([]);
+        setLoadError(res.error);
+      } else {
+        const list = (res.data ?? []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setEvents(list);
+        setLoadError(null);
+      }
       setLoading(false);
     };
     load();
-  }, [contactId]);
+  }, [contactId, attempt]);
 
   // D-277: one item per pasted WhatsApp message; the filter and its counts work on what the events read served only.
   const items = useMemo(() => foldPastedNotes(events), [events]);
@@ -140,6 +149,28 @@ export default function ContactTimelinePage() {
       : `${shown.length} of ${items.length} ${plural}`;
 
   if (loading) return <div className="p-4">Loading timeline...</div>;
+
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Clock className="h-5 w-5 text-muted-foreground" />
+          <h3 className="text-lg font-semibold">Timeline</h3>
+        </div>
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+          <span className="min-w-0 flex-1 break-words">Could not load the timeline: {loadError}</span>
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Group by date
   const groups: Record<string, ContactEvent[]> = {};
