@@ -5,11 +5,18 @@
  * a count here is never of an item the member cannot see. Events of no channel (a payment, a task, a booking, a
  * meeting) are in All only.
  *
- * Which channel an event is, by its stored type (any case) and, where the type does not say, its data.channel, as
- * the server reads channels (crm-communication.service.ts classifyEventChannel, best-channel.service.ts):
+ * Which channel an event is, by its stored type (any case), and where the type does not say, by its data.channel or
+ * source. This follows the server's own readings of channels (crm-communication.service.ts classifyEventChannel,
+ * best-channel.service.ts) but is not an exact copy of either (MIN-5):
  *   - communication.whatsapp / .email / .sms / .call, and whatsapp.*, email.*, sms.*, call.* (sent, logged, missed);
+ *     any other communication.* (a meeting, an unknown kind) is no channel here, where classifyEventChannel reads a
+ *     meeting as its own channel and an unknown kind as a call;
+ *   - message_received (the omnichannel processor's inbound message): its source, when that names a channel;
  *   - message.copied: its data.channel, else WhatsApp; campaign.sent / opened / clicked: its data.channel, else email;
- *   - note.*: Notes, except a note a pasted WhatsApp message was saved as (source whatsapp_inbound), which is WhatsApp.
+ *   - form.submitted and lead_form.submitted are no channel here (All only), where classifyEventChannel reads them
+ *     as inbound email;
+ *   - note.*: Notes, except a pasted WhatsApp message's note (source whatsapp_inbound) and, known by its noteId, that
+ *     note's later edit or delete (pastedNoteIds), which are WhatsApp.
  */
 
 export type TimelineChannel = "whatsapp" | "email" | "sms" | "call" | "note";
