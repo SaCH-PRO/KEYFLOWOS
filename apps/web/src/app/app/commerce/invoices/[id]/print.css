@@ -1,0 +1,138 @@
+/*
+ * SWP-INV-DETAIL (BUG-051): what a print of the invoice page shows.
+ *
+ * While the browser prints, the page places the invoice sheet (.kf-invoice-print) beside the app under <body> and
+ * marks <body> with .kf-printing-invoice; this sheet then prints alone, on A4. Everything else under <body> (the
+ * app's navigation, the page's tabs and buttons, toasts) is not printed. The sheet is never shown on screen, and
+ * without the mark (any other page) nothing here applies.
+ */
+.kf-invoice-print {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+
+  /* A rule of its own: a browser without :has() drops only this one. */
+  html:has(> body.kf-printing-invoice) {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body.kf-printing-invoice {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body.kf-printing-invoice > *:not(.kf-invoice-print) {
+    display: none !important;
+  }
+
+  body.kf-printing-invoice > .kf-invoice-print {
+    display: block !important;
+    color: #111827;
+    background: #fff;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+
+  .kf-invoice-print p,
+  .kf-invoice-print dl,
+  .kf-invoice-print dd {
+    margin: 0;
+  }
+
+  .kf-invoice-print__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #d1d5db;
+  }
+
+  .kf-invoice-print__title {
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .kf-invoice-print__number {
+    font-size: 12pt;
+    font-weight: 600;
+  }
+
+  .kf-invoice-print__meta div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .kf-invoice-print__meta dt,
+  .kf-invoice-print__label {
+    color: #6b7280;
+  }
+
+  .kf-invoice-print__billto {
+    margin: 16px 0;
+  }
+
+  .kf-invoice-print__strong {
+    font-weight: 700;
+  }
+
+  .kf-invoice-print__lines,
+  .kf-invoice-print__totals {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .kf-invoice-print__lines th,
+  .kf-invoice-print__lines td {
+    padding: 6px 4px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: right;
+    vertical-align: top;
+  }
+
+  .kf-invoice-print__lines th {
+    color: #4b5563;
+    font-weight: 600;
+    border-bottom-color: #9ca3af;
+  }
+
+  .kf-invoice-print__lines th:first-child,
+  .kf-invoice-print__lines td:first-child {
+    text-align: left;
+  }
+
+  .kf-invoice-print__lines tr {
+    break-inside: avoid;
+  }
+
+  .kf-invoice-print__totals {
+    width: auto;
+    margin: 12px 0 0 auto;
+    break-inside: avoid;
+  }
+
+  .kf-invoice-print__totals th,
+  .kf-invoice-print__totals td {
+    padding: 3px 4px 3px 24px;
+    text-align: right;
+    font-weight: inherit;
+  }
+
+  .kf-invoice-print__notes {
+    margin-top: 20px;
+    white-space: pre-wrap;
+    break-inside: avoid;
+  }
+}
