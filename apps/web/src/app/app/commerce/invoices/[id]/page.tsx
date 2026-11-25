@@ -29,6 +29,7 @@ import {
   ChevronRight,
   Pencil,
   Download,
+  RotateCcw,
 } from "lucide-react";
 import {
   getInvoice,
@@ -41,10 +42,22 @@ import {
   recordInvoicePayment,
   confirmPendingInvoicePayment,
   sendInvoiceEmail,
+  refundPayment,
   Invoice,
   PaymentRecord,
   InvoiceTimelineEntry,
 } from "@/lib/client";
+import {
+  isManualPayment,
+  isOutOfBandRefundable,
+  isGatewayRefundable,
+  GATEWAY_REFUND_HREF,
+  manualRefundableAmount,
+  manualRefundQuestion,
+  moneyOf,
+  outOfBandRefundQuestion,
+  MANUAL_REFUND_CHECKING,
+} from "@/lib/manual-refund";
 import { apiDelete, providerUnavailableOf } from "@/lib/api";
 import { canMarkInvoicePaid, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
@@ -119,6 +132,17 @@ export default function InvoiceDetailPage() {
   // W9-WEB-COMMERCE-NAV (R0-07): why the last "Email invoice" did not go out,
   // when the server said email is not set up or not available.
   const [emailError, setEmailError] = useState<string | null>(null);
+  // SWP-INV-REFUND-UI (BUG-049, D-169): the payment being refunded and the whole amount the confirm names; whether
+  // the refund is in flight; the last refusal, in the server's words; and whether the server refused this member
+  // refunds (403: no revenue write access).
+  // amount null: the dialog is open and the invoice's latest figures are being read (its confirm waits for them).
+  const [refundTarget, setRefundTarget] = useState<{ payment: PaymentRecord; amount: number | null } | null>(null);
+  // Review MINOR-5: each Refund press takes a lookup number; only the latest press's read opens its amount.
+  const refundLookupRef = useRef(0);
+  const [refunding, setRefunding] = useState(false);
+  const refundingRef = useRef(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [refundForbidden, setRefundForbidden] = useState(false);
 
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -384,6 +408,76 @@ export default function InvoiceDetailPage() {
     }
   };
 
+  // SWP-INV-REFUND-UI (BUG-049; refund ruling D-169: whole-payment refunds only). A payment recorded by hand is
+  // refunded through POST .../payments/:paymentId/refund (revenue write; no provider is called: the member gives the
+  // money back). Refund asks first, naming the whole amount the server will refund (what is left of the payment,
+  // never more than the invoice received net: manualRefundableAmount, the server's reading); nothing is sent until it
+  // is confirmed, and a second press while it is in flight sends nothing. Only the server's answer is reported: its
+  // refund row's amount on success, after which the invoice, its payments and its activity are read again; a refusal
+  // in the server's words (a 403 also withdraws Refund; any other re-reads, as the payment may have changed).
+  // Review MINOR-3 (repair round 1): the amount is never the last-loaded one. The dialog opens at once and the invoice
+  // and its payments are read again; the confirm waits for that read and names the amount from it (a payment refunded
+  // meanwhile, in part or whole, by another member). Only the latest press's read counts; Cancel drops a read in flight.
+  const openRefund = async (p: PaymentRecord) => {
+    if (!businessId || !invoice || refundingRef.current) return;
+    const lookup = ++refundLookupRef.current;
+    setRefundError(null);
+    setRefundTarget({ payment: p, amount: null });
+    const [fresh, list] = await Promise.all([getInvoice(businessId, invoice.id), listInvoicePayments(businessId, invoice.id)]);
+    if (!mountedRef.current || lookup !== refundLookupRef.current) return;
+    if (fresh.data) setInvoice(fresh.data);
+    if (!list.data) {
+      setRefundTarget(null);
+      setRefundError(list.error ?? "The invoice's payments could not be read.");
+      return;
+    }
+    setPayments(list.data.payments);
+    const current = list.data.payments.find((row) => row.id === p.id);
+    const amount = current && (isManualPayment(current) || isOutOfBandRefundable(current)) ? manualRefundableAmount(current, list.data.payments, list.data.paidAmount) : 0;
+    if (!current || !(amount > 0)) {
+      setRefundTarget(null);
+      setRefundError("Nothing is left to refund on this payment.");
+      return;
+    }
+    setRefundTarget({ payment: current, amount });
+  };
+
+  const reloadAfterRefund = async () => {
+    if (!businessId || !invoice) return;
+    const fresh = await getInvoice(businessId, invoice.id);
+    if (fresh.data && mountedRef.current) setInvoice(fresh.data);
+    await loadPayments();
+    void refreshTimeline();
+  };
+
+  const handleRefund = async () => {
+    const target = refundTarget;
+    if (!businessId || !invoice || !target || target.amount === null || refundingRef.current) return;
+    refundingRef.current = true;
+    setRefunding(true);
+    setRefundError(null);
+    try {
+      const { data, error, status } = await refundPayment(businessId, target.payment.id);
+      if (!mountedRef.current) return;
+      setRefundTarget(null);
+      if (!error && data) {
+        toast.success(`Refunded ${formatAmount(Math.abs(Number(data.amount)), data.currency || invoice.currency)}`, {
+          description: "Recorded in KeyFlow. Give the money back to the customer yourself: nothing was sent to them.",
+        });
+        await reloadAfterRefund();
+        return;
+      }
+      const message = error ?? "The refund was not recorded.";
+      setRefundError(message);
+      toast.error("Not refunded", { description: message });
+      if (status === 403) setRefundForbidden(true);
+      else await reloadAfterRefund();
+    } finally {
+      refundingRef.current = false;
+      if (mountedRef.current) setRefunding(false);
+    }
+  };
+
   const handleSendReminder = () => {
     if (!invoice) return;
     openComposer({
@@ -569,6 +663,12 @@ export default function InvoiceDetailPage() {
                 )}
                 {activeTab === "payments" && (
                   <motion.div key="payments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                    {refundError && (
+                      <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        <span>Not refunded: {refundError}</span>
+                        <button onClick={() => setRefundError(null)} className="shrink-0 text-xs font-medium underline">Dismiss</button>
+                      </div>
+                    )}
                     {paymentsLoading ? <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div> :
                       listedPayments.length === 0 ? (
                         <div className="text-center py-6">
@@ -577,6 +677,17 @@ export default function InvoiceDetailPage() {
                         </div>
                       ) : listedPayments.map(p => {
                         const pendingExtracted = isPendingExtractedPayment(p);
+                        // SWP-INV-REFUND-UI: a payment recorded by hand is refunded here (Refund); a WiPay payment,
+                        // whose gateway has no refund API, has its refund made outside KeyFlow recorded here (Record
+                        // refund, the same bookkeeping door, repair round 1b); a Stripe or PayPal payment is refunded
+                        // through its gateway in Money in (a link); any other payment is offered neither (fail closed).
+                        // Each whole, while something of it is left.
+                        const manual = isManualPayment(p);
+                        const outOfBand = !manual && isOutOfBandRefundable(p);
+                        const viaGateway = !manual && isGatewayRefundable(p);
+                        const known = manual || outOfBand || viaGateway;
+                        const refundable = manual || outOfBand ? manualRefundableAmount(p, payments, paidAmount) : 0;
+                        const refunded = known && manualRefundableAmount(p, payments, Infinity) <= 0;
                         return (
                         <div key={p.id} data-testid="invoice-payment-row" data-payment-id={p.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/60">
                           <div className="flex items-center gap-3">
@@ -599,6 +710,22 @@ export default function InvoiceDetailPage() {
                                 {confirmingPaymentId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
                                 Confirm
                               </button>
+                            )}
+                            {refunded && <span className="text-[11px] font-medium text-muted-foreground">Refunded</span>}
+                            {refundable > 0 && !refundForbidden && (
+                              <button
+                                onClick={() => void openRefund(p)}
+                                disabled={refunding}
+                                className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg border border-border text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                {outOfBand ? "Record refund" : "Refund"}
+                              </button>
+                            )}
+                            {viaGateway && !refunded && (
+                              <Link href={GATEWAY_REFUND_HREF} className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors">
+                                Refund in Money in
+                              </Link>
                             )}
                             <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${p.status === "SUCCESSFUL" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{p.status}</span>
                           </div>
@@ -738,6 +865,29 @@ export default function InvoiceDetailPage() {
       )}
 
       {printSheetShown && createPortal(<InvoicePrintSheet doc={invoiceDocumentOf(invoice, paidAmount, amountDue)} />, document.body)}
+
+      {/* SWP-INV-REFUND-UI (D-169): the whole payment, no amount field. */}
+      <ConfirmDialog
+        open={refundTarget !== null}
+        title={refundTarget && isOutOfBandRefundable(refundTarget.payment) ? "Record a refund made outside KeyFlow?" : "Refund this payment?"}
+        message={refundTarget?.amount != null && isOutOfBandRefundable(refundTarget.payment) ? outOfBandRefundQuestion({
+          refund: formatAmount(refundTarget.amount, invoice.currency),
+          paid: formatAmount(moneyOf(refundTarget.payment.amount), invoice.currency),
+          whole: moneyOf(refundTarget.amount) === moneyOf(refundTarget.payment.amount),
+          on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
+        }) : refundTarget?.amount != null ? manualRefundQuestion({
+          refund: formatAmount(refundTarget.amount, invoice.currency),
+          paid: formatAmount(moneyOf(refundTarget.payment.amount), invoice.currency),
+          whole: moneyOf(refundTarget.amount) === moneyOf(refundTarget.payment.amount),
+          method: refundTarget.payment.method ?? refundTarget.payment.provider,
+          on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
+        }) : MANUAL_REFUND_CHECKING}
+        confirmLabel={`${refundTarget && isOutOfBandRefundable(refundTarget.payment) ? "Record refund" : "Refund"}${refundTarget?.amount != null ? ` ${formatAmount(refundTarget.amount, invoice.currency)}` : ""}`}
+        variant="danger"
+        busy={refunding || refundTarget?.amount == null}
+        onCancel={() => { if (!refundingRef.current) { refundLookupRef.current++; setRefundTarget(null); } }}
+        onConfirm={() => void handleRefund()}
+      />
 
       <ConfirmDialog open={confirmOpen} onCancel={() => setConfirmOpen(false)} title={confirmTitle} message={confirmMessage} confirmLabel="Confirm" variant={confirmTitle.includes("Delete") || confirmTitle.includes("Void") ? "danger" : "default"} onConfirm={() => { confirmAction?.(); setConfirmOpen(false); }} />
     </motion.div>

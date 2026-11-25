@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CreditCard, Plus, RefreshCcw, ExternalLink, Trash2, AlertCircle, Search, Receipt, Copy, Plug } from "lucide-react";
+import { CreditCard, Plus, RefreshCcw, ExternalLink, Trash2, AlertCircle, Search, Receipt, Copy, Plug, RotateCcw } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { formatCurrency } from "@/lib/currency";
 import {
   fetchPaymentsGateways,
   fetchPaymentsTransactions,
@@ -14,11 +16,16 @@ import {
   createPaymentsLink,
   revokePaymentsLink,
   refundPaymentsCharge,
+  fetchBusinessPayments,
+  listInvoicePayments,
+  refundPayment,
+  type BusinessPayment,
   type PaymentsGatewayId,
   type PaymentsGatewayStatus,
   type PaymentsTransaction,
   type PaymentsLink,
 } from "@/lib/client";
+import { isManualPayment, manualRefundableAmount, manualRefundQuestion, moneyOf, MANUAL_REFUND_CHECKING } from "@/lib/manual-refund";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type TabKey = "transactions" | "links" | "refunds";
@@ -69,6 +76,20 @@ export default function PaymentsPage() {
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [selectedTx, setSelectedTx] = useState<PaymentsTransaction | null>(null);
+  // SWP-INV-REFUND-UI (BUG-049, D-169): the business's own payment rows (GET /commerce/businesses/:id/payments,
+  // revenue read), for the payments recorded by hand; why they could not be read (no amount is shown then, D-100);
+  // the one being refunded with the whole amount its confirm names; the refund in flight; the last refusal in the
+  // server's words; and whether the server refused this member refunds (403).
+  const [recorded, setRecorded] = useState<BusinessPayment[]>([]);
+  const [recordedError, setRecordedError] = useState<string | null>(null);
+  // amount null: the dialog is open and the invoice's latest figures are being read (its confirm waits for them).
+  const [refundTarget, setRefundTarget] = useState<{ payment: BusinessPayment; amount: number | null } | null>(null);
+  // Review MINOR-5: each Refund press takes a lookup number; only the latest press's read opens its amount.
+  const refundLookupRef = useRef(0);
+  const [refunding, setRefunding] = useState(false);
+  const refundingRef = useRef(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [refundForbidden, setRefundForbidden] = useState(false);
 
   const setActiveTab = useCallback(
     (k: string) => router.replace(`/app/payments?tab=${k}`, { scroll: false }),
@@ -100,12 +121,87 @@ export default function PaymentsPage() {
     loadAll();
   }, [loadAll]);
 
+  // SWP-INV-REFUND-UI review MINOR-5 (repair round 1): the payments recorded by hand are read on their own, not with
+  // the gateway activity, so a search keystroke (which reads the activity again) does not read them again.
+  const loadRecorded = useCallback(async () => {
+    if (!businessId) return;
+    const r = await fetchBusinessPayments(businessId);
+    setRecorded(r.data ?? []);
+    setRecordedError(r.data ? null : r.error ?? "The payments could not be read");
+  }, [businessId]);
+
+  useEffect(() => {
+    void loadRecorded();
+  }, [loadRecorded]);
+
+  const refreshAll = useCallback(() => {
+    void loadAll();
+    void loadRecorded();
+  }, [loadAll, loadRecorded]);
+
   useEffect(() => {
     if (txParam && transactions.length) {
       const found = transactions.find((t) => t.id === txParam);
       if (found) setSelectedTx(found);
     }
   }, [txParam, transactions]);
+
+  // SWP-INV-REFUND-UI (BUG-049; refund ruling D-169: whole-payment refunds only). A payment recorded by hand is
+  // refunded through POST /commerce/businesses/:id/payments/:paymentId/refund (revenue write; no provider is called).
+  // Refund first reads that invoice's payments (the server's rows and net received now) and names the whole amount
+  // the server will refund (manualRefundableAmount, its reading); nothing is sent until it is confirmed, and a second
+  // press while it is in flight sends nothing. Only the server's answer is reported: its refund row's amount on
+  // success, after which the payments are read again; a refusal in the server's words (a 403 also withdraws Refund).
+  const openRefund = async (p: BusinessPayment) => {
+    if (!businessId || refundingRef.current) return;
+    const lookup = ++refundLookupRef.current;
+    setRefundError(null);
+    setRefundTarget({ payment: p, amount: null });
+    const { data, error } = await listInvoicePayments(businessId, p.invoiceId);
+    // Review MINOR-5: a press made after this one owns the dialog; Cancel drops this read too.
+    if (lookup !== refundLookupRef.current) return;
+    if (!data) {
+      setRefundTarget(null);
+      setRefundError(error ?? "The invoice's payments could not be read");
+      return;
+    }
+    const current = data.payments.find((row) => row.id === p.id);
+    const amount = current && isManualPayment(current) ? manualRefundableAmount(current, data.payments, data.paidAmount) : 0;
+    if (!(amount > 0)) {
+      setRefundTarget(null);
+      setRefundError("Nothing is left to refund on this payment.");
+      void loadRecorded();
+      return;
+    }
+    setRefundTarget({ payment: p, amount });
+  };
+
+  const handleRefund = async () => {
+    const target = refundTarget;
+    if (!businessId || !target || target.amount === null || refundingRef.current) return;
+    refundingRef.current = true;
+    setRefunding(true);
+    setRefundError(null);
+    try {
+      const { data, error, status } = await refundPayment(businessId, target.payment.id);
+      setRefundTarget(null);
+      if (!error && data) {
+        toast.success(`Refunded ${formatCurrency(Math.abs(Number(data.amount)), data.currency || target.payment.currency)}`, {
+          description: "Recorded in KeyFlow. Give the money back to the customer yourself: nothing was sent to them.",
+        });
+        await loadRecorded();
+        return;
+      }
+      const message = error ?? "The refund was not recorded.";
+      setRefundError(message);
+      toast.error("Not refunded", { description: message });
+      if (status === 403) setRefundForbidden(true);
+      else await loadRecorded();
+    } finally {
+      refundingRef.current = false;
+      setRefunding(false);
+    }
+  };
 
   const disconnectedGateways = useMemo(() => gateways.filter((g) => !g.connected), [gateways]);
 
@@ -130,7 +226,7 @@ export default function PaymentsPage() {
       onAction={() => {
         if (activeTab === "links") setShowLinkModal(true);
         else if (activeTab === "refunds") setShowRefundModal(true);
-        else loadAll();
+        else refreshAll();
       }}
       headerRight={
         <div className="flex items-center gap-2 text-xs">
@@ -172,15 +268,26 @@ export default function PaymentsPage() {
       {loading ? (
         <div className="flex items-center justify-center py-20 text-sm text-gray-500">Loading payments…</div>
       ) : activeTab === "transactions" ? (
-        <TransactionsTab
-          transactions={transactions}
-          totalTtd={totalTtd}
-          search={search}
-          setSearch={setSearch}
-          onRefresh={loadAll}
-          refreshing={refreshing}
-          onSelect={setSelectedTx}
-        />
+        <div className="space-y-6">
+          <TransactionsTab
+            transactions={transactions}
+            totalTtd={totalTtd}
+            search={search}
+            setSearch={setSearch}
+            onRefresh={refreshAll}
+            refreshing={refreshing}
+            onSelect={setSelectedTx}
+          />
+          <RecordedPayments
+            payments={recorded}
+            readError={recordedError}
+            refundError={refundError}
+            onDismissError={() => setRefundError(null)}
+            canRefund={!refundForbidden}
+            refunding={refunding}
+            onRefund={(p) => void openRefund(p)}
+          />
+        </div>
       ) : activeTab === "links" ? (
         <LinksTab
           links={links}
@@ -240,6 +347,24 @@ export default function PaymentsPage() {
       )}
 
       {selectedTx && <TransactionDrawer tx={selectedTx} onClose={() => setSelectedTx(null)} />}
+
+      {/* SWP-INV-REFUND-UI (D-169): the whole payment, no amount field. */}
+      <ConfirmDialog
+        open={refundTarget !== null}
+        title="Refund this payment?"
+        message={refundTarget?.amount != null ? manualRefundQuestion({
+          refund: formatCurrency(refundTarget.amount, refundTarget.payment.currency),
+          paid: formatCurrency(moneyOf(refundTarget.payment.amount), refundTarget.payment.currency),
+          whole: moneyOf(refundTarget.amount) === moneyOf(refundTarget.payment.amount),
+          method: refundTarget.payment.method ?? refundTarget.payment.provider,
+          on: `${new Date(refundTarget.payment.createdAt).toLocaleDateString()}${refundTarget.payment.invoice?.invoiceNumber ? ` for invoice ${refundTarget.payment.invoice.invoiceNumber}` : ""}`,
+        }) : MANUAL_REFUND_CHECKING}
+        confirmLabel={refundTarget?.amount != null ? `Refund ${formatCurrency(refundTarget.amount, refundTarget.payment.currency)}` : "Refund"}
+        variant="danger"
+        busy={refunding || refundTarget?.amount == null}
+        onCancel={() => { if (!refundingRef.current) { refundLookupRef.current++; setRefundTarget(null); } }}
+        onConfirm={() => void handleRefund()}
+      />
     </WorkspaceShell>
   );
 }
@@ -368,6 +493,84 @@ function TransactionsTab({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * SWP-INV-REFUND-UI (BUG-049): the payments recorded by hand on the business's invoices (cash, bank transfer, a
+ * mark-paid row; never a gateway charge, which the activity above and its gateway refund cover), newest first, each
+ * with its invoice, its amount in its own currency and Refund while something of it is left; one with nothing left
+ * says Refunded. When the payments cannot be read (D-100: no revenue read), it says so and shows no amount.
+ */
+function RecordedPayments({
+  payments,
+  readError,
+  refundError,
+  onDismissError,
+  canRefund,
+  refunding,
+  onRefund,
+}: {
+  payments: BusinessPayment[];
+  readError: string | null;
+  refundError: string | null;
+  onDismissError: () => void;
+  canRefund: boolean;
+  refunding: boolean;
+  onRefund: (p: BusinessPayment) => void;
+}) {
+  const manual = payments.filter(isManualPayment);
+  return (
+    <section aria-labelledby="recorded-payments-heading" className="space-y-3">
+      <div>
+        <h2 id="recorded-payments-heading" className="text-sm font-semibold text-gray-900">Payments recorded by hand</h2>
+        <p className="text-xs text-gray-500">Cash, bank transfer and other payments recorded on an invoice. A refund here is recorded in KeyFlow: you give the money back.</p>
+      </div>
+      {refundError && (
+        <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <span>Not refunded: {refundError}</span>
+          <button onClick={onDismissError} className="shrink-0 text-xs font-medium underline">Dismiss</button>
+        </div>
+      )}
+      {readError ? (
+        <p className="text-sm text-gray-600">Payments recorded by hand could not be read: {readError}</p>
+      ) : manual.length === 0 ? (
+        <p className="text-sm text-gray-500">No payments recorded by hand yet.</p>
+      ) : (
+        <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+          {manual.map((p) => {
+            const rows = payments.filter((row) => row.invoiceId === p.invoiceId);
+            const refunded = manualRefundableAmount(p, rows, Infinity) <= 0;
+            const contact = p.invoice?.contact;
+            const customer = contact ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || contact.email || null : null;
+            return (
+              <li key={p.id} data-testid="recorded-payment-row" data-payment-id={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{formatCurrency(Number(p.amount), p.currency)}</div>
+                  <div className="text-xs text-gray-500">
+                    {[p.method || p.provider, new Date(p.createdAt).toLocaleDateString(), customer].filter(Boolean).join(" · ")}
+                    {p.invoice?.invoiceNumber ? ` · Invoice ${p.invoice.invoiceNumber}` : ""}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {refunded ? (
+                    <span className="text-xs font-medium text-gray-500">Refunded</span>
+                  ) : canRefund ? (
+                    <button
+                      onClick={() => onRefund(p)}
+                      disabled={refunding}
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3 w-3" /> Refund
+                    </button>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
