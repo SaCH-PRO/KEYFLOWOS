@@ -13338,6 +13338,113 @@
    "track_ruling": "orchestrator proposal 2026-11-25",
    "scope": "From M11's correctness confirmation: the owner deletes customer X, then within the 5 s Undo window clicks X in the next-action queue or focus view (its own state, not updated when the list hides X). FU-C4-FOCUS-OPEN now navigates to /app/crm/contacts/X, so leaving the page sends X's delete at once (FU-CONTACT-DELETE-LEAVE's rule) while X's page loads and trackRecent records it. Hide pending-delete ids from the queue and focus view, as the list does.",
    "definition_of_done": "RED: with a single delete pending, the queue and focus view do not offer that customer; Undo brings it back."
+  },
+  {
+   "id": "FU-REQUIRE-AUTH-REMOUNT",
+   "title": "The app shell is not torn down and re-verified on every page change",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C",
+    "D",
+    "F"
+   ],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/components/require-auth.tsx"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner (recommended: launch track; it affects every navigation): found 2026-11-25",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "Found by WEDGE-WA-INBOUND-CAPTURE's web half (2026-11-25): components/require-auth.tsx's verify depends on redirectToLogin, which depends on pathname, so every in-app navigation returns RequireAuth to 'checking' and replaces the whole shell with its spinner; the destination page mounts twice, and a page that reads and strips a one-shot URL parameter (?contactId) loses it. The WhatsApp capture doors therefore use full page loads; the contacts screens' Book appointment door (/app/bookings?contactId=) is likely broken by the same mechanism. Verify once per session (and on token change), not per pathname; keep the 401 redirect.",
+   "definition_of_done": "RED: a client navigation between two /app pages does not show RequireAuth's spinner or remount the shell, and a one-shot ?contactId survives a router.push; 401 still redirects to sign-in. Then the WhatsApp doors can return to router.push."
+  },
+  {
+   "id": "FU-SIDESHEET-MOBILE-OFFSET",
+   "title": "The shared SideSheet opens in place on phones",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/components/ui/side-sheet.tsx"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found 2026-11-25",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "Found by WEDGE-WA-INBOUND-CAPTURE's web half: useIsMobile starts false, so every freshly mounted SideSheet starts in its desktop layout and, on switching to the phone layout, leaves the panel offset off the right edge.",
+   "definition_of_done": "RED: a SideSheet mounted open at 375px is fully on screen."
+  },
+  {
+   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
+   "title": "The contact's Send quote opens New quote for that customer",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C",
+    "D"
+   ],
+   "step": 6,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-actions.ts"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found 2026-11-25",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "Found by WEDGE-WA-INBOUND-CAPTURE's web half: Send quote pushes ?tab=billing&segment=quotes&contactId=, which the commerce page maps to Snapshot, so it opens no quote. Point it at ?tab=quotes&contactId= (which the commerce page now reads).",
+   "definition_of_done": "RED: Send quote from a contact opens the New quote form with that customer chosen."
+  },
+  {
+   "id": "FU-INVOICE-REMAINING-CREDITS",
+   "title": "The operator invoice detail's remaining balance nets applied credit notes and is 0 on VOID",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "E"
+   ],
+   "step": 6,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/commerce/commerce.service.ts (getInvoiceForBusiness)"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "follow-on",
+   "track_reason": "pending the owner: found 2026-11-25",
+   "track_ruling": "orchestrator proposal 2026-11-25",
+   "scope": "Found by SWP-INV-DETAIL's web-half correctness review: the operator detail's remaining comes from balanceOfStoredRows alone, not net of credit notes (unlike the public reader) and not status-aware, so a FULLY_CREDITED invoice reads 'Amount due TTD 300.00' and its PDF 'Balance due'. The web clamps FULLY_CREDITED and VOID to 0 (SWP-INV-DETAIL repair); PARTIALLY_CREDITED needs the server figure.",
+   "definition_of_done": "RED (real DB): a partially credited invoice's operator remaining equals total - payments - applied credits; VOID and FULLY_CREDITED read 0."
   }
  ],
  "moot": [
