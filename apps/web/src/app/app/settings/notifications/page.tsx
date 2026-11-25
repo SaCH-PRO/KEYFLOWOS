@@ -147,7 +147,8 @@ export default function NotificationsSettingsPage() {
     if (!businessId) { setSaving(null); return; }
     const res = await apiPatch(`/notifications/businesses/${businessId}/customer-preferences`, { [key]: newValue });
     if (res.error) {
-      setPreferences(preferences);
+      // Put back only this switch, on whatever the page holds now (a Retry may have reloaded it meanwhile).
+      setPreferences((current) => (current ? { ...current, [key]: !newValue } : current));
       toast.error("Failed to update notification preference");
     } else {
       toast.success("Notification preference updated");
