@@ -39,6 +39,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *   RMN-15  RED-AT-096b9a20  correctness R-MINOR-1: signing out (or in) clears a pending notice without announcing it,
  *                       so the Business Genome gate, which re-checks on the announcement, does not redirect a member
  *                       who is signing out to /app/onboarding
+ * Correctness confirmation (21defe66):
+ *   RMN-16  pin         MINOR: clearAdminSession itself (every sign-in and sign-out runs it) clears a pending notice
+ *                       without announcing it; RMN-15 alone reaches it only through clearStoredBusinessId
  */
 
 const { bootstrapIdentity } = vi.hoisted(() => ({ bootstrapIdentity: vi.fn() }));
@@ -270,6 +273,27 @@ describe("SWP-REMOVED-MEMBER-NOTICE: a removed member is told, by name", () => {
       ws.clearStoredBusinessId();
       expect(ws.getRemovedBusinessNotice()).toBeNull();
       expect(announced, "nothing is announced while the session ends").toEqual([]);
+    } finally {
+      window.removeEventListener("kf:business-removed", listen);
+    }
+  });
+
+  it("RMN-16 pin (correctness confirmation MINOR at 21defe66): a sign-in or sign-out's clearAdminSession clears a pending notice without announcing it", async () => {
+    workingIn(OWNERS);
+    serve({ businesses: [OWN] });
+    const ws = await import("../workspace");
+    await ws.refreshWorkspace();
+    expect(ws.getRemovedBusinessNotice()).not.toBeNull();
+
+    const announced: unknown[] = [];
+    const listen = (e: Event) => announced.push((e as CustomEvent).detail);
+    window.addEventListener("kf:business-removed", listen);
+    try {
+      // Called directly (the login, signup and callback pages and adminSignOut do), not through clearStoredBusinessId,
+      // whose own silent dismissal would empty the key first and leave this call nothing to announce.
+      ws.clearAdminSession();
+      expect(ws.getRemovedBusinessNotice()).toBeNull();
+      expect(announced, "nothing is announced while a session starts or ends").toEqual([]);
     } finally {
       window.removeEventListener("kf:business-removed", listen);
     }
