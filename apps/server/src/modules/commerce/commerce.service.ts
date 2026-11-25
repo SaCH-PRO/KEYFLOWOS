@@ -4576,8 +4576,12 @@ export class CommerceService {
             ? 'A refund cannot itself be refunded'
             : 'Payment is already refunded',
       );
-    const gatewayRefusal = (row: { provider: string | null | undefined }) => {
+    const gatewayRefusal = (row: { provider: string | null | undefined; providerPaymentId?: string | null }) => {
       if (options?.allowApiGatewayBookkeeping) return null;
+      // R1-COR-1 / D-55: hand-recorded payments (`recordPayment`, web-form `'PayPal'`,
+      // evidence `'PAYPAL'`, pre-D-55 manual rows) always carry a `manual_` providerPaymentId
+      // and have no provider charge/capture to refund at `/payments/businesses/:b/refunds`.
+      if ((row.providerPaymentId ?? '').startsWith('manual_')) return null;
       const normalized = (row.provider ?? '').trim().toLowerCase();
       if (!API_REFUNDABLE_GATEWAY_PROVIDERS.has(normalized)) return null;
       return new ConflictException(
