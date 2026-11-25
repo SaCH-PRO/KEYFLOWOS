@@ -1,43 +1,51 @@
 "use client";
 
 /**
- * OWNER-ALERTS-WEB (D-154): the owner's alerts for a new booking, a payment received and an "I've paid" claim, sent
- * by push to the owner's phone first, with an email as the fallback (OWNER-ALERTS-SERVER, OwnerAlertsListener).
+ * OWNER-ALERTS-WEB (D-154): the business owner's alerts for a new booking, a payment received and an "I've paid"
+ * claim, sent by push to the owner's phone first, with an email as the fallback (OWNER-ALERTS-SERVER,
+ * OwnerAlertsListener, which reads Business.notificationPreferences: `owner_alert_<category>: false` turns that
+ * category off, absent is on).
  *
- * The listener reads Business.notificationPreferences: `owner_alert_<category>: false` turns that category off, and a
- * key that is absent is on (resolveOwnerAlertPreferences). They are read and saved through the route Settings >
- * Notifications already uses for customer emails, GET/PATCH /notifications/businesses/:id/customer-preferences
- * (settings read / write). A save counts only when the server answers the value it was sent; a refused or dropped
- * save puts the switch back and says so. Push on this device is turned on in My account (D-282), not here.
+ * Repair round 1:
+ * - SEC-OAW-1 (orchestrator ruling: fail closed until the owner rules): only an owner of the business changes them,
+ *   and a change applies to every owner. GET /notifications/businesses/:id/owner-alerts answers the three values and
+ *   whether this member may change them (canChange); everyone else sees them read-only. Saves go through PATCH
+ *   .../customer-preferences, which refuses a non-owner (403 OWNER_ALERTS_OWNER_ONLY). The words say "the business
+ *   owner", never "your": the reader may not be the owner.
+ * - COR-OAW-1 / SEC-OAW-3: FAILURE-KIT. A read is judged by readState: no access is NoAccessState (no Retry; nothing
+ *   to retry), a failed load says so with Retry. A refused save is said in the kit's words (refusalMessage: the
+ *   server's own words), with no "Try again" on a refusal.
+ *
+ * A save counts only when the server answers the value it was sent; otherwise the switch goes back and it says so.
+ * Push on this device is turned on in My account (D-282), not here.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarCheck, CreditCard, HandCoins, Loader2, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CalendarCheck, CreditCard, HandCoins, Loader2, type LucideIcon } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
+import { readState, refusalMessage, type ReadState } from "@/lib/failure-kit";
+import { NoAccessState } from "@/components/ui/no-access-state";
 
-type AlertKey = "owner_alert_bookings" | "owner_alert_payments" | "owner_alert_claims";
-type AlertState = Record<AlertKey, boolean>;
-
-const ALERTS: { key: AlertKey; label: string; description: string; icon: LucideIcon }[] = [
-  { key: "owner_alert_bookings", label: "New bookings", description: "When a customer books with you", icon: CalendarCheck },
-  { key: "owner_alert_payments", label: "Payments received", description: "When an invoice or order is paid", icon: CreditCard },
-  { key: "owner_alert_claims", label: '"I\'ve paid" claims', description: "When a customer says they paid by bank transfer, to confirm", icon: HandCoins },
-];
-
-const prefsPath = (businessId: string) => `/notifications/businesses/${encodeURIComponent(businessId)}/customer-preferences`;
-
-function readAlerts(prefs: Record<string, unknown>): AlertState {
-  return {
-    owner_alert_bookings: prefs.owner_alert_bookings !== false,
-    owner_alert_payments: prefs.owner_alert_payments !== false,
-    owner_alert_claims: prefs.owner_alert_claims !== false,
-  };
+type Category = "bookings" | "payments" | "claims";
+type Alerts = Record<Category, boolean>;
+interface OwnerAlertsAnswer extends Alerts {
+  canChange: boolean;
 }
 
+const ALERTS: { category: Category; key: string; label: string; description: string; icon: LucideIcon }[] = [
+  { category: "bookings", key: "owner_alert_bookings", label: "New bookings", description: "When a customer books", icon: CalendarCheck },
+  { category: "payments", key: "owner_alert_payments", label: "Payments received", description: "When an invoice or order is paid", icon: CreditCard },
+  { category: "claims", key: "owner_alert_claims", label: '"I\'ve paid" claims', description: "When a customer says they paid by bank transfer, to confirm", icon: HandCoins },
+];
+
+const WHAT = "the business owner's alerts";
+const base = (businessId: string) => `/notifications/businesses/${encodeURIComponent(businessId)}`;
+
 export function OwnerAlertSettings({ businessId }: { businessId: string | null }) {
-  const [alerts, setAlerts] = useState<AlertState | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<Alerts | null>(null);
+  const [canChange, setCanChange] = useState(false);
+  const [read, setRead] = useState<ReadState>({ kind: "ok" });
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState<AlertKey | null>(null);
+  const [saving, setSaving] = useState<Category | null>(null);
   const [reads, setReads] = useState(0);
   const live = useRef(true);
 
@@ -51,20 +59,22 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
   useEffect(() => {
     let current = true;
     void (async () => {
+      setAlerts(null);
       if (!businessId) {
-        setAlerts(null);
-        setLoadError("Your alert settings could not be loaded: no business is selected.");
+        setRead({ kind: "failed", message: `Couldn't load ${WHAT}: no business is selected.` });
         return;
       }
-      setLoadError(null);
-      const { data, error } = await apiGet<Record<string, unknown>>(prefsPath(businessId));
+      setRead({ kind: "ok" });
+      const res = await apiGet<OwnerAlertsAnswer>(`${base(businessId)}/owner-alerts`);
       if (!current) return;
-      if (error || !data || typeof data !== "object") {
-        setAlerts(null);
-        setLoadError(`Your alert settings could not be loaded (${error || "no answer"}).`);
+      const state = readState(res, { what: WHAT });
+      const data = res.data;
+      if (state.kind !== "ok" || !data || typeof data !== "object") {
+        setRead(state.kind === "ok" ? { kind: "failed", message: `Couldn't load ${WHAT}.` } : state);
         return;
       }
-      setAlerts(readAlerts(data));
+      setCanChange(data.canChange === true);
+      setAlerts({ bookings: data.bookings !== false, payments: data.payments !== false, claims: data.claims !== false });
     })();
     return () => {
       current = false;
@@ -72,37 +82,42 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
   }, [businessId, reads]);
 
   const toggle = useCallback(
-    async (key: AlertKey) => {
-      if (!businessId || !alerts || saving) return;
-      const next = !alerts[key];
-      const label = ALERTS.find((a) => a.key === key)?.label ?? key;
-      setSaving(key);
+    async (category: Category) => {
+      if (!businessId || !alerts || !canChange || saving) return;
+      const { key, label } = ALERTS.find((a) => a.category === category)!;
+      const next = !alerts[category];
+      setSaving(category);
       setSaveError(null);
-      setAlerts({ ...alerts, [key]: next });
-      const { data, error } = await apiPatch<Record<string, unknown>>(prefsPath(businessId), { [key]: next });
+      setAlerts({ ...alerts, [category]: next });
+      const res = await apiPatch<Record<string, unknown>>(`${base(businessId)}/customer-preferences`, { [key]: next });
       if (!live.current) return;
-      const kept = !error && data && typeof data === "object" && (data as Record<string, unknown>)[key] === next;
+      const refused = refusalMessage(res, { what: `change ${WHAT}` });
+      const kept = !refused && !!res.data && typeof res.data === "object" && res.data[key] === next;
       if (!kept) {
-        setAlerts((prev) => (prev ? { ...prev, [key]: !next } : prev));
-        setSaveError(`${label}: your change was not saved${error ? ` (${error})` : ""}. Try again.`);
+        setAlerts((prev) => (prev ? { ...prev, [category]: !next } : prev));
+        setSaveError(`${label}: ${refused ?? "the change was not saved (the server did not keep it)."}`);
       }
       setSaving(null);
     },
-    [businessId, alerts, saving],
+    [businessId, alerts, canChange, saving],
   );
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-testid="owner-alert-settings">
       <div>
-        <h3 className="text-sm font-semibold">Alerts to you</h3>
+        <h3 className="text-sm font-semibold">The business owner&apos;s alerts</h3>
         <p className="kf-text-caption text-muted-foreground">
-          A push to your phone, or an email if push is not on.
+          A push to the owner&apos;s phone first, or an email if push is not on. A change here applies to every owner of
+          this business.
         </p>
       </div>
 
-      {loadError && (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-border/40">
-          <p className="kf-text-caption">{loadError}</p>
+      {read.kind === "no-access" && <NoAccessState message={read.message} variant="compact" />}
+
+      {read.kind === "failed" && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-border/40 p-3">
+          <AlertTriangle className="h-4 w-4 shrink-0" style={{ color: "hsl(var(--kf-error))" }} />
+          <p className="kf-text-caption min-w-0 flex-1 break-words">{read.message}</p>
           <button
             type="button"
             onClick={() => setReads((n) => n + 1)}
@@ -113,11 +128,13 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
         </div>
       )}
 
-      {!loadError && !alerts && (
+      {read.kind === "ok" && !alerts && (
         <p className="kf-text-caption text-muted-foreground" role="status">
-          Loading your alert settings…
+          Loading {WHAT}…
         </p>
       )}
+
+      {alerts && !canChange && <p className="kf-text-caption">Only the business owner can change these.</p>}
 
       {saveError && (
         <p role="alert" className="kf-text-caption" style={{ color: "hsl(var(--kf-error))" }}>
@@ -126,11 +143,11 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
       )}
 
       {alerts &&
-        ALERTS.map(({ key, label, description, icon: Icon }) => {
-          const on = alerts[key];
+        ALERTS.map(({ category, label, description, icon: Icon }) => {
+          const on = alerts[category];
           return (
             <div
-              key={key}
+              key={category}
               className="flex items-center justify-between gap-3 p-4 rounded-xl border border-border/40 bg-card/50"
             >
               <div className="flex items-center gap-3 min-w-0">
@@ -148,15 +165,14 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
                   <p className="kf-text-caption text-muted-foreground">{description}</p>
                 </div>
               </div>
-              {/* h-6 w-11 / h-5 w-5: Tailwind 3 has no h-5.5 or h-4.5 (the page's customer-email switches use them
-                  and render 0px tall in a browser). */}
+              {/* h-6 w-11 / h-5 w-5: Tailwind 3 has no h-5.5 or h-4.5 (they render 0px tall in a browser). */}
               <button
                 type="button"
                 role="switch"
                 aria-checked={on}
                 aria-label={`Alerts for ${label}`}
-                onClick={() => toggle(key)}
-                disabled={saving !== null}
+                onClick={() => toggle(category)}
+                disabled={!canChange || saving !== null}
                 className="relative h-6 w-11 rounded-full transition-colors duration-200 flex-shrink-0 disabled:opacity-70"
                 style={{ background: on ? "hsl(var(--kf-success))" : "hsl(var(--muted))" }}
               >
@@ -164,7 +180,7 @@ export function OwnerAlertSettings({ businessId }: { businessId: string | null }
                   className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200"
                   style={{ transform: on ? "translateX(22px)" : "translateX(2px)" }}
                 />
-                {saving === key && (
+                {saving === category && (
                   <Loader2
                     className="absolute top-1 right-1 w-3.5 h-3.5 animate-spin"
                     style={{ color: "hsl(var(--background))" }}

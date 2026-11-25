@@ -6,8 +6,21 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertBusinessOwnerMember, isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { resolveTimelineViewer, type TimelineViewer } from '../timeline/timeline-visibility';
 import { briefingContactRule, type BriefingContactRule } from '../commerce/revenue-intelligence.controller';
+
+/**
+ * OWNER-ALERTS-WEB repair round 1 (SEC-OAW-1; orchestrator ruling: fail closed until the owner rules): the business
+ * owner's alerts (OwnerAlertsListener: a new booking, a payment, an "I've paid" claim) are the owner's to change, under
+ * the one owner rule (assertBusinessOwnerMember: an OWNER membership, a co-owner included, with BusinessGuard's
+ * SUPER_ADMIN bypass). Settings write alone does not change them.
+ */
+export const OWNER_ALERT_KEYS = ['owner_alert_bookings', 'owner_alert_payments', 'owner_alert_claims'] as const;
+export const OWNER_ALERTS_OWNER_ONLY = {
+  code: 'OWNER_ALERTS_OWNER_ONLY',
+  message: 'Only the business owner can change the owner\'s alerts (bookings, payments, "I\'ve paid" claims).',
+};
 
 /** The weekly financial briefing FinancialBriefingSchedulerService stores for the business: wholly revenue. */
 export const WEEKLY_BRIEFING_TYPE = 'financial.weekly_briefing';
@@ -124,11 +137,37 @@ export class NotificationsController {
 
   @Patch('businesses/:businessId/customer-preferences')
   @RequireModuleScope('settings', 'write')
-  updatePreferences(
+  async updatePreferences(
     @Param('businessId') businessId: string,
     @Body() body: Partial<NotificationPreferences>,
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    // SEC-OAW-1: a body carrying any owner alert key, whatever its value, is the owner's to send. Anyone else is
+    // refused whole, before anything is read or written (the customer-email keys in the same body included).
+    const touchesOwnerAlerts =
+      !!body && typeof body === 'object' && OWNER_ALERT_KEYS.some((key) => Object.prototype.hasOwnProperty.call(body, key));
+    if (touchesOwnerAlerts) await assertBusinessOwnerMember(this.prisma, businessId, req.user, OWNER_ALERTS_OWNER_ONLY);
     return this.transactionalEmail.updatePreferences(businessId, body);
+  }
+
+  /**
+   * OWNER-ALERTS-WEB repair round 1: the business owner's alerts as Settings > Notifications > Owner alerts shows them
+   * (the flat owner_alert_<category> keys, absent = on, as resolveOwnerAlertPreferences reads them), and whether the
+   * caller may change them (the owner rule of updatePreferences above), so the page shows them read-only to everyone
+   * else. Settings read, as GET customer-preferences.
+   */
+  @Get('businesses/:businessId/owner-alerts')
+  @RequireModuleScope('settings', 'read')
+  async getOwnerAlerts(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string; role?: string } }) {
+    const prefs = (await this.transactionalEmail.getPreferences(businessId)) as Record<string, unknown>;
+    const canChange =
+      req.user?.role === 'SUPER_ADMIN' || (await isBusinessOwnerMember(this.prisma.client, businessId, req.user?.id));
+    return {
+      bookings: prefs.owner_alert_bookings !== false,
+      payments: prefs.owner_alert_payments !== false,
+      claims: prefs.owner_alert_claims !== false,
+      canChange,
+    };
   }
 
   @Get('businesses/:businessId/customer-log')

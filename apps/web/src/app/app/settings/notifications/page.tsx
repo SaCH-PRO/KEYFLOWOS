@@ -19,7 +19,7 @@ import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { toast } from "sonner";
-// OWNER-ALERTS-WEB (D-154): the "Your alerts" tab, its own components.
+// OWNER-ALERTS-WEB (D-154): the "Owner alerts" tab, its own components.
 import { InstallAppStep } from "@/components/install-app-step";
 import { OwnerAlertSettings } from "@/components/owner-alert-settings";
 
@@ -200,7 +200,7 @@ export default function NotificationsSettingsPage() {
                 : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
-            {tab === "preferences" ? "Preferences" : tab === "alerts" ? "Your alerts" : `Log (${log.length})`}
+            {tab === "preferences" ? "Preferences" : tab === "alerts" ? "Owner alerts" : `Log (${log.length})`}
           </button>
         ))}
       </div>
@@ -414,9 +414,9 @@ export default function NotificationsSettingsPage() {
         </motion.div>
       )}
 
-      {/* OWNER-ALERTS-WEB (D-154): the owner's own alerts (push first, email fallback) and the install step. */}
+      {/* OWNER-ALERTS-WEB (D-154): the business owner's alerts (push first, email fallback) and the install step. */}
       {activeTab === "alerts" && (
-        <section aria-label="Your alerts" className="space-y-3">
+        <section aria-label="Owner alerts" className="space-y-3">
           <InstallAppStep />
           <OwnerAlertSettings businessId={getStoredBusinessId()} />
         </section>
