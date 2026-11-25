@@ -47,7 +47,7 @@ import {
   PaymentRecord,
   InvoiceTimelineEntry,
 } from "@/lib/client";
-import { isManualPayment, manualRefundableAmount } from "@/lib/manual-refund";
+import { isManualPayment, manualRefundableAmount, manualRefundQuestion, MANUAL_REFUND_CHECKING } from "@/lib/manual-refund";
 import { apiDelete, providerUnavailableOf } from "@/lib/api";
 import { canMarkInvoicePaid, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
@@ -125,7 +125,10 @@ export default function InvoiceDetailPage() {
   // SWP-INV-REFUND-UI (BUG-049, D-169): the payment being refunded and the whole amount the confirm names; whether
   // the refund is in flight; the last refusal, in the server's words; and whether the server refused this member
   // refunds (403: no revenue write access).
-  const [refundTarget, setRefundTarget] = useState<{ payment: PaymentRecord; amount: number } | null>(null);
+  // amount null: the dialog is open and the invoice's latest figures are being read (its confirm waits for them).
+  const [refundTarget, setRefundTarget] = useState<{ payment: PaymentRecord; amount: number | null } | null>(null);
+  // Review MINOR-5: each Refund press takes a lookup number; only the latest press's read opens its amount.
+  const refundLookupRef = useRef(0);
   const [refunding, setRefunding] = useState(false);
   const refundingRef = useRef(false);
   const [refundError, setRefundError] = useState<string | null>(null);
@@ -402,11 +405,31 @@ export default function InvoiceDetailPage() {
   // is confirmed, and a second press while it is in flight sends nothing. Only the server's answer is reported: its
   // refund row's amount on success, after which the invoice, its payments and its activity are read again; a refusal
   // in the server's words (a 403 also withdraws Refund; any other re-reads, as the payment may have changed).
-  const openRefund = (p: PaymentRecord) => {
-    const amount = manualRefundableAmount(p, payments, paidAmount);
-    if (!(amount > 0)) { setRefundError("Nothing is left to refund on this payment."); return; }
+  // Review MINOR-3 (repair round 1): the amount is never the last-loaded one. The dialog opens at once and the invoice
+  // and its payments are read again; the confirm waits for that read and names the amount from it (a payment refunded
+  // meanwhile, in part or whole, by another member). Only the latest press's read counts; Cancel drops a read in flight.
+  const openRefund = async (p: PaymentRecord) => {
+    if (!businessId || !invoice || refundingRef.current) return;
+    const lookup = ++refundLookupRef.current;
     setRefundError(null);
-    setRefundTarget({ payment: p, amount });
+    setRefundTarget({ payment: p, amount: null });
+    const [fresh, list] = await Promise.all([getInvoice(businessId, invoice.id), listInvoicePayments(businessId, invoice.id)]);
+    if (!mountedRef.current || lookup !== refundLookupRef.current) return;
+    if (fresh.data) setInvoice(fresh.data);
+    if (!list.data) {
+      setRefundTarget(null);
+      setRefundError(list.error ?? "The invoice's payments could not be read.");
+      return;
+    }
+    setPayments(list.data.payments);
+    const current = list.data.payments.find((row) => row.id === p.id);
+    const amount = current && isManualPayment(current) ? manualRefundableAmount(current, list.data.payments, list.data.paidAmount) : 0;
+    if (!current || !(amount > 0)) {
+      setRefundTarget(null);
+      setRefundError("Nothing is left to refund on this payment.");
+      return;
+    }
+    setRefundTarget({ payment: current, amount });
   };
 
   const reloadAfterRefund = async () => {
@@ -419,7 +442,7 @@ export default function InvoiceDetailPage() {
 
   const handleRefund = async () => {
     const target = refundTarget;
-    if (!businessId || !invoice || !target || refundingRef.current) return;
+    if (!businessId || !invoice || !target || target.amount === null || refundingRef.current) return;
     refundingRef.current = true;
     setRefunding(true);
     setRefundError(null);
@@ -674,7 +697,7 @@ export default function InvoiceDetailPage() {
                             {refunded && <span className="text-[11px] font-medium text-muted-foreground">Refunded</span>}
                             {refundable > 0 && !refundForbidden && (
                               <button
-                                onClick={() => openRefund(p)}
+                                onClick={() => void openRefund(p)}
                                 disabled={refunding}
                                 className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg border border-border text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
                               >
@@ -825,11 +848,17 @@ export default function InvoiceDetailPage() {
       <ConfirmDialog
         open={refundTarget !== null}
         title="Refund this payment?"
-        message={refundTarget ? `${formatAmount(refundTarget.amount, invoice.currency)} paid${refundTarget.payment.method ? ` by ${refundTarget.payment.method}` : ""} on ${new Date(refundTarget.payment.createdAt).toLocaleDateString()} is refunded whole, and the invoice is owed that much again. KeyFlow records the refund: give the money back to the customer yourself.` : ""}
-        confirmLabel={refundTarget ? `Refund ${formatAmount(refundTarget.amount, invoice.currency)}` : "Refund"}
+        message={refundTarget?.amount != null ? manualRefundQuestion({
+          refund: formatAmount(refundTarget.amount, invoice.currency),
+          paid: formatAmount(Number(refundTarget.payment.amount), invoice.currency),
+          whole: Math.round(refundTarget.amount * 100) === Math.round(Number(refundTarget.payment.amount) * 100),
+          method: refundTarget.payment.method ?? refundTarget.payment.provider,
+          on: new Date(refundTarget.payment.createdAt).toLocaleDateString(),
+        }) : MANUAL_REFUND_CHECKING}
+        confirmLabel={refundTarget?.amount != null ? `Refund ${formatAmount(refundTarget.amount, invoice.currency)}` : "Refund"}
         variant="danger"
-        busy={refunding}
-        onCancel={() => { if (!refundingRef.current) setRefundTarget(null); }}
+        busy={refunding || refundTarget?.amount == null}
+        onCancel={() => { if (!refundingRef.current) { refundLookupRef.current++; setRefundTarget(null); } }}
         onConfirm={() => void handleRefund()}
       />
 
