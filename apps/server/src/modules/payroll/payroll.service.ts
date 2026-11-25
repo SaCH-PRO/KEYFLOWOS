@@ -282,13 +282,22 @@ export class PayrollService {
   // ── Tier-3 transitions ─────────────────────────────────────────────────
 
   async approveRun(businessId: string, runId: string, userId?: string) {
-    const run = await this.getRun(businessId, runId);
-    if (run.status !== 'DRAFT') {
-      throw new BadRequestException(`Run is ${run.status} — only DRAFT runs can be approved`);
-    }
-    const approved = await this.prisma.client.payrollRun.update({
-      where: { id: runId },
-      data: { status: 'APPROVED', approvedAt: new Date(), approvedById: userId ?? null },
+    const approved = await this.prisma.client.$transaction(async (tx) => {
+      const run = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
+      if (!run) throw new NotFoundException('Payroll run not found');
+      if (run.status !== 'DRAFT') {
+        throw new BadRequestException(`Run is ${run.status} — only DRAFT runs can be approved`);
+      }
+      const claim = await tx.payrollRun.updateMany({
+        where: { id: runId, businessId, status: 'DRAFT' },
+        data: { status: 'APPROVED', approvedAt: new Date(), approvedById: userId ?? null },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException(`Payroll run ${runId} changed status concurrently; it was not approved`);
+      }
+      const updated = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
+      if (!updated) throw new NotFoundException('Payroll run not found');
+      return updated;
     });
     invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
     return approved;
@@ -532,7 +541,26 @@ export class PayrollService {
     let cleaned = '';
     for (let i = 0; i < raw.length; i += 1) {
       const code = raw.charCodeAt(i);
-      cleaned += code < 32 || code === 127 ? ' ' : raw[i];
+      // Reject unpaired UTF-16 surrogates (SEC-P59-2) so malformed Unicode returns 400 instead of 500 on DB write.
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = i + 1 < raw.length ? raw.charCodeAt(i + 1) : 0;
+        if (next < 0xdc00 || next > 0xdfff) {
+          throw new BadRequestException('reason contains invalid Unicode surrogate characters');
+        }
+        cleaned += raw[i] + raw[i + 1];
+        i += 1;
+        continue;
+      }
+      if (code >= 0xdc00 && code <= 0xdfff) {
+        throw new BadRequestException('reason contains invalid Unicode surrogate characters');
+      }
+      const isControlOrBidi =
+        code < 0x20 ||
+        code === 0x7f ||
+        (code >= 0x80 && code <= 0x9f) ||
+        (code >= 0x202a && code <= 0x202e) ||
+        (code >= 0x2066 && code <= 0x2069);
+      cleaned += isControlOrBidi ? ' ' : raw[i];
     }
     const normalized = cleaned.replace(/\s+/g, ' ').trim();
     if (normalized.length > 500) {

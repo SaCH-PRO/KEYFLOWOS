@@ -58,6 +58,7 @@ let safeToSpend: any;
 let businessGraph: any;
 let payrollService: any;
 let expensePosting: any;
+let invalidateSnapshotCache: (businessId: string) => void;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 const userRoles = new Map<string, string>();
@@ -99,6 +100,20 @@ function discardReq(
   );
   if (actor) req.set(HEADER, actor);
   return body !== undefined ? req.send(body) : req.send({});
+}
+
+function approveReq(actor: string, businessId: string, runId: string) {
+  return request(app.getHttpServer())
+    .post(`/payroll/businesses/${businessId}/runs/${runId}/approve`)
+    .set(HEADER, actor)
+    .send({});
+}
+
+function markPaidReq(actor: string, businessId: string, runId: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .post(`/payroll/businesses/${businessId}/runs/${runId}/mark-paid`)
+    .set(HEADER, actor)
+    .send(body);
 }
 
 let runSeq = 0;
@@ -199,6 +214,9 @@ beforeAll(async () => {
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   await app.init();
 
+  const { invalidateBusinessFinancialSnapshotCache } = await import('../src/modules/finance/finance-accounting.util');
+  invalidateSnapshotCache = invalidateBusinessFinancialSnapshotCache;
+
   safeToSpend = moduleRef.get(SafeToSpendService);
   businessGraph = moduleRef.get(BusinessGraphService);
   payrollService = moduleRef.get(PayrollService);
@@ -279,6 +297,7 @@ beforeEach(async () => {
   await db.$executeRawUnsafe(`DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`);
   await db.$executeRawUnsafe(`DELETE FROM payroll_items WHERE business_id LIKE ${sqlLikePrefix(P)}`);
   await db.$executeRawUnsafe(`DELETE FROM payroll_runs WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  invalidateSnapshotCache(ID.bizA);
 });
 
 afterAll(async () => {
@@ -308,6 +327,7 @@ describe('P59 — V1-65 (TOF-PAYROLL-DISCARD, D-144): POST /payroll/businesses/:
     expect(res.body).toMatchObject({
       id: run.id,
       status: 'VOID',
+      totalGross: 2500,
       discardedById: ID.ownerA,
       discardReason: 'Wrong period entered',
     });
@@ -450,29 +470,148 @@ describe('P59 — V1-65 (TOF-PAYROLL-DISCARD, D-144): POST /payroll/businesses/:
     expect(okRes.body.discardedById).toBe(ID.opsWrite);
   });
 
-  it('PD-05 RED-BEFORE: validates/sanitizes reason and handles concurrent discard calls atomically via CAS', async () => {
-    const run = await seedRun({ status: 'DRAFT', currency: 'TTD', totalGross: 1100, periodDayOffset: 27 });
+  it('PD-05 RED-BEFORE: validates/sanitizes reason deterministically (surrogates, C0/C1/BiDi, default fallback) and handles concurrent discard calls atomically via CAS', async () => {
+    const runSanitize = await seedRun({ status: 'DRAFT', currency: 'TTD', totalGross: 1100, periodDayOffset: 27 });
+    const runDefault = await seedRun({ status: 'DRAFT', currency: 'TTD', totalGross: 600, periodDayOffset: 28 });
+    const runConcurrent = await seedRun({ status: 'DRAFT', currency: 'TTD', totalGross: 950, periodDayOffset: 29 });
 
     // Non-string reason -> 400
-    expect((await discardReq(ID.ownerA, ID.bizA, run.id, { reason: 12345 as unknown as string })).status).toBe(400);
+    expect((await discardReq(ID.ownerA, ID.bizA, runSanitize.id, { reason: 12345 as unknown as string })).status).toBe(400);
     // Overlong reason (> 500 chars) -> 400
-    expect((await discardReq(ID.ownerA, ID.bizA, run.id, { reason: 'x'.repeat(501) })).status).toBe(400);
+    expect((await discardReq(ID.ownerA, ID.bizA, runSanitize.id, { reason: 'x'.repeat(501) })).status).toBe(400);
+    // Unpaired UTF-16 surrogates -> 400 (SEC-P59-2, never 500 on DB write)
+    expect((await discardReq(ID.ownerA, ID.bizA, runSanitize.id, { reason: 'bad \ud800 high' })).status).toBe(400);
+    expect((await discardReq(ID.ownerA, ID.bizA, runSanitize.id, { reason: 'bad \udfff low' })).status).toBe(400);
+
+    // Deterministic C0, C1 (U+009B), and BiDi override (U+202E) sanitization (COR-P59-2, SEC-P59-2).
+    const sanRes = await discardReq(ID.ownerA, ID.bizA, runSanitize.id, {
+      reason: 'Line 1\r\nLine 2\t\u0007\u009b\u202eok',
+    });
+    expect(sanRes.status).toBe(201);
+    expect(sanRes.body.discardReason).toBe('Line 1 Line 2 ok');
+    const sanRow = await db.payrollRun.findUniqueOrThrow({ where: { id: runSanitize.id } });
+    expect(sanRow.notes).toContain(': Line 1 Line 2 ok]');
+    const sanAct = await db.activity.findFirstOrThrow({
+      where: { businessId: ID.bizA, entityId: runSanitize.id, type: 'payroll_run.discarded' },
+    });
+    expect(sanAct.detail).toBe('Line 1 Line 2 ok');
+
+    // Deterministic whitespace-only reason falls back to 'Discarded by operator'.
+    const defRes = await discardReq(ID.ownerA, ID.bizA, runDefault.id, { reason: '   \t\r\n  ' });
+    expect(defRes.status).toBe(201);
+    expect(defRes.body.discardReason).toBe('Discarded by operator');
 
     // Concurrent discards on the same DRAFT run: exactly one wins (201), one loses (409), one Activity row.
     const [r1, r2] = await Promise.all([
-      discardReq(ID.ownerA, ID.bizA, run.id, { reason: 'Line 1\r\nLine 2' }),
-      discardReq(ID.opsWrite, ID.bizA, run.id, { reason: 'Concurrent call' }),
+      discardReq(ID.ownerA, ID.bizA, runConcurrent.id, { reason: 'First caller' }),
+      discardReq(ID.opsWrite, ID.bizA, runConcurrent.id, { reason: 'Second caller' }),
     ]);
     const statuses = [r1.status, r2.status].sort((a, b) => a - b);
     expect(statuses).toEqual([201, 409]);
 
     const winner = r1.status === 201 ? r1.body : r2.body;
     expect(winner.status).toBe('VOID');
-    expect(winner.discardReason).not.toMatch(/[\r\n]/);
 
     const audits = await db.activity.findMany({
-      where: { businessId: ID.bizA, entityType: 'payroll_run', entityId: run.id, type: 'payroll_run.discarded' },
+      where: { businessId: ID.bizA, entityType: 'payroll_run', entityId: runConcurrent.id, type: 'payroll_run.discarded' },
     });
     expect(audits).toHaveLength(1);
+  });
+
+  it('PD-06 (SEC-P59-1 / COR-P59-1): concurrent approveRun vs discardRun is mutually exclusive — VOID is never resurrected to APPROVED', async () => {
+    for (let i = 0; i < 4; i += 1) {
+      const run = await seedRun({
+        status: 'DRAFT',
+        currency: 'TTD',
+        totalGross: 1300,
+        periodDayOffset: 40 + i,
+      });
+
+      const [appRes, discRes] = await Promise.all([
+        approveReq(ID.ownerA, ID.bizA, run.id),
+        discardReq(ID.opsWrite, ID.bizA, run.id, { reason: `Race iteration ${i}` }),
+      ]);
+
+      // Exactly one transition may succeed (201); the loser must be refused (400 or 409).
+      const winners = [appRes.status, discRes.status].filter((s) => s === 201);
+      const losers = [appRes.status, discRes.status].filter((s) => s !== 201);
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      expect([400, 409]).toContain(losers[0]);
+
+      const stored = await db.payrollRun.findUniqueOrThrow({ where: { id: run.id } });
+      const audits = await db.activity.findMany({
+        where: { businessId: ID.bizA, entityType: 'payroll_run', entityId: run.id, type: 'payroll_run.discarded' },
+      });
+
+      if (discRes.status === 201) {
+        expect(stored.status).toBe('VOID');
+        expect(stored.notes).toContain('[VOIDED by');
+        expect(audits).toHaveLength(1);
+      } else {
+        expect(stored.status).toBe('APPROVED');
+        expect(stored.notes ?? '').not.toContain('[VOIDED by');
+        expect(audits).toHaveLength(0);
+      }
+    }
+  });
+
+  it('PD-07 (COR-P59-3): markRunPaid rejects VOID cleanly (400), empty-items & padded/lowercase foreign currency discard cleanly, and REVERSED posting refuses with 409', async () => {
+    // 1. Empty items (itemCount: 0) DRAFT run discards cleanly, and markRunPaid on VOID returns 400 with 0 ledger rows.
+    const emptyDraft = await seedRun({
+      status: 'DRAFT',
+      currency: 'TTD',
+      totalGross: 0,
+      itemCurrencies: [],
+      periodDayOffset: 50,
+    });
+    const emptyRes = await discardReq(ID.ownerA, ID.bizA, emptyDraft.id);
+    expect(emptyRes.status).toBe(201);
+    expect(emptyRes.body.status).toBe('VOID');
+    expect(emptyRes.body.discardReason).toBe('Discarded by operator');
+
+    const payVoidRes = await markPaidReq(ID.ownerA, ID.bizA, emptyDraft.id, { paymentMethod: 'bank_transfer' });
+    expect(payVoidRes.status).toBe(400);
+    const voidPostings = await db.financialTransaction.count({
+      where: { businessId: ID.bizA, sourceType: 'PayrollRun', sourceId: emptyDraft.id },
+    });
+    expect(voidPostings).toBe(0);
+
+    // 2. Lowercase/padded foreign currency (' usd ') APPROVED run in TTD business discards cleanly.
+    const paddedUsd = await seedRun({
+      status: 'APPROVED',
+      currency: ' usd ',
+      totalGross: 450,
+      itemCurrencies: [' usd '],
+      periodDayOffset: 51,
+    });
+    const paddedRes = await discardReq(ID.ownerA, ID.bizA, paddedUsd.id, { reason: 'Legacy padded usd run' });
+    expect(paddedRes.status).toBe(201);
+    expect(paddedRes.body.status).toBe('VOID');
+
+    // 3. A DRAFT run that has a REVERSED ledger FinancialTransaction is still refused with 409.
+    const reversedPostedDraft = await seedRun({
+      status: 'DRAFT',
+      currency: 'TTD',
+      totalGross: 850,
+      periodDayOffset: 52,
+    });
+    await db.financialTransaction.create({
+      data: {
+        id: `${P}ftx_rev`,
+        businessId: ID.bizA,
+        type: 'EXPENSE',
+        status: 'REVERSED',
+        date: new Date('2026-02-21T12:00:00Z'),
+        amount: 850,
+        currency: 'TTD',
+        sourceType: 'PayrollRun',
+        sourceId: reversedPostedDraft.id,
+        externalRef: `PayrollRun:${reversedPostedDraft.id}:paid`,
+      },
+    });
+    const revRes = await discardReq(ID.ownerA, ID.bizA, reversedPostedDraft.id, { reason: 'Try discard reversed posting' });
+    expect(revRes.status).toBe(409);
+    expect((await db.payrollRun.findUniqueOrThrow({ where: { id: reversedPostedDraft.id } })).status).toBe('DRAFT');
   });
 });
