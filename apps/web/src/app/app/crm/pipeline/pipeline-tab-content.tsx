@@ -596,6 +596,8 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
             onSelectContact={selectContact}
             favoriteIds={favoriteIds}
             onToggleFavorite={handleToggleFavorite}
+            search={searchInput}
+            onSearchChange={setSearchInput}
           />
         </ContactsTableDenialContext.Provider>
       ) : viewMode === "data-quality" && businessId ? (
