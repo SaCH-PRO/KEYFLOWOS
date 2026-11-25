@@ -204,6 +204,11 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING rema
       .getAllByRole("button")
       .find((b) => b.textContent?.includes("Pending") && b.textContent?.includes("1"));
     expect(pendingTab, "Pending status filter tab with count 1").toBeTruthy();
+
+    // Clicking the Unpaid card filters to the exact invoices it counts (including PENDING, excluding DRAFT).
+    fireEvent.click(unpaidBtn);
+    expect(screen.getByText("INV_PEND_PAGE")).toBeTruthy();
+    expect(screen.queryByText("INV_DRAFT_PAGE")).toBeNull();
   });
 
   it("PO-W05: invoices/page.tsx row action menu never offers 'Send reminder' on PENDING, but offers it on SENT", async () => {

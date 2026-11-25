@@ -57,12 +57,11 @@ import {
   PaymentRecord,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
-import { canShareInvoicePayLink } from "@/lib/commerce-status";
+import { canRemindInvoice, canShareInvoicePayLink } from "@/lib/commerce-status";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useCompose } from "@/components/email/compose-context";
-import { canRemindInvoice } from "@/lib/commerce-status";
 import {
   INVOICE_STATUS_FILTERS,
   InvoiceLineItem,

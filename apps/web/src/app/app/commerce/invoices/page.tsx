@@ -41,7 +41,13 @@ import {
   Product,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
-import { canShareInvoicePayLink } from "@/lib/commerce-status";
+import {
+  OWED_STATUSES,
+  canRemindInvoice,
+  canShareInvoicePayLink,
+  invoiceRemainingOwed,
+  safeInvoiceAmount,
+} from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId, getCachedBusiness } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
@@ -49,16 +55,15 @@ import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
 import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
-import { OWED_STATUSES, canRemindInvoice, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
 import type { DateRange } from "../components/date-range-filter";
 
 const PAGE_SIZE = 10;
-/** The Unpaid card's filter: the invoices it counts (SWP-INV-LIST, BUG-089). */
+/** The Unpaid card's filter: the invoices it counts (SWP-INV-LIST BUG-089 + FU-PENDING-OWED-WEB D-256). */
 const UNPAID_FILTER = "UNPAID";
-const UNPAID_STATUSES = ["SENT", "PARTIALLY_PAID"];
+const UNPAID_STATUSES = Array.from(OWED_STATUSES).filter((s) => s !== "OVERDUE");
 
 export default function InvoicesHubPage() {
   const router = useRouter();
@@ -156,7 +161,7 @@ export default function InvoicesHubPage() {
   });
 
   const dateFiltered = filterByDateRange(sorted, (inv) => inv.issueDate, dateRange);
-  // SWP-INV-LIST (BUG-089): "UNPAID" is the Unpaid card's own filter, the invoices it counts (sent and part-paid).
+  // SWP-INV-LIST (BUG-089) + FU-PENDING-OWED-WEB (D-256): "UNPAID" is the Unpaid card's own filter, matching the invoices it counts (pending, sent, and part-paid).
   const statusFiltered = statusFilter === "ALL" ? dateFiltered
     : statusFilter === UNPAID_FILTER ? dateFiltered.filter((inv) => UNPAID_STATUSES.includes(inv.status))
     : dateFiltered.filter((inv) => inv.status === statusFilter);
