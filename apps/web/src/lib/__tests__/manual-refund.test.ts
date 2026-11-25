@@ -13,7 +13,7 @@
  * RED-R1 cases fail at 58423afe.
  */
 import { describe, it, expect } from "vitest";
-import { isManualPayment, manualRefundableAmount } from "../manual-refund";
+import { isManualPayment, isOutOfBandRefundable, manualRefundableAmount } from "../manual-refund";
 
 const INV = "cmw1invoice0001";
 const HEX = "0123456789abcdef0123456789abcdef";
@@ -43,6 +43,17 @@ describe("isManualPayment: the hand-recording door's rows only (fail closed)", (
     expect(isManualPayment(row(`manual_${INV}_intent_${HEX}`, { status: "PENDING" })), "a pay-link intent").toBe(false);
     expect(isManualPayment(row(`manual_refund_pay1_${HEX.slice(0, 16)}`, { status: "REFUNDED", amount: -100 })), "a refund row").toBe(false);
     expect(isManualPayment(row(`manual_${INV}_key_${HEX}`, { status: "PENDING" })), "not money yet").toBe(false);
+  });
+});
+
+describe("isOutOfBandRefundable: a WiPay payment (no refund API) is recorded as refunded outside KeyFlow", () => {
+  it("RED-R1B: provider exactly 'wipay' (only the WiPay door writes it; D-55 stores a typed gateway name as 'manual')", () => {
+    expect(isOutOfBandRefundable(row("wipay_txn_77", { provider: "wipay" }))).toBe(true);
+    expect(isOutOfBandRefundable(row("WIPAY_1", { provider: "WiPay" })), "another casing").toBe(false);
+    expect(isOutOfBandRefundable(row("pi_1", { provider: "stripe" })), "stripe has a refund API").toBe(false);
+    expect(isOutOfBandRefundable(row("8AB1", { provider: "paypal" })), "paypal has a refund API").toBe(false);
+    expect(isOutOfBandRefundable(row("wipay_txn_78", { provider: "wipay", status: "PENDING" })), "not money").toBe(false);
+    expect(isOutOfBandRefundable(row("wipay_refund_1", { provider: "wipay", status: "REFUNDED", amount: -10 })), "a refund row").toBe(false);
   });
 });
 

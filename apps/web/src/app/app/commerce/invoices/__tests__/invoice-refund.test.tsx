@@ -33,6 +33,12 @@
  *   - test gaps closed (CONTROL at 58423afe): an unlinked same-provider refund is subtracted where the cap does not hide
  *     it, and a refund linked by provider and reference is that payment's.
  *
+ * Repair round 1b (the bookkeeping door is open to gateway payments on the server: commerce-refund RF-10/RF-12; WiPay
+ * has no refund API; RED-R1B cases fail at 379e3309): a WiPay payment (provider exactly 'wipay', which only the WiPay
+ * door writes: D-55 stores a hand-typed gateway name as 'manual') offers "Record refund", worded as a refund made
+ * outside KeyFlow, through the same route; a Stripe or PayPal payment offers no bookkeeping refund but a link to the
+ * existing gateway refund in Money > Money in (/app/payments?tab=refunds); another casing or provider offers neither.
+ *
  * The page is mounted as the route renders it; its data doors (@/lib/client), the workspace, the router and the
  * composer are stubbed with server-shaped answers.
  */
@@ -376,6 +382,54 @@ describe("SWP-INV-REFUND-UI: refund a manual payment on the invoice page (BUG-04
     expect(within(rowOf("pay_ref")).getByText(/^refunded$/i)).toBeInTheDocument();
     pressRefund("pay_other");
     await confirmFor(150);
+  });
+
+  it("RED-R1B: a WiPay payment offers Record refund, worded as a refund made outside KeyFlow, through the same route", async () => {
+    const wipay = pay("pay_wipay", 100, { provider: "wipay", method: "card", providerPaymentId: "wipay_txn_77" });
+    await openPayments(invoice("PARTIALLY_PAID", [wipay], 100, 200), [wipay]);
+    const record = within(rowOf("pay_wipay")).queryByRole("button", { name: /^record refund/i });
+    expect(record, "WiPay has no refund API: its refund is recorded here").not.toBeNull();
+    expect(refundButton("pay_wipay"), "not offered as a refund KeyFlow makes").toBeNull();
+
+    fireEvent.click(record!);
+    let confirm: HTMLElement | null = null;
+    await waitFor(() => {
+      confirm = within(dialog()!).getByRole("button", { name: `Record refund ${TTD(100)}` });
+      expect(confirm).not.toBeDisabled();
+    });
+    expect(dialog()!.textContent).toMatch(/outside KeyFlow/);
+    expect(dialog()!.textContent).toContain(`the ${TTD(100)} paid through WiPay on`);
+    expect(refundPayment).not.toHaveBeenCalled();
+
+    const refunded = refundRow("pay_wipay_refund", wipay);
+    refundPayment.mockResolvedValue({ data: { ...refunded, refundOfPaymentId: "pay_wipay", invoiceStatus: "SENT" }, error: null, status: 201 });
+    getInvoice.mockResolvedValue({ data: invoice("SENT", [wipay, refunded], 0, 300), error: null });
+    listInvoicePayments.mockResolvedValue(listed([refunded, wipay], 0, 300));
+    fireEvent.click(confirm!);
+    await waitFor(() => expect(summary()).toEqual({ paid: TTD(0), remaining: TTD(300) }));
+    expect(refundPayment).toHaveBeenCalledTimes(1);
+    expect(refundPayment.mock.calls[0]!.slice(0, 2)).toEqual([BIZ, "pay_wipay"]);
+    expect(within(rowOf("pay_wipay")).getByText(/^refunded$/i)).toBeInTheDocument();
+  });
+
+  it("RED-R1B: a Stripe or PayPal payment links to the gateway refund in Money in and offers no bookkeeping refund; other providers offer neither", async () => {
+    const stripe = pay("pay_stripe", 40, { provider: "stripe", method: "card", providerPaymentId: "pi_123" });
+    const paypal = pay("pay_paypal", 30, { provider: "paypal", method: "paypal", providerPaymentId: "8AB12345CD678901E" });
+    const casing = pay("pay_casing", 20, { provider: "WiPay", method: "card", providerPaymentId: "WIPAY_1" });
+    const unknown = pay("pay_unknown", 10, { provider: "fygaro", method: "card", providerPaymentId: "fyg_1" });
+    const rows = [stripe, paypal, casing, unknown];
+    await openPayments(invoice("PARTIALLY_PAID", rows, 100, 200), rows);
+
+    for (const id of ["pay_stripe", "pay_paypal"]) {
+      const link = within(rowOf(id)).queryByRole("link", { name: /refund in money in/i });
+      expect(link, `${id} is refunded through its gateway`).not.toBeNull();
+      expect(link!.getAttribute("href")).toBe("/app/payments?tab=refunds");
+      expect(within(rowOf(id)).queryByRole("button", { name: /refund/i }), `${id} offers no bookkeeping refund`).toBeNull();
+    }
+    for (const id of ["pay_casing", "pay_unknown"]) {
+      expect(within(rowOf(id)).queryByRole("button", { name: /refund/i }), `${id}: fail closed`).toBeNull();
+      expect(within(rowOf(id)).queryByRole("link", { name: /refund/i }), `${id}: fail closed`).toBeNull();
+    }
   });
 
   it("CONTROL: a payment recorded on a paid invoice is listed with its amount in the invoice's currency", async () => {
