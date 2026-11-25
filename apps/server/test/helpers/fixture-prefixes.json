@@ -1178,6 +1178,11 @@
       "packet": "V1-66 (W11-STOREFRONT-FULFIL-STEPS)"
     },
     {
+      "prefix": "v66d_",
+      "owner": "apps/server/test/inventory-summary-skus.integration.test.ts",
+      "packet": "V1-66 (SWP-INV-SKU-COUNT)"
+    },
+    {
       "prefix": "v66g_",
       "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
       "packet": "V1-66 (SWP-FIN-LEDGER)"
