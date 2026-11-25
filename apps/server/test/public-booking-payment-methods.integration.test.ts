@@ -104,7 +104,11 @@ process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
 /** Every credential value seeded here carries this, so a leak is one string search. */
 const CANARY = 'V64G_SECRET_';
 
-const OWN_PAYPAL = { paypalClientId: `${CANARY}paypal_client`, paypalClientSecret: `${CANARY}paypal_secret` };
+const OWN_PAYPAL = {
+  paypalClientId: `${CANARY}paypal_client`,
+  paypalClientSecret: `${CANARY}paypal_secret`,
+  paypalWebhookId: `${CANARY}paypal_webhook`,
+};
 const OWN_STRIPE = {
   stripePublishableKey: `${CANARY}stripe_pk`,
   stripeSecretKey: `${CANARY}stripe_sk`,

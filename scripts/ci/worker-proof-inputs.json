@@ -1,0 +1,23 @@
+{
+  "about": "The inputs of the Windows worker proof (FU-CI-WINDOWS-INPUT-GATE, owner ruling D-279). A PR or merge group that changes a path matching any pattern here runs the full proof; one that changes none skips it, naming the diff it checked. Patterns are globs matched without regard to case (** any depth, * within one name, {a,b} alternatives). Derived from what the suites and the negative controls read: scripts/ci/worker-proof-inputs.spec.mjs fails when a suite source names a tracked path not covered here. Paths a Windows checkout cannot reproduce exactly are a further run condition, in scripts/ci/worker-proof-inputs.mjs.",
+  "inputs": [
+    { "pattern": "scripts/agent-control/**", "why": "D-279: the control plane, the worker, the suites, their fixtures and the negative-control manifest" },
+    { "pattern": "scripts/ci/worker-proof-*", "why": "this gate: the input list, the decision, shard and aggregate scripts and their specs (a change to the gate runs the proof it gates)" },
+    { "pattern": "scripts/**/*.{mjs,js,ps1,yml,yaml,json}", "why": "authority-effects.spec.mjs reads every file of these kinds under scripts/ for a fixture's name" },
+    { "pattern": "scripts/security/native-dast*", "why": "workflow-integrity.spec.mjs and the negative controls read the native DAST scanner and its manifest" },
+    { "pattern": ".github/**", "why": "D-279: this workflow; workflow-integrity, admission, events and autopilot specs read every workflow; authority-effects.spec.mjs reads every file of code or YAML under .github/" },
+    { "pattern": ".agent-control/**", "why": "the packet, return and programme-state artifacts the suites read and the negative controls mutate" },
+    { "pattern": "docs/development/AGENT_AUTOPILOT*", "why": "workflow-integrity reads the autopilot doc; the platform DAG and policy specs read the policy; the negative controls mutate both" },
+    { "pattern": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml", "why": "dag, reconcile, orchestration and authority-effects specs and validate-dag.mjs load it" },
+    { "pattern": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml", "why": "platform-dag.spec.mjs and the merge-grant fixture load it" },
+    { "pattern": "docs/development/feature-inventory.md", "why": "workflow-integrity.spec.mjs reads it" },
+    { "pattern": "docs/SECURITY_DAST_SETUP.md", "why": "workflow-integrity.spec.mjs reads it; a negative control mutates it" },
+    { "pattern": "docs/PLUGIN_INTEGRATION_ROADMAP.md", "why": "workflow-integrity.spec.mjs reads it" },
+    { "pattern": "**/package.json", "why": "D-279: the package manifests (a manifest can set the module type or imports node resolves)" },
+    { "pattern": "{pnpm-lock.yaml,pnpm-workspace.yaml,package-lock.json,npm-shrinkwrap.json,yarn.lock,.npmrc,.yarnrc,.yarnrc.yml}", "why": "D-279: the lockfile and package manager settings" },
+    { "pattern": "{.nvmrc,.node-version,.tool-versions}", "why": "D-279: the Node pin (the workflow's own pin is covered by .github/**)" },
+    { "pattern": "**/.gitattributes", "why": "decides how every file is written on a Windows checkout (the negative controls require a pristine tree)" },
+    { "pattern": "**/.gitignore", "why": "decides what git status --ignored reports in the negative controls' pristine-tree check" },
+    { "pattern": "{.gitmodules,.lfsconfig}", "why": "submodules and LFS change what a checkout writes" }
+  ]
+}

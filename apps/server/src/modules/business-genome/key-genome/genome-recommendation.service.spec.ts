@@ -241,6 +241,63 @@ describe('GenomeRecommendationService', () => {
     expect(recs[0].domain).toBe('VISION_IDENTITY');
   });
 
+  it('[GRD-R1] excludes money-module readiness gaps when allowFinance is false even if missing fact is in a non-money section', async () => {
+    const { service, readiness } = makeService();
+    readiness.getReadiness.mockResolvedValue([
+      {
+        businessId: 'biz_1',
+        module: 'finance',
+        readinessScore: 20,
+        requiredFacts: [],
+        missingFacts: [
+          {
+            section: 'LEGAL_GOVERNANCE_COMPLIANCE',
+            domain: 'legal',
+            field: 'entity_type',
+            reason: 'Missing blocking fact: Entity type',
+            impact: 'BLOCKING',
+          },
+        ],
+        optionalFacts: [],
+        blockedReasons: ['Missing blocking fact: legal.entity_type'],
+        recommendedSetupActions: ['Provide blocking fact: legal.entity_type'],
+        automationAllowed: false,
+        riskLevel: 'HIGH',
+        lastComputedAt: new Date().toISOString(),
+      },
+      {
+        businessId: 'biz_1',
+        module: 'key_inbox',
+        readinessScore: 25,
+        requiredFacts: [],
+        missingFacts: [
+          {
+            section: 'VISION_IDENTITY',
+            domain: 'identity',
+            field: 'business_name',
+            reason: 'Missing blocking fact: Business name',
+            impact: 'BLOCKING',
+          },
+        ],
+        optionalFacts: [],
+        blockedReasons: ['Missing blocking fact: identity.business_name'],
+        recommendedSetupActions: ['Provide blocking fact: identity.business_name'],
+        automationAllowed: false,
+        riskLevel: 'HIGH',
+        lastComputedAt: new Date().toISOString(),
+      },
+    ] as ModuleReadinessData[]);
+
+    const recs = await service.generateRecommendations({
+      businessId: 'biz_1',
+      sources: ['READINESS_GAP'],
+      allowFinance: false,
+    });
+
+    expect(recs.map((r) => r.title)).toEqual(['Provide blocking fact: identity.business_name']);
+    expect(recs.some((r) => r.insight.toLowerCase().includes('finance'))).toBe(false);
+  });
+
   it('generates recommendations from weak Genome sections', async () => {
     const { service, scoring } = makeService();
     scoring.computeBusinessScore.mockReturnValue({

@@ -144,6 +144,10 @@ export class KeyGenomeController {
     return rankOf(await this.revenueLevel(businessId, req)) >= LEVEL_RANK.read;
   }
 
+  private async writesRevenue(businessId: string, req?: GenomeRequest): Promise<boolean> {
+    return rankOf(await this.revenueLevel(businessId, req)) >= LEVEL_RANK.write;
+  }
+
   /**
    * SEC-GFS-1 / GFS-R1 (D-128): the ranker, the opportunity detector and the
    * autonomy gate compute the cross-domain snapshot, and with it the finance
@@ -287,14 +291,17 @@ export class KeyGenomeController {
     //
     // The sweep in b53eef9e missed this: its gate matches `...` followed by a
     // BARE identifier, and this spread is parenthesised.
+    const revLevel = await this.revenueLevel(businessId, req);
+    const allowFinance = rankOf(revLevel) >= LEVEL_RANK.write;
     const created = await this.recommendationService.generateRecommendations({
       ...(body ?? {}),
       businessId,
+      allowFinance,
     });
     // SEC-GFS-4 (D-128 read clause): the generator turns NEW finance signals
     // into FINANCIAL recommendations whose insight is the signal's warning
     // text; a member without revenue read is not served them.
-    if (await this.readsRevenue(businessId, req)) return created;
+    if (rankOf(revLevel) >= LEVEL_RANK.read) return created;
     return created.filter((r) => !isFinanceRecommendation(r));
   }
 
@@ -1274,11 +1281,13 @@ export class KeyGenomeController {
     @Req() req?: GenomeRequest,
   ) {
     await this.requireRecomputeAuthorityIfNoSnapshot(businessId, req); // D-128
+    const allowFinance = await this.writesRevenue(businessId, req);
     return this.recommendationRanker.generateAndRankRecommendations(businessId, {
       limit: limit !== undefined ? Number(limit) : undefined,
       minConfidence:
         minConfidence !== undefined ? Number(minConfidence) : undefined,
       maxEffortLevel: maxEffortLevel as 'LOW' | 'MEDIUM' | 'HIGH' | undefined,
+      allowFinance,
     });
   }
 

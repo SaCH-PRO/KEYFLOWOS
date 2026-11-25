@@ -781,3 +781,49 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
     }
   });
 });
+
+describe('W1F-STORE-PAYPAL (OPK-COR-2): metaData.paypalWebhookId is write-only like the other payment secrets', () => {
+  const WH_SECRET = `${P}PAYPAL_WEBHOOK_ID_88ef`;
+
+  it('[W1F-SP-01] RED-BEFORE: GET, PATCH, and bootstrap mask metaData.paypalWebhookId as {configured:true}; non-owners are refused 403; owner can set, preserve, and null-clear it', async () => {
+    await reset(ID.bizP, { ...SECRET, ...PUBLIC_META, paypalWebhookId: WH_SECRET });
+    try {
+      // Every reader gets { configured: true }, never the raw webhook ID.
+      for (const actor of [ID.staff, ID.staffW, ID.admin, ID.owner, ID.coOwner, ID.superAdmin]) {
+        const res = await getBusiness(actor, ID.bizP);
+        expect(res.status, `GET as ${actor}`).toBe(200);
+        expect(JSON.stringify(res.body), `canary leaked to ${actor}`).not.toContain(WH_SECRET);
+        expect(res.body.metaData.paypalWebhookId).toEqual(MASKED);
+      }
+
+      // Non-owners (STAFF, ADMIN) are refused 403 when attempting to write or clear paypalWebhookId.
+      for (const actor of [ID.staff, ID.staffW, ID.admin]) {
+        const res = await patchBusiness(actor, ID.bizP, { metaData: { paypalWebhookId: `${P}WH_ATTACK` } });
+        expect(res.status, `PATCH as ${actor}`).toBe(403);
+      }
+      expect((await storedMeta(ID.bizP)).paypalWebhookId).toBe(WH_SECRET);
+
+      // Owner PATCH omitting paypalWebhookId or echoing { configured: true } preserves stored value.
+      const keepRes = await patchBusiness(ID.owner, ID.bizP, { metaData: { paypalWebhookId: MASKED } });
+      expect(keepRes.status).toBe(200);
+      expect(keepRes.body.metaData.paypalWebhookId).toEqual(MASKED);
+      expect((await storedMeta(ID.bizP)).paypalWebhookId).toBe(WH_SECRET);
+
+      // Owner replaces paypalWebhookId (trimmed) and response stays masked.
+      const nextWh = `${P}PAYPAL_WEBHOOK_ID_NEW`;
+      const replaceRes = await patchBusiness(ID.owner, ID.bizP, { metaData: { paypalWebhookId: `  ${nextWh}  ` } });
+      expect(replaceRes.status).toBe(200);
+      expect(JSON.stringify(replaceRes.body)).not.toContain(nextWh);
+      expect(replaceRes.body.metaData.paypalWebhookId).toEqual(MASKED);
+      expect((await storedMeta(ID.bizP)).paypalWebhookId).toBe(nextWh);
+
+      // Owner explicitly clears with null -> removed from stored metaData and absent from reads.
+      const clearRes = await patchBusiness(ID.owner, ID.bizP, { metaData: { paypalWebhookId: null } });
+      expect(clearRes.status).toBe(200);
+      expect(clearRes.body.metaData).not.toHaveProperty('paypalWebhookId');
+      expect(Object.prototype.hasOwnProperty.call(await storedMeta(ID.bizP), 'paypalWebhookId')).toBe(false);
+    } finally {
+      await reset(ID.bizP);
+    }
+  });
+});

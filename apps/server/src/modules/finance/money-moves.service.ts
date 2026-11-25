@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CashPositionService, otherCurrencyCash } from './cash-position.service';
-import { notCountedCashNote } from './finance-overview.service';
+import { notCountedCashNote, notCountedExpenseNote, splitExpensesByCurrency } from './finance-overview.service';
 
 export interface MoneyMoveDto {
   id: string;
@@ -145,21 +145,32 @@ export class MoneyMovesService {
     const position = await this.cashPosition.getCashPosition(businessId);
     const cashBalance = position.cashBalance;
     const otherCashNote = notCountedCashNote(position.currency, otherCurrencyCash(position));
-    const sixMonthExpenses = await this.prisma.client.expense.aggregate({
-      where: { businessId, date: { gte: new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000) } },
+    const sixMonthExpenseGroups = await this.prisma.client.expense.groupBy({
+      by: ['currency'],
+      where: {
+        businessId,
+        deletedAt: null,
+        date: { gte: new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000), lt: now },
+      },
       _sum: { amount: true },
     });
-    const avgMonthlyBurn = Number(sixMonthExpenses._sum.amount ?? 0) / 6;
+    const { businessTotal: sixMonthBusinessBurn, otherExpenses } = splitExpensesByCurrency(
+      sixMonthExpenseGroups,
+      position.currency,
+    );
+    const otherExpenseNote = notCountedExpenseNote(position.currency, otherExpenses);
+    const avgMonthlyBurn = sixMonthBusinessBurn / 6;
     const runwayMonths = avgMonthlyBurn > 0 ? cashBalance / avgMonthlyBurn : null;
     if (runwayMonths != null && runwayMonths < 3) {
       // Acceptance review C1 (CP-23): the ledger cash can be negative. The runway shown is never
       // below zero and the expected impact is zero for a shortfall, never negative.
       const shownMonths = Math.max(0, runwayMonths);
+      const notes = [otherCashNote, otherExpenseNote].filter(Boolean);
       moves.push({
         id: `mm-runway-${businessId}`,
         type: 'CUT_EXPENSE',
         title: 'Protect cash runway',
-        summary: `Runway is ~${shownMonths.toFixed(1)} months. Reducing burn or increasing collections is urgent.${otherCashNote ? ` ${otherCashNote}` : ''}`,
+        summary: `Runway is ~${shownMonths.toFixed(1)} months. Reducing burn or increasing collections is urgent.${notes.length > 0 ? ` ${notes.join(' ')}` : ''}`,
         expectedImpact: Math.max(0, cashBalance * 0.2),
         currency: position.currency,
         confidence: 80,

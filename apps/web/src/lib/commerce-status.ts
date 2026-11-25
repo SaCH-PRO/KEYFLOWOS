@@ -127,3 +127,31 @@ export const PAYLINK_SHAREABLE_STATUSES: ReadonlySet<string> = new Set([
 export function canShareInvoicePayLink(status: string | null | undefined): boolean {
   return typeof status === "string" && PAYLINK_SHAREABLE_STATUSES.has(status);
 }
+
+/**
+ * SWP-INV-DETAIL (BUG-086, review S-1 / MINOR-1): the invoices Mark paid is offered on, wherever an invoice is
+ * opened or listed as a document (its detail page and the Invoices list's row menu): where a payment can be
+ * recorded. Mark paid records the balance as a payment (R0-PL-04), which the server refuses (409) on a DRAFT.
+ */
+export const MARK_PAID_STATUSES: ReadonlySet<string> = new Set([
+  InvoiceStatus.SENT,
+  InvoiceStatus.OVERDUE,
+  InvoiceStatus.PARTIALLY_PAID,
+]);
+
+export function canMarkInvoicePaid(status: string | null | undefined): boolean {
+  return typeof status === "string" && MARK_PAID_STATUSES.has(status);
+}
+
+/**
+ * SWP-INV-DETAIL (BUG-086): the statuses the commerce Payments tab never offers Mark Paid on (row or bulk): the
+ * server refuses DRAFT, VOID and FULLY_CREDITED (409), and a PAID invoice has nothing to mark. The tab is wider
+ * than MARK_PAID_STATUSES on purpose: its merged pins settle PARTIALLY_CREDITED and FAILED rows by Mark paid
+ * (payments/__tests__/collections-health.test.tsx CH-11, CH-11b) and a past-due PENDING one from the Recovery Queue
+ * (CH-32, owner ruling D-256).
+ */
+export const PAYMENTS_TAB_MARK_PAID_REFUSED: ReadonlySet<string> = new Set(["DRAFT", "VOID", "FULLY_CREDITED", "PAID"]);
+
+export function canMarkPaidOnPaymentsTab(status: string | null | undefined): boolean {
+  return typeof status === "string" && !PAYMENTS_TAB_MARK_PAID_REFUSED.has(status);
+}

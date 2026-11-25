@@ -2,7 +2,12 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { BusinessIntelligenceService } from '../intelligence/business-intelligence.service';
 import { KeyExecutiveModeService } from '../intelligence/key-executive-mode.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
-import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import {
+  genomeReaderRevenueLevel,
+  listRecommendationsForReader,
+  listSignalsForReader,
+  type GenomeReader,
+} from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -279,13 +284,30 @@ export class BusinessCommandCenterService {
 
     const modeMap = new Map(modeBriefs.map((brief) => [brief.mode, brief]));
 
+    // W11-GENOME-RECS-DOMAIN (D-128/D-100): pass caller revenue authority to
+    // the genome bridge and genome signal/recommendation mappers so a member
+    // without revenue:read receives no finance snapshot, signal, or recommendation,
+    // and a member without revenue:write never triggers a finance snapshot recompute.
+    const revLevel =
+      reader === undefined
+        ? 'admin'
+        : await this.safeResolve(
+            sources,
+            'genomeRevenueScope',
+            businessId,
+            () => genomeReaderRevenueLevel(this.prisma, businessId, reader ?? undefined),
+            'none',
+          );
+    const readsRevenue = rankOf(revLevel) >= LEVEL_RANK.read;
+    const writesRevenue = rankOf(revLevel) >= LEVEL_RANK.write;
+
     // Compute KEY Genome scores and module readiness after the parallel block
     // so readiness uses freshly-scored facts rather than stale DB values.
     const keyGenomeFacts = await this.safeResolve(sources, 'keyGenomeFacts', businessId, () => this.genomeScoring.computeFactScores(businessId), []);
     const keyGenomeScore = this.safeResolveSync(sources, 'keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
     const moduleReadiness = await this.safeResolve(sources, 'moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
     const keyGenome = this.buildKeyGenome(keyGenomeScore);
-    keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness), undefined);
+    keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness, { readsRevenue, writesRevenue }), undefined);
 
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);
@@ -300,8 +322,8 @@ export class BusinessCommandCenterService {
     const weakSectionItems = this.mapWeakSectionItems(keyGenomeScore);
     // These two were the only unguarded reads: a throwing signal or
     // recommendation store rejected the whole snapshot (V1-47).
-    const genomeSignalItems = await this.safeResolve(sources, 'genomeSignals', businessId, () => this.mapGenomeSignalItems(businessId), [] as CommandCenterItem[]);
-    const genomeRecommendationItems = await this.safeResolve(sources, 'genomeRecommendations', businessId, () => this.mapGenomeRecommendationItems(businessId), [] as CommandCenterItem[]);
+    const genomeSignalItems = await this.safeResolve(sources, 'genomeSignals', businessId, () => this.mapGenomeSignalItems(businessId, readsRevenue), [] as CommandCenterItem[]);
+    const genomeRecommendationItems = await this.safeResolve(sources, 'genomeRecommendations', businessId, () => this.mapGenomeRecommendationItems(businessId, readsRevenue), [] as CommandCenterItem[]);
 
     const allItems: CommandCenterItem[] = [
       ...approvalItems,
@@ -999,12 +1021,17 @@ export class BusinessCommandCenterService {
       }));
   }
 
-  private async mapGenomeSignalItems(businessId: string): Promise<CommandCenterItem[]> {
-    const signals = await this.genomeSignal.listSignals(businessId, {
-      status: 'NEW',
-      minConfidence: 0.7,
-      limit: 5,
-    });
+  private async mapGenomeSignalItems(businessId: string, readsRevenue = true): Promise<CommandCenterItem[]> {
+    const signals = await listSignalsForReader(
+      this.genomeSignal,
+      businessId,
+      {
+        status: 'NEW',
+        minConfidence: 0.7,
+        limit: 5,
+      },
+      readsRevenue,
+    );
 
     return signals.map((signal) => {
       const criticalTypes = new Set(['FACT_CONFLICT', 'READINESS_BLOCKER']);
@@ -1042,11 +1069,16 @@ export class BusinessCommandCenterService {
     });
   }
 
-  private async mapGenomeRecommendationItems(businessId: string): Promise<CommandCenterItem[]> {
-    const recommendations = await this.genomeRecommendation.listRecommendations(businessId, {
-      status: 'ACTIVE',
-      limit: 5,
-    });
+  private async mapGenomeRecommendationItems(businessId: string, readsRevenue = true): Promise<CommandCenterItem[]> {
+    const recommendations = await listRecommendationsForReader(
+      this.genomeRecommendation,
+      businessId,
+      {
+        status: 'ACTIVE',
+        limit: 5,
+      },
+      readsRevenue,
+    );
 
     return recommendations.map((rec) => {
       const priority: CommandCenterPriority =
