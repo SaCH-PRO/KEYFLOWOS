@@ -74,10 +74,11 @@ function savedCredential(meta: unknown, key: string): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
-/** A store's own PayPal app credentials (D-138). */
+/** A store's own PayPal app credentials (D-138, W1F-STORE-PAYPAL / OPK-COR-2). */
 export interface StorePaypalCredentials {
   clientId: string;
   clientSecret: string;
+  webhookId: string;
 }
 
 /** A store's own Stripe account credentials (D-138). */
@@ -88,13 +89,15 @@ export interface StoreStripeCredentials {
 }
 
 /**
- * W11-STORE-OWN-PAYMENT-KEYS (D-138): the store's own complete PayPal pair from its settings, or null. Never reads the
- * platform env, so a store with only one of the two (or neither) has no PayPal, whatever the platform holds.
+ * W11-STORE-OWN-PAYMENT-KEYS (D-138) + W1F-STORE-PAYPAL (OPK-COR-2): the store's own complete PayPal set (client id,
+ * client secret, and webhook id) from its settings, or null. Never reads the platform env, so a store missing any of
+ * the three (including webhook id, without which storefront captures cannot settle) has no storefront PayPal.
  */
 export function storePaypalCredentials(meta: unknown): StorePaypalCredentials | null {
   const clientId = savedCredential(meta, 'paypalClientId');
   const clientSecret = savedCredential(meta, 'paypalClientSecret');
-  return clientId && clientSecret ? { clientId, clientSecret } : null;
+  const webhookId = savedCredential(meta, 'paypalWebhookId');
+  return clientId && clientSecret && webhookId ? { clientId, clientSecret, webhookId } : null;
 }
 
 /**
@@ -110,8 +113,8 @@ export function storeStripeCredentials(meta: unknown): StoreStripeCredentials | 
 
 /**
  * W11-STORE-OWN-PAYMENT-KEYS (D-138): the store's own PayPal webhook id (paypalWebhookId in its settings), or null.
- * The storefront PayPal capture (PayPal's webhook naming a storefront order) is verified with the store's own pair and
- * this id only: the platform's PAYPAL_WEBHOOK_ID belongs to the platform's app and is never mixed in.
+ * The storefront PayPal capture (PayPal's webhook naming a storefront order) is verified with the store's own triple
+ * only: the platform's PAYPAL_WEBHOOK_ID belongs to the platform's app and is never mixed in.
  */
 export function storePaypalWebhookId(meta: unknown): string | null {
   return savedCredential(meta, 'paypalWebhookId');
