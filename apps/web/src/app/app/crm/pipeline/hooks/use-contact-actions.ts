@@ -18,7 +18,6 @@ import {
   importContactsFromLink,
   logContactEvent,
   bulkUpdateContacts,
-  bulkDeleteContacts,
   deleteContactNote,
   deleteContactTask,
   updateContactNote,
@@ -27,6 +26,7 @@ import {
 } from "@/lib/client";
 import { moduleEvents } from "@/lib/module-events";
 import { showRefusal } from "@/lib/failure-kit";
+import { deleteContactsWithUndo } from "./contacts-bulk-delete";
 
 interface UseContactActionsParams {
   businessId: string | null;
@@ -63,6 +63,10 @@ export function useContactActions({
   selectedContactIdRef.current = selectedContactId;
   const contactDetailRef = useRef(contactDetail);
   contactDetailRef.current = contactDetail;
+  const loadContactsRef = useRef(loadContacts);
+  loadContactsRef.current = loadContacts;
+  const loadFlowDataRef = useRef(loadFlowData);
+  loadFlowDataRef.current = loadFlowData;
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingContact, setEditingContact] = useState<ContactFormData | null>(null);
@@ -537,13 +541,25 @@ export function useContactActions({
         const currentSelectedId = selectedContactIdRef.current;
         setBulkLoading(true);
         try {
-          await bulkDeleteContacts({ businessId, contactIds: Array.from(currentIds) });
-          setContacts((prev) => prev.filter((c) => !currentIds.has(c.id)));
-          if (currentSelectedId && currentIds.has(currentSelectedId)) { setSelectedContactId(null); setContactDetail(null); }
+          // FU-BULK-DELETE-UNDO (D-277b): sent at once; the toast offers Undo when the ids deleted are known, and
+          // Undo re-reads the list through the latest loaders (the screen may have changed, or gone, by then).
+          const outcome = await deleteContactsWithUndo({
+            businessId,
+            ids: Array.from(currentIds),
+            onRestored: () => { void loadContactsRef.current(); void loadFlowDataRef.current(); },
+          });
+          if (!outcome) return;
+          if (outcome.deletedIds) {
+            const gone = new Set(outcome.deletedIds);
+            setContacts((prev) => prev.filter((c) => !gone.has(c.id)));
+            if (currentSelectedId && gone.has(currentSelectedId)) { setSelectedContactId(null); setContactDetail(null); }
+          } else {
+            // Which ids went is not known: read the list again rather than guess.
+            void loadContacts();
+          }
           setSelectedIds(new Set());
           setSelectMode(false);
           void loadFlowData();
-          toast.success(`Deleted ${currentIds.size} contact${currentIds.size !== 1 ? "s" : ""}`);
         } catch {
           toast.error("Failed to delete contacts");
         } finally {
@@ -551,7 +567,7 @@ export function useContactActions({
         }
       },
     });
-  }, [businessId, loadFlowData, setContacts, setSelectedIds, setSelectMode, setSelectedContactId, setContactDetail]);
+  }, [businessId, loadContacts, loadFlowData, setContacts, setSelectedIds, setSelectMode, setSelectedContactId, setContactDetail]);
 
   const handleBulkAddToList = useCallback(async (listId: string) => {
     const ids = selectedIdsRef.current;
