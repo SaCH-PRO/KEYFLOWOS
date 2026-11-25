@@ -21,6 +21,9 @@
  *                       mid-session): the page says no access, no switch left on screen
  *   NPR-08i RED-BEFORE  (round 2) two PATCHes answered out of order: Payment Receipt commits first but its answer comes
  *                       last; the page ends as the server holds both switches
+ *   NPR-08j RED-BEFORE  (round 2, the same race on the failure path) Booking Confirmation's PATCH waits; Payment
+ *                       Receipt's is refused and its re-read (Booking still on at the server, Invoice Sent changed
+ *                       elsewhere) is put on the page except for the switch still saving: Booking stays off
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
  *                       no switch, no log row, no "(n)" count
  *   NPR-09b guard       the same with the switches showing and the log failed: after the refused Retry, no switch, no
@@ -258,6 +261,27 @@ describe("D-283 repair round 1: two toggles", () => {
     await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledTimes(2));
     expect(checked(BOOKING)).toBe(String(serverNow.booking_confirmed));
     expect(checked(RECEIPT)).toBe(String(serverNow.payment_receipt));
+  });
+});
+
+describe("D-283 repair round 2: a re-read does not overwrite a switch still saving", () => {
+  it("NPR-08j RED-BEFORE: a refused toggle's re-read leaves another pending switch as it is", async () => {
+    const reread = { ...PREFS, invoice_sent: false };
+    const server = serve(queue(() => json(200, PREFS), () => json(200, reread)), () => json(200, LOG));
+    await renderPage();
+    await clickBookingOff();
+    fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
+
+    server.answerPatch(json(400, { statusCode: 400, message: "Bad request" }), "payment_receipt");
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(server.prefsGets()).toBe(2);
+    expect(checked(RECEIPT)).toBe("false");
+    expect(checked(/toggle invoice sent/i)).toBe("false");
+    expect(checked(BOOKING)).toBe("false"); // still saving: its own answer decides it
+
+    server.answerPatch(json(200, { ...PREFS, booking_confirmed: false, invoice_sent: false }), "booking_confirmed");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
+    expect(checked(BOOKING)).toBe("false");
   });
 });
 
