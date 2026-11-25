@@ -158,6 +158,14 @@ interface PaymentsTabProps {
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
 }
 
+/**
+ * SWP-INV-DETAIL (BUG-086): Mark paid records the balance as a payment, which the server refuses (409) on a DRAFT, a
+ * VOID or a FULLY_CREDITED invoice; a PAID one has nothing to mark. Neither the row button nor the bulk action is
+ * offered for them (a DRAFT row offered it).
+ */
+const MARK_PAID_REFUSED: ReadonlySet<string> = new Set(["DRAFT", "VOID", "FULLY_CREDITED", "PAID"]);
+const canMarkPaid = (status: string) => !MARK_PAID_REFUSED.has(status);
+
 type PaymentView = "all" | "received" | "pending" | "overdue";
 
 const VIEW_FILTERS: { key: PaymentView; label: string }[] = [
@@ -366,7 +374,7 @@ export default function PaymentsTab({
     if (!businessId) return;
     const ids = Array.from(selectedIds).filter((id) => {
       const inv = invoices.find((i) => i.id === id);
-      return inv && inv.status !== "PAID" && inv.status !== "VOID";
+      return inv && canMarkPaid(inv.status);
     });
     if (ids.length === 0) {
       toast.info("No eligible invoices to mark as paid");
@@ -756,18 +764,20 @@ export default function PaymentsTab({
                           )}
                         </button>
                       )}
-                      <button
-                        onClick={() => handleMarkPaid(inv.id)}
-                        disabled={!!isLoading}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-                        title="Mark Paid"
-                      >
-                        {isLoading === "paid" ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      {canMarkPaid(inv.status) && (
+                        <button
+                          onClick={() => handleMarkPaid(inv.id)}
+                          disabled={!!isLoading}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                          title="Mark Paid"
+                        >
+                          {isLoading === "paid" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
