@@ -30,6 +30,7 @@ import { CommerceIntegrationService } from '../marketplace/commerce-integration.
 import {
   ORDER_STATUS_CHANGED_DURING_CANCEL,
   ROUTING_CLAIM_TX_OPTIONS,
+  claimOrderRouting,
   releaseOrderFulfilmentForCancel,
   statusEditMayCancel,
 } from '../marketplace/fulfillment-routing.service';
@@ -40,6 +41,60 @@ import {
   storeStripeCredentials,
   storefrontMethodNotOffered,
 } from '../payments/storefront-checkout-methods';
+
+export interface QuickSaleInvoiceSummary {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  subtotal: number;
+  taxAmount: number;
+  total: number;
+  currency: string;
+  contactId: string;
+}
+
+export interface QuickSalePaymentSummary {
+  id: string;
+  amount: number;
+  currency: string;
+  method: string;
+  status: string;
+  providerPaymentId: string | null;
+}
+
+export interface QuickSaleCommittedResult {
+  order: any;
+  invoice: QuickSaleInvoiceSummary;
+  payment: QuickSalePaymentSummary;
+  receiptToken: string;
+}
+
+export interface QuickSaleCheckoutInput {
+  businessId: string;
+  orderNumber: string;
+  customerName: string;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  contactId: string | null;
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  currency: string;
+  notes: string | null;
+  items: Array<{
+    productId: string;
+    name: string;
+    sku: string | null;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+    currency: string;
+  }>;
+  receiptToken: string;
+  idempotency: { slot: string; requestHash: string } | null;
+  onCommitted: (result: QuickSaleCommittedResult) => void;
+}
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -1312,119 +1367,100 @@ export class StoreOrderService {
      * such a line as for a missing own row.
      */
     providerSettlement?: boolean;
+    /**
+     * V1-66 (QUICK-SALE-SERVER, P83, Journey L): atomic counter-sale mode.
+     * Creates the QUICK_SALE MarketplaceOrder, optional shared Walk-in customer
+     * contact (under per-business pg_advisory_xact_lock), PAID invoice, canonical
+     * Payment + ledger posting, stock decrement under lock order + routing claim,
+     * COGS posting, receipt PaymentLink token, and IdempotencyKey in ONE transaction.
+     */
+    quickSale?: QuickSaleCheckoutInput;
   }) {
-    const order = await this.prisma.client.marketplaceOrder.findUnique({
-      where: { id: input.orderId },
-      include: { items: true, business: { select: { defaultTaxRate: true } } },
-    });
-    if (!order) throw new NotFoundException('Order not found');
-
-    if (order.paymentStatus === 'PAID') {
-      // Idempotent: if we already completed this order, return as-is.
-      this.logger.debug(`[store-order] completeCheckout no-op for already-PAID order ${order.id}`);
-      return this.prisma.client.marketplaceOrder.findUnique({
-        where: { id: order.id },
-        include: { items: true },
+    const qs = input.quickSale ?? null;
+    let existingOrder: any = null;
+    if (!qs) {
+      existingOrder = await this.prisma.client.marketplaceOrder.findUnique({
+        where: { id: input.orderId },
+        include: { items: true, business: { select: { defaultTaxRate: true } } },
       });
-    }
+      if (!existingOrder) throw new NotFoundException('Order not found');
 
-    // Resolve customer contact OUTSIDE the tx so CRM dedup logic
-    // (which has its own internal logic) doesn't expand the tx footprint.
-    //
-    // G6PUB-R3-STORE-ORDER-DOORS review (CR-1): the order's own
-    // store_order.created listener (CommerceIntegrationService.
-    // handleOrderCreated) resolves the same customer at the same time when an
-    // order is paid right after it is created (an order created paid, D-77).
-    // For a new customer both create the contact, and the one that loses on
-    // the contacts (business_id, email_normalized) unique index is refused
-    // (ConflictException), which answered this checkout 400 with the order left
-    // unpaid. The contact exists once the other creation has committed, so a
-    // failed resolution is tried again (CONTACT_RESOLVE_ATTEMPTS in all): the
-    // retry finds it.
-    let contactId: string | null = null;
-    const meta = (order.metadata as Record<string, unknown> | null) ?? {};
-    const referralCode: string | null = typeof meta.referralCode === 'string' ? meta.referralCode : null;
-    const nameParts = (order.customerName ?? '').trim().split(/\s+/);
-    for (let attempt = 1; attempt <= CONTACT_RESOLVE_ATTEMPTS; attempt += 1) {
-      try {
-        const contact = await this.crm.findOrCreateContact(order.businessId, {
-          firstName: nameParts[0] ?? null,
-          lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
-          email: order.customerEmail,
-          phone: order.customerPhone,
-          source: 'storefront',
-          sourceDetail: `order:${order.orderNumber}`,
-          ...(referralCode ? { custom: { referralCode } } : {}),
+      if (existingOrder.paymentStatus === 'PAID') {
+        // Idempotent: if we already completed this order, return as-is.
+        this.logger.debug(`[store-order] completeCheckout no-op for already-PAID order ${existingOrder.id}`);
+        return this.prisma.client.marketplaceOrder.findUnique({
+          where: { id: existingOrder.id },
+          include: { items: true },
         });
-        contactId = contact?.id ?? null;
-        break; // resolved, or the CRM resolves no contact for this order: nothing to try again
-      } catch (err: any) {
-        this.logger.warn(
-          `[store-order] CRM resolve failed for order ${order.id} (attempt ${attempt} of ${CONTACT_RESOLVE_ATTEMPTS}): ${(err as Error).message}`,
-        );
       }
     }
-    if (!contactId) {
-      // Invoice requires a contact. Surface this clearly rather than
-      // silently dropping the row.
-      throw new BadRequestException(
-        'Cannot finalize checkout: unable to resolve a contact for this order. Provide a customer email or phone.',
-      );
+
+    const targetBusinessId: string = qs ? qs.businessId : existingOrder.businessId;
+    const targetItems: Array<{ productId: string; name: string; quantity: number; unitPrice: number; total: number }> =
+      qs ? qs.items : existingOrder.items;
+    const targetTotal: number = qs ? qs.total : existingOrder.total;
+    const targetSubtotal: number = qs ? qs.subtotal : existingOrder.subtotal;
+    const targetTaxAmount: number = qs ? qs.taxAmount : existingOrder.taxAmount;
+    const targetDiscountAmount: number = qs ? 0 : (existingOrder.discountAmount ?? 0);
+    const targetCurrency: string = qs ? qs.currency : existingOrder.currency;
+    const targetOrderNumber: string = qs ? qs.orderNumber : existingOrder.orderNumber;
+
+    let contactId: string | null = qs ? qs.contactId : null;
+    const meta = (existingOrder?.metadata as Record<string, unknown> | null) ?? {};
+    const referralCode: string | null = !qs && typeof meta.referralCode === 'string' ? meta.referralCode : null;
+
+    if (!qs) {
+      const nameParts = (existingOrder.customerName ?? '').trim().split(/\s+/);
+      for (let attempt = 1; attempt <= CONTACT_RESOLVE_ATTEMPTS; attempt += 1) {
+        try {
+          const contact = await this.crm.findOrCreateContact(existingOrder.businessId, {
+            firstName: nameParts[0] ?? null,
+            lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+            email: existingOrder.customerEmail,
+            phone: existingOrder.customerPhone,
+            source: 'storefront',
+            sourceDetail: `order:${existingOrder.orderNumber}`,
+            ...(referralCode ? { custom: { referralCode } } : {}),
+          });
+          contactId = contact?.id ?? null;
+          break; // resolved, or the CRM resolves no contact for this order: nothing to try again
+        } catch (err: any) {
+          this.logger.warn(
+            `[store-order] CRM resolve failed for order ${existingOrder.id} (attempt ${attempt} of ${CONTACT_RESOLVE_ATTEMPTS}): ${(err as Error).message}`,
+          );
+        }
+      }
+      if (!contactId) {
+        // Invoice requires a contact. Surface this clearly rather than
+        // silently dropping the row.
+        throw new BadRequestException(
+          'Cannot finalize checkout: unable to resolve a contact for this order. Provide a customer email or phone.',
+        );
+      }
     }
 
     // Pick a default warehouse for stock decrement (first active per business).
     const defaultWarehouse = await this.prisma.client.warehouse.findFirst({
-      where: { businessId: order.businessId, isActive: true },
+      where: { businessId: targetBusinessId, isActive: true },
       orderBy: { createdAt: 'asc' },
     });
 
-    const amount = input.paidAmount ?? order.total;
-    const provider = input.provider ?? order.paymentMethod?.toLowerCase() ?? 'manual';
-    const method = (input.method ?? order.paymentMethod ?? 'manual').toLowerCase();
-    const paymentRef = input.paymentRef ?? order.paymentRef ?? `${provider}_${order.id}_${Date.now()}`;
-    const invoiceNumber = `INV-${order.orderNumber}`;
+    const amount = input.paidAmount ?? targetTotal;
+    const provider = input.provider ?? existingOrder?.paymentMethod?.toLowerCase() ?? 'manual';
+    const method = (input.method ?? existingOrder?.paymentMethod ?? 'manual').toLowerCase();
+    const paymentRef =
+      input.paymentRef ?? existingOrder?.paymentRef ?? `${provider}_${existingOrder?.id ?? targetOrderNumber}_${Date.now()}`;
+    const invoiceNumber = `INV-${targetOrderNumber}`;
 
-    // Pre-load inventory mode so stock invariants can be enforced inside the
-    // tx. Untracked / virtual products skip the decrement explicitly, not
-    // silently.
-    //
-    // NULL IS NOT "TRACKED", AND TWO SERVICES USED TO DISAGREE ABOUT THAT.
-    // `Product.inventoryMode` is `String?` with no default and nothing on the
-    // create path sets it, so it is NULL for every product whose owner never
-    // opened inventory settings. This file resolved that to 'tracked' and then
-    // failed the whole checkout — invoice and payment rolled back — with
-    // "no active warehouse configured for tracked products".
-    //
-    // inventory-risk.service.ts reads the same column as
-    // `inventoryMode === 'tracked' || stocks.length > 0`, so a product this
-    // file refused to sell was one that file considered untracked. Same field,
-    // opposite meaning, and the merchant sees only that checkout is broken.
-    //
-    // Resolved the risk service's way, because it is the one that matches what
-    // a merchant actually did: a product counts as tracked if they SAID so, or
-    // if stock is being kept for it. Someone who never configured inventory is
-    // not opted into an inventory invariant, and refusing their sales protects
-    // a number nobody is maintaining.
-    //
-    // The protection itself is unchanged. A product that IS tracked still
-    // cannot oversell, still needs a warehouse and a stock row, and still
-    // rolls the checkout back — see the loop below.
-    //
-    // W11-CHECKOUT-PAIR-SCOPE (W11SEAM-SM-CR-1, D-137): only the business's
-    // own stock rows count as stock kept for the product (ownStockRows, the
-    // filter every reader of the rule uses). A row of another business (a
-    // planted row on this product, left for an operator by D-137) is not this
-    // business's stock: counted, it made a product with no inventoryMode
-    // tracked and the decrement below then sold from that row.
-    const productIds = order.items.map((i) => i.productId);
+    const productIds = targetItems.map((i) => i.productId);
     const products = await this.prisma.client.product.findMany({
-      where: { id: { in: productIds } },
+      where: { id: { in: productIds }, businessId: targetBusinessId },
       select: {
         id: true,
         inventoryMode: true,
         outOfStockBehavior: true,
         name: true,
-        _count: { select: { inventoryStocks: { where: ownStockRows(order.businessId) } } },
+        _count: { select: { inventoryStocks: { where: ownStockRows(targetBusinessId) } } },
       },
     });
     const productMode = new Map(
@@ -1440,38 +1476,103 @@ export class StoreOrderService {
       products.map((p) => [p.id, p.name]),
     );
 
-    // Buffer for invoice events emitted by InvoiceWorkflowService.transition
-    // calls inside the transaction. We flush AFTER the tx commits so
-    // listeners (e.g. InvoiceReceiptListener) never act on uncommitted
-    // state if a later tx step rolls back.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
 
-    // W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1) + SWP-STORE-OVERSELL (BUG-017):
-    // lock every own stock row of each tracked line's product across warehouses
-    // in global id order before decrementing.
     const decrementedStockProducts =
       input.stockMovesOnFulfilment || !defaultWarehouse
         ? []
-        : order.items.filter((i) => productMode.get(i.productId) === 'tracked').map((i) => i.productId);
+        : targetItems.filter((i) => productMode.get(i.productId) === 'tracked').map((i) => i.productId);
 
     const result = await this.prisma.client.$transaction(async (tx) => {
-      // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): first, before any other row, every
-      // stock row the decrement below writes is locked at once in the global
-      // order (core/inventory/stock-lock-order.ts). Decremented line by line
-      // in line order and held to commit, this checkout and a routing
-      // reserving the same products in the other order each held one row and
-      // waited for the other's (40P01), and one of them (the customer's
-      // settlement, or the routing) was rolled back. The order row (the offline
-      // completion's FOR UPDATE below, and the final write) comes after the
-      // stock rows, as in routing.
-      await lockStockRowsInOrder(tx, order.businessId, decrementedStockProducts);
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      const now = new Date();
+
+      // V1-66 (QUICK-SALE-SERVER): resolve/create per-business Walk-in customer contact
+      // under a per-business transaction-scoped advisory lock BEFORE stock row locks
+      // (strict total order: walk-in lock -> global stock lock order -> order row).
+      let resolvedContactId = contactId;
+      if (qs && !resolvedContactId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`quick-sale-walkin:${targetBusinessId}`}))`;
+        const existingWalkIn = await tx.contact.findFirst({
+          where: { businessId: targetBusinessId, deletedAt: null, source: 'quick_sale_walkin' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { id: true },
+        });
+        if (existingWalkIn) {
+          resolvedContactId = existingWalkIn.id;
+        } else {
+          const createdWalkIn = await tx.contact.create({
+            data: {
+              businessId: targetBusinessId,
+              firstName: 'Walk-in',
+              lastName: 'customer',
+              displayName: 'Walk-in customer',
+              status: 'CUSTOMER',
+              source: 'quick_sale_walkin',
+              sourceDetail: 'Quick counter sale',
+              visibility: 'TEAM',
+              tags: ['walk-in'],
+            },
+            select: { id: true },
+          });
+          resolvedContactId = createdWalkIn.id;
+        }
+      }
+
+      // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): lock every stock row in global order before writes.
+      await lockStockRowsInOrder(tx, targetBusinessId, decrementedStockProducts);
+
+      let activeOrder = existingOrder;
+      if (qs) {
+        activeOrder = await tx.marketplaceOrder.create({
+          data: {
+            businessId: targetBusinessId,
+            orderNumber: qs.orderNumber,
+            status: 'COMPLETED',
+            type: 'QUICK_SALE',
+            customerName: qs.customerName,
+            customerEmail: qs.customerEmail,
+            customerPhone: qs.customerPhone,
+            subtotal: qs.subtotal,
+            shippingFee: 0,
+            taxAmount: qs.taxAmount,
+            dutyAmount: 0,
+            discountAmount: 0,
+            total: qs.total,
+            currency: qs.currency,
+            paymentStatus: 'PAID',
+            paymentMethod: method.toUpperCase(),
+            paymentRef,
+            notes: qs.notes,
+            metadata: {
+              source: 'QUICK_SALE',
+              taxRate: qs.taxRate,
+              links: { contactId: resolvedContactId },
+              statusTimeline: [{ status: 'completed', timestamp: now.toISOString(), note: 'Quick sale completed' }],
+            },
+            items: {
+              create: qs.items.map((item) => ({
+                productId: item.productId,
+                name: item.name,
+                sku: item.sku,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                total: item.total,
+                currency: item.currency,
+              })),
+            },
+          },
+          include: { items: true },
+        });
+        await claimOrderRouting(tx as any, targetBusinessId, activeOrder.id);
+      }
 
       // The order's status as of this transaction (SEC-V33-5): read under a
       // row lock for the offline completion, which refuses a closed order.
-      let currentStatus = order.status;
-      if (input.refuseClosedOrder) {
+      let currentStatus: string = activeOrder.status;
+      if (!qs && input.refuseClosedOrder) {
         const [locked] = await tx.$queryRaw<Array<{ status: string; payment_status: string }>>`
-          SELECT status, payment_status FROM marketplace_orders WHERE id = ${order.id} FOR UPDATE`;
+          SELECT status, payment_status FROM marketplace_orders WHERE id = ${activeOrder.id} FOR UPDATE`;
         if (!locked) throw new NotFoundException('Order not found');
         if (isClosedStorefrontOrder({ status: locked.status, paymentStatus: locked.payment_status })) {
           throw new ConflictException(`This order is ${locked.status.toLowerCase()} and cannot be completed`);
@@ -1483,22 +1584,21 @@ export class StoreOrderService {
       // through the canonical InvoiceWorkflowService inside this same
       // transaction so the row is never observable in DRAFT outside the
       // commit boundary. Events are buffered for post-commit emission.
-      const now = new Date();
       const invoice = await tx.invoice.create({
         data: {
-          businessId: order.businessId,
-          contactId: contactId!,
+          businessId: targetBusinessId,
+          contactId: resolvedContactId!,
           invoiceNumber,
           status: 'DRAFT',
-          subtotal: order.subtotal,
-          taxAmount: order.taxAmount,
-          discountAmount: order.discountAmount ?? 0,
-          total: order.total,
-          currency: order.currency,
+          subtotal: targetSubtotal,
+          taxAmount: targetTaxAmount,
+          discountAmount: targetDiscountAmount,
+          total: targetTotal,
+          currency: targetCurrency,
           issueDate: now,
-          notes: `Storefront order ${order.orderNumber}`,
+          notes: qs ? `Quick sale ${targetOrderNumber}` : `Storefront order ${targetOrderNumber}`,
           items: {
-            create: order.items.map((item) => ({
+            create: targetItems.map((item) => ({
               description: item.name,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
@@ -1507,7 +1607,6 @@ export class StoreOrderService {
           },
         },
       });
-      const txClient = tx as unknown as Prisma.TransactionClient;
       await this.invoiceWorkflow.transition(invoice.id, 'SENT', { sentAt: now, tx: txClient, eventBuffer: pendingEvents });
       await this.invoiceWorkflow.transition(invoice.id, 'PAID', { paidAt: now, tx: txClient, eventBuffer: pendingEvents });
 
@@ -1519,45 +1618,22 @@ export class StoreOrderService {
           provider,
           providerPaymentId: paymentRef,
           amount,
-          currency: order.currency,
+          currency: targetCurrency,
           status: 'SUCCESSFUL',
           method,
           invoiceId: invoice.id,
-          businessId: order.businessId,
+          businessId: targetBusinessId,
           recordedBy: input.actorId ?? null,
         },
       });
       await this.revenuePosting.onPaymentRecorded(payment.id, { tx: txClient, createdById: input.actorId ?? null });
 
-      // 3. Stock decrement + movement rows. Tracked products MUST have a
-      //    warehouse + stock row with sufficient quantity; otherwise we
-      //    fail the entire checkout (rolling back invoice + payment) so
-      //    we never sell stock we can't fulfill. Untracked / virtual
-      //    products are explicitly skipped per their inventoryMode.
-      //
-      //    W11-CHECKOUT-PAIR-SCOPE (W11SEAM-SM-CR-1, D-137): the row read and
-      //    written is the business's own row of the (product, default
-      //    warehouse) pair, the one lockStockRowsInOrder locked above. The pair
-      //    is unique across every business, so a planted row of another
-      //    business can hold it; read by the pair alone, that row was
-      //    decremented without its lock, given this business's 'sale' movement,
-      //    and costed by no COGS (onProductSold reads this business's rows). A
-      //    pair held by another business's row is no stock of this business:
-      //    the same refusal as a missing own row, and the other row is never
-      //    written.
-      //
-      //    W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-1, CPS-COR-2; the D-76
-      //    pattern): except for a provider settlement, whose money the provider
-      //    has already taken. There a line whose only blocker is the pair held
-      //    by another business's row takes no stock and is kept in
-      //    `stockHeldElsewhere`; the money is recorded and the business is told
-      //    after the commit (tellStockHeldElsewhere). The other row is still
-      //    never written.
+      // 3. Stock decrement + movement rows.
       const decrementedProductIds: string[] = [];
       const stockHeldElsewhere: StockHeldElsewhereLine[] = [];
       const trackedItems = input.stockMovesOnFulfilment
         ? []
-        : order.items.filter((i) => {
+        : targetItems.filter((i) => {
             const mode = productMode.get(i.productId) ?? 'untracked';
             return mode === 'tracked';
           });
@@ -1566,7 +1642,7 @@ export class StoreOrderService {
           'Cannot finalize checkout: no active warehouse configured for tracked products.',
         );
       }
-      for (const item of input.stockMovesOnFulfilment ? [] : order.items) {
+      for (const item of input.stockMovesOnFulfilment ? [] : targetItems) {
         const mode = productMode.get(item.productId) ?? 'untracked';
         if (mode !== 'tracked') {
           this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
@@ -1575,20 +1651,19 @@ export class StoreOrderService {
         const productName = productNameById.get(item.productId) || item.name || 'Product';
         const ownRows = await tx.inventoryStock.findMany({
           where: {
-            businessId: order.businessId,
+            businessId: targetBusinessId,
             productId: item.productId,
-            warehouse: { businessId: order.businessId, isActive: true },
+            warehouse: { businessId: targetBusinessId, isActive: true },
           },
           orderBy: [{ warehouse: { createdAt: 'asc' } }, { id: 'asc' }],
         });
         if (ownRows.length === 0) {
           if (input.providerSettlement) {
-            // Who holds the pair (unique across every business): read only, never written.
             const holder = await tx.inventoryStock.findUnique({
               where: { productId_warehouseId: { productId: item.productId, warehouseId: defaultWarehouse!.id } },
               select: { businessId: true },
             });
-            if (holder && holder.businessId !== order.businessId) {
+            if (holder && holder.businessId !== targetBusinessId) {
               stockHeldElsewhere.push({ productId: item.productId, name: item.name, quantity: item.quantity });
               continue;
             }
@@ -1597,16 +1672,12 @@ export class StoreOrderService {
             `Cannot finalize checkout: tracked product "${productName}" has no stock row in the default warehouse.`,
           );
         }
-        // Prefer the default warehouse first, then remaining active warehouses deterministically.
         const orderedRows = [
           ...ownRows.filter((r) => r.warehouseId === defaultWarehouse!.id),
           ...ownRows.filter((r) => r.warehouseId !== defaultWarehouse!.id),
         ];
         const totalAvailable = orderedRows.reduce((sum, r) => sum + Math.max(0, r.quantity - r.reserved), 0);
         if (totalAvailable < item.quantity) {
-          // Merchant explicitly opted into backorder for this product —
-          // allow the sale through and let stock dip negative so the
-          // owed-units delta is still tracked + visible in inventory.
           const allowBackorder = productOOSBehavior.get(item.productId) === 'allow_backorder';
           if (!allowBackorder) {
             throw new ConflictException({
@@ -1640,12 +1711,12 @@ export class StoreOrderService {
           });
           await tx.stockMovement.create({
             data: {
-              businessId: order.businessId,
+              businessId: targetBusinessId,
               warehouseId: stock.warehouseId,
               productId: item.productId,
               quantityChange: -take,
               type: 'sale',
-              referenceId: order.orderNumber,
+              referenceId: targetOrderNumber,
             },
           });
         }
@@ -1655,59 +1726,105 @@ export class StoreOrderService {
       // 4. Revenue attribution — hard requirement; failures roll back.
       await this.revenueAttribution.record(
         {
-          businessId: order.businessId,
-          source: 'storefront',
-          sourceDetail: `order:${order.orderNumber}`,
+          businessId: targetBusinessId,
+          source: qs ? 'manual' : 'storefront',
+          sourceDetail: qs ? `quick_sale:${targetOrderNumber}` : `order:${targetOrderNumber}`,
           revenueType: 'ORDER',
-          revenueId: order.id,
-          amount: order.total,
-          currency: order.currency,
-          contactId,
+          revenueId: activeOrder.id,
+          amount: targetTotal,
+          currency: targetCurrency,
+          contactId: resolvedContactId!,
           referralCode,
         },
-        tx as unknown as Prisma.TransactionClient,
+        txClient,
       );
 
-      // 4b. W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18): the COGS leg (Dr COGS / Cr Inventory at the weighted
-      //     unit cost, ExpensePostingService.onProductSold, idempotent on MarketplaceOrder:<id>:cogs) for every order
-      //     this door marks paid, STOREFRONT and STANDARD, in this transaction: a COGS failure (no cost accounts) rolls
-      //     the settlement back as a failed revenue posting does, and the provider retries. MarketplaceService posted it
-      //     after this door had committed, a failure only logged, and a storefront settlement posted none. Read after
-      //     step 3, so a decremented line is costed from the stock rows as this transaction left them. The checkout
-      //     invoice's items carry no productId, so the PAID transition posts no second COGS under sourceType Invoice.
-      const soldItems = order.items
+      // 4b. W11-CHECKOUT-COGS-TX (D-127): COGS leg inside the same transaction.
+      const soldItems = targetItems
         .filter((item) => item.productId && item.quantity > 0)
         .map((item) => ({ productId: item.productId, quantity: item.quantity }));
       if (soldItems.length > 0) {
         await this.expensePosting.onProductSold(
           {
-            businessId: order.businessId,
+            businessId: targetBusinessId,
             sourceType: 'MarketplaceOrder',
-            sourceId: order.id,
+            sourceId: activeOrder.id,
             date: now,
-            currency: order.currency,
-            contactId,
+            currency: targetCurrency,
+            contactId: resolvedContactId!,
             items: soldItems,
           },
           txClient,
         );
       }
 
-      // 5. Order — paid + confirmed. V1-33 review (V33-CR-3): fulfilment
-      //    already past CONFIRMED (a cash-on-delivery order shipped or
-      //    delivered before its cash was recorded) is kept, not rewound.
-      const updatedOrder = await tx.marketplaceOrder.update({
-        where: { id: order.id },
-        data: {
-          paymentStatus: 'PAID',
-          status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : (input.paidStatus ?? 'CONFIRMED'),
-          paymentRef,
-        },
-        include: { items: true },
-      });
+      // 5. Order finalization + quick-sale PaymentLink & IdempotencyKey commit.
+      const updatedOrder = qs
+        ? activeOrder
+        : await tx.marketplaceOrder.update({
+            where: { id: activeOrder.id },
+            data: {
+              paymentStatus: 'PAID',
+              status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : (input.paidStatus ?? 'CONFIRMED'),
+              paymentRef,
+            },
+            include: { items: true },
+          });
 
-      return { updatedOrder, invoice, decrementedProductIds, stockHeldElsewhere };
+      let quickSaleSummary: QuickSaleCommittedResult | null = null;
+      if (qs) {
+        await tx.paymentLink.create({
+          data: {
+            invoiceId: invoice.id,
+            businessId: targetBusinessId,
+            token: qs.receiptToken,
+            active: true,
+          },
+        });
+        quickSaleSummary = {
+          order: updatedOrder,
+          invoice: {
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            status: 'PAID',
+            subtotal: Number(invoice.subtotal ?? targetSubtotal),
+            taxAmount: Number(invoice.taxAmount ?? targetTaxAmount),
+            total: Number(invoice.total),
+            currency: invoice.currency,
+            contactId: resolvedContactId!,
+          },
+          payment: {
+            id: payment.id,
+            amount: Number(payment.amount),
+            currency: payment.currency,
+            method: payment.method ?? method,
+            status: payment.status,
+            providerPaymentId: payment.providerPaymentId ?? null,
+          },
+          receiptToken: qs.receiptToken,
+        };
+        if (qs.idempotency) {
+          await tx.idempotencyKey.create({
+            data: {
+              businessId: targetBusinessId,
+              idempotencyKey: qs.idempotency.slot,
+              status: 'completed',
+              requestHash: qs.idempotency.requestHash,
+              response: {
+                ...quickSaleSummary,
+                receiptPath: `/commerce/public/invoice-link/${qs.receiptToken}/receipt`,
+              } as unknown as Prisma.InputJsonValue,
+            },
+          });
+        }
+      }
+
+      return { updatedOrder, invoice, resolvedContactId: resolvedContactId!, decrementedProductIds, stockHeldElsewhere, quickSaleSummary };
     });
+
+    if (qs && result.quickSaleSummary) {
+      qs.onCommitted(result.quickSaleSummary);
+    }
 
     // Tx committed — now safe to flush buffered invoice events and
     // dispatch the storefront-funnel timeline + CRM hooks.
@@ -1716,7 +1833,7 @@ export class StoreOrderService {
     }
 
     if (result.stockHeldElsewhere.length > 0) {
-      await this.tellStockHeldElsewhere(order, defaultWarehouse!, provider, result.stockHeldElsewhere);
+      await this.tellStockHeldElsewhere(result.updatedOrder, defaultWarehouse!, provider, result.stockHeldElsewhere);
     }
 
     try {
@@ -1729,32 +1846,30 @@ export class StoreOrderService {
         paymentRef,
       };
       await this.publicEvents.logStorefrontEvent({
-        businessId: order.businessId,
-        contactId: contactId!,
+        businessId: targetBusinessId,
+        contactId: result.resolvedContactId,
         type: 'payment.completed',
-        sourceDetail: `order:${order.orderNumber}`,
+        sourceDetail: `order:${result.updatedOrder.orderNumber}`,
         data: baseData,
       });
     } catch (err: any) {
       this.logger.warn(`[store-order] post-checkout timeline write failed: ${(err as Error).message}`);
     }
 
-    this.events.emit('store_order.paid', { order: result.updatedOrder, businessId: order.businessId, invoiceId: result.invoice.id });
+    this.events.emit('store_order.paid', { order: result.updatedOrder, businessId: targetBusinessId, invoiceId: result.invoice.id });
 
-    // Re-evaluate inventory risk for affected products & emit signals so
-    // inventory-risk listeners (action queue, alerts) can react.
     for (const productId of result.decrementedProductIds) {
       try {
-        const risk = await this.inventoryRisk.evaluateProduct(productId, order.businessId);
+        const risk = await this.inventoryRisk.evaluateProduct(productId, targetBusinessId);
         if (!risk) continue;
         for (const signal of risk.signals) {
           if (signal.type === 'out_of_stock' || signal.type === 'low_stock') {
             this.events.emit(`inventory.${signal.type}`, {
-              businessId: order.businessId,
+              businessId: targetBusinessId,
               productId,
               productName: risk.productName,
               signal,
-              triggeredBy: { type: 'order', id: order.id, orderNumber: order.orderNumber },
+              triggeredBy: { type: 'order', id: result.updatedOrder.id, orderNumber: result.updatedOrder.orderNumber },
             });
           }
         }

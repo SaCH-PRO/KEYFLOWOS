@@ -25,6 +25,8 @@ import { CommerceService } from '../commerce/commerce.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { fromCents, toCents } from '../commerce/money';
 import { CommerceIntegrationService } from './commerce-integration.service';
+import { QuickSaleService } from './quick-sale.service';
+import type { CreateQuickSaleDto } from './dto/quick-sale.dto';
 import {
   PreorderDelayedPayload,
   StoreOrderCreatedPayload,
@@ -246,6 +248,23 @@ export class MarketplaceService {
    */
   private storeOrders(): StoreOrderService {
     return this.moduleRef.get(StoreOrderService, { strict: false });
+  }
+
+  private quickSales(): QuickSaleService {
+    try {
+      return this.moduleRef.get(QuickSaleService, { strict: false });
+    } catch {
+      return new QuickSaleService(this.prisma, this.moduleRef);
+    }
+  }
+
+  async createQuickSale(
+    businessId: string,
+    body: CreateQuickSaleDto,
+    actorId: string | null = null,
+    idempotencyHeader?: string,
+  ) {
+    return this.quickSales().createQuickSale(businessId, body, actorId, idempotencyHeader);
   }
 
   /**

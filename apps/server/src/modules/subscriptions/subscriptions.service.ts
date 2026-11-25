@@ -346,6 +346,30 @@ export class SubscriptionsService {
     });
   }
 
+  /**
+   * V1-66 (QUICK-SALE-SERVER, owner ruling D-160 `plans`): quick counter sales
+   * do not count toward the monthly invoice cap. Matching against the tenant's
+   * actual `marketplace_orders` row (`type = 'QUICK_SALE'`) guarantees a forged
+   * regular invoice carrying an `INV-QS-*` number is still counted.
+   */
+  private async countMonthlyBillableInvoices(businessId: string, startOfMonth: Date): Promise<number> {
+    const rows = await this.db.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM invoices i
+      WHERE i.business_id = ${businessId}
+        AND i.created_at >= ${startOfMonth}
+        AND i.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM marketplace_orders o
+          WHERE o.business_id = i.business_id
+            AND o.type = 'QUICK_SALE'
+            AND i.invoice_number = 'INV-' || o.order_number
+        )
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
   async checkLimit(businessId: string, resource: string): Promise<{ allowed: boolean; limit: number; current: number; upgradeTo: string }> {
     const { plan, limits } = await this.getActiveSubscription(businessId);
     const upgradeTo = plan === 'FREE' ? 'FLOW' : plan === 'FLOW' ? 'KEYFLOW' : 'KEYFLOW';
@@ -378,9 +402,7 @@ export class SubscriptionsService {
         return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'invoices': {
-        const count = await this.db.invoice.count({
-          where: { businessId, createdAt: { gte: startOfMonth } },
-        });
+        const count = await this.countMonthlyBillableInvoices(businessId, startOfMonth);
         const limit = limits.invoicesPerMonth;
         return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
@@ -558,7 +580,7 @@ export class SubscriptionsService {
       warehouseCount, reportCount, aiUsageAgg, aiByFeature,
     ] = await Promise.all([
       this.db.contact.count({ where: { businessId, deletedAt: null } }),
-      this.db.invoice.count({ where: { businessId, createdAt: { gte: startOfMonth } } }),
+      this.countMonthlyBillableInvoices(businessId, startOfMonth),
       this.db.booking.count({ where: { businessId, deletedAt: null, createdAt: { gte: startOfMonth } } }),
       this.db.staffMember.count({ where: { businessId, deletedAt: null } }),
       this.db.product.count({ where: { businessId, deletedAt: null } }),

@@ -464,7 +464,7 @@ describe('P83 — QUICK-SALE-SERVER (POST /marketplace/businesses/:businessId/qu
     });
     expect(cogsTx).not.toBeNull();
     const cogsDebit = cogsTx.entries.find((e: any) => e.account.systemKey === 'COGS' && Number(e.debit) > 0);
-    const invCredit = cogsTx.entries.find((e: any) => e.account.systemKey === 'INVENTORY' && Number(e.credit) > 0);
+    const invCredit = cogsTx.entries.find((e: any) => e.account.systemKey === 'INVENTORY_ASSET' && Number(e.credit) > 0);
     expect(Number(cogsDebit?.debit)).toBe(130);
     expect(Number(invCredit?.credit)).toBe(130);
 
@@ -497,8 +497,8 @@ describe('P83 — QUICK-SALE-SERVER (POST /marketplace/businesses/:businessId/qu
     expect(limitCheck.current).toBe(0);
     expect(limitCheck.allowed).toBe(true);
 
-    const usageSummary = await subscriptionsService.getUsageSummary(ID.bizA);
-    const invUsage = usageSummary.resources.find((r: any) => r.key === 'invoices');
+    const billingDashboard = await subscriptionsService.getBillingDashboard(ID.bizA);
+    const invUsage = billingDashboard.resourceUsage.find((r: any) => r.key === 'invoices');
     expect(invUsage?.current).toBe(0);
 
     // Anti-forgery check: a regular invoice with an INV-QS-* number but no QUICK_SALE order STILL counts
