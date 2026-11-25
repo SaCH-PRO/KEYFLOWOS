@@ -13,10 +13,14 @@
  *   NPR-08e RED-BEFORE  the PATCH's write landed (a reload reads it) but its answer is lost (500), and the re-read fails:
  *                       a load has happened since the click, so nothing is reverted; the switch shows the reload's value
  *   NPR-08f RED-BEFORE  (re-read count only) no load since the click, the PATCH is refused and the re-read fails: the switch is put back
- *   NPR-08g RED-BEFORE  (mutant R4) Booking Confirmation's PATCH waits; Payment Receipt's succeeds and its answer (the
- *                       server's preferences, Booking Confirmation still on) is put on the page; then Booking
- *                       Confirmation's PATCH is refused and the re-read fails: it is put back to its pre-click value (on),
- *                       not flipped from what the page now holds
+ *   NPR-08g RED-BEFORE  (mutant R4; round 2, SEC-NPR-5 / COR-NPR-5) Booking Confirmation's PATCH waits; Payment
+ *                       Receipt's succeeds, and only its own switch is taken from its answer: Booking Confirmation stays
+ *                       off, still saving (disabled), not flipped back on by an answer read before its own PATCH. Then
+ *                       Booking Confirmation's PATCH is refused and the re-read fails: it goes back to its pre-click value
+ *   NPR-08h RED-BEFORE  (round 2, SEC-NPR-6) a PATCH refused and its re-read refused by ModuleScopeGuard (access revoked
+ *                       mid-session): the page says no access, no switch left on screen
+ *   NPR-08i RED-BEFORE  (round 2) two PATCHes answered out of order: Payment Receipt commits first but its answer comes
+ *                       last; the page ends as the server holds both switches
  *   NPR-09  guard       (SEC-NPR-2) a first load with the log rows, a failed preferences read, then a Retry refused (403):
  *                       no switch, no log row, no "(n)" count
  *   NPR-09b guard       the same with the switches showing and the log failed: after the refused Retry, no switch, no
@@ -220,11 +224,15 @@ describe("D-283 repair round 1: two toggles", () => {
     fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
     expect(checked(RECEIPT)).toBe("true");
 
-    // Payment Receipt's PATCH goes through: the server's preferences, with Booking Confirmation still on.
+    // Payment Receipt's PATCH goes through. Its answer was read before Booking Confirmation's PATCH was decided, so it
+    // still says Booking Confirmation on; only Payment Receipt is taken from it. Booking Confirmation stays off and
+    // saving (its switch disabled), and Payment Receipt is no longer saving.
     server.answerPatch(json(200, { ...PREFS, payment_receipt: true }), "payment_receipt");
     await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Notification preference updated"));
-    expect(checked(BOOKING)).toBe("true");
+    expect(checked(BOOKING)).toBe("false");
     expect(checked(RECEIPT)).toBe("true");
+    expect((screen.getByRole("switch", { name: BOOKING }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("switch", { name: RECEIPT }) as HTMLButtonElement).disabled).toBe(false);
 
     // Booking Confirmation's PATCH is refused, and the re-read fails; no load has run since the click.
     server.answerPatch(json(400, { statusCode: 400, message: "Bad request" }), "booking_confirmed");
@@ -232,6 +240,41 @@ describe("D-283 repair round 1: two toggles", () => {
     expect(server.prefsGets()).toBe(2);
     expect(checked(BOOKING)).toBe("true");
     expect(checked(RECEIPT)).toBe("true");
+    expect((screen.getByRole("switch", { name: BOOKING }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("NPR-08i RED-BEFORE: two PATCH answers out of order: the page ends as the server holds both switches", async () => {
+    const server = serve(() => json(200, PREFS), () => json(200, LOG));
+    await renderPage();
+    await clickBookingOff();
+    fireEvent.click(screen.getByRole("switch", { name: RECEIPT }));
+
+    // The server commits Payment Receipt, then Booking Confirmation. Booking's answer (both changes) arrives first;
+    // Payment Receipt's (read before Booking's commit: Booking still on) arrives last.
+    const serverNow = { ...PREFS, booking_confirmed: false, payment_receipt: true };
+    server.answerPatch(json(200, serverNow), "booking_confirmed");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledTimes(1));
+    server.answerPatch(json(200, { ...PREFS, payment_receipt: true }), "payment_receipt");
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledTimes(2));
+    expect(checked(BOOKING)).toBe(String(serverNow.booking_confirmed));
+    expect(checked(RECEIPT)).toBe(String(serverNow.payment_receipt));
+  });
+});
+
+describe("D-283 repair round 2: access revoked mid-session (SEC-NPR-6)", () => {
+  it("NPR-08h RED-BEFORE: a PATCH refused and its re-read refused: no access, no switch on screen", async () => {
+    const writeRefused = () =>
+      json(403, { statusCode: 403, message: "Insufficient permissions: settings requires write access (you have none)", error: "Forbidden" });
+    const server = serve(queue(() => json(200, PREFS), refused), () => json(200, LOG));
+    await renderPage();
+    await clickBookingOff();
+
+    server.answerPatch(writeRefused());
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(server.prefsGets()).toBe(2);
+    await waitFor(() => expect(document.querySelector('[data-state="no-access"]')).not.toBeNull());
+    expect(document.querySelector('[data-state="no-access"]')!.textContent).toContain(SETTINGS_REFUSAL);
+    expect(screen.queryAllByRole("switch")).toHaveLength(0);
   });
 });
 
