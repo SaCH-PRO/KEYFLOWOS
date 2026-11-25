@@ -128,6 +128,9 @@ async function openTimeline(page: Page, contactId: string) {
 /** Clicks Load older when it is there (at the base it is not: the soft checks around it record the RED). */
 async function clickLoadOlder(page: Page, header: RegExp): Promise<boolean> {
   if (!(await loadOlder(page).count())) return false;
+  // The phone's fixed bottom bar covers the viewport's bottom edge, where a plain scroll-into-view leaves the button:
+  // a person scrolls it up into view first, and so does this (the scroll root's pb-28 leaves room above the bar).
+  await loadOlder(page).evaluate((el) => el.scrollIntoView({ block: "center" }));
   await loadOlder(page).click();
   await expect(page.getByText(header)).toHaveCount(1, { timeout: 30_000 });
   await settle(page, 500);
@@ -178,7 +181,7 @@ for (const width of [375, 768, 1024, 1440]) {
         expect.soft(await stated(page, "All"), "All: 39 items from 40 records, with +").toBe("39+");
       });
 
-      const ownerAll = await stated(page, "All");
+      let ownerAll: string | null = null;
       await test.step("3. Load older again: all 45 records; plain words; no Load older", async () => {
         expect.soft(await clickLoadOlder(page, /^\d+ events$/), "Load older loads the last page").toBe(true);
         await expect.soft(main.getByText(/^44 events$/), "44 items from 45 records, in plain words").toHaveCount(1);
@@ -189,6 +192,7 @@ for (const width of [375, 768, 1024, 1440]) {
         await expect.soft(main.getByText(PASTED, { exact: true }), "the pasted message, once").toHaveCount(1);
         expect.soft(await stated(page, "All"), "All: 44, no +").toBe("44");
         expect.soft(await stated(page, "WhatsApp"), "WhatsApp: 1, no +").toBe("1");
+        ownerAll = await stated(page, "All");
       });
 
       await test.step("4. no sideways page scroll", async () => {
