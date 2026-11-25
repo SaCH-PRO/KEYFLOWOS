@@ -27,6 +27,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *                       never raised as a notice to the signed-in user, even after a failed list read overwrote the
  *                       cached user; the leftover business is forgotten
  *   RMN-11  pin         MINOR-2: access given back (the business is in the list again) clears the notice
+ * Correctness review round:
+ *   RMN-12  pin         a member who switched business themselves (selectBusiness drops the cached user) and is then
+ *                       removed from the business they switched away from gets no notice: it is not the one stored
  */
 
 const { bootstrapIdentity } = vi.hoisted(() => ({ bootstrapIdentity: vi.fn() }));
@@ -202,5 +205,16 @@ describe("SWP-REMOVED-MEMBER-NOTICE: a removed member is told, by name", () => {
     serve({ businesses: [OWN, OWNERS] });
     await ws.refreshWorkspace();
     expect(ws.getRemovedBusinessNotice(), "re-invited: the notice no longer holds").toBeNull();
+  });
+
+  it("RMN-12 pin: a member who switched away themselves gets no notice for the business they left", async () => {
+    workingIn(OWNERS);
+    serve({ businesses: [OWN, OWNERS] });
+    const ws = await import("../workspace");
+    ws.selectBusiness(OWN.id);
+    // Removed from the business they had already switched away from.
+    serve({ businesses: [OWN] });
+    await expect(ws.refreshWorkspace()).resolves.toBe(OWN.id);
+    expect(ws.getRemovedBusinessNotice()).toBeNull();
   });
 });
