@@ -443,6 +443,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
               contacts={contacts}
               label="Contact"
               required
+              savedRecord={!!editingId}
             />
             <div>
               <label className="text-xs text-muted-foreground mb-1.5 inline-flex items-center gap-1">Frequency * <InfoBadge title="Recurring Frequency" body="How often this invoice is auto-generated and sent. Monthly is most common for retainers. The system creates a new invoice each cycle and optionally sends it to the client." side="right" iconSize={10} /></label>

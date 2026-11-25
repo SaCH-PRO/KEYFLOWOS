@@ -22,6 +22,8 @@ interface FormDetailsSectionProps {
   dateLabel: string;
   label: string;
   onPaymentTermsChange?: (term: string) => void;
+  /** Editing a saved document: its customer is kept even when this member cannot read them (ContactSelect savedRecord). */
+  savedRecord?: boolean;
 }
 
 export function FormDetailsSection({
@@ -38,6 +40,7 @@ export function FormDetailsSection({
   dateLabel,
   label,
   onPaymentTermsChange,
+  savedRecord = false,
 }: FormDetailsSectionProps) {
   return (
     <>
@@ -52,6 +55,7 @@ export function FormDetailsSection({
               label="Client"
               required
               error={contactError}
+              savedRecord={savedRecord}
             />
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground flex items-center gap-1">
