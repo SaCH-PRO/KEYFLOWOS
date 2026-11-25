@@ -89,7 +89,18 @@ function makeService() {
     computeOneDepartment: vi.fn().mockResolvedValue({ code: 'CFO_FINANCE' }),
   };
 
-  const service = new FinanceGenomeService(
+  const cashPosition = {
+    getCashPosition: vi.fn().mockResolvedValue({
+      cashBalance: 0,
+      currency: 'TTD',
+      byCurrency: { TTD: 0 },
+      basis: 'ledger' as const,
+      accounts: [],
+      unpostedOpeningBalances: [],
+    }),
+  };
+
+  const service = new (FinanceGenomeService as unknown as new (...args: any[]) => FinanceGenomeService)(
     prisma,
     metricService as any,
     factService as any,
@@ -97,6 +108,7 @@ function makeService() {
     recommendations as any,
     memory as any,
     departmentReadiness as any,
+    cashPosition as any,
   );
 
   return {
@@ -108,6 +120,7 @@ function makeService() {
     recommendations,
     memory,
     departmentReadiness,
+    cashPosition,
     storedSnapshots,
     storedMemory,
   };
@@ -253,5 +266,211 @@ describe('FinanceGenomeService', () => {
     const list = await service.listFinanceSnapshots('biz_1');
 
     expect(list.length).toBe(2);
+  });
+
+  describe('W11-GENOME-RUNWAY (D-135): business currency and ledger cash position', () => {
+    it('[GR-01] USD business persists snapshot currency USD instead of hard-coded TTD', async () => {
+      const { service, cashPosition } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 0,
+        currency: 'USD',
+        byCurrency: { USD: 0 },
+        basis: 'ledger',
+        accounts: [],
+        unpostedOpeningBalances: [],
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(cashPosition.getCashPosition).toHaveBeenCalledWith('biz_usd');
+      expect(snapshot.currency).toBe('USD');
+    });
+
+    it('[GR-02] ledger cash in business currency takes precedence over CASH_ON_HAND metric and drives LOW_RUNWAY', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 100,
+        currency: 'USD',
+        byCurrency: { USD: 100 },
+        basis: 'ledger',
+        accounts: [
+          { accountId: 'coa_1', systemKey: 'CASH', name: 'Cash', currency: 'USD', balance: 100 },
+        ],
+        unpostedOpeningBalances: [],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        CASH_ON_HAND: { value: 5000, currency: 'USD', confidence: 0.9 },
+        MONTHLY_EXPENSE: { value: 200, currency: 'USD', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBe(100);
+      expect(snapshot.runwayMonths).toBeCloseTo(0.5);
+      expect(snapshot.warnings).toContainEqual(
+        expect.objectContaining({ code: 'LOW_RUNWAY', severity: 'CRITICAL' }),
+      );
+    });
+
+    it('[GR-03] with no ledger cash, falls back to CASH_ON_HAND metric in business currency', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 0,
+        currency: 'USD',
+        byCurrency: { USD: 0 },
+        basis: 'ledger',
+        accounts: [
+          { accountId: 'coa_1', systemKey: 'CASH', name: 'Cash', currency: 'USD', balance: 0 },
+        ],
+        unpostedOpeningBalances: [],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        CASH_ON_HAND: { value: 5000, currency: 'USD', confidence: 0.9 },
+        MONTHLY_EXPENSE: { value: 2500, currency: 'USD', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBe(5000);
+      expect(snapshot.runwayMonths).toBeCloseTo(2);
+      expect(snapshot.warnings).toContainEqual(
+        expect.objectContaining({ code: 'LOW_RUNWAY', severity: 'HIGH' }),
+      );
+      expect(snapshot.missingInputs).not.toContain('cash_on_hand');
+      expect(snapshot.missingInputs).not.toContain('cash_on_hand (other currency)');
+    });
+
+    it('[GR-04] CASH_ON_HAND metric in TTD on a USD business is not used and missingInputs names it', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 0,
+        currency: 'USD',
+        byCurrency: { USD: 0 },
+        basis: 'ledger',
+        accounts: [],
+        unpostedOpeningBalances: [],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        CASH_ON_HAND: { value: 5000, currency: 'TTD', confidence: 0.9 },
+        MONTHLY_EXPENSE: { value: 1000, currency: 'USD', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBeNull();
+      expect(snapshot.runwayMonths).toBeNull();
+      expect(snapshot.missingInputs).toContain('cash_on_hand (other currency)');
+      expect(snapshot.missingInputs).not.toContain('cash_on_hand');
+      expect(snapshot.warnings.some((w) => w.code === 'LOW_RUNWAY')).toBe(false);
+    });
+
+    it('[GR-05] MONTHLY_EXPENSE metric in TTD on a USD business is not used and missingInputs names it', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 1000,
+        currency: 'USD',
+        byCurrency: { USD: 1000 },
+        basis: 'ledger',
+        accounts: [],
+        unpostedOpeningBalances: [
+          { financialAccountId: 'fa_1', name: 'Bank', type: 'BANK', currency: 'USD', amount: 1000 },
+        ],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        MONTHLY_EXPENSE: { value: 2000, currency: 'TTD', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBe(1000);
+      expect(snapshot.monthlyExpenses).toBeNull();
+      expect(snapshot.runwayMonths).toBeNull();
+      expect(snapshot.missingInputs).toContain('monthly_expenses (other currency)');
+      expect(snapshot.missingInputs).not.toContain('monthly_expenses');
+      expect(snapshot.warnings.some((w) => w.code === 'LOW_RUNWAY')).toBe(false);
+    });
+
+    it('[GR-06] foreign-currency ledger rows alone do not override a business-currency CASH_ON_HAND metric', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 0,
+        currency: 'USD',
+        byCurrency: { TTD: 500, USD: 0 },
+        basis: 'ledger',
+        accounts: [
+          { accountId: 'coa_1', systemKey: 'BANK', name: 'TTD Bank', currency: 'TTD', balance: 500 },
+        ],
+        unpostedOpeningBalances: [],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        CASH_ON_HAND: { value: 6000, currency: 'USD', confidence: 0.9 },
+        MONTHLY_EXPENSE: { value: 2000, currency: 'USD', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBe(6000);
+      expect(snapshot.runwayMonths).toBeCloseTo(3);
+      expect(snapshot.warnings).toContainEqual(
+        expect.objectContaining({ code: 'LOW_RUNWAY', severity: 'HIGH' }),
+      );
+    });
+
+    it('[GR-07] posted business-currency ledger accounts netting to zero take precedence over stale CASH_ON_HAND metric', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 0,
+        currency: 'USD',
+        byCurrency: { USD: 0 },
+        basis: 'ledger',
+        accounts: [
+          { accountId: 'coa_1', systemKey: 'CASH', name: 'Cash', currency: 'USD', balance: 200 },
+          { accountId: 'coa_2', systemKey: 'BANK', name: 'Bank', currency: 'USD', balance: -200 },
+        ],
+        unpostedOpeningBalances: [],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        CASH_ON_HAND: { value: 5000, currency: 'USD', confidence: 0.9 },
+        MONTHLY_EXPENSE: { value: 1000, currency: 'USD', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBe(0);
+      expect(snapshot.runwayMonths).toBe(0);
+      expect(snapshot.warnings).toContainEqual(
+        expect.objectContaining({ code: 'LOW_RUNWAY', severity: 'CRITICAL' }),
+      );
+    });
+
+    it('[GR-08] metric currencies normalize case/whitespace and LOW_RUNWAY severity thresholds stay unchanged', async () => {
+      const { service, cashPosition, metricService } = makeService();
+      cashPosition.getCashPosition.mockResolvedValue({
+        cashBalance: 0,
+        currency: 'USD',
+        byCurrency: { USD: 0 },
+        basis: 'ledger',
+        accounts: [],
+        unpostedOpeningBalances: [],
+      });
+      metricService.getLatestMetricsByType.mockResolvedValue({
+        CASH_ON_HAND: { value: 7000, currency: ' usd ', confidence: 0.9 },
+        MONTHLY_EXPENSE: { value: 1000, currency: 'usd', confidence: 0.9 },
+      });
+
+      const snapshot = await service.computeFinanceSnapshot('biz_usd');
+
+      expect(snapshot.currency).toBe('USD');
+      expect(snapshot.cashOnHand).toBe(7000);
+      expect(snapshot.monthlyExpenses).toBe(1000);
+      expect(snapshot.runwayMonths).toBeCloseTo(7);
+      expect(snapshot.warnings.some((w) => w.code === 'LOW_RUNWAY')).toBe(false);
+    });
   });
 });
