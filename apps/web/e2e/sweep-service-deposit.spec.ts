@@ -1,5 +1,5 @@
-import type { APIRequestContext, Page } from "@playwright/test";
-import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-helpers";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import { test, expect, API_URL, settle, coveringElement, type Tenant } from "./journeys/journey-helpers";
 
 /**
  * SWP-SERVICE-DEPOSIT, the browser half (sweep BUG-048; journeys B and F; D-26, D-59, D-80). The jsdom half is
@@ -18,6 +18,8 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  *      when the page's price is stale (lowered to 80 behind it), by the server, whose message the page shows; the
  *      stored deposit is unchanged;
  *   4. the deposit is turned off; after a reload the card says No deposit and the API stores false / null / null.
+ * Every control is pressed as a person would: scrolled into view as far as the page allows, and only if nothing (the
+ * phone's Mobile navigation bar, the KEY bubble) covers it there (journey-helpers coveringElement, F9's rule).
  *
  * Live only (E2E_LIVE=1, a production build, a real API and database: the journey harness's own fixtures, README in
  * e2e/journeys); without E2E_LIVE every case is skipped, so the mocked CI job is unaffected. Run it in the
@@ -82,6 +84,12 @@ async function seedPopularService(request: APIRequestContext, owner: Tenant): Pr
 const depositButton = (page: Page, name: string) => page.getByRole("button", { name: `Deposit for ${name}` });
 const editorOf = (page: Page, name: string) => page.getByRole("group", { name: `Deposit settings for ${name}` });
 
+/** Scrolls `target` into view as a person would, checks nothing covers it there, and presses it. */
+async function press(target: Locator, what: string) {
+  expect(await coveringElement(target), `${what} is not covered once scrolled into view`).toBeNull();
+  await target.click();
+}
+
 async function savePatch(page: Page, serviceId: string, click: () => Promise<void>) {
   const done = page.waitForResponse(
     (r) => r.request().method() === "PATCH" && new URL(r.url()).pathname.endsWith(`/services/${serviceId}`),
@@ -120,7 +128,7 @@ for (const width of WIDTHS) {
         await settle(page, 1_500);
         const card = page.locator("div.rounded-lg", { hasText: `${name} is popular` }).filter({ visible: true }).first();
         await expect(card, "the tip on Presence").toBeVisible({ timeout: 30_000 });
-        await card.getByRole("link", { name: /edit service/i }).click();
+        await press(card.getByRole("link", { name: /edit service/i }), "the tip's Edit service");
         await page.waitForURL(/\/app\/bookings/);
         await expect(editorOf(page, name), "the tip opened this service's deposit editor").toBeVisible({ timeout: 30_000 });
         await expect.poll(() => new URL(page.url()).search, { message: "serviceId leaves the URL; tab stays" }).toBe("?tab=catalog");
@@ -128,11 +136,12 @@ for (const width of WIDTHS) {
 
       await test.step("a 25% deposit is saved, and after a reload the editor and card show it", async () => {
         const editor = editorOf(page, name);
-        await editor.getByLabel("Require a deposit").check();
+        await press(editor.getByLabel("Require a deposit"), "Require a deposit");
+        await expect(editor.getByLabel("Require a deposit")).toBeChecked();
         await expect(editor.getByLabel("Deposit type")).toHaveValue("PERCENT");
         await editor.getByLabel("Deposit percent").fill("25");
         await expect(editor.getByTestId("deposit-preview")).toContainText("USD 30.00 of USD 120.00");
-        const res = await savePatch(page, service.id, () => editor.getByRole("button", { name: "Save deposit" }).click());
+        const res = await savePatch(page, service.id, () => press(editor.getByRole("button", { name: "Save deposit" }), "Save deposit"));
         expect(res.status(), await res.text()).toBe(200);
         await expect(editor).toBeHidden();
 
@@ -148,7 +157,7 @@ for (const width of WIDTHS) {
         const button = depositButton(page, name);
         await expect(button, "the card after a reload").toContainText("25%", { timeout: 30_000 });
         await expect(button).toContainText("USD 30.00");
-        await button.click();
+        await press(button, "the card's deposit control");
         const reopened = editorOf(page, name);
         await expect(reopened.getByLabel("Require a deposit")).toBeChecked();
         await expect(reopened.getByLabel("Deposit type")).toHaveValue("PERCENT");
@@ -168,7 +177,7 @@ for (const width of WIDTHS) {
         await api(request, owner, "PATCH", `/catalog/businesses/${owner.businessId}/services/${service.id}`, { price: 80 });
         await amount.fill("100");
         await expect(editor.getByTestId("deposit-problem")).toHaveCount(0);
-        const res = await savePatch(page, service.id, () => editor.getByRole("button", { name: "Save deposit" }).click());
+        const res = await savePatch(page, service.id, () => press(editor.getByRole("button", { name: "Save deposit" }), "Save deposit"));
         expect(res.status()).toBe(400);
         const message = ((await res.json()) as { message: string }).message;
         expect(message).toMatch(/at most the service price/);
@@ -185,9 +194,10 @@ for (const width of WIDTHS) {
 
       await test.step("the deposit is turned off, and after a reload it is off", async () => {
         const editor = editorOf(page, name);
-        await editor.getByLabel("Require a deposit").uncheck();
+        await press(editor.getByLabel("Require a deposit"), "Require a deposit");
+        await expect(editor.getByLabel("Require a deposit")).not.toBeChecked();
         await expect(editor.getByLabel("Deposit type")).toHaveCount(0);
-        const res = await savePatch(page, service.id, () => editor.getByRole("button", { name: "Save deposit" }).click());
+        const res = await savePatch(page, service.id, () => press(editor.getByRole("button", { name: "Save deposit" }), "Save deposit"));
         expect(res.status(), await res.text()).toBe(200);
         await expect(editor).toBeHidden();
 
@@ -202,7 +212,7 @@ for (const width of WIDTHS) {
         await settle(page, 1_000);
         const button = depositButton(page, name);
         await expect(button, "the card after a reload").toContainText("No deposit", { timeout: 30_000 });
-        await button.click();
+        await press(button, "the card's deposit control");
         await expect(editorOf(page, name).getByLabel("Require a deposit")).not.toBeChecked();
       });
     });
