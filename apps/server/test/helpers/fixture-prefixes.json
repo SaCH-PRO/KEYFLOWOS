@@ -1153,6 +1153,11 @@
       "packet": "V1-64 (SWP-INV-DETAIL)"
     },
     {
+      "prefix": "v64d_",
+      "owner": "apps/server/test/template-apply-idempotent.integration.test.ts",
+      "packet": "V1-64 (CATALOG-1)"
+    },
+    {
       "prefix": "v64g_",
       "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
