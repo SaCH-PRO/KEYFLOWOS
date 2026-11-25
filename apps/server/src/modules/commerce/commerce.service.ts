@@ -3759,6 +3759,14 @@ export class CommerceService {
      * of `input`.
      */
     providerPaymentId?: string;
+    /**
+     * CLAIM-LOOP (V1-65, P76): internal, confirmPaymentClaim only. Under the
+     * invoice lock, verifies this offline claim row is still PENDING (refusing
+     * concurrent dismiss/confirm with 409) and retires all PENDING offline
+     * intent rows for the invoice to CONFIRMED in the same transaction as the
+     * payment, ledger posting, and invoice reconcile.
+     */
+    claimId?: string;
   } = {}) {
     const actorId = options.actorId ?? null;
     const initiatedBy =
@@ -3869,6 +3877,43 @@ export class CommerceService {
           if (winner) return { kind: 'replay', existing: winner, keyedOn };
         }
         CommerceService.assertInvoiceAcceptsPayment(locked.status);
+        if (options.claimId) {
+          const freshClaim = await tx.payment.findFirst({
+            where: { id: options.claimId, businessId, invoiceId },
+            select: { status: true, provider: true, providerPaymentId: true },
+          });
+          if (
+            !freshClaim ||
+            !CommerceService.isOfflineClaimRow({
+              invoiceId,
+              provider: freshClaim.provider,
+              providerPaymentId: freshClaim.providerPaymentId,
+            })
+          ) {
+            throw new NotFoundException('Payment claim not found');
+          }
+          if (freshClaim.status !== 'PENDING') {
+            throw new ConflictException(`This payment claim was already ${freshClaim.status.toLowerCase()}`);
+          }
+          const current = await tx.invoice.findUnique({
+            where: { id: invoiceId },
+            select: { total: true, currency: true, payments: { where: { businessId }, select: { amount: true, status: true } } },
+          });
+          const credited = await appliedCreditsOf(txClient, { id: invoiceId, businessId, status: locked.status });
+          const balance = creditAwareBalance(
+            balanceOfStoredRows(Number(current?.total ?? 0), current?.payments ?? [], current?.currency),
+            credited,
+          );
+          const remaining = Math.min(balance.remaining, balance.total);
+          if (remaining <= 0) {
+            throw new ConflictException('Invoice is already paid');
+          }
+          if (paymentAmount > remaining) {
+            throw new BadRequestException(
+              `Confirmed amount (${paymentAmount.toFixed(2)}) cannot exceed remaining balance (${remaining.toFixed(2)})`,
+            );
+          }
+        }
         if (options.expectRemaining != null) {
           const current = await tx.invoice.findUnique({
             where: { id: invoiceId },
@@ -3917,6 +3962,20 @@ export class CommerceService {
           tx: txClient,
           eventBuffer: pendingEvents,
         });
+        if (options.claimId) {
+          // CLAIM-LOOP (V1-65, P76): retire all pending offline customer intent
+          // rows for this invoice to CONFIRMED inside the same transaction.
+          await tx.payment.updateMany({
+            where: {
+              invoiceId,
+              businessId,
+              status: 'PENDING',
+              provider: { in: [...CommerceService.OFFLINE_CLAIM_METHODS] },
+              providerPaymentId: { startsWith: `manual_${invoiceId}_intent_` },
+            },
+            data: { status: 'CONFIRMED' },
+          });
+        }
         return { kind: 'recorded', payment: created, reconciled: r };
       }, RECORD_PAYMENT_TX_OPTIONS);
     } catch (err: unknown) {
@@ -6138,9 +6197,17 @@ export class CommerceService {
    *   health score) sum Payment.amount whatever its status, so a defaulted
    *   balance would read as money paid.
    */
+  private static readonly OFFLINE_CLAIM_METHODS = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'] as const;
+
+  private static isOfflineClaimRow(row: { invoiceId: string; provider: string; providerPaymentId: string }): boolean {
+    return (
+      (CommerceService.OFFLINE_CLAIM_METHODS as readonly string[]).includes(row.provider) &&
+      row.providerPaymentId.startsWith(`manual_${row.invoiceId}_intent_`)
+    );
+  }
+
   async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: unknown) {
-    const validMethods = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'];
-    if (!validMethods.includes(method)) {
+    if (!(CommerceService.OFFLINE_CLAIM_METHODS as readonly string[]).includes(method)) {
       throw new BadRequestException('Invalid offline payment method');
     }
     // Validated before the invoice is read, so a 400 says nothing about the id.
@@ -6167,7 +6234,16 @@ export class CommerceService {
     });
     if (!invoice) throw notFound();
 
-    await this.prisma.client.$transaction(async (tx) => {
+    type OpenedClaim = {
+      claimId: string;
+      amount: number;
+      currency: string;
+      invoiceTotal: number;
+      contact: { firstName: string | null; lastName: string | null } | null;
+      customerName: string | null;
+    };
+
+    const openedClaim = await this.prisma.client.$transaction(async (tx): Promise<OpenedClaim | null> => {
       const locked = await CommerceService.lockInvoiceForPayment(tx as unknown as Prisma.TransactionClient, invoiceId);
       if (!locked || locked.deletedAt || locked.businessId !== invoice.businessId) throw notFound();
       if (locked.status === 'PAID') throw new ConflictException('Invoice is already paid');
@@ -6179,7 +6255,12 @@ export class CommerceService {
       // returned, so it neither answers 'already paid' nor moves the cap.
       const current = await tx.invoice.findFirst({
         where: { id: invoiceId },
-        select: { total: true, currency: true, payments: { where: { businessId: invoice.businessId }, select: { amount: true, status: true } } },
+        select: {
+          total: true,
+          currency: true,
+          contact: { select: { firstName: true, lastName: true } },
+          payments: { where: { businessId: invoice.businessId }, select: { amount: true, status: true } },
+        },
       });
       // A row the manual refund flipped to REFUNDED before V1-29 is read as
       // its payment plus its refund (balanceOfStoredRows, V1-29 review
@@ -6204,6 +6285,20 @@ export class CommerceService {
       // owed now, or 0 when none was declared (see the method comment).
       const intentAmount = declared === undefined ? 0 : Math.min(declared, remaining);
 
+      // CLAIM-LOOP (V1-65, P76): one open invoice-level claim at a time.
+      // Only emit `invoice.payment_claimed` when this call opens a new pending
+      // claim on an invoice that had no active customer offline intent row.
+      const activeClaimBefore = await tx.payment.findFirst({
+        where: {
+          invoiceId,
+          businessId: invoice.businessId,
+          status: 'PENDING',
+          provider: { in: [...CommerceService.OFFLINE_CLAIM_METHODS] },
+          providerPaymentId: { startsWith: `manual_${invoiceId}_intent_` },
+        },
+        select: { id: true },
+      });
+
       const existing = await tx.payment.findFirst({
         where: { invoiceId, businessId: invoice.businessId, status: 'PENDING', method, provider: method },
         select: { id: true, amount: true },
@@ -6215,12 +6310,12 @@ export class CommerceService {
         if (Number(existing.amount) !== intentAmount) {
           await tx.payment.update({ where: { id: existing.id }, data: { amount: intentAmount } });
         }
-        return;
+        return null;
       }
 
       // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
       // until the operator records the actual receipt via recordPayment().
-      await tx.payment.create({
+      const created = await tx.payment.create({
         data: {
           invoiceId,
           businessId: invoice.businessId,
@@ -6233,9 +6328,335 @@ export class CommerceService {
           reference: `Intent: ${invoice.invoiceNumber}`,
           notes: `Customer indicated ${method} payment via public payment page`,
         },
+        select: { id: true },
+      });
+
+      if (activeClaimBefore) {
+        return null;
+      }
+
+      const customerName =
+        [current?.contact?.firstName, current?.contact?.lastName].filter(Boolean).join(' ').trim() || null;
+      return {
+        claimId: created.id,
+        amount: intentAmount > 0 ? intentAmount : remaining,
+        currency: invoice.currency || current?.currency || 'TTD',
+        invoiceTotal: Number(current?.total ?? 0),
+        contact: current?.contact ?? null,
+        customerName,
+      };
+    });
+
+    // CLAIM-LOOP (V1-65, P76): emit after commit so a rolled-back intent never alerts the owner.
+    if (openedClaim) {
+      this.events.emit('invoice.payment_claimed', {
+        businessId: invoice.businessId,
+        invoiceId,
+        claimId: openedClaim.claimId,
+        method,
+        amount: openedClaim.amount,
+        currency: openedClaim.currency,
+        reference: `Intent: ${invoice.invoiceNumber}`,
+        customerName: openedClaim.customerName,
+        invoice: {
+          id: invoiceId,
+          businessId: invoice.businessId,
+          invoiceNumber: invoice.invoiceNumber,
+          total: openedClaim.invoiceTotal,
+          currency: openedClaim.currency,
+          contact: openedClaim.contact,
+        },
+      });
+    }
+
+    return { success: true, method, invoiceNumber: invoice.invoiceNumber };
+  }
+
+  /**
+   * CLAIM-LOOP (V1-65, P76): list active pending customer offline payment claims
+   * for a business, collapsed to one invoice-level claim per invoice (matching
+   * PI-05 where multiple methods may hold separate PENDING rows on one invoice).
+   */
+  async listPaymentClaims(businessId: string) {
+    const pendingRows = await this.prisma.client.payment.findMany({
+      where: {
+        businessId,
+        status: 'PENDING',
+        provider: { in: [...CommerceService.OFFLINE_CLAIM_METHODS] },
+        providerPaymentId: { startsWith: 'manual_' },
+        invoice: {
+          businessId,
+          deletedAt: null,
+          status: { in: [...CommerceService.INTENT_PAYABLE_STATUSES] as InvoiceStatus[] },
+        },
+      },
+      select: {
+        id: true,
+        invoiceId: true,
+        amount: true,
+        currency: true,
+        method: true,
+        provider: true,
+        providerPaymentId: true,
+        reference: true,
+        createdAt: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            total: true,
+            currency: true,
+            contact: { select: { firstName: true, lastName: true } },
+            payments: { where: { businessId }, select: { amount: true, status: true } },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    // Deduplicate to one claim per invoice (most recent pending offline intent row).
+    const byInvoice = new Map<string, (typeof pendingRows)[number]>();
+    for (const row of pendingRows) {
+      if (!CommerceService.isOfflineClaimRow(row)) continue;
+      if (!byInvoice.has(row.invoiceId)) {
+        byInvoice.set(row.invoiceId, row);
+      }
+    }
+
+    const claims: Array<{
+      id: string;
+      invoiceId: string;
+      invoiceNumber: string;
+      method: string;
+      amount: number;
+      declaredAmount: number;
+      remaining: number;
+      currency: string;
+      customerName: string | null;
+      reference: string | null;
+      createdAt: string;
+    }> = [];
+
+    for (const row of byInvoice.values()) {
+      const inv = row.invoice;
+      const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, {
+        id: inv.id,
+        businessId,
+        status: inv.status,
+      });
+      const balance = creditAwareBalance(
+        balanceOfStoredRows(Number(inv.total), inv.payments, inv.currency),
+        credited,
+      );
+      const remaining = Math.min(balance.remaining, balance.total);
+      if (remaining <= 0) continue;
+
+      const declaredAmount = Number(row.amount ?? 0);
+      const amount = declaredAmount > 0 ? Math.min(declaredAmount, remaining) : remaining;
+      const customerName =
+        [inv.contact?.firstName, inv.contact?.lastName].filter(Boolean).join(' ').trim() || null;
+
+      claims.push({
+        id: row.id,
+        invoiceId: row.invoiceId,
+        invoiceNumber: inv.invoiceNumber,
+        method: row.method ?? row.provider,
+        amount,
+        declaredAmount,
+        remaining,
+        currency: row.currency || inv.currency || 'TTD',
+        customerName,
+        reference: row.reference ?? null,
+        createdAt: row.createdAt.toISOString(),
+      });
+    }
+
+    return claims;
+  }
+
+  /**
+   * CLAIM-LOOP (V1-65, P76): confirm a pending customer payment claim by
+   * recording the payment through `recordPayment` with `claim-confirm:<id>` as
+   * the idempotency key and retiring all pending offline intent rows for that
+   * invoice to `CONFIRMED`. A second confirm on the same claim id replays
+   * idempotently without writing new payment/ledger rows or emitting events.
+   */
+  async confirmPaymentClaim(
+    claimId: string,
+    businessId: string,
+    actorId: string | null,
+    input: { amount?: unknown; reference?: string; notes?: string } = {},
+  ) {
+    let explicitAmount: number | undefined;
+    if (input.amount !== undefined) {
+      if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
+        throw new BadRequestException('Payment amount must be a number');
+      }
+      if (input.amount <= 0) {
+        throw new BadRequestException('Payment amount must be positive');
+      }
+      explicitAmount = roundMoney(input.amount);
+      if (explicitAmount < 0.01) {
+        throw new BadRequestException('Payment amount must be at least 0.01');
+      }
+    }
+
+    const claim = await this.prisma.client.payment.findFirst({
+      where: { id: claimId, businessId },
+      select: {
+        id: true,
+        invoiceId: true,
+        businessId: true,
+        amount: true,
+        currency: true,
+        status: true,
+        provider: true,
+        method: true,
+        providerPaymentId: true,
+        reference: true,
+        notes: true,
+      },
+    });
+    if (!claim || !CommerceService.isOfflineClaimRow(claim)) {
+      throw new NotFoundException('Payment claim not found');
+    }
+
+    const idempotencyKey = `claim-confirm:${claim.id}`;
+    const keyed = CommerceService.manualProviderPaymentId(
+      claim.invoiceId,
+      { amount: explicitAmount ?? Number(claim.amount ?? 0), idempotencyKey },
+      false,
+    );
+
+    // Idempotent replay: if this exact claim was already confirmed, return the
+    // recorded payment without touching the ledger or emitting any event.
+    if (claim.status === 'CONFIRMED') {
+      const existingPayment = await this.findRecordedPayment(keyed.value, businessId, claim.invoiceId);
+      if (existingPayment) {
+        const replayed = await this.replayRecordedPayment(
+          existingPayment,
+          claim.invoiceId,
+          explicitAmount ?? Number(existingPayment.amount),
+          'key',
+        );
+        return { ...replayed, claimId: claim.id, idempotentReplay: true };
+      }
+      throw new ConflictException('This payment claim was already confirmed');
+    }
+    if (claim.status !== 'PENDING') {
+      throw new ConflictException(`This payment claim was already ${claim.status.toLowerCase()}`);
+    }
+
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: claim.invoiceId, businessId, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        total: true,
+        currency: true,
+        payments: { where: { businessId }, select: { amount: true, status: true } },
+      },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, {
+      id: invoice.id,
+      businessId,
+      status: invoice.status,
+    });
+    const balance = creditAwareBalance(
+      balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency),
+      credited,
+    );
+    const remaining = Math.min(balance.remaining, balance.total);
+    if (remaining <= 0) {
+      throw new ConflictException('Invoice is already paid');
+    }
+
+    let confirmAmount: number;
+    if (explicitAmount !== undefined) {
+      if (explicitAmount > remaining) {
+        throw new BadRequestException(
+          `Confirmed amount (${explicitAmount.toFixed(2)}) cannot exceed remaining balance (${remaining.toFixed(2)})`,
+        );
+      }
+      confirmAmount = explicitAmount;
+    } else {
+      const declaredAmount = Number(claim.amount ?? 0);
+      confirmAmount = declaredAmount > 0 ? Math.min(declaredAmount, remaining) : remaining;
+    }
+
+    const recorded = await this.recordPayment(
+      claim.invoiceId,
+      businessId,
+      {
+        amount: confirmAmount,
+        method: (claim.method || claim.provider || 'bank_transfer').toUpperCase(),
+        reference: typeof input.reference === 'string' && input.reference.trim() ? input.reference.trim() : claim.reference ?? undefined,
+        notes: typeof input.notes === 'string' && input.notes.trim() ? input.notes.trim() : claim.notes ?? undefined,
+        idempotencyKey,
+      },
+      { actorId, claimId: claim.id },
+    );
+
+    return {
+      ...recorded,
+      claimId: claim.id,
+      idempotentReplay: Boolean((recorded as { idempotentReplay?: boolean }).idempotentReplay),
+    };
+  }
+
+  /**
+   * CLAIM-LOOP (V1-65, P76): dismiss ("Not yet") a pending customer payment
+   * claim without touching the invoice status or writing any ledger rows.
+   * Subsequent customer intents on the invoice will open a fresh claim.
+   */
+  async dismissPaymentClaim(claimId: string, businessId: string) {
+    const claim = await this.prisma.client.payment.findFirst({
+      where: { id: claimId, businessId },
+      select: {
+        id: true,
+        invoiceId: true,
+        businessId: true,
+        status: true,
+        provider: true,
+        providerPaymentId: true,
+      },
+    });
+    if (!claim || !CommerceService.isOfflineClaimRow(claim)) {
+      throw new NotFoundException('Payment claim not found');
+    }
+
+    await this.prisma.client.$transaction(async (tx) => {
+      const locked = await CommerceService.lockInvoiceForPayment(tx as unknown as Prisma.TransactionClient, claim.invoiceId);
+      if (!locked || locked.businessId !== businessId || locked.deletedAt) {
+        throw new NotFoundException('Invoice not found');
+      }
+      const fresh = await tx.payment.findFirst({
+        where: { id: claimId, businessId },
+        select: { status: true },
+      });
+      if (!fresh) throw new NotFoundException('Payment claim not found');
+      if (fresh.status === 'CONFIRMED') {
+        throw new ConflictException('This payment claim was already confirmed');
+      }
+      if (fresh.status === 'DISMISSED') {
+        return;
+      }
+      await tx.payment.updateMany({
+        where: {
+          invoiceId: claim.invoiceId,
+          businessId,
+          status: 'PENDING',
+          provider: { in: [...CommerceService.OFFLINE_CLAIM_METHODS] },
+          providerPaymentId: { startsWith: `manual_${claim.invoiceId}_intent_` },
+        },
+        data: { status: 'DISMISSED' },
       });
     });
 
-    return { success: true, method, invoiceNumber: invoice.invoiceNumber };
+    return { dismissed: true, claimId: claim.id, invoiceId: claim.invoiceId };
   }
 }
