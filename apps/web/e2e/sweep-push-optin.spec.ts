@@ -13,6 +13,12 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
  *          (api.test.local/api/businesses/:id/push/...) with the member's token; nothing is sent to the web origin's
  *          /api/businesses (RED at the base: My account has no push control).
  *   PSB-02 the same member's settings strip has no Notifications link, and the page does not scroll sideways (guard).
+ *   PSB-03 (repair round 1, COR-M3) without the test-only switch, this localhost origin offers no push: the app's
+ *          service worker unregisters itself on localhost (public/sw.js), so My account says push is not available on
+ *          a local development server and has no button (RED at b058731f: Turn on is offered).
+ *
+ * The run is on localhost, so PSB-01 sets the documented test-only switch window.__KF_PUSH_ALLOW_LOCALHOST__ = true
+ * (hooks/use-push-notifications.ts) to exercise the real path against the faked ServiceWorkerContainer.
  *
  * Run at 375, 768, 1024 and 1440. The browser context has the notifications permission granted. Headless Chromium
  * cannot subscribe to a real push service, and this run must not reach one, so the init script replaces the service
@@ -77,12 +83,17 @@ function fakePush(endpoint: string): void {
   (window as unknown as { __kfPush: typeof state }).__kfPush = state;
 }
 
-async function signIn(page: Page): Promise<{ push: Seen[]; webOrigin: string[] }> {
+async function signIn(page: Page, opts: { allowLocalhost?: boolean } = {}): Promise<{ push: Seen[]; webOrigin: string[] }> {
   await page.context().grantPermissions(["notifications"], { origin: e2eBaseURL() });
   await seedWorkspace(page.context());
   await page.context().addCookies([{ name: "kf_token", value: JWT_SHAPED, url: e2eBaseURL(), sameSite: "Lax" }]);
   await page.context().addInitScript((token) => window.localStorage.setItem("kf_token", token), JWT_SHAPED);
   await page.context().addInitScript(fakePush, ENDPOINT);
+  if (opts.allowLocalhost !== false) {
+    await page.context().addInitScript(() => {
+      (window as unknown as { __KF_PUSH_ALLOW_LOCALHOST__?: boolean }).__KF_PUSH_ALLOW_LOCALHOST__ = true;
+    });
+  }
   await mockCatchAll(page);
   await mockBaseLayout(page, { business: { sells: "services", advancedCrm: false } });
   await page.route(/\/identity\/businesses(\?.*)?$/, (route: Route) =>
@@ -182,6 +193,17 @@ for (const [width, height] of [[375, 812], [768, 1024], [1024, 900], [1440, 900]
       await expect(page.locator('a[href="/app/settings/notifications"]').filter({ visible: true })).toHaveCount(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow).toBeLessThanOrEqual(0);
+    });
+
+    test(`PSB-03 on localhost without the test-only switch, push is not offered (${width})`, async ({ page }) => {
+      const seen = await signIn(page, { allowLocalhost: false });
+      await page.goto("/app/settings/profile");
+      const heading = page.getByRole("heading", { name: /push notifications on this device/i });
+      await expect(heading).toBeVisible({ timeout: 20_000 });
+      const section = page.locator("section").filter({ has: heading });
+      await expect(section.getByText(/not available on a local development server/i)).toBeVisible();
+      await expect(section.getByRole("button")).toHaveCount(0);
+      expect(seen.push).toEqual([]);
     });
   });
 }

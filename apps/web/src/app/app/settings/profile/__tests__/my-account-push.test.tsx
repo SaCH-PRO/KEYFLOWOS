@@ -1,3 +1,5 @@
+// @vitest-environment-options {"url": "https://app.keyflowos.test/app/settings/profile"}
+// Repair round 1 (COR-M3): a deployed origin, not jsdom's default http://localhost:3000, where push is not offered.
 /**
  * FU-PUSH-OPTIN-MY-ACCOUNT (owner ruling D-282): every member turns on push for their own device from My account.
  *
