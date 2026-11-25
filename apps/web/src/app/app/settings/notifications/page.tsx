@@ -126,7 +126,9 @@ export default function NotificationsSettingsPage() {
   const [preferences, setPreferences] = useState<NotificationPreferences | null>(null);
   const [log, setLog] = useState<NotificationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null);
+  // The switches whose PATCH is in flight: each answer decides only its own switch (and clears only its own spinner).
+  const [saving, setSaving] = useState<ReadonlySet<keyof NotificationPreferences>>(() => new Set());
+  const pending = useRef(new Set<keyof NotificationPreferences>());
   const [activeTab, setActiveTab] = useState<"preferences" | "log">("preferences");
   // FU-NOTIFICATIONS-PAGE-REFUSED (D-283): each read judged by FAILURE-KIT's readState, so a settings-none member's
   // refused read is said as no access (never a blank tab or "No customer notifications sent yet"), and any other
@@ -161,31 +163,49 @@ export default function NotificationsSettingsPage() {
 
   const togglePreference = async (key: keyof NotificationPreferences) => {
     if (!preferences) return;
-    setSaving(key);
     const before = preferences[key];
     const newValue = !before;
     const loadAtClick = loadGen.current;
-    setPreferences({ ...preferences, [key]: newValue });
     const businessId = getStoredBusinessId();
-    if (!businessId) { setSaving(null); return; }
+    if (!businessId) return;
+    pending.current.add(key);
+    setSaving(new Set(pending.current));
+    setPreferences((current) => (current ? { ...current, [key]: newValue } : current));
     const path = `/notifications/businesses/${businessId}/customer-preferences`;
     const res = await apiPatch<NotificationPreferences>(path, { [key]: newValue });
     if (res.error) {
-      // The answer comes from the server (a Retry may have reloaded the page since the click): re-read the preferences.
-      // Only when that fails too, and no load has read the server since the click, is this one switch put back.
+      // The answer comes from the server (a Retry may have reloaded the page since the click): re-read the preferences
+      // and show them, except a switch whose own PATCH is still in flight. A refused re-read (access revoked) says no
+      // access; only when the re-read fails otherwise, and no load has read the server since the click, is this one
+      // switch put back.
       const fresh = await apiGet<NotificationPreferences>(path);
-      if (readState(fresh, { what: "the customer notification settings" }).kind === "ok" && fresh.data) {
-        setPreferences(fresh.data);
+      const freshState = readState(fresh, { what: "the customer notification settings" });
+      if (freshState.kind === "ok" && fresh.data) {
+        const server = fresh.data;
+        const stillSaving = [...pending.current].filter((other) => other !== key);
+        setPreferences((current) => {
+          const next = { ...server };
+          if (current) for (const other of stillSaving) next[other] = current[other];
+          return next;
+        });
+      } else if (freshState.kind === "no-access") {
+        setPrefsRead(freshState);
+        setPreferences(null);
       } else if (loadGen.current === loadAtClick) {
         setPreferences((current) => (current ? { ...current, [key]: before } : current));
       }
       toast.error("Failed to update notification preference");
     } else {
-      // The PATCH answers the whole preferences as the server now holds them.
-      if (res.data) setPreferences(res.data);
+      // The PATCH answers the whole preferences, but read before any other PATCH still in flight was decided: take
+      // only this switch from it.
+      const answered = res.data?.[key];
+      if (typeof answered === "boolean") {
+        setPreferences((current) => (current ? { ...current, [key]: answered } : current));
+      }
       toast.success("Notification preference updated");
     }
-    setSaving(null);
+    pending.current.delete(key);
+    setSaving(new Set(pending.current));
   };
 
   if (loading) {
@@ -315,7 +335,7 @@ export default function NotificationsSettingsPage() {
                   {/* h-6 w-11 / h-5 w-5: the old h-5.5 and h-4.5 are not Tailwind 3 classes and rendered the switch 0px tall. */}
                   <button
                     onClick={() => togglePreference(type.key)}
-                    disabled={saving === type.key}
+                    disabled={saving.has(type.key)}
                     className="relative h-6 w-11 rounded-full transition-colors duration-200 flex-shrink-0"
                     style={{
                       background: enabled
@@ -332,7 +352,7 @@ export default function NotificationsSettingsPage() {
                         transform: enabled ? "translateX(22px)" : "translateX(2px)",
                       }}
                     />
-                    {saving === type.key && (
+                    {saving.has(type.key) && (
                       <Loader2
                         className="absolute top-1 right-1 w-3.5 h-3.5 animate-spin"
                         style={{ color: "hsl(var(--background))" }}
