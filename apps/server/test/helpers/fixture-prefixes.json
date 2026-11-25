@@ -1232,6 +1232,11 @@
       "packet": "V1-71 (MEM-TEMPORAL-SCOPE)"
     },
     {
+      "prefix": "v93c_",
+      "owner": "apps/server/test/conversion-reps-revenue-scope.integration.test.ts",
+      "packet": "V1-93 (FU-CONVERSION-REPS-REVENUE)"
+    },
+    {
       "prefix": "v71x_",
       "owner": "apps/server/test/finance-intel-doors.integration.test.ts",
       "packet": "V1-71 (FU-FINANCE-INTEL-DOORS)"
