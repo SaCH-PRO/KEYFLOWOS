@@ -58,8 +58,10 @@ export default function MyAccountPage() {
     return () => { live = false; };
   }, []);
 
+  // pb-24 below md: the push section is the page's last, and on a phone the fixed bottom nav would cover its button.
+  // The app scroll root's pb-28 does not clear it: the page overflows the h-full PageTransition box, past that padding.
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
+    <div className="max-w-2xl mx-auto space-y-5 pb-24 md:pb-0">
       <div className="flex items-center gap-3">
         <div className="h-10 w-10 rounded-xl flex items-center justify-center bg-primary/10">
           <UserRound className="w-5 h-5 text-primary" aria-hidden="true" />
