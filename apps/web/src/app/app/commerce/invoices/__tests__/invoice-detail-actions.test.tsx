@@ -33,7 +33,10 @@ const markInvoicePaid = vi.hoisted(() => vi.fn());
 const recordInvoicePayment = vi.hoisted(() => vi.fn());
 const createInvoicePaymentLink = vi.hoisted(() => vi.fn());
 const fetchInvoices = vi.hoisted(() => vi.fn());
+const sendInvoiceEmail = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
+/** What storage holds as the selected business (review S-2: it may differ from the page's own). */
+const stored = vi.hoisted(() => ({ businessId: "biz_v64" }));
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() }),
@@ -54,7 +57,7 @@ vi.mock("@/lib/workspace", async (importOriginal) => {
   return {
     ...actual,
     refreshWorkspace: async () => "biz_v64",
-    getStoredBusinessId: () => "biz_v64",
+    getStoredBusinessId: () => stored.businessId,
     getCachedBusiness: () => ({ id: "biz_v64", name: "Island Events", currency: "TTD", country: "TT" }),
   };
 });
@@ -70,6 +73,7 @@ vi.mock("@/lib/client", async (importOriginal) => {
     recordInvoicePayment: (...args: unknown[]) => recordInvoicePayment(...args),
     createInvoicePaymentLink: (...args: unknown[]) => createInvoicePaymentLink(...args),
     fetchInvoices: (...args: unknown[]) => fetchInvoices(...args),
+    sendInvoiceEmail: (...args: unknown[]) => sendInvoiceEmail(...args),
     fetchContacts: async () => ({ data: { contacts: [] }, error: null }),
     fetchProducts: async () => ({ data: [], error: null }),
     getGmailStatus: async () => ({ data: { connected: false, email: null }, error: null }),
@@ -169,7 +173,8 @@ function latin1(blob: Blob): Promise<string> {
 }
 
 beforeEach(() => {
-  for (const fn of [getInvoice, getInvoiceTimeline, listInvoicePayments, updateInvoiceStatus, markInvoicePaid, recordInvoicePayment, createInvoicePaymentLink, fetchInvoices, push]) fn.mockReset();
+  for (const fn of [getInvoice, getInvoiceTimeline, listInvoicePayments, updateInvoiceStatus, markInvoicePaid, recordInvoicePayment, createInvoicePaymentLink, fetchInvoices, sendInvoiceEmail, push]) fn.mockReset();
+  stored.businessId = "biz_v64";
   vi.mocked(toast.success).mockReset();
   vi.mocked(toast.error).mockReset();
   vi.mocked(toast.info).mockReset();
@@ -259,7 +264,7 @@ describe("SWP-INV-DETAIL: the invoice detail page", () => {
     expect(markPaid.length).toBeGreaterThan(0);
     fireEvent.click(markPaid[0]!);
 
-    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalledWith(INV));
+    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalledWith(INV, BIZ));
     await waitFor(() => expect(paymentRows().map((r) => r.dataset.paymentId)).toEqual(["pay_markpaid"]));
     await waitFor(() => expect(amountDue()).toBe(TTD(0)));
     expect(remainingFigure()).toBe(TTD(0));
@@ -416,4 +421,211 @@ describe("SWP-INV-DETAIL: the other doors to Mark paid (B2)", () => {
     // RED-BEFORE: the draft is sent to the server (which refuses it, 409).
     expect(markInvoicePaid).not.toHaveBeenCalled();
   });
+});
+
+/** A promise the test resolves when it chooses (a response held in flight). */
+function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
+  let release!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
+/** Clicks Download PDF and returns the PDF's bytes as latin1. */
+async function downloadedPdf(): Promise<string> {
+  const blobs: Blob[] = [];
+  const { createObjectURL, revokeObjectURL } = URL;
+  URL.createObjectURL = vi.fn((b: Blob) => { blobs.push(b); return "blob:invoice-v64"; }) as typeof URL.createObjectURL;
+  URL.revokeObjectURL = vi.fn() as typeof URL.revokeObjectURL;
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  try {
+    fireEvent.click(screen.getAllByRole("button", { name: /download pdf/i })[0]!);
+    await waitFor(() => expect(blobs).toHaveLength(1), { timeout: 10_000 });
+  } finally {
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+  }
+  return latin1(blobs[0]!);
+}
+
+/** The print sheet's text when the browser prints (the page's Print, window.print recorded). */
+function printedSheet(): string {
+  let sheet = "";
+  vi.stubGlobal("print", vi.fn(() => { sheet = document.querySelector("[data-invoice-print]")?.textContent ?? ""; }));
+  fireEvent.click(screen.getAllByRole("button", { name: /^print/i })[0]!);
+  act(() => { window.dispatchEvent(new Event("afterprint")); });
+  return sheet;
+}
+
+/** The PDF's text-showing lines (jspdf writes each string as "(...) Tj"). */
+const pdfTextLines = (bytes: string) => bytes.split("\n").filter((l) => /\) Tj$/.test(l));
+
+describe("SWP-INV-DETAIL review round 1 (31861dcf): pins and repairs", () => {
+  it.each(["OVERDUE", "PARTIALLY_PAID"])("PIN (S-1, MINOR-1): a %s invoice offers Mark paid on its page (the shared allow-list: SENT, OVERDUE, PARTIALLY_PAID)", async (status) => {
+    await mountDetail(invoice(status, [P1], { paidAmount: 100, remaining: 200 }));
+    expect(screen.getAllByRole("button", { name: /mark paid/i }).length).toBeGreaterThan(0);
+  });
+
+  it.each(["OVERDUE", "PARTIALLY_PAID"])("PIN (S-1, MINOR-1): the Invoices list's %s row offers Mark paid", async (status) => {
+    fetchInvoices.mockResolvedValue({ data: [listRow({ id: "inv_row", invoiceNumber: "INV-ROW", status })], error: null });
+    render(<InvoicesHubPage />);
+    await openRowMenu("INV-ROW");
+    expect(screen.getByRole("button", { name: /mark paid/i })).toBeInTheDocument();
+  });
+
+  it("PIN (S-1, MINOR-1): the commerce Payments tab offers no Mark Paid on a VOID or a FULLY_CREDITED row, and its bulk Mark Paid skips both", async () => {
+    const future = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
+    const rows = [
+      listRow({ id: "inv_void", invoiceNumber: "INV-VOID", status: "VOID", dueDate: future }),
+      listRow({ id: "inv_cred", invoiceNumber: "INV-CRED", status: "FULLY_CREDITED", dueDate: future }),
+    ];
+    render(<PaymentsTab invoices={rows} currency="TTD" businessId={BIZ} setInvoices={vi.fn()} />);
+    const rowOf = (n: string) => screen.getByLabelText(`Select payment ${n}`).closest("label")!.parentElement as HTMLElement;
+    expect(within(rowOf("INV-VOID")).queryByTitle("Mark Paid")).toBeNull();
+    expect(within(rowOf("INV-CRED")).queryByTitle("Mark Paid")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Select payment INV-VOID"));
+    fireEvent.click(screen.getByLabelText("Select payment INV-CRED"));
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
+    fireEvent.click(screen.getByText("Mark Paid", { selector: "button" }));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("No eligible invoices to mark as paid"));
+    expect(markInvoicePaid).not.toHaveBeenCalled();
+  });
+
+  it("PIN (BUG-088 web side): Void re-reads the activity", async () => {
+    await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 300 }));
+    await screen.findByText("Invoice created");
+    updateInvoiceStatus.mockResolvedValue({ data: invoice("VOID", []), error: null });
+    getInvoiceTimeline.mockResolvedValue({ data: { entries: [entry("invoice.created", "Invoice created"), entry("invoice.void", "Invoice voided")] }, error: null });
+    fireEvent.click(screen.getByRole("button", { name: /^void invoice$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(updateInvoiceStatus).toHaveBeenCalledWith(INV, "VOID"));
+    expect(await screen.findByText("Invoice voided")).toBeInTheDocument();
+  });
+
+  it("PIN (BUG-088 web side): Record payment re-reads the activity", async () => {
+    await mountDetail(invoice("PARTIALLY_PAID", [P1], { paidAmount: 100, remaining: 200 }));
+    await screen.findByText("Invoice created");
+    recordInvoicePayment.mockResolvedValue({ data: { payment: P2, invoice: invoice("PARTIALLY_PAID", [P1, P2]), paidAmount: 150, remaining: 150 }, error: null });
+    getInvoiceTimeline.mockResolvedValue({ data: { entries: [entry("invoice.created", "Invoice created"), entry("invoice.payment_recorded", "Payment of 50 TTD via Bank Transfer")] }, error: null });
+    await recordThroughModal("50");
+    expect(await screen.findByText("Payment of 50 TTD via Bank Transfer")).toBeInTheDocument();
+  });
+
+  it("PIN (BUG-088 web side): Email invoice re-reads the activity", async () => {
+    await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 300 }));
+    await screen.findByText("Invoice created");
+    sendInvoiceEmail.mockResolvedValue({ data: { sent: true }, error: null });
+    getInvoiceTimeline.mockResolvedValue({ data: { entries: [entry("invoice.created", "Invoice created"), entry("invoice.emailed", "Invoice emailed")] }, error: null });
+    fireEvent.click(screen.getByRole("button", { name: /^email invoice$/i }));
+    await waitFor(() => expect(sendInvoiceEmail).toHaveBeenCalledWith(BIZ, INV, {}));
+    expect(await screen.findByText("Invoice emailed")).toBeInTheDocument();
+  });
+
+  it("PIN (BUG-088 web side): Mark paid re-reads the activity", async () => {
+    await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 300 }));
+    await screen.findByText("Invoice created");
+    listInvoicePayments.mockResolvedValue({ data: { payments: [PM], paidAmount: 300, remaining: 0, invoiceTotal: 300 }, error: null });
+    markInvoicePaid.mockResolvedValue({ data: invoice("PAID", [PM]), error: null });
+    getInvoice.mockResolvedValue({ data: invoice("PAID", [PM], { paidAmount: 300, remaining: 0 }), error: null });
+    getInvoiceTimeline.mockResolvedValue({ data: { entries: [entry("invoice.created", "Invoice created"), entry("invoice.paid", "Invoice fully paid")] }, error: null });
+    fireEvent.click(screen.getAllByRole("button", { name: /mark paid/i })[0]!);
+    expect(await screen.findByText("Invoice fully paid")).toBeInTheDocument();
+  });
+
+  it("PIN (BUG-085): Amount due is the server's Remaining, not total less paid (300 with 100 paid and a 150 credit note leaves 50)", async () => {
+    await mountDetail(invoice("PARTIALLY_CREDITED", [P1], { paidAmount: 100, remaining: 50 }));
+    expect(amountDue()).toBe(TTD(50));
+  });
+
+  it("RED-BEFORE (S-2): Mark paid names the page's business, not the one storage holds", async () => {
+    stored.businessId = "biz_stale";
+    await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 300 }));
+    listInvoicePayments.mockResolvedValue({ data: { payments: [PM], paidAmount: 300, remaining: 0, invoiceTotal: 300 }, error: null });
+    markInvoicePaid.mockResolvedValue({ data: invoice("PAID", [PM]), error: null });
+    getInvoice.mockResolvedValue({ data: invoice("PAID", [PM], { paidAmount: 300, remaining: 0 }), error: null });
+    fireEvent.click(screen.getAllByRole("button", { name: /mark paid/i })[0]!);
+    // RED-BEFORE: called with (INV) only, so lib/client named storage's business (biz_stale).
+    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalledWith(INV, BIZ));
+  });
+
+  it("RED-BEFORE (S-2): the Invoices list's Mark paid names the page's business, not the one storage holds", async () => {
+    stored.businessId = "biz_stale";
+    fetchInvoices.mockResolvedValue({ data: [listRow({ id: "inv_sent", invoiceNumber: "INV-SENT", status: "SENT" })], error: null });
+    markInvoicePaid.mockResolvedValue({ data: { ...listRow({ id: "inv_sent", invoiceNumber: "INV-SENT", status: "PAID" }) }, error: null });
+    render(<InvoicesHubPage />);
+    await openRowMenu("INV-SENT");
+    fireEvent.click(screen.getByRole("button", { name: /mark paid/i }));
+    // RED-BEFORE: called with ("inv_sent") only.
+    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalledWith("inv_sent", BIZ));
+  });
+
+  it("RED-BEFORE (MINOR-2): Mark paid while the Payments tab's first read is in flight: the stale read never wins, and the new payment is listed", async () => {
+    await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 300 }));
+    const first = held<{ data: { payments: PaymentRecord[] }; error: null }>();
+    listInvoicePayments.mockReturnValueOnce(first.promise);
+    listInvoicePayments.mockResolvedValue({ data: { payments: [PM], paidAmount: 300, remaining: 0, invoiceTotal: 300 }, error: null });
+    markInvoicePaid.mockResolvedValue({ data: invoice("PAID", [PM]), error: null });
+    getInvoice.mockResolvedValue({ data: invoice("PAID", [PM], { paidAmount: 300, remaining: 0 }), error: null });
+    openPaymentsTab();
+    await waitFor(() => expect(listInvoicePayments).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getAllByRole("button", { name: /mark paid/i })[0]!);
+    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalled());
+    await waitFor(() => expect(amountDue()).toBe(TTD(0)));
+    await act(async () => { first.release({ data: { payments: [] }, error: null }); });
+
+    // RED-BEFORE: the held read (the list before Mark paid) answered last and marked the list loaded: no rows.
+    await waitFor(() => expect(paymentRows().map((r) => r.dataset.paymentId)).toEqual(["pay_markpaid"]));
+  });
+
+  it("RED-BEFORE (MINOR-2): a payment recorded while the Payments tab's first read is in flight is still listed when that read answers", async () => {
+    await mountDetail(invoice("PARTIALLY_PAID", [P1], { paidAmount: 100, remaining: 200 }));
+    const first = held<{ data: { payments: PaymentRecord[] }; error: null }>();
+    listInvoicePayments.mockReturnValueOnce(first.promise);
+    listInvoicePayments.mockResolvedValue({ data: { payments: [P2, P1], paidAmount: 150, remaining: 150, invoiceTotal: 300 }, error: null });
+    recordInvoicePayment.mockResolvedValue({ data: { payment: P2, invoice: invoice("PARTIALLY_PAID", [P1, P2]), paidAmount: 150, remaining: 150 }, error: null });
+    openPaymentsTab();
+    await waitFor(() => expect(listInvoicePayments).toHaveBeenCalledTimes(1));
+
+    await recordThroughModal("50");
+    await act(async () => { first.release({ data: { payments: [P1] }, error: null }); });
+
+    // RED-BEFORE: the held read's [cash 100] replaced the list, dropping the payment just recorded.
+    await waitFor(() => expect(paymentRows().map((r) => r.dataset.paymentId)).toEqual(["pay_bank_50", "pay_cash_100"]));
+  });
+
+  it.each([
+    ["FULLY_CREDITED", 20, 280],
+    ["VOID", 50, 250],
+  ] as const)("RED-BEFORE (MINOR-3): a %s invoice owes nothing: Amount due, the print sheet's Balance due and the PDF's are 0, not the stored remaining", async (status, paid, stored) => {
+    await mountDetail(invoice(status, [], { paidAmount: paid, remaining: stored }));
+    // RED-BEFORE: the stored remaining.
+    expect(amountDue()).toBe(TTD(0));
+    const sheet = printedSheet();
+    expect(sheet).toContain(`Balance due${TTD(0)}`);
+    expect(sheet).not.toContain(TTD(stored));
+    const bytes = await downloadedPdf();
+    expect(bytes).toContain(`(${TTD(0)}) Tj`);
+    expect(bytes).not.toContain(`${stored}.00`);
+  }, 20_000);
+
+  it("RED-BEFORE (MINOR-4): Download PDF writes text outside WinAnsi plainly: fr-FR amounts (U+202F) read 'TTD 1 234,50', a non-Latin name reads as '?', and no string is written as 2-byte text", async () => {
+    const toLocale = Number.prototype.toLocaleString;
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, _locales?: string | string[], options?: Intl.NumberFormatOptions) {
+      return toLocale.call(this, "fr-FR", options);
+    });
+    await mountDetail(invoice("SENT", [], { paidAmount: 0, remaining: 1234.5 }, {
+      total: 1234.5,
+      subtotal: 1234.5,
+      contact: { firstName: "Анна", lastName: "李", email: "anna@example.test" },
+      items: [{ id: "it_1", description: "Tent hire", quantity: 1, unitPrice: 1234.5, total: 1234.5 } as NonNullable<Invoice["items"]>[number]],
+    }));
+    expect(amountDue(), "the page formats in fr-FR (U+202F)").toBe("TTD 1 234,50");
+    const bytes = await downloadedPdf();
+    const lines = pdfTextLines(bytes);
+    // RED-BEFORE: every string holding U+202F or a non-Latin letter is written as UTF-16 (NUL-padded) text.
+    expect(lines.filter((l) => l.includes("\u0000"))).toEqual([]);
+    expect(bytes).toContain("(TTD 1 234,50) Tj");
+    expect(bytes).toContain("(???? ?) Tj");
+  }, 20_000);
 });
