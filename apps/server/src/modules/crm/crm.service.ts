@@ -2718,17 +2718,18 @@ export class CrmService {
       contact = found;
     } else {
       const phoneHolders = await livePhoneHolderIds(this.prisma.client, input.businessId, e164, country);
-      const waTail = e164.replace(/\D/g, '').slice(-4);
-      const waCandidates = waTail.length === 4
-        ? await this.prisma.client.contact.findMany({
-            where: {
-              ...contactWhereBase(input.businessId),
-              whatsappNumber: { not: null, endsWith: waTail },
-            },
-            select: { id: true, whatsappNumber: true },
-            orderBy: { createdAt: 'asc' },
-            take: 200,
-          })
+      const waTail = e164.replace(/\D/g, '').slice(-7);
+      const waCandidates = waTail.length === 7
+        ? await this.prisma.client.$queryRaw<Array<{ id: string; whatsappNumber: string | null }>>`
+            SELECT id, whatsapp_number AS "whatsappNumber"
+            FROM contacts
+            WHERE business_id = ${input.businessId}
+              AND deleted_at IS NULL
+              AND whatsapp_number IS NOT NULL
+              AND RIGHT(regexp_replace(whatsapp_number, '[^0-9]', '', 'g'), 7) = ${waTail}
+            ORDER BY created_at ASC
+            LIMIT 200
+          `
         : [];
       const waHolders = waCandidates
         .filter((row) => phoneKeyReadsAs(contactPhoneKey(row.whatsappNumber), e164, country))
