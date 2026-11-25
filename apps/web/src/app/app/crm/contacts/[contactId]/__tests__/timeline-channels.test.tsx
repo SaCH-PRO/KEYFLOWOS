@@ -32,6 +32,9 @@
  *                    limit). A full read says so ("Showing the latest 20 events"), and its counts, header and empty
  *                    texts speak of the latest 20, never of the whole history ("No calls yet.")
  *   TCH-15  control  COR-TCH-1: a read of 19 is the whole history: today's wording, no "latest" line, plain counts
+ *   TCH-16  RED      MIN-1: an inbound message the omnichannel processor logs (type message_received, source the
+ *                    channel: omnichannel-processor.service.ts) is that channel's, "Email received" / "SMS received";
+ *                    a source of no channel of the filter's is in All only
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -360,5 +363,25 @@ describe("D-277: the Timeline has a channel filter", () => {
     expect(filterButton("WhatsApp")).not.toHaveTextContent("+");
     choose("Calls");
     expect(screen.getByText("No calls yet.")).toBeInTheDocument();
+  });
+
+  it("TCH-16 RED: message_received is its source's channel, in plain words; another source is in All only", async () => {
+    served = [
+      { id: "ev_in_email", contactId: C, type: "message_received", source: "email", createdAt: at(1), data: { intentType: "question", confidence: 0.9 } },
+      { id: "ev_in_sms", contactId: C, type: "message_received", source: "SMS", createdAt: at(2), data: { intentType: "booking" } },
+      { id: "ev_in_wa", contactId: C, type: "message_received", source: "whatsapp", createdAt: at(3), data: {} },
+      { id: "ev_in_form", contactId: C, type: "message_received", source: "form", createdAt: at(4), data: {} },
+    ];
+    await renderTimeline();
+    expect([countOf("All"), countOf("Email"), countOf("SMS"), countOf("WhatsApp"), countOf("Calls"), countOf("Notes")]).toEqual([4, 1, 1, 1, 0, 0]);
+    expect(screen.getByText("Email received")).toBeInTheDocument();
+    expect(screen.getByText("SMS received")).toBeInTheDocument();
+    expect(screen.getByText("WhatsApp message received")).toBeInTheDocument();
+    choose("Email");
+    expect(screen.getByText("Email received")).toBeInTheDocument();
+    expect(screen.queryByText("SMS received")).not.toBeInTheDocument();
+    choose("SMS");
+    expect(screen.getByText("SMS received")).toBeInTheDocument();
+    expect(screen.queryByText("Email received")).not.toBeInTheDocument();
   });
 });
