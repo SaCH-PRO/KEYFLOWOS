@@ -12,15 +12,17 @@
  *     soft-deletes only the ids this member may delete and answers the count, so after a partial delete without
  *     `deletedIds` the web cannot know which ids went: it says how many, and offers no Undo that could restore the
  *     wrong set (they are in Trash);
- *   - Undo sends one POST /api/businesses/:b/trash/contact/bulk-restore with exactly those ids (a second press sends
- *     nothing), says how many could not be restored when some could not, says a refusal, and then asks the screen
- *     to read its list again.
+ *   - Undo sends one POST /api/businesses/:b/trash/contact/bulk-restore with exactly those ids, in the delete's
+ *     business (a second press sends nothing), says how many could not be restored when some could not, says a
+ *     refusal, and then asks the screen to read its list again. It acts only for the session that deleted: after a
+ *     sign-out, or with another person signed in, it sends nothing and says so (the contacts stay in Trash).
  * The toast lives in the app-wide Toaster (components/providers.tsx), not in the screen, so it outlives the screen;
  * what it does after the screen has gone is the restore call itself, which needs nothing from the screen.
  */
 import { toast } from "sonner";
 import { bulkDeleteContacts, bulkRestoreTrashItems } from "@/lib/client";
 import { showRefusal } from "@/lib/failure-kit";
+import { actingMemberNow } from "@/lib/business-settings";
 
 /** How long the toast that offers Undo stays up. */
 export const BULK_DELETE_UNDO_MS = 10_000;
@@ -69,10 +71,10 @@ async function restoreFromTrash(businessId: string, ids: string[], onRestored?: 
   } else if (restored === ids.length && failedCount === 0) {
     toast.success(`Restored ${restored} ${contactsWord(restored)}`);
   } else {
-    const notRestored = ids.length - restored;
-    toast.warning(`Restored ${restored} of ${ids.length} contacts. ${notRestored} could not be restored.`, {
-      description: `${notRestored === 1 ? "It is" : "They are"} still in Trash.`,
-    });
+    // Review COR-P37-4: a failure count is named only when the answer counts failures; never "0 could not be restored".
+    const title = restored === ids.length ? `Restored ${restored} ${contactsWord(restored)}.` : `Restored ${restored} of ${ids.length} contacts.`;
+    const failures = failedCount > 0 ? ` ${failedCount} could not be restored.` : "";
+    toast.warning(`${title}${failures}`, { description: "Any not restored are still in Trash." });
   }
   onRestored?.();
 }
@@ -87,6 +89,10 @@ export async function deleteContactsWithUndo(input: {
   onRestored?: () => void;
 }): Promise<ContactsBulkDeleteResult | null> {
   const sent = Array.from(new Set(input.ids));
+  // Review SEC-P37W-1: the toast lives in the app-wide Toaster and outlives a sign-out (sign-out and sign-in navigate
+  // in place), so Undo acts only for the session that deleted: the person the session token names when the delete
+  // is sent (actingMemberNow(), as the business settings store tells one member's writes from the next's).
+  const deletedAs = actingMemberNow();
   const res = await bulkDeleteContacts({ businessId: input.businessId, contactIds: sent });
   if (showRefusal(res, { what: "delete these contacts" })) return null;
 
@@ -120,6 +126,14 @@ export async function deleteContactsWithUndo(input: {
     // One restore per delete, however often Undo is pressed.
     if (undoSent) return;
     undoSent = true;
+    const now = actingMemberNow();
+    if (now === "none" || now !== deletedAs) {
+      toast.warning("Nothing was restored: this Undo belonged to an earlier session.", {
+        description: `The ${contactsWord(deletedIds.length)} ${deletedIds.length === 1 ? "is" : "are"} still in Trash.`,
+      });
+      return;
+    }
+    // The delete's business, whatever business is selected now (review SEC-P37W-2).
     void restoreFromTrash(input.businessId, deletedIds, input.onRestored);
   };
   const offer = { description: inTrash, duration: BULK_DELETE_UNDO_MS, action: { label: "Undo", onClick: undo } };
