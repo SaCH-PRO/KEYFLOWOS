@@ -40,7 +40,7 @@ function serve(config: { publicKey: string | null; enabled?: boolean }): Call[] 
 
 function installPush() {
   const subscription = { endpoint: "https://push.example.test/ep", toJSON: () => ({ endpoint: "https://push.example.test/ep", keys: { p256dh: "p", auth: "a" } }), unsubscribe: vi.fn(async () => true) };
-  const subscribe = vi.fn(async () => subscription);
+  const subscribe = vi.fn(async (_opts: PushSubscriptionOptionsInit) => subscription);
   const registration = { pushManager: { getSubscription: vi.fn(async () => null), subscribe } };
   Object.defineProperty(navigator, "serviceWorker", {
     value: { getRegistration: async () => registration, register: async () => registration, ready: Promise.resolve(registration) },

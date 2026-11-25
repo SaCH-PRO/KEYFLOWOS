@@ -52,7 +52,7 @@ function serve(opts: {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     calls.push({ url, method, auth: new Headers(init?.headers).get("authorization"), body });
     if (url === PREFS_URL && method === "GET") {
-      if (failRead > 0) { failRead -= 1; return Response.json({ message: "Service Unavailable" }, { status: 503 }); }
+      if (failRead > 0) { failRead -= 1; return Response.json({ message: "Internal Server Error" }, { status: 500 }); }
       return Response.json(prefs);
     }
     if (url === PREFS_URL && method === "PATCH") {

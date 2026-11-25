@@ -19,6 +19,9 @@ import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { toast } from "sonner";
+// OWNER-ALERTS-WEB (D-154): the "Your alerts" tab, its own components.
+import { InstallAppStep } from "@/components/install-app-step";
+import { OwnerAlertSettings } from "@/components/owner-alert-settings";
 
 interface NotificationPreferences {
   booking_confirmed: boolean;
@@ -106,7 +109,7 @@ export default function NotificationsSettingsPage() {
   const [log, setLog] = useState<NotificationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"preferences" | "log">("preferences");
+  const [activeTab, setActiveTab] = useState<"preferences" | "log" | "alerts">("preferences");
 
   const loadData = useCallback(async () => {
     const businessId = getStoredBusinessId();
@@ -187,7 +190,7 @@ export default function NotificationsSettingsPage() {
       </div>
 
       <div className="flex gap-1 p-1 rounded-xl bg-muted/30 border border-border/40 w-fit">
-        {(["preferences", "log"] as const).map((tab) => (
+        {(["preferences", "log", "alerts"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -197,7 +200,7 @@ export default function NotificationsSettingsPage() {
                 : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
-            {tab === "preferences" ? "Preferences" : `Log (${log.length})`}
+            {tab === "preferences" ? "Preferences" : tab === "alerts" ? "Your alerts" : `Log (${log.length})`}
           </button>
         ))}
       </div>
@@ -409,6 +412,14 @@ export default function NotificationsSettingsPage() {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* OWNER-ALERTS-WEB (D-154): the owner's own alerts (push first, email fallback) and the install step. */}
+      {activeTab === "alerts" && (
+        <section aria-label="Your alerts" className="space-y-3">
+          <InstallAppStep />
+          <OwnerAlertSettings businessId={getStoredBusinessId()} />
+        </section>
       )}
     </div>
   );
