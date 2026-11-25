@@ -34,6 +34,9 @@
  *   CSR-13 New booking's form: a network failure, then Book Now sends the customer's id.
  *   CSR-14 an existing quote's customer survives a 403 on the read (BillingFormModal editing passes savedRecord), and
  *          the field says the member cannot see their details.
+ *   CSR-15 (pin) New booking's sheet hands the page's loading flag down: BookingSideSheet and BookingForm read nothing
+ *          while the list loads, and show the customer from the list once it arrives.
+ * The read rejecting outright (lib/api's apiGet never does today) is pinned in contact-select-read-throws.test.tsx.
  *
  * The real lib/client transport; only fetch is stubbed, with the GlobalHttpExceptionFilter's bodies.
  */
@@ -45,6 +48,7 @@ vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), err
 vi.mock("@/app/app/commerce/hooks/use-business-preview", () => ({
   useBusinessPreview: () => ({ businessData: { name: "CSR Bakery", primaryColor: "#F97316", secondaryColor: "#111" }, saveBranding: vi.fn(), savingBranding: false }),
 }));
+vi.mock("@/lib/navigation-context", () => ({ useNavigationContext: () => ({ getOriginContext: () => null }) }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/app/commerce",
@@ -54,6 +58,7 @@ vi.mock("next/navigation", () => ({
 
 import { ContactSelect, type ContactSelectItem } from "../contact-select";
 import BookingForm from "@/app/app/bookings/components/booking-form";
+import BookingSideSheet from "@/app/app/bookings/components/booking-side-sheet";
 import { BillingFormModal } from "@/app/app/commerce/components/billing-form-modal";
 
 const BIZ = "biz_csr";
@@ -308,4 +313,17 @@ describe("COR-2 / SEC-WAW-2: the customer field names a chosen customer outside 
     await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
     expect(onContactChange).not.toHaveBeenCalledWith("");
   }, 20_000);
+
+  it("CSR-15 New booking's sheet reads nothing while the page's list loads, then shows the customer from the list", async () => {
+    const Sheet = BookingSideSheet as unknown as (p: Record<string, unknown>) => React.ReactElement;
+    const props = { open: true, services: [], staff: [], onSubmit: vi.fn(), onClose: vi.fn(), formError: null, defaultContactId: OLDER_ID };
+    const { rerender } = render(<Sheet {...props} contacts={[]} contactsLoading />);
+    await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+    expect(detailCalls()).toEqual([]);
+    const arrived = [...loaded, { id: OLDER_ID, firstName: "Maria", lastName: "Lopez", status: "CLIENT" }];
+    rerender(<Sheet {...props} contacts={arrived} contactsLoading={false} />);
+    expect((await screen.findAllByText(/Maria Lopez/)).length).toBeGreaterThan(0);
+    await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+    expect(detailCalls()).toEqual([]);
+  });
 });
