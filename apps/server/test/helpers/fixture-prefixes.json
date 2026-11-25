@@ -798,6 +798,11 @@
       "packet": "V1-93 (W7-RECENT-CONTACTS-VISIBILITY)"
     },
     {
+      "prefix": "v93w_",
+      "owner": "apps/server/test/wa-inbound-capture.integration.test.ts",
+      "packet": "V1-93 (WEDGE-WA-INBOUND-CAPTURE)"
+    },
+    {
       "prefix": "v94a_",
       "owner": "apps/server/test/risc-signin-cutoff.integration.test.ts",
       "packet": "V1-94 (W8-RISC-SIGNIN-CUTOFF)"
@@ -1275,6 +1280,26 @@
 "prefix": "v64i_",
       "owner": "apps/server/test/storefront-oversell.integration.test.ts",
       "packet": "V1-64 (SWP-STORE-OVERSELL)"
+    },
+    {
+"prefix": "v64n_",
+      "owner": "apps/server/test/v1-hold-migration.integration.test.ts",
+      "packet": "V1-64 (MIGRATION-SET-A)"
+    },
+    {
+"prefix": "v65e_",
+      "owner": "apps/server/test/ready-to-send.integration.test.ts",
+      "packet": "V1-65 (READY-TO-SEND)"
+    },
+    {
+"prefix": "v91r_",
+      "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
+      "packet": "V1-91 (FU-BULK-DELETE-UNDO, P37)"
+    },
+    {
+"prefix": "v64a_",
+      "owner": "apps/server/test/key-proposal-result-reader-scope.integration.test.ts",
+      "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
     }
   ],
   "pendingRenames": [],

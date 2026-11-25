@@ -129,10 +129,10 @@ const V1_KEY_TOOLS = new Set([
   'bookings_reschedule_booking', 'calendar_check_conflicts', 'calendar_create_event', 'calendar_list_events',
   // Money: expenses, Books, Getting paid, reconciliation, reports.
   'expenses_create', 'expenses_list',
-  'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_create_bill', 'finance_create_coa_account',
+  'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_cashflow_forecast', 'finance_create_bill', 'finance_create_coa_account',
   'finance_customer_balance', 'finance_expense_breakdown', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
-  'finance_list_coa', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown',
-  'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
+  'finance_list_coa', 'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown',
+  'finance_safe_to_spend', 'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
   'payments_create_link', 'payments_list_gateways', 'payments_list_links', 'payments_list_transactions', 'payments_refund_charge',
   'payments_revoke_link', 'payments_search_transactions',
   'reconcile_connect_statement_source', 'reconcile_list_statement_sources', 'reconcile_list_unmatched', 'reconcile_match_line',

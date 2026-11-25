@@ -32,6 +32,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
+import { CaptureWhatsAppInboundDto } from './dto/capture-whatsapp-inbound.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -1033,6 +1034,31 @@ export class CrmController {
       authorId: req?.user?.id,
       source: body.source || 'crm',
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(30, 60_000)
+  @Post('businesses/:businessId/whatsapp/inbound-capture')
+  captureInboundWhatsApp(
+    @Param('businessId') businessId: string,
+    @Body() body: CaptureWhatsAppInboundDto,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    const actorUserId = this.requireActorUserId(req);
+    const audit = this.userAuditContext(req);
+    return this.crm.captureInboundWhatsApp(
+      {
+        businessId,
+        phone: body.phone,
+        message: body.message,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        contactId: body.contactId,
+        actorUserId,
+      },
+      audit,
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
