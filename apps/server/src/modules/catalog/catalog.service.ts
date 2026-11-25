@@ -482,6 +482,44 @@ export class CatalogService {
   }
 
   /**
+   * V1-64 (SWP-SERVICE-DEPOSIT, BUG-048, COR-P69-1, COR-P69-2): validate raw
+   * deposit input types (matching CatalogServiceDto even on /bookings
+   * passthrough) and reject non-null depositType/depositValue when
+   * depositRequired is omitted and effectively false so callers never get a
+   * silent discard.
+   */
+  private validateDepositInputShape(
+    input: { depositRequired?: boolean; depositType?: string | null; depositValue?: number | null },
+    effectiveRequired: boolean,
+  ): void {
+    if (input.depositRequired !== undefined && typeof input.depositRequired !== 'boolean') {
+      throw new BadRequestException('depositRequired must be a boolean');
+    }
+    if (
+      input.depositType !== undefined &&
+      input.depositType !== null &&
+      input.depositType !== 'PERCENT' &&
+      input.depositType !== 'FIXED'
+    ) {
+      throw new BadRequestException('depositType must be PERCENT or FIXED');
+    }
+    if (
+      input.depositValue !== undefined &&
+      input.depositValue !== null &&
+      (typeof input.depositValue !== 'number' || !Number.isFinite(input.depositValue))
+    ) {
+      throw new BadRequestException('depositValue must be a finite number');
+    }
+    if (
+      input.depositRequired === undefined &&
+      !effectiveRequired &&
+      (input.depositType != null || input.depositValue != null)
+    ) {
+      throw new BadRequestException('depositRequired must be true when setting depositType or depositValue');
+    }
+  }
+
+  /**
    * V1-64 (SWP-SERVICE-DEPOSIT, BUG-048): validate and normalize service
    * deposit terms against the effective service price.
    *   - depositRequired=false -> clears depositType & depositValue to null.
@@ -525,11 +563,10 @@ export class CatalogService {
     if (typeof input.price !== 'number' || !Number.isFinite(input.price) || input.price < 0) {
       throw new BadRequestException('Service price must be a non-negative number');
     }
-    if (input.depositRequired !== undefined && typeof input.depositRequired !== 'boolean') {
-      throw new BadRequestException('depositRequired must be a boolean');
-    }
+    const effectiveRequired = input.depositRequired === true;
+    this.validateDepositInputShape(input, effectiveRequired);
     const deposit = this.normalizeServiceDeposit(input.price, {
-      depositRequired: input.depositRequired ?? false,
+      depositRequired: effectiveRequired,
       depositType: input.depositType ?? null,
       depositValue: input.depositValue ?? null,
     });
@@ -564,9 +601,9 @@ export class CatalogService {
     if (input.price !== undefined && (typeof input.price !== 'number' || !Number.isFinite(input.price) || input.price < 0)) {
       throw new BadRequestException('Service price must be a non-negative number');
     }
-    if (input.depositRequired !== undefined && typeof input.depositRequired !== 'boolean') {
-      throw new BadRequestException('depositRequired must be a boolean');
-    }
+    const effectiveRequired =
+      input.depositRequired !== undefined ? input.depositRequired : existing.depositRequired;
+    this.validateDepositInputShape(input, effectiveRequired);
     const data: Record<string, any> = {};
     const fields: (keyof CatalogServicePatch)[] = [
       'name', 'duration', 'price', 'description', 'bufferMins', 'leadTimeMins', 'sourceProductId',
@@ -580,8 +617,6 @@ export class CatalogService {
       input.depositValue !== undefined;
     if (depositTouched || (input.price !== undefined && existing.depositRequired)) {
       const effectivePrice = input.price !== undefined ? input.price : existing.price;
-      const effectiveRequired =
-        input.depositRequired !== undefined ? input.depositRequired : existing.depositRequired;
       const deposit = this.normalizeServiceDeposit(effectivePrice, {
         depositRequired: effectiveRequired,
         depositType:

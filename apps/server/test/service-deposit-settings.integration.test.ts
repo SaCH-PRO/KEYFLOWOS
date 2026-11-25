@@ -319,6 +319,54 @@ describe('V1-64 (SWP-SERVICE-DEPOSIT, BUG-048) — server half', () => {
     // PATCH raising FIXED depositValue above price -> 400
     const raiseDep = await patchCatalogService(fixedEq.body.id, { depositValue: 150 });
     expect(raiseDep.status, JSON.stringify(raiseDep.body)).toBe(400);
+
+    // COR-P69-1: partial PATCH updating only depositValue on an enabled service preserves depositRequired & depositType
+    const partialPct = await patchCatalogService(pct1.body.id, { depositValue: 30 });
+    expect(partialPct.status, JSON.stringify(partialPct.body)).toBe(200);
+    expect(partialPct.body.depositRequired).toBe(true);
+    expect(partialPct.body.depositType).toBe('PERCENT');
+    expect(partialPct.body.depositValue).toBe(30);
+
+    // COR-P69-1: partial PATCH toggling depositRequired: true without prior config -> 400
+    const enableWithoutConfig = await patchCatalogService(freeNoDep.body.id, { depositRequired: true });
+    expect(enableWithoutConfig.status, JSON.stringify(enableWithoutConfig.body)).toBe(400);
+
+    // COR-P69-1: supplying depositType/depositValue while depositRequired is omitted & effectively false -> 400 (no silent discard)
+    const createOmittedFlag = await createCatalogService({
+      name: `${P}inv_omitted`,
+      duration: 30,
+      price: 200,
+      depositType: 'PERCENT',
+      depositValue: 25,
+    });
+    expect(createOmittedFlag.status, JSON.stringify(createOmittedFlag.body)).toBe(400);
+    const patchOmittedFlag = await patchCatalogService(freeNoDep.body.id, {
+      depositType: 'PERCENT',
+      depositValue: 25,
+    });
+    expect(patchOmittedFlag.status, JSON.stringify(patchOmittedFlag.body)).toBe(400);
+
+    // Explicit clearing with nulls when depositRequired is false stays valid
+    const patchNulls = await patchCatalogService(freeNoDep.body.id, {
+      depositType: null,
+      depositValue: null,
+    });
+    expect(patchNulls.status, JSON.stringify(patchNulls.body)).toBe(200);
+
+    // COR-P69-2: /bookings passthrough rejects malformed depositType/depositValue even when depositRequired is false
+    const badBookingsType = await createBookingsService({
+      name: `${P}inv_b_type`,
+      duration: 30,
+      price: 100,
+      depositRequired: false,
+      depositType: 'BOGUS',
+    });
+    expect(badBookingsType.status, JSON.stringify(badBookingsType.body)).toBe(400);
+    const badBookingsVal = await patchBookingsService(freeNoDep.body.id, {
+      depositRequired: false,
+      depositValue: 'not-a-number',
+    });
+    expect(badBookingsVal.status, JSON.stringify(badBookingsVal.body)).toBe(400);
   });
 
   it('[SDS-03] RED-BEFORE: booking a service configured via API with PERCENT 25 on price 200 bills a 50.00 DEPOSIT invoice', async () => {
