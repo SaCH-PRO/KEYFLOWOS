@@ -100,7 +100,7 @@ function makeService() {
     }),
   };
 
-  const service = new (FinanceGenomeService as unknown as new (...args: any[]) => FinanceGenomeService)(
+  const service = new FinanceGenomeService(
     prisma,
     metricService as any,
     factService as any,
