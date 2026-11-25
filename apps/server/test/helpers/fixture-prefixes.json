@@ -1317,6 +1317,11 @@
       "packet": "V1-64 (MIGRATION-SET-A)"
     },
     {
+      "prefix": "v65a_",
+      "owner": "apps/server/test/finance-overview-truth.integration.test.ts",
+      "packet": "V1-65 (SWP-FIN-OVERVIEW-TRUTH)"
+    },
+    {
       "prefix": "v65e_",
       "owner": "apps/server/test/ready-to-send.integration.test.ts",
       "packet": "V1-65 (READY-TO-SEND)"
