@@ -5,6 +5,11 @@ import { bootstrapIdentity } from "./client";
 // file, so pulling API_BASE from there would close an import cycle and could
 // leave the constant undefined depending on which module initialises first.
 import { getApiBase } from "./api-base";
+import {
+  dismissRemovedBusinessNotice,
+  getRemovedBusinessNotice,
+  raiseRemovedBusinessNotice,
+} from "./removed-business-notice";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
@@ -341,8 +346,29 @@ function forgetStoredBusiness() {
   businessCache = null;
 }
 
+// SWP-REMOVED-MEMBER-NOTICE: the notice's storage is its own module; re-exported for callers of this one.
+export {
+  BUSINESS_REMOVED_EVENT,
+  dismissRemovedBusinessNotice,
+  getRemovedBusinessNotice,
+  type RemovedBusinessNotice,
+} from "./removed-business-notice";
+
+/**
+ * The authoritative list no longer holds `stored`. Called before the caches are rewritten: the business cache still
+ * describes the lost business (its name is taken only when it is that business), and the cached user is compared with
+ * the signed-in one, so a stale id left by another account on a shared device never names that account's business.
+ */
+function noteRemovedBusiness(stored: string, signedIn: CachedUser | null) {
+  const before = getCachedUser();
+  if (!signedIn || !before || before.id !== signedIn.id) return;
+  const cached = getCachedBusiness();
+  raiseRemovedBusinessNotice({ id: stored, name: cached?.id === stored && cached.name ? cached.name : null });
+}
+
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
+  dismissRemovedBusinessNotice();
   purgeOnboardingTranscripts();
   // RR-ADMIN-LOGOUT: no sign-out leaves the admin bearer behind.
   clearAdminSession();
@@ -483,6 +509,11 @@ async function resolveBusinessSelection(
     if (user) setCachedUser(user);
     return stored;
   }
+  // The list is authoritative: a stored business it no longer holds was lost (removed by an owner), not chosen away.
+  if (stored && !businesses.some((b) => b.id === stored)) noteRemovedBusiness(stored, user);
+  // Access given back (re-invited): the notice no longer holds.
+  const pending = getRemovedBusinessNotice();
+  if (pending && businesses.some((b) => b.id === pending.id)) dismissRemovedBusinessNotice();
   if (businesses.length === 0) return bootstrapFirstBusiness(generation, stored, onSuperseded);
 
   const chosen =

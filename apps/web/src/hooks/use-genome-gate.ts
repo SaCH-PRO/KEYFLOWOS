@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { getRemovedBusinessNotice } from "@/lib/removed-business-notice";
 import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
 
 const ALLOWED_PATHS = [
@@ -69,9 +70,14 @@ export function useGenomeGate(): GenomeGateState {
       ? `${pathname}?${searchParams.toString()}`
       : pathname || "";
 
+    // SWP-REMOVED-MEMBER-NOTICE (BUG-117): a member who just lost access to a business is told so by the shell's
+    // notice; they are never sent to onboarding for that reason (their remaining business, or none, is not a choice
+    // they made). Once they dismiss the notice, the gate applies as usual.
+    const removedPending = getRemovedBusinessNotice() !== null;
+
     if (!businessId) {
       // No business selected -> keep gate closed and send to onboarding.
-      if (!isAllowedPath(pathWithQuery)) {
+      if (!removedPending && !isAllowedPath(pathWithQuery)) {
         router.replace("/app/onboarding");
       }
       // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag lifecycle: closes the gate once the no-business path resolves
@@ -109,7 +115,7 @@ export function useGenomeGate(): GenomeGateState {
           genesisCompleted: null,
         });
 
-        if (gateActive && pathWithQuery && !isAllowedPath(pathWithQuery)) {
+        if (gateActive && !removedPending && pathWithQuery && !isAllowedPath(pathWithQuery)) {
           router.replace("/app/onboarding");
         }
       })
