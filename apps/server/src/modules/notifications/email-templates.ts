@@ -1098,6 +1098,13 @@ export function ownerAlertTemplate(ctx: {
   ctaLabel?: string;
   ctaUrl?: string;
 }): { subject: string; html: string; text: string } {
+  const safeHexColor = (value?: string): string | undefined => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed) ? trimmed : undefined;
+  };
+  const primaryColor = safeHexColor(ctx.primaryColor);
+  const secondaryColor = safeHexColor(ctx.secondaryColor);
+  const safeSubject = ctx.subject.replace(/[\r\n]+/g, ' ').trim();
   const safeBusinessName = escapeHtml(ctx.businessName);
   const safeHeadline = escapeHtml(ctx.headline);
   const safeSummary = escapeHtml(ctx.summary);
@@ -1113,7 +1120,7 @@ export function ownerAlertTemplate(ctx: {
     heading(safeHeadline),
     paragraph(safeSummary),
     safeRows ? detailTable(safeRows) : '',
-    ctx.ctaLabel && safeCtaUrl ? ctaButton(escapeHtml(ctx.ctaLabel), safeCtaUrl, ctx.primaryColor) : '',
+    ctx.ctaLabel && safeCtaUrl ? ctaButton(escapeHtml(ctx.ctaLabel), safeCtaUrl, primaryColor) : '',
     paragraph('You received this alert by email because push notifications are not active on your device for this business.'),
   ].join('');
 
@@ -1121,10 +1128,10 @@ export function ownerAlertTemplate(ctx: {
     {
       businessName: safeBusinessName,
       customerName: safeBusinessName,
-      primaryColor: ctx.primaryColor,
-      secondaryColor: ctx.secondaryColor,
+      primaryColor,
+      secondaryColor,
     },
-    escapeHtml(ctx.subject),
+    escapeHtml(safeSubject),
     body,
   );
 
@@ -1136,6 +1143,6 @@ export function ownerAlertTemplate(ctx: {
     ...(safeCtaUrl ? ['', `Open in Keyflow: ${ctx.ctaUrl!.trim()}`] : []),
   ];
 
-  return { subject: ctx.subject, html, text: textLines.join('\n') };
+  return { subject: safeSubject, html, text: textLines.join('\n') };
 }
 

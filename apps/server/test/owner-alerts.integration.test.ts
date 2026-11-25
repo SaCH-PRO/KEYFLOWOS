@@ -340,6 +340,35 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
     expect(emailCalls[0].html).toContain('&lt;script&gt;x&lt;/script&gt;');
     expect(emailCalls[1].subject).toContain('INV-V65F-200');
     expect(emailCalls[2].subject).toMatch(/claim|transfer|payment/i);
+
+    // SEC-P58-1 / SEC-P58-3 / COR-P58-2: malicious primaryColor/secondaryColor, CRLF in Business.name, and null amount.
+    emailCalls.length = 0;
+    await db.business.update({
+      where: { id: ID.bizNoPush },
+      data: {
+        name: 'V65F Studio\r\nBcc: evil@example.test',
+        primaryColor: '"><img src=x>',
+        secondaryColor: 'javascript:alert(1)',
+      },
+    });
+    await emitAndSettle('invoice.payment_claimed', {
+      businessId: ID.bizNoPush,
+      invoiceId: `${P}inv_claim_sanitize_01`,
+      invoice: { id: `${P}inv_claim_sanitize_01`, businessId: ID.bizNoPush, invoiceNumber: 'INV-SAN-1\r\nX-Hdr: 1', total: null, currency: 'TTD' },
+      method: 'bank_transfer',
+      amount: null,
+      currency: 'TTD',
+    });
+    await db.business.update({
+      where: { id: ID.bizNoPush },
+      data: { name: 'V65F Email Fallback Studio', primaryColor: null, secondaryColor: null },
+    });
+    expect(emailCalls).toHaveLength(1);
+    expect(emailCalls[0].subject).not.toMatch(/[\r\n]/);
+    expect(emailCalls[0].html).not.toContain('<img src=x>');
+    expect(emailCalls[0].html).not.toContain('javascript:alert(1)');
+    expect(emailCalls[0].html).toContain('#F97316');
+    expect(emailCalls[0].html).not.toContain('TTD 0.00');
   });
 
   it('[OA-04] push failure (410 Gone) prunes expired subscription and falls back to one owner-only email', async () => {
@@ -481,7 +510,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
     expect(`${emailCalls[1].subject} ${emailCalls[1].html}`).toContain('20');
   });
 
-  it('[OA-07] D-116/D-125 owner resolution & tenant mismatch guard: demoted ownerId does not receive alerts, only OWNER membership does; mismatched businessId ignored', async () => {
+  it('[OA-07] D-104/D-116/D-125 owner resolution & tenant mismatch guard: demoted or removed ownerId gets zero alerts; only OWNER membership does; mismatched businessId ignored', async () => {
     await emitAndSettle('booking.created', {
       businessId: ID.bizDemoted,
       booking: { id: `${P}bk_demoted_01`, businessId: ID.bizDemoted, startTime: new Date('2026-12-04T11:00:00Z') },
@@ -490,6 +519,38 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
 
     expect(pushCalls).toHaveLength(1);
     expect(pushCalls[0].endpoint).toBe(ENDPOINT.coOwnerDemoted);
+    expect(emailCalls).toHaveLength(0);
+
+    // SEC-P58-2 / COR-P58-1: a business whose Business.ownerId has NO Membership row (removed former owner)
+    // and zero OWNER memberships gets 0 pushes and 0 emails even when business.email is set.
+    pushCalls.length = 0;
+    emailCalls.length = 0;
+    const removedBizId = `${P}biz_removed_owner`;
+    await db.business.create({
+      data: {
+        id: removedBizId,
+        name: 'V65F Removed Owner Biz',
+        slug: `${P}removed-owner`,
+        ownerId: ID.owner,
+        email: `${P}biz-fallback@example.test`,
+        currency: 'TTD',
+      },
+    });
+    await db.pushSubscription.create({
+      data: {
+        id: `${P}sub_removed_owner`,
+        endpoint: `https://push.v65f.test/sub/removed-owner`,
+        p256dh: 'kr',
+        auth: 'ar',
+        userId: ID.owner,
+        businessId: removedBizId,
+      },
+    });
+    await emitAndSettle('invoice.paid', {
+      businessId: removedBizId,
+      invoice: { id: `${P}inv_removed_01`, businessId: removedBizId, invoiceNumber: 'INV-REM-1', total: 75, currency: 'TTD' },
+    });
+    expect(pushCalls).toHaveLength(0);
     expect(emailCalls).toHaveLength(0);
 
     // Mismatched entity businessId -> refused silently, 0 pushes, 0 emails.

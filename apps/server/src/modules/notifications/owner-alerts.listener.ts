@@ -109,6 +109,7 @@ function parseClaimCoalesceRecord(raw: unknown): ClaimCoalesceRecord | null {
 }
 
 function formatAmount(amount: unknown, currency?: string | null): string {
+  if (amount == null || (typeof amount === 'string' && amount.trim() === '')) return '';
   const num = Number(amount);
   if (!Number.isFinite(num)) return '';
   const curr = (currency || 'TTD').toUpperCase();
@@ -310,7 +311,7 @@ export class OwnerAlertsListener {
           },
         });
         if (stored) {
-          if (!invoiceNumber) invoiceNumber = stored.invoiceNumber;
+          if (!invoiceNumber) invoiceNumber = sanitizeLine(stored.invoiceNumber);
           if (amountValue == null) amountValue = stored.total;
           if (!currencyValue) currencyValue = stored.currency;
           if (!customer) customer = contactName(stored.contact);
@@ -360,10 +361,12 @@ export class OwnerAlertsListener {
 
   /**
    * Resolves the business's OWNER users and owner-only fallback email address.
-   * Honours D-116 / D-125: active `Membership` rows with `role === 'OWNER'` take
-   * precedence; `Business.ownerId` is only used as a legacy fallback when the
-   * business has zero `OWNER` memberships and `ownerId` has not been demoted to
-   * a non-OWNER membership. Never reads any customer / contact address.
+   * Honours D-104 / D-116 / D-125: only active `Membership` rows with
+   * `role === 'OWNER'` are owners. `Business.ownerId` confers nothing by itself
+   * (a removed or demoted former owner receives zero pushes and zero emails),
+   * and `business.email` is only used as a secondary fallback when at least one
+   * active OWNER membership exists without a user email. Never reads any
+   * customer / contact address.
    */
   private async resolveOwnerTarget(
     businessId: string,
@@ -383,7 +386,6 @@ export class OwnerAlertsListener {
         id: true,
         name: true,
         email: true,
-        ownerId: true,
         notificationPreferences: true,
         primaryColor: true,
         secondaryColor: true,
@@ -399,32 +401,14 @@ export class OwnerAlertsListener {
       include: { user: { select: { id: true, email: true } } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
+    if (ownerMemberships.length === 0) return null;
 
     const ownerUserIds: string[] = [];
     let ownerEmail: string | null = null;
-
-    if (ownerMemberships.length > 0) {
-      for (const m of ownerMemberships) {
-        ownerUserIds.push(m.userId);
-        if (!ownerEmail && m.user?.email?.trim()) {
-          ownerEmail = m.user.email.trim();
-        }
-      }
-    } else if (business.ownerId) {
-      // Legacy fallback only when no OWNER membership exists and ownerId wasn't demoted.
-      const existingMembership = await this.prisma.client.membership.findUnique({
-        where: { userId_businessId: { userId: business.ownerId, businessId } },
-        select: { role: true },
-      });
-      if (!existingMembership || existingMembership.role === 'OWNER') {
-        const ownerUser = await this.prisma.client.user.findUnique({
-          where: { id: business.ownerId },
-          select: { id: true, email: true },
-        });
-        if (ownerUser) {
-          ownerUserIds.push(ownerUser.id);
-          if (ownerUser.email?.trim()) ownerEmail = ownerUser.email.trim();
-        }
+    for (const m of ownerMemberships) {
+      ownerUserIds.push(m.userId);
+      if (!ownerEmail && m.user?.email?.trim()) {
+        ownerEmail = m.user.email.trim();
       }
     }
 
@@ -432,11 +416,9 @@ export class OwnerAlertsListener {
       ownerEmail = business.email.trim();
     }
 
-    if (ownerUserIds.length === 0 && !ownerEmail) return null;
-
     return {
       businessId: business.id,
-      businessName: business.name || 'Your Business',
+      businessName: sanitizeLine(business.name) || 'Your Business',
       primaryColor: business.primaryColor ?? undefined,
       secondaryColor: business.secondaryColor ?? undefined,
       ownerUserIds,
@@ -569,12 +551,18 @@ export class OwnerAlertsListener {
   ): Promise<void> {
     let pushSent = 0;
     if (target.prefs.push && target.ownerUserIds.length > 0) {
-      const result = await this.pushNotifications.sendToBusinessUsers(
-        target.businessId,
-        target.ownerUserIds,
-        alert.push,
-      );
-      pushSent = result.sent;
+      try {
+        const result = await this.pushNotifications.sendToBusinessUsers(
+          target.businessId,
+          target.ownerUserIds,
+          alert.push,
+        );
+        pushSent = result.sent;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Owner push delivery errored for business ${target.businessId}; falling back to email: ${redactAddresses(err instanceof Error ? err.message : String(err))}`,
+        );
+      }
     }
 
     if (pushSent > 0) return;

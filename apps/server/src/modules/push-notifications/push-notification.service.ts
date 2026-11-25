@@ -6,27 +6,43 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class PushNotificationService {
   private readonly logger = new Logger(PushNotificationService.name);
   private vapidReady = false;
+  private appliedVapidTuple: string | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {
-    const vapidPublic = process.env.VAPID_PUBLIC_KEY?.trim();
-    const vapidPrivate = process.env.VAPID_PRIVATE_KEY?.trim();
-    const vapidSubject = process.env.VAPID_SUBJECT?.trim() || 'mailto:admin@keyflowos.com';
-
-    if (vapidPublic && vapidPrivate) {
-      try {
-        webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
-        this.vapidReady = true;
-      } catch (err: unknown) {
-        this.logger.warn(
-          `Invalid VAPID keys configured; push notifications disabled: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        this.vapidReady = false;
-      }
-    } else {
+    if (!this.ensureVapidConfigured() && !(process.env.VAPID_PUBLIC_KEY?.trim() && process.env.VAPID_PRIVATE_KEY?.trim())) {
       this.logger.warn('VAPID keys not configured. Push notifications will not work.');
     }
+  }
+
+  private ensureVapidConfigured(): boolean {
+    const vapidPublic = process.env.VAPID_PUBLIC_KEY?.trim() ?? '';
+    const vapidPrivate = process.env.VAPID_PRIVATE_KEY?.trim() ?? '';
+    const vapidSubject = process.env.VAPID_SUBJECT?.trim() || 'mailto:admin@keyflowos.com';
+
+    if (!vapidPublic || !vapidPrivate) {
+      this.vapidReady = false;
+      this.appliedVapidTuple = null;
+      return false;
+    }
+
+    const tuple = `${vapidSubject}\0${vapidPublic}\0${vapidPrivate}`;
+    if (this.appliedVapidTuple === tuple) {
+      return this.vapidReady;
+    }
+
+    try {
+      webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
+      this.vapidReady = true;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Invalid VAPID keys configured; push notifications disabled: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      this.vapidReady = false;
+    }
+    this.appliedVapidTuple = tuple;
+    return this.vapidReady;
   }
 
   async subscribe(userId: string, businessId: string, subscription: webpush.PushSubscription) {
@@ -212,6 +228,6 @@ export class PushNotificationService {
   }
 
   isConfigured(): boolean {
-    return this.vapidReady && Boolean(process.env.VAPID_PUBLIC_KEY?.trim() && process.env.VAPID_PRIVATE_KEY?.trim());
+    return this.ensureVapidConfigured();
   }
 }
