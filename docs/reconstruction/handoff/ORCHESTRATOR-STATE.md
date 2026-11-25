@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~20:15 UTC by the acting orchestrator (second-lane account, Claude Code), while M18 is
-being rebuilt; main `977a265c`. Rewrite in place on every merge, packet return
+Last written: 2026-11-25 ~20:20 UTC by the acting orchestrator (second-lane account, Claude Code), while M18 opens its
+PR; main `0d75cd02`. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -79,7 +79,7 @@ referred to on the board but is not yet a row.
 
 ## 0. Next session starts here (2026-11-25 ~20:15 UTC)
 
-Main is `977a265c` (M16 merged 18:15). V1-STATUS: 170 of 395 done, 44.4% of points.
+Main is `0d75cd02` (M23 merged ~20:10: P82, P83, P84). V1-STATUS: 172 of 395 done, 45.5% of points; launch 84 done of 254.
 
 **The owner's standing instruction (2026-11-25):**
 - Keep both lanes as full as possible.
@@ -94,7 +94,7 @@ The throughput plan is on #80 7172896636. Server lane (Antigravity), in order:
 5. The census and RR packets.
 6. FU-TEST-FLAKES.
 
-**M18 (Claude): rebuilding.** Branch `wave/v1-wave-m18`, on main `977a265c`. Packets:
+**M18 (Claude): proof green, PR opening.** Branch `wave/v1-wave-m18`, rebuilt at `19264b26` on main `977a265c`, then main `0d75cd02` (M23) merged in. M23 is server, scripts and docs only, with no web overlap. Packets:
 
 | Packet | Head |
 | --- | --- |
@@ -108,7 +108,7 @@ The throughput plan is on #80 7172896636. Server lane (Antigravity), in order:
 Plus docs.
 - The first head, `ecca24c5`, found one cross-packet test clash. P62's My account description now says "push notifications", and the /studio tests' name matcher counted that link as a settings entry.
 - It was fixed by two tests-only commits on the studio branch: 85a19ce8 (unit) and 79835e6b (e2e). Both lenses CONFIRMED both commits.
-- The wave is being rebuilt from those heads.
+- Rebuilt at `19264b26` (diff from `ecca24c5`: the two studio test files only). Proof there: web tsc 0, vitest 2361/2361, lint 0 errors, mocked build 0, CI e2e 25/25, mocked sweeps 37/37.
 - Proof at `ecca24c5`:
   - server: tsc 0, build 0, 15,872 passed;
   - 1 flake, WAH-R8 in `whatsapp.connector.spec`, which passes alone (59/59 twice);
@@ -116,7 +116,7 @@ Plus docs.
   - CI e2e 25/25; live release0 2/2; live cash and deposit sweeps 8/8.
 - Journeys B, F and H: 51 of 56 failed at the M18 head. These look like tracked gaps: B2 has no New service dialog, Sales > Products is missing (CATALOG-1 web), and catalog items are missing from the invoice and quote pickers.
 - **A base run of B, F and H on main `977a265c`** (scratchpad `wt-m18base`, logs `m18base-*`) proves pre-existing failures step by step.
-- **Then:** open the PR, run two wave confirmations, enqueue.
+- **Then:** the PR (look up `head=KEYFLOWOS:wave/v1-wave-m18` in the pulls API), two wave confirmations at the exact head, CI green, enqueue via ccr/auto_merge, subscribe to the PR.
 
 **Other packets in flight:**
 - **SWP-INV-REFUND-UI**, critical path #1, unblocks 39.
@@ -196,17 +196,17 @@ Plus docs.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `977a265c`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `0d75cd02`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **M18 (Claude)** | `wave/v1-wave-m18` (rebuild from the six pkt heads in section 0) | Proof mostly green; base run of journeys B/F/H on main in progress | PR, wave confirmations, enqueue |
+| **M18 (Claude)** | `wave/v1-wave-m18` (rebuild from the six pkt heads in section 0) | Proof green at `19264b26`, main `0d75cd02` merged in; base run of journeys B/F/H on main in progress | PR, wave confirmations, enqueue |
 | **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 58423afe (+ repair) | Repair round 1 | Two confirmations, RETURN |
 | **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Two reviews |
 | **Claude cloud sessions** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` (ecf7a0e1), `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` (c067bf97), `pkt/V1-FU-UNDO-TOAST-SIGNOUT` (0022c0bf), `pkt/V1-FU-E2E-MOCKED-SESSION-TOKEN` (7afe87e0), `pkt/V1-SWP-CRM-WEB-POLISH` (68aafd49) | Building (#80 7172995787) | Wait for each PACKET REPORT, then two reviews, RETURN, next Claude wave |
 | **Antigravity** | M23 (P82-P84) in the merge queue; M25 gathering P87, P88, P89, P91, P92; P90 blocked (question 52) | Building | Their next wave |
 | **Owner** | - | - | Section 4 questions 40-52 (51 = refund door S-1, 52 = P90 Release 0 contradiction, P0); production redeploy (D-266) |
-| `wave/v1-docs-p19` | main 977a265c merged in | This file, V1-STATUS | Squashed into each Claude wave |
+| `wave/v1-docs-p19` | main 0d75cd02 merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
