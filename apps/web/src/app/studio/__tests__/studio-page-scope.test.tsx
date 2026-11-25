@@ -12,6 +12,8 @@
  *   SPS-05     CONTROL: /app/settings, where /studio now sends them, offers a settings-none member no settings entry.
  *   SPS-06     CONTROL: nothing in the web source links to /studio.
  *   SPS-07     CONTROL: /app/settings is a page of its own, and neither middleware nor next.config sends it elsewhere.
+ *   SPS-08     RED-BEFORE (at 8b05aa1b): /studio is rendered on request. Prerendered, a page that only redirects is served
+ *              as a 200 with a meta refresh; on request it is an HTTP 307 to /app/settings (SPB-05 checks the answer).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -148,6 +150,11 @@ describe("FU-STUDIO-PAGE-SCOPE: where /studio sends the visitor", () => {
     };
     walk(srcDir);
     expect(hits).toEqual([]);
+  });
+
+  it("SPS-08 RED-BEFORE: /studio is rendered on request, so it answers with an HTTP 307, not a prerendered 200 with a meta refresh", async () => {
+    const mod = (await import("@/app/studio/page")) as { dynamic?: string };
+    expect(mod.dynamic).toBe("force-dynamic");
   });
 
   it("SPS-07 CONTROL: /app/settings is a page of its own, and neither middleware nor next.config sends it elsewhere", () => {

@@ -14,6 +14,8 @@ import { TEST_BUSINESS_ID, e2eBaseURL, mockBaseLayout, mockCatchAll, seedWorkspa
  *   SPB-02 a settings reader, at /studio: /app/settings, offering Getting paid and Notifications.
  *   SPB-03 an owner, at /studio: /app/settings, offering all eight entries.
  *   SPB-04 a signed-out visitor, at /studio: the sign-in page, no settings entry.
+ *   SPB-05 the /studio request itself answers 307 with Location /app/settings (RED at 8b05aa1b: a prerendered 200 with
+ *          a meta refresh).
  *
  * Run at 375, 768, 1024 and 1440. Mocked: every API call is answered by page.route on api.test.local; skipped under
  * E2E_LIVE. CI's e2e-mocked step runs a fixed list of specs that does not include this one: it is the packet's browser
@@ -126,3 +128,9 @@ for (const width of [375, 768, 1024, 1440]) {
     });
   });
 }
+
+test("SPB-05 /studio answers with an HTTP 307 to /app/settings, not a prerendered page", async ({ request }) => {
+  const res = await request.get("/studio", { maxRedirects: 0 });
+  expect(res.status()).toBe(307);
+  expect(res.headers()["location"]).toBe("/app/settings");
+});
