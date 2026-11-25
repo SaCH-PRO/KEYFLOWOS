@@ -54,7 +54,10 @@ export class AiAdvisorService {
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
     @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
   ) {
-    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+    this.cashPosition =
+      cashPosition && typeof cashPosition.getCashPosition === 'function'
+        ? cashPosition
+        : new CashPositionService(prisma);
   }
 
   async getBusinessContext(businessId: string) {
