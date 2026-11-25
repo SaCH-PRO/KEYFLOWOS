@@ -12,12 +12,13 @@
  *   RAT-04 an admin bearer that appears (another acting principal): dismissed
  *   RAT-05 a same-user rotation whose background answer names another user id: dismissed
  *   RAT-06 a same-user rotation from another tab (a refresh there): the toast stays
- *   RAT-07 the shell's first verification: a toast raised before it (at sign-in) stays
+ *   RAT-07 the shell's first verification: a toast raised before it (at sign-in) or during it stays
  *   RAT-08 a same-user rotation answered by a server error in the background: the toast stays
  *   RAT-09 a same-user rotation answered by a 403 in the background (the error state, same person): the toast stays
+ *   RAT-10 while a same-user rotation is verified in the background, this tab stores another person's token (no
+ *          storage event, no render): when the answer lands the shell is torn down and the toast dismissed
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ReactNode } from "react";
 import { render, screen, act, cleanup, waitFor } from "@testing-library/react";
 import { Toaster, toast } from "sonner";
 
@@ -208,21 +209,32 @@ describe("FU-UNDO-TOAST-SIGNOUT: RequireAuth ends the toasts of a session that e
     expect(screen.getByTestId("shell")).toBeTruthy();
   });
 
-  it("RAT-07 the shell's first verification keeps a toast raised before it ends", async () => {
+  it("RAT-07 the shell's first verification keeps a toast raised before it", async () => {
+    // The Toaster is up before the shell (it sits in Providers, above RequireAuth): a toast raised at sign-in, before
+    // the navigation into /app, is still on screen when RequireAuth mounts.
+    render(<Toaster />);
+    await raiseUndoToast();
     let answer = () => {};
     meGate = new Promise<void>((resolve) => {
       answer = resolve;
     });
-    render(<App />);
+    render(
+      <RequireAuth>
+        <div data-testid="shell">shell</div>
+      </RequireAuth>,
+    );
     expect(screen.queryByText(/Verifying session/)).not.toBeNull();
-    // Raised while the first /identity/me is on its way (a sign-in page's toast, before the shell is shown).
-    await raiseUndoToast();
+    // A toast raised while the first /identity/me is on its way stays too.
+    act(() => {
+      toast("Welcome back", { duration: 10_000 });
+    });
     meGate = null;
     await act(async () => {
       answer();
     });
     await screen.findByTestId("shell");
     await expectToastKept();
+    expect(screen.getByText("Welcome back")).toBeTruthy();
   });
 
   it("RAT-08 a same-user rotation answered by a server error in the background keeps the toast", async () => {
@@ -243,5 +255,24 @@ describe("FU-UNDO-TOAST-SIGNOUT: RequireAuth ends the toasts of a session that e
     otherTabWrites("kf_token", rotated);
     await waitFor(() => expect(screen.queryByText(/Server returned 403/)).not.toBeNull(), { timeout: 5_000 });
     await expectToastKept();
+  });
+
+  it("RAT-10 another person's token stored in this tab during a background check dismisses the Undo toast", async () => {
+    await renderVerified();
+    await raiseUndoToast();
+    let answer = () => {};
+    meGate = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    otherTabWrites("kf_token", jwt("user-1"));
+    await settle();
+    expect(screen.getByTestId("shell"), "a same-user rotation keeps the shell while it is checked").toBeTruthy();
+    // This tab stores another person's token: no storage event here, and nothing re-renders.
+    window.localStorage.setItem("kf_token", jwt("user-2"));
+    meGate = null;
+    await act(async () => {
+      answer();
+    });
+    await expectToastGone();
   });
 });
