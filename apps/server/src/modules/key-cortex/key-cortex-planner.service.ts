@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, ConflictException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import type { Prisma } from '@prisma/client';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -1086,18 +1087,7 @@ export class KeyCortexPlannerService {
    * Business.ownerId grants nothing on its own, a recorded owner holding ADMIN or STAFF is that role.
    */
   private async isBusinessOwner(businessId: string, userId: string): Promise<boolean> {
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return true;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // D-116 (W11-D116-KEY-OWNER): only with an OWNER one.
-      where: { id: businessId, ownerId: userId, members: { some: { userId: userId, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    return !!owned;
+    return isBusinessOwnerMember(this.prisma.client, businessId, userId);
   }
 
   /** Every step's command names `actorId`, which executePlan resolves (R0-09e). */
