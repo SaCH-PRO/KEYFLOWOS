@@ -76,8 +76,15 @@ export class UnifiedMemoryRetrievalService {
       if (ageMs > decayCutoffMs) {
         recencyScore *= 0.8;
       }
+      // P92 (MEM-EXPIRED-NOT-SERVED): distinguish explicit confidence <= 0 (scores 0, lowest) from missing/unscored (0.5),
+      // preserving `confidence * 0.5 + 0.5` (> 0.5) for all positive-confidence rows.
       const relevanceScore =
-        row.similarity ?? (row.confidence ? row.confidence * 0.5 + 0.5 : 0.5);
+        row.similarity ??
+        (typeof row.confidence === 'number' && Number.isFinite(row.confidence)
+          ? row.confidence <= 0
+            ? 0
+            : row.confidence * 0.5 + 0.5
+          : 0.5);
       const sourceWeight = this.sourceWeight(sourceType);
       let rankScore =
         (relevanceScore * 0.45 + recencyScore * 0.35 + sourceWeight * 0.2);
@@ -134,7 +141,12 @@ export class UnifiedMemoryRetrievalService {
       ...(options.documentExtractions === true ? [] : [DOCUMENT_EXTRACTION_CATEGORY]),
       ...(options.aiMemoryPatterns === false ? ['patterns'] : []),
     ];
-    const aiMemoryWhere = { ...whereBase, category: { notIn: unreadCategories } };
+    // P92 (MEM-EXPIRED-NOT-SERVED): exclude expired AiMemory rows, matching AiMemoryService.getAll and SemanticMemoryService.
+    const aiMemoryWhere = {
+      ...whereBase,
+      category: { notIn: unreadCategories },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    };
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
