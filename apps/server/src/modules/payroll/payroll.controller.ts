@@ -78,4 +78,25 @@ export class PayrollController {
       actorId: req?.user?.id ?? null,
     });
   }
+
+  /**
+   * V1-65 (TOF-PAYROLL-DISCARD, D-144): discard an unposted DRAFT run, or an
+   * unposted legacy DRAFT/APPROVED run in a non-business currency, to VOID
+   * with the server-verified member as actor (never read from body) and an
+   * optional reason. Releases the safe-to-spend payroll reserve now that the
+   * Payroll page is hidden in v1.
+   */
+  @Post('runs/:runId/discard')
+  @RequireModuleScope('operations', 'write')
+  discardRun(
+    @Param('businessId') businessId: string,
+    @Param('runId') runId: string,
+    @Body() body: { reason?: unknown } | undefined,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.payroll.discardRun(businessId, runId, {
+      reason: body?.reason,
+      actorId: req?.user?.id ?? null,
+    });
+  }
 }

@@ -36,6 +36,7 @@ on:
   push:
     branches-ignore:
       - main
+      - "gh-readonly-queue/**"
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -63,8 +64,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: branch-divergence-${{ github.ref }}
-  cancel-in-progress: true
+  group: branch-divergence-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 jobs:
   # ---------------------------------------------------------------------------

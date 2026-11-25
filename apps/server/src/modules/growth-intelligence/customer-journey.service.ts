@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isInboundWhatsAppEvent, stripInboundWhatsAppBody } from '../crm/whatsapp-inbound-exclusion';
 
 export type JourneyStage =
   | 'AWARENESS'
@@ -392,7 +393,9 @@ export class CustomerJourneyService {
           touchpointType: mapped.touchpointType,
           stageHint: mapped.stageHint,
           occurredAt: ev.createdAt,
-          metadata: ev.data as Record<string, unknown> | null ?? undefined,
+          metadata: isInboundWhatsAppEvent(ev)
+            ? stripInboundWhatsAppBody(ev.data)
+            : ((ev.data as Record<string, unknown> | null) ?? undefined),
         });
         recorded++;
       }
