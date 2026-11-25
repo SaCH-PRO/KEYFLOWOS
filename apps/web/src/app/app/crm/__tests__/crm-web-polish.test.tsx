@@ -100,10 +100,9 @@ function tableNames(): string[] {
     .filter((n): n is string => Boolean(n));
 }
 
-type TableProps = Parameters<typeof ContactsDatabase>[0] & { search?: string; onSearchChange?: (v: string) => void };
+type TableProps = Parameters<typeof ContactsDatabase>[0];
 
 function renderTable(extra: Partial<TableProps> = {}) {
-  const Table = ContactsDatabase as unknown as (p: TableProps) => JSX.Element;
   const props: TableProps = {
     businessId: BIZ,
     contacts: PEOPLE as unknown as LocalContact[],
@@ -112,8 +111,8 @@ function renderTable(extra: Partial<TableProps> = {}) {
     onSelectList: vi.fn(),
     ...extra,
   };
-  const view = render(<Table {...props} />);
-  return { ...view, rerenderWith: (more: Partial<TableProps>) => view.rerender(<Table {...props} {...more} />) };
+  const view = render(<ContactsDatabase {...props} />);
+  return { ...view, rerenderWith: (more: Partial<TableProps>) => view.rerender(<ContactsDatabase {...props} {...more} />) };
 }
 
 describe("BUG-080: the table view honours the screen's search, and its count agrees", () => {
