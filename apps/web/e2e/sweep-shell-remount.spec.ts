@@ -14,7 +14,9 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  *   1. a client navigation (router.push, as the app's own doors do) between two /app pages keeps the same shell
  *      element and never shows the spinner;
  *   2. the contacts screens' Book appointment door, router.push('/app/bookings?contactId=<id>'), opens the New
- *      booking sheet for that contact, and the shell is still the same element.
+ *      booking sheet for that contact, and the shell is still the same element;
+ *   3. the contacts screens' Create quote door, router.push('/app/commerce?tab=billing&segment=quotes&contactId=<id>'),
+ *      opens New quote for that contact, and the shell is still the same element.
  *
  * router.push is the app router's own (window.next.router, which Next sets in the browser), so the navigation is the
  * one every <Link> and useRouter().push makes. Live only (E2E_LIVE=1, the journey harness's fixtures, README in
@@ -69,7 +71,7 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 
   test.describe(`FU-REQUIRE-AUTH-REMOUNT the shell is not torn down on a page change (${viewport.width}x${viewport.height})`, () => {
     test.use(viewport.width < 600 ? { viewport, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { viewport });
 
-    test("a client navigation keeps the shell, and the Book appointment door's ?contactId opens the booking sheet", async ({ page, request, owner }) => {
+    test("a client navigation keeps the shell, and the Book appointment and Create quote doors' ?contactId open their forms", async ({ page, request, owner }) => {
       test.setTimeout(4 * 60_000);
       const lastName = `Shell${stamp()}`;
       const contactId = await seedContact(request, owner, lastName);
@@ -80,8 +82,9 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 
 
       await test.step("a client navigation between two /app pages keeps the same shell and never shows the spinner", async () => {
         await watchShell(page);
-        await routerPush(page, "/app/finance");
-        await page.waitForURL(/\/app\/finance(?:[/?#]|$)/);
+        // Money (/app/finance answers with a redirect to /app/financial-flow; this goes to the page itself).
+        await routerPush(page, "/app/financial-flow");
+        await page.waitForURL(/\/app\/financial-flow(?:[/?#]|$)/, { timeout: 30_000 });
         await settle(page, 3_000);
         const state = await shellState(page);
         expect(state.marked, "the shell was marked before the navigation").toBe(true);
@@ -92,13 +95,30 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 
       await test.step("router.push('/app/bookings?contactId=…') opens the New booking sheet for that contact", async () => {
         await watchShell(page);
         await routerPush(page, `/app/bookings?contactId=${encodeURIComponent(contactId)}`);
-        await page.waitForURL(/\/app\/bookings(?:[/?#]|$)/);
+        await page.waitForURL(/\/app\/bookings(?:[/?#]|$)/, { timeout: 30_000 });
         await expect
           .soft(page.getByRole("heading", { name: new RegExp(`New Booking · Remy ${lastName}`) }), "the New booking sheet, for the contact the door named")
           .toBeVisible({ timeout: 20_000 });
         const state = await shellState(page);
         expect.soft(state.spinnerSeen, "RequireAuth's spinner showed during the door's navigation").toBe(false);
         expect.soft(state.sameShell, "the shell element is the same one after the door's navigation").toBe(true);
+      });
+
+      await test.step("the contact's Create quote door, router.push('/app/commerce?tab=billing&segment=quotes&contactId=…'), opens New quote for that contact", async () => {
+        // The door of app/crm/pipeline/hooks/use-contact-actions.ts (send-quote). app/commerce/hooks/use-commerce.ts
+        // reads ?contactId from window.location once, on mount, and strips it.
+        await routerPush(page, "/app/crm/contacts");
+        await page.waitForURL(/\/app\/crm\/contacts(?:[/?#]|$)/, { timeout: 30_000 });
+        await settle(page, 2_000);
+        await watchShell(page);
+        await routerPush(page, `/app/commerce?tab=billing&segment=quotes&contactId=${encodeURIComponent(contactId)}`);
+        await page.waitForURL(/\/app\/commerce(?:[/?#]|$)/, { timeout: 30_000 });
+        const quote = page.getByRole("dialog", { name: /new quote/i });
+        await expect.soft(quote, "the New quote form opened from the door").toBeVisible({ timeout: 20_000 });
+        await expect.soft(quote.getByText(new RegExp(`Remy ${lastName}`)).first(), "with the contact the door named").toBeVisible({ timeout: 10_000 });
+        const state = await shellState(page);
+        expect.soft(state.spinnerSeen, "RequireAuth's spinner showed during the quote door's navigation").toBe(false);
+        expect.soft(state.sameShell, "the shell element is the same one after the quote door's navigation").toBe(true);
       });
     });
   });
