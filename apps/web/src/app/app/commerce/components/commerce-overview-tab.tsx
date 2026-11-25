@@ -17,7 +17,7 @@ import { CommerceHub } from "./commerce-hub";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { parseDate } from "@/lib/date-safe";
-import { InvoiceStatus, QuoteStatus } from "@/lib/commerce-status";
+import { InvoiceStatus, OWED_STATUSES, QuoteStatus, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import type { Invoice, Quote, RecurringInvoice } from "@/lib/client";
 import { invoiceMoney } from "../payments/payments-tab";
 
@@ -154,9 +154,10 @@ function RevenueAtAGlance({
   recurring?: RecurringInvoice[];
   currency: string;
 }) {
-  const quoteTotal = quotes.reduce((s, q) => s + (q.total ?? 0), 0);
-  const invoiceTotal = invoices.filter((i) => i.status === InvoiceStatus.SENT || i.status === InvoiceStatus.OVERDUE).reduce((s, i) => s + (Number(i.total) ?? 0), 0);
-  const paidTotal = invoices.filter((i) => i.status === InvoiceStatus.PAID).reduce((s, i) => s + (Number(i.total) ?? 0), 0);
+  const quoteTotal = quotes.reduce((s, q) => s + safeInvoiceAmount(q.total), 0);
+  const openInvoices = invoices.filter((i) => OWED_STATUSES.has(i.status));
+  const invoiceTotal = openInvoices.reduce((s, i) => s + invoiceRemainingOwed(i), 0);
+  const paidTotal = invoices.filter((i) => i.status === InvoiceStatus.PAID).reduce((s, i) => s + safeInvoiceAmount(i.total), 0);
 
   const activeRecurring = (recurring ?? []).filter((r) => r.status === "ACTIVE");
   const mrr = activeRecurring.reduce((s, r) => s + Number(r.amount ?? 0), 0);
@@ -166,7 +167,7 @@ function RevenueAtAGlance({
 
   const pipelineStages = [
     { label: "Quotes", amount: quoteTotal, count: quotes.length, icon: FileText, color: "text-blue-500", bg: "bg-blue-500/10" },
-    { label: "Invoiced", amount: invoiceTotal, count: invoices.filter((i) => i.status === InvoiceStatus.SENT || i.status === InvoiceStatus.OVERDUE).length, icon: CreditCard, color: "text-amber-500", bg: "bg-amber-500/10" },
+    { label: "Invoiced", amount: invoiceTotal, count: openInvoices.length, icon: CreditCard, color: "text-amber-500", bg: "bg-amber-500/10" },
     { label: "Paid", amount: paidTotal, count: invoices.filter((i) => i.status === InvoiceStatus.PAID).length, icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-500/10" },
   ];
 
@@ -238,7 +239,7 @@ function RevenueActionCards({
   const cards: { id: string; icon: React.ElementType; title: string; desc: string; cta: string; onClick: () => void; urgent: boolean; color: string; bg: string }[] = [];
 
   const overdue = invoices.filter((i) => i.status === InvoiceStatus.OVERDUE);
-  const overdueAmount = overdue.reduce((s, i) => s + (Number(i.total) ?? 0), 0);
+  const overdueAmount = overdue.reduce((s, i) => s + invoiceRemainingOwed(i), 0);
   if (overdue.length > 0) {
     cards.push({
       id: "overdue",

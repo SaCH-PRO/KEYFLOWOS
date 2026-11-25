@@ -82,6 +82,7 @@ export const INVOICE_STATUS_FILTERS = [
   { value: "DRAFT", label: "Draft" },
   { value: "SENT", label: "Sent" },
   { value: "PAID", label: "Paid" },
+  { value: "PENDING", label: "Pending" },
   { value: "PARTIALLY_PAID", label: "Partial" },
   { value: "OVERDUE", label: "Overdue" },
   { value: "VOID", label: "Void" },
@@ -157,6 +158,7 @@ export const BILLING_DOC_THEME = {
 export function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
     DRAFT: "bg-slate-500/20 text-slate-300 border-slate-500/40",
+    PENDING: "bg-amber-500/20 text-amber-300 border-amber-500/40",
     SENT: "bg-amber-500/20 text-amber-300 border-amber-500/40",
     PAID: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
     PARTIALLY_PAID: "bg-amber-500/20 text-amber-300 border-amber-500/40",

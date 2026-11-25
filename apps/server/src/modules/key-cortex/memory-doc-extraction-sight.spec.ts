@@ -12,6 +12,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { admitAllSemanticSightForTests } from '../../../test/helpers/semantic-sight.js';
 import { readersModuleSight, readersOwnPromptMemory } from './key-cortex-prompt-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
+import { KeyCortexDigestService } from './key-cortex-digest.service';
 
 const MEMBERSHIPS: Record<string, { role: string; permissionScopes: unknown }> = {
   blind: { role: 'STAFF', permissionScopes: { crm: 'read', operations: 'read', expenses: 'none', revenue: 'none' } },
@@ -142,7 +143,6 @@ describe('MEM-DOC-EXTRACTION-SIGHT: the memory read takes document extractions o
 
 describe("MEM-DOC-EXTRACTION-SIGHT: the owners' digest keeps the extractions (review finding: owner behaviour unchanged)", () => {
   it('KeyCortexDigestService asks its memory read for document extractions (the digest goes to the business owners)', async () => {
-    const { KeyCortexDigestService } = await import('./key-cortex-digest.service');
     const retrieveContext = vi.fn(async () => []);
     const service = new KeyCortexDigestService(
       { getMentalModel: vi.fn(async () => null) } as any,
