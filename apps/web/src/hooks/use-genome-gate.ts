@@ -85,8 +85,12 @@ export function useGenomeGate(): GenomeGateState {
 
     if (!businessId) {
       // No business selected -> keep gate closed and send to onboarding.
-      if (!removedPending && !isAllowedPath(pathWithQuery)) {
-        router.replace("/app/onboarding");
+      // The pending-notice guard wraps the allowed-path guard, never merges into it: the redirect keeps the exact form
+      // e2e/onboarding-loop-regression.spec.ts (Release 0 evidence, R0-06) pins.
+      if (!removedPending) {
+        if (!isAllowedPath(pathWithQuery)) {
+          router.replace("/app/onboarding");
+        }
       }
       // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag lifecycle: closes the gate once the no-business path resolves
       setState((s) => ({ ...s, checking: false, gateActive: true }));
@@ -123,8 +127,10 @@ export function useGenomeGate(): GenomeGateState {
           genesisCompleted: null,
         });
 
-        if (gateActive && !removedPending && pathWithQuery && !isAllowedPath(pathWithQuery)) {
-          router.replace("/app/onboarding");
+        if (!removedPending) {
+          if (gateActive && pathWithQuery && !isAllowedPath(pathWithQuery)) {
+            router.replace("/app/onboarding");
+          }
         }
       })
       .catch((err) => {
