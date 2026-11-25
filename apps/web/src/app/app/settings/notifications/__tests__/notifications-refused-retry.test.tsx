@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { toast } from "sonner";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
@@ -66,6 +67,8 @@ const checked = (name: RegExp) => screen.getByRole("switch", { name }).getAttrib
 
 let run = 0;
 beforeEach(() => {
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.success).mockClear();
   window.localStorage.setItem("kf_business_id", BIZ);
   window.localStorage.setItem("kf_token", `retry-token-${++run}`);
 });
@@ -100,7 +103,9 @@ describe("D-283 review round 1: Retry on Settings > Notifications", () => {
     let prefsGets = 0;
     let logGets = 0;
     let failPatch!: () => void;
-    const fresh = { ...PREFS, payment_receipt: true }; // changed elsewhere between the two loads
+    // What the reload answers: Payment Receipt changed elsewhere, and Booking Confirmation reads off (the PATCH has not
+    // been decided yet), so the revert below has something to do on both switches.
+    const fresh = { ...PREFS, booking_confirmed: false, payment_receipt: true };
     serve({
       prefs: (method) => {
         if (method === "PATCH") {
@@ -127,10 +132,14 @@ describe("D-283 review round 1: Retry on Settings > Notifications", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^preferences$/i }));
     await waitFor(() => expect(checked(/toggle payment receipt/i)).toBe("true"));
+    expect(checked(/toggle booking confirmation/i)).toBe("false");
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
 
-    // The PATCH is refused: Booking Confirmation goes back on, and the reloaded Payment Receipt stays on.
+    // The PATCH is refused (the page has handled it once its error toast is shown): Booking Confirmation goes back on,
+    // and the reloaded Payment Receipt stays on.
     failPatch();
-    await waitFor(() => expect(checked(/toggle booking confirmation/i)).toBe("true"));
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to update notification preference"));
+    expect(checked(/toggle booking confirmation/i)).toBe("true");
     expect(checked(/toggle payment receipt/i)).toBe("true");
   });
 });
