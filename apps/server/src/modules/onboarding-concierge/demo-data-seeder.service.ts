@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger, ConflictException, ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { ContactAuditService } from '../crm/privacy/contact-audit.service';
 
 type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
@@ -173,17 +174,8 @@ export class DemoDataSeederService {
    */
   private async resolveSeedOwner(businessId: string, actor: DemoSeedActor | undefined): Promise<string> {
     const actorId = actor?.id;
-    if (actorId) {
-      const [owned, membership] = await Promise.all([
-        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-        // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one.
-        this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId, role: 'OWNER' } } }, select: { id: true } }),
-        this.prisma.client.membership.findUnique({
-          where: { userId_businessId: { userId: actorId, businessId } },
-          select: { role: true },
-        }),
-      ]);
-      if (owned || membership?.role === 'OWNER') return actorId;
+    if (actorId && (await isBusinessOwnerMember(this.prisma.client, businessId, actorId))) {
+      return actorId;
     }
     throw new ForbiddenException({
       code: DEMO_SEED_OWNER_ONLY,

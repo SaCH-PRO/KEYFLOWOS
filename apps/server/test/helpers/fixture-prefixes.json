@@ -828,6 +828,21 @@
       "packet": "V1-95 (W9-IDENTITY-BACKFILL-SCRIPT)"
     },
     {
+      "prefix": "v95c_",
+      "owner": "apps/server/test/invoice-remaining-credits.integration.test.ts",
+      "packet": "V1-95 (FU-INVOICE-REMAINING-CREDITS, P65)"
+    },
+    {
+      "prefix": "v95e_",
+      "owner": "apps/server/test/contact-events-paging.integration.test.ts",
+      "packet": "V1-95 (FU-TIMELINE-EVENTS-PAGING, D-284)"
+    },
+    {
+      "prefix": "v95f_",
+      "owner": "apps/server/test/push-endpoint-allowlist.integration.test.ts",
+      "packet": "V1-95 (FU-PUSH-ENDPOINT-ALLOWLIST, P71 / MIN-4)"
+    },
+    {
       "prefix": "v95p_",
       "owner": "apps/server/test/contact-custom-field-names-tenant.integration.test.ts",
       "packet": "V1-95 (W9-CUSTOM-FIELDS-TENANT)"
@@ -1178,6 +1193,11 @@
       "packet": "V1-66 (SWP-CENSUS-OPEN-WRITES)"
     },
     {
+      "prefix": "v66i_",
+      "owner": "apps/server/test/call-log-list-paging.integration.test.ts",
+      "packet": "V1-66 (W11-CALLS-LIST-PAGING)"
+    },
+    {
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
@@ -1287,14 +1307,24 @@
       "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
     },
     {
-"prefix": "v64i_",
+      "prefix": "v64i_",
       "owner": "apps/server/test/storefront-oversell.integration.test.ts",
       "packet": "V1-64 (SWP-STORE-OVERSELL)"
+    },
+    {
+      "prefix": "v64j_",
+      "owner": "apps/server/test/service-deposit-settings.integration.test.ts",
+      "packet": "V1-64 (SWP-SERVICE-DEPOSIT)"
     },
     {
 "prefix": "v64n_",
       "owner": "apps/server/test/v1-hold-migration.integration.test.ts",
       "packet": "V1-64 (MIGRATION-SET-A)"
+    },
+    {
+      "prefix": "v65a_",
+      "owner": "apps/server/test/finance-overview-truth.integration.test.ts",
+      "packet": "V1-65 (SWP-FIN-OVERVIEW-TRUTH)"
     },
     {
       "prefix": "v65e_",

@@ -225,6 +225,9 @@ async function cleanup() {
     `DELETE FROM quotes WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     // W5-BRIEFING-SCOPE (TS-14): its invoices (Invoice.contact is NoAction).
     `DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    // SWP-FIN-CASH-SOURCES (P72, TS-13f): the seeded cash account for D-135 ledger cash forecast.
+    `DELETE FROM financial_accounts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     // W7-BRIEFINGS-REST (TS-20b, TS-21): the finance queue item and the skip route's audit rows.
     `DELETE FROM finance_action_items WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     // W8-REVENUE-ACTIONS-SCOPE (TS-22c): the stored weekly briefing and its sibling notification.
@@ -1221,6 +1224,7 @@ describe('W11-AI-CASHFLOW-REVENUE (D-57, D-100): the AI cash-flow forecast needs
       const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
       const { AiController } = await import('../src/modules/ai/ai.controller');
       const { AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service');
+      const { CashPositionService } = await import('../src/modules/finance/cash-position.service');
       const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
       const { StrategicIntelligenceService } = await import('../src/modules/ai/strategic-intelligence.service');
       const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
@@ -1233,6 +1237,7 @@ describe('W11-AI-CASHFLOW-REVENUE (D-57, D-100): the AI cash-flow forecast needs
           ModuleScopeGuard,
           CrmRateLimitGuard,
           { provide: EventEmitter2, useValue: { emit: () => true } },
+          CashPositionService,
           AiAdvisorService,
           {
             provide: AiUsageService,
@@ -1273,13 +1278,38 @@ describe('W11-AI-CASHFLOW-REVENUE (D-57, D-100): the AI cash-flow forecast needs
   it("TS-13f (W11-AI-CASHFLOW-REVENUE, D-57, D-100, D-104; was it.todo, review SEC-W10AT-2): GET /ai/businesses/:businessId/ai/cash-flow-forecast refuses a member without revenue read (403: no currentBalance, dailyRevenueRate, no figure, no outstanding-invoice alert) as its commerce twin does (TS-20e), and a non-member; a revenue-read STAFF member and the OWNER keep the forecast unchanged (one PAID invoice of 7777: currentBalance 7777, projectedBalance 10369.33 over the default 30 days, dailyRevenueRate 86.41, the days parameter honoured, the alert naming the outstanding total)", async () => {
     const PAID = `${P}inv_cf_paid`;
     const DUE = Array.from({ length: 6 }, (_, i) => `${P}inv_cf_due${i}`);
+    const CASH_COA = `${P}coa_cf_cash`;
+    const CASH_ACCOUNT = `${P}fa_cf_cash`;
     try {
-      // The forecast reads every PAID invoice and expense of the last 90 days: business A holds none
-      // here (each case above removes its own), so the figures are this case's invoice alone.
+      // The forecast reads the ledger cash position (D-135, SWP-FIN-CASH-SOURCES) plus PAID invoices
+      // and expenses of the last 90 days: business A holds none here, so the seeded cash account and
+      // invoice determine the figures alone.
       const since = new Date(Date.now() - 90 * 86_400_000);
       expect(await db.invoice.count({ where: { businessId: ID.bizA, deletedAt: null, status: 'PAID', paidAt: { gte: since } } })).toBe(0);
       expect(await db.expense.count({ where: { businessId: ID.bizA, deletedAt: null, date: { gte: since } } })).toBe(0);
       const outstandingBefore = await db.invoice.count({ where: { businessId: ID.bizA, deletedAt: null, status: { in: ['SENT', 'DRAFT'] } } });
+      await db.chartOfAccount.create({
+        data: {
+          id: CASH_COA,
+          businessId: ID.bizA,
+          code: '1010',
+          name: 'V84A Bank',
+          type: 'ASSET',
+          systemKey: 'BANK',
+        },
+      });
+      await db.financialAccount.create({
+        data: {
+          id: CASH_ACCOUNT,
+          businessId: ID.bizA,
+          chartOfAccountId: CASH_COA,
+          name: 'V84A CF Cash',
+          type: 'BANK',
+          currency: 'TTD',
+          openingBalance: 7777,
+          currentBalance: 7777,
+        },
+      });
       await db.invoice.createMany({
         data: [
           { id: PAID, invoiceNumber: 'v84a-INV-CF1', status: 'PAID', subtotal: 7777, total: 7777, currency: 'TTD', paidAt: new Date(), businessId: ID.bizA, contactId: ID.cTeam },
@@ -1328,6 +1358,8 @@ describe('W11-AI-CASHFLOW-REVENUE (D-57, D-100): the AI cash-flow forecast needs
       expect(JSON.stringify(outsider.body)).not.toContain('currentBalance');
     } finally {
       // Raw SQL: Invoice is a soft-deleted model (fixture-cleanup-integrity.spec.ts).
+      await db.$executeRawUnsafe(`DELETE FROM financial_accounts WHERE id = $1`, CASH_ACCOUNT);
+      await db.$executeRawUnsafe(`DELETE FROM chart_of_accounts WHERE id = $1`, CASH_COA);
       await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_cf_`)}`);
     }
   });

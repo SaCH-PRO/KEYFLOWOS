@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, OnModuleInit, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiOversightService } from './ai-oversight.service';
 import { PlannerService } from './planner.service';
@@ -98,15 +99,7 @@ function conditionToStore(filter: Record<string, unknown> | null, creator: strin
  * recorded owner holding only an ADMIN or STAFF membership is that role.
  */
 async function isBusinessOwner(prisma: PrismaService, businessId: string, userId: string): Promise<boolean> {
-  const membership = await prisma.client.membership.findUnique({
-    where: { userId_businessId: { userId, businessId } },
-    select: { role: true },
-  });
-  if (membership?.role === 'OWNER') return true;
-  // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-  // D-116 (W11-D116-KEY-OWNER): only with an OWNER one.
-  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId, members: { some: { userId: userId, role: 'OWNER' } } }, select: { id: true } });
-  return Boolean(owned);
+  return isBusinessOwnerMember(prisma.client, businessId, userId);
 }
 
 type TriggerContent = { name: string; eventPattern: string; objective: string; condition?: unknown; maxRiskTier?: number | null };

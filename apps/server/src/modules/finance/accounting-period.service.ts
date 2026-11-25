@@ -440,14 +440,6 @@ export class AccountingPeriodService {
         select: { role: true },
       });
       if (membership && PERIOD_GATE_ROLES.has(membership.role)) return actorId;
-      const owned = await this.prisma.client.business.findFirst({
-        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-        // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
-        // holding only STAFF is STAFF; ADMIN keeps the gate as an ADMIN, D-50).
-        where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId, role: 'OWNER' } } },
-        select: { id: true },
-      });
-      if (owned) return actorId;
     }
     throw new ForbiddenException(`Only the business owner or an admin can ${verb} an accounting period.`);
   }

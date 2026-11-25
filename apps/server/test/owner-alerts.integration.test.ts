@@ -47,12 +47,12 @@ const EMAIL = {
 };
 
 const ENDPOINT = {
-  ownerPush: `https://push.v65f.test/sub/owner-biz-push`,
-  staffPush: `https://push.v65f.test/sub/staff-biz-push`,
-  ownerOther: `https://push.v65f.test/sub/owner-biz-other`,
-  ownerFail: `https://push.v65f.test/sub/owner-biz-fail`,
-  coOwnerDemoted: `https://push.v65f.test/sub/coowner-biz-demoted`,
-  demotedFormerOwner: `https://push.v65f.test/sub/demoted-owner-biz-demoted`,
+  ownerPush: `https://fcm.googleapis.com/fcm/send/${P}owner-biz-push`,
+  staffPush: `https://fcm.googleapis.com/fcm/send/${P}staff-biz-push`,
+  ownerOther: `https://fcm.googleapis.com/fcm/send/${P}owner-biz-other`,
+  ownerFail: `https://fcm.googleapis.com/fcm/send/${P}owner-biz-fail`,
+  coOwnerDemoted: `https://fcm.googleapis.com/fcm/send/${P}coowner-biz-demoted`,
+  demotedFormerOwner: `https://fcm.googleapis.com/fcm/send/${P}demoted-owner-biz-demoted`,
 };
 
 let db: any;
@@ -539,7 +539,7 @@ describe('OWNER-ALERTS-SERVER (V1-65, P0, Journeys E / F / G)', () => {
     await db.pushSubscription.create({
       data: {
         id: `${P}sub_removed_owner`,
-        endpoint: `https://push.v65f.test/sub/removed-owner`,
+        endpoint: `https://fcm.googleapis.com/fcm/send/${P}removed-owner`,
         p256dh: 'kr',
         auth: 'ar',
         userId: ID.owner,

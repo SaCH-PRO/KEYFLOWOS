@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { ownStockRows, resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -106,6 +106,9 @@ export interface CatalogServiceInput {
   bufferMins?: number | null;
   leadTimeMins?: number | null;
   sourceProductId?: string | null;
+  depositRequired?: boolean;
+  depositType?: string | null;
+  depositValue?: number | null;
 }
 
 export interface CatalogServicePatch {
@@ -118,6 +121,9 @@ export interface CatalogServicePatch {
   bufferMins?: number | null;
   leadTimeMins?: number | null;
   sourceProductId?: string | null;
+  depositRequired?: boolean;
+  depositType?: string | null;
+  depositValue?: number | null;
 }
 
 /**
@@ -475,15 +481,95 @@ export class CatalogService {
     });
   }
 
+  /**
+   * V1-64 (SWP-SERVICE-DEPOSIT, BUG-048, COR-P69-1, COR-P69-2): validate raw
+   * deposit input types (matching CatalogServiceDto even on /bookings
+   * passthrough) and reject non-null depositType/depositValue when
+   * depositRequired is omitted and effectively false so callers never get a
+   * silent discard.
+   */
+  private validateDepositInputShape(
+    input: { depositRequired?: boolean; depositType?: string | null; depositValue?: number | null },
+    effectiveRequired: boolean,
+  ): void {
+    if (input.depositRequired !== undefined && typeof input.depositRequired !== 'boolean') {
+      throw new BadRequestException('depositRequired must be a boolean');
+    }
+    if (
+      input.depositType !== undefined &&
+      input.depositType !== null &&
+      input.depositType !== 'PERCENT' &&
+      input.depositType !== 'FIXED'
+    ) {
+      throw new BadRequestException('depositType must be PERCENT or FIXED');
+    }
+    if (
+      input.depositValue !== undefined &&
+      input.depositValue !== null &&
+      (typeof input.depositValue !== 'number' || !Number.isFinite(input.depositValue))
+    ) {
+      throw new BadRequestException('depositValue must be a finite number');
+    }
+    if (
+      input.depositRequired === undefined &&
+      !effectiveRequired &&
+      (input.depositType != null || input.depositValue != null)
+    ) {
+      throw new BadRequestException('depositRequired must be true when setting depositType or depositValue');
+    }
+  }
+
+  /**
+   * V1-64 (SWP-SERVICE-DEPOSIT, BUG-048): validate and normalize service
+   * deposit terms against the effective service price.
+   *   - depositRequired=false -> clears depositType & depositValue to null.
+   *   - depositRequired=true  -> requires depositType 'PERCENT' (1..100) or
+   *     'FIXED' (> 0 and <= price), else 400 BadRequestException.
+   */
+  private normalizeServiceDeposit(
+    price: number,
+    next: { depositRequired: boolean; depositType: string | null; depositValue: number | null },
+  ): { depositRequired: boolean; depositType: 'PERCENT' | 'FIXED' | null; depositValue: number | null } {
+    if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) {
+      throw new BadRequestException('Service price must be a non-negative number');
+    }
+    if (!next.depositRequired) {
+      return { depositRequired: false, depositType: null, depositValue: null };
+    }
+    if (next.depositType !== 'PERCENT' && next.depositType !== 'FIXED') {
+      throw new BadRequestException('depositType must be PERCENT or FIXED when depositRequired is true');
+    }
+    if (typeof next.depositValue !== 'number' || !Number.isFinite(next.depositValue)) {
+      throw new BadRequestException('depositValue must be a finite number when depositRequired is true');
+    }
+    if (next.depositType === 'PERCENT') {
+      if (next.depositValue < 1 || next.depositValue > 100) {
+        throw new BadRequestException('PERCENT depositValue must be between 1 and 100');
+      }
+      return { depositRequired: true, depositType: 'PERCENT', depositValue: next.depositValue };
+    }
+    if (next.depositValue <= 0 || next.depositValue > price) {
+      throw new BadRequestException('FIXED depositValue must be greater than 0 and at most the service price');
+    }
+    return { depositRequired: true, depositType: 'FIXED', depositValue: next.depositValue };
+  }
+
   async createService(input: CatalogServiceInput, tx?: TransactionClient) {
     const client = tx ?? this.prisma.client;
-    if (!input.name?.trim()) throw new Error('Service name is required');
-    if (typeof input.duration !== 'number' || input.duration <= 0) {
-      throw new Error('Service duration must be a positive number');
+    if (!input.name?.trim()) throw new BadRequestException('Service name is required');
+    if (typeof input.duration !== 'number' || !Number.isFinite(input.duration) || input.duration <= 0) {
+      throw new BadRequestException('Service duration must be a positive number');
     }
-    if (typeof input.price !== 'number' || input.price < 0) {
-      throw new Error('Service price must be a non-negative number');
+    if (typeof input.price !== 'number' || !Number.isFinite(input.price) || input.price < 0) {
+      throw new BadRequestException('Service price must be a non-negative number');
     }
+    const effectiveRequired = input.depositRequired === true;
+    this.validateDepositInputShape(input, effectiveRequired);
+    const deposit = this.normalizeServiceDeposit(input.price, {
+      depositRequired: effectiveRequired,
+      depositType: input.depositType ?? null,
+      depositValue: input.depositValue ?? null,
+    });
     const service = await client.service.create({
       data: {
         businessId: input.businessId,
@@ -494,6 +580,9 @@ export class CatalogService {
         bufferMins: input.bufferMins ?? null,
         leadTimeMins: input.leadTimeMins ?? null,
         sourceProductId: input.sourceProductId ?? null,
+        depositRequired: deposit.depositRequired,
+        depositType: deposit.depositType,
+        depositValue: deposit.depositValue,
       },
     });
     this.events.emit('catalog.service.created', { service, businessId: input.businessId } as CatalogServiceCreatedPayload);
@@ -506,6 +595,15 @@ export class CatalogService {
       where: { id: input.serviceId, businessId: input.businessId },
     });
     if (!existing) throw new NotFoundException('Service not found');
+    if (input.duration !== undefined && (typeof input.duration !== 'number' || !Number.isFinite(input.duration) || input.duration <= 0)) {
+      throw new BadRequestException('Service duration must be a positive number');
+    }
+    if (input.price !== undefined && (typeof input.price !== 'number' || !Number.isFinite(input.price) || input.price < 0)) {
+      throw new BadRequestException('Service price must be a non-negative number');
+    }
+    const effectiveRequired =
+      input.depositRequired !== undefined ? input.depositRequired : existing.depositRequired;
+    this.validateDepositInputShape(input, effectiveRequired);
     const data: Record<string, any> = {};
     const fields: (keyof CatalogServicePatch)[] = [
       'name', 'duration', 'price', 'description', 'bufferMins', 'leadTimeMins', 'sourceProductId',
@@ -513,8 +611,31 @@ export class CatalogService {
     for (const k of fields) {
       if (input[k] !== undefined) data[k as string] = input[k];
     }
+    const depositTouched =
+      input.depositRequired !== undefined ||
+      input.depositType !== undefined ||
+      input.depositValue !== undefined;
+    if (depositTouched || (input.price !== undefined && existing.depositRequired)) {
+      const effectivePrice = input.price !== undefined ? input.price : existing.price;
+      const deposit = this.normalizeServiceDeposit(effectivePrice, {
+        depositRequired: effectiveRequired,
+        depositType:
+          effectiveRequired
+            ? (input.depositType !== undefined ? input.depositType : existing.depositType)
+            : null,
+        depositValue:
+          effectiveRequired
+            ? (input.depositValue !== undefined ? input.depositValue : existing.depositValue)
+            : null,
+      });
+      if (depositTouched) {
+        data.depositRequired = deposit.depositRequired;
+        data.depositType = deposit.depositType;
+        data.depositValue = deposit.depositValue;
+      }
+    }
     const service = await client.service.update({
-      where: { id: input.serviceId },
+      where: { id: input.serviceId, businessId: input.businessId },
       data,
     });
     this.events.emit('catalog.service.updated', { service, businessId: input.businessId } as CatalogServiceUpdatedPayload);
