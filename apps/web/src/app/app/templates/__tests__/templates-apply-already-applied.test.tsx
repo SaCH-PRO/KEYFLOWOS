@@ -34,7 +34,6 @@ const TEMPLATE = {
   isPublished: true,
 };
 const SERVER_REFUSAL = "Only the business owner can apply a business template.";
-const OWNER_ONLY_FALLBACK = "Only the business owner can apply a template.";
 const SUCCESS_TEXT = "Template applied successfully!";
 
 type ApiResult = { data: unknown; error: string | null; status?: number; rawError?: Record<string, unknown> | null };

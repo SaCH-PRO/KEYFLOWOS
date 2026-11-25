@@ -6,7 +6,7 @@
  * shell stub also drawing the header's right-hand side, where the door is.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 
 const nav = vi.hoisted(() => ({
   router: { push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() },
