@@ -102,7 +102,7 @@ interface Opts {
   revenueRefused?: boolean;
   /** The discard route's answer; by default the server's rule (PayrollService.discardRun). */
   discard?: (r: Run | undefined) => Response;
-  /** Safe-to-spend reads after a discard has been answered fail 503. */
+  /** Safe-to-spend reads after a discard has been answered fail 500. */
   safeFailsAfterDiscard?: boolean;
 }
 
@@ -154,7 +154,8 @@ function stubServer(opts: Opts) {
       return (opts.discard ?? serverDiscard)(target);
     }
     if (method === "GET" && pathname.endsWith(`${FIN}/safe-to-spend`)) {
-      if (opts.safeFailsAfterDiscard && discarded) return jsonResponse(503, { statusCode: 503, message: "Service Unavailable" }, "Service Unavailable");
+      // 500, which lib/fetch-with-retry does not retry (a 503 is retried three times with backoff).
+      if (opts.safeFailsAfterDiscard && discarded) return jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error");
       return opts.revenueRefused
         ? jsonResponse(403, { statusCode: 403, message: REVENUE_REFUSAL, error: "Forbidden" }, "Forbidden")
         : jsonResponse(200, safe());

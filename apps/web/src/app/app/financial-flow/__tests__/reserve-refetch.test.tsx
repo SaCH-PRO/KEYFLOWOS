@@ -75,7 +75,7 @@ interface StubOpts {
   deleteTiming?: Record<string, { commitMs: number; returnMs: number }>;
   /** The cashflow forecast answers this status after this many ms. */
   forecast?: { delayMs: number; status: number };
-  /** Safe-to-spend reads after the first `n` answer 503. */
+  /** Safe-to-spend reads after the first `n` answer 500. */
   safeFailsAfter?: number;
 }
 
@@ -122,7 +122,8 @@ function stubServer(opts: StubOpts = {}) {
       const answer = safe();
       safeAnswers.push(answer.safeToSpend);
       if (opts.readDelayMs) await later(opts.readDelayMs);
-      if (opts.safeFailsAfter !== undefined && n > opts.safeFailsAfter) return jsonResponse(503, { statusCode: 503, message: "Service Unavailable" }, "Service Unavailable");
+      // 500, which lib/fetch-with-retry does not retry (a 503 is retried three times with backoff).
+      if (opts.safeFailsAfter !== undefined && n > opts.safeFailsAfter) return jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error");
       return jsonResponse(200, answer);
     }
     if (method === "GET" && pathname.endsWith(`${FIN}/cashflow-forecast`)) {
