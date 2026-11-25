@@ -944,7 +944,10 @@ export default function CatalogCapacityTab({
   ];
 
   return (
-    <div className="space-y-4">
+    // SWP-SERVICE-DEPOSIT: below md, the last card's controls (Save deposit, Buffer & lead time) sat under the floating
+    // Mobile navigation bar even fully scrolled: PageTransition's h-full box lets a tall page overflow past the scroll
+    // root's pb-28, so that padding never clears the bar. This tab keeps its own clearance until that is fixed.
+    <div className="space-y-4 pb-24 md:pb-0">
       <div className="kf-card rounded-xl p-3">
         <div className="flex items-center justify-between mb-2.5">
           <div>
