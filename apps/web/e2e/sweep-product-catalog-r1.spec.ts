@@ -44,11 +44,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
         await page.goto("/app/commerce");
         await settle(page, 1_000);
         const door = page.getByRole("link", { name: /^products$/i }).filter({ visible: true }).first();
-        await expect(door).toBeVisible();
-        await expect(door).toHaveAttribute("href", "/app/commerce/products");
-        await door.click();
-        await expect(page).toHaveURL(/\/app\/commerce\/products$/);
-        await expect(page.getByRole("heading", { name: /^products$/i }).first()).toBeVisible();
+        // Soft, so a missing door does not hide the steps after it.
+        await expect.soft(door, "Sales offers a visible Products door").toBeVisible();
+        if (await door.count()) {
+          await expect(door).toHaveAttribute("href", "/app/commerce/products");
+          await door.click();
+          await expect(page).toHaveURL(/\/app\/commerce\/products$/);
+          await expect(page.getByRole("heading", { name: /^products$/i }).first()).toBeVisible();
+        }
       });
 
       await test.step("grid: the inactive product's Off badge is clear of its More actions button", async () => {
@@ -61,7 +64,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
         const more = card.getByRole("button", { name: /more actions/i });
         await expect(badge).toBeVisible();
         await expect(more).toBeVisible();
-        expect(overlaps(await box(badge), await box(more)), "the Off badge and More actions overlap").toBe(false);
+        expect.soft(overlaps(await box(badge), await box(more)), "the Off badge and More actions overlap").toBe(false);
       });
 
       await test.step("a member with revenue 'read' sees the products but no New product and no More actions", async () => {
