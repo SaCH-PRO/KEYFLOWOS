@@ -15,7 +15,7 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { featureFlags as dormantFeatureFlags } from "@/lib/feature-flags";
-import { useMemberModuleLevels } from "@/hooks/use-app-layout";
+import type { ModuleLevels } from "@/lib/nav-config";
 import { useBusinessSettings } from "@/lib/business-settings";
 import { NewFromWhatsAppSheet, mayCaptureFromWhatsApp } from "@/components/whatsapp/new-from-whatsapp";
 
@@ -30,14 +30,15 @@ type MenuItem = {
  *
  * WEDGE-WA-INBOUND-CAPTURE (D-263): From WhatsApp opens the New from WhatsApp sheet in place of the menu (the menu
  * stays mounted under it, so closing the sheet closes the menu). It is offered only to a member who may write
- * customers; their access unknown hides nothing (the server refuses a capture without crm write).
+ * customers; their access unknown hides nothing (the server refuses a capture without crm write). The access is the
+ * shell's own answer (useAppLayout's moduleLevels, handed down by AppHeader): opening the menu asks no my-access read,
+ * and a member known to hold crm read never sees the door, not even while the menu opens (review COR-4).
  */
-export function NewEntityMenu({ onClose }: { onClose: () => void }) {
+export function NewEntityMenu({ onClose, levels = null }: { onClose: () => void; levels?: ModuleLevels }) {
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
   const [whatsAppOpen, setWhatsAppOpen] = useState(false);
-  const levels = useMemberModuleLevels();
   const businessSettings = useBusinessSettings();
   const sells = businessSettings.status === "ready" ? businessSettings.sells : null;
   const offerWhatsApp = mayCaptureFromWhatsApp(levels);

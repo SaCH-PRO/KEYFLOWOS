@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Search, Plus, Loader2, ChevronDown } from "lucide-react";
 import { useContactSearch } from "@/hooks/use-contact-search";
-import { createContact } from "@/lib/client";
+import { createContact, fetchContactDetail } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { moduleEvents } from "@/lib/module-events";
 import { useRefusal, answerFromThrown } from "@/lib/failure-kit";
@@ -86,11 +86,49 @@ export function ContactSelect({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const selectedContact = useMemo<ContactSelectItem | null>(() => {
+  // WEDGE-WA-INBOUND-CAPTURE review repairs COR-2 / SEC-WAW-2: a value in no list (a customer chosen by a door such
+  // as + New > From WhatsApp's ?contactId=, older than the page the screen loaded) is read by id through the guarded
+  // contact read (the member's own visibility applies) and shown. Refused, not found or unreadable, the selection is
+  // cleared, so no id the member cannot open stays in the form.
+  const [resolved, setResolved] = useState<ContactSelectItem | null>(null);
+
+  const listed = useMemo<ContactSelectItem | null>(() => {
     if (!value) return null;
     const all = (externalContacts ?? results) as ContactSelectItem[];
     return all.find((c) => c.id === value) ?? (picked?.id === value ? picked : null);
   }, [value, externalContacts, results, picked]);
+
+  const selectedContact = listed ?? (resolved?.id === value ? resolved : null);
+  const needsRead = Boolean(value) && !listed && resolved?.id !== value;
+
+  useEffect(() => {
+    if (!needsRead) return;
+    let cancelled = false;
+    const clear = () => {
+      if (!cancelled) onChange("", undefined);
+    };
+    fetchContactDetail(value, businessId ?? undefined)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        const contact = data?.contact;
+        if (error || !contact || contact.id !== value) return clear();
+        setResolved({
+          id: contact.id,
+          firstName: contact.firstName ?? null,
+          lastName: contact.lastName ?? null,
+          email: contact.email ?? null,
+          phone: contact.phone ?? null,
+          status: contact.status,
+          tags: contact.tags,
+        });
+      })
+      .catch(clear);
+    return () => {
+      cancelled = true;
+    };
+    // onChange is the parent's setter; reading again for a new callback identity would repeat the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsRead, value, businessId]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
