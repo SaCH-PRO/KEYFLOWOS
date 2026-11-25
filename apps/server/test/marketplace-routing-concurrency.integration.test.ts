@@ -1944,9 +1944,8 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
   // The SEC-UPS-2 follow-up (a set wrote no stock movement and named no actor, took a quantity below reserved and let a
   // member set reserved by hand) was ruled by the owner (D-139) and is live as RC-45..RC-57 (W11-INV-SET-MOVEMENT, the
   // describe block at the end of this file).
-  it.todo(
-    'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
-  );
+  // The Z5SEC-2 operator census and repair follow-up is now live in scripts/cleanup-planted-stock-rows.ts
+  // (W11-PLANTED-STOCK-CENSUS, D-137) and proven in test/data-cleanup-scripts.integration.test.ts (PSC-01..03).
 });
 
 /** POST .../purchase-orders as the route runs it: its handler (MarketplaceController.createPurchaseOrder), with the body as sent. */
