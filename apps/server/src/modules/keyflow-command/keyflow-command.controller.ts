@@ -18,6 +18,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { KeyflowCommandService } from './keyflow-command.service';
 import { KeyflowNotesService } from './keyflow-notes.service';
 import { KeyflowVoiceService } from './keyflow-voice.service';
@@ -55,7 +56,8 @@ export class KeyflowCommandController {
     return { items };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/notes')
   async createNote(
     @Param('businessId') businessId: string,
@@ -73,7 +75,8 @@ export class KeyflowCommandController {
     return this.notes.create(businessId, body, userId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/notes/:noteId')
   async updateNote(
     @Param('businessId') businessId: string,
@@ -83,7 +86,8 @@ export class KeyflowCommandController {
     return this.notes.update(businessId, noteId, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Delete('businesses/:businessId/notes/:noteId')
   async deleteNote(
     @Param('businessId') businessId: string,
@@ -92,7 +96,8 @@ export class KeyflowCommandController {
     return this.notes.delete(businessId, noteId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/notes/:noteId/brief')
   async generateBrief(
     @Param('businessId') businessId: string,
@@ -101,7 +106,8 @@ export class KeyflowCommandController {
     return this.notes.generateBrief(businessId, noteId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/voice/tts')
   async tts(
     @Param('businessId') businessId: string,
@@ -124,7 +130,8 @@ export class KeyflowCommandController {
     res.send(buffer);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/voice/transcribe')
   @UseInterceptors(FileInterceptor('audio', { limits: { fileSize: 25 * 1024 * 1024 } }))
   async transcribe(

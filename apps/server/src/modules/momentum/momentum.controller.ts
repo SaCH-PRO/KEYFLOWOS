@@ -4,6 +4,7 @@ import { ClientMomentumService } from './client-momentum.service';
 import { MomentumAiService } from './momentum-ai.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   assertContactVisible,
@@ -17,7 +18,7 @@ import { contactWhereBase } from '../crm/crm.helpers';
 const MAX_RECOMMENDATIONS = 50;
 
 @Controller('momentum/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class MomentumController {
   constructor(
     @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService,
@@ -181,6 +182,7 @@ export class MomentumController {
     return this.momentumService.getMomentumSummary(businessId);
   }
 
+  @RequireModuleScope('crm', 'write')
   @Post('sweep')
   async runDailySweep(
     @Param('businessId') businessId: string,

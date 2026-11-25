@@ -29,6 +29,8 @@ interface BookingSideSheetProps {
   saving?: boolean;
   showWaitlistOption?: boolean;
   onAddToWaitlist?: () => void;
+  /** The page's contact list is still loading (handed to BookingForm's customer field). */
+  contactsLoading?: boolean;
 }
 
 export default function BookingSideSheet({
@@ -45,6 +47,7 @@ export default function BookingSideSheet({
   saving,
   showWaitlistOption,
   onAddToWaitlist,
+  contactsLoading,
 }: BookingSideSheetProps) {
   const isMobile = useIsMobile();
   const router = useRouter();
@@ -142,6 +145,7 @@ export default function BookingSideSheet({
               defaultTime={defaultTime}
               defaultContactId={defaultContactId}
               saving={saving}
+              contactsLoading={contactsLoading}
             />
             {showWaitlistOption && onAddToWaitlist && (
               <div className="px-4 pb-4 pt-1">
@@ -208,6 +212,7 @@ export default function BookingSideSheet({
               defaultTime={defaultTime}
               defaultContactId={defaultContactId}
               saving={saving}
+              contactsLoading={contactsLoading}
             />
             {showWaitlistOption && onAddToWaitlist && (
               <div className="px-4 pb-4 pt-1">

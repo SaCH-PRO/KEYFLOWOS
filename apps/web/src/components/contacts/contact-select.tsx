@@ -11,6 +11,7 @@ import {
 import { Search, Plus, Loader2, ChevronDown } from "lucide-react";
 import { useContactSearch } from "@/hooks/use-contact-search";
 import { createContact } from "@/lib/client";
+import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { moduleEvents } from "@/lib/module-events";
 import { useRefusal, answerFromThrown } from "@/lib/failure-kit";
@@ -46,7 +47,20 @@ interface ContactSelectProps {
   className?: string;
   /** SWP-QUOTE-COMPOSER-CONTACT (BUG-095): a field error from the form (e.g. "Choose a client"), said under the field. */
   error?: string | null;
+  /**
+   * The parent's contact list is still loading: a value it may yet hold is not read by id until it has arrived
+   * (WEDGE-WA-INBOUND-CAPTURE review NEW-2).
+   */
+  contactsLoading?: boolean;
+  /**
+   * The value was loaded from a saved record (editing a quote, invoice or schedule): it is never cleared, whatever a
+   * read by id answers (review security NEW-1: a member with revenue write and no crm read is refused that read).
+   */
+  savedRecord?: boolean;
 }
+
+/** What the read by id of a value in no loaded list came to, when it did not show the customer. */
+type UnresolvedRead = { id: string; kind: "unavailable" | "no-access" | "not-found" };
 
 export function ContactSelect({
   value,
@@ -59,6 +73,8 @@ export function ContactSelect({
   disabled = false,
   className = "",
   error = null,
+  contactsLoading = false,
+  savedRecord = false,
 }: ContactSelectProps) {
   const businessId = getStoredBusinessId();
   const { results, search, setSearch, loading } = useContactSearch({
@@ -86,11 +102,76 @@ export function ContactSelect({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const selectedContact = useMemo<ContactSelectItem | null>(() => {
+  // WEDGE-WA-INBOUND-CAPTURE review repairs COR-2 / SEC-WAW-2, and round 2 (NEW-1, NEW-2, security NEW-1): a value in
+  // no loaded list (a customer chosen by a door such as + New > From WhatsApp's ?contactId=, older than the page the
+  // screen loaded) is read by id (GET /crm/businesses/:b/contacts/:id, the member's own visibility applies; lib/api's
+  // apiGet, which keeps the status) and shown. The rule:
+  //   - only the server's word that this member cannot have this customer clears the value: a 403 or 404, or a reply
+  //     naming another id; and never a value loaded from a saved record (savedRecord), which is kept and said;
+  //   - any other failure (network, 429, 5xx, an unreadable reply) keeps the value and says the customer could not
+  //     be loaded, with a retry;
+  //   - nothing is read while the parent's list is loading; a list that holds the value shows it from the list.
+  const [resolved, setResolved] = useState<ContactSelectItem | null>(null);
+  const [unresolved, setUnresolved] = useState<UnresolvedRead | null>(null);
+  const [readAttempt, setReadAttempt] = useState(0);
+
+  const listed = useMemo<ContactSelectItem | null>(() => {
     if (!value) return null;
     const all = (externalContacts ?? results) as ContactSelectItem[];
     return all.find((c) => c.id === value) ?? (picked?.id === value ? picked : null);
   }, [value, externalContacts, results, picked]);
+
+  const selectedContact = listed ?? (resolved?.id === value ? resolved : null);
+  const unresolvedNow = !listed && unresolved?.id === value ? unresolved : null;
+  const needsRead = Boolean(value) && !contactsLoading && !listed && resolved?.id !== value && !unresolvedNow;
+
+  useEffect(() => {
+    if (!needsRead || !businessId) return;
+    let cancelled = false;
+    const id = value;
+    const keep = (kind: UnresolvedRead["kind"]) => {
+      if (!cancelled) setUnresolved({ id, kind });
+    };
+    const clearOrKeep = (kind: UnresolvedRead["kind"]) => {
+      if (cancelled) return;
+      if (savedRecord) keep(kind);
+      else onChange("", undefined);
+    };
+    apiGet<{ contact?: Partial<ContactSelectItem> & { id?: unknown } }>(
+      `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(id)}`,
+    )
+      .then((res) => {
+        if (cancelled) return;
+        if (res.error !== null && res.error !== undefined) {
+          if (res.status === 404) return clearOrKeep("not-found");
+          if (res.status === 403) return clearOrKeep("no-access");
+          return keep("unavailable");
+        }
+        const contact = res.data?.contact;
+        if (!contact || typeof contact.id !== "string") return keep("unavailable");
+        if (contact.id !== id) return clearOrKeep("not-found");
+        setResolved({
+          id: contact.id,
+          firstName: contact.firstName ?? null,
+          lastName: contact.lastName ?? null,
+          email: contact.email ?? null,
+          phone: contact.phone ?? null,
+          status: contact.status,
+          tags: contact.tags,
+        });
+      })
+      .catch(() => keep("unavailable"));
+    return () => {
+      cancelled = true;
+    };
+    // onChange is the parent's setter; reading again for a new callback identity would repeat the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsRead, value, businessId, savedRecord, readAttempt]);
+
+  const retryRead = useCallback(() => {
+    setUnresolved(null);
+    setReadAttempt((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -260,6 +341,21 @@ export function ContactSelect({
             <ChevronDown className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} />
           </button>
         </div>
+      )}
+
+      {unresolvedNow && (
+        <p role="status" className="mt-1 text-xs text-muted-foreground">
+          {unresolvedNow.kind === "unavailable"
+            ? "A customer is chosen, but we couldn't load this customer's name. "
+            : unresolvedNow.kind === "no-access"
+              ? "This record's customer stays chosen, but you can't see this customer's details. "
+              : "This record's customer stays chosen, but they could not be found. "}
+          {unresolvedNow.kind === "unavailable" && (
+            <button type="button" onClick={retryRead} className="underline hover:text-foreground">
+              Retry
+            </button>
+          )}
+        </p>
       )}
 
       {error && (

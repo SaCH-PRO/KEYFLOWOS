@@ -1,13 +1,14 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { BlueprintService } from './blueprint.service';
 
 import { BlueprintPatch, DnaSectionKey } from './blueprint.types';
 
 @Controller('blueprint/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class BlueprintController {
   constructor(@Inject(BlueprintService) private readonly blueprint: BlueprintService) {}
 
@@ -16,6 +17,7 @@ export class BlueprintController {
     return this.blueprint.getBlueprint(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Patch()
   async update(
     @Param('businessId') businessId: string,
@@ -24,6 +26,7 @@ export class BlueprintController {
     return this.blueprint.updateBlueprint(businessId, body);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('infer/onboarding')
   async inferFromOnboarding(
     @Param('businessId') businessId: string,
@@ -32,6 +35,7 @@ export class BlueprintController {
     return this.blueprint.inferFromOnboarding(businessId, body.answers || {});
   }
 
+  @RequireModuleScope('settings', 'write')
   @Post('infer/events')
   async inferFromEvents(@Param('businessId') businessId: string) {
     return this.blueprint.inferFromEvents(businessId);
@@ -92,6 +96,7 @@ export class BlueprintController {
     return this.blueprint.generateConstitution(businessId);
   }
 
+  @RequireModuleScope('settings', 'write')
   @Patch('genome/dna/:section')
   @UseGuards(GenomeGateGuard)
   async updateDnaSection(
