@@ -5651,11 +5651,22 @@ ${triage.standingContext}`;
         });
         if (!contact) throw new Error('Contact not found');
 
-        // D-280 (SEC-WAW-1): exclude pasted WhatsApp notes on automatic/background
-        // surfaces (e.g. PRO_AUTO_MONITOR) or any run without a live authenticated
-        // human principal; explicit owner-initiated chat stays allowed.
+        // D-280 (SEC-WAW-1 / SEC-P60-1): fail closed — only explicit interactive
+        // human surfaces with a server-verified principalUserId may include
+        // pasted WhatsApp notes; every automatic/background/external surface
+        // excludes them.
+        const INTERACTIVE_OWNER_SURFACES = new Set([
+          'CHAT',
+          'CHAT_STREAM',
+          'CHAT_CONFIRM',
+          'GRAPH_ACTION',
+          'PLAN_HTTP',
+          'PROPOSAL',
+        ]);
         const isOwnerInitiatedInteractive =
-          Boolean(action?.principalUserId) && action?.surface !== 'PRO_AUTO_MONITOR';
+          Boolean(action?.principalUserId) &&
+          typeof action?.surface === 'string' &&
+          INTERACTIVE_OWNER_SURFACES.has(action.surface);
         const recentNotes = await this.prisma.client.contactNote.findMany({
           where: {
             contactId: args.contactId,

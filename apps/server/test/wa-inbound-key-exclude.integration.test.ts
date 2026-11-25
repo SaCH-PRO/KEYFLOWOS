@@ -50,6 +50,14 @@ let contactInsightListener: any;
 let markStaleSpy: ReturnType<typeof vi.fn>;
 
 const llmPrompts: Array<{ caller: string; prompt: string }> = [];
+const pendingActivityWrites: Array<Promise<unknown>> = [];
+
+async function drainActivityWrites(): Promise<void> {
+  while (pendingActivityWrites.length > 0) {
+    const batch = pendingActivityWrites.splice(0, pendingActivityWrites.length);
+    await Promise.allSettled(batch);
+  }
+}
 
 async function cleanup() {
   for (const sql of [
@@ -91,9 +99,15 @@ beforeAll(async () => {
   prismaService = new PrismaService();
   const events = new EventEmitter2({ wildcard: true, delimiter: '.' });
   const timelineService = new TimelineService(prismaService);
-  crmTimeline = new CrmTimelineService(prismaService, events, timelineService);
+  const origRecordEvent = timelineService.recordEvent.bind(timelineService);
+  timelineService.recordEvent = ((...args: Parameters<typeof timelineService.recordEvent>) => {
+    const p = origRecordEvent(...args);
+    pendingActivityWrites.push(p);
+    return p;
+  }) as typeof timelineService.recordEvent;
 
   const noop = new Proxy({}, { get: () => vi.fn(async () => undefined) });
+  crmTimeline = new CrmTimelineService(prismaService, events, timelineService, noop as any, noop as any);
   const contactAuditStub = { write: vi.fn(async () => undefined) };
   const statsStub = { invalidateCache: vi.fn() };
   const flowStub = { invalidateCache: vi.fn() };
@@ -182,6 +196,7 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  await drainActivityWrites();
   llmPrompts.length = 0;
   markStaleSpy.mockClear();
   await db.$executeRawUnsafe(`DELETE FROM journey_touchpoints WHERE business_id LIKE ${sqlLikePrefix(P)}`);
@@ -192,6 +207,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await drainActivityWrites();
   await cleanup();
 }, 30_000);
 
@@ -291,6 +307,18 @@ describe('FU-WA-INBOUND-KEY-EXCLUDE (P60, D-280 / SEC-WAW-1)', () => {
     expect(llmPrompts[0].prompt).not.toContain(CANARY.waInbound);
     expect(llmPrompts[0].prompt).toContain(CANARY.teamNull);
 
+    // Fail-closed allowlist (SEC-P60-1): non-interactive surfaces (e.g. PLAN_QUEUE) MUST exclude even if principalUserId is set.
+    llmPrompts.length = 0;
+    await flowOrchestrator.executeToolAction(
+      ID.biz,
+      'draft_followup_message',
+      { contactId: ID.contact, channel: 'email', tone: 'friendly' },
+      { surface: 'PLAN_QUEUE', principalUserId: ID.owner },
+    );
+    expect(llmPrompts).toHaveLength(1);
+    expect(llmPrompts[0].prompt).not.toContain(CANARY.waInbound);
+    expect(llmPrompts[0].prompt).toContain(CANARY.teamNull);
+
     // Control (owner-initiated interactive chat): authenticated principalUserId on CHAT surface stays allowed.
     llmPrompts.length = 0;
     await flowOrchestrator.executeToolAction(
@@ -337,15 +365,27 @@ describe('FU-WA-INBOUND-KEY-EXCLUDE (P60, D-280 / SEC-WAW-1)', () => {
       message: CANARY.waInbound,
       actorUserId: ID.owner,
     });
-    // Allow fire-and-forget Activity write to commit.
-    await new Promise((r) => setTimeout(r, 100));
+    // Deterministically drain all fire-and-forget Activity ledger writes before querying.
+    await drainActivityWrites();
 
-    // 1. ContactEvent itself keeps body for CRM Timeline UI / P41, while Unified Ledger Activity strips body.
+    // 1. ContactEvent itself keeps body for CRM Timeline UI / P41, while Unified Ledger Activity strips body
+    //    and preserves category='CONTACT' + non-body metadata.
     const storedEvent = await db.contactEvent.findUniqueOrThrow({ where: { id: captured.event.id } });
     expect((storedEvent.data as Record<string, unknown>).body).toBe(CANARY.waInbound);
 
     const activities = await db.activity.findMany({ where: { businessId: ID.biz, contactId: ID.contact } });
-    expect(activities.length).toBeGreaterThan(0);
+    const waAct = activities.find((a: { type: string | null }) => a.type === 'communication.whatsapp');
+    expect(waAct).toBeDefined();
+    expect(waAct.category).toBe('CONTACT');
+    expect(waAct.data).toMatchObject({
+      channel: 'whatsapp',
+      direction: 'inbound',
+      source: 'pasted_whatsapp',
+      senderPhone: '+18685550194',
+      noteId: captured.note.id,
+    });
+    expect(waAct.data).not.toHaveProperty('body');
+    expect(waAct.data).not.toHaveProperty('message');
     for (const act of activities) {
       expect(act.detail ?? '').not.toContain(CANARY.waInbound);
       expect(JSON.stringify(act.data ?? {})).not.toContain(CANARY.waInbound);
@@ -360,20 +400,33 @@ describe('FU-WA-INBOUND-KEY-EXCLUDE (P60, D-280 / SEC-WAW-1)', () => {
     });
     expect(markStaleSpy).not.toHaveBeenCalled();
 
-    // 3. CustomerJourneyService.backfillBusiness strips pasted WhatsApp body from JourneyTouchpoint.metadata.
+    // 3. CustomerJourneyService.backfillBusiness records the whatsapp message touchpoint while stripping pasted body.
     await customerJourney.backfillBusiness(ID.biz);
     const touchpoints = await db.journeyTouchpoint.findMany({ where: { businessId: ID.biz, contactId: ID.contact } });
+    expect(
+      touchpoints.some(
+        (tp: { channel: string | null; touchpointType: string | null }) =>
+          tp.channel === 'whatsapp' && tp.touchpointType === 'message',
+      ),
+    ).toBe(true);
     for (const tp of touchpoints) {
       expect(JSON.stringify(tp.metadata ?? {})).not.toContain(CANARY.waInbound);
     }
 
     // 4. Deleting the whatsapp_inbound note does NOT copy its body into note.deleted ContactEvent or Activity.
     await crmTimeline.deleteNote({ businessId: ID.biz, noteId: captured.note.id });
-    await new Promise((r) => setTimeout(r, 100));
+    await drainActivityWrites();
     const deleteEvents = await db.contactEvent.findMany({
       where: { businessId: ID.biz, contactId: ID.contact, type: 'note.deleted' },
     });
     expect(deleteEvents).toHaveLength(1);
     expect(JSON.stringify(deleteEvents[0].data ?? {})).not.toContain(CANARY.waInbound);
+
+    const deleteActivities = await db.activity.findMany({
+      where: { businessId: ID.biz, contactId: ID.contact, type: 'note.deleted' },
+    });
+    expect(deleteActivities).toHaveLength(1);
+    expect(deleteActivities[0].detail ?? '').not.toContain(CANARY.waInbound);
+    expect(JSON.stringify(deleteActivities[0].data ?? {})).not.toContain(CANARY.waInbound);
   });
 });
