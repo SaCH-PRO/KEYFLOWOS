@@ -409,7 +409,7 @@ export class ContactInsightService {
       }),
       this.db.contactNote.findMany({
         where: { businessId, contactId },
-        select: { body: true, createdAt: true },
+        select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),

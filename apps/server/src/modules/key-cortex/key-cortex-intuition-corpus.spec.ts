@@ -91,11 +91,14 @@ describe('collectTextCorpus sources', () => {
     expect(prisma.calls.conversationMessage, 'the retired store is queried again').toBeUndefined();
   });
 
-  it('scopes inbox and notes by businessId directly', async () => {
+  it('scopes inbox and notes by businessId directly and excludes whatsapp_inbound notes NULL-safely (D-280)', async () => {
     await svc.collectTextCorpus('biz_1', SINCE);
 
     expect(prisma.calls.keyInboxMessage[0].where.businessId).toBe('biz_1');
     expect(prisma.calls.contactNote[0].where.businessId).toBe('biz_1');
+    expect(prisma.calls.contactNote[0].where.AND).toEqual([
+      { OR: [{ source: null }, { source: { not: 'whatsapp_inbound' } }] },
+    ]);
   });
 
   it('scopes the inbox by businessId directly, now that it is the only store', async () => {

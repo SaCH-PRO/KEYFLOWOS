@@ -87,6 +87,19 @@ export function mergeQueueProblems(workflowTexts) {
     problems.push('native-dast.yml must not dereference github.event.pull_request unconditionally');
   }
 
+  const bdText = workflowTexts['.github/workflows/branch-divergence.yml'] || '';
+  const bdDoc = parseYaml(bdText) || {};
+  const bdBranchesIgnore = bdDoc?.on?.push?.['branches-ignore'] || [];
+  if (!Array.isArray(bdBranchesIgnore) || !bdBranchesIgnore.includes('gh-readonly-queue/**')) {
+    problems.push('branch-divergence.yml on.push.branches-ignore must include gh-readonly-queue/** so push does not collide with merge_group');
+  }
+  if (!bdText.includes('group: branch-divergence-${{ github.event_name }}-${{ github.ref }}')) {
+    problems.push('branch-divergence.yml concurrency.group must include github.event_name');
+  }
+  if (!bdText.includes("cancel-in-progress: ${{ github.event_name != 'merge_group' }}")) {
+    problems.push('branch-divergence.yml concurrency.cancel-in-progress must not cancel merge_group runs');
+  }
+
   return problems;
 }
 
@@ -153,5 +166,29 @@ test('MQ-05 (D-278): negative controls reject missing merge_group triggers or mi
   assert.ok(
     mergeQueueProblems(noWorkerRef).some((e) => e.includes('checkout refs')),
     'dropping merge_group.head_sha fallback from worker proof checkout must fail',
+  );
+
+  const noQueueIgnore = {
+    ...baseline,
+    '.github/workflows/branch-divergence.yml': baseline['.github/workflows/branch-divergence.yml'].replace(
+      /^\s*-\s*["']?gh-readonly-queue\/\*\*["']?\s*$/m,
+      '',
+    ),
+  };
+  assert.ok(
+    mergeQueueProblems(noQueueIgnore).some((e) => e.includes('gh-readonly-queue/**')),
+    'dropping gh-readonly-queue/** from branch-divergence.yml push.branches-ignore must fail',
+  );
+
+  const noEventConcurrency = {
+    ...baseline,
+    '.github/workflows/branch-divergence.yml': baseline['.github/workflows/branch-divergence.yml'].replace(
+      'group: branch-divergence-${{ github.event_name }}-${{ github.ref }}',
+      'group: branch-divergence-${{ github.ref }}',
+    ),
+  };
+  assert.ok(
+    mergeQueueProblems(noEventConcurrency).some((e) => e.includes('concurrency.group')),
+    'dropping github.event_name from branch-divergence.yml concurrency.group must fail',
   );
 });

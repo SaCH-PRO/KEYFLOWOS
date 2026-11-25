@@ -2255,7 +2255,10 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleContact(businessId, contactId, req);
-    const r = await this.conversationAi.summarizeThread(businessId, contactId, { force: true });
+    const r = await this.conversationAi.summarizeThread(businessId, contactId, {
+      force: true,
+      includeInboundWhatsApp: true,
+    });
     return { summary: r.insight, cached: r.cached };
   }
 
@@ -2274,6 +2277,7 @@ export class CrmController {
       count: typeof body?.count === 'number' ? body.count : undefined,
       preferredChannel: typeof body?.preferredChannel === 'string' ? body.preferredChannel : undefined,
       tone: typeof body?.tone === 'string' ? body.tone : undefined,
+      includeInboundWhatsApp: true,
     });
     return { replies };
   }

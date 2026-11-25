@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
+import { EXCLUDE_WHATSAPP_INBOUND_SOURCE } from '../crm/whatsapp-inbound-exclusion';
 import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
@@ -5650,8 +5651,28 @@ ${triage.standingContext}`;
         });
         if (!contact) throw new Error('Contact not found');
 
+        // D-280 (SEC-WAW-1 / SEC-P60-1): fail closed — only explicit interactive
+        // human surfaces with a server-verified principalUserId may include
+        // pasted WhatsApp notes; every automatic/background/external surface
+        // excludes them.
+        const INTERACTIVE_OWNER_SURFACES = new Set([
+          'CHAT',
+          'CHAT_STREAM',
+          'CHAT_CONFIRM',
+          'GRAPH_ACTION',
+          'PLAN_HTTP',
+          'PROPOSAL',
+        ]);
+        const isOwnerInitiatedInteractive =
+          Boolean(action?.principalUserId) &&
+          typeof action?.surface === 'string' &&
+          INTERACTIVE_OWNER_SURFACES.has(action.surface);
         const recentNotes = await this.prisma.client.contactNote.findMany({
-          where: { contactId: args.contactId, businessId },
+          where: {
+            contactId: args.contactId,
+            businessId,
+            ...(isOwnerInitiatedInteractive ? {} : { AND: [EXCLUDE_WHATSAPP_INBOUND_SOURCE] }),
+          },
           orderBy: { createdAt: 'desc' },
           take: 3,
           select: { body: true, createdAt: true },

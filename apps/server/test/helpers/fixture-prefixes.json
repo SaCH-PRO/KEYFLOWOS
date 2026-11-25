@@ -818,6 +818,11 @@
       "packet": "V1-94 (W8-MONEY-SIGNALS)"
     },
     {
+      "prefix": "v94w_",
+      "owner": "apps/server/test/wa-inbound-key-exclude.integration.test.ts",
+      "packet": "V1-94 (FU-WA-INBOUND-KEY-EXCLUDE, D-280 / SEC-WAW-1)"
+    },
+    {
       "prefix": "v95b_",
       "owner": "apps/server/test/google-identity-backfill.integration.test.ts",
       "packet": "V1-95 (W9-IDENTITY-BACKFILL-SCRIPT)"
@@ -1292,9 +1297,19 @@
       "packet": "V1-64 (MIGRATION-SET-A)"
     },
     {
-"prefix": "v65e_",
+      "prefix": "v65e_",
       "owner": "apps/server/test/ready-to-send.integration.test.ts",
       "packet": "V1-65 (READY-TO-SEND)"
+    },
+    {
+      "prefix": "v65f_",
+      "owner": "apps/server/test/owner-alerts.integration.test.ts",
+      "packet": "V1-65 (OWNER-ALERTS-SERVER)"
+    },
+    {
+      "prefix": "v65g_",
+      "owner": "apps/server/test/payroll-discard.integration.test.ts",
+      "packet": "V1-65 (TOF-PAYROLL-DISCARD)"
     },
     {
 "prefix": "v91r_",
