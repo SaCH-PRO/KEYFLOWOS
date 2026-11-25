@@ -2466,21 +2466,12 @@ describe('SWP-FIN-CASH-SOURCES (V1-65, P72, BUG-023, BUG-110): future-dated entr
   }
 
   async function balanceSheetCash(bizId: string, asOf: Date): Promise<number> {
-    const { LedgerBalancesService } = await import('../src/modules/finance/ledger-balances.service');
+    const { LedgerBalanceService } = await import('../src/modules/finance/ledger-balance.service');
     const { LedgerReportingService } = await import('../src/modules/reports/ledger-reporting.service');
-    const balances = new LedgerBalancesService(financePrisma);
-    const reporting = new LedgerReportingService(financePrisma, balances);
+    const balances = new LedgerBalanceService(financePrisma);
+    const reporting = new LedgerReportingService(financePrisma, balances, {} as any);
     const sheet = await reporting.getBalanceSheet(bizId, asOf);
-    const cashIds = new Set(
-      (await db.chartOfAccount.findMany({
-        where: { businessId: bizId, systemKey: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { id: true },
-      })).map((a: any) => a.id),
-    );
-    const total = sheet.assets
-      .filter((line: any) => cashIds.has(line.accountId))
-      .reduce((sum: number, line: any) => sum + Number(line.balance), 0);
-    return Math.round(total * 100) / 100;
+    return Math.round(sheet.assets.cashAndBank * 100) / 100;
   }
 
   beforeAll(async () => {
@@ -2538,11 +2529,15 @@ describe('SWP-FIN-CASH-SOURCES (V1-65, P72, BUG-023, BUG-110): future-dated entr
     expect(pos.cashBalance).toBe(500);
     expect(await balanceSheetCash(bizFut, new Date())).toBe(500);
 
-    const ov = await overviewRoute(bizFut, ownerP);
+    const ov = await request(financeApp.getHttpServer())
+      .get(`/finance/businesses/${bizFut}/overview`)
+      .set(HEADER, ownerP);
     expect(ov.status).toBe(200);
     expect(ov.body.cashBalance).toBe(500);
 
-    const sts = await safeToSpendRoute(bizFut, ownerP);
+    const sts = await request(financeApp.getHttpServer())
+      .get(`/finance/businesses/${bizFut}/safe-to-spend`)
+      .set(HEADER, ownerP);
     expect(sts.status).toBe(200);
     expect(sts.body.cashBalance).toBe(500);
   });
@@ -2607,12 +2602,13 @@ describe('SWP-FIN-CASH-SOURCES (V1-65, P72, BUG-023, BUG-110): future-dated entr
     const eventsStub = { emit: () => true } as any;
     const timelineStub = { recordEvent: async () => null } as any;
     const expensesSvc = new ExpensesService(financePrisma, eventsStub, expensePosting, timelineStub, posting);
-    const recExpSvc = new RecurringExpenseService(financePrisma, expensesSvc);
+    const recExpSvc = new RecurringExpenseService(financePrisma, eventsStub, expensesSvc);
 
     const recExp = await db.recurringExpense.create({
       data: {
         id: `${P}rec_exp_net`,
         businessId: bizRun,
+        name: 'Monthly Fibre Internet',
         description: 'Monthly Fibre Internet',
         amount: 150,
         currency: 'TTD',
