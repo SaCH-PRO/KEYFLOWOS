@@ -205,4 +205,49 @@ describe('CommandCenterKeyGenomeBridgeService', () => {
     expect(autonomyGate.checkGate).toHaveBeenCalledTimes(3);
     expect(brief.unsafeAutomationBlocks.length).toBe(3);
   });
+
+  it('[GRD-03] RED-BEFORE (D-128/D-100): withholds finance snapshot fields, opportunities, finance recommendations, and skips snapshot recompute when readsRevenue is false', async () => {
+    const { service, crossDomain, ranker, opportunityDetector, autonomyGate, signalService } = makeService();
+    signalService.listSignals.mockImplementation((_bizId: string, query: any) => {
+      if (query.signalType === 'STALE_FACT') {
+        return Promise.resolve([
+          { id: 'sig_fin', sourceModule: 'finance', section: 'FINANCIAL', domain: 'finance', signalType: 'STALE_FACT' },
+          { id: 'sig_ops', sourceModule: 'operations', section: 'OPERATIONAL_MODEL', domain: 'operations', signalType: 'STALE_FACT' },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const brief = await (service as any).buildCrossDomainBrief(
+      'biz_1',
+      [
+        { module: 'finance', readinessScore: 20, missingFacts: [{ impact: 'BLOCKING' }] } as any,
+        { module: 'operations', readinessScore: 80, missingFacts: [{ impact: 'BLOCKING' }] } as any,
+      ],
+      { readsRevenue: false },
+    );
+
+    expect(brief.domainHealth).toEqual({ operations_delivery: 65, marketing_growth: 80 });
+    expect(brief.domainReadiness).toEqual({ operations_delivery: 65, marketing_growth: 80 });
+    expect(brief.healthScore).toBe(73);
+    expect(brief.overallRiskLevel).toBe('UNKNOWN');
+    expect(brief.confidenceScore).toBe(0);
+    expect(brief.topOpportunities).toEqual([]);
+    expect(opportunityDetector.detectOpportunities).not.toHaveBeenCalled();
+    expect(brief.topRecommendations.every((r: any) => r.domain !== 'FINANCIAL')).toBe(true);
+    expect(brief.staleFactCount).toBe(1);
+    expect(brief.criticalMissingFactCount).toBe(1);
+
+    // When no snapshot exists and readsRevenue is false, never trigger computeCrossDomainSnapshot or ranker ensureSnapshot.
+    crossDomain.getLatestCrossDomainSnapshot.mockResolvedValue(null);
+    crossDomain.computeCrossDomainSnapshot.mockClear();
+    ranker.rankRecommendations.mockClear();
+    autonomyGate.checkGate.mockClear();
+    const noSnap = await (service as any).buildCrossDomainBrief('biz_1', [{ module: 'operations', readinessScore: 80, missingFacts: [] } as any], { readsRevenue: false });
+    expect(crossDomain.computeCrossDomainSnapshot).not.toHaveBeenCalled();
+    expect(ranker.rankRecommendations).not.toHaveBeenCalled();
+    expect(autonomyGate.checkGate).not.toHaveBeenCalled();
+    expect(noSnap.healthScore).toBe(0);
+    expect(noSnap.domainHealth).toEqual({});
+  });
 });
