@@ -440,6 +440,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                   dateLabel={theme.dateLabel}
                   label={theme.label}
                   onPaymentTermsChange={onPaymentTermsChange}
+                  savedRecord={isEditing}
                 />
 
                 <FormLineItemsSection

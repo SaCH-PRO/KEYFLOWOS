@@ -13,6 +13,7 @@ import { getCachedUser } from "@/lib/workspace";
 import { getNotificationIcon, getNotificationLink, relativeTime } from "@/lib/notifications";
 import type { AppNotification } from "@/lib/notifications";
 import type { CopilotModule } from "@/components/key/chat";
+import type { ModuleLevels } from "@/lib/nav-config";
 import {
   Menu,
   Brain,
@@ -47,6 +48,8 @@ interface AppHeaderProps {
   setUserMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   userMenuRef: React.RefObject<HTMLDivElement | null>;
   handleLogout: () => void;
+  /** The shell's answer to my-access (useAppLayout's moduleLevels), for the New menu's doors; null when unknown. */
+  moduleLevels?: ModuleLevels;
 }
 
 /* ─── Typing placeholder for KEY search ─── */
@@ -110,6 +113,7 @@ export function AppHeader({
   setUserMenuOpen,
   userMenuRef,
   handleLogout,
+  moduleLevels = null,
 }: AppHeaderProps) {
   const [searchFocused, setSearchFocused] = useState(false);
   const pathname = usePathname();
@@ -244,7 +248,7 @@ export function AppHeader({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -4, scale: 0.98 }}
               >
-                <NewEntityMenu onClose={() => setAddMenuOpen(false)} />
+                <NewEntityMenu onClose={() => setAddMenuOpen(false)} levels={moduleLevels} />
               </motion.div>
             )}
           </AnimatePresence>

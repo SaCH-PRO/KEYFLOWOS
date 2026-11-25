@@ -74,6 +74,11 @@ export interface AppLayoutState {
   visibleBuildSections: NavSection[];
   visibleMoreNav: NavItem[];
   meNav: NavItem[];
+  /**
+   * The member's level per module in the selected business, as GET my-access answered (null: unknown). Handed to the
+   * header's New menu (WEDGE-WA-INBOUND-CAPTURE review COR-4), so opening it never asks again.
+   */
+  moduleLevels: ModuleLevels;
 
   isSecondaryActive: (item: NavItem) => boolean;
   isPrimaryActive: (hub: HubNavItem) => boolean;
@@ -457,6 +462,7 @@ export function useAppLayout(): AppLayoutState {
     visibleBuildSections,
     visibleMoreNav,
     meNav,
+    moduleLevels,
     isSecondaryActive,
     isPrimaryActive,
     addMenuOpen,
