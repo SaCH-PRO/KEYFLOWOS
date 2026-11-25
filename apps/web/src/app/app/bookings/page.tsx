@@ -80,11 +80,37 @@ const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string
 ];
 
 /**
- * SWP-SERVICE-DEPOSIT: the service a deposit tip's door named, until Setup has opened it. Held outside the page
- * because taking serviceId out of the URL changes the page's search params, and after a client navigation (Presence's
- * tip is a Link) the App Router then mounts the page afresh: page state would lose the door.
+ * SWP-SERVICE-DEPOSIT: the service a deposit tip's door named, kept for the one remount it is for. Held outside the
+ * page because taking serviceId out of the URL changes the page's search params, and after a client navigation
+ * (Presence's tip is a Link) the App Router then mounts the page afresh: page state would lose the door.
+ *
+ * Repair round 1 (SEC-4 / M-1): the slot applies only to that remount. It names the business it was read under and
+ * the URL the strip left (/app/bookings?tab=catalog), and lasts DOOR_SLOT_TTL_MS. A mount takes it only when all three
+ * still hold, and the mount that takes it empties it, so an abandoned load, a later visit to Setup, a sign-out or a
+ * switch to another business never reopens it. Setup handling the door empties it too.
  */
-let pendingDoorServiceId: string | null = null;
+interface DoorSlot {
+  serviceId: string;
+  businessId: string | null;
+  href: string;
+  expiresAt: number;
+}
+const DOOR_SLOT_TTL_MS = 10_000;
+let pendingDoor: DoorSlot | null = null;
+
+function currentHref(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+/** The door kept for a page mounting now, or null when there is none or it was kept for another visit. */
+function doorKeptForThisMount(): DoorSlot | null {
+  const slot = pendingDoor;
+  if (!slot || typeof window === "undefined") return null;
+  if (Date.now() > slot.expiresAt) return null;
+  if (slot.href !== currentHref()) return null;
+  if (slot.businessId !== getStoredBusinessId()) return null;
+  return slot;
+}
 
 export default function BookingsPage() {
   const searchParams = useSearchParams();
@@ -159,8 +185,14 @@ export default function BookingsPage() {
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
   const [businessCurrency, setBusinessCurrency] = useState<string | null>(null);
-  // SWP-SERVICE-DEPOSIT: the service the deposit tip's door names (?serviceId=), until Setup has opened it.
-  const [focusServiceId, setFocusServiceId] = useState<string | null>(() => pendingDoorServiceId);
+  // SWP-SERVICE-DEPOSIT: the service the deposit tip's door names (?serviceId=), until Setup has opened it; on the
+  // remount the strip causes, the door kept for this mount.
+  const [keptDoor] = useState<DoorSlot | null>(() => doorKeptForThisMount());
+  const [focusServiceId, setFocusServiceId] = useState<string | null>(() => keptDoor?.serviceId ?? null);
+  useEffect(() => {
+    // This mount has taken the door kept for it: no other mount may take it again.
+    if (keptDoor && pendingDoor === keptDoor) pendingDoor = null;
+  }, [keptDoor]);
   const [pendingWaitlistData, setPendingWaitlistData] = useState<{
     contactId: string;
     serviceId: string;
@@ -235,17 +267,23 @@ export default function BookingsPage() {
     // stays on Setup), and Setup opens that service's deposit editor.
     const serviceIdParam = searchParams?.get("serviceId");
     if (serviceIdParam) {
-      pendingDoorServiceId = serviceIdParam;
       setTab("catalog");
       setFocusServiceId(serviceIdParam);
       const url = new URL(window.location.href);
       url.searchParams.delete("serviceId");
+      // Kept for the remount this strip causes: this business, this URL, a few seconds.
+      pendingDoor = {
+        serviceId: serviceIdParam,
+        businessId: getStoredBusinessId(),
+        href: `${url.pathname}${url.search}`,
+        expiresAt: Date.now() + DOOR_SLOT_TTL_MS,
+      };
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     }
   }, [searchParams, businessSlug]);
 
   const handleFocusServiceHandled = useCallback(() => {
-    pendingDoorServiceId = null;
+    pendingDoor = null;
     setFocusServiceId(null);
   }, []);
   const handleServiceUpdated = useCallback((updated: Service) => {
