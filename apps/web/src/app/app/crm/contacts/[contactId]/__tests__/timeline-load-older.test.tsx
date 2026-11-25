@@ -25,6 +25,8 @@
  *                    more, and no record is listed twice
  *   TLO-09  control  a history of 19 events is read once and offers no "Load older"
  *   TLO-10  RED      choosing a channel after loading older reads nothing more and keeps every loaded page
+ *   TLO-11  pin      an older page read for one customer that answers after the page has moved to another customer
+ *                    is dropped: the other customer's Timeline never lists the first one's records (mutation pin)
  *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
@@ -102,6 +104,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  params.contactId = C;
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -335,5 +338,34 @@ describe("D-284: the Timeline loads older events", () => {
     choose("All");
     expect(itemsListed()).toEqual(range(5, 44));
     expect(fetchMock.mock.calls.length).toBe(before);
+  });
+
+  it("TLO-11 pin: an older page that answers after the page moved to another customer is dropped", async () => {
+    const OTHER = "c_tlo_other";
+    served = Array.from({ length: 45 }, (_, i) => plain(i));
+    const otherServed: Ev[] = [{ id: "ev_other", contactId: OTHER, type: "sms.sent", source: "crm", createdAt: at(1), data: { body: "Other customer" } }];
+    let release: (() => void) | null = null;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      const { pathname, searchParams } = new URL(url, "http://localhost");
+      if (pathname.endsWith(`/crm/businesses/${BIZ}/contacts/${OTHER}/events`)) return serveEventsRead(url, otherServed);
+      if (!isEventsRead(url)) return json(404, { message: "Not stubbed" });
+      if (searchParams.has("cursor")) await new Promise<void>((r) => (release = r));
+      return serveEventsRead(url, served);
+    });
+    const { rerender } = render(<ContactTimelinePage />);
+    await vi.waitFor(() => expect(loadOlder()).not.toBeNull());
+    fireEvent.click(loadOlder()!);
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    params.contactId = OTHER;
+    rerender(<ContactTimelinePage />);
+    await screen.findByText("Other customer");
+    release!();
+    // Let the dropped answer settle, then: only the other customer's record.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText("Other customer")).toBeInTheDocument();
+    expect(itemsListed()).toEqual([]);
+    expect(screen.getByText(/^1 event$/)).toBeInTheDocument();
+    expect(loadOlder()).toBeNull();
   });
 });
