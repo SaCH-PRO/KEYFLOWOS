@@ -1302,9 +1302,14 @@
       "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
     },
     {
-"prefix": "v64i_",
+      "prefix": "v64i_",
       "owner": "apps/server/test/storefront-oversell.integration.test.ts",
       "packet": "V1-64 (SWP-STORE-OVERSELL)"
+    },
+    {
+      "prefix": "v64j_",
+      "owner": "apps/server/test/service-deposit-settings.integration.test.ts",
+      "packet": "V1-64 (SWP-SERVICE-DEPOSIT)"
     },
     {
 "prefix": "v64n_",
