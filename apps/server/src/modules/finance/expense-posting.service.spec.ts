@@ -147,6 +147,18 @@ describe('ExpensePostingService.onBillCreated / onBillPaid', () => {
     // Explicit paymentCoaId bypasses default paymentMethod lookup.
     expect(coa.getBySystemKey).not.toHaveBeenCalledWith('biz_1', 'CASH');
   });
+
+  it('bill_paid omits empty metadata when neither paymentAccountId nor paymentMethod is set (NIT-02)', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onBillPaid({
+      ...baseExpense,
+      paidAt: new Date('2026-05-15'),
+      paymentMethod: null,
+    });
+    const input = posting.post.mock.calls[0][0];
+    expect(input.entries.find((e: any) => e.credit).accountId).toBe('coa_cash');
+    expect(input.metadata).toBeUndefined();
+  });
 });
 
 describe('ExpensePostingService.onPurchaseOrderReceived', () => {

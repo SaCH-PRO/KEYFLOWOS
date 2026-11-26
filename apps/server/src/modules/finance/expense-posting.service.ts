@@ -379,7 +379,7 @@ export class ExpensePostingService {
         sourceId: expense.id,
         kind: 'bill_paid',
         reference: expense.vendor ?? null,
-        metadata,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
         entries: [
           { accountId: apCoaId, debit: expense.amount, memo: `Pay bill: ${expense.vendor ?? expense.description}` },
           { accountId: creditCoaId, credit: expense.amount, memo: expense.vendor ?? expense.description },

@@ -719,3 +719,57 @@ describe('Controls: default path, auth/scope boundary, void reversal, delete gua
     expect(row.deletedAt).toBeNull();
   });
 });
+
+describe('R1 Security repairs (R1-SEC-01, NIT-02): malformed/blank pay inputs rejected with 400', () => {
+  it('BPA-R1-01: rejects malformed/blank paymentAccountId, paidAt, and paymentMethod with 400 and zero DB/ledger writes', async () => {
+    const created = await createBill({
+      description: `${P}malformed payload guard bill`,
+      amount: 110,
+      currency: 'TTD',
+      vendor: 'Validation Vendor',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const billId = created.body.id;
+    const beforeCounts = await ledgerCounts(ID.biz);
+
+    const malformedPayloads: Array<[string, Record<string, unknown>]> = [
+      ['numeric paymentAccountId', { paymentAccountId: 123 }],
+      ['object paymentAccountId', { paymentAccountId: {} }],
+      ['empty paymentAccountId', { paymentAccountId: '' }],
+      ['whitespace paymentAccountId', { paymentAccountId: '   ' }],
+      ['numeric paidAt', { paidAt: 1700000000000 }],
+      ['blank paidAt', { paidAt: '   ' }],
+      ['invalid date paidAt', { paidAt: 'not-a-date' }],
+      ['numeric paymentMethod', { paymentMethod: 42 }],
+    ];
+
+    for (const [label, payload] of malformedPayloads) {
+      const res = await payBill(billId, payload);
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+      const row = await db.expense.findUnique({ where: { id: billId } });
+      expect(row.status, `${label} must leave bill as BILL`).toBe('BILL');
+      expect(row.paidAt, `${label} must leave paidAt null`).toBeNull();
+      expect(await ledgerCounts(ID.biz), `${label} must write zero ledger rows`).toEqual(beforeCounts);
+    }
+  });
+
+  it('BPA-R1-02: explicit paymentAccountId: null preserves the D-168 Cash default (201) and omits empty metadata (NIT-02)', async () => {
+    const created = await createBill({
+      description: `${P}explicit null account default`,
+      amount: 70,
+      currency: 'TTD',
+      vendor: 'Cash Default Vendor',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const billId = created.body.id;
+
+    const paid = await payBill(billId, { paymentAccountId: null });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    expect(paid.body.status).toBe('PAID');
+
+    const paidTxn = (await txnsOf(billId)).find((t: any) => t.externalRef === `Expense:${billId}:bill_paid`);
+    expect(paidTxn).toBeTruthy();
+    expect(paidTxn.entries.find((e: any) => Number(e.credit) > 0).accountId).toBe(coaIds.cash);
+    expect(paidTxn.metadata).toBeNull();
+  });
+});
