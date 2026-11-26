@@ -1377,6 +1377,11 @@
       "packet": "V1-65 (TODAY-AGGREGATE)"
     },
     {
+      "prefix": "v65c_",
+      "owner": "apps/server/test/onboarding-no-demo-seed.integration.test.ts",
+      "packet": "V1-65 (DEMO-PREVIEW)"
+    },
+    {
       "prefix": "v65d_",
       "owner": "apps/server/test/payment-claim-loop.integration.test.ts",
       "packet": "V1-65 (CLAIM-LOOP)"
