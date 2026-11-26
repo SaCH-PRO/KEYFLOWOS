@@ -3804,7 +3804,7 @@ describe("CSC-82 an unproven header name on a header-like receiver may be Set-Co
       expect(scan("src/fixture-r15t.ts", imp + fixture).filter((w) => w.store === "response-cookie")).toEqual([]);
     });
   }
-  it("the real tree's header copy is found and pinned (src/lib/api.ts mergeHeaders)", () => {
+  it("the real tree's header copy is found and pinned (src/lib/api.ts buildHeaders)", () => {
     const w = census().filter((x) => x.store === "response-cookie" && x.file === "src/lib/api.ts");
     expect(w.length).toBe(1);
     expect(REGISTRY.some((r) => covers(r, w[0]) && r.nonCredential)).toBe(true);
@@ -3834,6 +3834,10 @@ describe("CSC-83 a clear only when every branch proves one (F3)", () => {
   });
   it("a ternary value inside a cookie string is a write", () => {
     expect(keysOf(scan("src/fixture-r15d4.ts", 'document.cookie = `kf_view=${c ? "" : t}; Max-Age=0`;'))).toEqual(["cookie:kf_view"]);
+  });
+  it("a parenthesised inner ternary of clears is unwrapped: every arm a clear, so no write (round 16)", () => {
+    const fixture = 'document.cookie = c ? (b ? "kf_a=; max-age=0" : "kf_b=; max-age=0") : "kf_c=; max-age=0";';
+    expect(scan("src/fixture-r16a.ts", fixture)).toEqual([]);
   });
   it("pins: both branches clear, and a plain clear, are not writes", () => {
     const fixture = 'document.cookie = c ? "kf_a=; max-age=0" : "kf_b=; Max-Age=0";\ndocument.cookie = "kf_c=; max-age=0";\ncookieStore.set("kf_d", "", { maxAge: 0 });';
