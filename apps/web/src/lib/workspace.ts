@@ -6,6 +6,7 @@ import { bootstrapIdentity } from "./client";
 // file, so pulling API_BASE from there would close an import cycle and could
 // leave the constant undefined depending on which module initialises first.
 import { getApiBase } from "./api-base";
+import { isAdminTokenUsable } from "./admin-session";
 import {
   dismissRemovedBusinessNotice,
   getRemovedBusinessNotice,
@@ -626,6 +627,34 @@ export function getCachedAdminUser(): CachedUser | null {
 export function isSuperAdmin(): boolean {
   const user = getCachedUser() ?? getCachedAdminUser();
   return user?.role === "SUPER_ADMIN";
+}
+
+/**
+ * Does this browser hold a local admin session: an unexpired admin-shaped
+ * kf_admin_token from the separate admin sign-in (/admin/login)? The edge
+ * middleware serves the admin shell only on that (RR-ADMIN-SHELL-SERVER-GATE);
+ * owner ruling D-290: a normally signed-in SUPER_ADMIN without it does not get
+ * in. Shape only, like the edge check; the API stays the authority.
+ */
+export function hasAdminSession(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return isAdminTokenUsable(window.localStorage.getItem(ADMIN_TOKEN_KEY));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * May this browser open the Owner Console (owner ruling D-290)? Only on the separate admin sign-in: a local admin
+ * session (hasAdminSession) whose OWN user, kf_admin_user_cache as the admin sign-in writes it, is SUPER_ADMIN. The
+ * app session's user is never consulted (COR-1): a token without its admin user does not open it. Both the admin
+ * layout's guard and the Owner Console link (useAppLayout) use this one predicate, so the link is offered exactly
+ * where the shell would open. Shape only; the API stays the authority.
+ */
+export function canOpenOwnerConsole(): boolean {
+  if (!hasAdminSession()) return false;
+  return getCachedAdminUser()?.role === "SUPER_ADMIN";
 }
 
 export function getUserDisplayName(): string {

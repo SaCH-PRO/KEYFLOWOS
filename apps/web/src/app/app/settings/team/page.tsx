@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
@@ -26,12 +26,16 @@ import { getCachedUser, getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple as apiPost, apiDelete, apiPatch } from "@/lib/api";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { NoAccessState } from "@/components/ui/no-access-state";
+import { readState, type ReadState } from "@/lib/failure-kit";
 import Image from "next/image";
 
 type TeamMember = {
   id: string;
   role: string;
   userId: string;
+  /** SWP-TEAM-INVITE-SERVER (V1-63): an invite nobody has signed in as yet. It is not a member until then. */
+  invitePending?: boolean;
   permissionScopes: Record<string, string>;
   maxApprovalTier: number;
   activeTasks?: number;
@@ -124,6 +128,69 @@ const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
 const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
 
 /**
+ * SWP-TEAM-WEB (journey J2): the invite form's role choices. Admin and Staff are the server's two invitable roles with
+ * their role defaults; Front desk and Bookkeeper are presets over the same vocabulary, with no server change: each is
+ * the STAFF role with the STAFF default level for its own modules and none for every other canonical module, tier 0.
+ *
+ *   Staff       STAFF, the STAFF role defaults (bookings write; crm, revenue, expenses and the rest read; settings,
+ *               team, ai and connect none), tier 0
+ *   Admin       ADMIN, the ADMIN role defaults (team write, connect none, every other module admin), tier 3
+ *   Front desk  STAFF, bookings write and crm read, every other module none, tier 0 (no money, settings or team)
+ *   Bookkeeper  STAFF, revenue read and expenses read, every other module none, tier 0 (no settings or team)
+ *
+ * The choice's `value` is what the form keeps; the invite sends `role` and the preset's map. An inviter narrower than
+ * a preset still starts at the preset capped at its own access (inviteDefaults), as for the two roles.
+ */
+type InviteChoice = { value: string; label: string; role: "ADMIN" | "STAFF"; scopes: Record<string, string>; tier: number };
+
+const onlyModules = (levels: Record<string, string>) =>
+  Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, levels[m.key] ?? "none"]));
+
+const INVITE_CHOICES: InviteChoice[] = [
+  { value: "STAFF", label: "Staff", role: "STAFF", scopes: DEFAULT_SCOPES.STAFF, tier: DEFAULT_TIERS.STAFF },
+  { value: "ADMIN", label: "Admin", role: "ADMIN", scopes: DEFAULT_SCOPES.ADMIN, tier: DEFAULT_TIERS.ADMIN },
+  {
+    value: "FRONT_DESK",
+    label: "Front desk",
+    role: "STAFF",
+    scopes: onlyModules({ bookings: DEFAULT_SCOPES.STAFF.bookings, crm: DEFAULT_SCOPES.STAFF.crm }),
+    tier: DEFAULT_TIERS.STAFF,
+  },
+  {
+    value: "BOOKKEEPER",
+    label: "Bookkeeper",
+    role: "STAFF",
+    scopes: onlyModules({ revenue: DEFAULT_SCOPES.STAFF.revenue, expenses: DEFAULT_SCOPES.STAFF.expenses }),
+    tier: DEFAULT_TIERS.STAFF,
+  },
+];
+
+/** The invite form's starting choice, and the one it returns to after each invite (BUG-115, journey J3). */
+const DEFAULT_INVITE_CHOICE = "STAFF";
+
+const inviteChoice = (value: string): InviteChoice =>
+  INVITE_CHOICES.find((c) => c.value === value) ?? INVITE_CHOICES[0];
+
+/**
+ * legacyaccess ruling (D-179): the invite form before R0-ID-WEB-AUTHORITY-UX had 11 modules, without analytics,
+ * operations and connect, and the server reads a key missing from an explicit map as none. A member invited through it
+ * holds an explicit map that names neither analytics nor operations: they stay refused until the owner grants them on
+ * this page. Nothing is granted by itself. A map that names them, even at none, is the owner's own choice.
+ */
+const LEGACY_MISSING = ["analytics", "operations"] as const;
+/** The old form's eleven modules: it always sent all of them. */
+const LEGACY_FORM_MODULES = ["crm", "revenue", "bookings", "projects", "content", "expenses", "automations", "storefront", "settings", "ai", "team"];
+
+/**
+ * Exactly the old form's shape (repair round 1, SEC-TW-M2 / COR-TW-3): a plain map naming all eleven of its modules and
+ * neither analytics nor operations. An empty or partial map, an array, or a map missing only one of the two is not it.
+ */
+function isLegacyFormMap(scopes: unknown): boolean {
+  if (!scopes || typeof scopes !== "object" || Array.isArray(scopes)) return false;
+  return LEGACY_FORM_MODULES.every((key) => Object.hasOwn(scopes, key)) && LEGACY_MISSING.every((key) => !Object.hasOwn(scopes, key));
+}
+
+/**
  * R0-ID-WEB-AUTHORITY-UX review repairs (SEC-UX-1, CR-1): the server refuses an
  * invite above the inviter's own authority (K2, IdentityService.authorityExcess)
  * with 403 "You cannot grant more authority than your own". An ADMIN invited
@@ -144,7 +211,7 @@ const levelRank = (level: unknown) => (isLevel(level) ? LEVEL_RANK[level] : 0);
 const roleRank = (role: string) => (Object.hasOwn(ROLE_RANK, role) ? ROLE_RANK[role] : 0);
 const ownLevel = (scopes: Record<string, string>, key: string) => (isLevel(scopes[key]) ? scopes[key] : "none");
 const moduleLabel = (key: string) => PERMISSION_MODULES.find((m) => m.key === key)?.label ?? key;
-const roleLabel = (role: string) => roleConfig[role]?.label ?? role;
+const roleLabel = (role: string) => INVITE_CHOICES.find((c) => c.value === role)?.label ?? roleConfig[role]?.label ?? role;
 
 /** The signed-in inviter's own authority, when the server bounds it; null for the OWNER, a SUPER_ADMIN, or an inviter the page cannot find. */
 type InviterEnvelope = { role: string; scopes: Record<string, string>; tier: number };
@@ -154,7 +221,7 @@ function inviterEnvelope(members: TeamMember[]): InviterEnvelope | null {
   if (!me?.id || me.role === "SUPER_ADMIN") return null;
   const own = members.find((m) => m.userId === me.id);
   if (!own || own.role === "OWNER") return null;
-  return { role: own.role, scopes: own.permissionScopes ?? {}, tier: own.maxApprovalTier ?? 0 };
+  return { role: own.role, scopes: effectiveScopes(own), tier: own.maxApprovalTier ?? 0 };
 }
 
 function sameEnvelope(a: InviterEnvelope | null, b: InviterEnvelope | null): boolean {
@@ -165,10 +232,9 @@ function joinNames(names: string[]): string {
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** The role's defaults capped at the inviter's own authority, and the rows that were lowered. */
-function inviteDefaults(role: string, inviter: InviterEnvelope | null) {
-  const scopes = DEFAULT_SCOPES[role] || DEFAULT_SCOPES.STAFF;
-  const tier = DEFAULT_TIERS[role] ?? 0;
+/** The choice's role defaults or preset, capped at the inviter's own authority, and the rows that were lowered. */
+function inviteDefaults(choice: string, inviter: InviterEnvelope | null) {
+  const { scopes, tier } = inviteChoice(choice);
   if (!inviter) return { scopes, tier, lowered: [] as string[] };
   const lowered: string[] = [];
   const capped = Object.fromEntries(
@@ -197,6 +263,23 @@ function authorityExcess(role: string, scopes: Record<string, string>, tier: num
 }
 
 const CEILING_REFUSAL = /more authority than your own/i;
+
+/**
+ * Repair round 2 (SEC-TW-R1): a guard's refusal, in any of its sentences: ModuleScopeGuard's, and BusinessGuard's for a
+ * member who is no longer in the business. A reload refused like this (or with any 403) drops the team from the
+ * screen; only a 5xx, a network failure or an empty error keeps the last good list.
+ */
+const GUARD_REFUSAL = /no access to this business|not a member of this business|insufficient permissions/i;
+
+/**
+ * A member's map as the server reads it (memberModuleLevel, COR-TW-R2-2): its stored map when that is any object, else
+ * its role's defaults.
+ */
+function effectiveScopes(member: { role: string; permissionScopes?: unknown }): Record<string, string> {
+  return member.permissionScopes && typeof member.permissionScopes === "object"
+    ? (member.permissionScopes as Record<string, string>)
+    : DEFAULT_SCOPES[member.role] ?? DEFAULT_SCOPES.STAFF;
+}
 
 const roleConfig: Record<string, { label: string; color: string; icon: typeof Shield }> = {
   OWNER: { label: "Owner", color: "bg-amber-500/20 text-amber-300 border-amber-500/30", icon: Crown },
@@ -335,21 +418,32 @@ function MemberCard({
   onRoleChange,
   onRemove,
   onEditPermissions,
+  onGrantLegacy,
 }: {
   member: TeamMember;
   onRoleChange: (id: string, role: string) => void;
   onRemove: (id: string, name: string) => void;
   onEditPermissions: (member: TeamMember) => void;
+  /** The owner's one-click grant for a member from the old 11-item form (D-179); absent for any other viewer. */
+  onGrantLegacy?: (member: TeamMember) => void;
 }) {
   const displayName = getDisplayName(member);
   const role = roleConfig[member.role] || roleConfig.STAFF;
+  const legacy = member.role !== "OWNER" && isLegacyFormMap(member.permissionScopes);
 
   return (
     <div className="flex items-center justify-between rounded-xl border border-border/40 bg-[#1a1a1e] px-4 py-3 hover:bg-[#1e1e22] transition-colors group">
       <div className="flex items-center gap-3 min-w-0 flex-1">
         <Avatar member={member} />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium truncate">{displayName}</div>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-medium truncate">{displayName}</span>
+            {member.invitePending && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px]">
+                Invited
+              </span>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground truncate">{member.user.email}</div>
           {(member.orgUnit || member.jobRole) && (
             <div className="mt-1 flex items-center gap-1.5">
@@ -366,13 +460,23 @@ function MemberCard({
             </div>
           )}
           <div className="mt-1 flex items-center gap-2">
-            <ScopesSummary scopes={member.permissionScopes} />
+            <ScopesSummary scopes={effectiveScopes(member)} />
             {member.maxApprovalTier > 0 && (
               <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/20 text-[10px]">
                 Tier {member.maxApprovalTier}
               </span>
             )}
           </div>
+          {legacy && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span>Analytics and Operations: No access</span>
+              {onGrantLegacy && (
+                <Button variant="subtle" size="sm" onClick={() => onGrantLegacy(member)}>
+                  Grant Analytics and Operations
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -432,7 +536,7 @@ function PermissionEditor({
   onSave: (membershipId: string, scopes: Record<string, string>, tier: number) => void;
   onClose: () => void;
 }) {
-  const [scopes, setScopes] = useState<Record<string, string>>({ ...member.permissionScopes });
+  const [scopes, setScopes] = useState<Record<string, string>>({ ...effectiveScopes(member) });
   const [tier, setTier] = useState(member.maxApprovalTier);
   const [saving, setSaving] = useState(false);
 
@@ -667,10 +771,17 @@ function ActivityFeed({
 export default function TeamSettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("members");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  // FAILURE-KIT: what the team read answered. A refusal is "no access", a failed load says so; neither is an empty team.
+  const [teamRead, setTeamRead] = useState<ReadState>({ kind: "ok" });
+  // COR-TW-4: once the team has loaded, a reload that fails keeps it on screen and says so here, with Try again.
+  const [reloadError, setReloadError] = useState<string | null>(null);
+  const loadedOnce = useRef(false);
+  // Bumped by a refusal, so an activity answer that was out when it came changes nothing.
+  const readEpoch = useRef(0);
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("STAFF");
+  const [inviteRole, setInviteRole] = useState(DEFAULT_INVITE_CHOICE);
   const [inviteScopes, setInviteScopes] = useState<Record<string, string>>({});
   const [inviteTier, setInviteTier] = useState(0);
   const [inviter, setInviter] = useState<InviterEnvelope | null>(null);
@@ -686,7 +797,29 @@ export default function TeamSettingsPage() {
     const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
     const res = await apiGet<DashboardData>(`/identity/businesses/${businessId}/team/dashboard`);
-    if (res.data) {
+    const state = readState(res, { what: "your team" });
+    const refused = res?.status === 403 || (typeof res?.error === "string" && GUARD_REFUSAL.test(res.error));
+    if (state.kind === "failed" && loadedOnce.current && !refused) {
+      setReloadError(state.message);
+      setLoading(false);
+      return;
+    }
+    setReloadError(null);
+    setTeamRead(state);
+    if (state.kind !== "ok") {
+      // A refusal, or a first load that failed: nothing of the team stays on screen or in what was open.
+      readEpoch.current += 1;
+      setDashboard(null);
+      setActivityItems([]);
+      setEditingMember(null);
+      setConfirmRemove(null);
+      setShowInvite(false);
+      setShowAdvancedInvite(false);
+      setInviter(null);
+      loadedOnce.current = false;
+    }
+    if (state.kind === "ok" && res.data) {
+      loadedOnce.current = true;
       setDashboard(res.data);
       setActivityItems(res.data.recentActivity);
       // Kept by value, so a reload with the same envelope does not reset the inviter's edits.
@@ -701,9 +834,11 @@ export default function TeamSettingsPage() {
     if (!businessId) return;
     const params = new URLSearchParams({ limit: "50" });
     if (mod) params.set("module", mod);
+    const epoch = readEpoch.current;
     const res = await apiGet<{ items: ActivityItem[]; total: number }>(
       `/identity/businesses/${businessId}/team/activity?${params.toString()}`
     );
+    if (epoch !== readEpoch.current) return;
     if (res.data) setActivityItems(res.data.items);
   }, []);
 
@@ -715,26 +850,33 @@ export default function TeamSettingsPage() {
     if (activeTab === "activity") loadActivity(moduleFilter || undefined);
   }, [activeTab, moduleFilter, loadActivity]);
 
-  useEffect(() => {
-    const start = inviteDefaults(inviteRole, inviter);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+  const startInviteAt = useCallback((choice: string, from: InviterEnvelope | null) => {
+    const start = inviteDefaults(choice, from);
     setInviteScopes(start.scopes);
     setInviteTier(start.tier);
     setInviteLowered(start.lowered);
-  }, [inviteRole, inviter]);
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+    startInviteAt(inviteRole, inviter);
+  }, [inviteRole, inviter, startInviteAt]);
 
   const handleInvite = async () => {
     const businessId = getStoredBusinessId();
-    if (!businessId || !inviteEmail.trim()) return;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail.trim())) {
+    // One address in any letters (journey J1): the invite is sent trimmed and in lower case.
+    const email = inviteEmail.trim().toLowerCase();
+    if (!businessId || !email) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       toast.error("Please enter a valid email address");
       return;
     }
     setInviting(true);
 
+    const choice = inviteChoice(inviteRole);
     const payload: Record<string, unknown> = {
-      email: inviteEmail.trim(),
-      role: inviteRole,
+      email,
+      role: choice.role,
       scopes: inviteScopes,
       maxApprovalTier: inviteTier,
     };
@@ -743,7 +885,7 @@ export default function TeamSettingsPage() {
     if (res.error) {
       // A ceiling refusal names no module; name each one above the inviter's own access.
       const excess = res.status === 403 && CEILING_REFUSAL.test(res.error)
-        ? authorityExcess(inviteRole, inviteScopes, inviteTier, inviter)
+        ? authorityExcess(choice.role, inviteScopes, inviteTier, inviter)
         : [];
       toast.error(
         excess.length > 0
@@ -753,7 +895,10 @@ export default function TeamSettingsPage() {
     } else {
       toast.success("Team member invited");
       setInviteEmail("");
-      setShowInvite(false);
+      // BUG-115 (journey J3): the next invite starts at the default role and its defaults, not the last one's.
+      setInviteRole(DEFAULT_INVITE_CHOICE);
+      startInviteAt(DEFAULT_INVITE_CHOICE, inviter);
+      // The form stays open for the next invite (journey J2 sends three in a row); a closing form lost what was typed.
       setShowAdvancedInvite(false);
       loadDashboard();
     }
@@ -799,12 +944,68 @@ export default function TeamSettingsPage() {
     }
   };
 
+  /** D-179: the owner's one click for a member from the old 11-item form: analytics and operations at its role's default. */
+  const handleGrantLegacy = async (member: TeamMember) => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    const defaults = DEFAULT_SCOPES[member.role] ?? DEFAULT_SCOPES.STAFF;
+    const scopes = { ...member.permissionScopes };
+    for (const key of LEGACY_MISSING) scopes[key] = defaults[key];
+    const res = await apiPatch(`/identity/businesses/${businessId}/team/${member.id}/permissions`, {
+      scopes,
+      maxApprovalTier: member.maxApprovalTier,
+    });
+    if (res.error) {
+      toast.error(res.error || "Failed to grant Analytics and Operations");
+    } else {
+      toast.success(`Analytics and Operations granted to ${getDisplayName(member)}`);
+      loadDashboard();
+    }
+  };
+
   if (loading) return <SkeletonTeam />;
 
+  if (teamRead.kind !== "ok") {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-lg font-semibold flex items-center gap-2">
+            <Users className="h-5 w-5 text-[#F97316]" />
+            Team
+          </h1>
+        </div>
+        {teamRead.kind === "no-access" ? (
+          <NoAccessState message={teamRead.message} what="your team" />
+        ) : (
+          <div role="alert" className="kf-card p-6 space-y-3 text-sm">
+            <p>{teamRead.message}</p>
+            <Button size="sm" variant="subtle" onClick={() => { setLoading(true); loadDashboard(); }}>
+              Try again
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const members = dashboard?.members ?? [];
-  const ownerCount = members.filter((m) => m.role === "OWNER").length;
-  const adminCount = members.filter((m) => m.role === "ADMIN").length;
-  const staffCount = members.filter((m) => m.role === "STAFF").length;
+  // BUG-116 (journey J4): a pending invite is not a member yet, so it is not counted as one.
+  const joined = members.filter((m) => !m.invitePending);
+  const ownerCount = joined.filter((m) => m.role === "OWNER").length;
+  const adminCount = joined.filter((m) => m.role === "ADMIN").length;
+  const staffCount = joined.filter((m) => m.role === "STAFF").length;
+  const invitedCount = members.length - joined.length;
+  const me = getCachedUser();
+  const myRow = me?.id ? members.find((m) => m.userId === me.id) : undefined;
+  const viewerIsOwner = myRow?.role === "OWNER";
+  // SEC-TW-M1: the server refuses an invite below team write (403), so the form is not offered there. A viewer the
+  // page cannot find in the list keeps it: the server is the authority, and its refusal is shown as it is.
+  // SEC-TW-R2 (judged acceptable): with no cached user, or one absent from the list, the form stays; the server refuses.
+  const canInvite =
+    me?.role === "SUPER_ADMIN" ||
+    !myRow ||
+    myRow.role === "OWNER" ||
+    levelRank(ownLevel(effectiveScopes(myRow), "team")) >= LEVEL_RANK.write;
 
   return (
     <motion.div
@@ -827,20 +1028,34 @@ export default function TeamSettingsPage() {
             <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">{ownerCount} owner</span>
             <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">{adminCount} admin</span>
             <span className="px-2 py-0.5 rounded bg-muted/20 text-muted-foreground border border-border/30">{staffCount} staff</span>
+            {invitedCount > 0 && (
+              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">{invitedCount} invited</span>
+            )}
           </div>
           <Button size="sm" variant="subtle" onClick={() => window.location.href = "/app/structure?tab=assignments"}>
             <Network className="h-3.5 w-3.5 mr-1.5" />
             Structure
           </Button>
-          <Button size="sm" onClick={() => setShowInvite(!showInvite)}>
-            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-            Invite
-          </Button>
+          {canInvite && (
+            <Button size="sm" onClick={() => setShowInvite(!showInvite)}>
+              <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+              Invite
+            </Button>
+          )}
         </div>
       </div>
 
+      {reloadError && (
+        <div role="alert" className="kf-card px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs border border-amber-500/30">
+          <span>{reloadError} The team below is as it was last loaded.</span>
+          <Button size="sm" variant="subtle" onClick={() => loadDashboard()}>
+            Try again
+          </Button>
+        </div>
+      )}
+
       <AnimatePresence>
-        {showInvite && (
+        {canInvite && showInvite && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
@@ -871,8 +1086,8 @@ export default function TeamSettingsPage() {
                   onChange={(e) => setInviteRole(e.target.value)}
                   aria-label="Select role"
                 >
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>{r.charAt(0) + r.slice(1).toLowerCase()}</option>
+                  {INVITE_CHOICES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
                 </select>
                 <Button onClick={handleInvite} disabled={inviting || !inviteEmail.trim()}>
@@ -892,7 +1107,8 @@ export default function TeamSettingsPage() {
                   className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-white transition-colors"
                 >
                   <ChevronRight className={`h-3 w-3 transition-transform ${showAdvancedInvite ? "rotate-90" : ""}`} />
-                  {showAdvancedInvite ? "Hide" : "Set"} permissions &amp; approval tier
+                  {/* One text: the build dropped the space between a {Hide/Set} expression and the words after it (BUG-135). */}
+                  {`${showAdvancedInvite ? "Hide" : "Set"} permissions & approval tier`}
                 </button>
               </div>
 
@@ -998,6 +1214,7 @@ export default function TeamSettingsPage() {
                     onRoleChange={handleRoleChange}
                     onRemove={(id, name) => setConfirmRemove({ membershipId: id, name })}
                     onEditPermissions={(m) => setEditingMember(m)}
+                    onGrantLegacy={viewerIsOwner ? handleGrantLegacy : undefined}
                   />
                 ))}
               </div>
@@ -1077,7 +1294,7 @@ export default function TeamSettingsPage() {
                             <span className="text-purple-400">{member.maxApprovalTier}</span>
                           </td>
                           {PERMISSION_MODULES.map((mod) => {
-                            const level = member.permissionScopes[mod.key] || "none";
+                            const level = ownLevel(effectiveScopes(member), mod.key);
                             const Icon = levelIcon[level];
                             return (
                               <td key={mod.key} className="py-2 px-1 text-center">

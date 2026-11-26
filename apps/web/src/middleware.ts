@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ADMIN_LOGIN_PATH, isAdminLoginPath, isAdminTokenUsable } from "./lib/admin-session";
 
 const TOKEN_COOKIE = "kf_token";
 const LOGIN_PATH = "/auth/login";
+/**
+ * The admin session's cookies, as admin/login/page.tsx writes them and
+ * clearAdminSession (lib/workspace.ts ADMIN_SESSION_KEYS) clears them. A refusal
+ * clears all three.
+ */
+const ADMIN_TOKEN_COOKIE = "kf_admin_token";
+const ADMIN_SESSION_COOKIES = [ADMIN_TOKEN_COOKIE, "kf_admin_user_cache", "kf_auth_mode"] as const;
 
 /**
  * Decode a base64url-encoded JWT segment. Edge middleware has atob but not
@@ -104,9 +112,51 @@ function getRedirect(pathname: string, search: string): string | null {
  *
  * Redirects run first (so moved URLs map to new URLs), then auth gating applies
  * to the destination.
+ *
+ * `/admin/*` (except /admin/login) is gated separately, on the admin session
+ * cookie rather than the user's (RR-ADMIN-SHELL-SERVER-GATE).
  */
+/** The pathname with only its valid ASCII escapes (%00-%7F) decoded; never throws. */
+function decodeAsciiEscapes(pathname: string): string {
+  return pathname.replace(/%([0-7][0-9A-Fa-f])/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+
+  // 0. Admin shell gating runs first, on the DECODED pathname: Next routes
+  // /%61dmin/users and /admin%2Fusers to the admin pages too, so a raw-path
+  // check would let them fall through to the /app rules (where a user's
+  // kf_token passes). A pathname that cannot be decoded is refused, closed,
+  // when it is an /admin path, judged with its valid ASCII escapes decoded
+  // (so /%61dmin/%ZZ counts); any other keeps its own rules (COR-2).
+  // Every /admin page except the login page requires an unexpired
+  // admin-shaped kf_admin_token cookie (lib/admin-session.ts); otherwise the
+  // shell's HTML is not served: redirect to /admin/login and clear the admin
+  // session's cookies. The static-file skip below does not apply here.
+  let decoded: string | null;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    decoded = null;
+  }
+  const underAdmin = (p: string) => p === "/admin" || p.startsWith("/admin/");
+  if (underAdmin(decoded ?? decodeAsciiEscapes(pathname))) {
+    if (decoded !== null && isAdminLoginPath(decoded)) {
+      return NextResponse.next();
+    }
+    if (decoded !== null && isAdminTokenUsable(req.cookies.get(ADMIN_TOKEN_COOKIE)?.value)) {
+      return NextResponse.next();
+    }
+    const adminLogin = req.nextUrl.clone();
+    adminLogin.pathname = ADMIN_LOGIN_PATH;
+    adminLogin.search = "";
+    const refused = NextResponse.redirect(adminLogin);
+    for (const name of ADMIN_SESSION_COOKIES) {
+      refused.cookies.set(name, "", { maxAge: 0, path: "/" });
+    }
+    return refused;
+  }
 
   // Skip Next.js internal routes and known static assets. A broad `.` check
   // would let dotted application routes (e.g. /app/reports.v2) bypass auth,
@@ -141,5 +191,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/app/:path*"],
+  matcher: ["/app/:path*", "/admin/:path*"],
 };
