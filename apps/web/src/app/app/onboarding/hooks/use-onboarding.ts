@@ -30,11 +30,31 @@ const VALID_STEPS = new Set([...STEP_ORDER, ...Object.keys(LEGACY_STEP_MAP)]);
 // Map them to the onboarding step where that work is done.
 const SETUP_STATUS_TO_STEP: Record<string, OnboardingStep> = {
   products: "template",
+  catalog: "template",
+  share_link: "configure",
   hours: "configure",
   storefront: "configure",
   payments: "configure",
   contacts: "configure",
 };
+
+// TODAY-4BLOCK, BUG-010: once onboarding is complete, a setup-status name in ?step opens that step's real page (the
+// pages TODAY-AGGREGATE's Get set up names, today.service.ts buildGetSetUp), not Today. An onboarding step name
+// (welcome ... complete) on a completed onboarding still goes to Today.
+const SETUP_STATUS_PAGE: Record<string, string> = {
+  products: "/app/settings/catalog",
+  catalog: "/app/settings/catalog",
+  hours: "/app/profile",
+  storefront: "/app/store",
+  share_link: "/app/store",
+  payments: "/app/settings/business?tab=payments",
+  contacts: "/app/crm/contacts",
+};
+
+function setupStatusPage(raw: string | null): string | null {
+  if (!raw || !Object.prototype.hasOwnProperty.call(SETUP_STATUS_PAGE, raw)) return null;
+  return SETUP_STATUS_PAGE[raw];
+}
 
 function parseStepQueryParam(raw: string | null): OnboardingStep | null {
   if (!raw) return null;
@@ -63,6 +83,7 @@ export function useOnboarding(): UseOnboardingReturn {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedStep = parseStepQueryParam(searchParams.get("step"));
+  const requestedPage = setupStatusPage(searchParams.get("step"));
 
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [loading, setLoading] = useState(true);
@@ -126,6 +147,16 @@ export function useOnboarding(): UseOnboardingReturn {
     const initial = requestedStep;
     const serverStep = data.step;
 
+    // BUG-010: a finished owner who followed an old setup link (?step=products, hours, storefront, payments) goes
+    // to that step's page, without a detour through /app/onboarding?step=... or Today.
+    if (data.onboardingComplete && requestedPage) {
+      setStep(serverStep);
+      router.replace(requestedPage);
+      setLoading(false);
+      loadedRef.current = true;
+      return;
+    }
+
     if (!initial || stepIndex(initial) <= stepIndex(serverStep)) {
       // No deep link, or the deep link is at/behind the server state. The
       // server step is authoritative.
@@ -158,7 +189,7 @@ export function useOnboarding(): UseOnboardingReturn {
 
     setLoading(false);
     loadedRef.current = true;
-  }, [businessId, router, syncUrl, requestedStep]);
+  }, [businessId, router, syncUrl, requestedStep, requestedPage]);
 
   useEffect(() => {
     if (!loadedRef.current) {

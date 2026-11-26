@@ -324,11 +324,13 @@ describe("TODAY-4BLOCK: Today is four blocks from one server read", () => {
     // Due today in the business's day is not "overdue", even after midnight UTC has passed.
     expect(invoice.textContent).not.toMatch(/overdue/i);
 
-    for (const text of ["Braiding 30", "Call about colour", "ORD-0099"]) {
+    for (const text of ["Braiding 30", "Call about colour"]) {
       const r = row(today, text);
       expect(within(r).getAllByRole("link").length, text).toBeGreaterThan(0);
       expect(within(r).getByRole("link", { name: /Gina Links/ }).getAttribute("href")).toBe(`/app/crm/contacts/${CONTACT}`);
     }
+    // An order row carries no contact id (TodayOrderItem): its own link opens the orders list.
+    expect(within(row(today, "ORD-0099")).getByRole("link", { name: /ORD-0099/ })).toBeTruthy();
     const reminder = row(today, "INV-0009");
     expect(within(reminder).getByRole("link", { name: /whatsapp/i }).getAttribute("href")).toBe("https://wa.me/18687654321?text=Hi%20Gina");
   }, CASE_MS);
@@ -366,7 +368,8 @@ describe("TODAY-4BLOCK: Today is four blocks from one server read", () => {
     // Every link in the block is a step: the sample preview opens nothing.
     expect(within(setup).getAllByRole("link")).toHaveLength(STEPS.length);
     expect(within(setup).getAllByText(/sample/i).length).toBeGreaterThan(0);
-    expect(within(setup).getByText(/install keyflowos on your phone/i)).toBeTruthy();
+    // The install step renders once it has checked this device (install-app-step.tsx "checking").
+    expect(await within(setup).findByText(/install keyflowos on your phone/i)).toBeTruthy();
   }, CASE_MS);
 
   it("[T4B-09] RED-BEFORE: under KEY_DISABLED (keyDisabled on GET /identity/me) no KEY UI renders on Today: no KEY proposal, no approved KEY actions panel, no 'KEY' anywhere in the blocks", async () => {
@@ -387,7 +390,8 @@ describe("TODAY-4BLOCK: Today is four blocks from one server read", () => {
   }, CASE_MS);
 
   it("[T4B-11] RED-BEFORE: a Today read that fails says so and offers Retry; it never says nothing needs you, never shows a zero Pulse", async () => {
-    const api = serve({ today: [{ status: 503, body: { message: "Service Unavailable" } }, ok(freshToday())] });
+    // A 500: lib/fetch-with-retry.ts retries a GET once on 502/503/504, so a single 503 never reaches the page.
+    const api = serve({ today: [{ status: 500, body: { statusCode: 500, message: "Internal server error" } }, ok(freshToday())] });
     const { default: Page } = await import("@/app/app/command-center/page");
     render(
       <GenomeProvider>
