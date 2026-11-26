@@ -10,6 +10,7 @@ import {
   Product,
 } from "@/lib/client";
 import { notifyProductsChanged } from "@/lib/product-sync";
+import { getStoredBusinessId, BUSINESS_CHANGED_EVENT } from "@/lib/workspace";
 import { moduleWriteRefusal } from "@/lib/module-scope-refusal";
 import { moduleEvents } from "@/lib/module-events";
 import { ProductForm } from "../components/commerce-types";
@@ -129,10 +130,25 @@ export function useProducts(
   // Round 2 (5): the image link the product had when the form opened; an unchanged one is kept as it is.
   const [originalImageUrl, setOriginalImageUrl] = useState("");
   // Round 2 (6): the business a write was asked for; an answer after the business changed is dropped.
+  // Round 5 (SEC-CAT-R4-1): it also follows the selection itself (kf:business-changed, and the storage event from
+  // another tab), so an answer that lands after the switch and before the page renders with the new business is
+  // dropped too.
   const businessRef = useRef(businessId);
   useEffect(() => {
     businessRef.current = businessId;
   }, [businessId]);
+  useEffect(() => {
+    const follow = () => {
+      const next = getStoredBusinessId();
+      if (next && next !== businessRef.current) businessRef.current = next;
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, follow);
+    window.addEventListener("storage", follow);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, follow);
+      window.removeEventListener("storage", follow);
+    };
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openAddProduct = useCallback(() => {
@@ -269,8 +285,11 @@ export function useProducts(
     }
   }, [validate, businessId, create, productForm.category, blankForm]);
 
+  // Round 5 (SEC-CAT-R4-1): duplicate, toggle and the inline save drop an answer for a business no longer selected,
+  // as create, update and archive do.
   const handleDuplicateProduct = useCallback(async (product: Product) => {
     if (!businessId) return;
+    const askedFor = businessId;
     const { data, error } = await createProduct({
       businessId,
       name: `${product.name} (Copy)`,
@@ -284,6 +303,7 @@ export function useProducts(
       sku: product.sku ? `${product.sku}-COPY` : null,
       isActive: true,
     });
+    if (businessRef.current !== askedFor) return;
     if (error || !data) { toast.error("Failed to duplicate product"); return; }
     setProducts((prev) => [data, ...prev]);
     toast.success("Product duplicated");
@@ -294,11 +314,13 @@ export function useProducts(
   const handleToggleProductActive = useCallback(async (product: Product) => {
     if (!businessId) return;
     const newActive = !product.isActive;
+    const askedFor = businessId;
     const res = await updateProduct({
       businessId,
       productId: product.id,
       isActive: newActive,
     });
+    if (businessRef.current !== askedFor) return;
     const { data, error } = res;
     if (error) { toast.error(writeError({ error, status: (res as { status?: number }).status }, "change products", "Failed to update product status")); return; }
     if (data) {
@@ -324,7 +346,9 @@ export function useProducts(
       toast.error(IMAGE_LINK_RULE);
       throw new Error(IMAGE_LINK_RULE);
     }
+    const askedFor = businessId;
     const res = await updateProduct({ businessId, productId, ...buildProductPayload(form, "update") });
+    if (businessRef.current !== askedFor) return;
     const { data, error } = res;
     if (error) { const message = writeError(res, "change products", "Failed to update product"); toast.error(message); throw new Error(message); }
     if (data) {

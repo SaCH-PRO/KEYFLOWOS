@@ -45,7 +45,7 @@ function emptyStorefront(): StorefrontConfig {
  * Round 4 (SEC-CAT-R3-1): which of the selected business's own reads have landed. A write is made only from what
  * that business answered: its details and hours (business), its storefront (storefront), its store listing (graph).
  */
-type Landed = { businessId: string; business: boolean; storefront: boolean; graph: boolean };
+type Landed = { businessId: string; business: boolean; storefront: boolean; graph: boolean; graphRefused: boolean };
 
 export function useStoreData() {
   const emitEvent = useModuleEmit();
@@ -99,40 +99,6 @@ export function useStoreData() {
   const [configSaving, setConfigSaving] = useState(false);
   const [landed, setLanded] = useState<Landed | null>(null);
 
-  useEffect(() => {
-    const initWorkspace = async () => {
-      const stored = getStoredBusinessId();
-      if (stored) {
-        setBusinessId(stored);
-      }
-      try {
-        const fresh = await refreshWorkspace();
-        if (fresh) {
-          setBusinessId(fresh);
-          return;
-        }
-      } catch {}
-      if (!stored) {
-        try {
-          await new Promise((r) => setTimeout(r, 1000));
-          const retry = await refreshWorkspace();
-          if (retry) {
-            setBusinessId(retry);
-            return;
-          }
-        } catch {}
-        const fallback = getStoredBusinessId();
-        if (fallback) {
-          setBusinessId(fallback);
-        } else {
-          setLoading(false);
-          setLoadError("Could not find your workspace. Please refresh the page.");
-        }
-      }
-    };
-    void initWorkspace();
-  }, []);
-
   const backfillRan = useRef(false);
 
   /**
@@ -143,41 +109,82 @@ export function useStoreData() {
    *
    * Round 4 (SEC-CAT-R3-1, COR-R3-1): "everything" is every field set from a business read or a write's answer, so
    * nothing of A's is shown for B or written to B when one of B's reads answers nothing.
+   *
+   * Round 5 (SEC-CAT-R4-2): every way the page comes to show a business goes through switchTo, including the
+   * workspace answering, at mount, a business other than the stored one.
    */
   const currentBusiness = useRef<string | null>(null);
+  const switchTo = useCallback((next: string) => {
+    if (next === currentBusiness.current) return;
+    currentBusiness.current = next;
+    backfillRan.current = false;
+    setStockRead(null);
+    setServices([]);
+    setStaff([]);
+    setCommerceProducts([]);
+    setBusinessData(null);
+    setStoreGraph(null);
+    setDriftedItems([]);
+    setReadiness(null);
+    setOverviewAnalytics(null);
+    setStoreSlug("");
+    setStoreEnabled(true);
+    setBusinessHours(DEFAULT_HOURS);
+    setStorefrontConfig(emptyStorefront());
+    setActiveDeliveryMethodsCount(0);
+    setLoadError(null);
+    setProcessingItems(new Set());
+    setConfirmRemove(null);
+    setSlugSaving(false);
+    setHoursSaving(false);
+    setConfigSaving(false);
+    setSyncing(false);
+    setLanded(null);
+    setLoading(true);
+    setBusinessId(next);
+  }, []);
+
+  useEffect(() => {
+    const initWorkspace = async () => {
+      const stored = getStoredBusinessId();
+      if (stored) {
+        switchTo(stored);
+      }
+      try {
+        const fresh = await refreshWorkspace();
+        if (fresh) {
+          switchTo(fresh);
+          return;
+        }
+      } catch {}
+      if (!stored) {
+        try {
+          await new Promise((r) => setTimeout(r, 1000));
+          const retry = await refreshWorkspace();
+          if (retry) {
+            switchTo(retry);
+            return;
+          }
+        } catch {}
+        const fallback = getStoredBusinessId();
+        if (fallback) {
+          switchTo(fallback);
+        } else {
+          setLoading(false);
+          setLoadError("Could not find your workspace. Please refresh the page.");
+        }
+      }
+    };
+    void initWorkspace();
+  }, [switchTo]);
+
   useEffect(() => {
     currentBusiness.current = businessId;
   }, [businessId]);
   useEffect(() => {
     const follow = () => {
       const next = getStoredBusinessId();
-      if (!next || next === currentBusiness.current) return;
-      currentBusiness.current = next;
-      backfillRan.current = false;
-      setStockRead(null);
-      setServices([]);
-      setStaff([]);
-      setCommerceProducts([]);
-      setBusinessData(null);
-      setStoreGraph(null);
-      setDriftedItems([]);
-      setReadiness(null);
-      setOverviewAnalytics(null);
-      setStoreSlug("");
-      setStoreEnabled(true);
-      setBusinessHours(DEFAULT_HOURS);
-      setStorefrontConfig(emptyStorefront());
-      setActiveDeliveryMethodsCount(0);
-      setLoadError(null);
-      setProcessingItems(new Set());
-      setConfirmRemove(null);
-      setSlugSaving(false);
-      setHoursSaving(false);
-      setConfigSaving(false);
-      setSyncing(false);
-      setLanded(null);
-      setLoading(true);
-      setBusinessId(next);
+      if (next) switchTo(next);
     };
     window.addEventListener(BUSINESS_CHANGED_EVENT, follow);
     window.addEventListener("storage", follow);
@@ -185,7 +192,7 @@ export function useStoreData() {
       window.removeEventListener(BUSINESS_CHANGED_EVENT, follow);
       window.removeEventListener("storage", follow);
     };
-  }, []);
+  }, [switchTo]);
 
   const loadData = useCallback(async (showLoader = false) => {
     if (!businessId) return;
@@ -226,6 +233,8 @@ export function useStoreData() {
       }
 
       const graph = graphRes.data;
+      // COR-R4-2: GET store/graph is guarded by revenue read; a 403 is a permission refusal, not a failed load.
+      const graphRefused = !graph && (graphRes as { status?: number }).status === 403;
       if (graph) {
         setStoreGraph(graph);
 
@@ -265,6 +274,7 @@ export function useStoreData() {
           business: !!kept?.business || !!bizRes.data,
           storefront: !!kept?.storefront || !!configRes.data,
           graph: !!kept?.graph || !!graph,
+          graphRefused: !kept?.graph && !graph && graphRefused,
         };
       });
     } catch (e) {
@@ -338,14 +348,19 @@ export function useStoreData() {
   const canSaveBusiness = !!landedHere?.business;
   const canSaveStorefront = !!landedHere?.storefront;
   const canChangeListing = !!landedHere?.graph;
+  // COR-R4-2: the listing read was refused (403, no revenue read): changing the listing stays off, and it is not a
+  // failed load that a refresh would fix.
+  const listingRefused = !!landedHere && !landedHere.graph && landedHere.graphRefused;
   const isCurrent = (askedFor: string) => currentBusiness.current === askedFor;
 
-  function refuse(ready: boolean, what: string): boolean {
+  function refuse(ready: boolean, what: string, refused = false): boolean {
     if (ready) return false;
     if (!landedHere) toast.info("This store is still loading. Try again in a moment.");
+    else if (refused) toast.error(`You do not have permission to see this business's ${what}, so it cannot be changed here.`);
     else toast.error(`This business's ${what} did not load, so nothing was saved. Refresh the page to try again.`);
     return true;
   }
+  const refuseListing = () => refuse(canChangeListing, "store listing", listingRefused);
 
   function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
@@ -410,7 +425,7 @@ export function useStoreData() {
 
   async function syncDriftedItems() {
     if (!businessId || driftedItems.length === 0) return;
-    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    if (!isCurrent(businessId) || refuseListing()) return;
     const askedFor = businessId;
     setSyncing(true);
     let synced = 0;
@@ -439,7 +454,7 @@ export function useStoreData() {
 
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
-    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    if (!isCurrent(businessId) || refuseListing()) return;
     const askedFor = businessId;
     if (graphProductToServiceMap.has(product.id)) {
       toast.warning(`"${product.name}" is already in your store.`);
@@ -473,27 +488,21 @@ export function useStoreData() {
     }
   }
 
-  async function handleDeleteServiceFromStore(serviceId: string, _productName?: string) {
-    if (!businessId) return;
-    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
-    const askedFor = businessId;
-    const mapping = storeGraph?.mappings.find((m) => m.serviceId === serviceId);
-    const productId = mapping?.productId;
-    if (productId && confirmRemove !== productId) {
-      setConfirmRemove(productId);
-      return;
-    }
-    setConfirmRemove(null);
+  /**
+   * One store item removed for the business it was asked for, with no confirmation (the caller has it). "stale": the
+   * business changed before the answer, so nothing of it is applied or said.
+   */
+  async function removeOne(serviceId: string, askedFor: string): Promise<"removed" | "failed" | "stale"> {
+    const productId = storeGraph?.mappings.find((m) => m.serviceId === serviceId)?.productId;
     if (productId) setProcessingItems((prev) => new Set(prev).add(productId));
     try {
       const res = await deleteService(serviceId, askedFor);
-      if (!isCurrent(askedFor)) return;
+      if (!isCurrent(askedFor)) return "stale";
       if (res.error) {
         toast.error(`Failed to remove: ${res.error}`);
-      } else {
-        toast.info("Removed from store.");
-        await loadData();
+        return "failed";
       }
+      return "removed";
     } finally {
       if (productId && isCurrent(askedFor))
         setProcessingItems((prev) => {
@@ -502,6 +511,22 @@ export function useStoreData() {
           return n;
         });
     }
+  }
+
+  async function handleDeleteServiceFromStore(serviceId: string, _productName?: string) {
+    if (!businessId) return;
+    if (!isCurrent(businessId) || refuseListing()) return;
+    const askedFor = businessId;
+    const mapping = storeGraph?.mappings.find((m) => m.serviceId === serviceId);
+    const productId = mapping?.productId;
+    if (productId && confirmRemove !== productId) {
+      setConfirmRemove(productId);
+      return;
+    }
+    setConfirmRemove(null);
+    if ((await removeOne(serviceId, askedFor)) !== "removed") return;
+    toast.info("Removed from store.");
+    await loadData();
   }
 
   async function handleToggleStoreItem(product: Product) {
@@ -515,7 +540,7 @@ export function useStoreData() {
 
   async function handleSelectAll() {
     if (!businessId) return;
-    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    if (!isCurrent(businessId) || refuseListing()) return;
     const askedFor = businessId;
     const notAdded = commerceProducts.filter((p) => !graphProductToServiceMap.has(p.id));
     for (const p of notAdded) {
@@ -525,17 +550,28 @@ export function useStoreData() {
     }
   }
 
+  /**
+   * "Remove all", once confirmed (catalog-manager asks once for all): every live item of this business is removed.
+   * Round 5 (COR-R4-1): it called the single-item remove, whose confirmation state is the one read at render, so each
+   * item was only armed and nothing was removed. A run stops when the business changes.
+   */
   async function handleDeselectAll() {
     if (!businessId) return;
-    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    if (!isCurrent(businessId) || refuseListing()) return;
     if (!storeGraph) return;
     const askedFor = businessId;
     const liveEntries = storeGraph.mappings.filter((m) => m.isLive && m.serviceId);
+    setConfirmRemove(null);
+    let removed = 0;
     for (const entry of liveEntries) {
       if (!isCurrent(askedFor)) return;
-      setConfirmRemove(null);
-      await handleDeleteServiceFromStore(entry.serviceId!);
+      const outcome = await removeOne(entry.serviceId!, askedFor);
+      if (outcome === "stale") return;
+      if (outcome === "removed") removed++;
     }
+    if (!isCurrent(askedFor) || removed === 0) return;
+    toast.info(removed === 1 ? "Removed from store." : `Removed ${removed} items from store.`);
+    await loadData();
   }
 
   const ARRAY_CONFIG_KEYS = new Set(['sections', 'faqEntries']);
@@ -668,5 +704,6 @@ export function useStoreData() {
     canSaveBusiness,
     canSaveStorefront,
     canChangeListing,
+    listingRefused,
   };
 }

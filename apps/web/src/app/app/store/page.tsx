@@ -168,7 +168,7 @@ export default function StorePage() {
   const notLoaded = [
     !s.canSaveStorefront && "storefront settings",
     !s.canSaveBusiness && "business details",
-    !s.canChangeListing && "store listing",
+    !s.canChangeListing && !s.listingRefused && "store listing",
   ].filter((part): part is string => !!part);
 
   return (
@@ -233,6 +233,13 @@ export default function StorePage() {
         <p role="status" className="rounded-xl border border-border/60 bg-card px-4 py-3 text-caption text-muted-foreground">
           This business&apos;s {notLoaded.join(" and ")} did not load, so {notLoaded.length > 1 ? "they" : "it"} cannot be
           changed here. Refresh the page to try again.
+        </p>
+      )}
+      {s.listingRefused && (
+        // Round 5 (COR-R4-2): the listing read was refused (403: the member cannot read revenue). A refresh cannot fix it.
+        <p role="status" className="rounded-xl border border-border/60 bg-card px-4 py-3 text-caption text-muted-foreground">
+          You do not have permission to see this business&apos;s store listing, so items cannot be added to or removed
+          from the store here. Ask the business owner for access to Sales.
         </p>
       )}
 
