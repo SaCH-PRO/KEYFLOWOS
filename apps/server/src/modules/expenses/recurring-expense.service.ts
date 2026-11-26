@@ -5,6 +5,32 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpensesService, expenseCurrency } from './expenses.service';
 import { schedulersDisabled } from '../../core/config/env';
 
+const VALID_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'] as const;
+const DEFAULT_TIME_ZONE = 'America/Port_of_Spain';
+const CALENDAR_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function resolveTimeZone(raw?: string | null): string {
+  const candidate = typeof raw === 'string' ? raw.trim() : '';
+  if (candidate) {
+    try {
+      new Intl.DateTimeFormat('en-CA', { timeZone: candidate });
+      return candidate;
+    } catch {
+      // Unknown IANA zone: fall back to the business schema default.
+    }
+  }
+  return DEFAULT_TIME_ZONE;
+}
+
+function dayInZone(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at);
+}
+
 /**
  * FIN3 — RecurringExpense scheduler. Mirrors the RecurringInvoice
  * service: an hourly tick scans for due active schedules and emits one
@@ -44,6 +70,133 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * V1-91 (FU-RECURRING-EXPENSE-SERVER, SEC-EXH2-3): verify that any supplied
+   * categoryId, projectId, contactId, or serviceId belongs to `businessId` and
+   * is not soft-deleted (where applicable). Uses identical 400 wording across
+   * foreign-tenant, nonexistent, and soft-deleted ids so cross-tenant
+   * existence is never leaked.
+   */
+  private async assertRelationsInBusiness(
+    businessId: string,
+    refs: {
+      categoryId?: string | null;
+      projectId?: string | null;
+      contactId?: string | null;
+      serviceId?: string | null;
+    },
+  ): Promise<void> {
+    if (refs.categoryId !== undefined && refs.categoryId !== null) {
+      if (typeof refs.categoryId !== 'string' || refs.categoryId.trim().length === 0) {
+        throw new BadRequestException('Category not found or does not belong to this business');
+      }
+      const cat = await this.prisma.client.expenseCategory.findFirst({
+        where: { id: refs.categoryId, businessId },
+        select: { id: true },
+      });
+      if (!cat) {
+        throw new BadRequestException('Category not found or does not belong to this business');
+      }
+    }
+
+    if (refs.projectId !== undefined && refs.projectId !== null) {
+      if (typeof refs.projectId !== 'string' || refs.projectId.trim().length === 0) {
+        throw new BadRequestException('Project not found or does not belong to this business');
+      }
+      const proj = await this.prisma.client.project.findFirst({
+        where: { id: refs.projectId, businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!proj) {
+        throw new BadRequestException('Project not found or does not belong to this business');
+      }
+    }
+
+    if (refs.contactId !== undefined && refs.contactId !== null) {
+      if (typeof refs.contactId !== 'string' || refs.contactId.trim().length === 0) {
+        throw new BadRequestException('Contact not found or does not belong to this business');
+      }
+      const ct = await this.prisma.client.contact.findFirst({
+        where: { id: refs.contactId, businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!ct) {
+        throw new BadRequestException('Contact not found or does not belong to this business');
+      }
+    }
+
+    if (refs.serviceId !== undefined && refs.serviceId !== null) {
+      if (typeof refs.serviceId !== 'string' || refs.serviceId.trim().length === 0) {
+        throw new BadRequestException('Service not found or does not belong to this business');
+      }
+      const svc = await this.prisma.client.service.findFirst({
+        where: { id: refs.serviceId, businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!svc) {
+        throw new BadRequestException('Service not found or does not belong to this business');
+      }
+    }
+  }
+
+  /**
+   * V1-91 (FU-RECURRING-EXPENSE-SERVER): parse and validate `nextRunDate`
+   * against the start of today in the business's timezone. Today is accepted;
+   * strictly past dates and unparseable values are rejected with 400.
+   */
+  private async validateNextRunDate(businessId: string, raw: string | Date, now: Date = new Date()): Promise<Date> {
+    let parsed: Date;
+    let calendarDay: string | null = null;
+
+    if (raw instanceof Date) {
+      parsed = new Date(raw.getTime());
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('Invalid nextRunDate');
+      }
+    } else if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        throw new BadRequestException('Invalid nextRunDate');
+      }
+      const match = CALENDAR_DAY_RE.exec(trimmed);
+      if (match) {
+        const y = Number(match[1]);
+        const m = Number(match[2]);
+        const d = Number(match[3]);
+        parsed = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+        if (
+          Number.isNaN(parsed.getTime()) ||
+          parsed.getUTCFullYear() !== y ||
+          parsed.getUTCMonth() !== m - 1 ||
+          parsed.getUTCDate() !== d
+        ) {
+          throw new BadRequestException('Invalid nextRunDate');
+        }
+        calendarDay = trimmed;
+      } else {
+        parsed = new Date(trimmed);
+        if (Number.isNaN(parsed.getTime())) {
+          throw new BadRequestException('Invalid nextRunDate');
+        }
+      }
+    } else {
+      throw new BadRequestException('Invalid nextRunDate');
+    }
+
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { timezone: true },
+    });
+    const tz = resolveTimeZone(business?.timezone);
+    const todayDay = dayInZone(now, tz);
+    const candidateDay = calendarDay ?? dayInZone(parsed, tz);
+    if (candidateDay < todayDay) {
+      throw new BadRequestException('nextRunDate cannot be in the past');
+    }
+
+    return parsed;
+  }
+
   list(businessId: string) {
     return this.prisma.client.recurringExpense.findMany({
       where: { businessId, deletedAt: null },
@@ -72,15 +225,22 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     paymentMethod?: string;
     notes?: string;
     createsBill?: boolean;
-    dueOffsetDays?: number;
-    categoryId?: string;
-    projectId?: string;
-    contactId?: string;
-    serviceId?: string;
+    dueOffsetDays?: number | null;
+    categoryId?: string | null;
+    projectId?: string | null;
+    contactId?: string | null;
+    serviceId?: string | null;
   }) {
-    if (!['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'].includes(input.frequency)) {
+    if (!(VALID_FREQUENCIES as readonly string[]).includes(input.frequency)) {
       throw new BadRequestException(`Invalid frequency ${input.frequency}`);
     }
+    const nextRunDate = await this.validateNextRunDate(input.businessId, input.nextRunDate);
+    await this.assertRelationsInBusiness(input.businessId, {
+      categoryId: input.categoryId,
+      projectId: input.projectId,
+      contactId: input.contactId,
+      serviceId: input.serviceId,
+    });
     // FOLLOW3-B4 (VL-06, D-13): the business currency when none is named (it
     // was the literal 'TTD', so a USD business's schedules generated TTD expenses).
     const currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
@@ -89,7 +249,7 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
         businessId: input.businessId,
         name: input.name,
         frequency: input.frequency,
-        nextRunDate: new Date(input.nextRunDate),
+        nextRunDate,
         endDate: input.endDate ? new Date(input.endDate) : null,
         description: input.description,
         amount: input.amount,
@@ -122,6 +282,9 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     createsBill?: boolean;
     dueOffsetDays?: number | null;
     categoryId?: string | null;
+    projectId?: string | null;
+    contactId?: string | null;
+    serviceId?: string | null;
     isActive?: boolean;
   }) {
     const existing = await this.prisma.client.recurringExpense.findFirst({
@@ -129,10 +292,23 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     });
     if (!existing) throw new NotFoundException('Recurring expense not found');
 
+    if (input.frequency !== undefined && !(VALID_FREQUENCIES as readonly string[]).includes(input.frequency)) {
+      throw new BadRequestException(`Invalid frequency ${input.frequency}`);
+    }
+
+    await this.assertRelationsInBusiness(input.businessId, {
+      categoryId: input.categoryId,
+      projectId: input.projectId,
+      contactId: input.contactId,
+      serviceId: input.serviceId,
+    });
+
     const data: Prisma.RecurringExpenseUncheckedUpdateInput = {};
     if (input.name !== undefined) data.name = input.name;
     if (input.frequency !== undefined) data.frequency = input.frequency;
-    if (input.nextRunDate !== undefined) data.nextRunDate = new Date(input.nextRunDate);
+    if (input.nextRunDate !== undefined) {
+      data.nextRunDate = await this.validateNextRunDate(input.businessId, input.nextRunDate);
+    }
     if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null;
     if (input.amount !== undefined) data.amount = input.amount;
     if (input.description !== undefined) data.description = input.description;
@@ -142,6 +318,9 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     if (input.createsBill !== undefined) data.createsBill = input.createsBill;
     if (input.dueOffsetDays !== undefined) data.dueOffsetDays = input.dueOffsetDays;
     if (input.categoryId !== undefined) data.categoryId = input.categoryId;
+    if (input.projectId !== undefined) data.projectId = input.projectId;
+    if (input.contactId !== undefined) data.contactId = input.contactId;
+    if (input.serviceId !== undefined) data.serviceId = input.serviceId;
     if (input.isActive !== undefined) data.isActive = input.isActive;
 
     return this.prisma.client.recurringExpense.update({
@@ -161,38 +340,77 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** Compute the next run date from a frequency string. */
-  static computeNext(from: Date, frequency: string): Date {
-    const d = new Date(from);
+  /**
+   * Compute the next run date from a frequency string using UTC calendar math.
+   * Clamps month-end days instead of overflowing into the following month
+   * (e.g. Jan 31 + MONTHLY -> Feb 28/29, never Mar 3; leap Feb 29 + YEARLY ->
+   * Feb 28). Accepts an optional `anchorDay` (1..31) so multi-step cadence
+   * advancement preserves the original day-of-month across shorter months
+   * (Jan 31 -> Feb 28 -> Mar 31 -> Apr 30 -> May 31).
+   */
+  static computeNext(from: Date, frequency: string, anchorDay?: number): Date {
+    const base = new Date(from.getTime());
+    if (Number.isNaN(base.getTime())) {
+      throw new BadRequestException('Invalid date');
+    }
+    const y = base.getUTCFullYear();
+    const m = base.getUTCMonth();
+    const day = base.getUTCDate();
+    const h = base.getUTCHours();
+    const min = base.getUTCMinutes();
+    const s = base.getUTCSeconds();
+    const ms = base.getUTCMilliseconds();
+
+    const addMonths = (monthsToAdd: number): Date => {
+      const targetDay =
+        typeof anchorDay === 'number' && Number.isInteger(anchorDay) && anchorDay >= 1 && anchorDay <= 31
+          ? anchorDay
+          : day;
+      const totalMonths = y * 12 + m + monthsToAdd;
+      const targetYear = Math.floor(totalMonths / 12);
+      const targetMonth = ((totalMonths % 12) + 12) % 12;
+      const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+      const clampedDay = Math.min(targetDay, lastDayOfTargetMonth);
+      return new Date(Date.UTC(targetYear, targetMonth, clampedDay, h, min, s, ms));
+    };
+
     switch (frequency) {
       case 'WEEKLY':
-        d.setDate(d.getDate() + 7);
-        return d;
+        return new Date(Date.UTC(y, m, day + 7, h, min, s, ms));
       case 'BIWEEKLY':
-        d.setDate(d.getDate() + 14);
-        return d;
+        return new Date(Date.UTC(y, m, day + 14, h, min, s, ms));
       case 'MONTHLY':
-        d.setMonth(d.getMonth() + 1);
-        return d;
+        return addMonths(1);
       case 'QUARTERLY':
-        d.setMonth(d.getMonth() + 3);
-        return d;
+        return addMonths(3);
       case 'YEARLY':
-        d.setFullYear(d.getFullYear() + 1);
-        return d;
+        return addMonths(12);
       default:
         throw new Error(`Unknown frequency ${frequency}`);
     }
   }
 
+  /**
+   * Advance `nextRunDate` at least one period and strictly past `after`,
+   * preserving `from`'s day-of-month anchor across shorter months. Prevents
+   * an overdue schedule from firing hourly catch-up loops for missed periods.
+   */
+  static advancePast(from: Date, frequency: string, after: Date): Date {
+    const anchorDay = from.getUTCDate();
+    let next = RecurringExpenseService.computeNext(from, frequency, anchorDay);
+    while (next.getTime() <= after.getTime()) {
+      next = RecurringExpenseService.computeNext(next, frequency, anchorDay);
+    }
+    return next;
+  }
+
   /** Hourly scheduler tick. Public so tests + scripts can run it on demand. */
-  async processDueRecurringExpenses(): Promise<{ generated: number; failed: number }> {
+  async processDueRecurringExpenses(now: Date = new Date()): Promise<{ generated: number; failed: number }> {
     if (this.running) return { generated: 0, failed: 0 };
     this.running = true;
     let generated = 0;
     let failed = 0;
     try {
-      const now = new Date();
       const due = await this.prisma.client.recurringExpense.findMany({
         where: {
           isActive: true,
@@ -228,17 +446,21 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     return { generated, failed };
   }
 
-  /** Generate one expense for a schedule and roll its nextRunDate forward. */
+  /** Generate one expense for a schedule and roll its nextRunDate strictly past `now`. */
   async runOnce(recurringId: string, businessId: string, now: Date = new Date()) {
     const rec = await this.prisma.client.recurringExpense.findFirst({
       where: { id: recurringId, businessId, deletedAt: null },
     });
     if (!rec) throw new NotFoundException('Recurring expense not found');
     if (!rec.isActive) throw new BadRequestException('Schedule is not active');
+    if (rec.endDate && now > rec.endDate) {
+      throw new BadRequestException('Schedule has passed its end date');
+    }
 
-    const dueDate = rec.createsBill && rec.dueOffsetDays
-      ? new Date(now.getTime() + rec.dueOffsetDays * 86400000)
-      : undefined;
+    const dueDate =
+      rec.createsBill && typeof rec.dueOffsetDays === 'number' && Number.isFinite(rec.dueOffsetDays)
+        ? new Date(now.getTime() + rec.dueOffsetDays * 86400000)
+        : undefined;
 
     await this.expensesSvc.createExpense({
       businessId,
@@ -260,7 +482,7 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
       recurringFrequency: rec.frequency,
     });
 
-    const nextRunDate = RecurringExpenseService.computeNext(rec.nextRunDate, rec.frequency);
+    const nextRunDate = RecurringExpenseService.advancePast(rec.nextRunDate, rec.frequency, now);
     await this.prisma.client.recurringExpense.update({
       where: { id: rec.id },
       data: {
