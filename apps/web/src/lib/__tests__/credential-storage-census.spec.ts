@@ -27,29 +27,41 @@
  * localStorage, sessionStorage, indexedDB, objectStore, caches, cookieStore, document.cookie / document[, .cookies,
  * cookies(, set-cookie, window/self/globalThis .name) is parsed as JS by the same scanner (the text scanner if it does
  * not parse) and reported at host-file lines mapped through the raw text (CSC-37, CSC-43, CSC-48); so is the JSX
- * text of a <script> / <Script> element (CSC-45). A template substitution is resolved in the host file (a const, a
- * JSON.stringify of one); one that cannot be resolved in full, or whose own source names a credential, stands for a
- * secret, so the write fails closed (CSC-44, CSC-52, CSC-54). This
+ * text of a <script> / <Script> element (CSC-45). A template substitution goes through the key resolver in the host
+ * file (as a JSON.stringify of one, too); one it does not prove as a single string, or whose own source names a
+ * credential, stands for a secret, so the write fails closed (CSC-44, CSC-52, CSC-54, CSC-69). This
  * path errs toward counting: a string that only quotes a write (help text, an error message) counts as that write, a
  * deliberate, known false positive (CSC-47).
  * Response cookie jars include aliases (`const jar = res.cookies`, `res["cookies"]`, an aliased next/headers
  * `cookies` import); a Set-Cookie header name may be a const or a concatenation (CSC-38). In public/, a two-argument
  * put of request headers or the authorization header on any receiver is a Cache write, as is a put on a parameter
- * typed Cache anywhere (CSC-39). Keys resolve one hop through a same-file const object or enum (CSC-40).
+ * typed Cache anywhere (CSC-39).
  * A cookie may be built with `+`, a template or `[…].join("")`. A match inside a real comment is not a write; the
  * comments are the ones the TypeScript parser finds (commentRanges: the file parsed as TSX/TS/JSX/JS by its extension,
  * leading and trailing comment ranges at every node and token, none read where JSX text starts), so "/*" or "//" in a
  * string, a template, a regex literal or JSX text hides nothing.
  * A write that only clears (an empty value with Max-Age=0 / maxAge: 0) stores nothing and is not counted.
  *
- * Keys and names. Every key or name position (storage keys, cookieStore / response-cookie / document.cookie names,
- * cache names, wrapper calls, string code) goes through one resolver, resolveKeySet (rounds 12-13), on the host
- * file's AST: it either proves a finite set of runtime key strings or gives "*" for what it cannot prove, and a key
- * holding "*" is a credential write (fail closed). See resolveKeySet for the rules: scope-correct identifiers (only an
- * initialised const resolves; let / var / destructured / for / catch are "*"), parameters through their callers,
- * defaults and "undefined" (plus "*" when the function can be called from elsewhere or reassigns them), ternaries,
- * ||, ??, &&, +, templates, null / undefined as JS prints them, const-object members (last property wins) and enums,
- * same-file function returns, capped at 64 candidates. An empty set is never "no write".
+ * Keys and names (round 14). Every key or name position (storage keys, cookieStore / response-cookie /
+ * document.cookie / Set-Cookie names, Set-Cookie header names, cache and database names, string-code substitutions)
+ * goes through one resolver, resolveKeySet, on the host file's AST. It PROVES only this grammar, and nothing else:
+ *   - a string literal or a no-substitution template literal;
+ *   - an identifier bound to a TOP-LEVEL `const` of the same file whose initialiser is itself provable, where the
+ *     name is declared nowhere else in the file (no var, parameter, inner const, function, class, enum, import or
+ *     catch of that name) and is never the target of an assignment, ++ / --, delete, a destructuring pattern or a
+ *     for…of / for…in head; a file with a `with` statement or an `eval` call proves no const (provenConsts);
+ *   - `a + b` and templates whose every part is provable: the cartesian product, capped at 64;
+ *   - `a ? b : c`, `a || b` and `a ?? b` whose result branches are provable: the union, capped at 64;
+ *   - parentheses, `as T`, `satisfies T` and `!` around a provable expression;
+ *   - `null` and `undefined` (when the file declares no `undefined`) as the text "null" / "undefined", as a whole key
+ *     and inside `+` and templates.
+ * EVERYTHING ELSE IS "*": member access of any kind (const objects and enums included), any call (same-file functions
+ * and wrappers included), parameters, imports, let / var / using, numbers, `&&`, `void`, `await`, `<T>x`, tagged
+ * templates, computed names, and every identifier in a file that does not parse. A whole "*" is recorded as the key
+ * UNRESOLVED. A database or cache name, and a string-code substitution, must prove ONE string, else it is UNRESOLVED
+ * too. A Set-Cookie header name counts when it is proven to be "set-cookie", or when it is not proven and its source
+ * names a set-cookie (`H.SET_COOKIE`). Cookie VALUES and attributes are rendered by literalValue from the same
+ * proven pieces plus numbers, and a local const that is exactly the https-only Secure ternary (CSC-78).
  *
  * A write is a CREDENTIAL write when a resolved key holds "*", when it or the key's source text matches
  * CREDENTIAL_PATTERN (token, refresh, secret, session, auth, plus admin, verifier, password, jwt, bearer, credential,
@@ -58,8 +70,9 @@
  * and a const one hop away), when an IndexedDB or Cache Storage write keeps request headers, and always for
  * window.name. Every credential write must have a REGISTRY row (store, key, file) saying why it is there, and every
  * row must still match a write: a new unregistered write fails CSC-02, a stale row CSC-03. A row whose key holds "*"
- * is also pinned to the key's and the value's source text of the write it was read for (CSC-71), so another write of
- * that key shape in the file is unregistered. Every cookie row pins the attributes the source writes (CSC-12).
+ * or is UNRESOLVED is also pinned to the key's and the value's source text of the write it was read for (CSC-71), so
+ * another write of that key shape in the file is unregistered; each such row's reason was checked against the source.
+ * Every cookie row pins the attributes the source writes (CSC-12).
  *
  *   CSC-01 the scanner finds the writes it must (self-test on in-memory sources, including a new kf_new_token write).
  *   CSC-02 every credential write in the web app is registered.
@@ -72,8 +85,7 @@
  *   CSC-06..12 repair round 1, CSC-13..17 repair round 2, below.
  *
  * Known gaps, recorded as follow-ups (FU-CENSUS-HARDENING), not closed here:
- *   - receivers and channels: a storage wrapper defined in another file (only same-file wrappers and callers are
- *     followed; an exported function's parameters do take "*"); a bracket write on an aliased receiver
+ *   - receivers and channels: a bracket write on an aliased receiver
  *     (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `Object.defineProperty` on a store;
  *     `self.name` / `globalThis.name` writes; computed method names (`ls[m](k, v)`); `.call` / `.apply` / `.bind` /
  *     `Reflect.apply` on a write; a destructured `setItem`; a comma call (`(0, ls.setItem)(k, v)`); an aliased
@@ -83,7 +95,8 @@
  *   - cookie strings: a cookie built up in a variable (`let c = …; c += …; document.cookie = c`); a cookie string's
  *     VALUE and ATTRIBUTES still take a ternary's first resolvable branch (parseCookie), so `document.cookie =
  *     \`kf_session=${on ? token : ""}; Max-Age=${on ? age : 0}\`` reads as a clear (its NAME goes through the
- *     resolver);
+ *     resolver); a Set-Cookie header whose name is not proven and whose source does not name a set-cookie (an
+ *     imported `HDR` holding "Set-Cookie") is not seen (round 14: before it, imports and members were followed);
  *   - string code: code built by concatenating strings, `new Function(args, body)` with its parameters as keys,
  *     srcDoc HTML, data: URLs, minified dynamic code, comments inside string code, string code nested deeper than 3;
  *   - values are classed by pattern on their source text (VALUE_PATTERN), not resolved: a credential reached only
@@ -92,10 +105,10 @@
  * scanner only (a file with parse errors), a type literal `{ 'set-cookie': string }` reads as a response-cookie
  * write named "*", which is now classed as a credential write (CSC-30 pins that the tree has no such file).
  *
- * Counting (CSC_DUMP=1 prints one line per write found, sorted by file, line, store and key): a write reached through a
- * wrapper is one line per call site,
- * so the same id can print twice (cookie kf_sid @ presence-sdk.ts:93, once per writeCookie call). The registry has one
- * row per credential id.
+ * Counting (CSC_DUMP=1 prints one line per write found, sorted by file, line, store and key; CSC_PINS=1 prints each
+ * unregistered credential write with its key and value source text, for a new pinned row): one line per write and
+ * key candidate, so the same id can print twice (cacheStorage UNRESOLVED @ public/sw.js:311, an open and a put). The
+ * registry has one row per credential id, or per pinned write for UNRESOLVED and "*" keys.
  */
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
@@ -146,6 +159,10 @@ interface RegistryRow {
   valueExpr?: string;
 }
 
+/**
+ * The key a write is recorded under when the key resolver proves nothing about it (a whole "*"), and the placeholder
+ * for an unresolved string-code substitution: it names a secret, so the write fails closed (CSC-44).
+ */
 const UNRESOLVED = "__kf_unresolved_secret__";
 
 const CREDENTIAL_PATTERN = /token|refresh|secret|session|auth|admin|verifier|password|passwd|jwt|bearer|credential|api[_-]?key|(?:^|[^a-z])sid(?:[^a-z]|$)/i;
@@ -239,18 +256,11 @@ const REGISTRY: RegistryRow[] = [
 
 /* ------------------------------------------------------------------ scanner */
 
-/**
- * How the scanner reads a file. `read` returns another file's source by its path relative to apps/web (for an
- * imported const, one hop); `bindings` maps a wrapper's parameters to one call site's argument text.
- */
+/** How the scanner reads a file: its path (relative to apps/web), its source, and the write's offset in it. */
 interface Ctx {
   file: string;
   src: string;
-  read?: (rel: string) => string | null;
-  bindings?: Record<string, string>;
-  /** Each binding's call-site offset, so its argument text is resolved in the caller's scope. */
-  bindAt?: Record<string, number>;
-  /** The write's offset in src: a const declared nearest before it wins (constText). */
+  /** The write's offset in src (valueText: the const declared nearest before it). */
   at?: number;
 }
 
@@ -460,69 +470,6 @@ function constText(src: string, name: string, at?: number): string | null {
   return readExpr(src, m.index! + m[0].length, ",;", true).text;
 }
 
-/** Resolves an imported binding one hop: `import { A as B } from "./x"` → the const A in x. */
-function importedText(ctx: Ctx, name: string): { text: string; ctx: Ctx } | null {
-  if (!ctx.read) return null;
-  for (const m of ctx.src.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
-    for (const spec of m[1].split(",")) {
-      const [orig, local] = spec.trim().replace(/^type\s+/, "").split(/\s+as\s+/).map((x) => x.trim());
-      if ((local ?? orig) !== name) continue;
-      const from = m[2];
-      let base: string;
-      if (from.startsWith("@/")) base = `src/${from.slice(2)}`;
-      else if (from.startsWith(".")) base = path.posix.normalize(path.posix.join(path.posix.dirname(ctx.file), from));
-      else return null;
-      for (const ext of ["", ".ts", ".tsx", ".js", ".mjs", "/index.ts", "/index.tsx"]) {
-        const other = ctx.read(base + ext);
-        if (other === null) continue;
-        const text = constText(other, orig);
-        // One hop: the other file's own consts resolve, its imports do not.
-        return text === null ? null : { text, ctx: { file: base + ext, src: other } };
-      }
-      return null;
-    }
-  }
-  return null;
-}
-
-/** The index just past the `}` that closes the block opened at `open`. */
-function blockEnd(src: string, open: number): number {
-  let depth = 0;
-  let j = open;
-  while (j < src.length) {
-    const c = src[j];
-    if (c === '"' || c === "'") j = skipString(src, j);
-    else if (c === "`") j = skipTemplate(src, j);
-    else if (src.startsWith("//", j) || src.startsWith("/*", j)) j = skipWs(src, j);
-    else {
-      if (c === "{") depth++;
-      else if (c === "}" && --depth === 0) return j + 1;
-      j++;
-    }
-  }
-  return j;
-}
-
-/**
- * `function fn(…) { … return X` or `const fn = (…) => X`: the texts it can return (an expression body, or each
- * `return` in the block body, in order), or [] when fn is not a function of this file.
- */
-function functionReturnTexts(src: string, fn: string): string[] {
-  const name = fn.replace(/\$/g, "\\$");
-  const returns = (open: number) => {
-    const body = src.slice(open, blockEnd(src, open));
-    return [...body.matchAll(/\breturn\s+/g)].map((r) => readExpr(body, r.index! + r[0].length, ";", true).text);
-  };
-  const arrow = src.match(new RegExp(`\\b(?:const|let)\\s+${name}\\s*=\\s*(?:async\\s*)?(?:\\([^)]*\\)|[\\w$]+)\\s*(?::\\s*[^=]+)?=>\\s*`));
-  if (arrow && arrow.index !== undefined) {
-    const at = arrow.index + arrow[0].length;
-    return src[at] === "{" ? returns(at) : [readExpr(src, at, ",;", true).text];
-  }
-  const decl = src.match(new RegExp(`\\bfunction\\s+${name}\\s*\\([^)]*\\)[^{]*\\{`));
-  if (decl && decl.index !== undefined) return returns(decl.index + decl[0].length - 1);
-  return [];
-}
-
 /** `60 * 60 * 24` and the like: digits joined by * and +, else null. */
 function numberValue(t: string): string | null {
   if (!/^[\d_\s*+]+$/.test(t) || !/\d/.test(t)) return null;
@@ -531,10 +478,11 @@ function numberValue(t: string): string | null {
 }
 
 /**
- * The value of a key or cookie expression, as far as the source tells it: string and template literals, numbers,
- * `a + b`, a same-file const, a const imported one file away, a wrapper's bound argument, and a same-file function
- * that returns a template (CSC-09). An unknown piece is "*"; a wholly unknown expression is null. A `? "; Secure" : ""`
- * piece renders as "; secure-on-https" (CSC-12).
+ * The value of a cookie string or cookie attribute, as far as the source proves it (round 14: the key resolver's
+ * pieces plus numbers): string and template literals, numbers, `a + b`, and a proven top-level const (provenConsts).
+ * An unknown piece is "*"; a wholly unknown expression is null. A `? "; Secure" : ""` piece renders as
+ * "; secure-on-https" (CSC-12); any other ternary takes its first resolvable branch (a known gap, see the header).
+ * Cookie NAMES, database and cache names never come from here: they go through resolveKeySet.
  */
 function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
   const t = text.trim().replace(/\s+as\s+const$/, "");
@@ -564,43 +512,15 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
     }
     return null;
   }
-  // One-hop property access on a same-file const object or enum: K.a, K["a"], E.A (CSC6-SEC-4).
-  const member = t.match(/^([A-Za-z_$][\w$]*)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*(["'])([^"']*)\3\s*\])$/);
-  if (member) {
-    const [, obj, dotProp, , bracketProp] = member;
-    const prop = dotProp ?? bracketProp;
-    // Every regex character of the name escaped (COR7-5): K["a(b"] must not throw, K["a.b"] must not match aXb.
-    const p = prop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const propRe = (sep: string) => new RegExp(`(?:^|[{,\\s])(?:${p}|"${p}"|'${p}')\\s*${sep}\\s*`);
-    const objText = constText(ctx.src, obj, ctx.at);
-    if (objText !== null && objText.trim().startsWith("{")) {
-      const m = objText.match(propRe(":"));
-      if (m && m.index !== undefined) return literalValue(ctx, readExpr(objText, m.index + m[0].length, ",}").text, depth + 1);
-    }
-    const en = ctx.src.match(new RegExp(`\\benum\\s+${obj.replace(/\$/g, "\\$")}\\s*\\{`));
-    if (en && en.index !== undefined) {
-      const open = en.index + en[0].length - 1;
-      const body = ctx.src.slice(open, blockEnd(ctx.src, open));
-      const m = body.match(propRe("="));
-      if (m && m.index !== undefined) return literalValue(ctx, readExpr(body, m.index + m[0].length, ",}").text, depth + 1);
-    }
-  }
   if (IDENT.test(t)) {
-    if (ctx.bindings && Object.hasOwn(ctx.bindings, t)) return literalValue({ ...ctx, bindings: undefined }, ctx.bindings[t], depth + 1);
-    const own = constText(ctx.src, t, ctx.at);
-    if (own !== null) return literalValue(ctx, own, depth + 1);
-    const imported = importedText(ctx, t);
-    if (imported) return literalValue(imported.ctx, imported.text, depth + 1);
-    return null;
-  }
-  const call = t.match(/^([A-Za-z_$][\w$]*)\s*\(/);
-  if (call && t.endsWith(")")) {
-    // The first return that resolves to a key (`if (!owner) return null; return \`kf_…\`` resolves to the second).
-    for (const ret of functionReturnTexts(ctx.src, call[1])) {
-      if (/^(?:null|undefined|""|''|``)$/.test(ret)) continue;
-      const v = literalValue({ ...ctx, bindings: undefined }, ret, depth + 1);
-      if (v !== null) return v;
-    }
+    const parsed = parseFile(ctx.file, ctx.src);
+    const init = parsed.ok ? provenConsts(parsed.sf).consts.get(t) : undefined;
+    if (init) return literalValue(ctx, init.getText(parsed.sf), depth + 1);
+    // A local `const secure = isHttps() ? "; Secure" : ""` (workspace.ts): only the https-only Secure mark is read
+    // from an unproven const. It is an attribute, never a value or a Max-Age, so it cannot make a write a clear.
+    const local = constText(ctx.src, t, ctx.at);
+    const br = local === null ? null : ternaryBranches(local);
+    return br && /^(["'`]);\s*Secure\1$/i.test(br[0].trim()) && /^(["'`])\1$/.test(br[1].trim()) ? SECURE_MARK : null;
   }
   return null;
 }
@@ -608,74 +528,16 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
 /** The raw text a value expression stands for, one hop: an identifier's own const text is added (CSC-08). */
 function valueText(ctx: Ctx, text: string): string {
   const t = text.trim();
-  const hop = (id: string) => (ctx.bindings && Object.hasOwn(ctx.bindings, id) ? ctx.bindings[id] : constText(ctx.src, id, ctx.at));
+  const hop = (id: string) => constText(ctx.src, id, ctx.at);
   if (IDENT.test(t)) {
     const own = hop(t);
-    if (own !== null && own !== undefined) return `${t} ${own}`;
+    if (own !== null) return `${t} ${own}`;
   }
   // JSON.stringify(x) / String(x) of a const: x's own text too, one hop (CSC-13).
   const extra = [...t.matchAll(/\b(?:JSON\s*\.\s*stringify|String)\s*\(\s*([A-Za-z_$][\w$]*)\s*[,)]/g)]
     .map((m) => hop(m[1]))
-    .filter((x): x is string => typeof x === "string");
+    .filter((x): x is string => x !== null);
   return [t, ...extra].join(" ");
-}
-
-/** The parameter names in a parameter list's text (`a: string, b = 1, c?`). */
-const paramNames = (list: string) =>
-  list
-    .split(",")
-    .map((p) => p.trim().split(/[\s:=?]/)[0])
-    .filter((p) => p !== "");
-
-/**
- * The function that holds offset `at` and has `param` as a parameter (the innermost such, on the AST; round 13: not
- * an earlier function that happens to share the parameter name), its name and parameters, and whether it can be
- * called from elsewhere. A file that does not parse falls back to the nearest earlier regex match.
- */
-function wrapperOf(src: string, at: number, param: string): { fn: string; params: string[]; elsewhere: boolean } | null {
-  const parsed = parseCacheBySrc(src);
-  if (parsed && parsed.ok) {
-    const path = pathAt(parsed.sf, at);
-    for (let i = path.length - 1; i >= 0; i--) {
-      const node = path[i];
-      if (!ts.isFunctionLike(node)) continue;
-      const params = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ""));
-      if (!params.includes(param)) {
-        if (node.parameters.some((p) => bindsName(p.name, param))) return null;
-        continue;
-      }
-      const name = functionName(node);
-      return name ? { fn: name, params, elsewhere: calledFromElsewhere(parsed.sf, node) || reassignedIn(node, param) } : null;
-    }
-    return null;
-  }
-  const before = src.slice(0, at);
-  const re = /(?:function\s+([\w$]+)\s*\(|(?:const|let)\s+([\w$]+)\s*=\s*(?:async\s*)?\()([^)]*)\)/g;
-  let found: { fn: string; params: string[]; elsewhere: boolean } | null = null;
-  for (const m of before.matchAll(re)) {
-    const params = paramNames(m[3]);
-    if (params.includes(param)) found = { fn: m[1] ?? m[2], params, elsewhere: true };
-  }
-  return found;
-}
-
-/** The argument texts of each call to `fn` in the file (its declaration skipped). */
-function callSites(src: string, fn: string): Array<{ args: string[]; at: number }> {
-  const sites: Array<{ args: string[]; at: number }> = [];
-  const re = new RegExp(`(?<![\\w$.])${fn.replace(/\$/g, "\\$")}\\s*\\(`, "g");
-  for (const m of src.matchAll(re)) {
-    if (/(?:function|const|let)\s+$/.test(src.slice(Math.max(0, m.index! - 20), m.index!))) continue;
-    const args: string[] = [];
-    let i = m.index! + m[0].length;
-    for (;;) {
-      const r = readExpr(src, i);
-      if (r.text !== "") args.push(r.text);
-      if (src[r.end] !== ",") break;
-      i = r.end + 1;
-    }
-    sites.push({ args, at: m.index! });
-  }
-  return sites;
 }
 
 /**
@@ -702,13 +564,8 @@ function parseFile(file: string, src: string): { sf: ts.SourceFile; ok: boolean 
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
   const parsed = { sf, ok: (sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length === 0 };
   parseCache.set(cacheKey, parsed);
-  parseBySrc.set(src, parsed);
   return parsed;
 }
-
-/** The last parse of a source text, for helpers that only hold the text (wrapperOf), or undefined. */
-const parseBySrc = new Map<string, { sf: ts.SourceFile; ok: boolean }>();
-const parseCacheBySrc = (src: string) => parseBySrc.get(src);
 
 const commentCache = new Map<string, Array<[number, number]>>();
 function commentRanges(file: string, src: string): Array<[number, number]> {
@@ -806,27 +663,6 @@ function lineOf(src: string, at: number): number {
   return src.slice(0, at).split("\n").length;
 }
 
-/**
- * When `id` is a parameter of the enclosing function, one context per call site with the parameters bound;
- * otherwise the context itself.
- */
-function contexts(ctx: Ctx, at: number, id: string | undefined): Ctx[] {
-  if (!id || !IDENT.test(id)) return [ctx];
-  const w = wrapperOf(ctx.src, at, id);
-  if (!w) return [ctx];
-  const sites = callSites(ctx.src, w.fn);
-  if (sites.length === 0) return [ctx];
-  const bound = sites.map((s) => ({
-    ...ctx,
-    // A missing argument is left unbound: the resolver then takes the parameter's default (or "undefined").
-    bindings: Object.fromEntries(w.params.flatMap((p, i) => (s.args[i] !== undefined ? [[p, s.args[i]]] : []))),
-    bindAt: Object.fromEntries(w.params.map((p) => [p, s.at])),
-  }));
-  // A wrapper that can be called from elsewhere also gets the unbound context: its parameter then resolves to "*"
-  // too (CSC-70).
-  return w.elsewhere ? [...bound, ctx] : bound;
-}
-
 /** A cookie string rendered from its source: name, value and the attributes (lower-case, in order). */
 function parseCookie(ctx: Ctx, raw: string): { name: string; value: string; attrs: string[] } {
   const rendered = literalValue(ctx, raw) ?? "*";
@@ -863,179 +699,126 @@ const isClear = (value: string, attrs: string[]) =>
 
 const KEY_CAP = 64;
 
-/* ------------------------------------------------------------ key resolver (rounds 12-13) */
+/* -------------------------------------------------- key resolver (round 14: the proven grammar, nothing else) */
 
-type Decl =
-  | { kind: "const"; init: ts.Expression }
-  | { kind: "param"; fn: ts.SignatureDeclaration; index: number; param: ts.ParameterDeclaration }
-  | { kind: "function"; fn: ts.FunctionLikeDeclaration }
-  | { kind: "enum"; decl: ts.EnumDeclaration }
-  | { kind: "import" }
-  | { kind: "unknown" }
-  | { kind: "none" };
-
-/** The nodes from the file down to the deepest one that holds offset `at`. */
-function pathAt(sf: ts.SourceFile, at: number): ts.Node[] {
-  const path: ts.Node[] = [sf];
-  let node: ts.Node = sf;
-  for (;;) {
-    let next: ts.Node | undefined;
-    ts.forEachChild(node, (c) => {
-      if (next === undefined && c.getStart(sf) <= at && at < c.end) next = c;
-    });
-    if (!next) return path;
-    path.push(next);
-    node = next;
-  }
+/** What a parsed file lets the resolver read: its proven top-level consts, and every name it declares anywhere. */
+interface ConstFacts {
+  consts: Map<string, ts.Expression>;
+  declared: Set<string>;
 }
 
-const bindsName = (b: ts.BindingName, name: string): boolean =>
-  ts.isIdentifier(b) ? b.text === name : b.elements.some((e) => !ts.isOmittedExpression(e) && bindsName(e.name, name));
+const isAssignOp = (k: ts.SyntaxKind) => k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
 
-/** The declaration of `name` visible at `at`: the innermost scope wins (a parameter before an outer const). */
-function lookupDecl(sf: ts.SourceFile, name: string, at: number): Decl {
-  const path = pathAt(sf, at);
-  const inStatements = (statements: readonly ts.Statement[]): Decl | null => {
-    for (const st of statements) {
-      if (ts.isVariableStatement(st)) {
-        const isConst = (st.declarationList.flags & ts.NodeFlags.Const) !== 0;
-        for (const d of st.declarationList.declarations) {
-          if (!bindsName(d.name, name)) continue;
-          return isConst && ts.isIdentifier(d.name) && d.initializer ? { kind: "const", init: d.initializer } : { kind: "unknown" };
-        }
-      } else if (ts.isFunctionDeclaration(st) && st.name?.text === name) return { kind: "function", fn: st };
-      else if (ts.isEnumDeclaration(st) && st.name.text === name) return { kind: "enum", decl: st };
-      else if (ts.isClassDeclaration(st) && st.name?.text === name) return { kind: "unknown" };
-      else if (ts.isImportDeclaration(st) && st.importClause) {
-        const ic = st.importClause;
-        if (ic.name?.text === name) return { kind: "import" };
-        const nb = ic.namedBindings;
-        if (nb && ts.isNamespaceImport(nb) && nb.name.text === name) return { kind: "import" };
-        if (nb && ts.isNamedImports(nb) && nb.elements.some((e) => e.name.text === name)) return { kind: "import" };
-      }
-    }
-    return null;
-  };
-  for (let i = path.length - 1; i >= 0; i--) {
-    const node = path[i];
-    if (ts.isFunctionLike(node)) {
-      const idx = node.parameters.findIndex((p) => bindsName(p.name, name));
-      if (idx !== -1) {
-        const p = node.parameters[idx];
-        return ts.isIdentifier(p.name) ? { kind: "param", fn: node, index: idx, param: p } : { kind: "unknown" };
-      }
-      if ((ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) && node.name?.text === name) return { kind: "function", fn: node };
-    }
-    if (ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseClause(node) || ts.isDefaultClause(node)) {
-      const d = inStatements(node.statements);
-      if (d) return d;
-    }
-    if ((ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node)) && node.initializer && ts.isVariableDeclarationList(node.initializer)) {
-      if (node.initializer.declarations.some((d) => bindsName(d.name, name))) return { kind: "unknown" };
-    }
-    if (ts.isCatchClause(node) && node.variableDeclaration && bindsName(node.variableDeclaration.name, name)) return { kind: "unknown" };
-  }
-  return { kind: "none" };
-}
-
-/** A function-like's name as callers write it: its own name, or the const / let it is assigned to. */
-function functionName(fn: ts.SignatureDeclaration): string | null {
-  if ((ts.isFunctionDeclaration(fn) || ts.isFunctionExpression(fn)) && fn.name) return fn.name.text;
-  const p = fn.parent;
-  if (p && ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) return p.name.text;
-  return null;
+/** Is this identifier the name a declaration binds: a variable, binding element, parameter, function, class, enum, namespace or import, in any scope? */
+function isDeclName(n: ts.Identifier): boolean {
+  const p = n.parent;
+  return (
+    (ts.isVariableDeclaration(p) ||
+      ts.isBindingElement(p) ||
+      ts.isParameter(p) ||
+      ts.isFunctionDeclaration(p) ||
+      ts.isFunctionExpression(p) ||
+      ts.isClassDeclaration(p) ||
+      ts.isClassExpression(p) ||
+      ts.isEnumDeclaration(p) ||
+      ts.isModuleDeclaration(p) ||
+      ts.isImportClause(p) ||
+      ts.isNamespaceImport(p) ||
+      ts.isImportSpecifier(p) ||
+      ts.isImportEqualsDeclaration(p)) &&
+    p.name === n
+  );
 }
 
 /**
- * Can a function be called from somewhere this file does not show (CSC-70)? Exported (directly, by default, or by
- * name), anonymous, or used as a value (passed, stored, returned) rather than only called.
+ * Is this identifier written: the target of an assignment (any operator, through parentheses, `as`, `!` and
+ * destructuring patterns), the head of a for…of / for…in, the operand of ++ / --, or of delete?
  */
-function calledFromElsewhere(sf: ts.SourceFile, fn: ts.SignatureDeclaration): boolean {
-  const name = functionName(fn);
-  if (!name) return true;
-  const holder = ts.isVariableDeclaration(fn.parent) ? fn.parent.parent?.parent : fn;
-  const mods = holder && ts.canHaveModifiers(holder) ? (ts.getModifiers(holder) ?? []) : [];
-  if (mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword || m.kind === ts.SyntaxKind.DefaultKeyword)) return true;
-  let asValue = false;
+function isWritten(n: ts.Identifier): boolean {
+  let cur: ts.Node = n;
+  for (;;) {
+    const p = cur.parent;
+    if (!p) return false;
+    const wraps =
+      (ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p) || ts.isAsExpression(p) || ts.isSatisfiesExpression(p) || ts.isTypeAssertionExpression(p)) &&
+      p.expression === cur;
+    const inPattern =
+      (ts.isShorthandPropertyAssignment(p) && p.name === cur) ||
+      (ts.isPropertyAssignment(p) && p.initializer === cur) ||
+      ts.isSpreadAssignment(p) ||
+      ts.isSpreadElement(p) ||
+      ts.isObjectLiteralExpression(p) ||
+      ts.isArrayLiteralExpression(p);
+    if (wraps || inPattern) {
+      cur = p;
+      continue;
+    }
+    if (ts.isBinaryExpression(p)) return p.left === cur && isAssignOp(p.operatorToken.kind);
+    if (ts.isForOfStatement(p) || ts.isForInStatement(p)) return p.initializer === cur;
+    if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) {
+      return p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken;
+    }
+    return ts.isDeleteExpression(p);
+  }
+}
+
+const factsCache = new WeakMap<ts.SourceFile, ConstFacts>();
+/**
+ * The consts the resolver may read in a file that parses: a TOP-LEVEL `const NAME = init` (an identifier binding;
+ * not let, var or using) where NAME is declared nowhere else in the file (no var, parameter, inner const, function,
+ * class, enum, import or catch of that name, so no scope holds another NAME) and is never written (isWritten). A
+ * file with a `with` statement or an `eval` call proves no const: either can put another NAME in scope.
+ */
+function provenConsts(sf: ts.SourceFile): ConstFacts {
+  const hit = factsCache.get(sf);
+  if (hit) return hit;
+  const top = new Map<string, ts.Expression>();
+  for (const st of sf.statements) {
+    if (!ts.isVariableStatement(st)) continue;
+    const list = st.declarationList;
+    if ((list.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) !== ts.NodeFlags.Const) continue;
+    for (const d of list.declarations) if (ts.isIdentifier(d.name) && d.initializer) top.set(d.name.text, d.initializer);
+  }
+  const decls = new Map<string, number>();
+  const written = new Set<string>();
+  let opaque = false;
   const visit = (n: ts.Node) => {
-    if (asValue) return;
-    if (ts.isIdentifier(n) && n.text === name) {
-      const p = n.parent;
-      const isOwnName = (ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p) || ts.isVariableDeclaration(p)) && p.name === n;
-      const isCallee = ts.isCallExpression(p) && p.expression === n;
-      if (!isOwnName && !isCallee) asValue = true;
+    if (ts.isWithStatement(n)) opaque = true;
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "eval") opaque = true;
+    if (ts.isIdentifier(n)) {
+      if (isDeclName(n)) decls.set(n.text, (decls.get(n.text) ?? 0) + 1);
+      else if (isWritten(n)) written.add(n.text);
     }
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  return asValue;
+  const consts = new Map<string, ts.Expression>();
+  if (!opaque) for (const [name, init] of top) if (decls.get(name) === 1 && !written.has(name)) consts.set(name, init);
+  const facts = { consts, declared: new Set(decls.keys()) };
+  factsCache.set(sf, facts);
+  return facts;
 }
-
-/** Is `name` assigned (=, op=, ++, --) anywhere inside `fn`? */
-function reassignedIn(fn: ts.Node, name: string): boolean {
-  let found = false;
-  const visit = (n: ts.Node) => {
-    if (found) return;
-    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(n.left) && n.left.text === name) found = true;
-    if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && ts.isIdentifier(n.operand) && n.operand.text === name) {
-      if (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) found = true;
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(fn);
-  return found;
-}
-
-/** The expressions a function can return: an expression body, each return (bare → undefined), and undefined when the body can end without one. */
-function returnExprs(fn: ts.FunctionLikeDeclaration): Array<ts.Expression | "undefined"> {
-  if (!fn.body) return ["undefined"];
-  if (!ts.isBlock(fn.body)) return [fn.body];
-  const out: Array<ts.Expression | "undefined"> = [];
-  const visit = (n: ts.Node) => {
-    if (ts.isFunctionLike(n)) return;
-    if (ts.isReturnStatement(n)) out.push(n.expression ?? "undefined");
-    ts.forEachChild(n, visit);
-  };
-  fn.body.statements.forEach(visit);
-  const last = fn.body.statements[fn.body.statements.length - 1];
-  if (!last || !ts.isReturnStatement(last)) out.push("undefined");
-  return out;
-}
-
-/** A binding of a parameter: the expression it takes (in its own file and scope), or a fixed string. */
-type Bind =
-  | { expr: ts.Expression; sf: ts.SourceFile; ctx: Ctx; env: Env }
-  | { literal: string }
-  | { star: true }
-  | { text: string; at: number | undefined };
-type Env = ReadonlyMap<string, Bind>;
 
 /**
- * The key resolver: one structural resolver for every key or name position the census reads (storage setItem and
- * bracket or property assignment, cookieStore.set and response cookies().set names, document.cookie names,
- * caches.open, wrapper calls, string code). The key TEXT is parsed as a TypeScript expression and every identifier,
- * member and call in it is resolved on the HOST file's AST, scope by scope. It PROVES a finite set of runtime key
- * strings, or gives "*" for what it cannot prove (round 13); an empty set is never "no write":
- *   - a string or no-substitution template: itself; a number: itself; null / undefined / void: the strings JS gives,
- *     "null" and "undefined", as a whole key and inside "+" and templates;
- *   - an identifier: its innermost declaration at that point. An initialised const: its initialiser, in its own
- *     scope. let / var / destructured / for / catch / class: "*". A parameter bound by a call being resolved: the
- *     argument, its default, or "undefined". An unbound parameter: its same-file callers' arguments (default or
- *     "undefined" when one is missing), plus "*" when the function can be called from elsewhere (exported, anonymous,
- *     used as a value) or reassigns it, or has no callers. A const imported one file away: resolved there. Else "*";
- *   - `a ? b : c`: b and c; `a || b`, `a ?? b`, `a && b`: a and b; `+` and templates: the product of the parts;
- *   - `K.a`, `K["a"]` on a same-file const object (the LAST property of that name; a spread after it, a getter or a
- *     method, or no such property: "*") or enum member; String(x): x;
- *   - a call of a same-file function: each of its returns (undefined when its body can end without one), its
- *     parameters bound to the call's arguments or defaults;
- *   - parentheses, as, satisfies, !, <T>x, await: the inner expression; anything else: "*".
- * A union or product over KEY_CAP candidates is "*". A write whose key holds "*" is a credential write
- * (isCredential), so whatever is not proven fails closed. A file that does not parse resolves only `const NAME =`
- * initialisers by text (constText) and gives "*" for the rest.
+ * The key resolver (round 14). Every key or name position the census reads goes through it: storage setItem and
+ * bracket or property assignment, cookieStore.set and response cookies().set names, document.cookie and Set-Cookie
+ * names, Set-Cookie header names, caches.open and cache put names, indexedDB.open names, and string-code
+ * substitutions. The key TEXT is parsed as an expression and PROVEN on the host file's AST by this grammar only:
+ *   - a string literal or a no-substitution template literal: its text;
+ *   - `null`: "null"; `undefined` (when the file declares no `undefined`): "undefined"; as a whole key and inside
+ *     `+` and templates, as JS prints them;
+ *   - an identifier bound to a proven top-level const (provenConsts) whose initialiser is itself provable;
+ *   - `a + b`, and a template, whose every part is provable: the product of the parts;
+ *   - `a ? b : c`: b and c; `a || b` and `a ?? b`: a and b (every branch must be provable);
+ *   - parentheses, `as T`, `satisfies T` and `!` around a provable expression.
+ * Everything else is "*": member access of any kind (const objects and enums included), any call (same-file
+ * functions and wrappers included), parameters, imports, let / var, numbers, `&&`, `void`, `await`, `<T>x`, tagged
+ * templates, and every identifier in a file that does not parse. A union or product over KEY_CAP candidates is "*".
+ * A write whose key holds "*" is a credential write (isCredential).
  */
-function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<ts.Node> = new Set()): string[] {
+function resolveKeySet(ctx: Ctx, text: string): string[] {
   const t = text.trim();
-  if (t === "" || depth > 12) return ["*"];
+  if (t === "") return ["*"];
   const ksf = ts.createSourceFile("key.ts", `(${t}\n);`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const st = ksf.statements[0];
   if (
@@ -1047,15 +830,9 @@ function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<ts.N
   ) {
     return ["*"];
   }
-  // The wrapper bindings of this context (contexts(): one call site's arguments), as an Env.
-  const env = new Map<string, Bind>();
-  for (const [k, v] of Object.entries(ctx.bindings ?? {})) env.set(k, { text: v, at: ctx.bindAt?.[k] });
-  const out = resolveNode(ctx, ksf, st.expression.expression, ctx.at ?? 0, env, depth, seen);
-  return out.length === 0 ? ["*"] : out;
-}
-
-function resolveNode(ctx: Ctx, nsf: ts.SourceFile, node: ts.Expression, at: number, env: Env, depth: number, seen: ReadonlySet<ts.Node>): string[] {
   const host = parseFile(ctx.file, ctx.src);
+  const facts = host.ok ? provenConsts(host.sf) : null;
+  const memo = new Map<ts.Expression, string[]>();
   const union = (...sets: string[][]) => {
     const out = [...new Set(sets.flat())];
     return out.length > KEY_CAP ? ["*"] : out;
@@ -1063,7 +840,6 @@ function resolveNode(ctx: Ctx, nsf: ts.SourceFile, node: ts.Expression, at: numb
   const product = (sets: string[][]) => {
     let acc = [""];
     for (const set of sets) {
-      if (set.length === 0) return ["*"];
       const next: string[] = [];
       for (const a of acc) for (const b of set) next.push(a + b);
       acc = [...new Set(next)];
@@ -1071,186 +847,44 @@ function resolveNode(ctx: Ctx, nsf: ts.SourceFile, node: ts.Expression, at: numb
     }
     return acc;
   };
-  /** Resolve a host-file expression at its own position. */
-  const hostExpr = (e: ts.Expression, withEnv: Env = new Map(), more: ReadonlySet<ts.Node> = seen) =>
-    resolveNode(ctx, host.sf, e, e.getStart(host.sf), withEnv, depth + 1, more);
-  const fromBind = (b: Bind, more: ReadonlySet<ts.Node>): string[] => {
-    if ("star" in b) return ["*"];
-    if ("literal" in b) return [b.literal];
-    // A wrapper binding from contexts() is argument TEXT at its call site: resolved there, as a key of its own.
-    if ("text" in b) return resolveKeySet({ ...ctx, bindings: undefined, bindAt: undefined, at: b.at }, b.text, depth + 1);
-    return resolveNode(b.ctx, b.sf, b.expr, b.expr.getStart(b.sf), b.env, depth + 1, more);
-  };
-  /** The object literal or enum an expression names, in the host file, or null. */
-  const containerOf = (e: ts.Expression): ts.ObjectLiteralExpression | ts.EnumDeclaration | null => {
-    let u = e;
-    while (ts.isParenthesizedExpression(u) || ts.isAsExpression(u) || ts.isSatisfiesExpression(u) || ts.isNonNullExpression(u)) u = u.expression;
-    if (ts.isIdentifier(u)) {
-      if (!host.ok) return null;
-      const d = lookupDecl(host.sf, u.text, nsf === host.sf ? u.getStart(nsf) : at);
-      if (d.kind === "enum") return d.decl;
-      if (d.kind !== "const") return null;
-      let init = d.init;
-      while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isSatisfiesExpression(init)) init = init.expression;
-      return ts.isObjectLiteralExpression(init) ? init : null;
-    }
-    if (ts.isPropertyAccessExpression(u) || (ts.isElementAccessExpression(u) && ts.isStringLiteralLike(u.argumentExpression))) {
-      const parent = containerOf(u.expression);
-      if (!parent || !ts.isObjectLiteralExpression(parent)) return null;
-      const prop = ts.isPropertyAccessExpression(u) ? u.name.text : (u.argumentExpression as ts.StringLiteralLike).text;
-      const member = memberOf(parent, prop);
-      if (!member || !ts.isPropertyAssignment(member)) return null;
-      let init = member.initializer;
-      while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init)) init = init.expression;
-      return ts.isObjectLiteralExpression(init) ? init : null;
-    }
-    return null;
-  };
-  /** The LAST member of an object literal named `prop`, or null when a spread follows it or it is missing. */
-  const memberOf = (obj: ts.ObjectLiteralExpression, prop: string): ts.ObjectLiteralElementLike | null => {
-    let found: ts.ObjectLiteralElementLike | null = null;
-    for (const p of obj.properties) {
-      if (ts.isSpreadAssignment(p)) {
-        found = null;
-        continue;
-      }
-      const n = p.name;
-      const pn = n && (ts.isIdentifier(n) || ts.isStringLiteralLike(n) || ts.isNumericLiteral(n)) ? n.text : undefined;
-      if (pn === prop) found = p;
-    }
-    return found;
-  };
-  const go = (n: ts.Expression): string[] => {
-    if (
-      ts.isParenthesizedExpression(n) ||
-      ts.isAsExpression(n) ||
-      ts.isSatisfiesExpression(n) ||
-      ts.isNonNullExpression(n) ||
-      ts.isTypeAssertionExpression(n) ||
-      ts.isAwaitExpression(n)
-    ) {
-      return go(n.expression);
-    }
-    if (ts.isStringLiteralLike(n) || ts.isNumericLiteral(n)) return [n.text];
+  const prove = (n: ts.Expression, seen: ReadonlySet<ts.Expression>): string[] => {
+    if (ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isSatisfiesExpression(n) || ts.isNonNullExpression(n)) return prove(n.expression, seen);
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return [n.text];
     if (n.kind === ts.SyntaxKind.NullKeyword) return ["null"];
-    if (ts.isVoidExpression(n)) return ["undefined"];
-    if (ts.isConditionalExpression(n)) return union(go(n.whenTrue), go(n.whenFalse));
-    if (ts.isBinaryExpression(n)) {
-      const op = n.operatorToken.kind;
-      if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.AmpersandAmpersandToken) {
-        return union(go(n.left), go(n.right));
-      }
-      if (op === ts.SyntaxKind.PlusToken) return product([go(n.left), go(n.right)]);
-      return ["*"];
+    if (ts.isIdentifier(n)) {
+      if (!facts) return ["*"];
+      if (n.text === "undefined") return facts.declared.has("undefined") ? ["*"] : ["undefined"];
+      const init = facts.consts.get(n.text);
+      if (!init || seen.has(init)) return ["*"];
+      const known = memo.get(init);
+      if (known) return known;
+      const out = prove(init, new Set([...seen, init]));
+      memo.set(init, out);
+      return out;
     }
     if (ts.isTemplateExpression(n)) {
-      return product([[n.head.text], ...n.templateSpans.flatMap((sp) => [go(sp.expression), [sp.literal.text]])]);
+      return product([[n.head.text], ...n.templateSpans.flatMap((sp) => [prove(sp.expression, seen), [sp.literal.text]])]);
     }
-    if (ts.isIdentifier(n)) {
-      const name = n.text;
-      if (name === "undefined") return ["undefined"];
-      if (env.has(name)) return fromBind(env.get(name)!, seen);
-      const pos = nsf === host.sf ? n.getStart(nsf) : at;
-      if (!host.ok) {
-        // A file that does not parse: only a `const NAME =` initialiser, by text.
-        const m = ctx.src.match(new RegExp(`\\bconst\\s+${name.replace(/\$/g, "\\$")}\\s*(?::[^=;\\n]+)?=(?!=)`));
-        if (!m) return ["*"];
-        const own = constText(ctx.src, name, pos);
-        return own === null ? ["*"] : resolveKeySet({ ...ctx, bindings: undefined, at: pos }, own, depth + 1);
-      }
-      const d = lookupDecl(host.sf, name, pos);
-      if (d.kind === "const") {
-        if (seen.has(d.init)) return ["*"];
-        return hostExpr(d.init, new Map(), new Set([...seen, d.init]));
-      }
-      if (d.kind === "param") {
-        if (seen.has(d.fn)) return ["*"];
-        const more = new Set<ts.Node>([...seen, d.fn]);
-        const fnName = functionName(d.fn);
-        const sets: string[][] = [];
-        if (calledFromElsewhere(host.sf, d.fn) || reassignedIn(d.fn, name) || d.param.dotDotDotToken) sets.push(["*"]);
-        const calls: ts.CallExpression[] = [];
-        if (fnName) {
-          const visit = (k: ts.Node) => {
-            if (ts.isCallExpression(k) && ts.isIdentifier(k.expression) && k.expression.text === fnName) calls.push(k);
-            ts.forEachChild(k, visit);
-          };
-          visit(host.sf);
-        }
-        if (calls.length === 0) sets.push(["*"]);
-        for (const call of calls) {
-          const arg = call.arguments[d.index];
-          if (arg && ts.isSpreadElement(arg)) sets.push(["*"]);
-          else if (arg) sets.push(hostExpr(arg, new Map(), more));
-          else if (d.param.initializer) sets.push(hostExpr(d.param.initializer, new Map(), more));
-          else sets.push(["undefined"]);
-        }
-        return union(...sets);
-      }
-      if (d.kind === "import") {
-        const imported = importedText(ctx, name);
-        return imported ? resolveKeySet({ ...imported.ctx, read: ctx.read }, imported.text, depth + 1) : ["*"];
-      }
+    if (ts.isBinaryExpression(n)) {
+      const op = n.operatorToken.kind;
+      if (op === ts.SyntaxKind.PlusToken) return product([prove(n.left, seen), prove(n.right, seen)]);
+      if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) return union(prove(n.left, seen), prove(n.right, seen));
       return ["*"];
     }
-    if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
-      const prop = ts.isPropertyAccessExpression(n) ? n.name.text : ts.isStringLiteralLike(n.argumentExpression) ? n.argumentExpression.text : null;
-      if (prop === null) return ["*"];
-      const c = containerOf(n.expression);
-      if (!c) return ["*"];
-      if (ts.isEnumDeclaration(c)) {
-        const m = c.members.find((x) => (ts.isIdentifier(x.name) || ts.isStringLiteral(x.name)) && x.name.text === prop);
-        return m?.initializer ? hostExpr(m.initializer) : ["*"];
-      }
-      const member = memberOf(c, prop);
-      if (!member) return ["*"];
-      if (ts.isPropertyAssignment(member)) return hostExpr(member.initializer);
-      if (ts.isShorthandPropertyAssignment(member)) return hostExpr(member.name);
-      return ["*"];
-    }
-    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && !n.questionDotToken) {
-      const fnName = n.expression.text;
-      const pos = nsf === host.sf ? n.getStart(nsf) : at;
-      const d = host.ok ? lookupDecl(host.sf, fnName, pos) : ({ kind: "none" } as Decl);
-      if (d.kind === "none" && fnName === "String" && n.arguments.length === 1) return go(n.arguments[0]);
-      let fn: ts.FunctionLikeDeclaration | null = null;
-      if (d.kind === "function") fn = d.fn;
-      if (d.kind === "const") {
-        let init = d.init;
-        while (ts.isParenthesizedExpression(init)) init = init.expression;
-        if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) fn = init;
-      }
-      if (!fn || seen.has(fn)) return ["*"];
-      const more = new Set<ts.Node>([...seen, fn]);
-      const calleeEnv = new Map<string, Bind>();
-      fn.parameters.forEach((p, i) => {
-        const arg = n.arguments[i];
-        const names: string[] = [];
-        const collect = (b: ts.BindingName) => {
-          if (ts.isIdentifier(b)) names.push(b.text);
-          else for (const e of b.elements) if (!ts.isOmittedExpression(e)) collect(e.name);
-        };
-        collect(p.name);
-        if (!ts.isIdentifier(p.name) || p.dotDotDotToken || (arg && ts.isSpreadElement(arg)) || reassignedIn(fn!, names[0])) {
-          for (const nm of names) calleeEnv.set(nm, { star: true });
-          return;
-        }
-        if (arg) calleeEnv.set(p.name.text, { expr: arg, sf: nsf, ctx, env });
-        else if (p.initializer) calleeEnv.set(p.name.text, { expr: p.initializer, sf: host.sf, ctx, env: new Map(calleeEnv) });
-        else calleeEnv.set(p.name.text, { literal: "undefined" });
-      });
-      return union(
-        ...returnExprs(fn).map((r) => (r === "undefined" ? ["undefined"] : resolveNode(ctx, host.sf, r, r.getStart(host.sf), calleeEnv, depth + 1, more))),
-      );
-    }
+    if (ts.isConditionalExpression(n)) return union(prove(n.whenTrue, seen), prove(n.whenFalse, seen));
     return ["*"];
   };
-  if (depth > 12) return ["*"];
-  return go(node);
+  return prove(st.expression.expression, new Set());
 }
 
 /** A resolved key set as the keys a write is recorded under: "*" alone is UNRESOLVED; other "*" parts stay. */
-const keysFrom = (set: string[]) => [...new Set((set.length === 0 ? ["*"] : set).map((k) => (k === "*" ? UNRESOLVED : k)))];
+const keysFrom = (set: string[]) => [...new Set(set.map((k) => (k === "*" ? UNRESOLVED : k)))];
+
+/** A position that names one thing (a database or a cache): its one proven name, else UNRESOLVED. */
+const oneName = (ctx: Ctx, text: string) => {
+  const keys = keysFrom(resolveKeySet(ctx, text));
+  return keys.length === 1 ? keys[0] : UNRESOLVED;
+};
 
 /** Each write's offset in the source it was found in (kept out of the Write objects, so they keep their shape). */
 const writeOffsets = new WeakMap<Write, number>();
@@ -1259,14 +893,9 @@ const writeOffsets = new WeakMap<Write, number>();
 function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write, "file" | "line">, at: number) => void) {
   /** A keyed store write: key expression, value expression. */
   const keyed = (store: Store, keyExpr: string, valueExpr: string, at: number) => {
-    const id = IDENT.test(keyExpr.trim()) ? keyExpr.trim() : undefined;
-    for (const c of contexts({ ...base, at }, at, id)) {
-      // Every candidate the key resolver gives is a write (round 12); a "*" part fails closed (isCredential).
-      for (const key of keysFrom(resolveKeySet(c, keyExpr))) {
-        const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${key})` : keyExpr;
-        push({ store, key, expr, value: valueText(c, valueExpr) }, at);
-      }
-    }
+    const c = { ...base, at };
+    // Every candidate the key resolver gives is a write (round 12); a "*" part fails closed (isCredential).
+    for (const key of keysFrom(resolveKeySet(c, keyExpr))) push({ store, key, expr: keyExpr, value: valueText(c, valueExpr) }, at);
   };
 
   /** A cookie string write (document.cookie, a Set-Cookie header). */
@@ -1274,19 +903,14 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
     // [NAME, "=", t].join("") builds the same string as NAME + "=" + t (CSC-16).
     const joined = rawIn.match(/^\[([\s\S]*)\]\s*\.\s*join\s*\(\s*(?:(["'`])([\s\S]*?)\2)?\s*\)$/);
     const raw = joined ? splitTop(joined[1], ",").filter((x) => x !== "").join(joined[3] ? ` + ${JSON.stringify(joined[3])} + ` : " + ") : rawIn;
-    const id = raw.match(/^`\$\{\s*([\w$]+)\s*\}=/)?.[1];
-    for (const c of contexts({ ...base, at }, at, id)) {
-      const { name: firstName, value, attrs } = parseCookie(c, raw);
-      if (isClear(value, attrs)) continue;
-      const keySource = raw.split("=")[0];
-      const valueSource = raw.slice(raw.indexOf("=") + 1).split(";")[0];
-      // The cookie's name through the key resolver (round 12): each candidate string's part before its first "=".
-      const names = keysFrom(resolveKeySet(c, raw).map((k) => (k.includes("=") ? k.slice(0, k.indexOf("=")).trim() : "*")));
-      for (const name of names.length > 0 ? names : [firstName]) {
-        const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${name})` : keySource;
-        push({ store, key: name, expr, value: valueText(c, valueSource), attrs }, at);
-      }
-    }
+    const c = { ...base, at };
+    const { value, attrs } = parseCookie(c, raw);
+    if (isClear(value, attrs)) return;
+    const keySource = raw.split("=")[0];
+    const valueSource = raw.slice(raw.indexOf("=") + 1).split(";")[0];
+    // The cookie's name through the key resolver (round 12): each candidate string's part before its first "=".
+    const names = keysFrom(resolveKeySet(c, raw).map((k) => (k.includes("=") ? k.slice(0, k.indexOf("=")).trim() : "*")));
+    for (const name of names) push({ store, key: name, expr: keySource, value: valueText(c, valueSource), attrs }, at);
   };
 
   /** A Set-Cookie value: one cookie string, or an array of them. */
@@ -1322,7 +946,7 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
   /** A Cache Storage put into the cache opened as `nameExpr`. */
   const cachePut = (at: number, reqText: string, resText: string, nameExpr: string) => {
     const c = { ...base, at };
-    push({ store: "cacheStorage", key: literalValue(c, nameExpr) ?? nameExpr, expr: nameExpr, value: `${valueText(c, reqText)} ${valueText(c, resText)}` }, at);
+    push({ store: "cacheStorage", key: oneName(c, nameExpr), expr: nameExpr, value: `${valueText(c, reqText)} ${valueText(c, resText)}` }, at);
   };
 
   return { keyed, cookieString, setCookieValue, cookieArgs, cachePut };
@@ -1456,7 +1080,7 @@ function scanSourceText(file: string, src: string, base: Ctx): Write[] {
   // store (kf-sync-queue, CSC-10). Otherwise each write is its own, database "*".
   const opens = [...src.matchAll(/indexedDB\s*\.\s*open\s*\(/g)].map((m) => {
     const { text } = readExpr(src, m.index! + m[0].length);
-    return { key: literalValue(base, text) ?? text, expr: text, at: m.index! };
+    return { key: oneName({ ...base, at: m.index! }, text), expr: text, at: m.index! };
   });
   const idbFile = opens.length > 0 || /\.objectStore\s*\(|\bIDB(?:ObjectStore|Cursor)/.test(src);
   // Store receivers: a variable bound from .objectStore(…), a parameter typed IDBObjectStore, and, in a file that
@@ -1496,17 +1120,16 @@ function scanSourceText(file: string, src: string, base: Ctx): Write[] {
 }
 
 /**
- * `scanSource(file, src, { files })`: `files` (path relative to apps/web → source) serves imported consts.
+ * `scanSource(file, src)`: the writes in one file. Nothing is read from another file (round 14: an import is "*").
  * A file the TypeScript parser reads cleanly is scanned on its AST (scanSourceAst); a file with parse diagnostics falls
  * back to the text scanner (scanSourceText), where every match counts (CSC-30, CSC-35).
  */
 export function scanSource(
   file: string,
   src: string,
-  opts: { files?: Record<string, string>; read?: (rel: string) => string | null; depth?: number } = {},
+  opts: { depth?: number } = {},
 ): Write[] {
-  const read = opts.read ?? (opts.files ? (rel: string) => opts.files![rel] ?? null : undefined);
-  const base: Ctx = { file, src, read };
+  const base: Ctx = { file, src };
   const parsed = parseFile(file, src);
   return parsed.ok ? scanSourceAst(file, src, parsed.sf, base, opts.depth ?? 0) : scanSourceText(file, src, base);
 }
@@ -1614,9 +1237,15 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     return out.trim();
   };
   const at = (n: ts.Node) => n.getStart(sf);
-  /** A header name that is "Set-Cookie": any quote kind, a const, or a concatenation (CSC6-SEC-2). */
+  /**
+   * A header name that is "Set-Cookie": any quote kind, or a name the key resolver proves (a const, a concatenation,
+   * CSC6-SEC-2). A name it cannot prove counts when its source names a set-cookie (`H.SET_COOKIE`, an imported
+   * SET_COOKIE_HEADER), as the member and import resolution before round 14 found it.
+   */
   const isSetCookieExpr = (n: ts.Node | undefined) =>
-    !!n && (isSetCookieName(n) || (literalValue({ ...base, at: n.getStart(sf) }, text(n)) ?? "").toLowerCase() === "set-cookie");
+    !!n &&
+    (isSetCookieName(n) ||
+      resolveKeySet({ ...base, at: n.getStart(sf) }, text(n)).some((k) => k.toLowerCase() === "set-cookie" || (k.includes("*") && /set[\W_]*cookie/i.test(text(n)))));
   const setCookieNode = (v: ts.Node | undefined, pos: number) => {
     if (!v) return;
     if (ts.isArrayLiteralExpression(v)) for (const el of v.elements) cookieString("response-cookie", text(el), pos);
@@ -1699,7 +1328,7 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     if (m.name === "objectStore") objectStoreCalls++;
     if (m.name === "open" && lastName(m.recv) === "indexedDB") {
       const t0 = text(n.arguments[0]);
-      opens.push({ key: literalValue({ ...base, at: at(n) }, t0) ?? t0, expr: t0, at: at(n) });
+      opens.push({ key: oneName({ ...base, at: at(n) }, t0), expr: t0, at: at(n) });
     }
     if (m.name === "open" && lastName(m.recv) === "caches") {
       const nameText = text(n.arguments[0]);
@@ -1837,7 +1466,7 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
    * A template substitution's text, resolved in the host file; UNRESOLVED (a credential) when it cannot be resolved
    * in full ("*" piece), or when its own source names a credential (CSC8-SEC-1/2: `${token ? token : ""}`,
    * `${AUTH_KEY}`). Otherwise the substitution goes through resolveKeySet: a candidate with a "*" part fails closed;
-   * one naming a credential is spliced in; of plain candidates the first is spliced in.
+   * one naming a credential is spliced in; several plain candidates fail closed (CSC-69); one is spliced in.
    */
   function resolveSubstitution(e: ts.Expression): string {
     const t = text(e);
@@ -1847,7 +1476,7 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     // Through the key resolver (round 12): a candidate with a "*" part fails closed; otherwise a candidate naming a
     // credential is spliced in (so the inner write is a credential write under its real name), else the first.
     const cands = resolveKeySet(c, json ? json[1] : t);
-    if (cands.length === 0 || cands.some((x) => x.includes("*"))) return UNRESOLVED;
+    if (cands.some((x) => x.includes("*"))) return UNRESOLVED;
     // Several candidates: the code would be scanned with only one of them spliced in, so fail closed (CSC-69).
     if (cands.length > 1 && !cands.some((x) => CREDENTIAL_PATTERN.test(x))) return UNRESOLVED;
     const pick = cands.find((x) => CREDENTIAL_PATTERN.test(x)) ?? cands[0];
@@ -1865,7 +1494,7 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     const g = globalThis as unknown as { __kfInlineScans?: number };
     g.__kfInlineScans = (g.__kfInlineScans ?? 0) + 1;
     const firstLine = lineOf(src, rawStart);
-    for (const w of scanSource(`${file}.inline.js`, code, { read: base.read, depth: depth + 1 })) {
+    for (const w of scanSource(`${file}.inline.js`, code, { depth: depth + 1 })) {
       const rawIdx = rawOffsetOf(raw, writeOffsets.get(w) ?? 0);
       const mapped: Write = { ...w, file, line: firstLine + (raw.slice(0, rawIdx).match(/\n/g) ?? []).length };
       writeOffsets.set(mapped, contiguous ? rawStart + rawIdx : rawStart);
@@ -1919,19 +1548,10 @@ function sourceFiles(): string[] {
   return out;
 }
 
-function readWeb(rel: string): string | null {
-  const p = path.join(WEB, rel);
-  try {
-    return fs.statSync(p).isFile() ? fs.readFileSync(p, "utf8") : null;
-  } catch {
-    return null;
-  }
-}
-
 let censusCache: Write[] | null = null;
 function census(): Write[] {
   censusCache ??= sourceFiles().flatMap((p) =>
-    scanSource(path.relative(WEB, p).split(path.sep).join("/"), fs.readFileSync(p, "utf8"), { read: readWeb }),
+    scanSource(path.relative(WEB, p).split(path.sep).join("/"), fs.readFileSync(p, "utf8")),
   );
   return censusCache;
 }
