@@ -17,6 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
+import { visibleVatNumber } from './invoice-email.types';
 import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -117,6 +118,7 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
       instagram: true,
       twitter: true,
       whatsapp: true,
+      vatNumber: true,
     },
   },
 });
@@ -163,6 +165,7 @@ const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
       email: true,
       website: true,
       primaryColor: true,
+      vatNumber: true,
     },
   },
 });
@@ -1810,6 +1813,7 @@ export class CommerceService {
             instagram: true,
             twitter: true,
             whatsapp: true,
+            vatNumber: true,
           },
         },
       },
@@ -1844,6 +1848,7 @@ export class CommerceService {
       (!invoice.subtotal || invoice.subtotal === 0) && invoice.items.length > 0
         ? invoice.taxAmount ?? (invoice.taxRate ? subtotal * (invoice.taxRate / 100) : 0)
         : invoice.taxAmount;
+    const vat = visibleVatNumber(invoice.business?.vatNumber, taxAmount);
 
     return {
       id: invoice.id,
@@ -1881,6 +1886,7 @@ export class CommerceService {
             instagram: invoice.business.instagram,
             twitter: invoice.business.twitter,
             whatsapp: invoice.business.whatsapp,
+            ...(vat ? { vatNumber: vat } : {}),
           }
         : null,
       // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the net received, max(0, net),
@@ -3021,14 +3027,32 @@ export class CommerceService {
             email: true,
             website: true,
             primaryColor: true,
+            vatNumber: true,
           },
         },
       },
     });
     if (!quote || quote.deletedAt) return null;
+    const vat = visibleVatNumber(quote.business?.vatNumber, quote.taxAmount);
+    const business = quote.business
+      ? {
+          id: quote.business.id,
+          name: quote.business.name,
+          logoUrl: quote.business.logoUrl,
+          address: quote.business.address,
+          phone: quote.business.phone,
+          email: quote.business.email,
+          website: quote.business.website,
+          primaryColor: quote.business.primaryColor,
+          ...(vat ? { vatNumber: vat } : {}),
+        }
+      : null;
     // V1-QUOTE-CHAIN-finish (review SEC-5): the version of the terms this view
     // shows; the customer's accept sends it back (respondToQuoteByToken).
-    return { ...this.decorateQuote(toOperatorQuote(quote)), termsVersion: quoteTermsVersion(quote) };
+    return {
+      ...this.decorateQuote(toOperatorQuote({ ...quote, business })),
+      termsVersion: quoteTermsVersion(quote),
+    };
   }
 
   async markQuoteViewedByToken(token: string, visitorId?: string | null) {
