@@ -1920,10 +1920,14 @@ Be warm, specific, and insightful.`;
           create: {
             value: JSON.stringify(adj.newValue),
             source: 'key_self_tuning',
+            dataClass: 'GENERAL',
+            moduleScope: ['ai'],
           },
           update: {
             value: JSON.stringify(adj.newValue),
             source: 'key_self_tuning',
+            dataClass: 'GENERAL',
+            moduleScope: ['ai'],
           },
         }, this.semanticMemory);
         this.logger.log(

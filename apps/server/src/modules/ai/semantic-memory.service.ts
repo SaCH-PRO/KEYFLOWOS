@@ -3,6 +3,24 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiUsageService } from './ai-usage.service';
+import {
+  classifyAiMemoryWrite,
+  classifyEmbeddingWrite,
+  isMemoryRowDataClass,
+  MEMORY_DATA_CLASS_RANK,
+  type MemoryRowDataClass,
+} from './memory-classification';
+
+function sqlDataClassRank(col: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`CASE ${col}
+    WHEN 'SECRET_BEARING' THEN 4
+    WHEN 'PERSONAL' THEN 3
+    WHEN 'REVENUE' THEN 2
+    WHEN 'UNCLASSIFIED' THEN 1
+    WHEN 'GENERAL' THEN 0
+    ELSE -1
+  END`;
+}
 
 /**
  * W7-AI-SERVICES-503 (the R0-07a rule; COST-LEDGER-001 section 7 item 7): the
@@ -98,6 +116,8 @@ export interface AiMemoryCopySource {
   key: string;
   value: string;
   confidence: number;
+  dataClass?: string | null;
+  moduleScope?: string[] | null;
 }
 
 /** A copy a rewrite deleted (upsertAiMemoryDroppingStaleCopies): its content and metadata as they were. */
@@ -126,6 +146,8 @@ export interface StoreMemoryInput {
   sourceType: 'memory' | 'event' | 'conversation' | 'document' | 'action' | 'temporal_memory';
   sourceId: string;
   metadata?: Record<string, any>;
+  dataClass?: MemoryRowDataClass | null;
+  moduleScope?: string[] | null;
 }
 
 @Injectable()
@@ -253,6 +275,14 @@ export class SemanticMemoryService {
       }
       if (valueCopy) forms.push({ content: of.value, metadata: valueMetadata });
 
+      const derived = classifyAiMemoryWrite({
+        category: of.category,
+        key: of.key,
+        value: of.value,
+        explicitDataClass: isMemoryRowDataClass(of.dataClass) ? of.dataClass : null,
+        explicitModuleScope: of.moduleScope ?? null,
+      });
+
       let refused = false;
       for (const form of forms) {
         const copy: StoreMemoryInput = {
@@ -261,6 +291,8 @@ export class SemanticMemoryService {
           sourceType: AI_MEMORY_COPY_SOURCE_TYPE,
           sourceId: of.id,
           metadata: form.metadata,
+          dataClass: derived.dataClass,
+          moduleScope: derived.moduleScope,
         };
         try {
           const target = await this.copyTarget(copy);
@@ -279,7 +311,16 @@ export class SemanticMemoryService {
       if (!refused) return written;
       current = await this.prisma.client.aiMemory.findFirst({
         where: { id: of.id, businessId: of.businessId },
-        select: { id: true, businessId: true, category: true, key: true, value: true, confidence: true },
+        select: {
+          id: true,
+          businessId: true,
+          category: true,
+          key: true,
+          value: true,
+          confidence: true,
+          dataClass: true,
+          moduleScope: true,
+        },
       });
     }
     if (current) this.logger.warn(`Memory ${row.id} kept changing while it was copied again; it is copied by its next rewrite or backfill`);
@@ -313,28 +354,65 @@ export class SemanticMemoryService {
    * deletion's copy delete, its snapshot taken, never sees). deleteAiMemoriesWithCopies deletes the rows before their
    * copies for the same reason. FU-MEMORY-COPIES-REWRITE review SEC-FUMCR-1: a settings row (AI_MEMORY_SETTINGS_CATEGORIES)
    * gets no copy. Other source types insert as before.
+   *
+   * MEM-CLASS-COLUMNS (P125, D-257): every embedding copy records `data_class` (most restrictive of source row and
+   * caller classification) and `module_scope` (sorted deduplicated union of source row and caller module scopes).
    */
   private async insert(input: StoreMemoryInput, embedding: number[]): Promise<boolean> {
     const id = this.generateId();
     const vectorLiteral = `[${embedding.join(',')}]`;
-    if (input.sourceType !== AI_MEMORY_COPY_SOURCE_TYPE) {
+    const classified = classifyEmbeddingWrite({
+      sourceType: input.sourceType,
+      content: input.content,
+      metadata: input.metadata ?? null,
+      explicitDataClass: isMemoryRowDataClass(input.dataClass) ? input.dataClass : null,
+      explicitModuleScope: input.moduleScope ?? null,
+    });
+    const callerRank = MEMORY_DATA_CLASS_RANK[classified.dataClass];
+
+    if (input.sourceType === 'temporal_memory') {
       await this.prisma.client.$executeRaw(
-        Prisma.sql`INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
-        VALUES (${id}, ${input.businessId}, ${input.content}, ${input.sourceType}, ${input.sourceId}, ${vectorLiteral}::vector, ${input.metadata ?? {}}, NOW())`,
+        Prisma.sql`INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, data_class, module_scope, created_at)
+        SELECT ${id}::text, ${input.businessId}::text, ${input.content}::text, ${input.sourceType}::text, ${input.sourceId}::text,
+               ${vectorLiteral}::vector, ${JSON.stringify(input.metadata ?? {})}::jsonb,
+               CASE WHEN ${sqlDataClassRank(Prisma.sql`t.data_class`)} >= ${callerRank}
+                    THEN t.data_class
+                    ELSE ${classified.dataClass}::text
+               END,
+               ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(t.module_scope, ARRAY[]::text[]) || ${classified.moduleScope}::text[]) AS x WHERE x IS NOT NULL ORDER BY x),
+               NOW()
+        FROM (VALUES (1)) AS _v(one)
+        LEFT JOIN "temporal_flow_memories" t
+          ON t.id = ${input.sourceId}::text AND t.business_id = ${input.businessId}::text`,
       );
       return true;
     }
+
+    if (input.sourceType !== AI_MEMORY_COPY_SOURCE_TYPE) {
+      await this.prisma.client.$executeRaw(
+        Prisma.sql`INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, data_class, module_scope, created_at)
+        VALUES (${id}, ${input.businessId}, ${input.content}, ${input.sourceType}, ${input.sourceId}, ${vectorLiteral}::vector, ${input.metadata ?? {}}, ${classified.dataClass}, ${classified.moduleScope}::text[], NOW())`,
+      );
+      return true;
+    }
+
     const written = await this.prisma.client.$executeRaw(
       Prisma.sql`WITH source AS (
-          SELECT m.id FROM "ai_memories" m
+          SELECT m.id, m.data_class, m.module_scope FROM "ai_memories" m
           WHERE m.id = ${input.sourceId} AND m.business_id = ${input.businessId}
             AND ${copyHoldsRowValue(Prisma.sql`${input.content}::text`)}
             AND ${rowIsMemory()}
           FOR SHARE
         )
-        INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
+        INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, data_class, module_scope, created_at)
         SELECT ${id}::text, ${input.businessId}::text, ${input.content}::text, ${input.sourceType}::text, ${input.sourceId}::text,
-               ${vectorLiteral}::vector, ${JSON.stringify(input.metadata ?? {})}::jsonb, NOW()
+               ${vectorLiteral}::vector, ${JSON.stringify(input.metadata ?? {})}::jsonb,
+               CASE WHEN ${sqlDataClassRank(Prisma.sql`source.data_class`)} >= ${callerRank}
+                    THEN source.data_class
+                    ELSE ${classified.dataClass}::text
+               END,
+               ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(source.module_scope, ARRAY[]::text[]) || ${classified.moduleScope}::text[]) AS x WHERE x IS NOT NULL ORDER BY x),
+               NOW()
         FROM source`,
     );
     if (written === 0) {
@@ -497,12 +575,22 @@ export class SemanticMemoryService {
     let stored = 0;
     for (const memory of memories) {
       try {
+        const classified = classifyAiMemoryWrite({
+          category: memory.category,
+          key: memory.key,
+          value: memory.value,
+          source: memory.source,
+          explicitDataClass: isMemoryRowDataClass(memory.dataClass) ? memory.dataClass : null,
+          explicitModuleScope: memory.moduleScope ?? null,
+        });
         const written = await this.storeCopy({
           businessId,
           content: aiMemoryEntryCopy(memory),
           sourceType: AI_MEMORY_COPY_SOURCE_TYPE,
           sourceId: memory.id,
           metadata: { category: memory.category, key: memory.key, confidence: memory.confidence },
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
         });
         if (written) stored++;
       } catch (err: any) {

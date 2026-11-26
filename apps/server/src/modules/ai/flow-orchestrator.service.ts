@@ -64,7 +64,7 @@ import {
 } from '../key-cortex/genome-read-projections';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
-import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
+import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { classifyActionIntent } from '../key-cortex/action-intent';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
@@ -272,6 +272,82 @@ export function fillToolResultSlots(slots: Array<FlowToolResult | null>, execute
   const results = slots.map((slot) => slot ?? queue.shift() ?? null).filter((r): r is FlowToolResult => r !== null);
   // anything executed beyond the slots (never today) is kept rather than dropped
   return [...results, ...queue];
+}
+
+function formatToolCallError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err === null || err === undefined) return 'unknown error';
+  if (typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  try {
+    return String(err);
+  } catch {
+    return 'unknown error';
+  }
+}
+
+/**
+ * RR-TOOL-WRITES-SEQUENTIAL (P127 / V1-72; D-261, D-262, D-17, D-73):
+ * Run a turn's governance-cleared tool calls in model order. Consecutive READ
+ * calls (`isReadOnlyTool(name) === true`) form a contiguous batch that runs in
+ * parallel; every non-READ call (including unknown, MCP-bridged, or dotted
+ * cortex names) waits for the previous call or batch to finish and runs alone
+ * before the next call or batch starts.
+ *
+ * Failure isolation: a failing call (whether it resolves to `{ success: false }`
+ * or rejects) never cancels later calls or sibling reads in a batch; the
+ * returned array always preserves exact model order with one FlowToolResult
+ * per call.
+ */
+export async function runToolCallsWithReadParallelism<
+  T extends { tc: Pick<FlowToolCall, 'id' | 'name'> },
+>(
+  calls: readonly T[],
+  run: (item: T) => Promise<FlowToolResult>,
+  isReadOnly: (toolName: string) => boolean = isReadOnlyTool,
+): Promise<FlowToolResult[]> {
+  const results: FlowToolResult[] = [];
+  const runSafe = async (item: T): Promise<FlowToolResult> => {
+    try {
+      return await run(item);
+    } catch (err: unknown) {
+      const tool = getToolByName(item.tc.name);
+      return {
+        toolCallId: item.tc.id,
+        name: item.tc.name,
+        result: null,
+        changedEntities: [],
+        followOnSuggestions: [],
+        family: tool?.family ?? 'crud',
+        riskTier: tool?.riskTier ?? 1,
+        success: false,
+        error: formatToolCallError(err),
+      };
+    }
+  };
+
+  let readBatch: T[] = [];
+  const flushReads = async (): Promise<void> => {
+    if (readBatch.length === 0) return;
+    const batch = readBatch;
+    readBatch = [];
+    const batchResults = await Promise.all(batch.map(runSafe));
+    results.push(...batchResults);
+  };
+
+  for (const item of calls) {
+    if (isReadOnly(item.tc.name)) {
+      readBatch.push(item);
+    } else {
+      await flushReads();
+      results.push(await runSafe(item));
+    }
+  }
+  await flushReads();
+
+  return results;
 }
 
 /**
@@ -2889,8 +2965,9 @@ ${triage.standingContext}`;
         };
       }
 
-      const executedResults: FlowToolResult[] = await Promise.all(
-        governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
+      const executedResults: FlowToolResult[] = await runToolCallsWithReadParallelism(
+        governanceChecks,
+        ({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action),
       );
       const toolResults = fillToolResultSlots(slots, executedResults);
 
@@ -3458,8 +3535,9 @@ ${triage.standingContext}`;
         return;
       }
 
-      const executedResults: FlowToolResult[] = await Promise.all(
-        governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
+      const executedResults: FlowToolResult[] = await runToolCallsWithReadParallelism(
+        governanceChecks,
+        ({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action),
       );
       const toolResults = fillToolResultSlots(slots, executedResults);
 

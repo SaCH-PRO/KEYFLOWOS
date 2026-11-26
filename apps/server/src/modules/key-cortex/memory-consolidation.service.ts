@@ -4,6 +4,7 @@ import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { keyCronsDisabled } from '../../core/config/env';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from '../ai/ai-memory.service';
+import { classifyAiMemoryWrite, modulesFromIdentifiers } from '../ai/memory-classification';
 import { AI_MEMORY_COPY_SOURCE_TYPE, SemanticMemoryService } from '../ai/semantic-memory.service';
 
 /** The AiMemory rows promotion writes: category, key prefix and source. */
@@ -243,6 +244,14 @@ export class MemoryConsolidationService {
     for (const memory of highConfidence) {
       const key = promotedKey(memory.functionId);
       const value = promotedValue(memory.recommendation);
+      const classified = classifyAiMemoryWrite({
+        category: PROMOTED_CATEGORY,
+        key,
+        value,
+        source: PROMOTED_SOURCE,
+        userId: memory.userId ?? null,
+        explicitModuleScope: modulesFromIdentifiers(memory.functionId),
+      });
       // FU-MEMORY-COPIES-REWRITE: a recommendation promoted into the same key rewrites the row in place; the door
       // deletes the copies of the value it replaces and (review COR-V71I-3) copies the row again with the new one.
       await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: PROMOTED_CATEGORY, key }, {
@@ -250,10 +259,14 @@ export class MemoryConsolidationService {
           value,
           source: PROMOTED_SOURCE,
           confidence: memory.confidence,
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
         },
         update: {
           value,
           confidence: memory.confidence,
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
         },
       }, this.semantic);
       promoted++;
