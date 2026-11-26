@@ -14,6 +14,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { Button, Card, Input } from "@keyflow/ui";
 import { CheckSquare, Plus, Trash2, Calendar, Flag, Loader2, X, Check } from "lucide-react";
 import { toast } from "sonner";
+import { statusLabel } from "@/lib/status-labels";
 
 interface Task {
   id: string;
@@ -216,7 +217,7 @@ export default function ContactTasksPage() {
                     {task.priority && (
                       <span className="flex items-center gap-1">
                         <Flag className="h-3 w-3" />
-                        {task.priority}
+                        {statusLabel(task.priority)}
                       </span>
                     )}
                   </div>
