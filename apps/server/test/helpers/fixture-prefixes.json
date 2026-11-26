@@ -738,6 +738,11 @@
       "packet": "V1-86 (V1-38b-STATUS-READERS)"
     },
     {
+      "prefix": "v86u_",
+      "owner": "apps/server/test/untrusted-inbound-fence.integration.test.ts",
+      "packet": "V1-86 (FU-UNTRUSTED-INBOUND-FENCE)"
+    },
+    {
       "prefix": "v87a_",
       "owner": "apps/server/test/key-plan-reads.integration.test.ts",
       "packet": "V1-87 (KEY-R3a-PLAN-READS)"
