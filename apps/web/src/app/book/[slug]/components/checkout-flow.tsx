@@ -113,24 +113,57 @@ const slotRequestKey = (r: SlotRequest) => JSON.stringify([r.serviceId, r.date, 
  */
 function useSlotAnswers(businessId: string, timeZone: string | null | undefined, requests: SlotRequest[]) {
   const [answers, setAnswers] = useState<Record<string, SlotTime[] | null>>({});
+  // Bumped to ask again: by retry (a failed row's Try again) and forget (a refused Place Order).
+  const [generation, setGeneration] = useState(0);
   const asked = useRef(new Set<string>());
+  // The latest ask of each request: only its answer is kept, so an older answer still in flight never lands.
+  const latest = useRef(new Map<string, number>());
+  const idOf = (key: string) => `${businessId}|${timeZone ?? ""}|${key}`;
   const signature = JSON.stringify(requests.map(slotRequestKey).sort());
   useEffect(() => {
     for (const key of JSON.parse(signature) as string[]) {
       const id = `${businessId}|${timeZone ?? ""}|${key}`;
       if (asked.current.has(id)) continue;
       asked.current.add(id);
+      // A request asked again after a failure shows "Loading times…" while it runs, not the old failure.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears this request's earlier failed answer as it is asked again
+      setAnswers((prev) => {
+        if (prev[id] !== null) return prev;
+        const { [id]: _failed, ...rest } = prev;
+        return rest;
+      });
+      const ask = (latest.current.get(id) ?? 0) + 1;
+      latest.current.set(id, ask);
       const [serviceId, date, staffId] = JSON.parse(key) as [string, string, string];
       void fetchAvailableSlotTimes({ businessId, serviceId, date, staffId: staffId || undefined, timeZone })
         .catch(() => null)
         .then((slots) => {
+          if (latest.current.get(id) !== ask || !asked.current.has(id)) return;
           // A failed read is asked again the next time a row asks for it.
           if (slots === null) asked.current.delete(id);
           setAnswers((prev) => ({ ...prev, [id]: slots }));
         });
     }
-  }, [businessId, timeZone, signature]);
-  return (r: SlotRequest): SlotTime[] | null | undefined => answers[`${businessId}|${timeZone ?? ""}|${slotRequestKey(r)}`];
+  }, [businessId, timeZone, signature, generation]);
+  return {
+    answerFor: (r: SlotRequest): SlotTime[] | null | undefined => answers[idOf(slotRequestKey(r))],
+    /** COR-3: ask a failed request again (its Try again). */
+    retry: (r: SlotRequest) => {
+      const id = idOf(slotRequestKey(r));
+      asked.current.delete(id);
+      setAnswers((prev) => {
+        const { [id]: _old, ...rest } = prev;
+        return rest;
+      });
+      setGeneration((g) => g + 1);
+    },
+    /** COR-2: forget every answer (a refused Place Order: a time shown free may since have been taken). */
+    forget: () => {
+      asked.current.clear();
+      setAnswers({});
+      setGeneration((g) => g + 1);
+    },
+  };
 }
 
 /** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
@@ -222,11 +255,18 @@ export function CheckoutFlow({
     if (!bd?.date || isDayClosed(bd.date, business.businessHours)) return null;
     return { serviceId: bd.serviceId || si.sourceServiceId || si.id, date: bd.date, staffId: bd.staffId || "" };
   };
-  const slotAnswerFor = useSlotAnswers(
+  const slotAnswers = useSlotAnswers(
     business.id,
     business.timezone,
     serviceItemsInCart.map(slotRequestOf).filter((r): r is SlotRequest => r !== null),
   );
+  // COR-2: a row is scheduled only by a time its current answer offers, by the server's own instant.
+  const isRowScheduled = (si: CartItem): boolean => {
+    const bd = serviceBookings[`${si.id}_${si.itemType}`];
+    const request = slotRequestOf(si);
+    if (!bd?.date || !bd.time || !bd.startIso || !request) return false;
+    return (slotAnswers.answerFor(request) ?? []).some((s) => s.startIso === bd.startIso);
+  };
   const hasPhysicalProducts = cart.some((c) => c.itemType === "product");
   const hasServicesOnly = serviceItemsInCart.length > 0 && !hasPhysicalProducts;
 
@@ -265,10 +305,7 @@ export function CheckoutFlow({
     }
     if (stepKey === "delivery") {
       if (serviceItemsInCart.length > 0) {
-        const allBooked = serviceItemsInCart.every((si) => {
-          const bd = serviceBookings[`${si.id}_${si.itemType}`];
-          return bd && bd.date && bd.time;
-        });
+        const allBooked = serviceItemsInCart.every(isRowScheduled);
         if (!allBooked) return false;
       }
       if (hasPhysicalProducts) {
@@ -300,6 +337,8 @@ export function CheckoutFlow({
         termsAccepted,
       });
     } catch (e: unknown) {
+      // COR-2: a refused order may be a time taken since it was shown: every row reads its times afresh.
+      slotAnswers.forget();
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
       setSubmitting(false);
     }
@@ -687,13 +726,13 @@ export function CheckoutFlow({
                     const closed = isDayClosed(bd.date, business.businessHours);
                     const slotRequest = slotRequestOf(si);
                     // undefined: still loading; null: the route could not be read. Neither offers a time.
-                    const slotAnswer = slotRequest ? slotAnswerFor(slotRequest) : undefined;
+                    const slotAnswer = slotRequest ? slotAnswers.answerFor(slotRequest) : undefined;
                     const slots: SlotTime[] = slotAnswer ?? [];
                     const updateBd = (patch: Partial<ServiceBookingData>) => {
                       setServiceBookings((prev) => ({ ...prev, [key]: { ...bd, ...patch } }));
                     };
 
-                    const isScheduled = bd.date && bd.time;
+                    const isScheduled = isRowScheduled(si);
 
                     return (
                       <div
@@ -801,7 +840,14 @@ export function CheckoutFlow({
                           {bd.date && !closed && slotAnswer === null && (
                             <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
                               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                              Couldn&apos;t load times
+                              <span className="flex-1">Couldn&apos;t load times</span>
+                              <button
+                                type="button"
+                                onClick={() => slotRequest && slotAnswers.retry(slotRequest)}
+                                className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium min-h-[44px]"
+                              >
+                                Try again
+                              </button>
                             </div>
                           )}
 
@@ -821,7 +867,7 @@ export function CheckoutFlow({
                                     onClick={() => updateBd({ time: slot.time, startIso: slot.startIso })}
                                     className="px-2 py-2.5 rounded-lg text-xs font-medium border transition-all duration-200 active:scale-95 min-h-[44px]"
                                     style={
-                                      bd.time === slot.time
+                                      bd.startIso === slot.startIso
                                         ? {
                                             backgroundColor: primaryColor,
                                             borderColor: primaryColor,
