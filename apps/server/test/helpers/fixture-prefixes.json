@@ -1465,6 +1465,11 @@
       "prefix": "v63a_",
       "owner": "apps/server/test/key-cortex-self-model.integration.test.ts",
       "packet": "V1-63 (TOF-KEY-SELF-MODEL)"
+    },
+    {
+      "prefix": "v64f_",
+      "owner": "apps/server/test/decimal-quantity.integration.test.ts",
+      "packet": "V1-64 (DECIMALS-SERVER)"
     }
   ],
   "pendingRenames": [],
