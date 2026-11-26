@@ -8,6 +8,7 @@ import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import { UndoService } from './undo.service';
 import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { isReadOnlyTool } from './flow-tool-registry';
+import { KeyIdempotencyService, fingerprintToolRequest } from '../key-cortex/key-idempotency.service';
 
 export interface DispatchContext {
   businessId: string;
@@ -41,6 +42,21 @@ interface CircuitState {
   lastFailure: number;
   open: boolean;
 }
+
+interface DispatchClaimOutcome {
+  result?: unknown;
+}
+
+interface ActiveDispatchClaim {
+  readonly key: string;
+  executionStarted: boolean;
+  settled: boolean;
+  complete(result: unknown): Promise<void>;
+  fail(error: string): Promise<void>;
+  release(): Promise<void>;
+}
+
+const DISPATCH_CLAIM_PREFIX = 'dispatch:';
 
 /**
  * W9-DISPATCH-CIRCUIT (review SEC-W8CTNM-1, owner ruling D-73): the circuit a dispatch counts toward
@@ -105,6 +121,7 @@ export class ActionDispatcherService {
   private readonly CIRCUIT_TIMEOUT_MS = 60_000;
   private readonly MAX_RETRIES = 2;
   private readonly RETRY_DELAYS = [1_000, 3_000];
+  private fallbackIdempotency?: KeyIdempotencyService;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -120,10 +137,24 @@ export class ActionDispatcherService {
     @Optional()
     @Inject(forwardRef(() => FeedbackLoopService))
     private readonly feedbackLoop?: FeedbackLoopService,
+    // RR-DISPATCH-ATOMIC-CLAIM (V1-72): appended so positional test constructors stay valid,
+    // while NestJS DI requires KeyIdempotencyService (exported by KeyCortexModule).
+    @Inject(forwardRef(() => KeyIdempotencyService))
+    private readonly keyIdempotency?: KeyIdempotencyService,
   ) {}
 
+  private getIdempotencyService(): KeyIdempotencyService | null {
+    if (this.keyIdempotency) return this.keyIdempotency;
+    if (this.prisma?.client?.idempotencyKey) {
+      this.fallbackIdempotency ??= new KeyIdempotencyService(this.prisma);
+      return this.fallbackIdempotency;
+    }
+    return null;
+  }
+
   async dispatch(ctx: DispatchContext): Promise<DispatchResult> {
-    const dispatchId = ctx.idempotencyKey ?? `disp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const idempotencyKey = ctx.idempotencyKey?.trim() || undefined;
+    const dispatchId = idempotencyKey ?? `disp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const startTime = Date.now();
 
     // Check circuit breaker (this business's, for this tool: W9-DISPATCH-CIRCUIT)
@@ -133,18 +164,175 @@ export class ActionDispatcherService {
       return { success: false, error: msg, dispatchId, durationMs: Date.now() - startTime };
     }
 
-    // Check idempotency
-    if (ctx.idempotencyKey) {
-      const existing = await this.findIdempotentExecution(ctx.businessId, ctx.idempotencyKey);
-      if (existing) {
-        this.logger.log(`Idempotent hit for key "${ctx.idempotencyKey}"`);
-        return { success: existing.success, result: existing.result, error: existing.error, dispatchId, durationMs: 0 };
+    // RR-DISPATCH-ATOMIC-CLAIM (V1-72): take an atomic durable claim on `dispatch:<key>`
+    // in idempotency_keys before the governance check and execution loop.
+    let activeClaim: ActiveDispatchClaim | undefined;
+    if (idempotencyKey) {
+      const idempotency = this.getIdempotencyService();
+      if (!idempotency) {
+        this.logger.warn(
+          `Dispatch ${dispatchId} has idempotency key "${idempotencyKey}" but KeyIdempotencyService is unavailable; proceeding without durable claim`,
+        );
+      } else {
+        const claimKey = `${DISPATCH_CLAIM_PREFIX}${idempotencyKey}`;
+        let requestHash: string;
+        try {
+          requestHash = fingerprintToolRequest(ctx.toolName, ctx.args);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Dispatch ${dispatchId} request could not be fingerprinted: ${msg}`);
+          return { success: false, error: msg, dispatchId, durationMs: Date.now() - startTime };
+        }
+
+        const correlationId = ctx.planStepId ?? ctx.planId;
+        const check = await idempotency.check<DispatchClaimOutcome>({
+          businessId: ctx.businessId,
+          idempotencyKey: claimKey,
+          requestHash,
+          audit: {
+            toolName: ctx.toolName,
+            ...(correlationId ? { correlationId } : {}),
+          },
+        });
+
+        if (check.status === 'completed') {
+          this.logger.log(`Idempotent hit (completed) for key "${idempotencyKey}"`);
+          return {
+            success: true,
+            result: check.response?.result,
+            dispatchId,
+            durationMs: 0,
+          };
+        }
+
+        if (check.status === 'failed') {
+          this.logger.log(`Idempotent hit (failed) for key "${idempotencyKey}"`);
+          return {
+            success: false,
+            error: check.error,
+            dispatchId,
+            durationMs: 0,
+          };
+        }
+
+        if (check.status === 'pending') {
+          const msg = `Dispatch for idempotency key "${idempotencyKey}" is already in progress`;
+          this.logger.warn(msg);
+          return {
+            success: false,
+            error: msg,
+            dispatchId,
+            durationMs: Date.now() - startTime,
+          };
+        }
+
+        if (check.status === 'conflict') {
+          const msg = check.error ?? 'Idempotency key was already used for a different request';
+          this.logger.warn(msg);
+          return {
+            success: false,
+            error: msg,
+            dispatchId,
+            durationMs: Date.now() - startTime,
+          };
+        }
+
+        const claimReq = {
+          businessId: ctx.businessId,
+          idempotencyKey: claimKey,
+          requestHash,
+          claimId: check.claimId!,
+        };
+        activeClaim = {
+          key: claimKey,
+          executionStarted: false,
+          settled: false,
+          complete: async (result: unknown) => {
+            if (activeClaim!.settled) return;
+            activeClaim!.settled = true;
+            const payload: DispatchClaimOutcome = result !== undefined ? { result } : {};
+            try {
+              await idempotency.complete<DispatchClaimOutcome>(claimReq, payload);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `Failed to settle dispatch claim "${claimKey}" as completed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+              if (result !== undefined) {
+                try {
+                  await idempotency.complete<DispatchClaimOutcome>(claimReq, {});
+                } catch (fallbackErr: unknown) {
+                  this.logger.warn(
+                    `Fallback empty settle for dispatch claim "${claimKey}" also failed: ${
+                      fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+                    }`,
+                  );
+                }
+              }
+            }
+          },
+          fail: async (error: string) => {
+            if (activeClaim!.settled) return;
+            activeClaim!.settled = true;
+            try {
+              await idempotency.fail(claimReq, error);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `Failed to settle dispatch claim "${claimKey}" as failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+          },
+          release: async () => {
+            if (activeClaim!.settled) return;
+            activeClaim!.settled = true;
+            try {
+              await idempotency.release(claimReq);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `Failed to release dispatch claim "${claimKey}": ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+          },
+        };
       }
     }
 
+    try {
+      return await this.executeClaimedDispatch(ctx, dispatchId, startTime, idempotencyKey, activeClaim);
+    } catch (err: unknown) {
+      if (activeClaim && !activeClaim.settled) {
+        const errMsg =
+          err instanceof Error
+            ? err.message
+            : err !== null && err !== undefined
+              ? String(err)
+              : 'Dispatch failed';
+        if (activeClaim.executionStarted) {
+          await activeClaim.fail(errMsg);
+        } else {
+          await activeClaim.release();
+        }
+      }
+      throw err;
+    }
+  }
+
+  private async executeClaimedDispatch(
+    ctx: DispatchContext,
+    dispatchId: string,
+    startTime: number,
+    idempotencyKey?: string,
+    activeClaim?: ActiveDispatchClaim,
+  ): Promise<DispatchResult> {
     // Governance check
     const decision = await this.governance.evaluate(ctx.businessId, ctx.toolName);
     if (!decision.allowed) {
+      if (activeClaim) await activeClaim.release();
       this.recordFailure(ctx.businessId, ctx.toolName);
       return {
         success: false,
@@ -155,9 +343,12 @@ export class ActionDispatcherService {
     }
 
     // Execute with retries
+    if (activeClaim) activeClaim.executionStarted = true;
     let lastError: string | undefined;
     let boundaryAnswer: { actionId?: string | null; disposition?: string } | undefined;
     let refused = false;
+    let succeeded = false;
+    let successResult: unknown;
     const retries = ctx.retryCount ?? this.MAX_RETRIES;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -168,7 +359,7 @@ export class ActionDispatcherService {
       }
 
       try {
-        const result = await this.flowOrchestrator.executeToolDirectly(
+        successResult = await this.flowOrchestrator.executeToolDirectly(
           ctx.businessId,
           ctx.toolName,
           ctx.args,
@@ -176,52 +367,8 @@ export class ActionDispatcherService {
           // KF-EXEC-ACTION-001: the queue worker has a business and no principal.
           { surface: 'PLAN_QUEUE', planId: ctx.planId ?? null, planStepId: ctx.planStepId ?? null },
         );
-
-        const durationMs = Date.now() - startTime;
-        this.recordSuccess(ctx.businessId, ctx.toolName);
-
-        await this.executionLog.logToolExecution(
-          ctx.businessId,
-          ctx.toolName,
-          ctx.args,
-          result,
-          true,
-          durationMs,
-          {
-            mode: 'autonomous',
-            planId: ctx.planId,
-            planStepId: ctx.planStepId,
-            riskTier: decision.tier,
-            idempotencyKey: ctx.idempotencyKey,
-          },
-        );
-
-        this.events.emit('action.executed', {
-          businessId: ctx.businessId,
-          toolName: ctx.toolName,
-          dispatchId,
-          planId: ctx.planId,
-          planStepId: ctx.planStepId,
-          result,
-        });
-
-        // Register for undo if result contains entity info
-        if (result?.id || result?.entityId) {
-          const entityType = this.inferEntityType(ctx.toolName);
-          if (entityType) {
-            this.undoService.registerAction({
-              businessId: ctx.businessId,
-              actionType: ctx.toolName,
-              entityType,
-              entityId: result.id ?? result.entityId,
-              originalPayload: ctx.args,
-            }).catch(() => {});
-          }
-        }
-
-        await this.runFeedback(ctx, result, true);
-
-        return { success: true, result, dispatchId, durationMs };
+        succeeded = true;
+        break;
       } catch (err: any) {
         lastError =
           err instanceof Error
@@ -256,6 +403,69 @@ export class ActionDispatcherService {
       }
     }
 
+    if (succeeded) {
+      const result = successResult;
+      const durationMs = Date.now() - startTime;
+      this.recordSuccess(ctx.businessId, ctx.toolName);
+
+      if (activeClaim) {
+        await activeClaim.complete(result);
+      }
+
+      await this.executionLog.logToolExecution(
+        ctx.businessId,
+        ctx.toolName,
+        ctx.args,
+        result,
+        true,
+        durationMs,
+        {
+          mode: 'autonomous',
+          planId: ctx.planId,
+          planStepId: ctx.planStepId,
+          riskTier: decision.tier,
+          idempotencyKey,
+        },
+      );
+
+      this.events.emit('action.executed', {
+        businessId: ctx.businessId,
+        toolName: ctx.toolName,
+        dispatchId,
+        planId: ctx.planId,
+        planStepId: ctx.planStepId,
+        result,
+      });
+
+      // Register for undo if result contains entity info
+      const resultObj =
+        result && typeof result === 'object'
+          ? (result as { id?: unknown; entityId?: unknown })
+          : null;
+      const entityId =
+        typeof resultObj?.id === 'string'
+          ? resultObj.id
+          : typeof resultObj?.entityId === 'string'
+            ? resultObj.entityId
+            : undefined;
+      if (entityId) {
+        const entityType = this.inferEntityType(ctx.toolName);
+        if (entityType) {
+          this.undoService.registerAction({
+            businessId: ctx.businessId,
+            actionType: ctx.toolName,
+            entityType,
+            entityId,
+            originalPayload: ctx.args,
+          }).catch(() => {});
+        }
+      }
+
+      await this.runFeedback(ctx, result, true);
+
+      return { success: true, result, dispatchId, durationMs };
+    }
+
     const durationMs = Date.now() - startTime;
     // A refusal by the boundary is the boundary working, not the tool failing.
     // Counting it would open this tool's circuit after five proposals and stop
@@ -267,6 +477,10 @@ export class ActionDispatcherService {
     const awaitingApproval = boundaryAnswer?.disposition?.startsWith('AWAITING')
       ? { actionId: boundaryAnswer.actionId ?? null }
       : undefined;
+
+    if (activeClaim) {
+      await activeClaim.fail(lastError ?? 'Dispatch failed');
+    }
 
     await this.executionLog.logToolExecution(
       ctx.businessId,
@@ -280,7 +494,7 @@ export class ActionDispatcherService {
         planId: ctx.planId,
         planStepId: ctx.planStepId,
         riskTier: decision.tier,
-        idempotencyKey: ctx.idempotencyKey,
+        idempotencyKey,
       },
     );
 
@@ -421,18 +635,5 @@ export class ActionDispatcherService {
     if (toolName.includes('task')) return 'task';
     if (toolName.includes('message') || toolName.includes('send')) return 'message';
     return null;
-  }
-
-  private async findIdempotentExecution(businessId: string, key: string): Promise<{ success: boolean; result?: any; error?: string } | null> {
-    const log = await this.prisma.client.aiExecutionLog.findFirst({
-      where: { businessId, idempotencyKey: key },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!log) return null;
-    return {
-      success: log.success,
-      result: log.outputSummary ?? undefined,
-      error: log.errorMessage ?? undefined,
-    };
   }
 }

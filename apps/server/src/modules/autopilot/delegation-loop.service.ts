@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
+import { modulesFromIdentifiers } from '../ai/memory-classification';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { ClientMomentumService } from '../momentum/client-momentum.service';
@@ -485,6 +486,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           confidence: 0.9,
           source: 'pattern_analysis',
           expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          moduleScope: modulesFromIdentifiers(loop.loopType, toolName),
         }).catch(() => {});
       }
 
@@ -1608,6 +1610,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         confidence: Math.min(approvalRate, 0.95),
         source: 'pattern_analysis',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        moduleScope: modulesFromIdentifiers(loopType, toolName),
       });
 
       this.events.emit('delegation_loop.trust_elevated', {
@@ -1636,6 +1639,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         confidence: Math.min(1 - approvalRate, 0.9),
         source: 'pattern_analysis',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        moduleScope: modulesFromIdentifiers(loopType, toolName),
       });
 
       this.events.emit('delegation_loop.trust_degraded', {

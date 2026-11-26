@@ -70,7 +70,16 @@ describe('feedback loop wiring', () => {
       .map((l) => /(?:private readonly )(\w+)\??:/.exec(l)?.[1])
       .filter((n): n is string => Boolean(n));
 
-    expect(params.indexOf('feedbackLoop')).toBe(params.length - 1);
+    // Appended after the 6 core positional params (later optional deps like keyIdempotency append after it)
+    expect(params.slice(0, 6)).toEqual([
+      'prisma',
+      'events',
+      'executionLog',
+      'governance',
+      'flowOrchestrator',
+      'undoService',
+    ]);
+    expect(params.indexOf('feedbackLoop')).toBe(6);
   });
 
   it('applies the analysis, rather than computing and discarding it', () => {

@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import { normalizeModuleScope } from '../ai/memory-classification';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import type { SemanticReader } from '../ai/semantic-memory-sight';
 
@@ -597,7 +598,14 @@ export class TemporalFlowService {
   async updateMemoryIfUnchanged(
     businessId: string,
     row: { id: string; updatedAt: Date; content: string },
-    data: { content?: string; confidence?: number; sourceEventIds?: string[]; metadata?: Record<string, unknown> },
+    data: {
+      content?: string;
+      confidence?: number;
+      sourceEventIds?: string[];
+      metadata?: Record<string, unknown>;
+      dataClass?: string;
+      moduleScope?: string[];
+    },
   ) {
     try {
       return await this.prisma.client.temporalFlowMemory.update({
@@ -607,6 +615,8 @@ export class TemporalFlowService {
           confidence: data.confidence,
           sourceEventIds: data.sourceEventIds,
           metadata: data.metadata as never,
+          ...(data.dataClass !== undefined ? { dataClass: data.dataClass } : {}),
+          ...(data.moduleScope !== undefined ? { moduleScope: normalizeModuleScope(data.moduleScope) } : {}),
         },
       });
     } catch (err) {

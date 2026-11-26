@@ -4,6 +4,7 @@ import { ProAutoMonitorService, ProAutoInsight } from './pro-auto-monitor.servic
 import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
+import { classifyAiMemoryWrite, modulesFromIdentifiers } from './memory-classification';
 import { SemanticMemoryService } from './semantic-memory.service';
 
 export interface ChatSuggestion {
@@ -76,13 +77,32 @@ export class ProactiveSuggestionService {
         // rewritten in place (the same key) leaves no copy of the one it replaced.
         const key = `${insight.category}_${Date.now()}`;
         const expiresAt = new Date(Date.now() + SUGGESTION_COOLDOWN_HOURS * 60 * 60 * 1000);
+        const serialized = JSON.stringify(suggestion);
+        const classified = classifyAiMemoryWrite({
+          category: 'suggestion',
+          key,
+          value: serialized,
+          source: 'key_ai',
+          explicitModuleScope: modulesFromIdentifiers(
+            insight.category,
+            insight.suggestedTool,
+            ...suggestion.actions.map((a) => a.toolName),
+          ),
+        });
         await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'suggestion', key }, {
-          update: { value: JSON.stringify(suggestion), expiresAt },
+          update: {
+            value: serialized,
+            expiresAt,
+            dataClass: classified.dataClass,
+            moduleScope: classified.moduleScope,
+          },
           create: {
-            value: JSON.stringify(suggestion),
+            value: serialized,
             confidence: insight.severity === 'critical' ? 0.95 : insight.severity === 'warning' ? 0.8 : 0.7,
             source: 'key_ai',
             expiresAt,
+            dataClass: classified.dataClass,
+            moduleScope: classified.moduleScope,
           },
         }, this.semantic);
       }
@@ -134,9 +154,26 @@ export class ProactiveSuggestionService {
   async blockCategory(businessId: string, category: string): Promise<void> {
     // FU-MEMORY-COPIES-REWRITE: through the write door (a re-block only moves the expiry; nothing is rewritten).
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const classified = classifyAiMemoryWrite({
+      category: 'suggestion_block',
+      key: category,
+      value: 'blocked',
+      source: 'user',
+      explicitModuleScope: modulesFromIdentifiers(category),
+    });
     await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'suggestion_block', key: category }, {
-      update: { expiresAt },
-      create: { value: 'blocked', source: 'user', expiresAt },
+      update: {
+        expiresAt,
+        dataClass: classified.dataClass,
+        moduleScope: classified.moduleScope,
+      },
+      create: {
+        value: 'blocked',
+        source: 'user',
+        expiresAt,
+        dataClass: classified.dataClass,
+        moduleScope: classified.moduleScope,
+      },
     }, this.semantic);
   }
 

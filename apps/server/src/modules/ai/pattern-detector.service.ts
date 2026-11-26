@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiMemoryService } from './ai-memory.service';
+import { modulesFromIdentifiers } from './memory-classification';
 import { AiUsageService } from './ai-usage.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
@@ -100,12 +101,18 @@ export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
 
     // Store patterns and emit events
     for (const pattern of allPatterns) {
+      const moduleScope = modulesFromIdentifiers(
+        pattern.category,
+        pattern.suggestedTool,
+        ...(pattern.affectedEntities ?? []).map((e) => e.type),
+      );
       await this.memory.upsert(businessId, {
         category: 'patterns',
         key: `pattern_${pattern.category}_${Date.now()}`,
         value: JSON.stringify(pattern),
         confidence: pattern.confidence,
         source: 'pattern_analysis',
+        moduleScope,
       }).catch(() => {});
 
       this.events.emit('pattern.detected', {

@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
+import { modulesFromIdentifiers, unionModuleScopes } from '../ai/memory-classification';
 import { keyCronsDisabled } from '../../core/config/env';
 
 /**
@@ -83,6 +84,7 @@ export interface ToolLesson {
   occurrences: number;
   failureRate: number;
   lesson: string;
+  modules?: string[];
 }
 
 @Injectable()
@@ -129,6 +131,10 @@ export class KeyCortexCerebellumService {
 
     for (const lesson of lessons) {
       try {
+        const moduleScope = unionModuleScopes(
+          lesson.modules,
+          modulesFromIdentifiers(lesson.toolName),
+        );
         await this.memory.upsert(businessId, {
           // The category FlowOrchestrator already renders as "Lessons from past
           // failures". Writing anywhere else would be a reader with no writer,
@@ -145,6 +151,7 @@ export class KeyCortexCerebellumService {
           source: 'pattern_analysis',
           confidence: Math.min(0.5 + lesson.occurrences * 0.1, 0.95),
           expiresAt,
+          moduleScope,
         });
       } catch (err: unknown) {
         this.logger.warn(
@@ -163,7 +170,12 @@ export class KeyCortexCerebellumService {
 
   /** Group recent failures into recurring, actionable patterns. Never throws. */
   async detectLessons(businessId: string): Promise<ToolLesson[]> {
-    let rows: Array<{ toolName: string | null; success: boolean; errorMessage: string | null }>;
+    let rows: Array<{
+      toolName: string | null;
+      module?: string | null;
+      success: boolean;
+      errorMessage: string | null;
+    }>;
 
     try {
       rows = await this.prisma.client.aiExecutionLog.findMany({
@@ -172,7 +184,7 @@ export class KeyCortexCerebellumService {
           createdAt: { gte: new Date(Date.now() - WINDOW_HOURS * 3600_000) },
           toolName: { not: null },
         },
-        select: { toolName: true, success: true, errorMessage: true },
+        select: { toolName: true, module: true, success: true, errorMessage: true },
         take: SAMPLE_LIMIT,
         orderBy: { createdAt: 'desc' },
       });
@@ -183,7 +195,10 @@ export class KeyCortexCerebellumService {
     // Total attempts per tool, so a lesson can state a failure RATE rather than
     // a bare count. "Failed twice" means nothing without "out of three".
     const attempts = new Map<string, number>();
-    const failures = new Map<string, { tool: string; signature: string; count: number }>();
+    const failures = new Map<
+      string,
+      { tool: string; signature: string; count: number; modules: Set<string> }
+    >();
 
     for (const row of rows) {
       if (!row.toolName) continue;
@@ -193,8 +208,14 @@ export class KeyCortexCerebellumService {
       const signature = this.signature(row.errorMessage);
       const key = `${row.toolName}::${signature}`;
       const existing = failures.get(key);
-      if (existing) existing.count += 1;
-      else failures.set(key, { tool: row.toolName, signature, count: 1 });
+      if (existing) {
+        existing.count += 1;
+        if (row.module) existing.modules.add(row.module);
+      } else {
+        const modules = new Set<string>();
+        if (row.module) modules.add(row.module);
+        failures.set(key, { tool: row.toolName, signature, count: 1, modules });
+      }
     }
 
     return [...failures.values()]
@@ -207,6 +228,7 @@ export class KeyCortexCerebellumService {
           occurrences: f.count,
           failureRate: f.count / total,
           lesson: this.phrase(f.tool, f.signature, f.count, total),
+          modules: [...f.modules],
         };
       })
       .sort((a, b) => b.occurrences - a.occurrences)
