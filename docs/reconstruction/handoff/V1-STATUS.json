@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "391d3dd19317ca1ede9f2da7943bc070236d5c84",
-  "main_commit_date": "2026-11-26T11:56:59+00:00",
+  "main_sha": "f951b4408add5fe4c4d054a922720922ea8cc4cf",
+  "main_commit_date": "2026-11-26T15:07:01+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 211,
-    "points": 316.5,
-    "pct_by_points": 55.5
+    "packets": 213,
+    "points": 319,
+    "pct_by_points": 55.9
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 185,
-    "points": 254,
-    "pct_by_points": 44.5
+    "packets": 183,
+    "points": 251.5,
+    "pct_by_points": 44.1
    }
   },
   "by_step": {
@@ -78,9 +78,9 @@
     "total": 53
    },
    "5": {
-    "done": 54,
+    "done": 55,
     "in-progress": 0,
-    "todo": 38,
+    "todo": 37,
     "total": 92
    },
    "6": {
@@ -90,9 +90,9 @@
     "total": 40
    },
    "7": {
-    "done": 2,
+    "done": 3,
     "in-progress": 0,
-    "todo": 32,
+    "todo": 31,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 122,
+    "done": 124,
     "in-progress": 0,
-    "todo": 133,
+    "todo": 131,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 90,
+   "prior-status-file": 89,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 84,
-   "compacted-commit": 80,
-   "no-evidence": 114
+   "compacted-commit": 82,
+   "no-evidence": 113
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -215,8 +215,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 107,
-  "todo_with_dependencies_met_launch": 77
+  "todo_with_dependencies_met": 106,
+  "todo_with_dependencies_met_launch": 76
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -233,9 +233,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 25,
+   "weight": 23,
    "chain": [
-    "SWP-TEAM-WEB",
     "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
     "W11-WEB-INVENTORY-REFUSALS",
@@ -273,14 +272,14 @@
    "unblocks": 46
   },
   {
-   "id": "SWP-TEAM-WEB",
+   "id": "SWP-FIN-WEB-CRASHES",
    "step": 5,
    "priority": "P1",
-   "size": "M",
+   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 20
+   "unblocks": 19
   },
   {
    "id": "EXPENSES-HUB-2",
@@ -983,16 +982,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-ADMIN-SHELL-SERVER-GATE",
-   "step": 7,
-   "priority": "P3",
-   "size": "XS",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-AI-CONTRACT-ZOD-FIRST",
    "step": 7,
    "priority": "P3",
@@ -1345,14 +1334,14 @@
    "unblocks": 46
   },
   {
-   "id": "SWP-TEAM-WEB",
+   "id": "SWP-FIN-WEB-CRASHES",
    "step": 5,
    "priority": "P1",
-   "size": "M",
+   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 20
+   "unblocks": 19
   },
   {
    "id": "EXPENSES-HUB-2",
@@ -1929,16 +1918,6 @@
    "step": 6,
    "priority": "P3",
    "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-ADMIN-SHELL-SERVER-GATE",
-   "step": 7,
-   "priority": "P3",
-   "size": "XS",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
@@ -4162,17 +4141,19 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "602c5d79"
+   ],
    "depends_on": [
     "SWP-CRM-WEB-POLISH",
     "SWP-TEAM-INVITE-SERVER",
     "FAILURE-KIT"
    ],
    "title": "Team page: no-access state for refused members, the role resets after an invite, pending invites look pending, emails normalised",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-FIN-WEB-CRASHES",
@@ -4189,7 +4170,7 @@
     "SWP-TEAM-WEB"
    ],
    "title": "Reports: switching Books tabs never crashes",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-UI-COPY",
@@ -7985,15 +7966,17 @@
    "size": "XS",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "f857791a"
+   ],
    "depends_on": [
     "RR-ADMIN-LOGOUT"
    ],
    "title": "/admin pages are refused at the edge without an unexpired admin session cookie (the API stays the authority)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-SESSION-STORAGE-CENSUS",
