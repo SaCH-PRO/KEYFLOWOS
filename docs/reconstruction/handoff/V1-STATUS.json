@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "93120fa228cefadf61b37759457ffdd14f9f7d74",
-  "main_commit_date": "2026-11-26T00:40:32+00:00",
+  "main_sha": "2c0f86e89a195b22c5a2fa1a59c3e618a3f08735",
+  "main_commit_date": "2026-11-26T05:51:49+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 184,
-    "points": 274.5,
-    "pct_by_points": 48.1
+    "packets": 194,
+    "points": 290.5,
+    "pct_by_points": 50.9
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 212,
-    "points": 296,
-    "pct_by_points": 51.9
+    "packets": 202,
+    "points": 280,
+    "pct_by_points": 49.1
    }
   },
   "by_step": {
@@ -66,27 +66,27 @@
     "total": 7
    },
    "3": {
-    "done": 81,
+    "done": 83,
     "in-progress": 0,
-    "todo": 68,
+    "todo": 66,
     "total": 149
    },
    "4": {
-    "done": 25,
+    "done": 26,
     "in-progress": 0,
-    "todo": 28,
+    "todo": 27,
     "total": 53
    },
    "5": {
-    "done": 42,
+    "done": 45,
     "in-progress": 0,
-    "todo": 50,
+    "todo": 47,
     "total": 92
    },
    "6": {
-    "done": 19,
+    "done": 23,
     "in-progress": 0,
-    "todo": 21,
+    "todo": 17,
     "total": 40
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 96,
+    "done": 106,
     "in-progress": 0,
-    "todo": 159,
+    "todo": 149,
     "total": 255
    },
    "follow-on": {
@@ -123,20 +123,22 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 100,
+   "prior-status-file": 94,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 65,
-   "compacted-commit": 72,
-   "no-evidence": 131
+   "code-commit-subject": 71,
+   "compacted-commit": 76,
+   "no-evidence": 127
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
    "W11-KEY-TRANSFER-INTEGER",
    "TOF-FINANCE-CANONICAL-TOOLS",
    "W11-OWNER-HELPER-REST",
+   "TOF-KEY-SELF-MODEL",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
    "SWP-KEY-SHELL-SMOKE",
+   "EXPENSES-HUB-1",
    "CATALOG-1",
    "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
@@ -148,9 +150,11 @@
    "W11-RUNWAY-BURN-CURRENCY",
    "TOF-PAYROLL-DISCARD",
    "TODAY-AGGREGATE",
+   "DEMO-PREVIEW",
    "CLAIM-LOOP",
    "READY-TO-SEND",
    "OWNER-ALERTS-SERVER",
+   "VAT-BASICS",
    "W11-SHIP-STOCK-DECREMENT",
    "W11-STOREFRONT-ROUTE-DECREMENTED",
    "W11-STOREFRONT-FULFIL-STEPS",
@@ -162,6 +166,7 @@
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
    "SWP-CENSUS-V1-A",
+   "SWP-CENSUS-V1-B",
    "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
    "FU-PROVIDER-ERROR-HYGIENE",
@@ -171,6 +176,7 @@
    "FU-PROPOSAL-REVENUE-SIGHT",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
+   "MEM-CENSUS",
    "MEM-EXPIRED-NOT-SERVED",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
@@ -196,12 +202,11 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 119,
-  "todo_with_dependencies_met_launch": 90
+  "todo_with_dependencies_met": 121,
+  "todo_with_dependencies_met_launch": 91
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "DEMO-PREVIEW",
    "TODAY-4BLOCK",
    "HARNESS-REMOVAL",
    "NAV-B-HIDE",
@@ -235,24 +240,24 @@
  },
  "ready": [
   {
-   "id": "DEMO-PREVIEW",
+   "id": "TODAY-4BLOCK",
    "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
+   "priority": "P0",
+   "size": "L",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 20
+   "unblocks": 17
   },
   {
-   "id": "TOF-KEY-SELF-MODEL",
+   "id": "TOF-KNOWLEDGE-UPLOAD",
    "step": 3,
    "priority": "P2",
    "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 50
+   "unblocks": 46
   },
   {
    "id": "SWP-TEAM-WEB",
@@ -265,44 +270,44 @@
    "unblocks": 20
   },
   {
-   "id": "OWNER-ALERTS-WEB",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 18
-  },
-  {
-   "id": "VAT-BASICS",
-   "step": 6,
+   "id": "NAV-B-LEGACY-SERVER",
+   "step": 7,
    "priority": "P1",
    "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 18
-  },
-  {
-   "id": "SWP-CENSUS-V1-B",
-   "step": 6,
-   "priority": "P0",
-   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 16
+   "unblocks": 14
   },
   {
-   "id": "EXPENSES-HUB-1",
+   "id": "EXPENSES-HUB-2",
    "step": 4,
    "priority": "P1",
    "size": "M",
-   "lane": "both",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 12
+   "unblocks": 11
+  },
+  {
+   "id": "W11-TRANSIENT-CONFLICT",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 11
+  },
+  {
+   "id": "CUSTOMER-PAGE-HONESTY",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -335,11 +340,11 @@
    "unblocks": 9
   },
   {
-   "id": "MEM-CENSUS",
-   "step": 3,
+   "id": "PLAN-TABLE",
+   "step": 6,
    "priority": "P1",
-   "size": "M",
-   "lane": "server",
+   "size": "L",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
@@ -409,6 +414,16 @@
    "step": 3,
    "priority": "P1",
    "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "MEM-CLASS-COLUMNS",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -695,21 +710,21 @@
    "unblocks": 0
   },
   {
-   "id": "FU-TIMELINE-LOAD-OLDER",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-UNTRUSTED-INBOUND-FENCE",
    "step": 5,
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-EVAL-SUITE",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -807,16 +822,6 @@
   {
    "id": "FU-CONTACT-PANEL-PRUNE",
    "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
-   "step": 6,
    "priority": "P2",
    "size": "S",
    "lane": "web",
@@ -1115,16 +1120,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-ADMIN-SHELL-SERVER-GATE",
    "step": 7,
    "priority": "P3",
@@ -1191,6 +1186,16 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CORTEX-BUS-BACKPRESSURE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1335,12 +1340,32 @@
    "unblocks": 0
   },
   {
+   "id": "RR-LEARNING-OUTCOME-SEMANTICS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
    "step": 7,
    "priority": "P3",
    "size": "S",
    "lane": "server",
    "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-REFLECTION-HONEST",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1427,24 +1452,24 @@
  ],
  "ready_launch": [
   {
-   "id": "DEMO-PREVIEW",
+   "id": "TODAY-4BLOCK",
    "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
+   "priority": "P0",
+   "size": "L",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 20
+   "unblocks": 17
   },
   {
-   "id": "TOF-KEY-SELF-MODEL",
+   "id": "TOF-KNOWLEDGE-UPLOAD",
    "step": 3,
    "priority": "P2",
    "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 50
+   "unblocks": 46
   },
   {
    "id": "SWP-TEAM-WEB",
@@ -1457,44 +1482,44 @@
    "unblocks": 20
   },
   {
-   "id": "OWNER-ALERTS-WEB",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 18
-  },
-  {
-   "id": "VAT-BASICS",
-   "step": 6,
+   "id": "NAV-B-LEGACY-SERVER",
+   "step": 7,
    "priority": "P1",
    "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 18
-  },
-  {
-   "id": "SWP-CENSUS-V1-B",
-   "step": 6,
-   "priority": "P0",
-   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 16
+   "unblocks": 14
   },
   {
-   "id": "EXPENSES-HUB-1",
+   "id": "EXPENSES-HUB-2",
    "step": 4,
    "priority": "P1",
    "size": "M",
-   "lane": "both",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 12
+   "unblocks": 11
+  },
+  {
+   "id": "W11-TRANSIENT-CONFLICT",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 11
+  },
+  {
+   "id": "CUSTOMER-PAGE-HONESTY",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -1527,11 +1552,11 @@
    "unblocks": 9
   },
   {
-   "id": "MEM-CENSUS",
-   "step": 3,
+   "id": "PLAN-TABLE",
+   "step": 6,
    "priority": "P1",
-   "size": "M",
-   "lane": "server",
+   "size": "L",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
@@ -1601,6 +1626,16 @@
    "step": 3,
    "priority": "P1",
    "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "MEM-CLASS-COLUMNS",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1867,21 +1902,21 @@
    "unblocks": 0
   },
   {
-   "id": "FU-TIMELINE-LOAD-OLDER",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-UNTRUSTED-INBOUND-FENCE",
    "step": 5,
    "priority": "P1",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-EVAL-SUITE",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1979,16 +2014,6 @@
   {
    "id": "FU-CONTACT-PANEL-PRUNE",
    "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONTACT-SEND-QUOTE-DOOR",
-   "step": 6,
    "priority": "P2",
    "size": "S",
    "lane": "web",
@@ -2177,16 +2202,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-ADMIN-SHELL-SERVER-GATE",
    "step": 7,
    "priority": "P3",
@@ -2268,6 +2283,26 @@
   },
   {
    "id": "RR-INDEX-COVERAGE-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-LEARNING-OUTCOME-SEMANTICS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-REFLECTION-HONEST",
    "step": 3,
    "priority": "P3",
    "size": "S",
@@ -2825,15 +2860,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "1c733f16"
+   ],
    "depends_on": [
     "W11-OWNER-HELPER-REST"
    ],
    "title": "KEY operational self-model (#162): correct fields, real errors, and one consumer",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "TOF-KNOWLEDGE-UPLOAD",
@@ -2850,7 +2887,7 @@
     "TOF-KEY-SELF-MODEL"
    ],
    "title": "Business knowledge upload (#134): module-scoped routes and only approved documents reach cortex.search_knowledge",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "KEY-TOOL-ALLOWLIST",
@@ -3596,16 +3633,18 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "c68318b5"
+   ],
    "depends_on": [
     "NAV-A2",
     "FAILURE-KIT"
    ],
    "title": "Expense detail and bills: Delete tells the truth, Void a posted expense with a confirm step, and Approve asks which account and method pay the bill",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "EXPENSES-HUB-2",
@@ -3622,7 +3661,7 @@
     "EXPENSES-HUB-1"
    ],
    "title": "Expense form: business currency, today's Trinidad date, 'bill to pay later', and 'Recurring' creates a real schedule",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -4206,16 +4245,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "54614543"
+   ],
    "depends_on": [
     "TODAY-AGGREGATE",
     "W11-OWNER-HELPER-REST"
    ],
    "title": "Onboarding stops seeding a demo contact and DRAFT invoice; the checklist shows a sample as a preview instead",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "CLAIM-LOOP",
@@ -4285,15 +4326,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "d543548e"
+   ],
    "depends_on": [
     "OWNER-ALERTS-SERVER"
    ],
    "title": "Push setup reaches the API, an 'install on your phone' step, and alert settings",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "TODAY-4BLOCK",
@@ -4314,7 +4357,7 @@
     "NAV-A3"
    ],
    "title": "Today in four blocks (Needs you, Today, Pulse, Get set up) on the one server read; the metaphor hero, genome readiness and 23 other widgets removed",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "KEY-PASTE-BOX",
@@ -4586,10 +4629,12 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "8345e5d2"
+   ],
    "depends_on": [
     "MIGRATION-SET-A",
     "SWP-QUOTE-PUBLIC-PAGE",
@@ -4598,7 +4643,7 @@
     "BIZ-SETTINGS-WEB"
    ],
    "title": "VAT basics: a VAT registration number on the business, printed on invoices, receipts, PDFs and customer pages whenever tax is charged; tax off by default with a 12.5% preset",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "CUSTOMER-PAGE-HONESTY",
@@ -4618,7 +4663,7 @@
     "OWNER-ALERTS-SERVER"
    ],
    "title": "Honest customer pages: no unearned badges or 'Open Now', slug URLs, product page from the storefront payload, /site/<slug> redirects to /book/<slug>, no client order-notify call",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
@@ -4865,7 +4910,7 @@
     "DEMO-PREVIEW"
    ],
    "title": "One plan and feature table: every advertised limit is enforced or removed; FREE lets a habit form; plan copy without autopilot, unlimited AI or dormant features",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-PUBLIC-SITE-MINOR",
@@ -5042,15 +5087,17 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "557e662e"
+   ],
    "depends_on": [
     "SWP-KEY-SHELL-SMOKE"
    ],
    "title": "REST scope census, v1 hubs batch B: site, presence, onboarding concierge, approvals, identity, actions, notifications, connectors (48 open rows, 9 controllers)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "TOF-TIER-PRICING-SCHEMA",
@@ -5167,7 +5214,7 @@
     "SWP-CENSUS-V1-B"
    ],
    "title": "Per-business legacy modules: a server read of which hidden modules this business already has data in",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "KEY-TOOL-DOMAIN-HIDE",
@@ -5302,7 +5349,7 @@
     "VAT-BASICS"
    ],
    "title": "Share isLostTransactionConflict with identity bootstrap, PayPal capture recording and the KEY action boundary (F-37)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-LOAD-SENSITIVE-TESTS",
@@ -6421,13 +6468,16 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "a1d0e984",
+    "695c86e7"
+   ],
    "depends_on": [],
    "title": "Census of every KEY memory read and write path, with its tenant predicate and reader projection; a spec fails on an unregistered path",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-TEMPORAL-SCOPE",
@@ -6534,7 +6584,7 @@
     "MEM-CENSUS"
    ],
    "title": "Memory rows and embedding copies record data class and module scope at write, from provenance",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-CLASS-BACKFILL",
@@ -6639,7 +6689,7 @@
     "MEM-CENSUS"
    ],
    "title": "The memory leak suite and the KEY memory task suite, with recorded baselines",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-FINANCE-INTEL-DOORS",
@@ -7043,7 +7093,7 @@
     "MEM-CENSUS"
    ],
    "title": "KEY cortex event bus bounds its in-flight ledger writes and reports saturation instead of starting unbounded concurrent writes",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-UNKNOWN-COST-NOT-ZERO",
@@ -7667,7 +7717,7 @@
     "MEM-CENSUS"
    ],
    "title": "A tool's execution result is recorded as execution, not as the user's acceptance, and confidence calibration counts only real user responses",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-EVAL-HARNESS-NO-VACUOUS",
@@ -7765,7 +7815,7 @@
     "MEM-CENSUS"
    ],
    "title": "KEY's reflection maintenance stops reporting work it did not do, and the in-process dream journal is bounded and labelled unpersisted",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-MIGRATION-CASH-TARGET",
@@ -9222,16 +9272,18 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "9f37f3bd"
+   ],
    "depends_on": [
     "FU-CONTACT-TIMELINE-CHANNELS",
     "FU-ME-NOTIFICATIONS-SCOPE"
    ],
    "title": "The customer notifications page says 'no access' on a refused read, not 'nothing sent'",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-STUDIO-PAGE-SCOPE",
@@ -9350,15 +9402,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "4acbe32a"
+   ],
    "depends_on": [
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The contact's Send quote opens New quote for that customer",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-INVOICE-REMAINING-CREDITS",
@@ -9435,16 +9489,18 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "c90cf8a7"
+   ],
    "depends_on": [
     "FU-TIMELINE-EVENTS-PAGING",
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The contact Timeline loads older events",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "CONTACTS-LIST-FIRST",
