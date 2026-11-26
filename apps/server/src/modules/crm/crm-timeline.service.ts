@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CONTACT_EVENT_TYPES_BY_CATEGORY, normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
 import type { ContactEvent, Invoice, Prisma } from '@prisma/client';
@@ -18,6 +18,7 @@ import {
 } from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
+import { ContactAuditService, type ContactAuditActor, type ContactAuditContext } from './privacy/contact-audit.service';
 
 export const CONTACT_EVENTS_DEFAULT_LIMIT = 20;
 export const CONTACT_EVENTS_MAX_LIMIT = 200;
@@ -168,6 +169,7 @@ const EVENT_SCAN_BATCH = 100;
 @Injectable()
 export class CrmTimelineService {
   private readonly logger = new Logger(CrmTimelineService.name);
+  private readonly contactAudit: ContactAuditService;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -175,7 +177,22 @@ export class CrmTimelineService {
     @Inject(TimelineService) private readonly timeline: TimelineService,
     @Inject(EvidenceService) private readonly evidence: EvidenceService,
     @Inject(TaskAssignmentService) private readonly assignments: TaskAssignmentService,
-  ) {}
+    @Optional() @Inject(ContactAuditService) contactAudit?: ContactAuditService,
+  ) {
+    this.contactAudit = contactAudit ?? new ContactAuditService(prisma);
+  }
+
+  private resolveAuditActor(audit?: ContactAuditContext | null, fallbackUserId?: string | null): ContactAuditActor {
+    if (audit?.actor) return audit.actor;
+    if (fallbackUserId) return { type: 'USER', id: fallbackUserId };
+    return { type: 'SYSTEM' };
+  }
+
+  private eventMetaForAudit(audit?: ContactAuditContext | null, source = 'crm'): { actorType?: string; actorId?: string; source?: string } | undefined {
+    const actor = audit?.actor;
+    if (!actor) return undefined;
+    return { actorType: actor.type, actorId: actor.id ?? undefined, source };
+  }
 
   private formatContactName(contact: {
     displayName?: string | null;
@@ -450,9 +467,14 @@ export class CrmTimelineService {
     });
   }
 
-  addNote(input: { businessId: string; contactId: string; body: string; authorId?: string | null; source?: string }) {
-    return this.assertContact(input.businessId, input.contactId).then(async () => {
-      const note = await this.prisma.client.contactNote.create({
+  async addNote(
+    input: { businessId: string; contactId: string; body: string; authorId?: string | null; source?: string },
+    audit?: ContactAuditContext,
+  ) {
+    await this.assertContact(input.businessId, input.contactId);
+    const actor = this.resolveAuditActor(audit, input.authorId);
+    return this.prisma.client.$transaction(async (tx) => {
+      const note = await tx.contactNote.create({
         data: {
           businessId: input.businessId,
           contactId: input.contactId,
@@ -461,30 +483,53 @@ export class CrmTimelineService {
           source: input.source ?? 'manual',
         },
       });
+      // D-25 / D-207 (FU-CONTACT-AUDIT-RESIDUAL): the audit entry commits with
+      // the note inside the same transaction, before logEvent so a refused
+      // audit row leaves no ContactEvent, feed copy or announcement behind.
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          action: 'note_added',
+          entityType: 'note',
+          entityId: note.id,
+          after: { body: note.body, source: note.source },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
       await this.logEvent(
         input.businessId,
         input.contactId,
         'note.created',
         { noteId: note.id },
-        { source: input.source ?? 'crm', actorType: 'USER', actorId: input.authorId ?? undefined },
+        { source: input.source ?? 'crm', actorType: actor.type, actorId: actor.id ?? undefined },
+        tx,
       );
       return note;
     });
   }
 
-  async addTask(input: {
-    businessId: string;
-    contactId: string;
-    title: string;
-    dueDate?: string | null;
-    priority?: string | null;
-    assigneeId?: string | null;
-    assigneeType?: string | null;
-    remindAt?: string | null;
-    creatorId?: string | null;
-    source?: string | null;
-  }) {
+  async addTask(
+    input: {
+      businessId: string;
+      contactId: string;
+      title: string;
+      dueDate?: string | null;
+      priority?: string | null;
+      assigneeId?: string | null;
+      assigneeType?: string | null;
+      remindAt?: string | null;
+      creatorId?: string | null;
+      source?: string | null;
+    },
+    audit?: ContactAuditContext,
+  ) {
     await this.assertContact(input.businessId, input.contactId);
+    const actor = this.resolveAuditActor(audit, input.creatorId);
 
     const task = await this.prisma.client.$transaction(async (tx) => {
       const created = await tx.contactTask.create({
@@ -522,71 +567,183 @@ export class CrmTimelineService {
         });
       }
 
+      // D-25 / D-207 (FU-CONTACT-AUDIT-RESIDUAL): task, assignment, audit row
+      // and task.created event commit or roll back atomically.
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          action: 'task_added',
+          entityType: 'task',
+          entityId: created.id,
+          after: {
+            title: created.title,
+            dueDate: input.dueDate ?? null,
+            priority: created.priority,
+            assigneeId: created.assigneeId,
+          },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
+
+      await this.logEvent(
+        input.businessId,
+        input.contactId,
+        'task.created',
+        {
+          title: input.title,
+          dueDate: input.dueDate,
+          priority: input.priority ?? 'NORMAL',
+          assigneeId: input.assigneeId,
+        },
+        { actorType: actor.type, actorId: actor.id ?? undefined, source: input.source ?? 'crm' },
+        tx,
+      );
+
       return created;
     });
 
-    await this.logEvent(
-      input.businessId,
-      input.contactId,
-      'task.created',
-      {
-        title: input.title,
-        dueDate: input.dueDate,
-        priority: input.priority ?? 'NORMAL',
-        assigneeId: input.assigneeId,
-      },
-      { actorType: 'USER', actorId: input.creatorId ?? undefined, source: input.source ?? 'crm' },
-    );
     this.events.emit('contact_task.created', { task, businessId: input.businessId });
     return task;
   }
 
-  async updateNote(input: { businessId: string; noteId: string; body?: string; source?: string }) {
-    const note = await this.prisma.client.contactNote.findFirst({
-      where: { id: input.noteId, businessId: input.businessId },
+  async updateNote(
+    input: { businessId: string; noteId: string; body?: string; source?: string },
+    audit?: ContactAuditContext,
+  ) {
+    const actor = this.resolveAuditActor(audit);
+    return this.prisma.client.$transaction(async (tx) => {
+      const note = await tx.contactNote.findFirst({
+        where: { id: input.noteId, businessId: input.businessId },
+      });
+      if (!note) throw new NotFoundException('Note not found');
+      const data: any = {};
+      if (input.body !== undefined) data.body = input.body;
+      if (input.source !== undefined) data.source = input.source;
+      const updated = await tx.contactNote.update({
+        where: { id: input.noteId },
+        data,
+      });
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: note.contactId,
+          action: 'note_updated',
+          entityType: 'note',
+          entityId: note.id,
+          before: { body: note.body, source: note.source },
+          after: { body: updated.body, source: updated.source },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
+      await this.logEvent(
+        input.businessId,
+        note.contactId,
+        'note.updated',
+        { noteId: note.id },
+        this.eventMetaForAudit(audit),
+        tx,
+      );
+      return updated;
     });
-    if (!note) throw new NotFoundException('Note not found');
-    const data: any = {};
-    if (input.body !== undefined) data.body = input.body;
-    if (input.source !== undefined) data.source = input.source;
-    const updated = await this.prisma.client.contactNote.update({
-      where: { id: input.noteId },
-      data,
-    });
-    await this.logEvent(input.businessId, note.contactId, 'note.updated', { noteId: note.id });
-    return updated;
   }
 
-  async deleteNote(input: { businessId: string; noteId: string }) {
-    const note = await this.prisma.client.contactNote.findFirst({
-      where: { id: input.noteId, businessId: input.businessId },
+  async deleteNote(
+    input: { businessId: string; noteId: string },
+    audit?: ContactAuditContext,
+  ) {
+    const actor = this.resolveAuditActor(audit);
+    return this.prisma.client.$transaction(async (tx) => {
+      const note = await tx.contactNote.findFirst({
+        where: { id: input.noteId, businessId: input.businessId },
+      });
+      if (!note) throw new NotFoundException('Note not found');
+      await tx.contactNote.delete({ where: { id: input.noteId } });
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: note.contactId,
+          action: 'note_deleted',
+          entityType: 'note',
+          entityId: note.id,
+          before: { body: note.body, source: note.source },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
+      // D-280 (SEC-WAW-1): deleting a pasted WhatsApp note must not copy its body into ContactEvent / Activity.
+      const deleteData =
+        note.source === WHATSAPP_INBOUND_SOURCE
+          ? { noteId: note.id }
+          : { noteId: note.id, body: note.body?.slice(0, 100) };
+      await this.logEvent(
+        input.businessId,
+        note.contactId,
+        'note.deleted',
+        deleteData,
+        this.eventMetaForAudit(audit),
+        tx,
+      );
+      return { deleted: true };
     });
-    if (!note) throw new NotFoundException('Note not found');
-    await this.prisma.client.contactNote.delete({ where: { id: input.noteId } });
-    // D-280 (SEC-WAW-1): deleting a pasted WhatsApp note must not copy its body into ContactEvent / Activity.
-    const deleteData =
-      note.source === WHATSAPP_INBOUND_SOURCE
-        ? { noteId: note.id }
-        : { noteId: note.id, body: note.body?.slice(0, 100) };
-    await this.logEvent(input.businessId, note.contactId, 'note.deleted', deleteData);
-    return { deleted: true };
   }
 
-  async updateTask(input: { businessId: string; taskId: string; title?: string; dueDate?: string; priority?: string; remindAt?: string }) {
-    const task = await this.prisma.client.contactTask.findFirst({
-      where: { id: input.taskId, businessId: input.businessId },
+  async updateTask(
+    input: { businessId: string; taskId: string; title?: string; dueDate?: string; priority?: string; remindAt?: string },
+    audit?: ContactAuditContext,
+  ) {
+    const actor = this.resolveAuditActor(audit);
+    const { task, updated } = await this.prisma.client.$transaction(async (tx) => {
+      const existing = await tx.contactTask.findFirst({
+        where: { id: input.taskId, businessId: input.businessId },
+      });
+      if (!existing) throw new NotFoundException('Task not found');
+      const data: any = {};
+      if (input.title !== undefined) data.title = input.title;
+      if (input.dueDate !== undefined) data.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+      if (input.priority !== undefined) data.priority = input.priority;
+      if (input.remindAt !== undefined) data.remindAt = input.remindAt ? new Date(input.remindAt) : null;
+      const next = await tx.contactTask.update({
+        where: { id: input.taskId },
+        data,
+      });
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: existing.contactId,
+          action: 'task_updated',
+          entityType: 'task',
+          entityId: existing.id,
+          before: { title: existing.title, dueDate: existing.dueDate, priority: existing.priority, remindAt: existing.remindAt },
+          after: { title: next.title, dueDate: next.dueDate, priority: next.priority, remindAt: next.remindAt },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
+      await this.logEvent(
+        input.businessId,
+        existing.contactId,
+        'task.updated',
+        { taskId: existing.id, title: next.title },
+        this.eventMetaForAudit(audit),
+        tx,
+      );
+      return { task: existing, updated: next };
     });
-    if (!task) throw new NotFoundException('Task not found');
-    const data: any = {};
-    if (input.title !== undefined) data.title = input.title;
-    if (input.dueDate !== undefined) data.dueDate = input.dueDate ? new Date(input.dueDate) : null;
-    if (input.priority !== undefined) data.priority = input.priority;
-    if (input.remindAt !== undefined) data.remindAt = input.remindAt ? new Date(input.remindAt) : null;
-    const updated = await this.prisma.client.contactTask.update({
-      where: { id: input.taskId },
-      data,
-    });
-    await this.logEvent(input.businessId, task.contactId, 'task.updated', { taskId: task.id, title: updated.title });
     this.events.emit('contact_task.updated', { task: updated, businessId: input.businessId });
     if (input.dueDate !== undefined && input.dueDate !== (task.dueDate?.toISOString?.() ?? null)) {
       this.events.emit('contact_task.rescheduled', { task: updated, businessId: input.businessId });
@@ -594,18 +751,50 @@ export class CrmTimelineService {
     return updated;
   }
 
-  async deleteTask(input: { businessId: string; taskId: string }) {
-    const task = await this.prisma.client.contactTask.findFirst({
-      where: { id: input.taskId, businessId: input.businessId },
+  async deleteTask(
+    input: { businessId: string; taskId: string },
+    audit?: ContactAuditContext,
+  ) {
+    const actor = this.resolveAuditActor(audit);
+    const taskId = await this.prisma.client.$transaction(async (tx) => {
+      const task = await tx.contactTask.findFirst({
+        where: { id: input.taskId, businessId: input.businessId },
+      });
+      if (!task) throw new NotFoundException('Task not found');
+      await tx.contactTask.delete({ where: { id: input.taskId } });
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: task.contactId,
+          action: 'task_deleted',
+          entityType: 'task',
+          entityId: task.id,
+          before: { title: task.title, status: task.status, priority: task.priority },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
+      await this.logEvent(
+        input.businessId,
+        task.contactId,
+        'task.deleted',
+        { taskId: task.id, title: task.title },
+        this.eventMetaForAudit(audit),
+        tx,
+      );
+      return task.id;
     });
-    if (!task) throw new NotFoundException('Task not found');
-    await this.prisma.client.contactTask.delete({ where: { id: input.taskId } });
-    await this.logEvent(input.businessId, task.contactId, 'task.deleted', { taskId: task.id, title: task.title });
-    this.events.emit('contact_task.deleted', { businessId: input.businessId, taskId: task.id });
+    this.events.emit('contact_task.deleted', { businessId: input.businessId, taskId });
     return { deleted: true };
   }
 
-  async completeTask(input: { businessId: string; taskId: string; evidenceIds?: string[] }) {
+  async completeTask(
+    input: { businessId: string; taskId: string; evidenceIds?: string[] },
+    audit?: ContactAuditContext,
+  ) {
     const task = await this.prisma.client.contactTask.findFirst({
       where: { id: input.taskId, businessId: input.businessId },
     });
@@ -621,30 +810,87 @@ export class CrmTimelineService {
       }
     }
 
-    const updated = await this.prisma.client.contactTask.update({
-      where: { id: input.taskId },
-      data: { status: 'DONE', completedAt: new Date() },
-    });
-    await this.logEvent(input.businessId, task.contactId, 'task.completed', {
-      taskId: task.id,
-      title: task.title,
-      evidenceIds: input.evidenceIds ?? [],
+    const actor = this.resolveAuditActor(audit);
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const next = await tx.contactTask.update({
+        where: { id: input.taskId },
+        data: { status: 'DONE', completedAt: new Date() },
+      });
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: task.contactId,
+          action: 'task_completed',
+          entityType: 'task',
+          entityId: task.id,
+          before: { status: task.status },
+          after: { status: 'DONE' },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? null,
+        },
+        tx,
+      );
+      await this.logEvent(
+        input.businessId,
+        task.contactId,
+        'task.completed',
+        {
+          taskId: task.id,
+          title: task.title,
+          evidenceIds: input.evidenceIds ?? [],
+        },
+        this.eventMetaForAudit(audit),
+        tx,
+      );
+      return next;
     });
     this.events.emit('contact_task.completed', { task: updated, businessId: input.businessId });
     return updated;
   }
 
-  async reopenTask(input: { businessId: string; taskId: string }) {
-    const task = await this.prisma.client.contactTask.findFirst({
-      where: { id: input.taskId, businessId: input.businessId },
-    });
-    if (!task) throw new NotFoundException('Task not found');
+  async reopenTask(
+    input: { businessId: string; taskId: string },
+    audit?: ContactAuditContext,
+  ) {
+    const actor = this.resolveAuditActor(audit);
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const task = await tx.contactTask.findFirst({
+        where: { id: input.taskId, businessId: input.businessId },
+      });
+      if (!task) throw new NotFoundException('Task not found');
 
-    const updated = await this.prisma.client.contactTask.update({
-      where: { id: input.taskId },
-      data: { status: 'OPEN', completedAt: null },
+      const next = await tx.contactTask.update({
+        where: { id: input.taskId },
+        data: { status: 'OPEN', completedAt: null },
+      });
+      await this.contactAudit.write(
+        {
+          businessId: input.businessId,
+          contactId: task.contactId,
+          action: 'task_updated',
+          entityType: 'task',
+          entityId: task.id,
+          before: { status: task.status },
+          after: { status: 'OPEN' },
+          actor,
+          ip: audit?.ip ?? null,
+          userAgent: audit?.userAgent ?? null,
+          reason: audit?.reason ?? 'task.reopened',
+        },
+        tx,
+      );
+      await this.logEvent(
+        input.businessId,
+        task.contactId,
+        'task.reopened',
+        { taskId: task.id, title: task.title },
+        this.eventMetaForAudit(audit),
+        tx,
+      );
+      return next;
     });
-    await this.logEvent(input.businessId, task.contactId, 'task.reopened', { taskId: task.id, title: task.title });
     this.events.emit('contact_task.reopened', { task: updated, businessId: input.businessId });
     return updated;
   }
