@@ -96,7 +96,9 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     return () => window.removeEventListener(KEY_OPEN_EVENT, handler);
   }, [currentModule, openGenomeOnboardingConversation, setCurrentModule, setInput, setOpen, setPageContext]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts. KeyAgent is the one owner of Cmd/Ctrl+K (the palette) and Cmd/Ctrl+J (KEY's drawer): the
+  // shell's useKeyboardShortcuts lists both for the shortcuts help but leaves the keypress here (ownedBy "KeyAgent";
+  // FU-C4-CMDK-SEARCH, FU-KEY-CTRLJ-OWNERS).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.key) return;
