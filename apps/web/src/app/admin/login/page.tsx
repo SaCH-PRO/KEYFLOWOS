@@ -44,10 +44,13 @@ export default function AdminLoginPage() {
     localStorage.setItem("kf_admin_user_cache", JSON.stringify(res.data.user));
     localStorage.setItem("kf_auth_mode", "admin");
 
-    // Also mirror to cookie for SSR/edge middleware
-    document.cookie = `kf_admin_token=${res.data.accessToken}; path=/; max-age=86400`;
-    document.cookie = `kf_admin_user_cache=${encodeURIComponent(JSON.stringify(res.data.user))}; path=/; max-age=86400`;
-    document.cookie = `kf_auth_mode=admin; path=/; max-age=86400`;
+    // Also mirror to cookie for SSR/edge middleware. SameSite=Lax always, Secure on https (as writeTokenCookie
+    // writes kf_token): a browser drops a Secure cookie set over plain http, and the edge gate would refuse every
+    // admin page in local dev.
+    const attrs = `; path=/; max-age=86400; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}`;
+    document.cookie = `kf_admin_token=${res.data.accessToken}${attrs}`;
+    document.cookie = `kf_admin_user_cache=${encodeURIComponent(JSON.stringify(res.data.user))}${attrs}`;
+    document.cookie = `kf_auth_mode=admin${attrs}`;
 
     router.replace("/admin");
   };

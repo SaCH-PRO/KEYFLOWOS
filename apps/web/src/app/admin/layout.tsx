@@ -18,7 +18,8 @@ import {
   Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { adminSignOut, isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
+import { adminSignOut, canOpenOwnerConsole } from "@/lib/workspace";
+import { isAdminLoginPath } from "@/lib/admin-session";
 import { toast } from "sonner";
 
 const navItems = [
@@ -32,33 +33,33 @@ const navItems = [
   { label: "Feature Flags", href: "/admin/feature-flags", icon: Flag },
 ];
 
+/**
+ * The sign-in page is the one admin route a browser without an admin session must reach (the edge middleware sends
+ * it there), so it is rendered bare: no shell and no admin-session guard. Guarding it left a logged-out admin with an
+ * "Access denied" toast and a blank page, unable to sign in (RR-ADMIN-SHELL-SERVER-GATE OBS-1).
+ */
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  if (isAdminLoginPath(pathname ?? "")) return <>{children}</>;
+  return <GuardedAdminShell pathname={pathname}>{children}</GuardedAdminShell>;
+}
+
+function GuardedAdminShell({ children, pathname }: { children: ReactNode; pathname: string | null }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [allowed, setAllowed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    const check = async () => {
-      // Check if admin local-auth token is present
-      const isAdminMode = typeof window !== "undefined" &&
-        window.localStorage.getItem("kf_auth_mode") === "admin";
-
-      if (!isAdminMode) {
-        // Try regular workspace refresh (Supabase token)
-        await refreshWorkspace();
-      }
-
-      if (isSuperAdmin()) {
-        setAllowed(true);
-      } else {
-        toast.error("Access denied: super admin only");
-        router.replace("/admin/login");
-      }
-      setChecked(true);
-    };
-    check();
+    // D-290: the shell opens only on the separate admin sign-in. The app session (Supabase) is never consulted, so a
+    // SUPER_ADMIN signed in to the app, whose kf_admin_token cookie outlived the local admin session, is refused.
+    if (canOpenOwnerConsole()) {
+      setAllowed(true);
+    } else {
+      toast.error("Access denied: sign in to the Owner Console");
+      router.replace("/admin/login");
+    }
+    setChecked(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
