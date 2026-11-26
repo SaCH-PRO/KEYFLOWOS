@@ -682,3 +682,195 @@ describe('FU-MERGE-CONTACTS-UNIQUE: existing-identity conflicts refuse cleanly (
     expect(await db.contactAuditEntry.count({ where: { businessId: ID.bizB } })).toBe(auditsBefore);
   });
 });
+
+describe('FU-MERGE-CONTACTS-UNIQUE R1 repair regressions', () => {
+  const bizC = `${P}bizC`;
+  const R = {
+    concP: `${P}c_conc_pri`,
+    concD1: `${P}c_conc_d1`,
+    concD2: `${P}c_conc_d2`,
+    undefP: `${P}c_undef_pri`,
+    undefD: `${P}c_undef_dup`,
+    badP: `${P}c_bad_pri`,
+    badD: `${P}c_bad_dup`,
+    e164P: `${P}c_e164_pri`,
+    e164D: `${P}c_e164_dup`,
+    e164Third: `${P}c_e164_third`,
+    wsP: `${P}c_ws_pri`,
+    wsD: `${P}c_ws_dup`,
+  };
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: bizC, name: 'V71H Biz C', ownerId: ID.owner, country: 'Trinidad and Tobago' } });
+    await db.membership.create({ data: { id: `${P}m_owner_c`, userId: ID.owner, businessId: bizC, role: 'OWNER' } });
+
+    // 1. Concurrent mergeContacts(P, D1) + mergeContacts(P, D2)
+    await db.contact.create({
+      data: { id: R.concP, businessId: bizC, firstName: 'Quinn', lastName: `${P}seed`, tags: [`${P}p`] },
+    });
+    await db.contact.create({
+      data: {
+        id: R.concD1,
+        businessId: bizC,
+        firstName: 'Quinn',
+        lastName: `${P}seed`,
+        tags: [`${P}d1`],
+        jobTitle: 'Architect',
+        email: `${P}r1-d1@example.test`,
+        emailNormalized: `${P}r1-d1@example.test`,
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: R.concD2,
+        businessId: bizC,
+        firstName: 'Quinn',
+        lastName: `${P}seed`,
+        tags: [`${P}d2`],
+        companyName: `${P}Studio`,
+        phone: '+18687180201',
+        phoneNormalized: '+18687180201',
+      },
+    });
+
+    // 2. fieldOverrides with undefined values (service-level call)
+    await db.contact.create({
+      data: {
+        id: R.undefP,
+        businessId: bizC,
+        firstName: 'Uma',
+        lastName: `${P}seed`,
+        email: `${P}undef-pri@example.test`,
+        emailNormalized: `${P}undef-pri@example.test`,
+        phone: '+18687180202',
+        phoneNormalized: '+18687180202',
+      },
+    });
+    await db.contact.create({
+      data: { id: R.undefD, businessId: bizC, firstName: 'Uma', lastName: `${P}seed`, jobTitle: 'Advisor' },
+    });
+
+    // 3. fieldOverrides with non-string or syntactically invalid email
+    await db.contact.create({
+      data: { id: R.badP, businessId: bizC, firstName: 'Tariq', lastName: `${P}seed` },
+    });
+    await db.contact.create({
+      data: { id: R.badD, businessId: bizC, firstName: 'Tariq', lastName: `${P}seed`, jobTitle: 'Founder' },
+    });
+
+    // 4. COR-E164-3: primary has legacy phoneNormalized while a 3rd live contact holds the E.164 key
+    await db.contact.create({
+      data: {
+        id: R.e164P,
+        businessId: bizC,
+        firstName: 'Leila',
+        lastName: `${P}seed`,
+        phone: '868-718-0255',
+        phoneNormalized: '8687180255',
+      },
+    });
+    await db.contact.create({
+      data: { id: R.e164D, businessId: bizC, firstName: 'Leila', lastName: `${P}seed`, jobTitle: 'Lead' },
+    });
+    await db.contact.create({
+      data: {
+        id: R.e164Third,
+        businessId: bizC,
+        firstName: 'Holder',
+        lastName: `${P}seed`,
+        phone: '+18687180255',
+        phoneNormalized: '+18687180255',
+      },
+    });
+
+    // 5. Legacy whitespace-only primary.email (emailNormalized: null)
+    const whitespaceOnly = '   ';
+    await db.contact.create({
+      data: { id: R.wsP, businessId: bizC, firstName: 'Walt', lastName: `${P}seed`, email: whitespaceOnly, emailNormalized: null },
+    });
+    await db.contact.create({
+      data: { id: R.wsD, businessId: bizC, firstName: 'Walt', lastName: `${P}seed`, jobTitle: 'Analyst' },
+    });
+  });
+
+  it('R1-SEC-01 / R1-COR-04: concurrent mergeContacts(P, D1) + mergeContacts(P, D2) preserves both tags and copied fields with no lost update', async () => {
+    const [r1, r2] = await Promise.all([
+      mergeReq(bizC, R.concP, R.concD1),
+      mergeReq(bizC, R.concP, R.concD2),
+    ]);
+    expect(r1.status, JSON.stringify(r1.body).slice(0, 300)).toBe(201);
+    expect(r2.status, JSON.stringify(r2.body).slice(0, 300)).toBe(201);
+
+    const pri = await db.contact.findUnique({ where: { id: R.concP } });
+    expect(pri?.deletedAt).toBeNull();
+    expect(pri?.tags).toEqual(expect.arrayContaining([`${P}p`, `${P}d1`, `${P}d2`]));
+    expect(pri).toMatchObject({
+      jobTitle: 'Architect',
+      companyName: `${P}Studio`,
+      email: `${P}r1-d1@example.test`,
+      emailNormalized: `${P}r1-d1@example.test`,
+      phone: '+18687180201',
+      phoneNormalized: '+18687180201',
+    });
+    expect((await storedContact(R.concD1))?.deleted_at).not.toBeNull();
+    expect((await storedContact(R.concD2))?.deleted_at).not.toBeNull();
+  });
+
+  it('R1-SEC-02 / R1-COR-03: fieldOverrides ignores undefined entries and rejects non-string or syntactically invalid email with 400', async () => {
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const crmService = app.get(CrmService);
+
+    await crmService.mergeContacts({
+      businessId: bizC,
+      primaryId: R.undefP,
+      duplicateId: R.undefD,
+      fieldOverrides: { email: undefined, phone: undefined },
+      actorId: ID.owner,
+      actorType: 'USER',
+    });
+
+    expect(await storedContact(R.undefP)).toMatchObject({
+      email: `${P}undef-pri@example.test`,
+      email_normalized: `${P}undef-pri@example.test`,
+      phone: '+18687180202',
+      phone_normalized: '+18687180202',
+      job_title: 'Advisor',
+      deleted_at: null,
+    });
+    expect((await storedContact(R.undefD))?.deleted_at).not.toBeNull();
+
+    const nonString = await mergeReq(bizC, R.badP, R.badD, { fieldOverrides: { email: 123 } });
+    expect(nonString.status, JSON.stringify(nonString.body).slice(0, 300)).toBe(400);
+
+    const badEmail = await mergeReq(bizC, R.badP, R.badD, { fieldOverrides: { email: `${P}not-an-email` } });
+    expect(badEmail.status, JSON.stringify(badEmail.body).slice(0, 300)).toBe(400);
+
+    // Both refused requests left duplicate live
+    expect((await storedContact(R.badD))?.deleted_at).toBeNull();
+  });
+
+  it('R1-COR-01: COR-E164-3 parity — re-sending primary legacy phone when a 3rd live contact holds E.164 succeeds without 409', async () => {
+    const res = await mergeReq(bizC, R.e164P, R.e164D, {
+      fieldOverrides: { phone: '868-718-0255' },
+    });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(await storedContact(R.e164P)).toMatchObject({
+      phone: '868-718-0255',
+      phone_normalized: '8687180255',
+      job_title: 'Lead',
+      deleted_at: null,
+    });
+    expect((await storedContact(R.e164D))?.deleted_at).not.toBeNull();
+  });
+
+  it('R1-COR-02: whitespace-only legacy primary.email leaves emailNormalized null (never empty string)', async () => {
+    const res = await mergeReq(bizC, R.wsP, R.wsD);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(await storedContact(R.wsP)).toMatchObject({
+      email_normalized: null,
+      job_title: 'Analyst',
+      deleted_at: null,
+    });
+    expect((await storedContact(R.wsD))?.deleted_at).not.toBeNull();
+  });
+});
