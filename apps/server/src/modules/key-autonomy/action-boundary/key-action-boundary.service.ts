@@ -17,6 +17,11 @@ import { CapabilityContractService, type CapabilityDefinition } from '../../capa
 import { HelpdeskService } from '../../helpdesk/helpdesk.service';
 import { TemporalFlowService } from '../../temporal-flow/temporal-flow.service';
 import {
+  computeProposalCarriesMoney,
+  monotonicCarriesMoney,
+  structuralTextCarriesMoney,
+} from '../proposal-money-tag';
+import {
   ActionEnvelopeError,
   HELPDESK_CREATE_TICKET,
   buildHelpdeskCreateTicketEnvelope,
@@ -403,18 +408,33 @@ export class KeyActionBoundaryService {
         });
       }
     } else {
+      const proposalTitle = `Create support ticket: ${envelope.material.title}`;
+      const proposalSummary = envelope.material.description;
+      const proposalSourceType = this.sourceTypeFor(surface);
+      const proposalPayload = { toolName: capability.name, inputPayload: envelope.material };
+      const carriesMoney = computeProposalCarriesMoney({
+        sourceType: proposalSourceType,
+        actionType: 'EXECUTE_TOOL',
+        toolName: capability.name,
+        module: capability.ownerModule,
+        title: proposalTitle,
+        summary: proposalSummary,
+        rationale: requirement.reason,
+        payload: proposalPayload,
+        inputPayload: envelope.material,
+      });
       const row = await this.prisma.client.keyActionProposal.create({
         data: {
           businessId,
           userId: requestedBy,
-          sourceType: this.sourceTypeFor(surface),
+          sourceType: proposalSourceType,
           sourceId: ctx.sourceId ?? null,
           sourceMode: surface,
-          title: `Create support ticket: ${envelope.material.title}`,
-          summary: envelope.material.description,
+          title: proposalTitle,
+          summary: proposalSummary,
           rationale: requirement.reason,
           actionType: 'EXECUTE_TOOL',
-          payload: { toolName: capability.name, inputPayload: envelope.material } as unknown as Prisma.InputJsonValue,
+          payload: proposalPayload as unknown as Prisma.InputJsonValue,
           toolName: capability.name,
           module: capability.ownerModule,
           inputPayload: envelope.material as unknown as Prisma.InputJsonValue,
@@ -425,6 +445,7 @@ export class KeyActionBoundaryService {
           riskLevel: capability.riskLevel.toUpperCase(),
           status: 'PENDING',
           requiresApproval: requirement.kind !== 'NONE',
+          carriesMoney,
           capabilityName: capability.name,
           capabilityVersion: capability.version,
           executionSurface: surface,
@@ -583,11 +604,19 @@ export class KeyActionBoundaryService {
           throw new ConflictException(`This action is already ${record.status.toLowerCase()}`);
         }
         const now = new Date();
+        const reasonCarriesMoney =
+          resolution === 'REJECTED' && typeof reason === 'string' && structuralTextCarriesMoney(reason);
         return tx.keyActionProposal.update({
           where: { id: actionId },
           data:
             resolution === 'REJECTED'
-              ? { status: 'REJECTED', rejectedBy: by, rejectedAt: now, rejectionReason: reason ?? null }
+              ? {
+                  status: 'REJECTED',
+                  rejectedBy: by,
+                  rejectedAt: now,
+                  rejectionReason: reason ?? null,
+                  ...(reasonCarriesMoney ? { carriesMoney: true } : {}),
+                }
               : { status: 'CANCELLED' },
         });
       });
@@ -983,7 +1012,14 @@ export class KeyActionBoundaryService {
     if (!sealed || !('actionFingerprint' in sealed)) {
       throw new BadRequestException('This action has no valid parameters and cannot be approved');
     }
-    return tx.keyActionProposal.update({ where: { id: record.id }, data: sealed as Prisma.KeyActionProposalUncheckedUpdateInput });
+    const carriesMoney = monotonicCarriesMoney(record.carriesMoney, computeProposalCarriesMoney(record));
+    return tx.keyActionProposal.update({
+      where: { id: record.id },
+      data: {
+        ...(sealed as Prisma.KeyActionProposalUncheckedUpdateInput),
+        carriesMoney,
+      },
+    });
   }
 
   private async readPrincipal(
