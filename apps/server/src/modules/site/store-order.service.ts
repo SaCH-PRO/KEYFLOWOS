@@ -1185,7 +1185,13 @@ export class StoreOrderService {
    *   method, so the posting's deposit leg is PAYMENT_PROCESSOR; recorded as
    *   'unknown' it went to CASH and the row did not say who took the money.
    */
-  async updatePaymentStatus(orderId: string, paymentStatus: string, paymentRef?: string, provider?: string) {
+  async updatePaymentStatus(
+    orderId: string,
+    paymentStatus: string,
+    paymentRef?: string,
+    provider?: string,
+    providerReference?: string,
+  ) {
     if (paymentStatus === 'PAID') {
       // Route through completeCheckout so Invoice + Payment + stock decrement
       // + RevenueAttribution all land in one transaction.
@@ -1195,6 +1201,7 @@ export class StoreOrderService {
       return this.completeCheckout({
         orderId,
         paymentRef,
+        providerReference,
         provider: provider ?? 'unknown',
         method: provider ?? 'unknown',
         providerSettlement: true,
@@ -1330,6 +1337,8 @@ export class StoreOrderService {
   async completeCheckout(input: {
     orderId: string;
     paymentRef?: string;
+    /** W1F-STORE-STRIPE-R0: related provider reference (e.g. Stripe payment_intent / charge id) stashed on Payment.reference so later refund webhooks correlate to the settlement payment. */
+    providerReference?: string;
     provider?: string;
     method?: string;
     paidAmount?: number;
@@ -1651,6 +1660,7 @@ export class StoreOrderService {
         data: {
           provider,
           providerPaymentId: paymentRef,
+          ...(input.providerReference ? { reference: input.providerReference } : {}),
           amount,
           currency: targetCurrency,
           status: 'SUCCESSFUL',
