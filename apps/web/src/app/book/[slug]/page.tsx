@@ -750,6 +750,13 @@ function PublicBookingPageInner() {
   }) => {
     if (!business) return;
 
+    // SWP-BOOKING-SLOTS (SEC-M2): every service row books the instant the public slots route offered. A row without
+    // one is refused before anything is booked, never read as a wall time on the visitor's clock.
+    for (const si of serviceItemsInCart) {
+      const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+      if (bd && !bd.startIso) throw new Error(`Please pick a time for ${si.name} again.`);
+    }
+
     // SEC-W9WCN-1: the bookings an unfinished checkout made are reused only
     // by the same customer booking the same services; any other checkout
     // drops them and books its own.
@@ -768,8 +775,9 @@ function PublicBookingPageInner() {
         if (!bd) continue;
 
         // SWP-BOOKING-SLOTS: the instant the public slots route offered, as is; the date and time shown are the
-        // business's clock, so reading them on the visitor's clock booked another instant in another zone.
-        const startTime = bd.startIso ?? new Date(`${bd.date}T${bd.time}`).toISOString();
+        // business's clock, so reading them on the visitor's clock booked another instant in another zone. A row
+        // without one was refused above (SEC-M2).
+        const startTime = bd.startIso as string;
 
         for (let q = 0; q < si.quantity; q++) {
           const trimmedLocation = bd.location?.trim() || undefined;
