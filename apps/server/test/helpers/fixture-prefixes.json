@@ -1445,6 +1445,11 @@
       "prefix": "v66b_",
       "owner": "apps/server/test/vat-number.integration.test.ts",
       "packet": "V1-66 (VAT-BASICS)"
+    },
+    {
+      "prefix": "v71h_",
+      "owner": "apps/server/test/merge-contacts-unique.integration.test.ts",
+      "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE, P112)"
     }
   ],
   "pendingRenames": [],
