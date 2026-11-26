@@ -29,6 +29,15 @@
  *   BPD-14  RED  SEC MINOR-1: Pay is a form submit (Enter); submitting while the accounts failed or are loading
  *                sends nothing (the guard in pay(), not only the disabled button)
  *   BPD-15  pin  COR: a Retry that fails again leaves Pay disabled
+ *   Repair round 3 (reviews at c3b9757):
+ *   BPD-16  pin  SEC: two submits while the first pay is in flight send one payBill (the inFlight ref, not the
+ *                disabled button: both submits land before React re-renders)
+ *   BPD-17  RED  COR: re-rendered for another business, the method chosen and an earlier refusal are not carried over
+ *   BPD-18  RED  COR: re-rendered for another bill of the same business, Pay reads again and starts from the
+ *                defaults; it pays that bill (bill.id in the read's key)
+ *   BPD-19  RED  COR: Escape closes Pay, except while a pay is in flight
+ *   BPD-20  RED  COR: focus moves into Pay on open, Tab and Shift+Tab stay inside it, and focus returns to Approve
+ *                on close
  *
  * Mounted on the real ExpenseDetailPage and the real api clients (lib/api.ts, lib/client.ts, lib/api/finance.ts),
  * so the request body is read off the wire; only `fetch`, the toast, next/navigation and the stored business are
@@ -433,5 +442,136 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     fireEvent.click(pay);
     await new Promise((r) => setTimeout(r, 20));
     expect(pays).toEqual([]);
+  });
+
+  /** Renders the dialog alone, on a fetch stub whose account reads and pays the test controls. */
+  function renderDialog(opts: { accounts?: (biz: string, n: number) => Response | Promise<Response>; pay?: () => Response | Promise<Response> } = {}) {
+    const pays: Sent[] = [];
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(url, "http://localhost");
+      const method = (init?.method ?? "GET").toUpperCase();
+      const acc = /\/finance\/businesses\/([^/]+)\/accounts$/.exec(pathname);
+      if (method === "GET" && acc) {
+        reads += 1;
+        return opts.accounts ? opts.accounts(acc[1], reads) : jsonResponse(200, { items: ACCOUNTS });
+      }
+      if (method === "POST" && /\/bills\/[^/]+\/pay$/.test(pathname)) {
+        pays.push({ path: pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        return opts.pay ? opts.pay() : jsonResponse(201, PAID, "Created");
+      }
+      return jsonResponse(200, {});
+    }));
+    return pays;
+  }
+
+  const BILL2 = { ...BILL, id: "exp_hub1_bill2", vendor: "TSTT", paymentMethod: "card" };
+
+  it("BPD-16 two submits while the first pay is in flight send one payBill", async () => {
+    let release: (r: Response) => void = () => {};
+    const pays = renderDialog({ pay: () => new Promise<Response>((r) => { release = r; }) });
+    const onPaid = vi.fn();
+    render(<BillPayDialog businessId={BUSINESS} bill={BILL as unknown as Expense} onClose={vi.fn()} onPaid={onPaid} />);
+    await screen.findByRole("combobox", { name: /pay from/i });
+    const form = (screen.getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).form!;
+
+    // Both land before React re-renders and disables the button: only pay()'s inFlight ref stands between them.
+    form.requestSubmit();
+    form.requestSubmit();
+    await waitFor(() => expect(pays).toHaveLength(1));
+    release(jsonResponse(201, PAID, "Created"));
+    await waitFor(() => expect(onPaid).toHaveBeenCalledTimes(1));
+    expect(pays).toHaveLength(1);
+  });
+
+  it("BPD-17 re-rendered for another business, the method chosen and an earlier refusal are not carried over", async () => {
+    const words = "Payment account fa_bank is archived";
+    const OTHER = "biz_hub1_other";
+    const pays = renderDialog({
+      accounts: (biz) => jsonResponse(200, { items: biz === OTHER ? [acct("fb_bank", "Other bank", "BANK", { businessId: OTHER, isDefault: true })] : ACCOUNTS }),
+      pay: () => jsonResponse(400, { statusCode: 400, message: words, error: "Bad Request" }, "Bad Request"),
+    });
+    const props = { bill: BILL as unknown as Expense, onClose: vi.fn(), onPaid: vi.fn() };
+    const { rerender } = render(<BillPayDialog businessId={BUSINESS} {...props} />);
+    await screen.findByRole("combobox", { name: /pay from/i });
+    fireEvent.change(screen.getByRole("combobox", { name: /payment method/i }), { target: { value: "cheque" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Pay/ }));
+    await waitFor(() => expect(within(payDialog()).getByText(words)).toBeTruthy());
+
+    rerender(<BillPayDialog businessId={OTHER} {...props} />);
+    await within(payDialog()).findByRole("combobox", { name: /pay from/i });
+    expect(within(payDialog()).queryByText(words)).toBeNull();
+    expect((within(payDialog()).getByRole("combobox", { name: /payment method/i }) as HTMLSelectElement).value).toBe("cash");
+    expect(pays).toHaveLength(1);
+  });
+
+  it("BPD-18 re-rendered for another bill of the same business, Pay reads again, starts from the defaults and pays that bill", async () => {
+    let releaseSecond: (r: Response) => void = () => {};
+    const pays = renderDialog({
+      accounts: (_biz, n) => (n === 1 ? jsonResponse(200, { items: ACCOUNTS }) : new Promise<Response>((r) => { releaseSecond = r; })),
+    });
+    const props = { businessId: BUSINESS, onClose: vi.fn(), onPaid: vi.fn() };
+    const { rerender } = render(<BillPayDialog bill={BILL as unknown as Expense} {...props} />);
+    const first = await screen.findByRole("combobox", { name: /pay from/i });
+    fireEvent.change(first, { target: { value: "fa_bank" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /payment method/i }), { target: { value: "cheque" } });
+
+    rerender(<BillPayDialog bill={BILL2 as unknown as Expense} {...props} />);
+    expect(within(payDialog()).queryByRole("combobox", { name: /pay from/i })).toBeNull();
+    expect((within(payDialog()).getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(true);
+
+    releaseSecond(jsonResponse(200, { items: ACCOUNTS }));
+    const second = (await within(payDialog()).findByRole("combobox", { name: /pay from/i })) as HTMLSelectElement;
+    expect(second.value).toBe("fa_cash");
+    expect((within(payDialog()).getByRole("combobox", { name: /payment method/i }) as HTMLSelectElement).value).toBe("card");
+    fireEvent.click(within(payDialog()).getByRole("button", { name: /^Pay/ }));
+    await waitFor(() => expect(pays).toHaveLength(1));
+    expect(pays[0].path).toContain(`/bills/${BILL2.id}/pay`);
+    expect(pays[0].body).toEqual({ paymentAccountId: "fa_cash", paymentMethod: "card" });
+  });
+
+  it("BPD-19 Escape closes Pay, except while a pay is in flight", async () => {
+    let release: (r: Response) => void = () => {};
+    renderDialog({ pay: () => new Promise<Response>((r) => { release = r; }) });
+    const onClose = vi.fn();
+    render(<BillPayDialog businessId={BUSINESS} bill={BILL as unknown as Expense} onClose={onClose} onPaid={vi.fn()} />);
+    await screen.findByRole("combobox", { name: /pay from/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pay/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    release(jsonResponse(400, { statusCode: 400, message: "Bill changed status concurrently", error: "Conflict" }, "Conflict"));
+    await waitFor(() => expect((screen.getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("BPD-20 focus moves into Pay on open, Tab stays inside it, and focus returns to Approve on close", async () => {
+    stubServer();
+    await mount();
+    const approve = screen.getByRole("button", { name: /^Approve/ });
+    approve.focus();
+    fireEvent.click(approve);
+    const dialog = await screen.findByRole("dialog", { name: /pay bill/i });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    await within(dialog).findByRole("combobox", { name: /pay from/i });
+
+    const focusables = Array.from(dialog.querySelectorAll<HTMLElement>("select:not([disabled]), button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])"));
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    expect(first).toBe(within(dialog).getByRole("combobox", { name: /pay from/i }));
+    expect(last).toBe(within(dialog).getByRole("button", { name: /^Pay/ }));
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /pay bill/i })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Approve/ }));
   });
 });
