@@ -185,6 +185,23 @@ describe("SWP-BOOKING-SLOTS: the schedule step offers the server's free slots", 
     expect(bd.startIso).toBe("2026-12-15T15:00:00.000Z");
   });
 
+  it("CFS-07 a failed answer is asked again when the row comes back to that date", async () => {
+    let failing = true;
+    apiGet.mockImplementation(async (path: string) => {
+      if (!path.startsWith(SLOTS_ROUTE)) return { data: [], error: null };
+      if (failing) return { data: null, error: "Service unavailable" };
+      return { data: { date: "2026-12-15", slots: SERVER_SLOTS }, error: null };
+    });
+    const { pick } = renderToSchedule({ hours: { tue: { open: "09:00", close: "17:00" }, wed: { open: "09:00", close: "17:00" } } });
+    pick("2026-12-15");
+    expect(await screen.findByText("Couldn't load times")).toBeInTheDocument();
+    failing = false;
+    pick("2026-12-16");
+    pick("2026-12-15");
+    expect(await screen.findByRole("button", { name: "09:00" })).toBeInTheDocument();
+    expect(slotCalls().filter((p) => p.includes("date=2026-12-15")).length).toBe(2);
+  });
+
   it("CFS-06 a day closed under the sunday..saturday spelling shows the closed banner and offers no time", async () => {
     const { pick } = renderToSchedule({ hours: { sunday: { closed: true }, tuesday: { open: "09:00", close: "17:00" } } });
     pick("2026-12-13");
