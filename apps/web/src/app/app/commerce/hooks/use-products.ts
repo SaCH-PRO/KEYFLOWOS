@@ -15,6 +15,9 @@ import { moduleWriteRefusal } from "@/lib/module-scope-refusal";
 import { moduleEvents } from "@/lib/module-events";
 import { ProductForm } from "../components/commerce-types";
 
+/** lib/workspace keeps the selected business under this localStorage key (another tab's change arrives as storage). */
+const BUSINESS_ID_STORAGE_KEY = "kf_business_id";
+
 const productSchema = z.object({
   name: z.string().min(1, "Name is required"),
   price: z.number().positive("Price must be positive"),
@@ -137,16 +140,22 @@ export function useProducts(
   useEffect(() => {
     businessRef.current = businessId;
   }, [businessId]);
+  // Round 6 (SEC-R5-M2): only a storage event on the selection (kf_business_id, or null: localStorage cleared) is a
+  // switch, as the page filters it; another key changes nothing.
   useEffect(() => {
     const follow = () => {
       const next = getStoredBusinessId();
       if (next && next !== businessRef.current) businessRef.current = next;
     };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== BUSINESS_ID_STORAGE_KEY && e.key !== null) return;
+      follow();
+    };
     window.addEventListener(BUSINESS_CHANGED_EVENT, follow);
-    window.addEventListener("storage", follow);
+    window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener(BUSINESS_CHANGED_EVENT, follow);
-      window.removeEventListener("storage", follow);
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);

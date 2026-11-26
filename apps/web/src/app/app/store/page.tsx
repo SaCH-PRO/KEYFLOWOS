@@ -236,10 +236,11 @@ export default function StorePage() {
         </p>
       )}
       {s.listingRefused && (
-        // Round 5 (COR-R4-2): the listing read was refused (403: the member cannot read revenue). A refresh cannot fix it.
+        // Round 5 (COR-R4-2): the listing read was refused (403). A refresh cannot fix it. Round 6 (COR-R5-4): the 403
+        // is the revenue read guard or BusinessGuard (a member just removed), so the notice names no module.
         <p role="status" className="rounded-xl border border-border/60 bg-card px-4 py-3 text-caption text-muted-foreground">
-          You do not have permission to see this business&apos;s store listing, so items cannot be added to or removed
-          from the store here. Ask the business owner for access to Sales.
+          You do not have permission to see this business&apos;s store listing, so it cannot be changed here. Ask the
+          business owner if you need it.
         </p>
       )}
 

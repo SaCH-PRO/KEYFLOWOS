@@ -53,8 +53,9 @@ type Props = {
   processingItems: Set<string>;
   confirmRemove: string | null;
   onToggleItem: (product: Product) => void;
-  onSelectAll: () => void;
-  onDeselectAll: () => void;
+  /** Add all / Remove all; while the run they return is going on, both bulk buttons are off (COR-R5-3). */
+  onSelectAll: () => void | Promise<void>;
+  onDeselectAll: () => void | Promise<void>;
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: { id: string; name: string }[];
@@ -128,6 +129,7 @@ export function CatalogManager({
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showFilters, setShowFilters] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState<"add" | "remove" | null>(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [orderedProducts, setOrderedProducts] = useState<Product[]>(products);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [showCategoryEmphasis, setShowCategoryEmphasis] = useState(false);
@@ -177,19 +179,33 @@ export function CatalogManager({
 
   const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean)));
 
+  /** COR-R5-3: one bulk run at a time; the buttons stay off until the run (and its reload) has ended. */
+  function runBulk(run: () => void | Promise<void>) {
+    setBulkConfirm(null);
+    setBulkRunning(true);
+    let running: void | Promise<void>;
+    try {
+      running = run();
+    } catch (e) {
+      setBulkRunning(false);
+      throw e;
+    }
+    void Promise.resolve(running).finally(() => setBulkRunning(false));
+  }
+
   function handleBulkAdd() {
+    if (bulkRunning) return;
     if (bulkConfirm === "add") {
-      onSelectAll();
-      setBulkConfirm(null);
+      runBulk(onSelectAll);
     } else {
       setBulkConfirm("add");
     }
   }
 
   function handleBulkRemove() {
+    if (bulkRunning) return;
     if (bulkConfirm === "remove") {
-      onDeselectAll();
-      setBulkConfirm(null);
+      runBulk(onDeselectAll);
     } else {
       setBulkConfirm("remove");
     }
@@ -393,13 +409,13 @@ export function CatalogManager({
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleBulkAdd}
-              disabled={products.every((p) => liveProductIds.has(p.id))}
+              disabled={bulkRunning || products.every((p) => liveProductIds.has(p.id))}
               className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
                 bulkConfirm === "add"
                   ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
                   : "kf-btn-secondary"
               }`}
-              style={{ opacity: products.every((p) => liveProductIds.has(p.id)) ? 0.3 : 1 }}
+              style={{ opacity: bulkRunning || products.every((p) => liveProductIds.has(p.id)) ? 0.3 : 1 }}
             >
               <CheckCircle2 className="w-3 h-3 inline mr-1" />
               {bulkConfirm === "add" ? "Confirm Add All?" : "Add All"}
@@ -407,6 +423,8 @@ export function CatalogManager({
             {inStoreCount > 0 && (
               <button
                 onClick={handleBulkRemove}
+                disabled={bulkRunning}
+                style={{ opacity: bulkRunning ? 0.3 : 1 }}
                 className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
                   bulkConfirm === "remove"
                     ? "bg-red-500/20 border border-red-500/30 text-red-400"

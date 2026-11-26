@@ -112,11 +112,21 @@ export function useStoreData() {
    *
    * Round 5 (SEC-CAT-R4-2): every way the page comes to show a business goes through switchTo, including the
    * workspace answering, at mount, a business other than the stored one.
+   *
+   * Round 6 (SEC-R5-M1): switchTo is the only writer of currentBusiness. An effect copying the committed businessId
+   * into it could run after a later switch (one landing between A's commit and A's effects) and move it back to A,
+   * so A's answers were applied on B's page.
+   * Round 6 (COR-CAT-R4-1): every reset is followed by a load for the business now current (switchCount is in the
+   * load effect's deps), so a switch A -> B -> A in one batch, which nets businessId back to A, still reloads A.
    */
   const currentBusiness = useRef<string | null>(null);
+  // COR-R5-3: the bulk run (Add all or Remove all) in progress for the current business, if any.
+  const bulkRun = useRef<object | null>(null);
+  const [switchCount, setSwitchCount] = useState(0);
   const switchTo = useCallback((next: string) => {
     if (next === currentBusiness.current) return;
     currentBusiness.current = next;
+    bulkRun.current = null;
     backfillRan.current = false;
     setStockRead(null);
     setServices([]);
@@ -142,6 +152,7 @@ export function useStoreData() {
     setLanded(null);
     setLoading(true);
     setBusinessId(next);
+    setSwitchCount((c) => c + 1);
   }, []);
 
   useEffect(() => {
@@ -178,9 +189,6 @@ export function useStoreData() {
     void initWorkspace();
   }, [switchTo]);
 
-  useEffect(() => {
-    currentBusiness.current = businessId;
-  }, [businessId]);
   useEffect(() => {
     const follow = () => {
       const next = getStoredBusinessId();
@@ -233,7 +241,8 @@ export function useStoreData() {
       }
 
       const graph = graphRes.data;
-      // COR-R4-2: GET store/graph is guarded by revenue read; a 403 is a permission refusal, not a failed load.
+      // COR-R4-2: a 403 on GET store/graph is a refusal (the revenue read guard, or BusinessGuard for a member just
+      // removed), not a failed load.
       const graphRefused = !graph && (graphRes as { status?: number }).status === 403;
       if (graph) {
         setStoreGraph(graph);
@@ -290,7 +299,7 @@ export function useStoreData() {
 
   useEffect(() => {
     void loadData(true);
-  }, [loadData]);
+  }, [loadData, switchCount]);
 
   // The stock, read again with every load, and only when the member may read prices (SEC-CAT-7).
   useEffect(() => {
@@ -538,16 +547,30 @@ export function useStoreData() {
     }
   }
 
+  /** COR-R5-3: a bulk run asked for while one is going on for this business is ignored. */
+  async function asBulkRun(run: () => Promise<void>) {
+    if (bulkRun.current) return;
+    const token = {};
+    bulkRun.current = token;
+    try {
+      await run();
+    } finally {
+      if (bulkRun.current === token) bulkRun.current = null;
+    }
+  }
+
   async function handleSelectAll() {
     if (!businessId) return;
     if (!isCurrent(businessId) || refuseListing()) return;
     const askedFor = businessId;
     const notAdded = commerceProducts.filter((p) => !graphProductToServiceMap.has(p.id));
-    for (const p of notAdded) {
-      // An "Add all" running when the business changes stops there.
-      if (!isCurrent(askedFor)) return;
-      await handleQuickAddProduct(p);
-    }
+    await asBulkRun(async () => {
+      for (const p of notAdded) {
+        // An "Add all" running when the business changes stops there.
+        if (!isCurrent(askedFor)) return;
+        await handleQuickAddProduct(p);
+      }
+    });
   }
 
   /**
@@ -561,17 +584,19 @@ export function useStoreData() {
     if (!storeGraph) return;
     const askedFor = businessId;
     const liveEntries = storeGraph.mappings.filter((m) => m.isLive && m.serviceId);
-    setConfirmRemove(null);
-    let removed = 0;
-    for (const entry of liveEntries) {
-      if (!isCurrent(askedFor)) return;
-      const outcome = await removeOne(entry.serviceId!, askedFor);
-      if (outcome === "stale") return;
-      if (outcome === "removed") removed++;
-    }
-    if (!isCurrent(askedFor) || removed === 0) return;
-    toast.info(removed === 1 ? "Removed from store." : `Removed ${removed} items from store.`);
-    await loadData();
+    await asBulkRun(async () => {
+      setConfirmRemove(null);
+      let removed = 0;
+      for (const entry of liveEntries) {
+        if (!isCurrent(askedFor)) return;
+        const outcome = await removeOne(entry.serviceId!, askedFor);
+        if (outcome === "stale") return;
+        if (outcome === "removed") removed++;
+      }
+      if (!isCurrent(askedFor) || removed === 0) return;
+      toast.info(removed === 1 ? "Removed from store." : `Removed ${removed} items from store.`);
+      await loadData();
+    });
   }
 
   const ARRAY_CONFIG_KEYS = new Set(['sections', 'faqEntries']);
