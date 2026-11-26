@@ -593,6 +593,11 @@
       "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
     },
     {
+      "prefix": "v70f_",
+      "owner": "apps/server/test/store-stripe-own-key.integration.test.ts",
+      "packet": "V1-70 (W1F-STORE-STRIPE-R0)"
+    },
+    {
       "prefix": "v70h_",
       "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
