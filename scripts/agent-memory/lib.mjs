@@ -38,9 +38,9 @@ export function commitEvidence(id, commits) {
   const code = named.filter((c) => CODE_TYPES.has(subjectType(c.subject)));
   const other = named.filter((c) => !CODE_TYPES.has(subjectType(c.subject)));
   // compact.sh gives a tests-only packet (gate and census packets) exactly one commit, its RED commit.
-  const testsOnly = named.filter(
-    (c) => subjectType(c.subject) === 'test' && c.subject.includes(`RED for pkt/V1-${id} (compacted)`),
-  );
+  // The whole subject must be compact.sh's RED subject, so a revert or a two-packet subject never counts.
+  const red = new RegExp(`^test(\\([^)]*\\))?: RED for pkt/V1-${escapeRe(id)} \\(compacted\\)$`);
+  const testsOnly = named.filter((c) => red.test(c.subject));
   return { compacted, code, other, testsOnly };
 }
 
