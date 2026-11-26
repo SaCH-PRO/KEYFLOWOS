@@ -113,7 +113,7 @@ export class TemporalFlowController {
       endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
       occurredAt: body.occurredAt ? new Date(body.occurredAt) : undefined,
       reminderAt: body.reminderAt ? new Date(body.reminderAt) : undefined,
-    }, writerFilter);
+    }, writerFilter, genomeReaderOf(req));
   }
 
   @Patch(':eventId/resolve')
@@ -122,7 +122,12 @@ export class TemporalFlowController {
     @Param('eventId') eventId: string,
     @Req() req?: ReaderRequest,
   ) {
-    return this.temporal.markResolved(businessId, eventId, await this.temporal.readerFilter(businessId, req?.user));
+    return this.temporal.markResolved(
+      businessId,
+      eventId,
+      await this.temporal.readerFilter(businessId, req?.user),
+      genomeReaderOf(req),
+    );
   }
 
   @Post('analyze')

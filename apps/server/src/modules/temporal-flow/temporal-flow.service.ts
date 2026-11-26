@@ -221,6 +221,41 @@ const UNCLASSIFIED = {
 /** The events withheld from a reader who misses the `withheld` owners (non-empty). */
 const withheldEvents = (withheld: readonly EventOwner[]) => ({ OR: [...withheld.map(ownedBy), UNCLASSIFIED] });
 
+/**
+ * FU-TIMELINE-CALLERS-SCOPE (R1-SEC-02): classifies an event's owning module(s) from `(module, source, type)`
+ * using the exact canonical rules as `ownedBy` / `UNCLASSIFIED`, for write-side authorization on creates/upserts.
+ */
+function classifyEventOwners(input: { module?: string | null; source?: string | null; type?: string | null }): {
+  owners: EventOwner[];
+  unclassified: boolean;
+} {
+  const mod = typeof input.module === 'string' ? input.module.trim().toLowerCase() : '';
+  const src = typeof input.source === 'string' ? input.source.trim().toLowerCase() : '';
+  const typ = typeof input.type === 'string' ? input.type.trim().toLowerCase() : '';
+
+  const knownModule =
+    mod.length > 0 &&
+    (EVENT_OWNERS.some((o) => OWNER_PATTERNS[o].modules.includes(mod)) || BUSINESS_WIDE.modules.includes(mod));
+
+  const owners: EventOwner[] = [];
+  for (const owner of EVENT_OWNERS) {
+    const p = OWNER_PATTERNS[owner];
+    const matchesModule = mod.length > 0 && p.modules.includes(mod);
+    const matchesSource = src.length > 0 && p.sources.includes(src);
+    const matchesType = typ.length > 0 && p.typePrefixes.some((prefix) => typ.startsWith(prefix));
+    const matchesKeyNote = owner === 'revenue' && src === KEY_NOTE_SOURCE && !knownModule;
+    if (matchesModule || matchesSource || matchesType || matchesKeyNote) {
+      owners.push(owner);
+    }
+  }
+
+  const isBusinessWide =
+    (mod.length > 0 && BUSINESS_WIDE.modules.includes(mod)) ||
+    (src.length > 0 && BUSINESS_WIDE.sources.includes(src));
+  const unclassified = owners.length === 0 && !isBusinessWide;
+  return { owners, unclassified };
+}
+
 @Injectable()
 export class TemporalFlowService {
   private readonly logger = new Logger(TemporalFlowService.name);
@@ -232,15 +267,62 @@ export class TemporalFlowService {
   ) {}
 
   /**
-   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-3): given a writer's filter (readerFilter), an upsert whose
-   * (source, externalId) names an existing event the writer cannot read is refused (403) before anything is written,
-   * so a member cannot overwrite a KEY Inbox event, nor read back the fields the upsert keeps (its sender handle).
+   * FU-TIMELINE-CALLERS-SCOPE (R1-SEC-02): whether `writer` may emit an event naming `(module, source, type)`
+   * in `businessId`. Fails closed when `writer` is null/missing or has no membership (unless active SUPER_ADMIN).
+   * A writer who misses any owning module of the event (or emits an unclassified event while missing any owner)
+   * is refused.
    */
-  async emit(input: TemporalFlowEventInput, writerFilter?: Record<string, unknown>) {
+  async canWriteEvent(
+    businessId: string,
+    input: Pick<TemporalFlowEventInput, 'module' | 'source' | 'type'>,
+    writer: TemporalFlowReader,
+  ): Promise<boolean> {
+    const writerId = typeof writer?.id === 'string' ? writer.id.trim() : '';
+    if (!writerId) return false;
+    const normalized: TemporalFlowReader = { id: writerId, role: writer?.role };
+    if (await this.isSuperAdmin(normalized)) return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: writerId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return false;
+    const reads = (module: EventOwner) =>
+      rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
+    const withheld = EVENT_OWNERS.filter((module) => !reads(module));
+    if (withheld.length === 0) return true;
+    const { owners, unclassified } = classifyEventOwners(input);
+    if (unclassified) return false;
+    return owners.every((o) => !withheld.includes(o));
+  }
+
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-3) + FU-TIMELINE-CALLERS-SCOPE (R1-SEC-02):
+   * - When `writer` is provided (including `null` fail-closed), refuses writes whose owning module(s) are
+   *   withheld from `writer` (or when `writer` is missing/non-member) BEFORE inserting or upserting.
+   * - Given a writer's filter (readerFilter), an upsert whose (source, externalId) names an existing event the
+   *   writer cannot read is refused (403) before anything is written.
+   */
+  async emit(
+    input: TemporalFlowEventInput,
+    writerFilter?: Record<string, unknown>,
+    writer?: TemporalFlowReader,
+  ) {
+    if (writer !== undefined) {
+      const allowed = await this.canWriteEvent(input.businessId, input, writer);
+      if (!allowed) {
+        throw new ForbiddenException('This event belongs to a module you cannot access');
+      }
+    }
+
+    const effectiveWriterFilter =
+      writer !== undefined && writerFilter === undefined && input.externalId
+        ? await this.readerFilter(input.businessId, writer)
+        : writerFilter;
+
     const data = this.buildCreateData(input);
 
-    if (input.externalId && writerFilter) {
-      return this.emitScoped(input, data, writerFilter);
+    if (input.externalId && effectiveWriterFilter) {
+      return this.emitScoped(input, data, effectiveWriterFilter);
     }
 
     if (input.externalId) {
@@ -326,9 +408,9 @@ export class TemporalFlowService {
     try {
       const user = await this.prisma.client.user?.findUnique({
         where: { id: reader.id },
-        select: { role: true },
+        select: { role: true, deletedAt: true, bannedAt: true },
       });
-      return user?.role === 'SUPER_ADMIN';
+      return user?.role === 'SUPER_ADMIN' && !user.deletedAt && !user.bannedAt;
     } catch {
       return false;
     }
@@ -747,9 +829,13 @@ export class TemporalFlowService {
   }
 
   /**
-   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-2) + FU-TIMELINE-CALLERS-SCOPE: given the writer's filter
-   * (and optional reader for D-238 financial proposal/genome-evolution projection), an event they cannot read is
-   * never resolved and answers { count: 0 }, identically to a missing or cross-tenant event.
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-2) + FU-TIMELINE-CALLERS-SCOPE (R1-SEC-03/04, R1-COR-02):
+   * - If `reader` is supplied without `writerFilter`, derives `readerFilter(businessId, reader)` automatically
+   *   so callers cannot accidentally fail open on module ownership.
+   * - When scoped (`effectiveFilter !== undefined || reader !== undefined`), excludes `HIDDEN` events so
+   *   members cannot probe or mutate hidden timeline rows.
+   * - When `reader !== undefined`, verifies D-238 `forReader` visibility and closes the check-then-write
+   *   TOCTOU window by pinning `updatedAt`, `entityType`, `entityId`, `title`, and `summary` on `updateMany`.
    */
   async markResolved(
     businessId: string,
@@ -757,12 +843,37 @@ export class TemporalFlowService {
     writerFilter?: Record<string, unknown>,
     reader?: GenomeReader | null,
   ) {
-    const where = this.scoped({ id: eventId, businessId }, writerFilter);
+    const effectiveFilter =
+      reader !== undefined && writerFilter === undefined
+        ? await this.readerFilter(businessId, reader)
+        : writerFilter;
+    const baseWhere: Record<string, unknown> = { id: eventId, businessId };
+    if (effectiveFilter !== undefined || reader !== undefined) {
+      baseWhere.visibility = { not: 'HIDDEN' };
+    }
+    const where = this.scoped(baseWhere, effectiveFilter);
     if (reader !== undefined) {
       const existing = await this.prisma.client.temporalFlowEvent.findFirst({ where });
       if (!existing) return { count: 0 };
       const visible = await this.forReader(businessId, [existing], reader);
       if (visible.length === 0) return { count: 0 };
+      return this.prisma.client.temporalFlowEvent.updateMany({
+        where: this.scoped(
+          {
+            ...baseWhere,
+            ...(existing.updatedAt ? { updatedAt: existing.updatedAt } : {}),
+            entityType: existing.entityType,
+            entityId: existing.entityId,
+            title: existing.title,
+            summary: existing.summary,
+          },
+          effectiveFilter,
+        ),
+        data: {
+          status: 'RESOLVED',
+          completedAt: new Date(),
+        },
+      });
     }
     return this.prisma.client.temporalFlowEvent.updateMany({
       where,
@@ -936,7 +1047,11 @@ export class TemporalFlowService {
     reader?: GenomeReader | null,
     readerFilter?: Record<string, unknown>,
   ): Promise<TemporalFlowGenomeCandidate[]> {
-    const events = recent ?? (await this.list(businessId, { limit: 500 }, reader, readerFilter));
+    const effectiveFilter =
+      reader !== undefined && readerFilter === undefined
+        ? await this.readerFilter(businessId, reader)
+        : readerFilter;
+    const events = recent ?? (await this.list(businessId, { limit: 500 }, reader, effectiveFilter));
     const candidates: TemporalFlowGenomeCandidate[] = [];
 
     const whatsappLeads = events.filter(

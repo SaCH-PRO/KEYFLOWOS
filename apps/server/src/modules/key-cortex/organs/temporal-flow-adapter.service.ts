@@ -34,42 +34,46 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
   }
 
   /**
-   * FU-TIMELINE-CALLERS-SCOPE (D-100, D-179, D-227, D-234): the acting member for a KEY tool call.
-   * `ctx.auditUserId` decides no permission (KeyCortexToolContext); missing or non-string `ctx.userId`
+   * FU-TIMELINE-CALLERS-SCOPE (D-100, D-179, D-227, D-234, R1-SEC-07): the acting member for a KEY tool call.
+   * `ctx.auditUserId` decides no permission (KeyCortexToolContext); missing, blank, or non-string `ctx.userId`
    * fails closed (`null`, withholding every module-owned and unclassified event).
    */
   private readerOf(ctx: KeyCortexToolContext): TemporalFlowReader {
-    return typeof ctx.userId === 'string' && ctx.userId ? { id: ctx.userId } : null;
+    const id = typeof ctx.userId === 'string' ? ctx.userId.trim() : '';
+    return id ? { id } : null;
   }
 
   /**
    * System interoception (`KeyCortexInteroceptionService.senseBody`) calls `getState(businessId)` with
-   * no reader and discards `metadata` (keeping only `healthy`, `status`, `gaps`). Any member-facing
-   * caller passing `reader` (including `null` fail-closed) receives counts scoped to that reader.
+   * no reader and discards `metadata` (keeping only `healthy`, `status`, `gaps`). When `reader === undefined`,
+   * omit `metadata` entirely (R1-SEC-05). Any member-facing caller passing `reader` (including `null`
+   * fail-closed) receives counts scoped to that reader.
    */
   async getState(
     businessId: string,
     reader?: TemporalFlowReader,
   ): Promise<import('./key-organ-adapter.interface').KeyOrganState> {
     try {
-      let analysis;
       if (reader !== undefined) {
         const [readerFilter, memorySight] = await Promise.all([
           this.temporalFlow.readerFilter(businessId, reader),
           this.temporalFlow.memorySight(businessId, reader),
         ]);
-        analysis = await this.temporalFlow.analyze(businessId, readerFilter, memorySight, reader);
-      } else {
-        analysis = await this.temporalFlow.analyze(businessId);
+        const analysis = await this.temporalFlow.analyze(businessId, readerFilter, memorySight, reader);
+        return {
+          healthy: true,
+          status: 'Timeline active',
+          metadata: {
+            urgentItems: analysis.urgentItems?.length ?? 0,
+            opportunities: analysis.opportunities?.length ?? 0,
+            risks: analysis.risks?.length ?? 0,
+          },
+        };
       }
+      await this.temporalFlow.analyze(businessId);
       return {
         healthy: true,
         status: 'Timeline active',
-        metadata: {
-          urgentItems: analysis.urgentItems?.length ?? 0,
-          opportunities: analysis.opportunities?.length ?? 0,
-          risks: analysis.risks?.length ?? 0,
-        },
       };
     } catch (err: unknown) {
       this.logger.error(`getState failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -130,24 +134,26 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
           entityId: { type: 'string' },
         },
         async (ctx, input) => {
-          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, this.readerOf(ctx));
-          const event = await this.temporalFlow.emit(
-            {
-              businessId: ctx.businessId,
-              source: 'key_cortex',
-              type: (input.type as string) ?? 'note',
-              title: input.title as string,
-              summary: (input.summary as string) ?? '',
-              description: input.description as string,
-              startsAt: input.startsAt ? new Date(input.startsAt as string) : undefined,
-              endsAt: input.endsAt ? new Date(input.endsAt as string) : undefined,
-              importance: (input.importance as any) ?? 'normal',
-              reminderAt: input.reminderAt ? new Date(input.reminderAt as string) : undefined,
-              entityType: input.entityType as string,
-              entityId: input.entityId as string,
-            },
-            writerFilter,
-          );
+          const reader = this.readerOf(ctx);
+          const payload = {
+            businessId: ctx.businessId,
+            source: 'key_cortex',
+            type: (input.type as string) ?? 'note',
+            title: input.title as string,
+            summary: (input.summary as string) ?? '',
+            description: input.description as string,
+            startsAt: input.startsAt ? new Date(input.startsAt as string) : undefined,
+            endsAt: input.endsAt ? new Date(input.endsAt as string) : undefined,
+            importance: (input.importance as any) ?? 'normal',
+            reminderAt: input.reminderAt ? new Date(input.reminderAt as string) : undefined,
+            entityType: input.entityType as string,
+            entityId: input.entityId as string,
+          };
+          if (!(await this.temporalFlow.canWriteEvent(ctx.businessId, payload, reader))) {
+            return { success: false, error: 'Unauthorized' };
+          }
+          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, reader);
+          const event = await this.temporalFlow.emit(payload, writerFilter, reader);
           return { success: true, data: { eventId: event.id, title: event.title } };
         },
       ),
@@ -161,18 +167,20 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
           description: { type: 'string' },
         },
         async (ctx, input) => {
-          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, this.readerOf(ctx));
-          const event = await this.temporalFlow.emit(
-            {
-              businessId: ctx.businessId,
-              source: 'key_cortex',
-              type: 'reminder',
-              title: input.title as string,
-              summary: (input.description as string) ?? '',
-              reminderAt: new Date(input.reminderAt as string),
-            },
-            writerFilter,
-          );
+          const reader = this.readerOf(ctx);
+          const payload = {
+            businessId: ctx.businessId,
+            source: 'key_cortex',
+            type: 'reminder',
+            title: input.title as string,
+            summary: (input.description as string) ?? '',
+            reminderAt: new Date(input.reminderAt as string),
+          };
+          if (!(await this.temporalFlow.canWriteEvent(ctx.businessId, payload, reader))) {
+            return { success: false, error: 'Unauthorized' };
+          }
+          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, reader);
+          const event = await this.temporalFlow.emit(payload, writerFilter, reader);
           return { success: true, data: { eventId: event.id, reminderAt: event.reminderAt } };
         },
       ),
