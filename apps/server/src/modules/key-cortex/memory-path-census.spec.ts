@@ -261,20 +261,126 @@ function findClassMethod(cls: ts.ClassDeclaration | null, methodName: string, sf
   return null;
 }
 
+function isConditionalControlFlow(node: ts.Node): boolean {
+  if (
+    ts.isIfStatement(node) ||
+    ts.isSwitchStatement(node) ||
+    ts.isConditionalExpression(node) ||
+    ts.isCatchClause(node) ||
+    ts.isWhileStatement(node) ||
+    ts.isDoStatement(node) ||
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node)
+  ) {
+    return true;
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+      node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function nodeEncloses(ancestor: ts.Node, descendant: ts.Node): boolean {
+  return ancestor.pos <= descendant.pos && descendant.end <= ancestor.end;
+}
+
+function isNonEnclosingBranch(node: ts.Node, anchor: ts.Node): boolean {
+  if (isConditionalControlFlow(node)) {
+    return !nodeEncloses(node, anchor);
+  }
+  const p = node.parent;
+  if (p) {
+    if (ts.isIfStatement(p) && (node === p.thenStatement || node === p.elseStatement)) {
+      return !nodeEncloses(node, anchor);
+    }
+    if (ts.isConditionalExpression(p) && (node === p.whenTrue || node === p.whenFalse)) {
+      return !nodeEncloses(node, anchor);
+    }
+    if (ts.isCaseOrDefaultClause(node)) {
+      return !nodeEncloses(node, anchor);
+    }
+  }
+  return false;
+}
+
 /**
- * Checks whether an expression contains an embedded `businessId` value (used
- * solely for tenant-namespaced synthetic `id` templates in `upsert` where
- * `create` also explicitly supplies `businessId`).
+ * Checks whether an expression references a `businessId` identifier/property
+ * (never accepting raw string/template literal text).
  */
-function idExprEmbedsBusinessId(
+function exprReferencesBusinessId(
   expr: ts.Expression,
   scopeNode: ts.Node,
+  anchorNode: ts.Node,
   sf: ts.SourceFile,
   visited = new Set<string>(),
 ): boolean {
   const e = unwrapExpr(expr);
-  if (ts.isTemplateExpression(e) || ts.isNoSubstitutionTemplateLiteral(e) || ts.isBinaryExpression(e)) {
-    return /\bbusinessId\b/.test(e.getText(sf));
+  if (ts.isIdentifier(e)) {
+    if (e.text === 'businessId') return true;
+    const name = e.text;
+    if (visited.has(name)) return false;
+    const nextVisited = new Set(visited);
+    nextVisited.add(name);
+    let found = false;
+    const search = (x: ts.Node): void => {
+      if (found || isNonEnclosingBranch(x, anchorNode)) return;
+      if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === name && x.initializer) {
+        if (exprReferencesBusinessId(x.initializer, scopeNode, x, sf, new Set(nextVisited))) found = true;
+      }
+      ts.forEachChild(x, search);
+    };
+    search(scopeNode);
+    return found;
+  }
+  if (ts.isPropertyAccessExpression(e)) {
+    return e.name.text === 'businessId';
+  }
+  if (ts.isTemplateExpression(e)) {
+    return e.templateSpans.some((span) =>
+      exprReferencesBusinessId(span.expression, scopeNode, anchorNode, sf, new Set(visited)),
+    );
+  }
+  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return (
+      exprReferencesBusinessId(e.left, scopeNode, anchorNode, sf, new Set(visited)) ||
+      exprReferencesBusinessId(e.right, scopeNode, anchorNode, sf, new Set(visited))
+    );
+  }
+  return false;
+}
+
+/**
+ * Checks whether an expression contains an interpolated/concatenated `businessId`
+ * expression (used solely for tenant-namespaced synthetic `id` templates in
+ * `upsert` where `create` also explicitly supplies `businessId`).
+ *
+ * Non-interpolated literals (e.g. `` `businessId` `` or `'businessId'`) are
+ * explicitly rejected.
+ */
+function idExprEmbedsBusinessId(
+  expr: ts.Expression,
+  scopeNode: ts.Node,
+  anchorNode: ts.Node,
+  sf: ts.SourceFile,
+  visited = new Set<string>(),
+): boolean {
+  const e = unwrapExpr(expr);
+  if (ts.isTemplateExpression(e)) {
+    return e.templateSpans.some((span) =>
+      exprReferencesBusinessId(span.expression, scopeNode, anchorNode, sf, new Set(visited)),
+    );
+  }
+  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return (
+      exprReferencesBusinessId(e.left, scopeNode, anchorNode, sf, new Set(visited)) ||
+      exprReferencesBusinessId(e.right, scopeNode, anchorNode, sf, new Set(visited))
+    );
   }
   if (ts.isIdentifier(e)) {
     const name = e.text;
@@ -283,9 +389,9 @@ function idExprEmbedsBusinessId(
     nextVisited.add(name);
     let found = false;
     const search = (x: ts.Node): void => {
-      if (found) return;
+      if (found || isNonEnclosingBranch(x, anchorNode)) return;
       if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === name && x.initializer) {
-        if (idExprEmbedsBusinessId(x.initializer, scopeNode, sf, nextVisited)) found = true;
+        if (idExprEmbedsBusinessId(x.initializer, scopeNode, x, sf, new Set(nextVisited))) found = true;
       }
       ts.forEachChild(x, search);
     };
@@ -298,28 +404,36 @@ function idExprEmbedsBusinessId(
 /**
  * Structural tenant-predicate verifier for Prisma `where` and `data` clauses.
  *
- * Returns true ONLY when the clause itself carries a `businessId` (or
- * `businessId_*` / `*_businessId`) key — directly, via spread, via `AND`/`OR`/`NOT`,
- * via a local clause variable in the enclosing method, or via a same-class
- * `this.helper(...)` whose returned object carries `businessId`.
+ * Returns true ONLY when the clause itself guarantees a `businessId` (or
+ * `businessId_*` / `*_businessId`) predicate — directly, via spread, via `AND`
+ * (at least one conjunct scoped), via `OR` (every non-empty branch scoped),
+ * via an unconditionally defined/assigned local clause variable dominating the
+ * call site in the enclosing method, or via a same-class `this.helper(...)`
+ * whose returned object carries `businessId`.
  *
- * Critically, does NOT follow scalar row property references like
- * `where: { id: existing.id }`, so bare-id follow-ups and post-fetch checks
- * cannot falsely pass as having a query-level tenant predicate.
+ * Explicitly REJECTS:
+ *   - `NOT: { businessId }` (negated predicate never scopes to tenant)
+ *   - `OR: [{ businessId }, { ...unscoped }]` (partially scoped disjunction)
+ *   - conditional assignments like `if (businessId) where.businessId = businessId`
+ *   - scalar row references like `where: { id: existing.id }`
  */
 function clauseHasBusinessId(
   expr: ts.Expression,
   scopeNode: ts.Node,
+  anchorNode: ts.Node,
   classDecl: ts.ClassDeclaration | null,
   sf: ts.SourceFile,
   visited: Set<string> = new Set(),
+  arrayMode: 'some' | 'every' = 'some',
 ): boolean {
   const e = unwrapExpr(expr);
 
   if (ts.isObjectLiteralExpression(e)) {
     for (const p of e.properties) {
       if (ts.isSpreadAssignment(p)) {
-        if (clauseHasBusinessId(p.expression, scopeNode, classDecl, sf, new Set(visited))) return true;
+        if (clauseHasBusinessId(p.expression, scopeNode, anchorNode, classDecl, sf, new Set(visited), 'some')) {
+          return true;
+        }
         continue;
       }
       const key = propKeyName(p);
@@ -327,27 +441,45 @@ function clauseHasBusinessId(
       if (key === 'businessId' || key.startsWith('businessId_') || key.endsWith('_businessId')) {
         return true;
       }
-      if (key === 'AND' || key === 'OR' || key === 'NOT') {
+      if (key === 'AND') {
         const val = ts.isPropertyAssignment(p) ? p.initializer : (p as ts.ShorthandPropertyAssignment).name;
-        if (clauseHasBusinessId(val, scopeNode, classDecl, sf, new Set(visited))) return true;
+        if (clauseHasBusinessId(val, scopeNode, anchorNode, classDecl, sf, new Set(visited), 'some')) return true;
+      }
+      if (key === 'OR') {
+        const val = ts.isPropertyAssignment(p) ? p.initializer : (p as ts.ShorthandPropertyAssignment).name;
+        if (clauseHasBusinessId(val, scopeNode, anchorNode, classDecl, sf, new Set(visited), 'every')) return true;
       }
     }
     return false;
   }
 
   if (ts.isArrayLiteralExpression(e)) {
-    return e.elements.some((el) => clauseHasBusinessId(el, scopeNode, classDecl, sf, new Set(visited)));
+    if (arrayMode === 'every') {
+      return (
+        e.elements.length > 0 &&
+        e.elements.every((el) =>
+          clauseHasBusinessId(el, scopeNode, anchorNode, classDecl, sf, new Set(visited), 'some'),
+        )
+      );
+    }
+    return e.elements.some((el) =>
+      clauseHasBusinessId(el, scopeNode, anchorNode, classDecl, sf, new Set(visited), 'some'),
+    );
   }
 
   if (ts.isConditionalExpression(e)) {
     return (
-      clauseHasBusinessId(e.whenTrue, scopeNode, classDecl, sf, new Set(visited)) &&
-      clauseHasBusinessId(e.whenFalse, scopeNode, classDecl, sf, new Set(visited))
+      clauseHasBusinessId(e.whenTrue, scopeNode, anchorNode, classDecl, sf, new Set(visited), arrayMode) &&
+      clauseHasBusinessId(e.whenFalse, scopeNode, anchorNode, classDecl, sf, new Set(visited), arrayMode)
     );
   }
 
   if (ts.isCallExpression(e)) {
-    if (e.arguments.some((arg) => clauseHasBusinessId(arg, scopeNode, classDecl, sf, new Set(visited)))) {
+    if (
+      e.arguments.some((arg) =>
+        clauseHasBusinessId(arg, scopeNode, anchorNode, classDecl, sf, new Set(visited), 'some'),
+      )
+    ) {
       return true;
     }
     const callee = unwrapExpr(e.expression);
@@ -366,7 +498,7 @@ function clauseHasBusinessId(
           const findReturn = (x: ts.Node): void => {
             if (helperReturnsScoped) return;
             if (ts.isReturnStatement(x) && x.expression) {
-              if (clauseHasBusinessId(x.expression, helper, classDecl, sf, new Set(nextVisited))) {
+              if (clauseHasBusinessId(x.expression, helper, x, classDecl, sf, new Set(nextVisited), arrayMode)) {
                 helperReturnsScoped = true;
               }
             }
@@ -388,8 +520,12 @@ function clauseHasBusinessId(
     let found = false;
     const searchDef = (x: ts.Node): void => {
       if (found) return;
+      // Block conditional, loop, catch, and short-circuit control flow that does
+      // not enclose the call site so `if (businessId) where.businessId = businessId`
+      // never counts as guaranteed.
+      if (isNonEnclosingBranch(x, anchorNode)) return;
       if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === name && x.initializer) {
-        if (clauseHasBusinessId(x.initializer, scopeNode, classDecl, sf, new Set(nextVisited))) {
+        if (clauseHasBusinessId(x.initializer, scopeNode, x, classDecl, sf, new Set(nextVisited), arrayMode)) {
           found = true;
         }
       }
@@ -402,7 +538,7 @@ function clauseHasBusinessId(
         ) {
           found = true;
         } else if (ts.isIdentifier(x.left) && x.left.text === name) {
-          if (clauseHasBusinessId(x.right, scopeNode, classDecl, sf, new Set(nextVisited))) {
+          if (clauseHasBusinessId(x.right, scopeNode, x, classDecl, sf, new Set(nextVisited), arrayMode)) {
             found = true;
           }
         }
@@ -428,10 +564,10 @@ function prismaCallHasTenantPredicate(
   if (ts.isObjectLiteralExpression(arg0)) {
     if (op === 'create' || op === 'createMany' || op === 'createManyAndReturn') {
       const dataProp = getObjectProp(arg0, 'data');
-      return dataProp ? clauseHasBusinessId(dataProp, scopeNode, classDecl, sf) : false;
+      return dataProp ? clauseHasBusinessId(dataProp, scopeNode, callNode, classDecl, sf) : false;
     }
     const whereProp = getObjectProp(arg0, 'where');
-    if (whereProp && clauseHasBusinessId(whereProp, scopeNode, classDecl, sf)) {
+    if (whereProp && clauseHasBusinessId(whereProp, scopeNode, callNode, classDecl, sf)) {
       return true;
     }
     if (op === 'upsert' && whereProp) {
@@ -441,29 +577,71 @@ function prismaCallHasTenantPredicate(
         const idProp = getObjectProp(unwrappedWhere, 'id');
         if (
           idProp &&
-          clauseHasBusinessId(createProp, scopeNode, classDecl, sf) &&
-          idExprEmbedsBusinessId(idProp, scopeNode, sf)
+          clauseHasBusinessId(createProp, scopeNode, callNode, classDecl, sf) &&
+          idExprEmbedsBusinessId(idProp, scopeNode, callNode, sf)
         ) {
           return true;
         }
       }
     }
     for (const p of arg0.properties) {
-      if (ts.isSpreadAssignment(p) && clauseHasBusinessId(p.expression, scopeNode, classDecl, sf)) {
+      if (ts.isSpreadAssignment(p) && clauseHasBusinessId(p.expression, scopeNode, callNode, classDecl, sf)) {
         return true;
       }
     }
     return false;
   }
-  return clauseHasBusinessId(arg0, scopeNode, classDecl, sf);
+  return clauseHasBusinessId(arg0, scopeNode, callNode, classDecl, sf);
 }
 
-function extractSqlText(node: ts.Node, scopeNode: ts.Node): string {
+function stripSqlComments(sql: string): string {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+}
+
+/**
+ * Clause-aware raw SQL tenant-predicate verifier:
+ *   - Strips `-- ...` and `/* ... *\/` SQL comments first.
+ *   - For `INSERT INTO <table> (<cols>)`: requires `business_id` inside the
+ *     INSERT column list (and if the statement also reads from a table via
+ *     `WHERE`/`FROM` in a CTE/subquery, requires `business_id` in `WHERE`/`ON`).
+ *   - For reads / `UPDATE` / `DELETE`: requires `business_id` inside a `WHERE`
+ *     or `ON` predicate (NOT merely in `SELECT`, `RETURNING`, or `ORDER BY`).
+ */
+function rawSqlHasTenantPredicate(sqlText: string): boolean {
+  const clean = stripSqlComments(sqlText);
+  const whereOrOnSegments = [
+    ...clean.matchAll(
+      /\b(?:WHERE|ON)\b([\s\S]*?)(?=\b(?:GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|RETURNING|FOR\s+(?:SHARE|UPDATE)|UNION|INTERSECT|EXCEPT|SET|VALUES|INTO|SELECT)\b|;|$)/gi,
+    ),
+  ].map((m) => m[1] ?? '');
+  const hasWherePredicate = whereOrOnSegments.some((seg) => /\bbusiness_id\b/i.test(seg));
+
+  if (/\bINSERT\s+INTO\b/i.test(clean)) {
+    const insertCols = [
+      ...clean.matchAll(/\bINSERT\s+INTO\s+"?(?:public"?\."?)?\w+"?\s*\(([^)]*)\)/gi),
+    ].map((m) => m[1] ?? '');
+    const insertHasBiz = insertCols.length > 0 && insertCols.every((cols) => /\bbusiness_id\b/i.test(cols));
+    if (!insertHasBiz) return false;
+    // If the INSERT also reads rows via a CTE/SELECT with WHERE, verify the read is tenant-scoped too.
+    if (/\bWHERE\b/i.test(clean)) return hasWherePredicate;
+    return true;
+  }
+
+  return hasWherePredicate;
+}
+
+function extractSqlText(
+  node: ts.Node,
+  scopeNode: ts.Node,
+  classDecl: ts.ClassDeclaration | null,
+  sf: ts.SourceFile,
+): string {
   const parts: string[] = [];
   const visitedVars = new Set<string>();
 
-  const collect = (n: ts.Node | undefined): void => {
-    if (!n) return;
+  const collect = (raw: ts.Node | undefined): void => {
+    if (!raw) return;
+    const n = ts.isExpression(raw) ? unwrapExpr(raw) : raw;
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
       parts.push(n.text);
     } else if (ts.isTemplateExpression(n)) {
@@ -479,12 +657,27 @@ function extractSqlText(node: ts.Node, scopeNode: ts.Node): string {
       collect(n.right);
     } else if (ts.isCallExpression(n)) {
       for (const arg of n.arguments) collect(arg);
+    } else if (
+      ts.isPropertyAccessExpression(n) &&
+      n.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      classDecl
+    ) {
+      const propKey = `this.${n.name.text}`;
+      if (visitedVars.has(propKey)) return;
+      visitedVars.add(propKey);
+      for (const member of classDecl.members) {
+        if (ts.isPropertyDeclaration(member) && member.name?.getText(sf) === n.name.text && member.initializer) {
+          collect(member.initializer);
+        }
+      }
     } else if (ts.isIdentifier(n)) {
       const varName = n.text;
       if (visitedVars.has(varName)) return;
       visitedVars.add(varName);
+      let foundInScope = false;
       const findDef = (x: ts.Node): void => {
         if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === varName && x.initializer) {
+          foundInScope = true;
           collect(x.initializer);
         }
         if (
@@ -494,11 +687,31 @@ function extractSqlText(node: ts.Node, scopeNode: ts.Node): string {
           (x.operatorToken.kind === ts.SyntaxKind.EqualsToken ||
             x.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken)
         ) {
+          foundInScope = true;
           collect(x.right);
         }
         ts.forEachChild(x, findDef);
       };
       findDef(scopeNode);
+      if (!foundInScope && classDecl && classDecl !== scopeNode) {
+        for (const member of classDecl.members) {
+          if (ts.isPropertyDeclaration(member) && member.name?.getText(sf) === varName && member.initializer) {
+            foundInScope = true;
+            collect(member.initializer);
+          }
+        }
+      }
+      if (!foundInScope && sf !== scopeNode) {
+        for (const st of sf.statements) {
+          if (ts.isVariableStatement(st)) {
+            for (const decl of st.declarationList.declarations) {
+              if (ts.isIdentifier(decl.name) && decl.name.text === varName && decl.initializer) {
+                collect(decl.initializer);
+              }
+            }
+          }
+        }
+      }
     } else if (ts.isConditionalExpression(n)) {
       collect(n.whenTrue);
       collect(n.whenFalse);
@@ -513,50 +726,131 @@ function extractSqlText(node: ts.Node, scopeNode: ts.Node): string {
 
 function isWriteSql(op: string, sqlText: string): boolean {
   if (op.includes('execute')) return true;
-  return /\b(INSERT\s+INTO|UPDATE\s+[\s\S]*?\bSET\b|DELETE\s+FROM)\b/i.test(sqlText);
+  return /\b(INSERT\s+INTO|UPDATE\s+[\s\S]*?\bSET\b|DELETE\s+FROM)\b/i.test(stripSqlComments(sqlText));
+}
+
+function getStringLiteralText(expr: ts.Expression): string | null {
+  const e = unwrapExpr(expr);
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+  return null;
 }
 
 /**
- * AST scanner over all non-test `.ts` files under `apps/server/src` (or synthetic
- * virtual sources for `MEM-CEN-01`). Detects both Prisma delegate calls and raw
- * SQL statements touching any of the 10 memory/event/log models/tables.
+ * Extracts `(receiverObj, op)` from a property-access or bracket-indexed call
+ * target (e.g. `prisma.client.aiMemory.findMany`, `prisma.client.aiMemory['findMany']`,
+ * or `(prisma.client as any)['$queryRaw']`).
  */
-export function scanMemoryAccesses(sources: readonly VirtualSource[] = loadServerSources()): ScannedMemoryAccess[] {
+function extractMemberOp(expr: ts.Expression): { receiver: ts.Expression; op: string } | null {
+  const e = unwrapExpr(expr);
+  if (ts.isPropertyAccessExpression(e)) {
+    return { receiver: unwrapExpr(e.expression), op: e.name.text };
+  }
+  if (ts.isElementAccessExpression(e)) {
+    const lit = getStringLiteralText(e.argumentExpression);
+    if (lit) return { receiver: unwrapExpr(e.expression), op: lit };
+  }
+  return null;
+}
+
+/**
+ * Extracts a Prisma delegate name from a direct member expression, excluding
+ * bare `this.<delegate>` injected NestJS service fields (e.g. `this.aiMemory.upsert`).
+ */
+function extractDirectDelegateName(obj: ts.Expression): string | null {
+  const e = unwrapExpr(obj);
+  if (ts.isPropertyAccessExpression(e)) {
+    if (e.expression.kind === ts.SyntaxKind.ThisKeyword) return null;
+    return e.name.text;
+  }
+  if (ts.isElementAccessExpression(e)) {
+    if (e.expression.kind === ts.SyntaxKind.ThisKeyword) return null;
+    return getStringLiteralText(e.argumentExpression);
+  }
+  return null;
+}
+
+/**
+ * Resolves a local destructured or aliased Prisma delegate identifier within
+ * `scopeNode`, e.g.:
+ *   - `const { aiMemory } = this.prisma.client; aiMemory.findMany(...)`
+ *   - `const { aiMemory: repo } = prisma; repo.findMany(...)`
+ *   - `const repo = this.prisma.client.aiMemory; repo.findMany(...)`
+ */
+function resolveLocalDelegateAlias(
+  identName: string,
+  scopeNode: ts.Node,
+  sf: ts.SourceFile,
+): string | null {
+  let resolved: string | null = null;
+  const search = (x: ts.Node): void => {
+    if (resolved) return;
+    if (ts.isVariableDeclaration(x) && x.initializer) {
+      const init = unwrapExpr(x.initializer);
+      if (ts.isIdentifier(x.name) && x.name.text === identName) {
+        const direct = extractDirectDelegateName(init);
+        if (direct && DELEGATE_TO_SPEC.has(direct)) {
+          resolved = direct;
+          return;
+        }
+      } else if (ts.isObjectBindingPattern(x.name) && init.kind !== ts.SyntaxKind.ThisKeyword) {
+        for (const el of x.name.elements) {
+          if (ts.isIdentifier(el.name) && el.name.text === identName) {
+            const propName = el.propertyName
+              ? ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)
+                ? el.propertyName.text
+                : el.propertyName.getText(sf)
+              : el.name.text;
+            if (DELEGATE_TO_SPEC.has(propName)) {
+              resolved = propName;
+              return;
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(x, search);
+  };
+  search(scopeNode);
+  return resolved;
+}
+
+const MEMORY_FAST_PREFILTER = new RegExp(
+  `\\b(${MODEL_SPECS.map((m) => `${m.delegate}|${m.table}`).join('|')})\\b|\\$(?:query|execute)Raw`,
+);
+
+let cachedLiveScan: ScannedMemoryAccess[] | null = null;
+
+/**
+ * AST scanner over all non-test `.ts` files under `apps/server/src` (or synthetic
+ * virtual sources for `MEM-CEN-01`). Detects both Prisma delegate calls (direct,
+ * bracket-indexed, aliased, or destructured) and raw SQL statements touching any
+ * of the 10 memory/event/log models/tables.
+ */
+export function scanMemoryAccesses(sources?: readonly VirtualSource[]): ScannedMemoryAccess[] {
+  if (!sources && cachedLiveScan) return cachedLiveScan;
+  const inputs = sources ?? loadServerSources();
   const allFindings: ScannedMemoryAccess[] = [];
 
-  for (const { file, text } of sources) {
+  for (const { file, text } of inputs) {
+    if (!MEMORY_FAST_PREFILTER.test(text)) continue;
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     const fileFindings: Omit<ScannedMemoryAccess, 'occurrenceIndex'>[] = [];
 
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
-        const callee = unwrapExpr(node.expression);
-        if (ts.isPropertyAccessExpression(callee)) {
-          const op = callee.name.text;
+        const memberOp = extractMemberOp(node.expression);
+        if (memberOp) {
+          const { receiver: obj, op } = memberOp;
           if (PRISMA_OPS.has(op)) {
-            const obj = unwrapExpr(callee.expression);
-            let delegateName: string | null = null;
-            let isBareThisService = false;
-            if (ts.isPropertyAccessExpression(obj)) {
-              delegateName = obj.name.text;
-              // `this.aiMemory.upsert(...)` is an injected NestJS service, not a Prisma delegate.
-              if (obj.expression.kind === ts.SyntaxKind.ThisKeyword) {
-                isBareThisService = true;
-              }
-            } else if (
-              ts.isElementAccessExpression(obj) &&
-              ts.isStringLiteral(obj.argumentExpression)
-            ) {
-              delegateName = obj.argumentExpression.text;
-              if (obj.expression.kind === ts.SyntaxKind.ThisKeyword) {
-                isBareThisService = true;
-              }
+            const { symbol, scopeNode, classDecl } = getEnclosingOwner(node, sf);
+            let delegateName = extractDirectDelegateName(obj);
+            if (!delegateName && ts.isIdentifier(obj)) {
+              delegateName = resolveLocalDelegateAlias(obj.text, scopeNode, sf);
             }
 
-            if (!isBareThisService && delegateName) {
+            if (delegateName) {
               const spec = DELEGATE_TO_SPEC.get(delegateName);
               if (spec) {
-                const { symbol, scopeNode, classDecl } = getEnclosingOwner(node, sf);
                 const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
                 fileFindings.push({
                   file,
@@ -573,13 +867,14 @@ export function scanMemoryAccesses(sources: readonly VirtualSource[] = loadServe
           }
 
           if (RAW_SQL_OPS.has(op)) {
-            const { symbol, scopeNode } = getEnclosingOwner(node, sf);
-            const sqlText = node.arguments.map((a) => extractSqlText(a, scopeNode)).join(' ');
+            const { symbol, scopeNode, classDecl } = getEnclosingOwner(node, sf);
+            const sqlText = node.arguments.map((a) => extractSqlText(a, scopeNode, classDecl, sf)).join(' ');
+            const cleanSql = stripSqlComments(sqlText);
             const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
             const kind: MemoryAccessKind = isWriteSql(op, sqlText) ? 'write' : 'read';
-            const hasTenantPredicate = /\bbusiness_id\b/i.test(sqlText);
+            const hasTenantPredicate = rawSqlHasTenantPredicate(sqlText);
             for (const spec of MODEL_SPECS) {
-              if (new RegExp(`\\b${spec.table}\\b`, 'i').test(sqlText)) {
+              if (new RegExp(`\\b${spec.table}\\b`, 'i').test(cleanSql)) {
                 fileFindings.push({
                   file,
                   symbol,
@@ -599,23 +894,20 @@ export function scanMemoryAccesses(sources: readonly VirtualSource[] = loadServe
       if (ts.isTaggedTemplateExpression(node)) {
         const tag = unwrapExpr(node.tag);
         let op: string | null = null;
-        if (ts.isPropertyAccessExpression(tag) && RAW_SQL_OPS.has(tag.name.text)) {
-          op = tag.name.text;
-        } else if (
-          ts.isExpressionWithTypeArguments(tag) &&
-          ts.isPropertyAccessExpression(tag.expression) &&
-          RAW_SQL_OPS.has(tag.expression.name.text)
-        ) {
-          op = tag.expression.name.text;
+        const tagExpr = ts.isExpressionWithTypeArguments(tag) ? unwrapExpr(tag.expression) : tag;
+        const tagMember = extractMemberOp(tagExpr);
+        if (tagMember && RAW_SQL_OPS.has(tagMember.op)) {
+          op = tagMember.op;
         }
         if (op) {
-          const { symbol, scopeNode } = getEnclosingOwner(node, sf);
-          const sqlText = extractSqlText(node.template, scopeNode);
+          const { symbol, scopeNode, classDecl } = getEnclosingOwner(node, sf);
+          const sqlText = extractSqlText(node.template, scopeNode, classDecl, sf);
+          const cleanSql = stripSqlComments(sqlText);
           const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
           const kind: MemoryAccessKind = isWriteSql(op, sqlText) ? 'write' : 'read';
-          const hasTenantPredicate = /\bbusiness_id\b/i.test(sqlText);
+          const hasTenantPredicate = rawSqlHasTenantPredicate(sqlText);
           for (const spec of MODEL_SPECS) {
-            if (new RegExp(`\\b${spec.table}\\b`, 'i').test(sqlText)) {
+            if (new RegExp(`\\b${spec.table}\\b`, 'i').test(cleanSql)) {
               fileFindings.push({
                 file,
                 symbol,
@@ -645,6 +937,7 @@ export function scanMemoryAccesses(sources: readonly VirtualSource[] = loadServe
     }
   }
 
+  if (!sources) cachedLiveScan = allFindings;
   return allFindings;
 }
 
@@ -728,24 +1021,52 @@ export function validateTenantPredicates(
   return violations;
 }
 
+function normalizeTypeName(raw: string, importAliases: ReadonlyMap<string, string>): string {
+  const lastSegment = raw.includes('.') ? raw.slice(raw.lastIndexOf('.') + 1) : raw;
+  return importAliases.get(lastSegment) ?? lastSegment;
+}
+
+function extractTypeName(
+  typeNode: ts.TypeNode,
+  sf: ts.SourceFile,
+  importAliases: ReadonlyMap<string, string>,
+): string | null {
+  if (ts.isTypeReferenceNode(typeNode)) {
+    return normalizeTypeName(typeNode.typeName.getText(sf), importAliases);
+  }
+  if (ts.isUnionTypeNode(typeNode)) {
+    for (const t of typeNode.types) {
+      if (ts.isTypeReferenceNode(t)) {
+        return normalizeTypeName(t.typeName.getText(sf), importAliases);
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Extracts declared type names of constructor parameter properties, class
- * properties, and local variables/parameters within a class or method so the
- * dormant caller scanner distinguishes e.g. `KeyInboxService.addMessage` from
- * `KeyCortexConversationService.addMessage`.
+ * properties, and local variables/parameters within a class or method (normalizing
+ * import aliases and namespace-qualified names) so the dormant caller scanner
+ * distinguishes e.g. `KeyInboxService.addMessage` from
+ * `KeyCortexConversationService.addMessage` while catching aliased imports.
  */
-function buildClassPropTypes(cls: ts.ClassDeclaration | null, sf: ts.SourceFile): Map<string, string> {
+function buildClassPropTypes(
+  cls: ts.ClassDeclaration | null,
+  sf: ts.SourceFile,
+  importAliases: ReadonlyMap<string, string>,
+): Map<string, string> {
   const map = new Map<string, string>();
   if (!cls) return map;
   for (const member of cls.members) {
     if (ts.isPropertyDeclaration(member) && member.name && member.type) {
-      const typeName = extractTypeName(member.type, sf);
+      const typeName = extractTypeName(member.type, sf, importAliases);
       if (typeName) map.set(member.name.getText(sf), typeName);
     }
     if (ts.isConstructorDeclaration(member)) {
       for (const param of member.parameters) {
         if (ts.isIdentifier(param.name) && param.type) {
-          const typeName = extractTypeName(param.type, sf);
+          const typeName = extractTypeName(param.type, sf, importAliases);
           if (typeName) map.set(param.name.text, typeName);
         }
       }
@@ -754,20 +1075,29 @@ function buildClassPropTypes(cls: ts.ClassDeclaration | null, sf: ts.SourceFile)
   return map;
 }
 
-function buildLocalTypes(scopeNode: ts.Node, sf: ts.SourceFile): Map<string, string> {
+function buildLocalTypes(
+  scopeNode: ts.Node,
+  sf: ts.SourceFile,
+  importAliases: ReadonlyMap<string, string>,
+): Map<string, string> {
   const map = new Map<string, string>();
   const walk = (n: ts.Node): void => {
     if (ts.isParameter(n) && ts.isIdentifier(n.name) && n.type) {
-      const t = extractTypeName(n.type, sf);
+      const t = extractTypeName(n.type, sf, importAliases);
       if (t) map.set(n.name.text, t);
     } else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) {
       if (n.type) {
-        const t = extractTypeName(n.type, sf);
+        const t = extractTypeName(n.type, sf, importAliases);
         if (t) map.set(n.name.text, t);
       } else if (n.initializer) {
         const init = unwrapExpr(n.initializer);
-        if (ts.isNewExpression(init) && ts.isIdentifier(init.expression)) {
-          map.set(n.name.text, init.expression.text);
+        if (ts.isNewExpression(init)) {
+          const ctor = unwrapExpr(init.expression);
+          if (ts.isIdentifier(ctor)) {
+            map.set(n.name.text, normalizeTypeName(ctor.text, importAliases));
+          } else if (ts.isPropertyAccessExpression(ctor)) {
+            map.set(n.name.text, normalizeTypeName(ctor.getText(sf), importAliases));
+          }
         }
       }
     }
@@ -777,26 +1107,54 @@ function buildLocalTypes(scopeNode: ts.Node, sf: ts.SourceFile): Map<string, str
   return map;
 }
 
-function extractTypeName(typeNode: ts.TypeNode, sf: ts.SourceFile): string | null {
-  if (ts.isTypeReferenceNode(typeNode)) {
-    return typeNode.typeName.getText(sf);
+function resolveReceiverClass(
+  receiverExpr: ts.Expression,
+  classDecl: ts.ClassDeclaration | null,
+  propTypes: ReadonlyMap<string, string>,
+  localTypes: ReadonlyMap<string, string>,
+  importAliases: ReadonlyMap<string, string>,
+  sf: ts.SourceFile,
+): string | null {
+  const e = unwrapExpr(receiverExpr);
+  if (e.kind === ts.SyntaxKind.ThisKeyword) {
+    return classDecl?.name?.text ?? null;
   }
-  if (ts.isUnionTypeNode(typeNode)) {
-    for (const t of typeNode.types) {
-      if (ts.isTypeReferenceNode(t)) return t.typeName.getText(sf);
-    }
+  if (ts.isPropertyAccessExpression(e) && e.expression.kind === ts.SyntaxKind.ThisKeyword) {
+    return propTypes.get(e.name.text) ?? null;
+  }
+  if (ts.isIdentifier(e)) {
+    return localTypes.get(e.text) ?? null;
+  }
+  if (ts.isNewExpression(e)) {
+    const ctor = unwrapExpr(e.expression);
+    if (ts.isIdentifier(ctor)) return normalizeTypeName(ctor.text, importAliases);
+    if (ts.isPropertyAccessExpression(ctor)) return normalizeTypeName(ctor.getText(sf), importAliases);
   }
   return null;
 }
 
+function isInsideTypeNode(node: ts.Node): boolean {
+  let cur: ts.Node | undefined = node.parent;
+  while (cur) {
+    if (ts.isTypeNode(cur)) return true;
+    cur = cur.parent;
+  }
+  return false;
+}
+
 /**
- * Scans every non-test source file for live callers of any method registered
- * in `DORMANT_MEMORY_PATHS`.
+ * Scans every non-test source file for live references/calls to any method
+ * registered in `DORMANT_MEMORY_PATHS`, catching:
+ *   - direct calls (`this.writer.storePreference(...)`)
+ *   - bracket-indexed calls & refs (`this.writer['storePreference']`)
+ *   - `.call` / `.apply` / `.bind` and function-reference passing (`const fn = this.writer.storePreference`)
+ *   - destructured references (`const { storePreference } = this.writer`)
+ *   - import-aliased (`import { X as Y }`) and namespace-qualified (`ns.X`) callers
  *
  * Calls from another method that is ALSO registered in `DORMANT_MEMORY_PATHS`
- * (e.g., dormant `selfTune` calling private `applyTuningAdjustment`) are treated
- * as inside the dormant subgraph; the first non-dormant caller of ANY dormant
- * entry immediately produces a hit and fails `MEM-CEN-05`.
+ * (e.g., dormant `selfTune` calling private `applyTuningAdjustment`) stay inside
+ * the dormant subgraph; the first non-dormant caller of ANY dormant entry
+ * immediately fails `MEM-CEN-05`.
  */
 export function scanDormantCallers(
   dormantEntries: readonly DormantMemoryPathEntry[],
@@ -815,73 +1173,90 @@ export function scanDormantCallers(
   const hits: DormantCallerHit[] = [];
 
   for (const { file, text } of sources) {
-    // Fast pre-check: skip files mentioning none of the dormant method names.
     const candidates = [...byMethod.keys()].filter((m) => text.includes(m));
     if (candidates.length === 0) continue;
 
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-    const importedIds = new Set<string>();
+    const importAliases = new Map<string, string>();
+    const importedExports = new Set<string>();
+    let hasNamespaceImport = false;
+
     for (const st of sf.statements) {
-      if (ts.isImportDeclaration(st) && st.importClause?.namedBindings && ts.isNamedImports(st.importClause.namedBindings)) {
-        for (const el of st.importClause.namedBindings.elements) {
-          importedIds.add(el.name.text);
+      if (!ts.isImportDeclaration(st) || !st.importClause?.namedBindings) continue;
+      const nb = st.importClause.namedBindings;
+      if (ts.isNamedImports(nb)) {
+        for (const el of nb.elements) {
+          const exportedName = el.propertyName ? el.propertyName.text : el.name.text;
+          importAliases.set(el.name.text, exportedName);
+          importedExports.add(exportedName);
         }
+      } else if (ts.isNamespaceImport(nb)) {
+        hasNamespaceImport = true;
       }
     }
 
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node)) {
-        const callee = unwrapExpr(node.expression);
-        let invokedMethod: string | null = null;
-        let receiverExpr: ts.Expression | null = null;
+    const reportIfDormantTarget = (
+      node: ts.Node,
+      methodName: string,
+      receiverExpr: ts.Expression | null,
+    ): void => {
+      const targets = byMethod.get(methodName);
+      if (!targets) return;
+      const { symbol: callerSymbol, scopeNode, classDecl } = getEnclosingOwner(node, sf);
+      const propTypes = buildClassPropTypes(classDecl, sf, importAliases);
+      const localTypes = buildLocalTypes(scopeNode, sf, importAliases);
+      const resolvedClass = receiverExpr
+        ? resolveReceiverClass(receiverExpr, classDecl, propTypes, localTypes, importAliases, sf)
+        : null;
 
-        if (ts.isPropertyAccessExpression(callee)) {
-          invokedMethod = callee.name.text;
-          receiverExpr = unwrapExpr(callee.expression);
-        } else if (
-          ts.isElementAccessExpression(callee) &&
-          ts.isStringLiteral(callee.argumentExpression)
+      for (const target of targets) {
+        if (dormantSymbols.has(callerSymbol)) continue;
+        if (resolvedClass && resolvedClass !== target.className) continue;
+        if (
+          !resolvedClass &&
+          file !== target.file &&
+          !importedExports.has(target.className) &&
+          !hasNamespaceImport
         ) {
-          invokedMethod = callee.argumentExpression.text;
-          receiverExpr = unwrapExpr(callee.expression);
+          continue;
         }
+        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+        hits.push({
+          target: `${target.className}.${target.methodName}`,
+          callerFile: file,
+          callerSymbol,
+          line,
+          expression: node.getText(sf).replace(/\s+/g, ' ').slice(0, 120),
+        });
+      }
+    };
 
-        if (invokedMethod && byMethod.has(invokedMethod) && receiverExpr) {
-          const { symbol: callerSymbol, scopeNode, classDecl } = getEnclosingOwner(node, sf);
-          const propTypes = buildClassPropTypes(classDecl, sf);
-          const localTypes = buildLocalTypes(scopeNode, sf);
-
-          let resolvedClass: string | null = null;
-          if (receiverExpr.kind === ts.SyntaxKind.ThisKeyword) {
-            resolvedClass = classDecl?.name?.text ?? null;
-          } else if (
-            ts.isPropertyAccessExpression(receiverExpr) &&
-            receiverExpr.expression.kind === ts.SyntaxKind.ThisKeyword
-          ) {
-            resolvedClass = propTypes.get(receiverExpr.name.text) ?? null;
-          } else if (ts.isIdentifier(receiverExpr)) {
-            resolvedClass = localTypes.get(receiverExpr.text) ?? null;
-          }
-
-          for (const target of byMethod.get(invokedMethod)!) {
-            // Skip dormant-to-dormant internal calls (e.g. dormant selfTune -> private applyTuningAdjustment).
-            if (dormantSymbols.has(callerSymbol)) continue;
-
-            // If receiver type resolves to a different concrete class, this is an unrelated method name collision
-            // (e.g., KeyInboxService.addMessage vs KeyCortexConversationService.addMessage).
-            if (resolvedClass && resolvedClass !== target.className) continue;
-
-            // If receiver type couldn't be resolved statically, only flag if this file defines or imports target.className.
-            if (!resolvedClass && file !== target.file && !importedIds.has(target.className)) continue;
-
-            const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-            hits.push({
-              target: `${target.className}.${target.methodName}`,
-              callerFile: file,
-              callerSymbol,
-              line,
-              expression: node.getText(sf).replace(/\s+/g, ' ').slice(0, 120),
-            });
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAccessExpression(node) && !isInsideTypeNode(node)) {
+        const methodName = node.name.text;
+        if (byMethod.has(methodName)) {
+          reportIfDormantTarget(node, methodName, unwrapExpr(node.expression));
+        }
+      } else if (ts.isElementAccessExpression(node) && !isInsideTypeNode(node)) {
+        const methodName = getStringLiteralText(node.argumentExpression);
+        if (methodName && byMethod.has(methodName)) {
+          reportIfDormantTarget(node, methodName, unwrapExpr(node.expression));
+        }
+      } else if (ts.isObjectBindingPattern(node)) {
+        let receiverExpr: ts.Expression | null = null;
+        if (ts.isVariableDeclaration(node.parent) && node.parent.initializer) {
+          receiverExpr = unwrapExpr(node.parent.initializer);
+        }
+        for (const el of node.elements) {
+          const boundProp = el.propertyName
+            ? ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)
+              ? el.propertyName.text
+              : el.propertyName.getText(sf)
+            : ts.isIdentifier(el.name)
+              ? el.name.text
+              : null;
+          if (boundProp && byMethod.has(boundProp)) {
+            reportIfDormantTarget(el, boundProp, receiverExpr);
           }
         }
       }
@@ -1062,6 +1437,208 @@ describe('MEM-CENSUS (P107): AST census of KEY memory read/write paths', () => {
       callerFile: 'modules/synthetic/bad-dormant-caller.service.ts',
       callerSymbol: 'BadDormantCallerService.run',
     });
+
+    // 5. [R1-SEC-01 / R1-COR-01] Prisma tenant-predicate bypasses MUST yield hasTenantPredicate=false and fail validateTenantPredicates
+    const prismaBypassFixture: VirtualSource[] = [
+      {
+        file: 'modules/synthetic/predicate-bypasses.service.ts',
+        text: `
+          export class PredicateBypassesService {
+            constructor(private readonly prisma: any) {}
+            async negatedNot(businessId: string) {
+              return this.prisma.client.aiMemory.findMany({ where: { NOT: { businessId } } });
+            }
+            async partialOr(businessId: string) {
+              return this.prisma.client.aiMemory.findMany({
+                where: { OR: [{ businessId }, { category: 'fact' }] },
+              });
+            }
+            async conditionalAssign(businessId?: string) {
+              const where: any = {};
+              if (businessId) where.businessId = businessId;
+              return this.prisma.client.aiMemory.findMany({ where });
+            }
+            async literalTemplateUpsert(businessId: string) {
+              return this.prisma.client.keyCortexMemory.upsert({
+                where: { id: \`businessId\` },
+                create: { id: \`businessId\`, businessId, type: 'x', key: 'k', value: 'v', source: 's' },
+                update: { value: 'v' },
+              });
+            }
+          }
+        `,
+      },
+    ];
+    const bypassSites = scanMemoryAccesses(prismaBypassFixture);
+    expect(bypassSites).toHaveLength(4);
+    for (const s of bypassSites) {
+      expect(s.hasTenantPredicate, `${s.symbol} must NOT pass as tenant-scoped`).toBe(false);
+    }
+    const bypassViolations = validateTenantPredicates(
+      bypassSites,
+      bypassSites.map((s) => ({
+        file: s.file,
+        symbol: s.symbol,
+        model: s.model,
+        op: s.op,
+        kind: s.kind,
+        via: s.via,
+        tenantPredicate: 'yes' as const,
+        surface: 'api' as const,
+        projection: 'unprojected' as const,
+        dataClass: 'MIXED' as const,
+        followUp: 'MEM-CLASS-READ',
+      })),
+    );
+    expect(bypassViolations).toHaveLength(4);
+
+    // 6. [R1-SEC-02] Raw SQL SELECT-only / comment-only business_id MUST yield hasTenantPredicate=false and fail validateTenantPredicates
+    const rawBypassFixture: VirtualSource[] = [
+      {
+        file: 'modules/synthetic/raw-sql-bypasses.service.ts',
+        text: `
+          export class RawSqlBypassesService {
+            constructor(private readonly prisma: any) {}
+            async selectOnlyBiz(id: string) {
+              return this.prisma.client.$queryRaw\`SELECT id, business_id FROM ai_memories WHERE id = \${id}\`;
+            }
+            async commentOnlyBiz(id: string) {
+              return this.prisma.client.$queryRaw\`
+                SELECT id FROM ai_memories
+                /* WHERE business_id = $1 */
+                WHERE id = \${id}
+              \`;
+            }
+          }
+        `,
+      },
+    ];
+    const rawBypassSites = scanMemoryAccesses(rawBypassFixture);
+    expect(rawBypassSites).toHaveLength(2);
+    for (const s of rawBypassSites) {
+      expect(s.hasTenantPredicate, `${s.symbol} must NOT pass as tenant-scoped`).toBe(false);
+    }
+    const rawBypassViolations = validateTenantPredicates(
+      rawBypassSites,
+      rawBypassSites.map((s) => ({
+        file: s.file,
+        symbol: s.symbol,
+        model: s.model,
+        op: s.op,
+        kind: s.kind,
+        via: s.via,
+        tenantPredicate: 'yes' as const,
+        surface: 'api' as const,
+        projection: 'unprojected' as const,
+        dataClass: 'MIXED' as const,
+        followUp: 'MEM-CLASS-READ',
+      })),
+    );
+    expect(rawBypassViolations).toHaveLength(2);
+
+    // 7. [R1-SEC-03] Dormant guard catches destructured, .bind/fn-ref, import-aliased, and namespace-qualified callers
+    const writerDormant: DormantMemoryPathEntry[] = [
+      {
+        file: 'modules/key-cortex/unified-memory-writer.service.ts',
+        className: 'UnifiedMemoryWriterService',
+        methodName: 'storePreference',
+        reason: 'Passes userId that AiMemory cannot store',
+        followUp: 'MEM-CLASS-COLUMNS, D-130',
+      },
+    ];
+    const sneakyDormantFixtures: VirtualSource[] = [
+      {
+        file: 'modules/synthetic/destructured-dormant.service.ts',
+        text: `
+          import { UnifiedMemoryWriterService } from '../key-cortex/unified-memory-writer.service';
+          export class DestructuredDormantService {
+            constructor(private readonly writer: UnifiedMemoryWriterService) {}
+            async run() {
+              const { storePreference } = this.writer;
+              return storePreference('b', 'u', 'k', 'v');
+            }
+          }
+        `,
+      },
+      {
+        file: 'modules/synthetic/bound-dormant.service.ts',
+        text: `
+          import { UnifiedMemoryWriterService } from '../key-cortex/unified-memory-writer.service';
+          export class BoundDormantService {
+            constructor(private readonly writer: UnifiedMemoryWriterService) {}
+            async run() {
+              const fn = this.writer.storePreference.bind(this.writer);
+              return fn('b', 'u', 'k', 'v');
+            }
+          }
+        `,
+      },
+      {
+        file: 'modules/synthetic/aliased-dormant.service.ts',
+        text: `
+          import { UnifiedMemoryWriterService as MemWriter } from '../key-cortex/unified-memory-writer.service';
+          export class AliasedDormantService {
+            constructor(private readonly w: MemWriter) {}
+            async run() {
+              return this.w.storePreference('b', 'u', 'k', 'v');
+            }
+          }
+        `,
+      },
+      {
+        file: 'modules/synthetic/namespace-dormant.service.ts',
+        text: `
+          import * as writerMod from '../key-cortex/unified-memory-writer.service';
+          export class NamespaceDormantService {
+            constructor(private readonly w: writerMod.UnifiedMemoryWriterService) {}
+            async run() {
+              return this.w['storePreference']('b', 'u', 'k', 'v');
+            }
+          }
+        `,
+      },
+    ];
+    const sneakyHits = scanDormantCallers(writerDormant, sneakyDormantFixtures);
+    expect(sneakyHits.map((h) => h.callerSymbol).sort()).toEqual([
+      'AliasedDormantService.run',
+      'BoundDormantService.run',
+      'DestructuredDormantService.run',
+      'NamespaceDormantService.run',
+    ]);
+
+    // 8. [R1-SEC-04] AST scanner catches destructured delegate, aliased delegate, bracket-indexed op, and module-level raw SQL constant
+    const evasionFixture: VirtualSource[] = [
+      {
+        file: 'modules/synthetic/scanner-evasions.service.ts',
+        text: `
+          const EMBED_SQL = 'SELECT id FROM ai_memory_embeddings WHERE business_id = $1';
+          export class ScannerEvasionsService {
+            constructor(private readonly prisma: any) {}
+            async destructuredDelegate(businessId: string) {
+              const { aiMemory } = this.prisma.client;
+              return aiMemory.findMany({ where: { businessId } });
+            }
+            async aliasedDelegate(businessId: string) {
+              const repo = this.prisma.client.temporalFlowMemory;
+              return repo.findMany({ where: { businessId } });
+            }
+            async bracketIndexedOp(businessId: string) {
+              return this.prisma.client.aiMemory['findFirst']({ where: { businessId } });
+            }
+            async moduleConstRawSql(businessId: string) {
+              return (this.prisma.client as any)['$queryRawUnsafe'](EMBED_SQL, businessId);
+            }
+          }
+        `,
+      },
+    ];
+    const evasionSites = scanMemoryAccesses(evasionFixture);
+    expect(evasionSites.map((s) => `${s.symbol}:${s.model}:${s.op}:${s.via}:${s.hasTenantPredicate}`)).toEqual([
+      'ScannerEvasionsService.destructuredDelegate:AiMemory:findMany:prisma:true',
+      'ScannerEvasionsService.aliasedDelegate:TemporalFlowMemory:findMany:prisma:true',
+      'ScannerEvasionsService.bracketIndexedOp:AiMemory:findFirst:prisma:true',
+      'ScannerEvasionsService.moduleConstRawSql:AiMemoryEmbedding:$queryRawUnsafe:raw-sql:true',
+    ]);
   });
 
   it('MEM-CEN-02: every Prisma call and raw SQL access to the 10 memory models across apps/server/src is registered (0 unregistered, 0 duplicates)', () => {
