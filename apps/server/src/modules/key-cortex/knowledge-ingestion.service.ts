@@ -1,5 +1,13 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+export const MAX_PG_INT32 = 2_147_483_647;
 
 export interface IngestTextInput {
   businessId: string;
@@ -83,11 +91,32 @@ export class KnowledgeIngestionService {
       throw new NotFoundException('Knowledge source not found');
     }
 
-    if (existing.status !== 'approved') {
-      await this.prisma.client.knowledgeSource.update({
-        where: { id: existing.id },
-        data: { status: 'approved' },
+    if (existing.status === 'approved') {
+      return { sourceId: existing.id, status: 'approved' as const };
+    }
+
+    if (existing.status !== 'quarantined') {
+      throw new ConflictException(
+        `Knowledge source in status "${existing.status}" cannot be approved; only quarantined sources may be approved`,
+      );
+    }
+
+    const updated = await this.prisma.client.knowledgeSource.updateMany({
+      where: { id: existing.id, businessId, status: 'quarantined' },
+      data: { status: 'approved' },
+    });
+
+    if (updated.count === 0) {
+      const current = await this.prisma.client.knowledgeSource.findFirst({
+        where: { id: existing.id, businessId },
+        select: { id: true, status: true },
       });
+      if (current?.status === 'approved') {
+        return { sourceId: current.id, status: 'approved' as const };
+      }
+      throw new ConflictException(
+        'Knowledge source status changed concurrently and cannot be approved',
+      );
     }
 
     return { sourceId: existing.id, status: 'approved' as const };
@@ -98,8 +127,14 @@ export class KnowledgeIngestionService {
     status?: string,
     options: { limit?: number; offset?: number } = {},
   ): Promise<KnowledgeSourceMetadata[]> {
-    const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100);
-    const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
+    const rawLimit = Number.isFinite(options.limit)
+      ? Math.trunc(options.limit!)
+      : 50;
+    const rawOffset = Number.isFinite(options.offset)
+      ? Math.trunc(options.offset!)
+      : 0;
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
+    const offset = Math.min(Math.max(rawOffset, 0), MAX_PG_INT32);
     return this.prisma.client.knowledgeSource.findMany({
       where: { businessId, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },

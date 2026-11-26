@@ -13,10 +13,11 @@ import { z } from 'zod';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
-import { KnowledgeIngestionService } from './knowledge-ingestion.service';
+import { KnowledgeIngestionService, MAX_PG_INT32 } from './knowledge-ingestion.service';
 
 export const MAX_SYNC_TEXT_BYTES = 64 * 1024;
 export const MAX_URL_LENGTH = 4_096;
+export const MAX_OFFSET = MAX_PG_INT32;
 
 const ALLOWED_STATUSES = new Set([
   'pending',
@@ -26,17 +27,31 @@ const ALLOWED_STATUSES = new Set([
   'failed',
 ]);
 
+function hasControlOrWhitespace(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f || /\s/.test(value[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export const httpUrlSchema = z
   .string()
   .max(MAX_URL_LENGTH)
   .refine((value) => {
+    if (hasControlOrWhitespace(value)) return false;
     try {
       const parsed = new URL(value);
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      return (
+        (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+        parsed.hostname.length > 0
+      );
     } catch {
       return false;
     }
-  }, 'URL must be a valid http or https URL');
+  }, 'URL must be a valid http or https URL without control characters or whitespace');
 
 export const textInputSchema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -69,7 +84,8 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   return result.data;
 }
 
-function parseStrictInt(raw: string): number {
+function parseStrictInt(raw: unknown): number {
+  if (typeof raw !== 'string') return Number.NaN;
   const trimmed = raw.trim();
   if (!/^-?\d+$/.test(trimmed)) return Number.NaN;
   return Number(trimmed);
@@ -146,32 +162,37 @@ export class KnowledgeIngestionController {
   @RequireModuleScope('ai', 'read')
   list(
     @Param('businessId') businessId: string,
-    @Query('status') status?: string,
-    @Query('limit') limitRaw?: string,
-    @Query('offset') offsetRaw?: string,
+    @Query('status') status?: string | string[],
+    @Query('limit') limitRaw?: string | string[],
+    @Query('offset') offsetRaw?: string | string[],
   ) {
-    if (status !== undefined && !ALLOWED_STATUSES.has(status)) {
-      throw new BadRequestException({
-        code: 'KNOWLEDGE_SOURCE_STATUS_INVALID',
-        message: 'status must be one of pending, quarantined, approved, processed, or failed',
-      });
+    let validStatus: string | undefined;
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !ALLOWED_STATUSES.has(status)) {
+        throw new BadRequestException({
+          code: 'KNOWLEDGE_SOURCE_STATUS_INVALID',
+          message: 'status must be one of pending, quarantined, approved, processed, or failed',
+        });
+      }
+      validStatus = status;
     }
 
     const limit = limitRaw === undefined ? 50 : parseStrictInt(limitRaw);
     const offset = offsetRaw === undefined ? 0 : parseStrictInt(offsetRaw);
     if (
-      !Number.isInteger(limit) ||
+      !Number.isSafeInteger(limit) ||
       limit < 1 ||
       limit > 100 ||
-      !Number.isInteger(offset) ||
-      offset < 0
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset > MAX_OFFSET
     ) {
       throw new BadRequestException({
         code: 'KNOWLEDGE_SOURCE_PAGE_INVALID',
-        message: 'limit must be an integer from 1 to 100 and offset must be a non-negative integer',
+        message: `limit must be an integer from 1 to 100 and offset must be an integer from 0 to ${MAX_OFFSET}`,
       });
     }
 
-    return this.knowledge.listSources(businessId, status, { limit, offset });
+    return this.knowledge.listSources(businessId, validStatus, { limit, offset });
   }
 }
