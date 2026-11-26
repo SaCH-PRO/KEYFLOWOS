@@ -606,11 +606,14 @@ describe("TODAY-4BLOCK repair round 2 (confirmation reviews at 14934c7c)", () =>
  */
 const BIZ_Y = "biz_t4b_y";
 type Route = "today" | "items" | "due" | "action";
-function serveTwo(answers: Record<string, Partial<Record<Route, Answer>>>, hold: Array<[string, Route]> = []) {
+function serveTwo(answers: Record<string, Partial<Record<Route, Answer | Answer[]>>>, hold: Array<[string, Route] | [string, Route, number]> = []) {
   const held = new Map<string, Array<() => void>>();
   const sent: Sent[] = [];
   const answeredRoutes: string[] = [];
-  const isHeld = (biz: string, route: Route) => hold.some(([b, r]) => b === biz && r === route);
+  const calls = new Map<string, number>();
+  // [biz, route] holds every call of that route; [biz, route, n] holds only its n-th call (0-based).
+  const isHeld = (biz: string, route: Route, n: number) =>
+    hold.some((h) => h[0] === biz && h[1] === route && (h.length === 2 || h[2] === n));
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(url, "http://localhost");
@@ -624,14 +627,18 @@ function serveTwo(answers: Record<string, Partial<Record<Route, Answer>>>, hold:
       else if (method === "GET" && pathname.endsWith(`/command/businesses/${biz}/items/due`)) route = "due";
       else if (method === "POST" && pathname.startsWith(`/command/businesses/${biz}/items/`)) route = "action";
       if (!route) continue;
-      const answer = answers[biz]?.[route] ?? { status: 500, body: { message: "Internal server error" } };
-      if (isHeld(biz, route)) {
+      const key = `${biz}:${route}`;
+      const n = calls.get(key) ?? 0;
+      calls.set(key, n + 1);
+      const listed = answers[biz]?.[route];
+      const seq = Array.isArray(listed) ? listed : listed ? [listed] : [];
+      const answer = seq.length ? seq[Math.min(n, seq.length - 1)] : { status: 500, body: { message: "Internal server error" } };
+      if (isHeld(biz, route, n)) {
         await new Promise<void>((resolve) => {
-          const key = `${biz}:${route}`;
           held.set(key, [...(held.get(key) ?? []), resolve]);
         });
       }
-      answeredRoutes.push(`${biz}:${route}`);
+      answeredRoutes.push(key);
       return jsonResponse(answer.status, answer.body);
     }
     return jsonResponse(500, { message: "Internal server error" });
@@ -640,11 +647,15 @@ function serveTwo(answers: Record<string, Partial<Record<Route, Answer>>>, hold:
     sent,
     /** The server has answered this route for this business (the page then takes a tick to render it). */
     answered: (biz: string, route: Route) => answeredRoutes.includes(`${biz}:${route}`),
+    /** How many times this route was answered for this business. */
+    answeredCount: (biz: string, route: Route) => answeredRoutes.filter((k) => k === `${biz}:${route}`).length,
+    /** How many times this route was requested for this business. */
+    calls: (biz: string, route: Route) => calls.get(`${biz}:${route}`) ?? 0,
     release: (biz: string, route: Route) => {
       const key = `${biz}:${route}`;
       for (const resolve of held.get(key) ?? []) resolve();
       held.delete(key);
-      hold = hold.filter(([b, r]) => !(b === biz && r === route));
+      hold = hold.filter((h) => !(h[0] === biz && h[1] === route));
     },
     releaseAll: () => {
       for (const list of held.values()) for (const resolve of list) resolve();
@@ -804,5 +815,180 @@ describe("TODAY-4BLOCK repair round 3 (confirmation reviews at a173d9bc): nothin
     await screen.findByTestId("today-unavailable", {}, { timeout: 10_000 });
     expect(screen.queryByRole("heading", { name: /^pulse$/i })).toBeNull();
     expect(screen.queryByText(/INV-0042/)).toBeNull();
+  }, CASE_MS);
+});
+
+describe("TODAY-4BLOCK repair round 4 (confirmation reviews at 3b4bb17b): an action in flight across a switch, and the guards pinned", () => {
+  const Y_ITEM = { ...RESTOCK_X, id: "ci_t4b_y_restock", title: "Reorder low stock for Y" };
+  const doneIn = (title: string) => {
+    let node: HTMLElement | null = screen.getByText(title);
+    while (node && !within(node).queryByRole("button", { name: "Done" })) node = node.parentElement;
+    if (!node) throw new Error(`no Done for ${title}`);
+    return within(node).getByRole("button", { name: "Done" }) as HTMLButtonElement;
+  };
+  const readRefusal: Answer = { status: 403, body: { statusCode: 403, message: "Insufficient permissions: operations requires write access (you have read)", error: "Forbidden" } };
+
+  it("[T4B-29] RED-BEFORE (MAJOR, P1): X's Done still in flight across a switch leaves Y alone: Y's item, 'Command Queue (1)' and Y's learned 'read' level all stay", async () => {
+    const api = serveTwo(
+      {
+        [BIZ]: { today: ok(busyToday()), items: listedItems([RESTOCK_X]), due: dueList([]), action: ok({}) },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([Y_ITEM]), due: dueList([]), action: readRefusal },
+      },
+      [[BIZ, "action"]],
+    );
+    try {
+      await mountPage();
+      await screen.findByText(RESTOCK_X.title, {}, { timeout: 10_000 });
+      fireEvent.click(doneIn(RESTOCK_X.title));
+      await waitFor(() => expect(api.calls(BIZ, "action")).toBe(1));
+      selectBusiness(BIZ_Y);
+      await screen.findByText(Y_ITEM.title, {}, { timeout: 10_000 });
+      fireEvent.click(doneIn(Y_ITEM.title));
+      await screen.findByTestId("command-actions-withheld", {}, { timeout: 10_000 });
+      api.release(BIZ, "action");
+      await new Promise((r) => setTimeout(r, 400));
+      expect(screen.getByText(Y_ITEM.title)).toBeTruthy();
+      expect(screen.getByText("Command Queue (1)")).toBeTruthy();
+      expect(screen.queryByText(RESTOCK_X.title)).toBeNull();
+      expect(screen.getByTestId("command-actions-withheld").textContent).toMatch(/write access/i);
+      expect(api.calls(BIZ, "items")).toBe(1);
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-30] RED-BEFORE (MAJOR, P2): X's obligation Done still in flight across a switch leaves Y's due panel alone: Y's rows show, never a stuck 'Checking what is due'", async () => {
+    const api = serveTwo(
+      {
+        [BIZ]: { today: ok(busyToday()), items: listedItems([]), due: dueList([OBLIGATION_X]), action: ok({}) },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([]), due: dueList([OBLIGATION_Y]) },
+      },
+      [[BIZ, "action"]],
+    );
+    try {
+      await mountPage();
+      await screen.findByText(OBLIGATION_X.title, {}, { timeout: 10_000 });
+      fireEvent.click(doneIn(OBLIGATION_X.title));
+      await waitFor(() => expect(api.calls(BIZ, "action")).toBe(1));
+      selectBusiness(BIZ_Y);
+      await screen.findByText(OBLIGATION_Y.title, {}, { timeout: 10_000 });
+      api.release(BIZ, "action");
+      await new Promise((r) => setTimeout(r, 400));
+      expect(screen.getByText(OBLIGATION_Y.title)).toBeTruthy();
+      expect(screen.queryByText(/checking what is due/i)).toBeNull();
+      expect(screen.queryByText(OBLIGATION_X.title)).toBeNull();
+      expect(api.calls(BIZ, "due")).toBe(1);
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-31] (MINOR 2) pins the queue's stale-reply drop: X's held queue reply landing after Y's listed answer does not overwrite Y's queue", async () => {
+    // lib/api.ts coalesces identical GETs in flight, so a stale reply for one business cannot follow a newer read of
+    // the same URL: the stale reply that can land is the old business's. Without the drop it replaces Y's stored queue.
+    const api = serveTwo(
+      {
+        [BIZ]: { today: ok(busyToday()), items: listedItems([RESTOCK_X]), due: dueList([]) },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([Y_ITEM]), due: dueList([]) },
+      },
+      [[BIZ, "items"]],
+    );
+    try {
+      await mountPage();
+      await waitFor(() => expect(api.wasRequested(BIZ, "items")).toBe(true), { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await screen.findByText(Y_ITEM.title, {}, { timeout: 10_000 });
+      api.release(BIZ, "items");
+      await waitFor(() => expect(api.answered(BIZ, "items")).toBe(true));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.getByText(Y_ITEM.title)).toBeTruthy();
+      expect(screen.getByText("Command Queue (1)")).toBeTruthy();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-32] (MINOR 2) pins the queue's business filters: while Y's queue is in flight, neither X's 'Command Queue (1)' nor X's learned 'read' level shows under Y", async () => {
+    const api = serveTwo(
+      {
+        [BIZ]: { today: ok(busyToday()), items: listedItems([RESTOCK_X]), due: dueList([]), action: readRefusal },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([Y_ITEM]), due: dueList([]) },
+      },
+      [[BIZ_Y, "items"]],
+    );
+    try {
+      await mountPage();
+      await screen.findByText(RESTOCK_X.title, {}, { timeout: 10_000 });
+      fireEvent.click(doneIn(RESTOCK_X.title));
+      await screen.findByTestId("command-actions-withheld", {}, { timeout: 10_000 });
+      expect(screen.getByText("Command Queue (1)")).toBeTruthy();
+      selectBusiness(BIZ_Y);
+      await waitFor(() => expect(api.wasRequested(BIZ_Y, "items")).toBe(true), { timeout: 5_000 });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(screen.queryByText("Command Queue (1)")).toBeNull();
+      expect(screen.queryByTestId("command-actions-withheld")).toBeNull();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-33] (MINOR 2) pins the due panel's business filter: while Y's due read is in flight, no X obligation (or its Done) shows under Y", async () => {
+    const api = serveTwo(
+      {
+        [BIZ]: { today: ok(busyToday()), items: listedItems([]), due: dueList([OBLIGATION_X]) },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([]), due: dueList([OBLIGATION_Y]) },
+      },
+      [[BIZ_Y, "due"]],
+    );
+    try {
+      await mountPage();
+      await screen.findByText(OBLIGATION_X.title, {}, { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await waitFor(() => expect(api.wasRequested(BIZ_Y, "due")).toBe(true), { timeout: 5_000 });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(screen.queryByText(OBLIGATION_X.title)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-34] RED-BEFORE (MINOR 3): a queue read that fails (5xx) says so with Retry, never 'Command Queue (0)' or a clear queue; Retry reads it again", async () => {
+    const api = serveTwo({
+      [BIZ]: { today: ok(busyToday()), due: dueList([]), items: [{ status: 500, body: { statusCode: 500, message: "Internal server error" } }, listedItems([RESTOCK_X])] },
+    });
+    try {
+      await mountPage();
+      const box = await screen.findByTestId("command-queue-unavailable", {}, { timeout: 10_000 });
+      expect(box.textContent).toMatch(/could not be loaded/i);
+      expect(screen.queryByText("Command Queue (0)")).toBeNull();
+      expect(screen.queryByText("Your queue is clear. Great work!")).toBeNull();
+      fireEvent.click(within(box).getByRole("button", { name: /retry/i }));
+      await screen.findByText(RESTOCK_X.title, {}, { timeout: 10_000 });
+      expect(screen.getByText("Command Queue (1)")).toBeTruthy();
+      expect(api.calls(BIZ, "items")).toBe(2);
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-35] RED-BEFORE (MINOR 4): the due panel's Try again shows it is working while the retry runs", async () => {
+    const api = serveTwo(
+      { [BIZ]: { today: ok(busyToday()), items: listedItems([]), due: [{ status: 500, body: { statusCode: 500, message: "Internal server error" } }, dueList([OBLIGATION_X])] } },
+      [[BIZ, "due", 1]],
+    );
+    try {
+      await mountPage();
+      const retry = await screen.findByRole("button", { name: /try again/i }, { timeout: 10_000 });
+      fireEvent.click(retry);
+      await waitFor(() => expect(api.calls(BIZ, "due")).toBe(2));
+      const busy = screen.getByRole("button", { name: /trying again/i }) as HTMLButtonElement;
+      expect(busy.disabled).toBe(true);
+      expect(busy.getAttribute("aria-busy")).toBe("true");
+      api.release(BIZ, "due");
+      await screen.findByText(OBLIGATION_X.title, {}, { timeout: 10_000 });
+    } finally {
+      api.releaseAll();
+    }
   }, CASE_MS);
 });
