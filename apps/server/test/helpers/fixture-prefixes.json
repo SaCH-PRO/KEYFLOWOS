@@ -1595,6 +1595,11 @@
       "prefix": "v91d_",
       "owner": "apps/server/test/slots-hours-reader.integration.test.ts",
       "packet": "V1-91 (FU-SLOTS-HOURS-READER, P227)"
+    },
+    {
+      "prefix": "v91a_",
+      "owner": "apps/server/test/admin-api-signin-kind.integration.test.ts",
+      "packet": "V1-91 (RR-ADMIN-API-SIGNIN-KIND)"
     }
   ],
   "pendingRenames": [],
