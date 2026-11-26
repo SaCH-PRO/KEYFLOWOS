@@ -102,7 +102,6 @@ function paymentMethodsFor(currency: string, gateways: StorefrontGateways | null
   return paymentMethods.filter((pm) => (pm.id !== "wipay" || takesWipay) && (pm.id !== "paypal" || takesPaypal));
 }
 
-/** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
 /** SWP-BOOKING-SLOTS: what a schedule row asks the public slots route: the service, date and staff member chosen. */
 type SlotRequest = { serviceId: string; date: string; staffId: string };
 const slotRequestKey = (r: SlotRequest) => JSON.stringify([r.serviceId, r.date, r.staffId]);
@@ -124,12 +123,17 @@ function useSlotAnswers(businessId: string, timeZone: string | null | undefined,
       const [serviceId, date, staffId] = JSON.parse(key) as [string, string, string];
       void fetchAvailableSlotTimes({ businessId, serviceId, date, staffId: staffId || undefined, timeZone })
         .catch(() => null)
-        .then((slots) => setAnswers((prev) => ({ ...prev, [id]: slots })));
+        .then((slots) => {
+          // A failed read is asked again the next time a row asks for it.
+          if (slots === null) asked.current.delete(id);
+          setAnswers((prev) => ({ ...prev, [id]: slots }));
+        });
     }
   }, [businessId, timeZone, signature]);
   return (r: SlotRequest): SlotTime[] | null | undefined => answers[`${businessId}|${timeZone ?? ""}|${slotRequestKey(r)}`];
 }
 
+/** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
 type StorefrontGateways = { wipay: boolean; paypal: boolean };
 
 /**
