@@ -274,6 +274,20 @@ export function fillToolResultSlots(slots: Array<FlowToolResult | null>, execute
   return [...results, ...queue];
 }
 
+function formatToolCallError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err === null || err === undefined) return 'unknown error';
+  if (typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  try {
+    return String(err);
+  } catch {
+    return 'unknown error';
+  }
+}
+
 /**
  * RR-TOOL-WRITES-SEQUENTIAL (P127 / V1-72; D-261, D-262, D-17, D-73):
  * Run a turn's governance-cleared tool calls in model order. Consecutive READ
@@ -309,7 +323,7 @@ export async function runToolCallsWithReadParallelism<
         family: tool?.family ?? 'crud',
         riskTier: tool?.riskTier ?? 1,
         success: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: formatToolCallError(err),
       };
     }
   };
