@@ -105,6 +105,9 @@ describe("C-1: a receipt name with a literal % is still a link", () => {
   it.each([
     "https://elsewhere.test/%E0%A4%A/objects/x",
     "https://elsewhere.test/%25E0%A4%A.png",
+    // Decodes once, then fails with escapes still left (one hides %6Fbjects): never a link.
+    "https://elsewhere.test/%25E0%25A4%25A/%256Fbjects/x",
+    "https://elsewhere.test/%25E0%25A4%25A.png",
   ])("the undecodable pin %s still holds", (url) => {
     expect(receiptKind(url, "biz_A")).not.toBe("link");
   });
