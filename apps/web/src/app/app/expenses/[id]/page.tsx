@@ -42,8 +42,16 @@ import { BillPayDialog } from "../components/bill-pay-dialog";
  * words meant for a developer ("call POST /finance/.../void"). Said to the owner: why, and the way out, Void.
  */
 const POSTED_DELETE_REFUSAL = /cannot delete a posted expense/i;
-const POSTED_DELETE_WORDS =
-  "This expense is posted to your books, so it can't be deleted. Void it instead: that reverses its entries and keeps it on record as voided.";
+/** The way out fits the row (review COR M1): a paid expense is voided, a bill is rejected, a void row is done. */
+function postedDeleteWords(status: string | undefined): string {
+  if (status === "BILL") {
+    return "This bill is posted to your books, so it can't be deleted. Reject it instead: that voids it and reverses its entries.";
+  }
+  if (status === "VOID") {
+    return "This expense is already voided: its entries are reversed and it stays on record, so it can't be deleted.";
+  }
+  return "This expense is posted to your books, so it can't be deleted. Void it instead: that reverses its entries and keeps it on record as voided.";
+}
 
 function _getMerchantColor(vendor?: string): string {
   if (!vendor) return "#94a3b8";
@@ -138,7 +146,7 @@ export default function ExpenseDetailPage() {
       const res = await deleteExpense(businessId, expense.id);
       const refusal = refusalMessage(res, { what: "delete this expense" });
       if (refusal !== null) {
-        toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? POSTED_DELETE_WORDS : refusal);
+        toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? postedDeleteWords(expense.status) : refusal);
       } else {
         toast.success("Expense deleted");
         router.push("/app/expenses");

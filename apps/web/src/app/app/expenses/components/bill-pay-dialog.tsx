@@ -7,8 +7,10 @@
  *
  * The accounts offered are the ones the server accepts (expenses.service resolveBillPaymentCoa): active, of type
  * CASH, BANK, PAYMENT_PROCESSOR or CREDIT_CARD, in the bill's currency (D-13, nothing converted). GET accounts needs
- * revenue read (D-146): when it is refused, or no account fits, Pay says so and sends the method only, which the
- * server pays from that method's default account.
+ * revenue read (D-146): when that read is refused (a scope refusal: this member cannot list accounts), or no account
+ * fits, Pay says so and sends the method only, which the server pays from that method's default account. A read that
+ * FAILED (a 5xx, a BusinessGuard 403, the network) is not an answer: Pay says so, offers Retry and cannot be pressed,
+ * so a bill is never paid from a default account because a list did not load (review SEC MINOR-2, D-168).
  */
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -40,7 +42,8 @@ function defaultMethod(bill: Expense): string {
 type Accounts =
   | { kind: "loading" }
   | { kind: "ok"; items: FinancialAccountRow[] }
-  | { kind: "unavailable"; message: string };
+  | { kind: "no-access"; message: string }
+  | { kind: "failed"; message: string };
 
 export function BillPayDialog({
   businessId,
@@ -60,6 +63,9 @@ export function BillPayDialog({
   const inFlight = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  // Bumped by Retry: reads the accounts again.
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -67,7 +73,7 @@ export function BillPayDialog({
       if (!live) return;
       const state = readState(res, { what: "the payment accounts" });
       if (state.kind !== "ok") {
-        setAccounts({ kind: "unavailable", message: state.message });
+        setAccounts({ kind: state.kind, message: state.message });
         return;
       }
       const items = billPaymentAccounts(res?.data?.items ?? [], bill.currency);
@@ -77,10 +83,18 @@ export function BillPayDialog({
     return () => {
       live = false;
     };
-  }, [businessId, bill.currency]);
+  }, [businessId, bill.currency, attempt]);
+
+  const retry = () => {
+    setAccounts({ kind: "loading" });
+    setAttempt((n) => n + 1);
+  };
+
+  // Pay can be pressed once the owner has been asked: the accounts listed, or their read refused (method only).
+  const canPay = accounts.kind === "ok" || accounts.kind === "no-access";
 
   const pay = async () => {
-    if (inFlight.current || accounts.kind === "loading") return;
+    if (inFlight.current || !canPay) return;
     inFlight.current = true;
     setBusy(true);
     setMessage(null);
@@ -105,7 +119,7 @@ export function BillPayDialog({
   };
 
   const noAccountNote =
-    accounts.kind === "unavailable"
+    accounts.kind === "no-access"
       ? `${accounts.message} Pay sends the method only: the bill is paid from that method's default account.`
       : accounts.kind === "ok" && accounts.items.length === 0
         ? `No payment account in ${norm(bill.currency)}. Pay sends the method only: the bill is paid from that method's default account.`
@@ -145,10 +159,18 @@ export function BillPayDialog({
             </div>
           ) : null}
           {noAccountNote && <p className="text-xs text-amber-700">{noAccountNote}</p>}
+          {accounts.kind === "failed" && (
+            <div role="alert" className="flex items-start justify-between gap-3 text-sm text-rose-600">
+              <span>{accounts.message} Pay waits for them, so the bill is not paid from an account you did not choose.</span>
+              <Button variant="subtle" onClick={retry}>
+                Retry
+              </Button>
+            </div>
+          )}
 
           {/* Asked together with the account, once the accounts have answered: a method alone while they load is
               a question the owner answers without the account (live journey H5 paid from Cash that way). */}
-          {accounts.kind !== "loading" && (
+          {canPay && (
             <div>
               <label htmlFor="bill-pay-method" className="text-xs font-medium text-muted-foreground mb-1 block">Payment method</label>
               <select
@@ -178,7 +200,7 @@ export function BillPayDialog({
           <Button variant="subtle" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={pay} disabled={busy || accounts.kind === "loading"} aria-busy={busy || undefined}>
+          <Button onClick={pay} disabled={busy || !canPay} aria-busy={busy || undefined}>
             {busy && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
             Pay
           </Button>
