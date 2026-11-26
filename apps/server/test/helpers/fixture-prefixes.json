@@ -1575,6 +1575,11 @@
       "prefix": "v70e_",
       "owner": "apps/server/test/settle-no-stock.integration.test.ts",
       "packet": "V1-70 (W1F-SETTLE-NO-STOCK)"
+    },
+    {
+      "prefix": "v88p_",
+      "owner": "apps/server/test/proposal-money-tag.integration.test.ts",
+      "packet": "V1-88 (FU-PROPOSAL-MONEY-TAG)"
     }
   ],
   "pendingRenames": [],
