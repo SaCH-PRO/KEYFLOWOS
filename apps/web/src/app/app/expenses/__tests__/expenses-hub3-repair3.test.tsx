@@ -158,6 +158,8 @@ describe("S-M1 / S-m1 / S-m2: receiptKind", () => {
     ["http://api.test/objects/uploads/biz_A1/obj1", "unavailable"],
     ["/objects/uploads/biz_A1/obj1", "unavailable"],
     ["http://evil.test/objects/uploads/biz_A/obj1", "unavailable"],
+    ["http://evil.test/OBJECTS/uploads/biz_A/obj1", "unavailable"],
+    ["https://evil.test/Objects/uploads/biz_OTHER/x.png", "unavailable"],
     ["//evil.test/objects/uploads/biz_A/obj1", "unavailable"],
     ["http://api.test/objects/uploads/biz_A/obj%2e", "unavailable"],
     ["http://api.test/objects/uploads/biz_A/a\\b", "unavailable"],
