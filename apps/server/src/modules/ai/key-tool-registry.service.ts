@@ -13,6 +13,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { readInvoiceMoney } from '../commerce/commerce-stats.service';
 import { balanceOfStoredRows, creditAwareBalance } from '../commerce/invoice-workflow.service';
 import { fromCents, sumMoney, toCents } from '../commerce/money';
+import { normalizeCurrency } from '../finance/posting.service';
 
 export interface ToolResult<T = unknown> {
   success: boolean;
@@ -129,6 +130,10 @@ export const SENT_OVERDUE_INVOICE_STATUSES: ReadonlySet<string> = new Set([
   'PARTIALLY_CREDITED',
 ]);
 
+const MAX_OVERDUE_LIMIT = 100;
+const REMINDER_TONES = ['friendly', 'firm', 'urgent'] as const;
+type ReminderTone = (typeof REMINDER_TONES)[number];
+
 const financeListOverdueInvoices: KeyToolDefinition<
   { limit?: number },
   {
@@ -143,6 +148,8 @@ const financeListOverdueInvoices: KeyToolDefinition<
       daysOverdue: number;
     }>;
     total: number;
+    currency: string;
+    totalsByCurrency: Record<string, number>;
   }
 > = {
   name: 'listOverdueInvoices',
@@ -151,15 +158,34 @@ const financeListOverdueInvoices: KeyToolDefinition<
   riskTier: 1,
   requiresApproval: false,
   validateInput: (input) => {
-    const limit = num(input, 'limit', 10) ?? 10;
-    return { valid: true, parsed: { limit } };
+    const raw = input.limit;
+    if (raw === undefined || raw === null || raw === '') {
+      return { valid: true, parsed: { limit: 10 } };
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      return { valid: false, error: 'limit must be a positive finite number' };
+    }
+    return { valid: true, parsed: { limit: Math.min(Math.floor(n), MAX_OVERDUE_LIMIT) } };
   },
   execute: async (ctx, input, deps) => {
+    if (typeof ctx.businessId !== 'string' || ctx.businessId.length === 0) {
+      return { success: true, data: { invoices: [], total: 0, currency: 'TTD', totalsByCurrency: {} } };
+    }
+
     // D-260: read open receivables directly and restrict to sent open statuses
     // (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) without altering
     // ReceivablesService.getAging totals (which keep PENDING under D-256).
     const now = new Date();
-    const openInvoices = await readInvoiceMoney(deps.prisma.client, ctx.businessId, now, { openOnly: true });
+    const [biz, openInvoices] = await Promise.all([
+      deps.prisma.client.business.findUnique({
+        where: { id: ctx.businessId },
+        select: { currency: true },
+      }),
+      readInvoiceMoney(deps.prisma.client, ctx.businessId, now, { openOnly: true }),
+    ]);
+    const homeCurrency = normalizeCurrency(biz?.currency) || 'TTD';
+
     const overdueSent = openInvoices
       .filter((inv) => SENT_OVERDUE_INVOICE_STATUSES.has(inv.status) && inv.overdue && inv.remaining > 0)
       .map((inv) => {
@@ -174,14 +200,31 @@ const financeListOverdueInvoices: KeyToolDefinition<
     );
     const contacts = contactIds.length
       ? await deps.prisma.client.contact.findMany({
-          where: { businessId: ctx.businessId, id: { in: contactIds } },
+          where: { businessId: ctx.businessId, deletedAt: null, id: { in: contactIds } },
           select: { id: true, firstName: true, lastName: true, email: true },
         })
       : [];
     const contactOf = new Map(contacts.map((c) => [c.id, c]));
 
-    const limit = Math.max(0, Math.floor(input.limit ?? 10));
-    const total = sumMoney(overdueSent.map(({ inv }) => inv.remaining));
+    // D-13 / D-251: never add different currencies together; keep top-level total in homeCurrency
+    // and expose every currency separately in totalsByCurrency.
+    const amountsByCurrency = new Map<string, number[]>();
+    for (const { inv } of overdueSent) {
+      const cur = normalizeCurrency(inv.currency) || homeCurrency;
+      const bucket = amountsByCurrency.get(cur);
+      if (bucket) bucket.push(inv.remaining);
+      else amountsByCurrency.set(cur, [inv.remaining]);
+    }
+    const totalsByCurrency: Record<string, number> = {};
+    for (const [cur, amounts] of amountsByCurrency.entries()) {
+      totalsByCurrency[cur] = sumMoney(amounts);
+    }
+
+    const limit = Math.min(
+      Math.max(1, Math.floor(Number.isFinite(input.limit) ? (input.limit as number) : 10)),
+      MAX_OVERDUE_LIMIT,
+    );
+    const total = totalsByCurrency[homeCurrency] ?? 0;
     const invoices = overdueSent
       .sort((a, b) => b.daysOverdue - a.daysOverdue)
       .slice(0, limit)
@@ -195,13 +238,13 @@ const financeListOverdueInvoices: KeyToolDefinition<
           invoiceNumber: inv.invoiceNumber ?? undefined,
           status: inv.status,
           total: inv.remaining,
-          currency: inv.currency || 'TTD',
+          currency: normalizeCurrency(inv.currency) || homeCurrency,
           dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString() : '',
           contactName,
           daysOverdue,
         };
       });
-    return { success: true, data: { invoices, total } };
+    return { success: true, data: { invoices, total, currency: homeCurrency, totalsByCurrency } };
   },
 };
 
@@ -241,7 +284,7 @@ const financeCashflowForecast: KeyToolDefinition<
 };
 
 const financeCreateInvoiceReminderDraft: KeyToolDefinition<
-  { invoiceId: string; tone: 'friendly' | 'firm' | 'urgent' },
+  { invoiceId: string; tone: ReminderTone },
   { draft: string; invoiceId: string }
 > = {
   name: 'createInvoiceReminderDraft',
@@ -252,10 +295,21 @@ const financeCreateInvoiceReminderDraft: KeyToolDefinition<
   validateInput: (input) => {
     const invoiceId = str(input, 'invoiceId');
     if (!invoiceId) return { valid: false, error: 'invoiceId is required' };
-    const tone = (str(input, 'tone', 'friendly') || 'friendly') as 'friendly' | 'firm' | 'urgent';
-    return { valid: true, parsed: { invoiceId, tone } };
+    const rawTone = input.tone;
+    if (rawTone === undefined || rawTone === null || rawTone === '') {
+      return { valid: true, parsed: { invoiceId, tone: 'friendly' as ReminderTone } };
+    }
+    const tone = String(rawTone);
+    if (!(REMINDER_TONES as readonly string[]).includes(tone)) {
+      return { valid: false, error: 'tone must be one of: friendly, firm, urgent' };
+    }
+    return { valid: true, parsed: { invoiceId, tone: tone as ReminderTone } };
   },
   execute: async (ctx, input, deps) => {
+    if (typeof ctx.businessId !== 'string' || ctx.businessId.length === 0) {
+      return { success: false, error: 'Invoice not found' };
+    }
+
     const invoice = await deps.prisma.client.invoice.findFirst({
       where: {
         id: input.invoiceId,
@@ -263,7 +317,7 @@ const financeCreateInvoiceReminderDraft: KeyToolDefinition<
         deletedAt: null,
       },
       include: {
-        contact: { select: { firstName: true, lastName: true, email: true } },
+        contact: { select: { firstName: true, lastName: true, email: true, businessId: true, deletedAt: true } },
         payments: { where: { businessId: ctx.businessId }, select: { amount: true, status: true } },
       },
     });
@@ -309,18 +363,26 @@ const financeCreateInvoiceReminderDraft: KeyToolDefinition<
       };
     }
 
-    const name = invoice.contact?.firstName || 'there';
-    const currency = invoice.currency;
+    const ownContact =
+      invoice.contact && invoice.contact.businessId === ctx.businessId && !invoice.contact.deletedAt
+        ? invoice.contact
+        : null;
+    const name = ownContact?.firstName || 'there';
+    const currency = normalizeCurrency(invoice.currency) || 'TTD';
     const daysOverdue = invoice.dueDate
       ? Math.max(0, Math.floor((now.getTime() - new Date(invoice.dueDate).getTime()) / 86400000))
       : 0;
+    const overduePhrase = daysOverdue > 0 ? `${daysOverdue} days overdue` : 'overdue';
 
-    const templates: Record<string, string> = {
-      friendly: `Hi ${name}, just a friendly reminder that invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${daysOverdue > 0 ? `${daysOverdue} days overdue` : 'overdue'}. Please let me know if you need anything.`,
-      firm: `Hi ${name}, this is a follow-up regarding invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()}, which is now ${daysOverdue} days overdue. Please arrange payment at your earliest convenience.`,
-      urgent: `Hi ${name}, invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${daysOverdue} days overdue and requires immediate attention. Please contact us to arrange payment.`,
+    const templates: Record<ReminderTone, string> = {
+      friendly: `Hi ${name}, just a friendly reminder that invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${overduePhrase}. Please let me know if you need anything.`,
+      firm: `Hi ${name}, this is a follow-up regarding invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()}, which is now ${overduePhrase}. Please arrange payment at your earliest convenience.`,
+      urgent: `Hi ${name}, invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${overduePhrase} and requires immediate attention. Please contact us to arrange payment.`,
     };
-    return { success: true, data: { draft: templates[input.tone] ?? templates.friendly, invoiceId: input.invoiceId } };
+    const draft = Object.prototype.hasOwnProperty.call(templates, input.tone)
+      ? templates[input.tone]
+      : templates.friendly;
+    return { success: true, data: { draft, invoiceId: input.invoiceId } };
   },
 };
 
