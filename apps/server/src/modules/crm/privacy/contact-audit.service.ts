@@ -14,18 +14,17 @@ import { safeRedactedSnapshot } from '../../../core/security/redaction';
  * `contactId` foreign-key is nulled and identifiers in the entries
  * are scrubbed.
  *
- * Two kinds of write (owner ruling D-25: every contact write records a
- * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT):
+ * Two kinds of write (owner rulings D-25 & D-207: every contact write records a
+ * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT & FU-CONTACT-AUDIT-RESIDUAL):
  *   - write(opts, tx): the entry is part of the caller's transaction and a
- *     failure throws, so the contact write it audits rolls back with it. A
- *     failed INSERT aborts a Postgres transaction anyway: it cannot be
- *     swallowed there. CrmService's contact writes pass it: createContact,
- *     updateContact, softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
- *     reassignContacts, mergeContacts and the import merge.
+ *     failure throws, so the contact, note or task write it audits rolls back
+ *     with it. A failed INSERT aborts a Postgres transaction anyway: it cannot
+ *     be swallowed there. Used by all CrmService contact writes, CrmTimelineService
+ *     note/task writes (D-207), paid-invoice lifecycle moves, and Google/Outlook
+ *     contact syncs.
  *   - write(opts) with no transaction: best-effort. A failure is logged and
- *     swallowed, never breaking the operation it reports (the GDPR purge's
- *     steps, the contact syncs' own entries, the paid-invoice lifecycle move,
- *     and CrmService's note and task writes).
+ *     swallowed, never breaking the operation it reports (e.g. non-transactional
+ *     compliance log steps).
  * writeOrThrow(opts, tx?) is the throwing write itself, for a caller that has
  * no transaction and must fail with its audit row.
  */
@@ -70,6 +69,13 @@ export interface ContactAuditActor {
   type: 'USER' | 'SYSTEM' | 'API';
   id?: string | null;
   label?: string | null;
+}
+
+export interface ContactAuditContext {
+  actor?: ContactAuditActor | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  reason?: string | null;
 }
 
 export interface ContactAuditWriteOptions {
