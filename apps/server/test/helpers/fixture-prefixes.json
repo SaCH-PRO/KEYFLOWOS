@@ -593,6 +593,11 @@
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
     },
     {
+      "prefix": "v72d_",
+      "owner": "apps/server/test/social-webhook-tenant.integration.test.ts",
+      "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
+    },
+    {
       "prefix": "v80m_",
       "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
       "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
