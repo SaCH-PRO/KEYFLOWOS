@@ -16,6 +16,13 @@
  *   BPD-08  RED  while the accounts load, Pay asks nothing yet: account and method are asked together (live
  *                journey H5 at 4fafe8d chose "Bank Account" in the method select, shown alone while the accounts
  *                loaded, and the bill was paid from Cash)
+ *   Repair round 1 (acceptance reviews at 35c72cb):
+ *   BPD-09  RED  SEC MINOR-2: a read that FAILED (5xx, a BusinessGuard 403, the network), as distinct from a scope
+ *                refusal, is said with Retry, and Pay cannot be pressed: it never pays without asking (D-168)
+ *   BPD-10  RED  Retry reads the accounts again; once they load, Pay asks and pays from the account chosen
+ *   BPD-11  pin  COR M2: an ok answer with no account that fits says "No payment account in TTD" and sends the
+ *                method only
+ *   BPD-12  pin  COR M2: the default account is listed first and chosen first, whatever order the server answers
  *
  * Mounted on the real ExpenseDetailPage and the real api clients (lib/api.ts, lib/client.ts, lib/api/finance.ts),
  * so the request body is read off the wire; only `fetch`, the toast, next/navigation and the stored business are
@@ -131,7 +138,9 @@ async function openPay() {
   fireEvent.click(screen.getByRole("button", { name: /^Approve/ }));
   const dialog = await screen.findByRole("dialog", { name: /pay bill/i });
   // The account list has arrived (or its refusal has been said).
-  await waitFor(() => expect(within(dialog).queryByText(/loading accounts/i)).toBeNull());
+  // The client retries a failed read itself (lib/fetch-with-retry: 300ms base, doubling), so a failure is answered
+  // only after its backoff.
+  await waitFor(() => expect(within(dialog).queryByText(/loading accounts/i)).toBeNull(), { timeout: 8_000 });
   return dialog;
 }
 
@@ -254,5 +263,76 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     await waitFor(() => expect(within(payDialog()).getByRole("combobox", { name: /pay from/i })).toBeTruthy());
     expect(within(payDialog()).getByRole("combobox", { name: /payment method/i })).toBeTruthy();
     expect(pays).toEqual([]);
+  });
+
+  it.each([
+    ["a 5xx", () => jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error")],
+    ["a BusinessGuard 403", () => jsonResponse(403, { statusCode: 403, message: "Unable to verify business access", error: "Forbidden" }, "Forbidden")],
+    ["the network", () => { throw new TypeError("Failed to fetch"); }],
+  ])("BPD-09 an accounts read that failed (%s) is said with Retry, and Pay cannot be pressed", { timeout: 15_000 }, async (_what, answer) => {
+    const pays = stubServer({ accounts: answer as () => Response });
+    await mount();
+    const dialog = await openPay();
+
+    expect(within(dialog).getByText(/couldn't load the payment accounts/i)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: /^Retry$/ })).toBeTruthy();
+    expect(within(dialog).queryByRole("combobox", { name: /pay from/i })).toBeNull();
+    expect(within(dialog).queryByText(/sends the method only/i)).toBeNull();
+    const pay = within(dialog).getByRole("button", { name: /^Pay/ }) as HTMLButtonElement;
+    expect(pay.disabled).toBe(true);
+    fireEvent.click(pay);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pays).toEqual([]);
+  });
+
+  it("BPD-10 Retry reads the accounts again; once they load, Pay asks and pays from the account chosen", { timeout: 20_000 }, async () => {
+    // The read fails (through the client's own retries) until the owner presses Retry.
+    let retried = false;
+    const pays = stubServer({
+      accounts: () => (retried ? jsonResponse(200, { items: ACCOUNTS }) : jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error")),
+    });
+    await mount();
+    const dialog = await openPay();
+    retried = true;
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Retry$/ }));
+
+    const account = await within(payDialog()).findByRole("combobox", { name: /pay from/i }, { timeout: 8_000 });
+    expect(within(payDialog()).queryByText(/couldn't load the payment accounts/i)).toBeNull();
+    fireEvent.change(account, { target: { value: "fa_bank" } });
+    fireEvent.change(within(payDialog()).getByRole("combobox", { name: /payment method/i }), { target: { value: "bank_transfer" } });
+    const pay = within(payDialog()).getByRole("button", { name: /^Pay/ }) as HTMLButtonElement;
+    expect(pay.disabled).toBe(false);
+    fireEvent.click(pay);
+    await waitFor(() => expect(pays).toHaveLength(1));
+    expect(pays[0].body).toEqual({ paymentAccountId: "fa_bank", paymentMethod: "bank_transfer" });
+  });
+
+  it("BPD-11 an ok answer with no account that fits says 'No payment account in TTD' and sends the method only", async () => {
+    const pays = stubServer({
+      accounts: () => jsonResponse(200, { items: ACCOUNTS.filter((a) => ["fa_old", "fa_loan", "fa_usd"].includes(a.id)) }),
+    });
+    await mount();
+    const dialog = await openPay();
+
+    expect(within(dialog).getByText(/No payment account in TTD\./)).toBeTruthy();
+    expect(within(dialog).queryByRole("combobox", { name: /pay from/i })).toBeNull();
+    fireEvent.change(within(dialog).getByRole("combobox", { name: /payment method/i }), { target: { value: "cheque" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Pay/ }));
+    await waitFor(() => expect(pays).toHaveLength(1));
+    expect(pays[0].body).toEqual({ paymentMethod: "cheque" });
+  });
+
+  it("BPD-12 the default account is listed first and chosen first, whatever order the server answers", async () => {
+    const byId = (id: string) => ACCOUNTS.find((a) => a.id === id)!;
+    const pays = stubServer({ accounts: () => jsonResponse(200, { items: [byId("fa_bank"), byId("fa_wipay"), byId("fa_cash"), byId("fa_card")] }) });
+    await mount();
+    const dialog = await openPay();
+    const select = within(dialog).getByRole("combobox", { name: /pay from/i }) as HTMLSelectElement;
+
+    expect(Array.from(select.options).map((o) => o.value)[0]).toBe("fa_cash");
+    expect(select.value).toBe("fa_cash");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Pay/ }));
+    await waitFor(() => expect(pays).toHaveLength(1));
+    expect((pays[0].body as { paymentAccountId?: string }).paymentAccountId).toBe("fa_cash");
   });
 });

@@ -15,6 +15,11 @@
  *   EDT-04  RED  Cancel on the confirm step voids nothing
  *   EDT-05  RED  a refused void says the server's words and no success; the expense stays as it was
  *   EDT-06  ctrl a BILL (Reject voids it) and a VOID expense offer no "Void expense"
+ *   Repair round 1 (acceptance reviews at 35c72cb):
+ *   EDT-07  pin  SEC MINOR-3: a member without expenses write is told so on Delete, and nothing says "deleted"
+ *   EDT-08  pin  SEC MINOR-3: the same on Void, and nothing says "voided"
+ *   EDT-09  RED  COR M1: a refused Delete on a BILL names Reject (a bill's void), not a Void it does not offer
+ *   EDT-10  RED  COR M1: a refused Delete on a VOID row says it is already voided, not to void it
  *
  * Mounted on the real ExpenseDetailPage; the client reads, the finance API helpers, the workspace, next/navigation
  * and sonner are stubbed (as expense-detail-actions.test.tsx does).
@@ -67,6 +72,7 @@ vi.mock("@/lib/api/finance", () => ({
 import { toast } from "sonner";
 import ExpenseDetailPage from "../[id]/page";
 
+const SCOPE_REFUSAL = "Insufficient permissions: expenses requires write access (you have read)";
 const POSTED_REFUSAL =
   "Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.";
 
@@ -191,5 +197,60 @@ describe("EXPENSES-HUB-1: Void a posted expense, with a confirm step (D-170, BUG
   it.each(["BILL", "VOID"])("EDT-06 a %s expense offers no 'Void expense'", async (status) => {
     await mount(status);
     expect(screen.queryByRole("button", { name: /^Void expense$/ })).toBeNull();
+  });
+});
+
+describe("EXPENSES-HUB-1 repair round 1: refusals said as they are, for the row they are about", () => {
+  it("EDT-07 a member without expenses write is told so on Delete, and nothing says 'deleted'", async () => {
+    deleteExpense.mockResolvedValue({ data: null, error: SCOPE_REFUSAL, status: 403 });
+    await mount("PAID");
+    fireEvent.click(screen.getByRole("button", { name: /Delete expense/ }));
+    fireEvent.click(within(openDialog()).getByRole("button", { name: /^Delete$/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(errorTexts().join(" | ")).toMatch(/You can't delete this expense in this business: it needs expenses write access\./);
+    expect(successTexts().filter((t) => /deleted/i.test(t))).toEqual([]);
+    expect(errorTexts().join(" | ")).not.toMatch(/void it/i);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("EDT-08 a member without expenses write is told so on Void, and nothing says 'voided'", async () => {
+    voidBill.mockResolvedValue({ data: null, error: SCOPE_REFUSAL, status: 403 });
+    await mount("PAID");
+    fireEvent.click(screen.getByRole("button", { name: /^Void expense$/ }));
+    fireEvent.click(within(openDialog()).getByRole("button", { name: /^Void expense$/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(errorTexts().join(" | ")).toMatch(/You can't void this expense in this business: it needs expenses write access\./);
+    expect(successTexts().filter((t) => /voided/i.test(t))).toEqual([]);
+    expect(screen.getByRole("button", { name: /^Void expense$/ })).toBeTruthy();
+  });
+
+  it("EDT-09 a refused Delete on a BILL names Reject, not a Void it does not offer", async () => {
+    deleteExpense.mockResolvedValue({ data: null, error: POSTED_REFUSAL });
+    await mount("BILL");
+    fireEvent.click(screen.getByRole("button", { name: /Delete expense/ }));
+    fireEvent.click(within(openDialog()).getByRole("button", { name: /^Delete$/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const said = errorTexts().join(" | ");
+    expect(said).toMatch(/can't be deleted/i);
+    expect(said).toMatch(/Reject it instead/);
+    expect(said).not.toMatch(/Void it/);
+    expect(screen.getByRole("button", { name: /^Reject$/ })).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("EDT-10 a refused Delete on a VOID row says it is already voided, not to void it", async () => {
+    deleteExpense.mockResolvedValue({ data: null, error: POSTED_REFUSAL });
+    await mount("VOID");
+    fireEvent.click(screen.getByRole("button", { name: /Delete expense/ }));
+    fireEvent.click(within(openDialog()).getByRole("button", { name: /^Delete$/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const said = errorTexts().join(" | ");
+    expect(said).toMatch(/already voided/i);
+    expect(said).not.toMatch(/Void it|Reject it/);
+    expect(successTexts()).toEqual([]);
   });
 });
