@@ -1440,6 +1440,11 @@
       "prefix": "v64c_",
       "owner": "apps/server/test/bill-pay-account.integration.test.ts",
       "packet": "V1-64 (EXPENSES-HUB-1)"
+    },
+    {
+      "prefix": "v66b_",
+      "owner": "apps/server/test/vat-number.integration.test.ts",
+      "packet": "V1-66 (VAT-BASICS)"
     }
   ],
   "pendingRenames": [],
