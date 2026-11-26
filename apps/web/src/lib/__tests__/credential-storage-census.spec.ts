@@ -54,7 +54,10 @@
  * here: a storage wrapper defined in another file (only same-file wrappers expand); a bracket write on an aliased
  * receiver (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `self.name` /
  * `globalThis.name`; a cookie string built up in a variable (`let c = …; c += …; document.cookie = c`); Dexie / idb
- * library databases (contacts-db.ts `new Dexie(name)`); and the registry pins keys and cookie attributes, not values.
+ * library databases (contacts-db.ts `new Dexie(name)`); the registry pins keys and cookie attributes, not values;
+ * and keys and values are read by a hand-written expression reader (readExpr: strings, templates, regex literals,
+ * brackets), not from the TypeScript AST; FU-CENSUS-HARDENING takes argument text from the call's argument nodes.
+ * A file with parse errors gets no comment ranges (every match in it counts), and CSC-30 pins that the tree has none.
  *
  * Counting (CSC_DUMP=1 prints one line per write found): a write reached through a wrapper is one line per call site,
  * so the same id can print twice (cookie kf_sid @ presence-sdk.ts:93, once per writeCookie call). The registry has one
@@ -215,6 +218,13 @@ function readExpr(src: string, i: number, stops = ",)", statement = false): { te
       out += " ";
       continue;
     }
+    // A regex literal (a "/" where an expression starts): read whole, so "\/\//" in it is not a comment (CSC4-SEC-3).
+    if (c === "/" && (out.trim() === "" || /[(,=:[!&|?{};+\-*%<>~^]$/.test(out.trimEnd()))) {
+      const e = skipRegexLiteral(src, j);
+      out += src.slice(j, e);
+      j = e;
+      continue;
+    }
     if (c === "(" || c === "[" || c === "{") depth++;
     else if (c === ")" || c === "]" || c === "}") {
       if (depth === 0) break;
@@ -230,6 +240,25 @@ function readExpr(src: string, i: number, stops = ",)", statement = false): { te
     j++;
   }
   return { text: out.trim(), end: j };
+}
+
+/** A regex literal from its opening "/": past the closing "/" and its flags (classes and escapes kept), or to the line break. */
+function skipRegexLiteral(src: string, i: number): number {
+  let j = i + 1;
+  let inClass = false;
+  while (j < src.length && src[j] !== "\n") {
+    const c = src[j];
+    if (c === "\\") j += 2;
+    else if (c === "[" || c === "]") {
+      inClass = c === "[";
+      j++;
+    } else if (c === "/" && !inClass) {
+      j++;
+      while (j < src.length && /[a-z]/i.test(src[j])) j++;
+      return j;
+    } else j++;
+  }
+  return j;
 }
 
 function skipString(src: string, i: number): number {
@@ -540,6 +569,12 @@ function commentRanges(file: string, src: string): Array<[number, number]> {
         ? ts.ScriptKind.JSX
         : ts.ScriptKind.JS;
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
+  // Fail closed (CSC4-SEC-2): a file the parser cannot read cleanly gets no comment ranges, so every match in it
+  // counts. CSC-30 pins that the census tree parses with no diagnostics.
+  if ((sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length > 0) {
+    commentCache.set(cacheKey, []);
+    return [];
+  }
   const jsxTextStarts = new Set<number>();
   const visitText = (node: ts.Node) => {
     if (node.kind === ts.SyntaxKind.JsxText) jsxTextStarts.add(node.pos);
@@ -559,6 +594,9 @@ function commentRanges(file: string, src: string): Array<[number, number]> {
   };
   const visit = (node: ts.Node) => {
     if (node.kind === ts.SyntaxKind.JsxText) return;
+    // A JSDoc node lies inside its comment: a range read at its pos would start inside the comment and could run past
+    // its */ (CSC4-SEC-1). The JSDoc block itself is found as the leading comment of the node it documents.
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return;
     if (!jsxTextStarts.has(node.pos)) add(ts.getLeadingCommentRanges(src, node.pos));
     if (!jsxTextStarts.has(node.end)) add(ts.getTrailingCommentRanges(src, node.end));
     for (const child of node.getChildren(sf)) visit(child);
@@ -566,6 +604,22 @@ function commentRanges(file: string, src: string): Array<[number, number]> {
   visit(sf); // getChildren includes the end-of-file token, so comments after the last token are read too.
   commentCache.set(cacheKey, ranges);
   return ranges;
+}
+
+/** The character before `at`, past whitespace and real comments (commentRanges), or "" at the start of the file. */
+function prevSignificant(file: string, src: string, at: number): string {
+  const ranges = commentRanges(file, src);
+  let j = at - 1;
+  while (j >= 0) {
+    if (/\s/.test(src[j])) {
+      j--;
+      continue;
+    }
+    const r = ranges.find(([a, b]) => a <= j && j < b);
+    if (!r) return src[j];
+    j = r[0] - 1;
+  }
+  return "";
 }
 
 /** Is offset `at` inside a real comment of the file (commentRanges)? */
@@ -732,7 +786,7 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   // (its "[" follows "[" or ","), as in new Headers([[…], …]) or headers: [[…]]. A header-name list such as
   // ["set-cookie", "content-length"] is not a write.
   for (const m of src.matchAll(/\[\s*(["'])set-cookie\1\s*,/gi)) {
-    if (!/[[,]\s*$/.test(src.slice(Math.max(0, m.index! - 40), m.index!))) continue;
+    if (!/[[,]/.test(prevSignificant(file, src, m.index!))) continue;
     const value = readExpr(src, m.index! + m[0].length);
     if (!/^\s*,?\s*\]/.test(src.slice(value.end))) continue;
     setCookieValue(value.text, m.index!);
@@ -1713,6 +1767,11 @@ describe("CSC-30 a file with parse errors fails closed", () => {
 });
 
 describe("CSC-31 a regex literal in a value does not cut it short", () => {
+  it("a regex class holding slashes does not end the literal early", () => {
+    const fixture = `export const s = (session: { access_token: string }) => localStorage.setItem("kf_pd3_plain", /[///]/.source + session.access_token);`;
+    expect(compare(scan("src/fixture-pd3.ts", fixture), []).unregistered.some((u) => u.startsWith("localStorage kf_pd3_plain @"))).toBe(true);
+  });
+
   it("a value built from a regex's source and a session token is a credential write", () => {
     const fixture = `export const s = (session: { access_token: string }) => localStorage.setItem("kf_pd2_plain", /a\\/\\//.source + session.access_token);`;
     expect(compare(scan("src/fixture-pd.ts", fixture), []).unregistered.some((u) => u.startsWith("localStorage kf_pd2_plain @"))).toBe(true);
