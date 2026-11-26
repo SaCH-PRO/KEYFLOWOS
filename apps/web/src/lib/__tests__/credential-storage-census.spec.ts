@@ -53,6 +53,10 @@ interface RegistryRow {
   key: string;
   file: string;
   why: string;
+  /** Cookie rows: the attributes the write sets, pinned (lower-case, in source order; see cookieAttrs). */
+  attrs?: string[];
+  /** A credential store that is a known defect, reported as a follow-up and not fixed by this packet. */
+  followUp?: string;
 }
 
 const CREDENTIAL_PATTERN = /token|refresh|secret|session|auth|admin|verifier|password|passwd|jwt|bearer|credential|api[_-]?key|(?:^|[^a-z])sid(?:[^a-z]|$)/i;
@@ -64,27 +68,37 @@ const CREDENTIAL_PATTERN = /token|refresh|secret|session|auth|admin|verifier|pas
 const REGISTRY: RegistryRow[] = [
   // The user session (Supabase access token, refresh token, expiry), lib/workspace.ts.
   { store: "localStorage", key: "kf_token", file: "src/lib/workspace.ts", why: "User access token; api.ts reads it for the Authorization header. Script-readable (the HttpOnly move is an owner question)." },
-  { store: "cookie", key: "kf_token", file: "src/lib/workspace.ts", why: "Mirror of the access token so the edge middleware can gate /app/*. Script-readable, SameSite=Lax, Secure on https." },
+  { store: "cookie", key: "kf_token", file: "src/lib/workspace.ts", why: "Mirror of the access token so the edge middleware can gate /app/*. Script-readable, SameSite=Lax, Secure on https.", attrs: ["path=/", "max-age=604800", "samesite=lax", "secure-on-https"] },
   { store: "localStorage", key: "kf_refresh_token", file: "src/lib/workspace.ts", why: "User refresh token, used to renew the session. Script-readable: the first thing the HttpOnly move would take out." },
   { store: "localStorage", key: "kf_token_expires_at", file: "src/lib/workspace.ts", why: "Access token expiry (ms), not a secret; read to refresh before expiry." },
 
   // The admin session, app/admin/login/page.tsx.
   { store: "localStorage", key: "kf_admin_token", file: "src/app/admin/login/page.tsx", why: "Admin bearer from /api/admin/auth/login; api.ts prefers it over kf_token. Script-readable." },
-  { store: "cookie", key: "kf_admin_token", file: "src/app/admin/login/page.tsx", why: "Mirror of the admin bearer for the edge middleware. Script-readable, no SameSite or Secure attribute." },
+  { store: "cookie", key: "kf_admin_token", file: "src/app/admin/login/page.tsx", why: "Mirror of the admin bearer for the edge middleware. Script-readable, no SameSite or Secure attribute.", attrs: ["path=/", "max-age=86400"] },
   { store: "localStorage", key: "kf_admin_user_cache", file: "src/app/admin/login/page.tsx", why: "Admin user (id, email, role); isSuperAdmin reads it. Not a secret, but it decides what the shell shows." },
-  { store: "cookie", key: "kf_admin_user_cache", file: "src/app/admin/login/page.tsx", why: "Cookie mirror of the admin user cache." },
+  { store: "cookie", key: "kf_admin_user_cache", file: "src/app/admin/login/page.tsx", why: "Cookie mirror of the admin user cache.", attrs: ["path=/", "max-age=86400"] },
   { store: "localStorage", key: "kf_auth_mode", file: "src/app/admin/login/page.tsx", why: "'admin' marks the admin session; admin/layout.tsx reads it. Not a secret." },
-  { store: "cookie", key: "kf_auth_mode", file: "src/app/admin/login/page.tsx", why: "Cookie mirror of the auth mode." },
+  { store: "cookie", key: "kf_auth_mode", file: "src/app/admin/login/page.tsx", why: "Cookie mirror of the auth mode.", attrs: ["path=/", "max-age=86400"] },
 
   // OAuth sign-in, lib/oauth-state.ts and lib/oauth-pkce.ts.
-  { store: "cookie", key: "kf_oauth_state", file: "src/lib/oauth-state.ts", why: "OAuth state (CSRF) for 10 minutes; the client must read it to compare, so not HttpOnly (see the file)." },
+  { store: "cookie", key: "kf_oauth_state", file: "src/lib/oauth-state.ts", why: "OAuth state (CSRF) for 10 minutes; the client must read it to compare, so not HttpOnly (see the file).", attrs: ["path=/", "max-age=600", "samesite=lax", "secure-on-https"] },
   { store: "localStorage", key: "kf_oauth_code_verifier", file: "src/lib/oauth-pkce.ts", why: "PKCE code verifier for the code exchange; cleared after use." },
-  { store: "cookie", key: "kf_oauth_code_verifier", file: "src/lib/oauth-pkce.ts", why: "Cookie fallback for the PKCE verifier (10 minutes), script-readable." },
+  { store: "cookie", key: "kf_oauth_code_verifier", file: "src/lib/oauth-pkce.ts", why: "Cookie fallback for the PKCE verifier (10 minutes), script-readable.", attrs: ["path=/", "max-age=600", "samesite=lax", "secure-on-https"] },
 
   // Public-site presence analytics, app/_lib/presence-sdk.ts. An analytics session id, not a sign-in credential.
   { store: "storage", key: "kf_sid", file: "src/app/_lib/presence-sdk.ts", why: "Presence analytics session id (30 minutes); grants nothing." },
   { store: "storage", key: "kf_sid_ts", file: "src/app/_lib/presence-sdk.ts", why: "Timestamp of the presence analytics session id." },
-  { store: "cookie", key: "kf_sid", file: "src/app/_lib/presence-sdk.ts", why: "Cookie copy of the presence analytics session id (via writeCookie)." },
+  { store: "cookie", key: "kf_sid", file: "src/app/_lib/presence-sdk.ts", why: "Cookie copy of the presence analytics session id (via writeCookie).", attrs: ["path=/", "max-age=1800", "samesite=lax", "secure-on-https"] },
+
+  // The service worker's offline write queue, public/sw.js. enqueue() stores each queued request's headers, so the
+  // user's Authorization bearer is written to IndexedDB in clear (security review follow-up, not fixed here).
+  {
+    store: "indexedDB",
+    key: "kf-sync-queue",
+    file: "public/sw.js",
+    why: "Offline mutation queue: each entry keeps the request's headers, so the Authorization bearer lands in IndexedDB.",
+    followUp: "public/sw.js enqueue() must not store the Authorization header (security review of RR-SESSION-STORAGE-CENSUS)",
+  },
 ];
 
 /* ------------------------------------------------------------------ scanner */
@@ -411,5 +425,226 @@ describe("CSC-02/03 the census matches the registry", () => {
   it("CSC-05 no credential in IndexedDB, and server cookie writes only clear", () => {
     const bad = writes.filter((w) => (w.store === "indexedDB" || w.store === "response-cookie") && isCredential(w));
     expect(bad.map((w) => `${id(w)}:${w.line}`)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------- repair round 1 */
+
+/**
+ * Repair round 1 (correctness review REPAIR, security review ACCEPT WITH FOLLOW-UPS). Each case plants an in-memory
+ * sample the round-0 scanner missed.
+ *
+ *   CSC-06 (CSC-1, MAJOR) a call split over lines, the shape Prettier writes (key on the next line), resolves its key.
+ *   CSC-07 more write channels: storage property / bracket assignment, the Cookie Store API, next/headers cookies(),
+ *          a Set-Cookie header, Cache Storage names, window.name, and IndexedDB object-store writes.
+ *   CSC-08 value matching: a credential in the VALUE is a credential write, whatever the key is called.
+ *   CSC-09 one-hop resolution: `PREFIX + x`, an imported const (one file away), and a same-file key function.
+ *   CSC-10 kf-sync-queue (public/sw.js) is a credential store: its entries keep the request headers.
+ *   CSC-11 public/ is scanned recursively (public/widgets/v1/loader.js).
+ *   CSC-12 every cookie row pins its attributes, and the census reads them from the source.
+ */
+type ScanOpts = { files?: Record<string, string> };
+const scan = (file: string, src: string, opts?: ScanOpts): Write[] =>
+  (scanSource as unknown as (f: string, s: string, o?: ScanOpts) => Write[])(file, src, opts);
+const keysOf = (ws: Write[]) => ws.map((w) => `${w.store}:${w.key}`);
+
+describe("CSC-06 a multi-line call resolves its key (CSC-1)", () => {
+  const fixture = [
+    `const MULTI_KEY = "kf_multi_secret";`,
+    `export function save(t: string) {`,
+    `  localStorage.setItem(`,
+    `    "kf_multi_token",`,
+    `    JSON.stringify({ t }),`,
+    `  );`,
+    `  window.sessionStorage.setItem(`,
+    `    // a comment before the key`,
+    `    MULTI_KEY,`,
+    `    t,`,
+    `  );`,
+    `  res.cookies.set(`,
+    `    "kf_multi_session",`,
+    `    t,`,
+    `    { httpOnly: true },`,
+    `  );`,
+    `  indexedDB.open(`,
+    `    "kf-multi-token-db",`,
+    `    1,`,
+    `  );`,
+    `}`,
+  ].join("\n");
+  const keys = keysOf(scan("src/fixture-multi.ts", fixture));
+
+  it("resolves keys written on the line after the call", () => {
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "localStorage:kf_multi_token",
+        "sessionStorage:kf_multi_secret",
+        "response-cookie:kf_multi_session",
+        "indexedDB:kf-multi-token-db",
+      ]),
+    );
+  });
+
+  it("no write in the web app has an empty key", () => {
+    const empty = census().filter((w) => w.key.trim() === "" || w.expr.trim() === "");
+    expect(empty.map((w) => `${w.store} @ ${w.file}:${w.line}`)).toEqual([]);
+  });
+
+  it("the real multi-line write (jarvis-voice.tsx saveLocalVoice) is found with its key", () => {
+    const w = census().filter((x) => x.file === "src/app/app/keyflow-command/components/jarvis-voice.tsx");
+    expect(w.some((x) => x.store === "localStorage" && x.key !== "" && x.key !== "STORAGE_KEY")).toBe(true);
+  });
+});
+
+describe("CSC-07 more write channels", () => {
+  const fixture = [
+    `export async function save(t: string) {`,
+    `  localStorage["kf_bracket_token"] = t;`,
+    `  sessionStorage.kf_prop_secret = t;`,
+    `  await cookieStore.set("kf_cs_session", t);`,
+    `  await cookieStore.set({ name: "kf_cs_obj_token", value: t });`,
+    `  cookies().set("kf_next_session", t);`,
+    `  (await cookies()).set("kf_next2_token", t);`,
+    `  const jar = await cookies();`,
+    `  jar.set("kf_jar_token", t);`,
+    `  headers.append("Set-Cookie", \`kf_hdr_session=\${t}; Path=/; HttpOnly\`);`,
+    `  return new Response(null, { headers: { "Set-Cookie": "kf_hdr2_token=x; Path=/" } });`,
+    `}`,
+    `const cache = await caches.open("kf-token-cache");`,
+    `window.name = t;`,
+    `const db = indexedDB.open("kf-plain-db", 1);`,
+    `store.put({ accessToken: t });`,
+  ].join("\n");
+  const ws = scan("src/fixture-channels.ts", fixture);
+  const keys = keysOf(ws);
+
+  it("finds each channel's key", () => {
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "localStorage:kf_bracket_token",
+        "sessionStorage:kf_prop_secret",
+        "cookie:kf_cs_session",
+        "cookie:kf_cs_obj_token",
+        "response-cookie:kf_next_session",
+        "response-cookie:kf_next2_token",
+        "response-cookie:kf_jar_token",
+        "response-cookie:kf_hdr_session",
+        "response-cookie:kf_hdr2_token",
+        "cacheStorage:kf-token-cache",
+        "window.name:window.name",
+      ]),
+    );
+  });
+
+  it("window.name holding a token and an IndexedDB put of a token are credential writes", () => {
+    const { unregistered } = compare(ws, []);
+    expect(unregistered.some((u) => u.startsWith("window.name window.name @"))).toBe(true);
+    expect(unregistered.some((u) => u.startsWith("indexedDB kf-plain-db @"))).toBe(true);
+  });
+});
+
+describe("CSC-08 a credential in the value counts", () => {
+  const fixture = [
+    `export function save(session: { access_token: string }, accessToken: string) {`,
+    `  localStorage.setItem("kf_prefs", JSON.stringify({ accessToken }));`,
+    `  document.cookie = \`kf_x=\${session.access_token}; Path=/\`;`,
+    `  sessionStorage.setItem("kf_draft", refreshToken);`,
+    `  localStorage.setItem("kf_view", "grid");`,
+    `  localStorage.setItem("kf_count", String(count));`,
+    `}`,
+  ].join("\n");
+  const { unregistered } = compare(scan("src/fixture-values.ts", fixture), []);
+
+  it("flags writes whose value is a token, whatever the key", () => {
+    for (const k of ["localStorage kf_prefs", "cookie kf_x", "sessionStorage kf_draft"]) {
+      expect(unregistered.some((u) => u.startsWith(`${k} @`)), k).toBe(true);
+    }
+  });
+
+  it("does not flag plain values", () => {
+    expect(unregistered.some((u) => u.includes("kf_view") || u.includes("kf_count"))).toBe(false);
+  });
+});
+
+describe("CSC-09 one-hop key resolution", () => {
+  const files = {
+    "src/lib/fixture-keys.ts": `export const STORE_KEY = "kf_refresh_token_copy";\nexport const PLAIN = "kf_plain";`,
+  };
+  const fixture = [
+    `import { STORE_KEY } from "./fixture-keys";`,
+    `import { PLAIN as RENAMED } from "@/lib/fixture-keys";`,
+    `const PREFIX = "kf-scroll-";`,
+    `const keyFor = (id: string) => \`kf_token_\${id}\`;`,
+    `function vaultKey(id: string) {`,
+    `  return \`kf_vault_secret_\${id}\`;`,
+    `}`,
+    `export function save(route: string, id: string, t: string) {`,
+    `  sessionStorage.setItem(PREFIX + route, t);`,
+    `  localStorage.setItem(STORE_KEY, t);`,
+    `  localStorage.setItem(RENAMED, "1");`,
+    `  localStorage.setItem(keyFor(id), "1");`,
+    `  localStorage.setItem(vaultKey(id), "1");`,
+    `}`,
+  ].join("\n");
+  const keys = keysOf(scan("src/lib/fixture-hop.ts", fixture, { files }));
+
+  it("resolves concatenation, imported consts and key functions", () => {
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "sessionStorage:kf-scroll-*",
+        "localStorage:kf_refresh_token_copy",
+        "localStorage:kf_plain",
+        "localStorage:kf_token_*",
+        "localStorage:kf_vault_secret_*",
+      ]),
+    );
+  });
+
+  it("the census resolves the app's own concatenated key (use-return-navigation.ts)", () => {
+    expect(census().some((w) => w.file === "src/lib/use-return-navigation.ts" && w.key === "kf-scroll-*")).toBe(true);
+  });
+});
+
+describe("CSC-10 kf-sync-queue keeps request headers, so it is a credential store", () => {
+  it("public/sw.js kf-sync-queue is a credential write, registered with its follow-up", () => {
+    const w = census().find((x) => x.store === "indexedDB" && x.key === "kf-sync-queue");
+    expect(w, "the census finds kf-sync-queue").toBeTruthy();
+    expect(isCredential(w!), "kf-sync-queue counts as a credential store").toBe(true);
+    const row = REGISTRY.find((r) => r.key === "kf-sync-queue");
+    expect(row?.followUp, "registered as a follow-up").toMatch(/Authorization/);
+  });
+});
+
+describe("CSC-11 public/ is scanned recursively", () => {
+  it("includes public/widgets/v1/loader.js", () => {
+    const files = sourceFiles().map((p) => path.relative(WEB, p).split(path.sep).join("/"));
+    expect(files).toContain("public/sw.js");
+    expect(files).toContain("public/widgets/v1/loader.js");
+  });
+});
+
+describe("CSC-12 cookie attributes are pinned", () => {
+  it("parses attributes, resolving consts and the https-only Secure", () => {
+    const fixture = [
+      `const K = "kf_attr_token";`,
+      `const MAX = 60 * 60 * 24 * 7;`,
+      `export function w(t: string) {`,
+      `  const secure = isHttps() ? "; Secure" : "";`,
+      `  document.cookie = \`\${K}=\${encodeURIComponent(t)}; Path=/; Max-Age=\${MAX}; SameSite=Lax\${secure}\`;`,
+      `  document.cookie = "kf_plain_session=1; path=/; max-age=60; Secure; HttpOnly";`,
+      `}`,
+    ].join("\n");
+    const ws = scan("src/fixture-attrs.ts", fixture) as Array<Write & { attrs?: string[] }>;
+    expect(ws.find((w) => w.key === "kf_attr_token")?.attrs).toEqual(["path=/", "max-age=604800", "samesite=lax", "secure-on-https"]);
+    expect(ws.find((w) => w.key === "kf_plain_session")?.attrs).toEqual(["path=/", "max-age=60", "secure", "httponly"]);
+  });
+
+  it("every cookie row's attrs match what the source writes", () => {
+    const writes = census() as Array<Write & { attrs?: string[] }>;
+    for (const r of REGISTRY.filter((x) => x.store === "cookie")) {
+      expect(r.attrs, `${id(r)} pins its attributes`).toBeDefined();
+      const w = writes.find((x) => id(x) === id(r));
+      expect(w?.attrs, id(r)).toEqual(r.attrs);
+    }
   });
 });
