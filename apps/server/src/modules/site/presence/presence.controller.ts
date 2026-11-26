@@ -86,10 +86,11 @@ export class PresenceController {
   @Get('businesses/:businessId/overview')
   getOverview(
     @Param('businessId') businessId: string,
+    @Req() req: any,
     @Query('days') days?: string,
   ) {
     const d = days ? Math.min(Math.max(parseInt(days, 10) || 30, 1), 365) : 30;
-    return this.overview.getOverview(businessId, d);
+    return this.overview.getOverview(businessId, d, presenceActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -103,11 +104,14 @@ export class PresenceController {
   @Get('businesses/:businessId/leads')
   listLeads(
     @Param('businessId') businessId: string,
+    @Req() req: any,
     @Query('limit') limit?: string,
   ) {
-    return this.overview.listStorefrontLeads(businessId, {
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
+    return this.overview.listStorefrontLeads(
+      businessId,
+      { limit: limit ? parseInt(limit, 10) : undefined },
+      presenceActor(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -144,8 +148,8 @@ export class PresenceController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/today-stats')
-  getTodayStats(@Param('businessId') businessId: string) {
-    return this.overview.getTodayStats(businessId);
+  getTodayStats(@Param('businessId') businessId: string, @Req() req: any) {
+    return this.overview.getTodayStats(businessId, presenceActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
