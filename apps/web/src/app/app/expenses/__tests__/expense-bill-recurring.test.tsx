@@ -287,7 +287,8 @@ describe.each<Form>(["modal", "sidesheet"])("COR-F1: in the %s, a back-dated rec
     ["MONTHLY", "2026-11-26", "2026-12-26"],
     ["YEARLY", "2024-02-29", "2027-02-28"],
     ["YEARLY", "2025-12-01", "2026-12-01"],
-    ["QUARTERLY", "2025-11-30", "2027-02-28"],
+    ["QUARTERLY", "2025-11-30", "2026-11-30"],
+    ["QUARTERLY", "2025-08-15", "2027-02-15"],
     ["WEEKLY", "2026-11-01", "2026-11-29"],
     ["BIWEEKLY", "2026-10-01", "2026-12-10"],
   ])("%s dated %s is first due %s, after today, with no catch-up", async (frequency, date, next) => {
