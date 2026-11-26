@@ -75,6 +75,8 @@ async function cleanup() {
     `DELETE FROM keystore_service_listings WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM keystore_service_categories WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_signals WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -322,7 +324,7 @@ beforeAll(async () => {
       status: 'ACTIVE',
     },
   });
-}, 30_000);
+}, 120_000);
 
 afterAll(async () => {
   if (db) await cleanup();
@@ -799,5 +801,343 @@ describe('P114 — SignalsService contactId validation', () => {
       },
     );
     expect(omitted.contactId).toBeNull();
+  });
+});
+
+describe('P114 R1 regressions — CommandService columns/visibility, Contracts empty/orphan, TimeCost inference, and internal callers', () => {
+  const R1 = {
+    staffOwned: `${P}staffOwned`,
+    contactPrivateA: `${P}cPrivA`,
+    invDelContact: `${P}invDelC`,
+    bookingDelContact: `${P}bkDelC`,
+    serviceA: `${P}svcA`,
+    plainCmd: `${P}cmdPlain`,
+    contactOwnerCmd: `${P}cmdContactOwner`,
+  };
+
+  let commandService: any;
+  let prismaService: any;
+
+  beforeAll(async () => {
+    const { CommandService } = await import('../src/modules/command/command.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    commandService = app.get(CommandService);
+    prismaService = app.get(PrismaService);
+
+    await db.user.create({
+      data: { id: R1.staffOwned, email: emailOf(R1.staffOwned), name: 'V83C Staff Owned', role: 'USER' },
+    });
+    await db.membership.create({
+      data: {
+        id: `${P}memStaffOwned`,
+        userId: R1.staffOwned,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { operations: 'write', crm: 'read', crm_view: 'owned' },
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: R1.contactPrivateA,
+        businessId: ID.bizA,
+        firstName: 'Private',
+        lastName: 'OwnerOnly',
+        email: `${P}priva@v83c.test.local`,
+        visibility: 'PRIVATE',
+        ownerId: ID.ownerA,
+      },
+    });
+    await db.service.create({
+      data: {
+        id: R1.serviceA,
+        businessId: ID.bizA,
+        name: 'V83C Service',
+        duration: 30,
+        price: 120,
+      },
+    });
+    await db.invoice.create({
+      data: {
+        id: R1.invDelContact,
+        businessId: ID.bizA,
+        contactId: ID.contactDeletedA,
+        invoiceNumber: `${P}INV-DEL`,
+        status: 'SENT',
+        subtotal: 120,
+        total: 120,
+        currency: 'TTD',
+        dueDate: new Date('2025-01-01T00:00:00.000Z'),
+      },
+    });
+    await db.booking.create({
+      data: {
+        id: R1.bookingDelContact,
+        businessId: ID.bizA,
+        contactId: ID.contactDeletedA,
+        serviceId: R1.serviceA,
+        invoiceId: R1.invDelContact,
+        startTime: new Date('2025-01-01T10:00:00.000Z'),
+        endTime: new Date('2025-01-01T10:30:00.000Z'),
+        status: 'CONFIRMED',
+      },
+    });
+    await db.commandItem.createMany({
+      data: [
+        {
+          id: R1.plainCmd,
+          businessId: ID.bizA,
+          sourceModule: 'operations',
+          title: 'Plain item',
+          category: 'WORK',
+          actionType: 'REVIEW',
+          status: 'OPEN',
+        },
+        {
+          id: R1.contactOwnerCmd,
+          businessId: ID.bizA,
+          sourceModule: 'crm',
+          title: 'Contact-owned item',
+          category: 'PEOPLE',
+          actionType: 'FOLLOW_UP',
+          ownerType: 'CONTACT',
+          ownerId: ID.contactLiveA,
+          status: 'OPEN',
+        },
+      ],
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (!db) return;
+    for (const sql of [
+      `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
+    ]) {
+      await db.$executeRawUnsafe(sql);
+    }
+  }, 30_000);
+
+  it('[R1-SEC-01] CommandService.create validates entityType=contact entityId and ownerType=CONTACT ownerId', async () => {
+    for (const badId of [ID.contactLiveB, ID.contactDeletedA, '']) {
+      const before = await db.commandItem.count({ where: { businessId: ID.bizA } });
+      const res = await asOwnerA(api().post(`/command/businesses/${ID.bizA}/items`)).send({
+        sourceModule: 'crm',
+        title: 'Entity contact check',
+        category: 'PEOPLE',
+        actionType: 'FOLLOW_UP',
+        entityType: 'contact',
+        entityId: badId,
+      });
+      expect(res.status).toBe(404);
+      expect(await db.commandItem.count({ where: { businessId: ID.bizA } })).toBe(before);
+
+      await expect(
+        commandService.create(ID.bizA, {
+          sourceModule: 'crm',
+          title: 'Owner contact check',
+          category: 'PEOPLE',
+          actionType: 'FOLLOW_UP',
+          ownerType: 'CONTACT',
+          ownerId: badId,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(await db.commandItem.count({ where: { businessId: ID.bizA } })).toBe(before);
+    }
+
+    const okEntity = await asOwnerA(api().post(`/command/businesses/${ID.bizA}/items`)).send({
+      sourceModule: 'crm',
+      title: 'Valid entity contact',
+      category: 'PEOPLE',
+      actionType: 'FOLLOW_UP',
+      entityType: 'contact',
+      entityId: ID.contactLiveA,
+    });
+    expect(okEntity.status).toBe(201);
+
+    const okOwner = await commandService.create(ID.bizA, {
+      sourceModule: 'crm',
+      title: 'Valid owner contact',
+      category: 'PEOPLE',
+      actionType: 'FOLLOW_UP',
+      ownerType: 'CONTACT',
+      ownerId: ID.contactLiveA,
+    });
+    expect(okOwner.ownerId).toBe(ID.contactLiveA);
+  });
+
+  it('[R1-SEC-01] CommandService.assign and update validate CONTACT ownerId', async () => {
+    for (const badId of [ID.contactLiveB, ID.contactDeletedA, '   ']) {
+      const assignRes = await asOwnerA(
+        api().post(`/command/businesses/${ID.bizA}/items/${R1.plainCmd}/assign`),
+      ).send({ ownerType: 'CONTACT', ownerId: badId });
+      expect(assignRes.status).toBe(404);
+      const plain = await db.commandItem.findUnique({ where: { id: R1.plainCmd } });
+      expect(plain?.ownerId).toBeNull();
+
+      const patchRes = await asOwnerA(
+        api().patch(`/command/businesses/${ID.bizA}/items/${R1.contactOwnerCmd}`),
+      ).send({ ownerId: badId });
+      expect(patchRes.status).toBe(404);
+      const owned = await db.commandItem.findUnique({ where: { id: R1.contactOwnerCmd } });
+      expect(owned?.ownerId).toBe(ID.contactLiveA);
+    }
+
+    const okAssign = await asOwnerA(
+      api().post(`/command/businesses/${ID.bizA}/items/${R1.plainCmd}/assign`),
+    ).send({ ownerType: 'CONTACT', ownerId: ID.contactLiveA });
+    expect(okAssign.status).toBe(201);
+    expect(okAssign.body.ownerId).toBe(ID.contactLiveA);
+
+    const okPatch = await asOwnerA(
+      api().patch(`/command/businesses/${ID.bizA}/items/${R1.contactOwnerCmd}`),
+    ).send({ ownerId: ID.contactLiveA2 });
+    expect(okPatch.status).toBe(200);
+    expect(okPatch.body.ownerId).toBe(ID.contactLiveA2);
+  });
+
+  it('[R1-SEC-02] restricted STAFF (crm_view: owned) naming OWNER PRIVATE contact on create/assign gets 404 with zero writes', async () => {
+    const asStaff = (req: request.Test) => req.set('x-test-user', R1.staffOwned);
+    const before = await db.commandItem.count({ where: { businessId: ID.bizA } });
+
+    const createByContactId = await asStaff(api().post(`/command/businesses/${ID.bizA}/items`)).send({
+      sourceModule: 'crm',
+      title: 'Oracle probe',
+      category: 'PEOPLE',
+      actionType: 'FOLLOW_UP',
+      contactId: R1.contactPrivateA,
+    });
+    expect(createByContactId.status).toBe(404);
+
+    const createByEntity = await asStaff(api().post(`/command/businesses/${ID.bizA}/items`)).send({
+      sourceModule: 'crm',
+      title: 'Entity oracle probe',
+      category: 'PEOPLE',
+      actionType: 'FOLLOW_UP',
+      entityType: 'contact',
+      entityId: R1.contactPrivateA,
+    });
+    expect(createByEntity.status).toBe(404);
+    expect(await db.commandItem.count({ where: { businessId: ID.bizA } })).toBe(before);
+
+    // Seed a plain item staff can open and try assigning it to OWNER's PRIVATE contact
+    const staffPlain = await asStaff(api().post(`/command/businesses/${ID.bizA}/items`)).send({
+      sourceModule: 'operations',
+      title: 'Staff visible plain item',
+      category: 'WORK',
+      actionType: 'REVIEW',
+    });
+    expect(staffPlain.status).toBe(201);
+
+    const assignPriv = await asStaff(
+      api().post(`/command/businesses/${ID.bizA}/items/${staffPlain.body.id}/assign`),
+    ).send({ ownerType: 'CONTACT', ownerId: R1.contactPrivateA });
+    expect(assignPriv.status).toBe(404);
+    const reloaded = await db.commandItem.findUnique({ where: { id: staffPlain.body.id } });
+    expect(reloaded?.ownerId).toBeNull();
+
+    // Control: OWNER can still create against their own PRIVATE contact
+    const ownerCreate = await asOwnerA(api().post(`/command/businesses/${ID.bizA}/items`)).send({
+      sourceModule: 'crm',
+      title: 'Owner private item',
+      category: 'PEOPLE',
+      actionType: 'FOLLOW_UP',
+      contactId: R1.contactPrivateA,
+    });
+    expect(ownerCreate.status).toBe(201);
+  });
+
+  it('[R1-COR-01][R1-SEC-03] ContractsService normalizes empty contactId to null, rejects whitespace, and leaves zero orphan DRAFT contracts on handleDocumentExtracted', async () => {
+    const unlinked = await asOwnerA(
+      api().patch(`/contracts/businesses/${ID.bizA}/${ID.contractBase}`),
+    ).send({
+      parties: [{ role: 'client', name: 'Unlinked', contactId: '' }],
+    });
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.body.parties).toHaveLength(1);
+    expect(unlinked.body.parties[0].contactId).toBeNull();
+
+    const whitespace = await asOwnerA(
+      api().patch(`/contracts/businesses/${ID.bizA}/${ID.contractBase}`),
+    ).send({
+      parties: [{ role: 'client', name: 'Whitespace', contactId: '   ' }],
+    });
+    expect(whitespace.status).toBe(404);
+
+    const beforeContracts = await db.contract.count({ where: { businessId: ID.bizA } });
+    await expect(
+      contractsService.handleDocumentExtracted({
+        businessId: ID.bizA,
+        source: 'asset',
+        filename: `${P}orphan-check.pdf`,
+        result: {
+          documentType: 'contract',
+          sourceId: `${P}src_orphan`,
+          confidence: 0.9,
+          filename: `${P}orphan-check.pdf`,
+          rawText: 'raw',
+          suggestedActions: [],
+          contractData: {
+            contractType: 'NDA',
+            confidence: 0.9,
+            parties: [{ role: 'client', name: 'Foreign Party', contactId: ID.contactLiveB }],
+          },
+        },
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(await db.contract.count({ where: { businessId: ID.bizA } })).toBe(beforeContracts);
+  });
+
+  it('[R1-COR-02] TimeCostService.create with omitted contactId against invoice of soft-deleted contact returns 201 with contactId: null', async () => {
+    const res = await asOwnerA(api().post(`/commerce/businesses/${ID.bizA}/time-cost`)).send({
+      refType: 'INVOICE',
+      refId: R1.invDelContact,
+      minutes: 25,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.contactId).toBeNull();
+  });
+
+  it('[R1-COR-03] StorefrontInvoiceAttributionListener and ScheduledScansService tolerate invoices referencing a soft-deleted contact', async () => {
+    const { StorefrontInvoiceAttributionListener } = await import(
+      '../src/modules/commerce/storefront-invoice-attribution.listener'
+    );
+    const { ScheduledScansService } = await import(
+      '../src/modules/intelligence/scheduled-scans.service'
+    );
+
+    const listener = new StorefrontInvoiceAttributionListener(prismaService, revenueAttributionService);
+    await listener.handleInvoicePaid({
+      businessId: ID.bizA,
+      invoice: {
+        id: R1.invDelContact,
+        businessId: ID.bizA,
+        total: 120,
+        currency: 'TTD',
+        contactId: ID.contactDeletedA,
+      },
+    });
+    const attrRow = await db.revenueAttribution.findFirst({
+      where: { businessId: ID.bizA, revenueType: 'INVOICE', revenueId: R1.invDelContact },
+    });
+    expect(attrRow).not.toBeNull();
+    expect(attrRow?.contactId).toBeNull();
+
+    const bridged: Array<{ sourceId?: string; contactId?: string }> = [];
+    const scans: any = new ScheduledScansService(
+      prismaService,
+      {} as any,
+      signalsService,
+      { bridge: async (input: any) => { bridged.push(input); return null; } } as any,
+      { calculateAll: async () => [], saveSnapshot: async () => undefined } as any,
+    );
+    await scans.evaluateRules(ID.bizA);
+    const sigRow = await db.businessSignal.findFirst({
+      where: { businessId: ID.bizA, type: 'OVERDUE_INVOICE', entityId: R1.invDelContact },
+    });
+    expect(sigRow).not.toBeNull();
+    expect(sigRow?.contactId).toBeNull();
+    const bridgedInv = bridged.find((b) => b.sourceId === R1.invDelContact);
+    expect(bridgedInv).toBeDefined();
+    expect(bridgedInv?.contactId).toBeUndefined();
   });
 });

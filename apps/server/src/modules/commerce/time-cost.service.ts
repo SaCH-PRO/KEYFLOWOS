@@ -83,9 +83,12 @@ export class TimeCostService {
 
   private async assertContactInBusiness(
     businessId: string,
-    contactId: string | null | undefined,
+    contactId: unknown,
   ): Promise<void> {
     if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || contactId.trim().length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
     const contact = await this.db.contact.findFirst({
       where: { id: contactId, businessId, deletedAt: null },
       select: { id: true },
@@ -300,20 +303,40 @@ export class TimeCostService {
     try {
       switch (refType) {
         case 'INVOICE': {
-          const r = await this.db.invoice.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          const r = await this.db.invoice.findFirst({
+            where: { id: refId, businessId },
+            select: { contactId: true, contact: { select: { businessId: true, deletedAt: true } } },
+          });
+          return r?.contactId && r.contact?.businessId === businessId && r.contact?.deletedAt === null
+            ? r.contactId
+            : null;
         }
         case 'QUOTE': {
-          const r = await this.db.quote.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          const r = await this.db.quote.findFirst({
+            where: { id: refId, businessId },
+            select: { contactId: true, contact: { select: { businessId: true, deletedAt: true } } },
+          });
+          return r?.contactId && r.contact?.businessId === businessId && r.contact?.deletedAt === null
+            ? r.contactId
+            : null;
         }
         case 'BOOKING': {
-          const r = await this.db.booking.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          const r = await this.db.booking.findFirst({
+            where: { id: refId, businessId },
+            select: { contactId: true, contact: { select: { businessId: true, deletedAt: true } } },
+          });
+          return r?.contactId && r.contact?.businessId === businessId && r.contact?.deletedAt === null
+            ? r.contactId
+            : null;
         }
         case 'PROJECT': {
           const r = await this.db.project.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          if (!r?.contactId) return null;
+          const c = await this.db.contact.findFirst({
+            where: { id: r.contactId, businessId, deletedAt: null },
+            select: { id: true },
+          });
+          return c?.id ?? null;
         }
         case 'ORDER': {
           // MarketplaceOrder is keyed by customer email rather than a CRM

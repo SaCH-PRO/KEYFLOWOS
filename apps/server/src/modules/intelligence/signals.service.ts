@@ -9,9 +9,12 @@ export class SignalsService {
 
   private async assertContactInBusiness(
     businessId: string,
-    contactId: string | null | undefined,
+    contactId: unknown,
   ): Promise<void> {
     if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || contactId.trim().length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
     const contact = await this.prisma.client.contact.findFirst({
       where: { id: contactId, businessId, deletedAt: null },
       select: { id: true },

@@ -107,14 +107,24 @@ export class CommandService {
 
   private async assertContactInBusiness(
     businessId: string,
-    contactId: string | null | undefined,
+    contactId: unknown,
+    actorUserId?: string,
   ): Promise<void> {
-    if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || contactId.trim().length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
     const contact = await this.prisma.client.contact.findFirst({
       where: { id: contactId, businessId, deletedAt: null },
       select: { id: true },
     });
     if (!contact) throw new NotFoundException('Contact not found');
+    if (actorUserId) {
+      const access = await this.restrictedAccess(businessId, actorUserId);
+      if (access) {
+        const hidden = await this.hiddenAmong(businessId, access, actorUserId, [contactId]);
+        if (hidden.length > 0) throw new NotFoundException('Contact not found');
+      }
+    }
   }
 
   /**
@@ -123,7 +133,15 @@ export class CommandService {
    * and the row stays a SYSTEM one, as before.
    */
   async create(businessId: string, dto: CreateCommandItemDto, actorUserId?: string) {
-    await this.assertContactInBusiness(businessId, dto.contactId);
+    if (dto.contactId !== undefined && dto.contactId !== null) {
+      await this.assertContactInBusiness(businessId, dto.contactId, actorUserId);
+    }
+    if (isContactType(dto.ownerType ?? null)) {
+      await this.assertContactInBusiness(businessId, dto.ownerId, actorUserId);
+    }
+    if (isContactType(dto.entityType ?? null)) {
+      await this.assertContactInBusiness(businessId, dto.entityId, actorUserId);
+    }
     const item = await this.prisma.client.commandItem.create({
       data: {
         businessId,
@@ -487,6 +505,11 @@ export class CommandService {
 
   async update(businessId: string, id: string, dto: UpdateCommandItemDto, actorUserId?: string) {
     const existing = await this.findOne(businessId, id, actorUserId);
+    const effectiveOwnerType = dto.ownerType ?? existing.ownerType;
+    if ((dto.ownerType !== undefined || dto.ownerId !== undefined) && isContactType(effectiveOwnerType)) {
+      const effectiveOwnerId = dto.ownerId !== undefined ? dto.ownerId : existing.ownerId;
+      await this.assertContactInBusiness(businessId, effectiveOwnerId, actorUserId);
+    }
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: {
@@ -596,6 +619,9 @@ export class CommandService {
 
   async assign(businessId: string, id: string, ownerType: string, ownerId: string, actorUserId?: string) {
     const existing = await this.findOne(businessId, id, actorUserId);
+    if (isContactType(ownerType)) {
+      await this.assertContactInBusiness(businessId, ownerId, actorUserId);
+    }
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { ownerType, ownerId },
