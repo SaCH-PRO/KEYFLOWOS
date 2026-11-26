@@ -48,6 +48,7 @@ vi.mock("@/lib/client", () => ({
   PAYMENT_METHODS: [{ value: "cash", label: "Cash" }],
 }));
 
+import { toast } from "sonner";
 import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { formatCurrency, formatDate } from "../components/expense-utils";
@@ -247,5 +248,108 @@ describe("SEC-EXH2-1: another business's cached currency never labels this busin
     cachedBusiness.value = { id: "biz_other_y", name: "Y Co", currency: "USD" };
     storedBusinessId.value = BUSINESS;
     expect(formatCurrency(150)).not.toMatch(/USD/);
+  });
+});
+
+describe("SEC-r1-1: the panel and the utils use the business in hand, not the cached-and-stored one", () => {
+  // A reloaded tab: business Y (USD, Tokyo) is stored and cached, while this panel shows business X.
+  beforeEach(() => {
+    cachedBusiness.value = { id: "biz_other_y", name: "Y Co", currency: "USD", timezone: "Asia/Tokyo" };
+    storedBusinessId.value = "biz_other_y";
+  });
+
+  it("the builder of X's panel does not show Y's currency", async () => {
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    await waitFor(() => expect(screen.getByText(/Amount \(TTD\)/)).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "45" } });
+    expect(document.body.textContent).not.toMatch(/USD/);
+  });
+
+  it("X's panel shows a schedule's instant in X's zone (Trinidad), not Y's (Tokyo)", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValueOnce({
+      data: [{ id: "r3", name: "Rent", description: "Rent", amount: 4500, currency: "TTD", frequency: "MONTHLY", nextRunDate: "2026-12-26T01:00:00.000Z", isActive: true, runCount: 1, failureCount: 0, createsBill: false, businessId: BUSINESS, createdAt: "", updatedAt: "" }],
+      error: null,
+    } as never);
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
+    await waitFor(() => expect(screen.getByText(/Next: Dec 25/)).toBeTruthy());
+  });
+
+  it("formatCurrency and formatDate given X do not use Y", () => {
+    expect(formatCurrency(150, undefined, BUSINESS)).not.toMatch(/USD/);
+    expect(formatDate("2026-11-26T01:00:00.000Z", BUSINESS)).toBe("Nov 25, 2026");
+    // Without X they still read the stored business (Y): the comparison the callers no longer rely on.
+    expect(formatDate("2026-11-26T01:00:00.000Z")).toBe("Nov 26, 2026");
+  });
+});
+
+describe("SEC-r1-2: the New Recurring Expense builder never schedules a past run", () => {
+  // 10:00 on 26 November 2026 in Port of Spain.
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-26T14:00:00.000Z"));
+    const client = await import("@/lib/client");
+    vi.mocked(client.createRecurringExpense).mockReset().mockResolvedValue({ data: { id: "rec_new" }, error: null } as never);
+    vi.mocked(toast.success).mockReset();
+    vi.mocked(toast.error).mockReset();
+  });
+
+  async function openBuilder() {
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("e.g., Office Rent")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("e.g., Office Rent"), { target: { value: "Office rent" } });
+    fireEvent.change(screen.getByPlaceholderText("What is this expense for?"), { target: { value: "Office rent" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "4500" } });
+    return document.querySelector('input[type="date"]') as HTMLInputElement;
+  }
+
+  it("the next run date cannot be before tomorrow in the business zone", async () => {
+    const date = await openBuilder();
+    expect(date.min).toBe("2026-11-27");
+  });
+
+  it.each(["2026-11-26", "2026-03-10"])("a next run on %s (today or past) is refused inline and nothing is sent", async (day) => {
+    const client = await import("@/lib/client");
+    const date = await openBuilder();
+    fireEvent.change(date, { target: { value: day } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(screen.getByText(/next run.*after today/i)).toBeTruthy());
+    expect(client.createRecurringExpense).not.toHaveBeenCalled();
+  });
+
+  it("a next run tomorrow is sent", async () => {
+    const client = await import("@/lib/client");
+    const date = await openBuilder();
+    fireEvent.change(date, { target: { value: "2026-11-27" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(client.createRecurringExpense).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(client.createRecurringExpense).mock.calls[0][1]).toMatchObject({ nextRunDate: "2026-11-27" });
+  });
+
+  it("a double click creates one schedule", async () => {
+    const client = await import("@/lib/client");
+    let release: (v: unknown) => void = () => {};
+    vi.mocked(client.createRecurringExpense).mockImplementation((() => new Promise((r) => { release = r; })) as never);
+    const date = await openBuilder();
+    fireEvent.change(date, { target: { value: "2026-12-01" } });
+    const create = screen.getByRole("button", { name: "Create" });
+    fireEvent.click(create);
+    fireEvent.click(create);
+    await waitFor(() => expect(client.createRecurringExpense).toHaveBeenCalledTimes(1));
+    release({ data: { id: "rec_new" }, error: null });
+    fireEvent.click(create);
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalled());
+    expect(client.createRecurringExpense).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a refused create the builder can save again", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.createRecurringExpense).mockResolvedValueOnce({ data: null, error: "Invalid frequency", status: 400 } as never);
+    const date = await openBuilder();
+    fireEvent.change(date, { target: { value: "2026-12-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Invalid frequency"));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(client.createRecurringExpense).toHaveBeenCalledTimes(2));
   });
 });

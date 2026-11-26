@@ -351,3 +351,41 @@ describe("COR-F5: a bill whose receipt and tags are refused says so", () => {
     expect(onSaved, "the bill exists: the sheet closes and the list reloads").toHaveBeenCalled();
   });
 });
+
+describe.each<Form>(["modal", "sidesheet"])("COR-r1-1: in the %s, the save guard clears after a refused save", (form) => {
+  it("a save refused (409) can be pressed again, and the second press sends", async () => {
+    createExpense.mockResolvedValueOnce({ data: null, error: "Conflict", status: 409 });
+    const { container } = mount(form);
+    fillBasics(container, "Office rent", "4500");
+    const save = screen.getByRole("button", { name: "Add Expense" });
+    fireEvent.click(save);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Conflict"));
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(createExpense).toHaveBeenCalledTimes(2));
+  });
+
+  it("a save that throws can be pressed again", async () => {
+    createExpense.mockRejectedValueOnce(new Error("network down"));
+    const { container } = mount(form);
+    fillBasics(container, "Office rent", "4500");
+    const save = screen.getByRole("button", { name: "Add Expense" });
+    fireEvent.click(save);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Failed to save expense"));
+    fireEvent.click(save);
+    await waitFor(() => expect(createExpense).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("COR-r1-1: a refused bill can be recorded again", () => {
+  it("Record bill after a refusal sends again", async () => {
+    createBill.mockResolvedValueOnce({ data: null, error: "Amount must be positive", status: 400 });
+    const { container } = mount("sidesheet", { kind: "bill" });
+    fillBasics(container, "Bill", "5");
+    const save = screen.getByRole("button", { name: /^record bill$/i });
+    fireEvent.click(save);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Amount must be positive"));
+    fireEvent.click(save);
+    await waitFor(() => expect(createBill).toHaveBeenCalledTimes(2));
+  });
+});
