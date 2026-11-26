@@ -1310,6 +1310,9 @@ function census(): Write[] {
 
 const id = (r: { store: string; key: string; file: string }) => `${r.store} ${r.key} @ ${r.file}`;
 
+/** The CSC_DUMP lines (repair round 7b fills this in: sorted by file, line, store and key). */
+const dumpLines = (writes: Write[]): string[] => writes.map((w) => `CSC ${isCredential(w) ? "CRED" : "----"} ${w.store} ${w.key} @ ${w.file}:${w.line}`);
+
 /** The census against a registry: credential writes with no row, and rows with no write. */
 function compare(writes: Write[], registry: RegistryRow[]) {
   const found = new Map<string, Write>();
@@ -2429,5 +2432,60 @@ describe("CSC-41 logical assignment", () => {
   ].join("\n");
   it("finds each", () => {
     expect(keysOf(scan("src/fixture-la.ts", fixture))).toEqual(["cookie:kf_la1_session", "window.name:window.name", "localStorage:kf_la3_token"]);
+  });
+});
+
+/* ------------------------------------------------------ repair round 7b */
+
+/**
+ * Repair round 7b (correctness review of round 6: COR6-2..5).
+ *
+ *   CSC-42 pins for shapes the AST matcher handles with no case yet (+= on document.cookie, an element-access method
+ *          name, element access in a receiver, window.document.cookie); IndexedDB parameters with a union type; both
+ *          scanners classify `(localStorage satisfies Storage).setItem` as localStorage; the CSC_DUMP lines are sorted
+ *          by file, line, store and key.
+ */
+describe("CSC-42 round-6 correctness pins", () => {
+  for (const [name, fixture, key] of [
+    ["+= on document.cookie (pin)", "document.cookie += `kf_pe_session=${t}`;", "cookie:kf_pe_session"],
+    ["an element-access method name (pin)", `localStorage['setItem']("kf_em_token", t);`, "localStorage:kf_em_token"],
+    ["element access in the receiver (pin)", `window["localStorage"]["setItem"]("kf_er_token", t);`, "localStorage:kf_er_token"],
+    ["window.document.cookie (pin)", "window.document.cookie = `kf_wd_session=${t}`;", "cookie:kf_wd_session"],
+  ]) {
+    it(`${name}: found`, () => {
+      expect(keysOf(scan("src/fixture-c6.ts", fixture))).toContain(key);
+    });
+  }
+
+  it("IndexedDB parameters with a union type are stores and cursors", () => {
+    const fixture = [
+      `export function f(c: IDBCursorWithValue | null, s: IDBObjectStore | undefined, token: string) {`,
+      `  c!.update({ token });`,
+      `  s!.put({ token });`,
+      `}`,
+    ].join("\n");
+    expect(scan("src/fixture-union.ts", fixture).filter((w) => w.store === "indexedDB" && isCredential(w)).map((w) => w.line)).toEqual([2, 3]);
+  });
+
+  it("both scanners classify (localStorage satisfies Storage).setItem as localStorage", () => {
+    const line = `(localStorage satisfies Storage).setItem("kf_sat_token", t);`;
+    expect(keysOf(scan("src/fixture-sat.ts", line))).toEqual(["localStorage:kf_sat_token"]);
+    // A file with parse errors goes to the text scanner.
+    expect(keysOf(scan("src/fixture-sat.tsx", `const f = <T>(x: T) => x;\n${line}`))).toContain("localStorage:kf_sat_token");
+  });
+
+  it("the CSC_DUMP lines are sorted by file, line, store and key", () => {
+    const ws: Write[] = [
+      { store: "localStorage", key: "b", expr: "b", value: "", file: "src/b.ts", line: 2 },
+      { store: "cookie", key: "a", expr: "a", value: "", file: "src/a.ts", line: 9 },
+      { store: "localStorage", key: "a", expr: "a", value: "", file: "src/b.ts", line: 2 },
+      { store: "cookie", key: "z", expr: "z", value: "", file: "src/a.ts", line: 3 },
+    ];
+    expect((dumpLines as unknown as (w: Write[]) => string[])(ws)).toEqual([
+      "CSC ---- cookie z @ src/a.ts:3",
+      "CSC ---- cookie a @ src/a.ts:9",
+      "CSC ---- localStorage a @ src/b.ts:2",
+      "CSC ---- localStorage b @ src/b.ts:2",
+    ]);
   });
 });
