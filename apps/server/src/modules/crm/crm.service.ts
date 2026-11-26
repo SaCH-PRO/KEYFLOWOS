@@ -2673,6 +2673,7 @@ export class CrmService {
           return val;
         } catch (err) {
           await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${sp}`);
+          await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${sp}`);
           throw err;
         }
       };
@@ -3215,7 +3216,7 @@ export class CrmService {
           previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
           previousNextActionType: existing.nextActionType ?? null,
         },
-        { actorType: input.actorId ? 'USER' : 'SYSTEM', actorId: input.actorId ?? undefined, source: 'crm' },
+        { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(audit) },
         tx,
       );
       return row;
@@ -3282,7 +3283,7 @@ export class CrmService {
           nextActionAt: target.toISOString(),
           nextActionType: existing.nextActionType ?? null,
         },
-        { actorType: input.actorId ? 'USER' : 'SYSTEM', actorId: input.actorId ?? undefined, source: 'crm' },
+        { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(audit) },
         tx,
       );
       return row;
