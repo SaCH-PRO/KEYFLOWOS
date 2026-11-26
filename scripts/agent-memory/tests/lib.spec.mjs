@@ -70,6 +70,12 @@ test('deriveStatus: a tests-only packet is done on its compacted RED commit alon
   // whole ids only, and a loose RED mention still is not done
   assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test(web): RED for pkt/V1-A-2 (compacted)')] }).status, 'todo');
   assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test: RED for A')] }).status, 'todo');
+  // the whole subject must be the RED subject (M36 wave security confirmation, MINOR-1)
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test(web): RED for pkt/V1-A (compacted) revert')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('B'), { ...base, commits: [c('test(web): RED for pkt/V1-A (compacted), B RED for pkt/V1-B (compacted)')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test(web)!: RED for pkt/V1-A (compacted)')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test: RED for pkt/V1-A (compacted)')] }).status, 'done');
+  assert.equal(deriveStatus(pk('A.B'), { ...base, commits: [c('test(web): RED for pkt/V1-AxB (compacted)')] }).status, 'todo');
 });
 
 test('wave2bMerged', () => {
