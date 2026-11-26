@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Bell,
@@ -18,7 +18,12 @@ import Link from "next/link";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
+import { NoAccessState } from "@/components/ui/no-access-state";
+import { readState, type ReadState } from "@/lib/failure-kit";
 import { toast } from "sonner";
+// OWNER-ALERTS-WEB (D-154): the "Owner alerts" tab, its own components.
+import { InstallAppStep } from "@/components/install-app-step";
+import { OwnerAlertSettings } from "@/components/owner-alert-settings";
 
 interface NotificationPreferences {
   booking_confirmed: boolean;
@@ -101,23 +106,56 @@ const TYPE_LABELS: Record<string, string> = {
   payment_receipt: "Receipt",
 };
 
+/** A read that did not give the tab its data: no access (FAILURE-KIT's NoAccessState), or a failed load with Retry. */
+function ReadProblem({ state, onRetry }: { state: ReadState; onRetry: () => void }) {
+  if (state.kind === "ok") return null;
+  if (state.kind === "no-access") return <NoAccessState message={state.message} />;
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+      <span className="min-w-0 flex-1 break-words">{state.message}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="min-h-9 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export default function NotificationsSettingsPage() {
   const [preferences, setPreferences] = useState<NotificationPreferences | null>(null);
   const [log, setLog] = useState<NotificationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"preferences" | "log">("preferences");
+  // The switches whose PATCH is in flight: each answer decides only its own switch (and clears only its own spinner).
+  const [saving, setSaving] = useState<ReadonlySet<keyof NotificationPreferences>>(() => new Set());
+  const pending = useRef(new Set<keyof NotificationPreferences>());
+  const [activeTab, setActiveTab] = useState<"preferences" | "log" | "alerts">("preferences");
+  // FU-NOTIFICATIONS-PAGE-REFUSED (D-283): each read judged by FAILURE-KIT's readState, so a settings-none member's
+  // refused read is said as no access (never a blank tab or "No customer notifications sent yet"), and any other
+  // failure (a 5xx, a network error, BusinessGuard's 403) as a failed load.
+  const [prefsRead, setPrefsRead] = useState<ReadState>({ kind: "ok" });
+  const [logRead, setLogRead] = useState<ReadState>({ kind: "ok" });
+  // Counts the loads started, so a toggle's failure knows whether a load (a Retry) has read the server since its click.
+  const loadGen = useRef(0);
 
   const loadData = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
+    loadGen.current += 1;
     setLoading(true);
     const [prefsRes, logRes] = await Promise.all([
       apiGet<NotificationPreferences>(`/notifications/businesses/${businessId}/customer-preferences`),
       apiGet<NotificationLogEntry[]>(`/notifications/businesses/${businessId}/customer-log?limit=100`),
     ]);
-    if (prefsRes.data) setPreferences(prefsRes.data);
-    if (logRes.data) setLog(logRes.data);
+    const prefsState = readState(prefsRes, { what: "the customer notification settings" });
+    const logState = readState(logRes, { what: "the customer notification log" });
+    setPrefsRead(prefsState);
+    setLogRead(logState);
+    setPreferences(prefsState.kind === "ok" ? prefsRes.data : null);
+    setLog(logState.kind === "ok" && Array.isArray(logRes.data) ? logRes.data : []);
     setLoading(false);
   }, []);
 
@@ -128,20 +166,48 @@ export default function NotificationsSettingsPage() {
 
   const togglePreference = async (key: keyof NotificationPreferences) => {
     if (!preferences) return;
-    setSaving(key);
-    const newValue = !preferences[key];
-    const updated = { ...preferences, [key]: newValue };
-    setPreferences(updated);
+    const before = preferences[key];
+    const newValue = !before;
+    const loadAtClick = loadGen.current;
     const businessId = getStoredBusinessId();
-    if (!businessId) { setSaving(null); return; }
-    const res = await apiPatch(`/notifications/businesses/${businessId}/customer-preferences`, { [key]: newValue });
+    if (!businessId) return;
+    pending.current.add(key);
+    setSaving(new Set(pending.current));
+    setPreferences((current) => (current ? { ...current, [key]: newValue } : current));
+    const path = `/notifications/businesses/${businessId}/customer-preferences`;
+    const res = await apiPatch<NotificationPreferences>(path, { [key]: newValue });
     if (res.error) {
-      setPreferences(preferences);
+      // The answer comes from the server (a Retry may have reloaded the page since the click): re-read the preferences
+      // and take this switch from them, as a PATCH answer is taken: every other switch is decided by its own answer or
+      // by a load, so a re-read read before another switch's commit cannot flip it. A refused re-read (access revoked)
+      // says no access; only when the re-read fails otherwise, and no load has read the server since the click, is this
+      // switch put back.
+      const fresh = await apiGet<NotificationPreferences>(path);
+      const freshState = readState(fresh, { what: "the customer notification settings" });
+      const serverValue = fresh.data?.[key];
+      if (freshState.kind === "ok" && typeof serverValue === "boolean") {
+        setPreferences((current) => (current ? { ...current, [key]: serverValue } : current));
+      } else if (freshState.kind === "no-access") {
+        // Both reads need settings read: the log goes too.
+        setPrefsRead(freshState);
+        setPreferences(null);
+        setLogRead(readState(fresh, { what: "the customer notification log" }));
+        setLog([]);
+      } else if (loadGen.current === loadAtClick) {
+        setPreferences((current) => (current ? { ...current, [key]: before } : current));
+      }
       toast.error("Failed to update notification preference");
     } else {
+      // The PATCH answers the whole preferences, but read before any other PATCH still in flight was decided: take
+      // only this switch from it.
+      const answered = res.data?.[key];
+      if (typeof answered === "boolean") {
+        setPreferences((current) => (current ? { ...current, [key]: answered } : current));
+      }
       toast.success("Notification preference updated");
     }
-    setSaving(null);
+    pending.current.delete(key);
+    setSaving(new Set(pending.current));
   };
 
   if (loading) {
@@ -187,7 +253,7 @@ export default function NotificationsSettingsPage() {
       </div>
 
       <div className="flex gap-1 p-1 rounded-xl bg-muted/30 border border-border/40 w-fit">
-        {(["preferences", "log"] as const).map((tab) => (
+        {(["preferences", "log", "alerts"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -197,7 +263,7 @@ export default function NotificationsSettingsPage() {
                 : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
-            {tab === "preferences" ? "Preferences" : `Log (${log.length})`}
+            {tab === "preferences" ? "Preferences" : tab === "alerts" ? "Owner alerts" : logRead.kind === "ok" ? `Log (${log.length})` : "Log"}
           </button>
         ))}
       </div>
@@ -212,7 +278,10 @@ export default function NotificationsSettingsPage() {
         .
       </p>
 
-      {activeTab === "preferences" && preferences && (
+      {activeTab === "preferences" && <ReadProblem state={prefsRead} onRetry={loadData} />}
+      {activeTab === "log" && <ReadProblem state={logRead} onRetry={loadData} />}
+
+      {activeTab === "preferences" && prefsRead.kind === "ok" && preferences && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -265,10 +334,11 @@ export default function NotificationsSettingsPage() {
                       <p className="kf-text-caption text-muted-foreground">{type.description}</p>
                     </div>
                   </div>
+                  {/* h-6 w-11 / h-5 w-5: the old h-5.5 and h-4.5 are not Tailwind 3 classes and rendered the switch 0px tall. */}
                   <button
                     onClick={() => togglePreference(type.key)}
-                    disabled={saving === type.key}
-                    className="relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0"
+                    disabled={saving.has(type.key)}
+                    className="relative h-6 w-11 rounded-full transition-colors duration-200 flex-shrink-0"
                     style={{
                       background: enabled
                         ? "hsl(var(--kf-success))"
@@ -279,12 +349,12 @@ export default function NotificationsSettingsPage() {
                     aria-checked={enabled}
                   >
                     <span
-                      className="absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition-transform duration-200"
+                      className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200"
                       style={{
-                        transform: enabled ? "translateX(19px)" : "translateX(2px)",
+                        transform: enabled ? "translateX(22px)" : "translateX(2px)",
                       }}
                     />
-                    {saving === type.key && (
+                    {saving.has(type.key) && (
                       <Loader2
                         className="absolute top-1 right-1 w-3.5 h-3.5 animate-spin"
                         style={{ color: "hsl(var(--background))" }}
@@ -298,7 +368,7 @@ export default function NotificationsSettingsPage() {
         </motion.div>
       )}
 
-      {activeTab === "log" && (
+      {activeTab === "log" && logRead.kind === "ok" && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -409,6 +479,14 @@ export default function NotificationsSettingsPage() {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* OWNER-ALERTS-WEB (D-154): the business owner's alerts (push first, email fallback) and the install step. */}
+      {activeTab === "alerts" && (
+        <section aria-label="Owner alerts" className="space-y-3">
+          <InstallAppStep />
+          <OwnerAlertSettings businessId={getStoredBusinessId()} />
+        </section>
       )}
     </div>
   );
