@@ -1515,6 +1515,11 @@
       "prefix": "v67b_",
       "owner": "apps/server/test/legacy-modules.integration.test.ts",
       "packet": "V1-67 (NAV-B-LEGACY-SERVER)"
+    },
+    {
+      "prefix": "v84k_",
+      "owner": "apps/server/test/cortex-insight-cash-truth.integration.test.ts",
+      "packet": "V1-84 (FU-CORTEX-INSIGHT-CASH-TRUTH, P119)"
     }
   ],
   "pendingRenames": [],
