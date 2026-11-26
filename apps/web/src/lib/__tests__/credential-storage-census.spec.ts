@@ -2222,3 +2222,125 @@ describe("CSC-36 (round 6) argument text has its comments removed", () => {
     expect(w?.attrs).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------- repair round 7 */
+
+/**
+ * Repair round 7 (security REJECT on round 6: CSC6-SEC-1 regression, CSC6-SEC-2..5).
+ *
+ *   CSC-37 (CSC6-SEC-1) code inside a string or template literal is scanned: an inline script's __html template, eval,
+ *          new Function and a string setTimeout; its writes are reported at their host-file lines.
+ *   CSC-38 (CSC6-SEC-2) a cookie jar alias (`const jar = res.cookies`), res["cookies"], an aliased import of
+ *          next/headers cookies, and a Set-Cookie header name held in a const or built with "+".
+ *   CSC-39 (CSC6-SEC-3) a service-worker Cache put on a parameter (untyped in public/, or typed Cache) that stores
+ *          request headers or the authorization header.
+ *   CSC-40 (CSC6-SEC-4) a key held in a same-file const object or enum resolves.
+ *   CSC-41 logical assignment (||= ??= &&=) to document.cookie, window.name and storage.
+ */
+describe("CSC-37 code inside a string or template is scanned", () => {
+  it("an inline script's __html template: the write is found at its host line", () => {
+    const fixture = [
+      `export default function Layout() {`,
+      `  return (`,
+      `    <script`,
+      `      dangerouslySetInnerHTML={{`,
+      `        __html: \``,
+      `          (function () {`,
+      `            document.cookie = 'kf_pre_token=' + localStorage.getItem('kf_token') + '; path=/';`,
+      `          })();`,
+      `        \`,`,
+      `      }}`,
+      `    />`,
+      `  );`,
+      `}`,
+    ].join("\n");
+    const w = scan("src/fixture-inline.tsx", fixture).find((x) => x.key === "kf_pre_token");
+    expect(w, "kf_pre_token is found").toBeTruthy();
+    expect(w!.store).toBe("cookie");
+    expect(w!.line).toBe(7);
+  });
+
+  for (const [name, fixture, key] of [
+    ["eval", `eval('localStorage.setItem("kf_ev_token", t)');`, "localStorage:kf_ev_token"],
+    ["new Function", `const f = new Function("t", 'sessionStorage.setItem("kf_nf_token", t)');`, "sessionStorage:kf_nf_token"],
+    ["a string setTimeout", `setTimeout("document.cookie = 'kf_st_session=1; path=/'", 0);`, "cookie:kf_st_session"],
+    ["a template with a substitution", "const s = `localStorage.setItem(\"kf_ts_token\", ${t});`;", "localStorage:kf_ts_token"],
+  ]) {
+    it(`${name}: the write in the string is found`, () => {
+      expect(keysOf(scan("src/fixture-str-code.ts", fixture))).toContain(key);
+    });
+  }
+
+  it("prose that only names a store is not a write", () => {
+    const fixture = `const msg = "localStorage is full; clear the token cache"; const h = "Set-Cookie";`;
+    expect(scan("src/fixture-prose.ts", fixture)).toEqual([]);
+  });
+});
+
+describe("CSC-38 cookie jar aliases and Set-Cookie header names", () => {
+  const fixture = [
+    `import { cookies as c } from "next/headers";`,
+    `const SET_COOKIE = "Set-Cookie";`,
+    `export async function h(res: { cookies: { set(n: string, v: string): void }; headers: Headers }, t: string) {`,
+    `  const jar = res.cookies;`,
+    `  jar.set("kf_rv_session", t);`,
+    `  res["cookies"].set("kf_el_session", t);`,
+    `  (await c()).set("kf_alias_session", t);`,
+    `  res.headers.append(SET_COOKIE, \`kf_const_session=\${t}\`);`,
+    `  res.headers.append("Set-" + "Cookie", \`kf_concat_session=\${t}\`);`,
+    `  const o = { [SET_COOKIE]: "kf_prop_session=1" };`,
+    `  const h2 = new Headers([[SET_COOKIE, "kf_tuple_session=1"]]);`,
+    `}`,
+  ].join("\n");
+  const keys = keysOf(scan("src/fixture-jar.ts", fixture));
+  for (const k of ["kf_rv_session", "kf_el_session", "kf_alias_session", "kf_const_session", "kf_concat_session", "kf_prop_session", "kf_tuple_session"]) {
+    it(`${k} is found`, () => {
+      expect(keys).toContain(`response-cookie:${k}`);
+    });
+  }
+});
+
+describe("CSC-39 a service-worker Cache put on a parameter", () => {
+  it("an untyped parameter in public/: a put of the authorization header is a credential write", () => {
+    const fixture = `async function stash(cache, req) { await cache.put(req.url, new Response(req.headers.get("authorization"))); }`;
+    const ws = scan("public/fixture-stash.js", fixture);
+    expect(ws.filter((w) => w.store === "cacheStorage" && isCredential(w)).length).toBe(1);
+  });
+
+  it("a parameter typed Cache, anywhere: a put of request headers is a credential write", () => {
+    const fixture = `export async function stash(cache: Cache, req: Request) { await cache.put(req.url, new Response(JSON.stringify([...req.headers]))); }`;
+    const ws = scan("src/fixture-stash.ts", fixture);
+    expect(ws.filter((w) => w.store === "cacheStorage" && isCredential(w)).length).toBe(1);
+  });
+
+  it("a Map's put-like call outside public/ on an untyped receiver is not a Cache write", () => {
+    const fixture = `export function f(m, req) { m.put(req.url, req.headers); }`;
+    expect(scan("src/fixture-map.ts", fixture).filter((w) => w.store === "cacheStorage")).toEqual([]);
+  });
+});
+
+describe("CSC-40 a key held in a const object or enum", () => {
+  const fixture = [
+    `const K = { a: "kf_obj_token", b: \`kf_tpl_\${"x"}_secret\` };`,
+    `enum E { A = "kf_enum_token", B = "kf_enum_plain" }`,
+    `export function save(t: string) {`,
+    `  localStorage.setItem(K.a, t);`,
+    `  localStorage.setItem(K["b"], t);`,
+    `  localStorage.setItem(E.A, t);`,
+    `}`,
+  ].join("\n");
+  it("resolves K.a, K[\"b\"] and E.A", () => {
+    expect(keysOf(scan("src/fixture-objkey.ts", fixture))).toEqual(["localStorage:kf_obj_token", "localStorage:kf_tpl_x_secret", "localStorage:kf_enum_token"]);
+  });
+});
+
+describe("CSC-41 logical assignment", () => {
+  const fixture = [
+    "document.cookie ||= `kf_la1_session=${t}`;",
+    "window.name ??= t;",
+    `localStorage["kf_la3_token"] &&= t;`,
+  ].join("\n");
+  it("finds each", () => {
+    expect(keysOf(scan("src/fixture-la.ts", fixture))).toEqual(["cookie:kf_la1_session", "window.name:window.name", "localStorage:kf_la3_token"]);
+  });
+});
