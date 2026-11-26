@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -21,7 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, formatShortDate } from "./expense-utils";
+import { businessCurrency, dayAfter, formatShortDate, todayInBusinessZone } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -65,8 +65,13 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     }
   }, [triggerNew]);
 
+  // SEC-r1-2: one save at a time (a double click creates one schedule); cleared however the save ends.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
   const handleSave = async (form: RecurringFormData) => {
-    if (!businessId) return;
+    if (!businessId || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       const payload = {
         name: form.name,
@@ -96,6 +101,9 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       void load();
     } catch {
       toast.error("Failed to save");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -138,6 +146,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
             <RecurringCard
               key={item.id}
               item={item}
+              businessId={businessId}
               categories={categories}
               onEdit={() => { setEditing(item); setShowBuilder(true); }}
               onCancel={() => handleCancel(item.id)}
@@ -150,6 +159,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       <AnimatePresence>
         {showBuilder && (
           <RecurringBuilder
+            businessId={businessId}
+            saving={saving}
             categories={categories}
             editing={editing}
             onClose={() => { setShowBuilder(false); setEditing(null); }}
@@ -162,6 +173,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
 }
 
 function RecurringCard({
+  businessId,
   item,
   categories,
   onEdit,
@@ -169,6 +181,7 @@ function RecurringCard({
   onRunNow,
 }: {
   item: RecurringExpense;
+  businessId: string | null;
   categories: ExpenseCategory[];
   onEdit: () => void;
   onCancel: () => void;
@@ -214,7 +227,7 @@ function RecurringCard({
               </>
             )}
             <span className="text-border">·</span>
-            <span>Next: {formatShortDate(item.nextRunDate)}</span>
+            <span>Next: {formatShortDate(item.nextRunDate, businessId)}</span>
             <span className="text-border">·</span>
             <span>{item.runCount} runs</span>
           </div>
@@ -276,15 +289,19 @@ interface RecurringFormData {
 }
 
 function RecurringBuilder({
+  businessId,
+  saving,
   categories,
   editing,
   onClose,
   onSave,
 }: {
+  businessId: string | null;
+  saving: boolean;
   categories: ExpenseCategory[];
   editing: RecurringExpense | null;
   onClose: () => void;
-  onSave: (form: RecurringFormData) => void;
+  onSave: (form: RecurringFormData) => void | Promise<void>;
 }) {
   const [form, setForm] = useState<RecurringFormData>(() => {
     if (editing) {
@@ -320,8 +337,21 @@ function RecurringBuilder({
   });
 
   const amountNum = parseFloat(form.amount || "0");
-  // BUG-027: the business currency (the server writes it on the schedule), never a literal TTD.
-  const currency = businessCurrency();
+  // BUG-027: the business currency (the server writes it on the schedule), never a literal TTD; this panel's
+  // business, never another cached one (SEC-r1-1).
+  const currency = businessCurrency(businessId);
+  // SEC-r1-2: the server generates one expense per due period from nextRunDate, so a run on or before today
+  // would book every missed period at once: the first run is tomorrow at the earliest, in the business zone.
+  const earliestRun = dayAfter(todayInBusinessZone(new Date(), businessId));
+  const [dateError, setDateError] = useState<string | null>(null);
+  const save = () => {
+    if (!form.nextRunDate || form.nextRunDate < earliestRun) {
+      setDateError("The next run must be after today: a past run would book every missed period at once.");
+      return;
+    }
+    setDateError(null);
+    onSave(form);
+  };
 
   return (
     <SideSheet
@@ -351,8 +381,9 @@ function RecurringBuilder({
               Cancel
             </button>
             <button
-              onClick={() => onSave(form)}
-              disabled={!form.name.trim() || !form.amount || !form.nextRunDate}
+              onClick={save}
+              disabled={saving || !form.name.trim() || !form.amount || !form.nextRunDate}
+              aria-busy={saving || undefined}
               className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 bg-rose-500/10 text-rose-400 border border-rose-500/30"
             >
               {editing ? "Update" : "Create"}
@@ -411,9 +442,15 @@ function RecurringBuilder({
             <input
               type="date"
               value={form.nextRunDate}
-              onChange={(e) => setForm({ ...form, nextRunDate: e.target.value })}
+              min={earliestRun}
+              aria-invalid={dateError ? true : undefined}
+              aria-describedby={dateError ? "recurring-next-run-error" : undefined}
+              onChange={(e) => { setDateError(null); setForm({ ...form, nextRunDate: e.target.value }); }}
               className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-rose-500/40"
             />
+            {dateError && (
+              <p id="recurring-next-run-error" role="alert" className="text-[11px] text-red-400 mt-1">{dateError}</p>
+            )}
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">End Date (optional)</label>

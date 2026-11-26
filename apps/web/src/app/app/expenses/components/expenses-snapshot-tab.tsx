@@ -20,6 +20,8 @@ import { formatCurrency } from "./expense-utils";
 import type { Expense, ExpenseCategory, ExpenseSummary, ExpenseBudget } from "@/lib/client";
 
 interface ExpensesSnapshotTabProps {
+  /** The business these figures are (SEC-r1-1): its currency, never another cached business's. */
+  businessId?: string | null;
   expenses: Expense[];
   categories: ExpenseCategory[];
   summary: ExpenseSummary | null;
@@ -29,6 +31,7 @@ interface ExpensesSnapshotTabProps {
 }
 
 export function ExpensesSnapshotTab({
+  businessId,
   expenses,
   categories,
   summary,
@@ -58,7 +61,7 @@ export function ExpensesSnapshotTab({
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Spent</p>
-            <p className="text-3xl font-bold text-foreground mt-1">{formatCurrency(totalSpent)}</p>
+            <p className="text-3xl font-bold text-foreground mt-1">{formatCurrency(totalSpent, undefined, businessId)}</p>
             <div className="flex items-center gap-1.5 mt-2">
               {direction === "up" ? (
                 <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
@@ -79,7 +82,7 @@ export function ExpensesSnapshotTab({
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground">Average</p>
-              <p className="text-sm font-semibold">{formatCurrency(summary?.averageExpense ?? 0)}</p>
+              <p className="text-sm font-semibold">{formatCurrency(summary?.averageExpense ?? 0, undefined, businessId)}</p>
             </div>
           </div>
         </div>
@@ -150,7 +153,7 @@ export function ExpensesSnapshotTab({
                         Due {new Date(bill.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </span>
                     )}
-                    <span className="text-xs font-semibold">{formatCurrency(bill.amount, bill.currency)}</span>
+                    <span className="text-xs font-semibold">{formatCurrency(bill.amount, bill.currency, businessId)}</span>
                   </div>
                 </div>
               );
@@ -236,7 +239,7 @@ export function ExpensesSnapshotTab({
                     <span className="text-[10px] text-muted-foreground">
                       {new Date(exp.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </span>
-                    <span className="text-xs font-medium">{formatCurrency(exp.amount, exp.currency)}</span>
+                    <span className="text-xs font-medium">{formatCurrency(exp.amount, exp.currency, businessId)}</span>
                   </div>
                 </div>
               );

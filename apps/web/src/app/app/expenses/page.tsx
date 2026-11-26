@@ -440,7 +440,7 @@ export default function ExpensesInboxPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
           <StatCard
             label="Spent this month"
-            value={formatCurrency(stats.spentThisMonth)}
+            value={formatCurrency(stats.spentThisMonth, undefined, d.businessId)}
             sub={`${d.summary ? Math.round((stats.spentThisMonth / (d.summary.total * 1.5 || 1)) * 100) : 0}% of monthly budget`}
             icon={TrendingUp}
             iconColor="text-blue-600"
@@ -448,7 +448,7 @@ export default function ExpensesInboxPage() {
           />
           <StatCard
             label="Pending approval"
-            value={formatCurrency(stats.pendingApproval)}
+            value={formatCurrency(stats.pendingApproval, undefined, d.businessId)}
             sub={`${tabCounts.pending_approval} expense${tabCounts.pending_approval !== 1 ? "s" : ""} waiting`}
             icon={Clock}
             iconColor="text-amber-600"
@@ -554,7 +554,7 @@ export default function ExpensesInboxPage() {
                               <input type="checkbox" className="rounded border-border" />
                             </td>
                             <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                              {formatDate(exp.date)}
+                              {formatDate(exp.date, d.businessId)}
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2.5">
@@ -575,7 +575,7 @@ export default function ExpensesInboxPage() {
                               <StatusBadge status={status} />
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <span className="text-sm font-semibold text-foreground">{formatCurrency(exp.amount, exp.currency)}</span>
+                              <span className="text-sm font-semibold text-foreground">{formatCurrency(exp.amount, exp.currency, d.businessId)}</span>
                             </td>
                             <td className="px-4 py-3 hidden xl:table-cell">
                               <span className={cn("text-xs font-medium", budgetColor)}>{budgetImpact}</span>

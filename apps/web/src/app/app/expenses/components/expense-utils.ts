@@ -131,6 +131,13 @@ export function firstRunAfter(day: string, frequency: string, today: string): st
   return next;
 }
 
+/** The day after `day` (YYYY-MM-DD). */
+export function dayAfter(day: string): string {
+  const p = parseDay(day);
+  if (!p) return day;
+  return new Date(Date.UTC(p.y, p.m - 1, p.d + 1)).toISOString().slice(0, 10);
+}
+
 /** Whole days from `from` to `to` (YYYY-MM-DD), or null when either is not a day. */
 export function daysBetween(from: string, to: string): number | null {
   const a = parseDay(from);
@@ -140,8 +147,8 @@ export function daysBetween(from: string, to: string): number | null {
 }
 
 /** An amount in its own currency, else in the business currency (BUG-027: it was always "TTD"). */
-export function formatCurrency(amount: number, currency?: string | null): string {
-  const code = typeof currency === "string" && currency.trim() ? currency.trim().toUpperCase() : businessCurrency();
+export function formatCurrency(amount: number, currency?: string | null, businessId?: string | null): string {
+  const code = typeof currency === "string" && currency.trim() ? currency.trim().toUpperCase() : businessCurrency(businessId);
   return formatMoney(amount, code);
 }
 
@@ -153,21 +160,22 @@ const CALENDAR_DAY = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00(?::00(?:\.0+)?)?Z)?$/;
  * time) is the day it falls on in the business's zone. Read in local time, a calendar day showed a day early
  * in Port of Spain (COR-F2).
  */
-function displayDay(dateStr: string, options: Intl.DateTimeFormatOptions): string {
+function displayDay(dateStr: string, options: Intl.DateTimeFormatOptions, businessId?: string | null): string {
   const day = CALENDAR_DAY.exec(dateStr);
   if (day) return new Date(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]))).toLocaleDateString("en-US", { ...options, timeZone: "UTC" });
   const at = new Date(dateStr);
   if (Number.isNaN(at.getTime())) return dateStr;
-  return at.toLocaleDateString("en-US", { ...options, timeZone: businessTimeZone() });
+  return at.toLocaleDateString("en-US", { ...options, timeZone: businessTimeZone(businessId) });
 }
 
-export function formatDate(dateStr: string): string {
-  return displayDay(dateStr, { year: "numeric", month: "short", day: "numeric" });
+/** `businessId`: the business the date belongs to (SEC-r1-1); without it, the stored one. */
+export function formatDate(dateStr: string, businessId?: string | null): string {
+  return displayDay(dateStr, { year: "numeric", month: "short", day: "numeric" }, businessId);
 }
 
 /** A date, short: "Dec 25". */
-export function formatShortDate(dateStr: string): string {
-  return displayDay(dateStr, { month: "short", day: "numeric" });
+export function formatShortDate(dateStr: string, businessId?: string | null): string {
+  return displayDay(dateStr, { month: "short", day: "numeric" }, businessId);
 }
 
 /** What a saved expense (or bill) gives its recurring schedule. */

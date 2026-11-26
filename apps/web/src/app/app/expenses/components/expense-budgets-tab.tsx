@@ -58,12 +58,12 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="kf-card rounded-xl p-3">
               <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Allocated</span>
-              <span className="text-sm font-bold">{formatCurrency(totalAllocated)}</span>
+              <span className="text-sm font-bold">{formatCurrency(totalAllocated, undefined, businessId)}</span>
               <span className="text-[10px] text-muted-foreground block mt-0.5">{budgets.length} budget{budgets.length !== 1 ? "s" : ""} active</span>
             </div>
             <div className="kf-card rounded-xl p-3">
               <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Consumed</span>
-              <span className="text-sm font-bold" style={{ color: totalConsumed > totalAllocated ? "hsl(var(--kf-error))" : undefined }}>{formatCurrency(totalConsumed)}</span>
+              <span className="text-sm font-bold" style={{ color: totalConsumed > totalAllocated ? "hsl(var(--kf-error))" : undefined }}>{formatCurrency(totalConsumed, undefined, businessId)}</span>
               <span className="text-[10px] text-muted-foreground block mt-0.5">{totalAllocated > 0 ? `${Math.round((totalConsumed / totalAllocated) * 100)}%` : "0%"} used</span>
             </div>
             <div className="kf-card rounded-xl p-3">
@@ -80,7 +80,7 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
               ) : (
                 <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-success))" }}>All on track</span>
               )}
-              <span className="text-[10px] text-muted-foreground block mt-0.5">{formatCurrency(Math.max(0, totalAllocated - totalConsumed))} remaining</span>
+              <span className="text-[10px] text-muted-foreground block mt-0.5">{formatCurrency(Math.max(0, totalAllocated - totalConsumed), undefined, businessId)} remaining</span>
             </div>
           </div>
         )}
@@ -115,8 +115,8 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
                     <button onClick={() => handleDeleteBudget(b.id)} className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-red-400 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                   <div className="flex items-baseline gap-2 mb-2">
-                    <span className="text-lg font-bold">{formatCurrency(b.spent)}</span>
-                    <span className="text-xs text-muted-foreground">of {formatCurrency(b.amount)}</span>
+                    <span className="text-lg font-bold">{formatCurrency(b.spent, undefined, businessId)}</span>
+                    <span className="text-xs text-muted-foreground">of {formatCurrency(b.amount, undefined, businessId)}</span>
                   </div>
                   <div className="h-2.5 rounded-full bg-muted/30 overflow-hidden mb-1.5 relative">
                     <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(b.percentUsed, 100)}%` }} transition={{ duration: 0.6 }} className={`h-full rounded-full ${b.isOverBudget ? "bg-red-500" : b.isNearAlert ? "bg-amber-500" : "bg-green-500"}`} />
@@ -124,17 +124,17 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
                   </div>
                   <div className="flex items-center justify-between text-xs mb-2">
                     <span className={b.isOverBudget ? "text-red-400" : b.isNearAlert ? "text-amber-400" : "text-green-400"}>
-                      {b.isOverBudget ? `Over by ${formatCurrency(Math.abs(b.remaining))}` : `${formatCurrency(b.remaining)} remaining`}
+                      {b.isOverBudget ? `Over by ${formatCurrency(Math.abs(b.remaining), undefined, businessId)}` : `${formatCurrency(b.remaining, undefined, businessId)} remaining`}
                     </span>
                     <span className="text-muted-foreground">{b.percentUsed}%</span>
                   </div>
                   <div className="flex items-center gap-3 text-[10px] text-muted-foreground border-t border-border/30 pt-2 mt-1">
                     <span className="flex items-center gap-1">
                       {projectedOver ? <TrendingUp className="w-3 h-3 text-red-400" /> : <TrendingDown className="w-3 h-3 text-green-400" />}
-                      Projected: {formatCurrency(projectedSpend)}
+                      Projected: {formatCurrency(projectedSpend, undefined, businessId)}
                     </span>
                     {projectedOver && (
-                      <span className="text-red-400">+{formatCurrency(projectedOverBy)} over</span>
+                      <span className="text-red-400">+{formatCurrency(projectedOverBy, undefined, businessId)} over</span>
                     )}
                   </div>
                   {b.isOverBudget && <div className="mt-2 flex items-center gap-1.5 text-[10px] text-red-400 bg-red-500/10 rounded-lg px-2 py-1"><AlertTriangle className="w-3 h-3" /> Budget exceeded!</div>}
