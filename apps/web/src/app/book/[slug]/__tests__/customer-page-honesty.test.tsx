@@ -56,6 +56,7 @@ import { TrustBar, SecurityFooter } from "../components/trust-bar";
 import ProductPage from "../product/[productId]/page";
 import { CheckoutFlow } from "../components/checkout-flow";
 import { ItemDetailModal } from "../components/item-detail-modal";
+import PublicBookingPage from "../page";
 import type { Business, BusinessHours } from "../components/types";
 import { OrderConfirmation } from "../components/order-confirmation";
 import PublicSitePage from "../../../site/[slug]/page";
@@ -350,5 +351,55 @@ describe("checkout and item details: no guarantee wording", () => {
     );
     expect(pageText()).toContain("Scorpion pepper sauce");
     expect(pageText(), "a guarantee in the item details").not.toMatch(/guarantee/i);
+  });
+});
+
+describe("/book/<slug> trust bar: today's hours on the business's clock, or nothing", () => {
+  const BUSINESS = { id: "biz_honest_1", name: "Pepper Co", slug: "pepper-co", currency: "TTD", timezone: "America/Port_of_Spain", storeEnabled: true };
+  const every = (keys: string[], open: string, close: string) =>
+    Object.fromEntries(keys.map((d) => [d, { open, close, closed: false }]));
+  const SHORT = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const LONG = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+  async function openStore(businessHours: unknown) {
+    api.apiGet.mockImplementation(async (path: string) => {
+      if (path === "/identity/businesses/slug/pepper-co") return { data: { ...BUSINESS, businessHours }, error: null };
+      if (path === "/site/storefront/public/pepper-co") return { data: { storefront: {} }, error: null };
+      if (path.endsWith("/services") || path.endsWith("/staff") || path.endsWith("/products")) return { data: [], error: null };
+      return { data: null, error: null };
+    });
+    window.localStorage.clear();
+    render(<PublicBookingPage />);
+    await screen.findAllByText("Pepper Co");
+    await waitFor(() => expect(screen.getByText("Secure Checkout")).toBeTruthy());
+    return pageText();
+  }
+
+  it("hours saved with short keys (sun..sat): today's hours, not 'Closed'", async () => {
+    at("2026-11-26T15:00:00Z");
+    const text = await openStore(every(SHORT, "09:00", "17:00"));
+    expect(text).toContain("Today: 09:00 – 17:00");
+    expect(text).not.toMatch(/today: closed/i);
+  });
+
+  it("hours saved with long keys (sunday..saturday) read the same", async () => {
+    at("2026-11-26T15:00:00Z");
+    const text = await openStore(every(LONG, "09:00", "17:00"));
+    expect(text).toContain("Today: 09:00 – 17:00");
+  });
+
+  it("today is the business's day, not UTC's: 02:30 UTC Friday is still Thursday in Port of Spain", async () => {
+    at("2026-11-27T02:30:00Z");
+    const text = await openStore({ thu: { open: "18:00", close: "23:30", closed: false }, fri: { open: "09:00", close: "17:00", closed: true } });
+    expect(text).toContain("Today: 18:00 – 23:30");
+  });
+
+  it("no hours set: no 'Today' line and no 'Closed'", async () => {
+    for (const hours of [null, {}]) {
+      const text = await openStore(hours);
+      expect(text, `hours ${JSON.stringify(hours)}`).not.toMatch(/today:/i);
+      expect(text, `hours ${JSON.stringify(hours)}`).not.toMatch(/\bclosed\b/i);
+      cleanup();
+    }
   });
 });
