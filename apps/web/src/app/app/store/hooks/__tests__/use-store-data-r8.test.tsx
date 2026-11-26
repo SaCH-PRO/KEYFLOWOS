@@ -18,13 +18,6 @@ type Res<T> = { data: T | null; error: string | null };
 const ok = <T,>(data: T): Res<T> => ({ data, error: null });
 const failed = <T,>(): Res<T> => ({ data: null, error: "Internal server error" });
 
-/** A write that waits until the test releases it. */
-function held<T>() {
-  let release!: (v: T) => void;
-  const promise = new Promise<T>((res) => { release = res; });
-  return { promise, release };
-}
-
 const ws = vi.hoisted(() => ({ businessId: "biz_A" }));
 const client = vi.hoisted(() => ({
   getBusinessById: vi.fn().mockName("getBusinessById"),
@@ -133,7 +126,6 @@ async function landed(hook: Hook, biz: string) {
 }
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
-const added = () => client.createService.mock.calls.map((c) => (c[0] as { sourceProductId: string }).sourceProductId);
 const backfillsFor = (biz: string) => client.backfillStoreLinks.mock.calls.filter((c) => c[0] === biz).length;
 
 describe("SEC-R7-m1 / MIN-B: a load closure for A starting after B's load has run", () => {
