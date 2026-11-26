@@ -30,6 +30,7 @@ import {
   Mail,
   Phone,
   Building2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { CONTACT_AGE_GROUPS, CONTACT_AGE_GROUP_LABELS } from "@/lib/crm-constants";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
@@ -97,7 +98,21 @@ export interface PipelineToolbarProps {
   savedViewState?: PipelineFilterState;
   onApplySavedView?: (view: ContactSavedView) => void;
   onClearSavedView?: () => void;
+  /**
+   * CONTACTS-LIST-FIRST (D-289): the collapsible "Insights and filters" panel the screen draws under this toolbar.
+   * With onToggleInsights the toolbar shows its toggle in the search row and, while the panel is closed, folds its
+   * segment chips into it at every width and its All/Pinned/Recent row below the sm breakpoint, so a phone shows
+   * the header, the search, then the list, and the first row is in view at 1440x900. Without it the toolbar is
+   * drawn as before.
+   */
+  insightsOpen?: boolean;
+  onToggleInsights?: () => void;
+  /** How many filters set inside the panel are on, announced on the toggle while it is closed. */
+  insightsActiveCount?: number;
 }
+
+/** The id of the panel the toolbar's "Insights and filters" toggle controls. */
+export const CONTACTS_INSIGHTS_PANEL_ID = "contacts-insights-panel";
 
 function PipelineToolbarInner({
   searchInput,
@@ -128,7 +143,16 @@ function PipelineToolbarInner({
   savedViewState,
   onApplySavedView,
   onClearSavedView,
+  insightsOpen = false,
+  onToggleInsights,
+  insightsActiveCount = 0,
 }: PipelineToolbarProps) {
+  // While the insights panel is closed (D-289) the segment chips fold into it at every width, and the
+  // All/Pinned/Recent row below sm only (it always shows from sm up).
+  const folded = onToggleInsights && !insightsOpen;
+  const segmentsDisplay = folded ? "hidden" : "flex";
+  const phoneFolded = folded ? "hidden sm:flex" : "flex";
+  const insightsLabel = `Insights and filters${!insightsOpen && insightsActiveCount > 0 ? ` (${insightsActiveCount} on)` : ""}`;
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
   const [focusedSortIndex, setFocusedSortIndex] = useState(-1);
@@ -215,6 +239,25 @@ function PipelineToolbarInner({
             </button>
           )}
         </div>
+        {onToggleInsights && (
+          <button
+            type="button"
+            onClick={onToggleInsights}
+            aria-expanded={insightsOpen}
+            aria-controls={CONTACTS_INSIGHTS_PANEL_ID}
+            aria-label={insightsLabel}
+            title={insightsLabel}
+            className={`relative inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs font-medium transition-all flex-shrink-0 ${insightsOpen ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]" : "border-border/50 bg-white/[0.03] text-foreground hover:bg-white/[0.06] hover:border-border/70"}`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span className="hidden sm:inline">Insights</span>
+            {!insightsOpen && insightsActiveCount > 0 && (
+              <span aria-hidden className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[hsl(var(--kf-accent1))] text-white text-[10px] font-bold leading-4 text-center">
+                {insightsActiveCount}
+              </span>
+            )}
+          </button>
+        )}
         {onApplySavedView && onClearSavedView && (
           <PipelineViewsPicker
             businessId={businessId}
@@ -374,7 +417,7 @@ function PipelineToolbarInner({
         )}
       </AnimatePresence>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5" data-walkthrough="crm-segments">
+      <div className={`${segmentsDisplay} items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5`} data-walkthrough="crm-segments">
         {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color, description }) => {
           const count = segmentCounts[key];
           const isActive = activeSegment === key;
@@ -416,7 +459,7 @@ function PipelineToolbarInner({
         )}
       </div>
 
-      <div role="tablist" aria-label="Contact list views" className="flex gap-1 border-t border-border/30 pt-2.5">
+      <div role="tablist" aria-label="Contact list views" className={`${phoneFolded} gap-1 border-t border-border/30 pt-2.5`}>
         {[
           { key: "all" as const, label: "All", count: allCount, icon: Users },
           { key: "pinned" as const, label: "Pinned", count: pinnedCount, icon: Star },
