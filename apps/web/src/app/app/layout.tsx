@@ -1,6 +1,8 @@
 "use client";
 
 import { Suspense } from "react";
+// OWNER-ALERTS-WEB (COR-OAW-2): holds the browser's install prompt whichever page loads first (components/install-app-step.tsx).
+import "@/lib/install-prompt";
 import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { NavigationContextProvider } from "@/lib/navigation-context";
 import { AiContextProvider } from "@/contexts/ai-context";

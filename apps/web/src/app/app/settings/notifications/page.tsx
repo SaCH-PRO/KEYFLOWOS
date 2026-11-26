@@ -21,6 +21,9 @@ import { InfoBadge } from "@/components/ui/info-badge";
 import { NoAccessState } from "@/components/ui/no-access-state";
 import { readState, type ReadState } from "@/lib/failure-kit";
 import { toast } from "sonner";
+// OWNER-ALERTS-WEB (D-154): the "Owner alerts" tab, its own components.
+import { InstallAppStep } from "@/components/install-app-step";
+import { OwnerAlertSettings } from "@/components/owner-alert-settings";
 
 interface NotificationPreferences {
   booking_confirmed: boolean;
@@ -129,7 +132,7 @@ export default function NotificationsSettingsPage() {
   // The switches whose PATCH is in flight: each answer decides only its own switch (and clears only its own spinner).
   const [saving, setSaving] = useState<ReadonlySet<keyof NotificationPreferences>>(() => new Set());
   const pending = useRef(new Set<keyof NotificationPreferences>());
-  const [activeTab, setActiveTab] = useState<"preferences" | "log">("preferences");
+  const [activeTab, setActiveTab] = useState<"preferences" | "log" | "alerts">("preferences");
   // FU-NOTIFICATIONS-PAGE-REFUSED (D-283): each read judged by FAILURE-KIT's readState, so a settings-none member's
   // refused read is said as no access (never a blank tab or "No customer notifications sent yet"), and any other
   // failure (a 5xx, a network error, BusinessGuard's 403) as a failed load.
@@ -250,7 +253,7 @@ export default function NotificationsSettingsPage() {
       </div>
 
       <div className="flex gap-1 p-1 rounded-xl bg-muted/30 border border-border/40 w-fit">
-        {(["preferences", "log"] as const).map((tab) => (
+        {(["preferences", "log", "alerts"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -260,7 +263,7 @@ export default function NotificationsSettingsPage() {
                 : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
-            {tab === "preferences" ? "Preferences" : logRead.kind === "ok" ? `Log (${log.length})` : "Log"}
+            {tab === "preferences" ? "Preferences" : tab === "alerts" ? "Owner alerts" : logRead.kind === "ok" ? `Log (${log.length})` : "Log"}
           </button>
         ))}
       </div>
@@ -476,6 +479,14 @@ export default function NotificationsSettingsPage() {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* OWNER-ALERTS-WEB (D-154): the business owner's alerts (push first, email fallback) and the install step. */}
+      {activeTab === "alerts" && (
+        <section aria-label="Owner alerts" className="space-y-3">
+          <InstallAppStep />
+          <OwnerAlertSettings businessId={getStoredBusinessId()} />
+        </section>
       )}
     </div>
   );
