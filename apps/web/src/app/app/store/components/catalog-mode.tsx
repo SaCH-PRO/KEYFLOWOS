@@ -19,6 +19,7 @@ type Props = {
   onToggleItem: (product: Product) => void;
   onSelectAll: () => void;
   onDeselectAll: () => void;
+  bulkRunning?: boolean;
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: Service[];
@@ -43,6 +44,7 @@ export function CatalogMode({
   onToggleItem,
   onSelectAll,
   onDeselectAll,
+  bulkRunning,
   onConfirmRemoveChange,
   onDeleteFromStore,
   services,
@@ -169,6 +171,7 @@ export function CatalogMode({
           onToggleItem={onToggleItem}
           onSelectAll={onSelectAll}
           onDeselectAll={onDeselectAll}
+          bulkRunning={bulkRunning}
           onConfirmRemoveChange={onConfirmRemoveChange}
           onDeleteFromStore={onDeleteFromStore}
           services={services.map((s) => ({ id: s.id, name: s.name }))}

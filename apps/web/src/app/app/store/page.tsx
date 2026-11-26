@@ -335,6 +335,7 @@ export default function StorePage() {
                 onToggleItem={s.handleToggleStoreItem}
                 onSelectAll={s.handleSelectAll}
                 onDeselectAll={s.handleDeselectAll}
+                bulkRunning={s.bulkRunning}
                 onConfirmRemoveChange={s.setConfirmRemove}
                 onDeleteFromStore={s.handleDeleteServiceFromStore}
                 services={s.services}

@@ -99,7 +99,9 @@ export function useStoreData() {
   const [configSaving, setConfigSaving] = useState(false);
   const [landed, setLanded] = useState<Landed | null>(null);
 
-  const backfillRan = useRef(false);
+  // Round 7 (SEC-R6-m1): the business whose store links were last backfilled. A business selected runs its own
+  // backfill (a switch to another business makes this differ), whatever a load for another business did.
+  const backfillRan = useRef<string | null>(null);
 
   /**
    * CATALOG-1 round 3 (SEC-CAT-7, D-100): Your page follows the business selection (kf:business-changed, and the
@@ -122,12 +124,14 @@ export function useStoreData() {
   const currentBusiness = useRef<string | null>(null);
   // COR-R5-3: the bulk run (Add all or Remove all) in progress for the current business, if any.
   const bulkRun = useRef<object | null>(null);
+  // Round 7 (MIN-4): whether one is going on, for the bulk buttons; it is the page's, so it outlives a remount.
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [switchCount, setSwitchCount] = useState(0);
   const switchTo = useCallback((next: string) => {
     if (next === currentBusiness.current) return;
     currentBusiness.current = next;
     bulkRun.current = null;
-    backfillRan.current = false;
+    setBulkRunning(false);
     setStockRead(null);
     setServices([]);
     setStaff([]);
@@ -206,11 +210,14 @@ export function useStoreData() {
     if (!businessId) return;
     // An answer for a business no longer selected (a reload in flight across a switch) is dropped.
     const stale = () => currentBusiness.current !== null && currentBusiness.current !== businessId;
+    // Round 7 (SEC-R6-m1): a load starting for a business no longer selected sends nothing (the backfill is a POST)
+    // and leaves the selected business's backfill to its own load.
+    if (stale()) return;
     if (showLoader) setLoading(true);
     setLoadError(null);
     try {
-      if (!backfillRan.current) {
-        backfillRan.current = true;
+      if (backfillRan.current !== businessId) {
+        backfillRan.current = businessId;
         backfillStoreLinks(businessId);
       }
       const [servicesRes, staffRes, bizRes, productsRes, graphRes] = await Promise.all([
@@ -547,15 +554,25 @@ export function useStoreData() {
     }
   }
 
-  /** COR-R5-3: a bulk run asked for while one is going on for this business is ignored. */
-  async function asBulkRun(run: () => Promise<void>) {
+  /**
+   * COR-R5-3: a bulk run asked for while one is going on for this business is ignored.
+   * Round 7 (SEC-R6-m2): the run is told whether it is still the current run. A switch ends it (switchTo clears the
+   * guard), and it stays ended when its business is selected again (A -> B -> A): isCurrent(A) is true again then,
+   * and a fresh run may have started, so a run that went on with the list it read before the switch would add or
+   * remove the same items twice.
+   */
+  async function asBulkRun(run: (live: () => boolean) => Promise<void>) {
     if (bulkRun.current) return;
     const token = {};
     bulkRun.current = token;
+    setBulkRunning(true);
     try {
-      await run();
+      await run(() => bulkRun.current === token);
     } finally {
-      if (bulkRun.current === token) bulkRun.current = null;
+      if (bulkRun.current === token) {
+        bulkRun.current = null;
+        setBulkRunning(false);
+      }
     }
   }
 
@@ -564,10 +581,10 @@ export function useStoreData() {
     if (!isCurrent(businessId) || refuseListing()) return;
     const askedFor = businessId;
     const notAdded = commerceProducts.filter((p) => !graphProductToServiceMap.has(p.id));
-    await asBulkRun(async () => {
+    await asBulkRun(async (live) => {
       for (const p of notAdded) {
-        // An "Add all" running when the business changes stops there.
-        if (!isCurrent(askedFor)) return;
+        // An "Add all" running when the business changes stops there, and does not resume when it comes back.
+        if (!live() || !isCurrent(askedFor)) return;
         await handleQuickAddProduct(p);
       }
     });
@@ -584,11 +601,11 @@ export function useStoreData() {
     if (!storeGraph) return;
     const askedFor = businessId;
     const liveEntries = storeGraph.mappings.filter((m) => m.isLive && m.serviceId);
-    await asBulkRun(async () => {
+    await asBulkRun(async (live) => {
       setConfirmRemove(null);
       let removed = 0;
       for (const entry of liveEntries) {
-        if (!isCurrent(askedFor)) return;
+        if (!live() || !isCurrent(askedFor)) return;
         const outcome = await removeOne(entry.serviceId!, askedFor);
         if (outcome === "stale") return;
         if (outcome === "removed") removed++;
@@ -730,5 +747,6 @@ export function useStoreData() {
     canSaveStorefront,
     canChangeListing,
     listingRefused,
+    bulkRunning,
   };
 }

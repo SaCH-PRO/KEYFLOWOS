@@ -56,6 +56,11 @@ type Props = {
   /** Add all / Remove all; while the run they return is going on, both bulk buttons are off (COR-R5-3). */
   onSelectAll: () => void | Promise<void>;
   onDeselectAll: () => void | Promise<void>;
+  /**
+   * Round 7 (MIN-4): a bulk run is going on for this business (useStoreData().bulkRunning). The page holds it, so a
+   * tab change during the run, which mounts this list again, keeps both bulk buttons off.
+   */
+  bulkRunning?: boolean;
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: { id: string; name: string }[];
@@ -116,6 +121,7 @@ export function CatalogManager({
   onToggleItem,
   onSelectAll,
   onDeselectAll,
+  bulkRunning: pageBulkRunning = false,
   onConfirmRemoveChange,
   onDeleteFromStore,
   services: _services,
@@ -129,7 +135,9 @@ export function CatalogManager({
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showFilters, setShowFilters] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState<"add" | "remove" | null>(null);
-  const [bulkRunning, setBulkRunning] = useState(false);
+  // This list's own flag covers the run it started until the page's flag says so; the page's outlives a remount.
+  const [ownBulkRunning, setBulkRunning] = useState(false);
+  const bulkRunning = pageBulkRunning || ownBulkRunning;
   const [orderedProducts, setOrderedProducts] = useState<Product[]>(products);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [showCategoryEmphasis, setShowCategoryEmphasis] = useState(false);
