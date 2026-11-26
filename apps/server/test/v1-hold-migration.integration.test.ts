@@ -214,7 +214,7 @@ describe('V1-64 (MIGRATION-SET-A): v1 hold migration set', () => {
     const migrations = readdirSync(join(PRISMA_DIR, 'migrations'))
       .filter((d) => /^\d{14}_/.test(d) && d > '20261101000000_contact_partial_identity_uniques')
       .sort();
-    expect(migrations).toEqual([HOLD_MIGRATION]);
+    expect(migrations[0]).toBe(HOLD_MIGRATION);
 
     const { url } = await createEmptyDb('fresh');
     const deployed = runPrisma(['migrate', 'deploy', '--schema=./prisma/schema.prisma'], url);

@@ -773,6 +773,11 @@
       "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
     },
     {
+      "prefix": "v87m_",
+      "owner": "apps/server/test/memory-class-columns.integration.test.ts",
+      "packet": "V1-87 (MEM-CLASS-COLUMNS)"
+    },
+    {
       "prefix": "v88a_",
       "owner": "apps/server/test/booking-attribution-currency.integration.test.ts",
       "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
@@ -1550,6 +1555,11 @@
       "prefix": "v86r_",
       "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
       "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
+    },
+    {
+      "prefix": "v72c_",
+      "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
     }
   ],
   "pendingRenames": [],

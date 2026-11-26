@@ -1,6 +1,14 @@
 import { Injectable, Logger, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import {
+  classifyTemporalMemoryWrite,
+  isMemoryRowDataClass,
+  mergeMemoryClassifications,
+  normalizeModuleScope,
+  type MemoryRowDataClass,
+  type TemporalEventProvenance,
+} from '../ai/memory-classification';
 import type {
   CreateTemporalFlowMemoryInput,
   TemporalFlowMemoryData,
@@ -31,6 +39,43 @@ export class TemporalFlowMemoryService {
     @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
   ) {}
 
+  /**
+   * Resolves source `temporal_flow_events` for non-opaque temporal memories so
+   * provenance classification can inspect every referenced event (or fail closed
+   * when any referenced event is missing).
+   */
+  async resolveSourceEvents(
+    businessId: string,
+    sourceEventIds: readonly string[],
+    client: typeof this.prisma.client = this.prisma.client,
+  ): Promise<{ sourceEvents: TemporalEventProvenance[]; hasMissingSourceEvents: boolean }> {
+    const uniqueIds = Array.from(new Set(sourceEventIds));
+    if (uniqueIds.length === 0) {
+      return { sourceEvents: [], hasMissingSourceEvents: false };
+    }
+    if (!client.temporalFlowEvent?.findMany) {
+      return { sourceEvents: [], hasMissingSourceEvents: true };
+    }
+    const fetched =
+      (await client.temporalFlowEvent.findMany({
+        where: { businessId, id: { in: uniqueIds } },
+        select: {
+          id: true,
+          source: true,
+          type: true,
+          module: true,
+          entityType: true,
+          title: true,
+          summary: true,
+          description: true,
+        },
+      })) ?? [];
+    return {
+      sourceEvents: fetched,
+      hasMissingSourceEvents: fetched.length < uniqueIds.length,
+    };
+  }
+
   async createMemory(input: CreateTemporalFlowMemoryInput): Promise<TemporalFlowMemoryData> {
     // MEM-TEMPORAL-SCOPE: without a business the lookup and the rewrite below would have no tenant predicate.
     if (!isKey(input.businessId)) throw new BadRequestException('Temporal memory needs a business');
@@ -45,12 +90,55 @@ export class TemporalFlowMemoryService {
       },
     });
 
+    let sourceEvents: TemporalEventProvenance[] = input.sourceEvents ?? [];
+    let hasMissingSourceEvents = false;
+    if (
+      input.sourceEvents === undefined &&
+      (input.sourceEventIds?.length ?? 0) > 0 &&
+      input.entityType !== 'business' &&
+      input.sourceModule !== 'key_cortex'
+    ) {
+      const resolved = await this.resolveSourceEvents(input.businessId, input.sourceEventIds ?? []);
+      sourceEvents = resolved.sourceEvents;
+      hasMissingSourceEvents = resolved.hasMissingSourceEvents;
+    }
+
+    const classified = classifyTemporalMemoryWrite({
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      type: input.type,
+      sourceModule: input.sourceModule,
+      content: input.content,
+      sourceEvents,
+      sourceEventIds: input.sourceEventIds ?? [],
+      hasMissingSourceEvents,
+      explicitDataClass: input.dataClass ?? null,
+      explicitModuleScope: input.moduleScope ?? null,
+    });
+
+    // R1-SEC-02: re-summarization onto an existing row never weakens data_class or drops module_scope.
+    const effective = existing
+      ? mergeMemoryClassifications([
+          {
+            dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
+              ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+              : null,
+            moduleScope: Array.isArray((existing as { moduleScope?: unknown }).moduleScope)
+              ? ((existing as { moduleScope?: string[] }).moduleScope ?? null)
+              : null,
+          },
+          classified,
+        ])
+      : classified;
+
     const data = {
       content: input.content,
       sourceEventIds: input.sourceEventIds ?? [],
       sourceModule: input.sourceModule,
       metadata: input.metadata ?? {},
       confidence: input.confidence ?? 0.5,
+      dataClass: effective.dataClass,
+      moduleScope: effective.moduleScope,
     };
 
     let record;
@@ -88,6 +176,8 @@ export class TemporalFlowMemoryService {
             sourceModule: record.sourceModule,
             confidence: record.confidence,
           },
+          dataClass: effective.dataClass,
+          moduleScope: effective.moduleScope,
         });
       } catch (err: any) {
         this.logger.warn(`Embedding failed for memory ${record.id}: ${(err as Error).message}`);
@@ -172,19 +262,78 @@ export class TemporalFlowMemoryService {
       confidence?: number;
       sourceEventIds?: string[];
       metadata?: Record<string, unknown>;
+      dataClass?: MemoryRowDataClass;
+      moduleScope?: string[];
     },
   ): Promise<TemporalFlowMemoryData> {
     if (!isKey(businessId) || !isKey(memoryId)) throw new NotFoundException('Memory not found');
-    try {
-      return await this.prisma.client.temporalFlowMemory.update({
+    const runUpdate = async (tx: typeof this.prisma.client) => {
+      const existing = await tx.temporalFlowMemory.findFirst({
+        where: { id: memoryId, businessId },
+      });
+      let nextDataClass: MemoryRowDataClass | undefined = patch.dataClass;
+      let nextModuleScope: string[] | undefined =
+        patch.moduleScope !== undefined ? normalizeModuleScope(patch.moduleScope) : undefined;
+
+      if (existing) {
+        const effectiveSourceEventIds =
+          patch.sourceEventIds ?? (Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : []);
+        const isOpaque = existing.entityType === 'business' || existing.sourceModule === 'key_cortex';
+        let sourceEvents: TemporalEventProvenance[] = [];
+        let hasMissingSourceEvents = false;
+        if (!isOpaque && effectiveSourceEventIds.length > 0) {
+          const resolved = await this.resolveSourceEvents(businessId, effectiveSourceEventIds, tx);
+          sourceEvents = resolved.sourceEvents;
+          hasMissingSourceEvents = resolved.hasMissingSourceEvents;
+        }
+        const patchTags = Array.isArray(patch.metadata?.tags)
+          ? patch.metadata.tags.filter((t): t is string => typeof t === 'string')
+          : [];
+        const reclassified = classifyTemporalMemoryWrite({
+          entityType: existing.entityType,
+          entityId: existing.entityId,
+          type: existing.type,
+          sourceModule: existing.sourceModule,
+          content: patch.content ?? existing.content,
+          sourceEvents,
+          sourceEventIds: effectiveSourceEventIds,
+          hasMissingSourceEvents,
+          tags: patchTags,
+          explicitDataClass: patch.dataClass ?? null,
+          explicitModuleScope: patch.moduleScope ?? null,
+        });
+        const merged = mergeMemoryClassifications([
+          {
+            dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
+              ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+              : null,
+            moduleScope: Array.isArray((existing as { moduleScope?: unknown }).moduleScope)
+              ? ((existing as { moduleScope?: string[] }).moduleScope ?? null)
+              : null,
+          },
+          reclassified,
+        ]);
+        nextDataClass = merged.dataClass;
+        nextModuleScope = merged.moduleScope;
+      }
+
+      return tx.temporalFlowMemory.update({
         where: { id: memoryId, businessId },
         data: {
           content: patch.content,
           confidence: patch.confidence,
           sourceEventIds: patch.sourceEventIds,
           metadata: patch.metadata,
+          ...(nextDataClass !== undefined ? { dataClass: nextDataClass } : {}),
+          ...(nextModuleScope !== undefined ? { moduleScope: nextModuleScope } : {}),
         },
       });
+    };
+
+    try {
+      return typeof this.prisma.client.$transaction === 'function'
+        ? await this.prisma.client.$transaction((tx) => runUpdate(tx as unknown as typeof this.prisma.client))
+        : await runUpdate(this.prisma.client);
     } catch (err) {
       // P2025: no row matched the where (missing, or another business's).
       if ((err as { code?: unknown } | null)?.code === 'P2025') {
@@ -248,6 +397,7 @@ export class TemporalFlowMemoryService {
       type: 'summary',
       content,
       sourceEventIds: events.map((e) => e.id),
+      sourceEvents: events,
       sourceModule: 'key_inbox',
       metadata: {
         eventCount: events.length,
@@ -293,6 +443,7 @@ export class TemporalFlowMemoryService {
       type: 'summary',
       content,
       sourceEventIds: events.map((e) => e.id),
+      sourceEvents: events,
       sourceModule: 'key_inbox',
       metadata: {
         eventCount: events.length,
@@ -336,6 +487,7 @@ export class TemporalFlowMemoryService {
       type: 'pattern',
       content,
       sourceEventIds: events.slice(0, 20).map((e) => e.id),
+      sourceEvents: events,
       sourceModule: 'key_inbox',
       metadata: {
         eventCount: events.length,
