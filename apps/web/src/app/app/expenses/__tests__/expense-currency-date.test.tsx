@@ -353,3 +353,80 @@ describe("SEC-r1-2: the New Recurring Expense builder never schedules a past run
     await waitFor(() => expect(client.createRecurringExpense).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("Round 3: the recurring builder's date is a real day; an edit keeps a past run it did not change; the card's currency", () => {
+  // 10:00 on 26 November 2026 in Port of Spain.
+  const PAST: Record<string, unknown> = { id: "r_past", name: "Office rent", description: "Office rent", amount: 4500, currency: "TTD", frequency: "MONTHLY", nextRunDate: "2026-03-10T00:00:00.000Z", isActive: false, runCount: 3, failureCount: 2, createsBill: false, businessId: BUSINESS, createdAt: "", updatedAt: "" };
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-26T14:00:00.000Z"));
+    const client = await import("@/lib/client");
+    vi.mocked(client.createRecurringExpense).mockReset().mockResolvedValue({ data: { id: "rec_new" }, error: null } as never);
+    vi.mocked(client.updateRecurringExpense).mockReset().mockResolvedValue({ data: { id: "r_past" }, error: null } as never);
+    vi.mocked(toast.success).mockReset();
+    vi.mocked(toast.error).mockReset();
+  });
+
+  it.each(["9/1/2025", "March 10, 2026", "2026-02-30", "2026-13-01"])("a next run of '%s' (not a YYYY-MM-DD day) is refused inline and nothing is sent", async (typed) => {
+    const client = await import("@/lib/client");
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("e.g., Office Rent")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("e.g., Office Rent"), { target: { value: "Office rent" } });
+    fireEvent.change(screen.getByPlaceholderText("What is this expense for?"), { target: { value: "Office rent" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "4500" } });
+    // A page edited to type="text" (or a script) can put any string in the field.
+    const date = document.querySelector('input[type="date"]') as HTMLInputElement;
+    date.setAttribute("type", "text");
+    fireEvent.change(date, { target: { value: typed } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/next run/i));
+    expect(client.createRecurringExpense).not.toHaveBeenCalled();
+  });
+
+  async function editPast() {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValueOnce({ data: [PAST], error: null } as never);
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update" })).toBeTruthy());
+    return client;
+  }
+
+  it("editing only the amount of a past-dated (paused) schedule sends, and leaves its next run out of the PATCH", async () => {
+    const client = await editPast();
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "4800" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(client.updateRecurringExpense).toHaveBeenCalledTimes(1));
+    const [, id, patch] = vi.mocked(client.updateRecurringExpense).mock.calls[0];
+    expect(id).toBe("r_past");
+    expect(patch).toMatchObject({ amount: 4800 });
+    expect(Object.keys(patch as object)).not.toContain("nextRunDate");
+  });
+
+  it("an edit that moves the next run to a past day is refused inline and nothing is sent", async () => {
+    const client = await editPast();
+    const date = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(date, { target: { value: "2026-11-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/next run.*after today/i));
+    expect(client.updateRecurringExpense).not.toHaveBeenCalled();
+  });
+
+  it("an edit that moves the next run after today sends the new day", async () => {
+    const client = await editPast();
+    fireEvent.change(document.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: "2026-12-10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(client.updateRecurringExpense).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(client.updateRecurringExpense).mock.calls[0][2]).toMatchObject({ nextRunDate: "2026-12-10" });
+  });
+
+  it("a schedule with no currency shows the USD business's currency, not TTD", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValueOnce({ data: [{ ...PAST, currency: null }], error: null } as never);
+    const { container } = render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
+    await waitFor(() => expect(container.textContent).toMatch(/USD 4,500\.00/));
+    expect(container.textContent).not.toMatch(/TTD/);
+  });
+});
