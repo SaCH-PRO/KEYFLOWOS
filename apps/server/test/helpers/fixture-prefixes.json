@@ -1480,6 +1480,11 @@
       "prefix": "v64l_",
       "owner": "apps/server/test/census-key-b.integration.test.ts",
       "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v84k_",
+      "owner": "apps/server/test/cortex-insight-cash-truth.integration.test.ts",
+      "packet": "V1-84 (FU-CORTEX-INSIGHT-CASH-TRUTH, P119)"
     }
   ],
   "pendingRenames": [],
