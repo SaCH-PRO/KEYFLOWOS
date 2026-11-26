@@ -406,4 +406,16 @@ describe("TODAY-4BLOCK: Today is four blocks from one server read", () => {
     await screen.findByRole("heading", { level: 2, name: /^get set up$/i }, { timeout: 10_000 });
     expect(api.todayReads()).toHaveLength(2);
   }, CASE_MS);
+  it("[T4B-12] RED-BEFORE (journey I6): a member without revenue read (pulseStatus RESTRICTED) sees no money anywhere on Today, the sample preview included; it is still a sample", async () => {
+    const restricted = freshToday();
+    restricted.pulseStatus = "RESTRICTED";
+    restricted.pulse = null;
+    const container = await (async () => {
+      serve({ today: [ok(restricted)] });
+      return renderToday();
+    })();
+    await screen.findByRole("heading", { level: 2, name: /^get set up$/i });
+    expect(within(block(/^get set up$/i)).getAllByText(/sample/i).length).toBeGreaterThan(0);
+    expect((container.textContent ?? "").replace(/\s+/g, " ")).not.toMatch(/(TTD|TT\$|USD)\s?[\d,]+\.\d{2}/);
+  }, CASE_MS);
 });
