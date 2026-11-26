@@ -247,18 +247,21 @@ function classifyEventOwners(input: { module?: string | null; source?: string | 
     (EVENT_OWNERS.some((o) => OWNER_PATTERNS[o].modules.includes(rawMod)) || BUSINESS_WIDE.modules.includes(rawMod));
 
   const owners: EventOwner[] = [];
+  let hasRawOwner = false;
   for (const owner of EVENT_OWNERS) {
     const p = OWNER_PATTERNS[owner];
-    const matchesModule =
-      (rawMod.length > 0 && p.modules.includes(rawMod)) || (trimMod.length > 0 && p.modules.includes(trimMod));
-    const matchesSource =
-      (rawSrc.length > 0 && p.sources.includes(rawSrc)) || (trimSrc.length > 0 && p.sources.includes(trimSrc));
-    const matchesType =
+    const rawMatch =
+      (rawMod.length > 0 && p.modules.includes(rawMod)) ||
+      (rawSrc.length > 0 && p.sources.includes(rawSrc)) ||
       (rawTyp.length > 0 && p.typePrefixes.some((prefix) => rawTyp.startsWith(prefix))) ||
-      (trimTyp.length > 0 && p.typePrefixes.some((prefix) => trimTyp.startsWith(prefix)));
-    const matchesKeyNote =
-      owner === 'revenue' && (rawSrc === KEY_NOTE_SOURCE || trimSrc === KEY_NOTE_SOURCE) && !knownModule;
-    if (matchesModule || matchesSource || matchesType || matchesKeyNote) {
+      (owner === 'revenue' && rawSrc === KEY_NOTE_SOURCE && !knownModule);
+    const trimMatch =
+      (trimMod.length > 0 && p.modules.includes(trimMod)) ||
+      (trimSrc.length > 0 && p.sources.includes(trimSrc)) ||
+      (trimTyp.length > 0 && p.typePrefixes.some((prefix) => trimTyp.startsWith(prefix))) ||
+      (owner === 'revenue' && trimSrc === KEY_NOTE_SOURCE && !knownModule);
+    if (rawMatch) hasRawOwner = true;
+    if (rawMatch || trimMatch) {
       owners.push(owner);
     }
   }
@@ -266,7 +269,7 @@ function classifyEventOwners(input: { module?: string | null; source?: string | 
   const isBusinessWide =
     (rawMod.length > 0 && BUSINESS_WIDE.modules.includes(rawMod)) ||
     (rawSrc.length > 0 && BUSINESS_WIDE.sources.includes(rawSrc));
-  const unclassified = owners.length === 0 && !isBusinessWide;
+  const unclassified = !hasRawOwner && !isBusinessWide;
   return { owners, unclassified };
 }
 
