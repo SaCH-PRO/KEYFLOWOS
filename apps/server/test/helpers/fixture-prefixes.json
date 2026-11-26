@@ -1550,6 +1550,11 @@
       "prefix": "v86r_",
       "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
       "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
+    },
+    {
+      "prefix": "v91a_",
+      "owner": "apps/server/test/admin-api-signin-kind.integration.test.ts",
+      "packet": "V1-91 (RR-ADMIN-API-SIGNIN-KIND)"
     }
   ],
   "pendingRenames": [],
