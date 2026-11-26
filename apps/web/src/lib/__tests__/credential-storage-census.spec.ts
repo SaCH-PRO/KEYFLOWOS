@@ -3009,3 +3009,101 @@ describe("CSC-59 a ternary key resolves to all its branches", () => {
     expect(credentialWrites("src/fixture-tp.ts", fixture)).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------ repair round 12 */
+
+/**
+ * Repair round 12, the root fix for key and name positions (security NOT CONFIRMED on round 11; correctness F1-F3):
+ * one structural key resolver (resolveKeySet) for every key or name the census reads. It returns a finite set of
+ * candidates, a "*" standing for any part it cannot resolve; a key with any "*" part, or naming a credential, makes
+ * a credential write (fail closed).
+ *
+ *   CSC-60 cookie names through the resolver (cookieStore.set, cookies().set).
+ *   CSC-61 a ternary inside a template or "+" key (with a parameter branch, with and without a literal caller; also in
+ *          string code).
+ *   CSC-62 `||` and `??` keys (a caller passing a credential name to the parameter side).
+ *   CSC-63 `as`, `!` around a ternary key.
+ *   CSC-64 parentheses are structural: `(K1) || (…)`, `(K1) + (…)`, `(getKey)(…)` (correctness F1, F3).
+ *   CSC-65 pins: plain branches stay plain writes; the product is capped (over 64 → unresolved).
+ */
+const credWrites = (file: string, fixture: string, store?: Store) =>
+  scan(file, fixture).filter((w) => (store === undefined || w.store === store) && isCredential(w));
+const AB = ['const A = "kf_x_token";', 'const B = "kf_x_prefs";'];
+
+describe("CSC-60 cookie names go through the resolver", () => {
+  it("cookieStore.set(on ? B : A, v) is a credential write", () => {
+    expect(credWrites("src/fixture-r12a.ts", [...AB, "cookieStore.set(on ? B : A, v);"].join("\n"), "cookie").length).toBeGreaterThan(0);
+  });
+  it("cookies().set(on ? B : A, v) is a credential write", () => {
+    expect(credWrites("src/fixture-r12b.ts", [...AB, "cookies().set(on ? B : A, v);"].join("\n"), "response-cookie").length).toBeGreaterThan(0);
+  });
+});
+
+describe("CSC-61 a ternary inside a template or + key", () => {
+  const AB2 = ['const A = "x_token";', 'const B = "x_prefs";'];
+  it("`kf_${on ? B : A}` is a credential write", () => {
+    expect(credWrites("src/fixture-r12c.ts", [...AB2, "localStorage.setItem(`kf_${on ? B : A}`, v);"].join("\n"), "localStorage").length).toBeGreaterThan(0);
+  });
+  it("`kf_${on ? \"prefs\" : k}` with k a parameter and no caller is a credential write", () => {
+    const fixture = 'export function s(k: string, on: boolean, v: string) { localStorage.setItem(`kf_${on ? "prefs" : k}`, v); }';
+    expect(credWrites("src/fixture-r12d.ts", fixture, "localStorage").length).toBeGreaterThan(0);
+  });
+  it("…and with a caller s(\"session_token\", …) it resolves to kf_session_token", () => {
+    const fixture = 'function s(k: string, on: boolean, v: string) { localStorage.setItem(`kf_${on ? "prefs" : k}`, v); }\ns("session_token", true, "v");';
+    expect(keysOf(scan("src/fixture-r12e.ts", fixture))).toEqual(expect.arrayContaining(["localStorage:kf_prefs", "localStorage:kf_session_token"]));
+  });
+  it('"kf_" + (on ? B : A) is a credential write', () => {
+    expect(credWrites("src/fixture-r12f.ts", [...AB2, 'localStorage.setItem("kf_" + (on ? B : A), v);'].join("\n"), "localStorage").length).toBeGreaterThan(0);
+  });
+  it("the same in string code is a credential write", () => {
+    const fixture = 'eval("localStorage.setItem(`kf_${on ? \\"p\\" : A}`, v)");';
+    expect(credWrites("src/fixture-r12g.ts", fixture, "localStorage").length).toBeGreaterThan(0);
+  });
+});
+
+describe("CSC-62 || and ?? keys", () => {
+  for (const op of ["||", "??"]) {
+    it(`setItem(B ${op} A, v) is a credential write`, () => {
+      expect(credWrites("src/fixture-r12h.ts", [...AB, `localStorage.setItem(B ${op} A, v);`].join("\n"), "localStorage").length).toBeGreaterThan(0);
+    });
+  }
+  it('setItem(k || "kf_prefs", v) with a caller passing "kf_session_token" is a credential write', () => {
+    const fixture = 'function s(k: string, v: string) { localStorage.setItem(k || "kf_prefs", v); }\ns("kf_session_token", "v");';
+    expect(keysOf(scan("src/fixture-r12i.ts", fixture))).toEqual(expect.arrayContaining(["localStorage:kf_session_token"]));
+  });
+});
+
+describe("CSC-63 as and ! around a ternary key", () => {
+  for (const wrapped of ["(on ? B : A) as string", "(on ? B : A)!"]) {
+    it(`setItem(${wrapped}, v) is a credential write`, () => {
+      expect(credWrites("src/fixture-r12j.ts", [...AB, `localStorage.setItem(${wrapped}, v);`].join("\n"), "localStorage").length).toBeGreaterThan(0);
+    });
+  }
+});
+
+describe("CSC-64 parentheses are structural", () => {
+  const K1 = 'const K1 = "kf_session_token";';
+  it('(K1) || (on ? "kf_a" : "kf_b") is a credential write', () => {
+    expect(credWrites("src/fixture-r12k.ts", [K1, 'localStorage.setItem((K1) || (on ? "kf_a" : "kf_b"), v);'].join("\n"), "localStorage").length).toBeGreaterThan(0);
+  });
+  it('(K1) + (on ? "_a" : "_b") is kf_session_token_a and _b, credential writes', () => {
+    const fixture = [K1, 'localStorage.setItem((K1) + (on ? "_a" : "_b"), v);'].join("\n");
+    expect(keysOf(scan("src/fixture-r12l.ts", fixture))).toEqual(["localStorage:kf_session_token_a", "localStorage:kf_session_token_b"]);
+  });
+  it('(getKey)(on ? "kf_a" : "kf_b"): a call the resolver cannot follow is a credential write', () => {
+    expect(credWrites("src/fixture-r12m.ts", 'localStorage.setItem((getKey)(on ? "kf_a" : "kf_b"), v);', "localStorage").length).toBe(1);
+  });
+});
+
+describe("CSC-65 pins", () => {
+  it('on ? "kf_a" : "kf_b" gives two plain writes', () => {
+    const ws = scan("src/fixture-r12n.ts", 'localStorage.setItem(on ? "kf_a" : "kf_b", v);');
+    expect(keysOf(ws)).toEqual(["localStorage:kf_a", "localStorage:kf_b"]);
+    expect(ws.filter(isCredential)).toEqual([]);
+  });
+  it("a product over 64 candidates is unresolved (a credential write)", () => {
+    const t = (n: number) => `(${Array.from({ length: n }, (_, i) => `x === ${i} ? "p${i}"`).join(" : ")} : "q")`;
+    const fixture = `localStorage.setItem(\`kf_\${${t(9)}}_\${${t(9)}}\`, v);`;
+    expect(credWrites("src/fixture-r12o.ts", fixture, "localStorage").length).toBe(1);
+  });
+});
