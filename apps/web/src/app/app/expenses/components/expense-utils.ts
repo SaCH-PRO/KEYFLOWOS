@@ -131,6 +131,15 @@ export function firstRunAfter(day: string, frequency: string, today: string): st
   return next;
 }
 
+/** A real calendar day written YYYY-MM-DD (not "9/1/2025", not 2026-02-30). */
+export function isCalendarDay(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const p = parseDay(value);
+  if (!p) return false;
+  const at = new Date(Date.UTC(p.y, p.m - 1, p.d));
+  return at.getUTCFullYear() === p.y && at.getUTCMonth() === p.m - 1 && at.getUTCDate() === p.d;
+}
+
 /** The day after `day` (YYYY-MM-DD). */
 export function dayAfter(day: string): string {
   const p = parseDay(day);

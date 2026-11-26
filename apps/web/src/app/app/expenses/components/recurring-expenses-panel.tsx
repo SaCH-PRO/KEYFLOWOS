@@ -21,7 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, dayAfter, formatShortDate, todayInBusinessZone } from "./expense-utils";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, todayInBusinessZone } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -73,7 +73,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     savingRef.current = true;
     setSaving(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: form.name,
         description: form.description,
         amount: parseFloat(form.amount),
@@ -87,6 +87,9 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
         createsBill: form.createsBill,
         dueOffsetDays: form.dueOffsetDays ? parseInt(form.dueOffsetDays) : null,
       };
+      // An edit that leaves a past next run as it was (a paused or failed schedule) does not send it back:
+      // the PATCH leaves nextRunDate untouched when it is absent (RecurringExpenseService.update).
+      if (editing && form.nextRunDate === storedDay(editing.nextRunDate)) delete payload.nextRunDate;
       // A refused save is said, never reported as saved (EXPENSES-HUB-2: the schedule is real or it is not).
       const res = editing
         ? await updateRecurringExpense(businessId, editing.id, payload)
@@ -233,7 +236,7 @@ function RecurringCard({
           </div>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-sm font-bold text-foreground">{formatCurrency(item.amount, item.currency)}</p>
+          <p className="text-sm font-bold text-foreground">{formatAmount(item.amount, item.currency, businessId)}</p>
         </div>
       </div>
 
@@ -273,6 +276,11 @@ function ActionBtn({
   );
 }
 
+/** The YYYY-MM-DD the builder shows for a stored next run. */
+function storedDay(nextRunDate: string | null | undefined): string {
+  return nextRunDate ? nextRunDate.split("T")[0] : "";
+}
+
 interface RecurringFormData {
   name: string;
   description: string;
@@ -310,7 +318,7 @@ function RecurringBuilder({
         description: editing.description,
         amount: String(editing.amount),
         frequency: editing.frequency,
-        nextRunDate: editing.nextRunDate ? editing.nextRunDate.split("T")[0] : "",
+        nextRunDate: storedDay(editing.nextRunDate),
         endDate: editing.endDate ? editing.endDate.split("T")[0] : "",
         vendor: editing.vendor || "",
         paymentMethod: editing.paymentMethod || "",
@@ -345,7 +353,14 @@ function RecurringBuilder({
   const earliestRun = dayAfter(todayInBusinessZone(new Date(), businessId));
   const [dateError, setDateError] = useState<string | null>(null);
   const save = () => {
-    if (!form.nextRunDate || form.nextRunDate < earliestRun) {
+    // On Create the floor applies; on Update only when the next run was changed (a paused schedule's past run
+    // can stay as it is while its amount changes).
+    const unchanged = editing !== null && form.nextRunDate === storedDay(editing.nextRunDate);
+    if (!unchanged && !isCalendarDay(form.nextRunDate)) {
+      setDateError("The next run must be a date (YYYY-MM-DD) after today.");
+      return;
+    }
+    if (!unchanged && form.nextRunDate < earliestRun) {
       setDateError("The next run must be after today: a past run would book every missed period at once.");
       return;
     }
