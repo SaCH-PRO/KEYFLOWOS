@@ -81,7 +81,10 @@
  * dynamic code, comments inside string code, string code nested deeper than 3, a `d = document` alias, nested const
  * objects, a destructured jar and `globalThis.Cache` types; from round 8 (CSC8-SEC-3, FU-CENSUS-HARDENING): a
  * cookie set through ternaries reads as a clear (`document.cookie = \`kf_session=${on ? token : ""};
- * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0); in the text scanner only (a file with parse errors), a
+ * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0); from round 9: a
+ * ternary of two plain-named consts keeps only its first resolvable branch (`const A = "kf_x_token",
+ * B = "kf_x_prefs"; setItem(on ? B : A, v)` reads as kf_x_prefs), in direct code and in string code alike; in the
+ * text scanner only (a file with parse errors), a
  * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
  * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
@@ -1333,7 +1336,8 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
         code += resolved + breaks + sp.literal.text;
         // The raw side stands in for the substitution with as many characters and line breaks, and no escapes.
         const litStart = sp.literal.getStart(sf) + 1;
-        raw += resolved.replace(/[^\n]/g, "x") + breaks + src.slice(litStart, sp.literal.end - (ts.isTemplateTail(sp.literal) ? 1 : 2));
+        // Every character, line breaks included: a resolved value's own line breaks are not host line breaks.
+        raw += resolved.replace(/[\s\S]/g, "x") + breaks + src.slice(litStart, sp.literal.end - (ts.isTemplateTail(sp.literal) ? 1 : 2));
       }
       scanInline(code, raw, at(n) + 1, false, true);
       return;
@@ -1346,8 +1350,9 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
 
   /**
    * A template substitution's text, resolved in the host file; UNRESOLVED (a credential) when it cannot be resolved
-   * in full, or when its own source names a credential (CSC8-SEC-1/2): a ternary's first resolvable branch, a "*"
-   * piece or a resolved const would otherwise lose the credential (`${token ? token : ""}`, `${AUTH_KEY}`).
+   * in full ("*" piece), or when its own source names a credential (CSC8-SEC-1/2: `${token ? token : ""}`,
+   * `${AUTH_KEY}`). A ternary is covered only in that second case: `${on ? B : A}` of two plain-named consts still
+   * resolves to its first resolvable branch (a known gap, see the header).
    */
   function resolveSubstitution(e: ts.Expression): string {
     const t = text(e);
