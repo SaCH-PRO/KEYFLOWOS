@@ -38,6 +38,7 @@ import { HttpModule } from '@nestjs/axios';
 import { KeyCortexController } from './key-cortex.controller';
 import { KeyCortexAuditController } from './key-cortex-audit.controller';
 import { KeyCortexGoalsController } from './key-cortex-goals.controller';
+import { KnowledgeIngestionController } from './knowledge-ingestion.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
 import { CognitiveTriageService } from './cognitive-triage.service';
 import { KeyCortexEfferentBridgeService } from './key-cortex-efferent-bridge.service';
@@ -305,6 +306,8 @@ import { CapabilitiesModule } from '../capabilities/capabilities.module';
     KeyCortexAuditController,
     // Phase 3: Goals & Plans
     KeyCortexGoalsController,
+    // Business knowledge upload + approval surface (P110, #134)
+    KnowledgeIngestionController,
   ],
 
   providers: [

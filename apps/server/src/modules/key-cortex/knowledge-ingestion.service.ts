@@ -1,15 +1,5 @@
-// @keyflow:dormant — registered in key-cortex.module.ts and injected by nothing.
-//
-// Verified 2026-08-06: zero injection sites repo-wide. Nothing ingests external
-// knowledge into semantic memory, so docs/neuro-atlas-code-mapping.md §45
-// (Neurodevelopment / Neurogenesis) currently maps to a file rather than to a
-// behaviour.
-//
-// This is roadmap capability with no caller, not a wiring slip — writing the
-// driver is the work, and until then the atlas entry overstates what runs.
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { SemanticMemoryService } from '../ai/semantic-memory.service';
 
 export interface IngestTextInput {
   businessId: string;
@@ -19,24 +9,31 @@ export interface IngestTextInput {
   content: string;
 }
 
+export interface KnowledgeSourceMetadata {
+  id: string;
+  title: string;
+  sourceType: string;
+  status: string;
+  createdAt: Date;
+}
+
 /**
- * Ingests external knowledge (best practices, research, regulations) into
- * KEY's semantic memory and knowledge source ledger.
- *
- * Foundation implementation: stores the source, chunks the text, and indexes
- * each chunk via SemanticMemoryService. Future iterations will summarize,
- * link to Genome facts, and propose constitution amendments.
+ * Manages business-scoped external knowledge sources with quarantine-first
+ * ingestion, explicit approval before retrieval admission, metadata-only URL
+ * registration (no outbound fetch), and bounded metadata listing.
  */
 @Injectable()
 export class KnowledgeIngestionService {
   private readonly logger = new Logger(KnowledgeIngestionService.name);
 
   constructor(
+    @Inject(PrismaService)
     private readonly prisma: PrismaService,
-    private readonly semanticMemory: SemanticMemoryService,
   ) {}
 
   async ingestText(input: IngestTextInput): Promise<string> {
+    // Quarantine-first ingestion: supplied material is recorded with provenance
+    // and held out of retrieval until explicitly approved via approveSource().
     const source = await this.prisma.client.knowledgeSource.create({
       data: {
         businessId: input.businessId,
@@ -44,42 +41,26 @@ export class KnowledgeIngestionService {
         sourceType: input.sourceType,
         sourceUrl: input.sourceUrl ?? null,
         content: input.content,
-        status: 'pending',
+        status: 'quarantined',
       },
     });
 
-    const chunks = this.chunkText(input.content, 2000);
-    for (let i = 0; i < chunks.length; i++) {
-      await this.semanticMemory.store({
-        businessId: input.businessId,
-        content: `[${input.title} chunk ${i + 1}/${chunks.length}]\n${chunks[i]}`,
-        sourceType: 'document',
-        sourceId: `${source.id}:${i}`,
-        metadata: {
-          knowledgeSourceId: source.id,
-          title: input.title,
-          sourceType: input.sourceType,
-          chunkIndex: i,
-        },
-      });
-    }
-
-    await this.prisma.client.knowledgeSource.update({
-      where: { id: source.id },
-      data: { status: 'processed' },
-    });
-
-    this.logger.log(`[ingestText] Processed ${chunks.length} chunk(s) for ${source.id}`);
+    this.logger.log(
+      `[ingestText] Quarantined source ${source.id}; no semantic-memory write performed`,
+    );
     return source.id;
   }
 
-  async ingestUrl(businessId: string, url: string, _title?: string): Promise<string> {
-    // Foundation: we do not fetch external URLs automatically in this pass.
-    // The source is recorded so a worker or follow-up can fetch it safely.
+  async ingestUrl(
+    businessId: string,
+    url: string,
+    title?: string,
+  ): Promise<string> {
+    // Metadata registration only: never performs an outbound HTTP fetch here.
     const source = await this.prisma.client.knowledgeSource.create({
       data: {
         businessId,
-        title: _title ?? url,
+        title: title ?? url,
         sourceType: 'url',
         sourceUrl: url,
         content: '',
@@ -89,31 +70,48 @@ export class KnowledgeIngestionService {
     return source.id;
   }
 
+  async approveSource(
+    businessId: string,
+    sourceId: string,
+  ): Promise<{ sourceId: string; status: 'approved' }> {
+    const existing = await this.prisma.client.knowledgeSource.findFirst({
+      where: { id: sourceId, businessId },
+      select: { id: true, status: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Knowledge source not found');
+    }
+
+    if (existing.status !== 'approved') {
+      await this.prisma.client.knowledgeSource.update({
+        where: { id: existing.id },
+        data: { status: 'approved' },
+      });
+    }
+
+    return { sourceId: existing.id, status: 'approved' as const };
+  }
+
   async listSources(
     businessId: string,
     status?: string,
-  ): Promise<Array<{ id: string; title: string; sourceType: string; status: string; createdAt: Date }>> {
-    const rows = await this.prisma.client.knowledgeSource.findMany({
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<KnowledgeSourceMetadata[]> {
+    const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100);
+    const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
+    return this.prisma.client.knowledgeSource.findMany({
       where: { businessId, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+      select: {
+        id: true,
+        title: true,
+        sourceType: true,
+        status: true,
+        createdAt: true,
+      },
     });
-
-    return rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      sourceType: r.sourceType,
-      status: r.status,
-      createdAt: r.createdAt,
-    }));
-  }
-
-  private chunkText(text: string, maxChars: number): string[] {
-    const chunks: string[] = [];
-    let start = 0;
-    while (start < text.length) {
-      chunks.push(text.slice(start, start + maxChars));
-      start += maxChars;
-    }
-    return chunks;
   }
 }
