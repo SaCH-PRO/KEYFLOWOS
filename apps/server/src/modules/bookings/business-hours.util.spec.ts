@@ -141,9 +141,57 @@ describe('readBusinessDayHours', () => {
     expect(readBusinessDayHours({ mon: { open: '09:00', close: '17:00' } }, 1.5)).toBeNull();
   });
 
-  it('ignores prototype properties safely', () => {
+  it('ignores prototype properties safely on both outer map and inner day entries', () => {
     const proto = { mon: { open: '09:00', close: '17:00', closed: false } };
     const obj = Object.create(proto);
     expect(readBusinessDayHours(obj, 1)).toBeNull();
+
+    const innerProto = { open: '09:00', close: '17:00', closed: false };
+    const innerObj = Object.create(innerProto);
+    expect(readBusinessDayHours({ mon: innerObj }, 1)).toBeNull();
+  });
+
+  it('falls through from an incomplete/malformed short key to a valid long key instead of failing open', () => {
+    expect(
+      readBusinessDayHours({ mon: { closed: false }, monday: { closed: true } }, 1),
+    ).toEqual({ closed: true });
+    expect(
+      readBusinessDayHours({ mon: {}, monday: { closed: true } }, 1),
+    ).toEqual({ closed: true });
+    expect(
+      readBusinessDayHours(
+        { mon: { open: 'bad', close: 'bad' }, monday: { open: '10:00', close: '12:00', closed: false } },
+        1,
+      ),
+    ).toEqual({
+      closed: false,
+      openMin: 600,
+      closeMin: 720,
+      open: '10:00',
+      close: '12:00',
+    });
+    // Without a valid fallback long key, an incomplete short key still returns null.
+    expect(readBusinessDayHours({ mon: { closed: false } }, 1)).toBeNull();
+  });
+
+  it('preserves short-key precedence even when short key is mixed-case and long key is lowercase', () => {
+    expect(
+      readBusinessDayHours(
+        { MON: { closed: true }, monday: { open: '09:00', close: '17:00', closed: false } },
+        1,
+      ),
+    ).toEqual({ closed: true });
+    expect(
+      readBusinessDayHours(
+        { Mon: { open: '11:00', close: '13:00' }, monday: { open: '09:00', close: '17:00' } },
+        1,
+      ),
+    ).toEqual({
+      closed: false,
+      openMin: 660,
+      closeMin: 780,
+      open: '11:00',
+      close: '13:00',
+    });
   });
 });
