@@ -3,11 +3,11 @@
  * wave M25) gave GET /identity/me `keyDisabled: boolean` from the server's KEY_DISABLED. This file pins the web:
  *
  *   useKeyEnabled (hooks/use-key-enabled.ts) reads that field through apiGet. KEY is offered only once the server has
- *   answered and did not say keyDisabled: true. While the read is in flight, and when it fails, nothing of KEY renders
- *   (fail-safe: a KEY-disabled business never sees a door flash; a KEY-enabled one sees its doors a moment later). A
- *   200 without the field (a server from before P89, which had no switch the web could read) leaves KEY on.
+ *   answered keyDisabled: false. While the read is in flight, and when it fails, nothing of KEY renders (fail-safe: a
+ *   KEY-disabled business never sees a door flash; a KEY-enabled one sees its doors a moment later). A 200 without
+ *   the field, or with a value that is not a boolean, leaves KEY off (fail closed; repair round 1, SEC-M1 / COR-5).
  *
- *   KSS-W01  RED-BEFORE  the hook: keyDisabled true -> off; false -> on; field absent -> on
+ *   KSS-W01  RED-BEFORE  the hook: keyDisabled true -> off; false -> on; field absent -> off
  *   KSS-W02  RED-BEFORE  the hook: off while /identity/me is in flight (no flash), and off when the read fails
  *   KSS-W03  RED-BEFORE  under keyDisabled the header has no "Ask KEY" button (app-header.tsx)
  *   KSS-W04  control     with KEY on the header still has its "Ask KEY" button
@@ -32,11 +32,15 @@
  *   KSS-W15  RED-BEFORE  under keyDisabled the drawer does not render even when KEY's chat store is opened directly
  *                        (as the Genome chip and the chat history do through openGenomeConversation, not an event)
  *   KSS-W17  guard       COR-CJ-2 (carried from FU-KEY-CTRLJ-OWNERS's review): in the app shell, with the Genome gate
- *                        deferred, Ctrl+J and Cmd+J pressed while the gate is still checking and again once the shell
- *                        has drawn leave KEY's drawer and the shell's chat store shut under keyDisabled, not even for
- *                        a moment. On main the shell's useKeyboardShortcuts and KeyAgent both answer Ctrl+J and
- *                        cancel each other out, which masks a missing guard; with KeyAgent as Ctrl+J's one owner
- *                        (FU-KEY-CTRLJ-OWNERS) this case fails when KeyAgent's Ctrl+J guard is removed
+ *                        deferred, Ctrl+J and Cmd+J pressed once the shell has drawn leave KEY's drawer and the
+ *                        shell's chat store shut under keyDisabled, not even for a moment. It kills the mutant that
+ *                        drops KeyAgent's Ctrl+J guard, with main's shortcut hook and with FU-KEY-CTRLJ-OWNERS's
+ *                        (KSS-W16 kills it too). The one mutant it cannot see on main's hook is the double one, both
+ *                        the Ctrl+J guard and the kf:open-key guard removed: the hook's kf:open-key and KeyAgent's
+ *                        toggle then cancel out in the shell; KSS-W16, which mounts KeyAgent without the hook, kills it.
+ *                        The presses made while the gate still checks cannot open anything (the layout draws only its
+ *                        spinner then, app/app/layout.tsx, so KeyAgent is not mounted); they prove that nothing
+ *                        pressed then is kept and acted on once the shell draws (repair round 1, COR-2 / COR-3)
  *
  * Each case uses its own session token: useKeyEnabled keeps one answer per session token, so a case never reads the
  * answer an earlier case was given.
@@ -149,13 +153,20 @@ async function answer(input: RequestInfo | URL, init?: RequestInit): Promise<Res
 }
 
 let tokenSeq = 0;
+async function resetSwitch() {
+  const mod = (await import(/* @vite-ignore */ HOOK_PATH)) as { resetKeySwitchForTests?: () => void };
+  mod.resetKeySwitchForTests?.();
+}
 function serveMe(me: MeAnswer) {
   server.me = me;
 }
 const keyOff = () => serveMe({ status: 200, body: { id: "usr_kss", email: "owner@kss.test", keyDisabled: true } });
 const keyOn = () => serveMe({ status: 200, body: { id: "usr_kss", email: "owner@kss.test", keyDisabled: false } });
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The switch is the deployment's, kept once per tab (repair round 1, COR-1): each case starts from a tab that has
+  // not read it yet.
+  await resetSwitch();
   tokenSeq += 1;
   window.localStorage.setItem("kf_token", `kss-token-${tokenSeq}-${Math.random().toString(36).slice(2)}`);
   window.localStorage.setItem("kf_business_id", BIZ);
@@ -238,7 +249,7 @@ async function renderAgent() {
 }
 
 describe("SWP-KEY-SHELL-SMOKE: useKeyEnabled reads keyDisabled from /identity/me", () => {
-  it("KSS-W01 RED-BEFORE: keyDisabled true turns KEY off; false turns it on; a 200 without the field leaves it on", async () => {
+  it("KSS-W01 RED-BEFORE: keyDisabled true turns KEY off; false turns it on; a 200 without the field leaves it off", async () => {
     const useKeyEnabled = await loadHook();
 
     keyOff();
@@ -247,6 +258,7 @@ describe("SWP-KEY-SHELL-SMOKE: useKeyEnabled reads keyDisabled from /identity/me
     expect(off.result.current.enabled).toBe(false);
     off.unmount();
 
+    await resetSwitch();
     window.localStorage.setItem("kf_token", `kss-token-on-${Math.random()}`);
     keyOn();
     const on = renderHook(() => useKeyEnabled());
@@ -254,11 +266,12 @@ describe("SWP-KEY-SHELL-SMOKE: useKeyEnabled reads keyDisabled from /identity/me
     expect(on.result.current.enabled).toBe(true);
     on.unmount();
 
+    await resetSwitch();
     window.localStorage.setItem("kf_token", `kss-token-absent-${Math.random()}`);
     serveMe({ status: 200, body: { id: "usr_kss", email: "owner@kss.test" } });
     const absent = renderHook(() => useKeyEnabled());
     await waitFor(() => expect(absent.result.current.known).toBe(true));
-    expect(absent.result.current.enabled).toBe(true);
+    expect(absent.result.current.enabled, "a 200 without keyDisabled (fail closed)").toBe(false);
   });
 
   it("KSS-W02 RED-BEFORE: KEY is off while /identity/me is in flight, and off when the read fails", async () => {
@@ -274,6 +287,7 @@ describe("SWP-KEY-SHELL-SMOKE: useKeyEnabled reads keyDisabled from /identity/me
     await waitFor(() => expect(pending.result.current).toEqual({ enabled: true, known: true }));
     pending.unmount();
 
+    await resetSwitch();
     window.localStorage.setItem("kf_token", `kss-token-403-${Math.random()}`);
     serveMe({ status: 403, body: { message: "Forbidden" } });
     const refused = renderHook(() => useKeyEnabled());
@@ -281,6 +295,7 @@ describe("SWP-KEY-SHELL-SMOKE: useKeyEnabled reads keyDisabled from /identity/me
     expect(refused.result.current.enabled).toBe(false);
     refused.unmount();
 
+    await resetSwitch();
     window.localStorage.setItem("kf_token", `kss-token-net-${Math.random()}`);
     serveMe("network-error");
     const offline = renderHook(() => useKeyEnabled());
