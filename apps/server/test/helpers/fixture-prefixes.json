@@ -1555,6 +1555,11 @@
       "prefix": "v86r_",
       "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
       "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
+    },
+    {
+      "prefix": "v72c_",
+      "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
     }
   ],
   "pendingRenames": [],
