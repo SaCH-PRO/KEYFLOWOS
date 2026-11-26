@@ -342,7 +342,7 @@ export class ExpensesService {
     }
     const bill = normalizeCurrency(billCurrency);
     const held = normalizeCurrency(account.currency) || bill;
-    if (bill && held !== bill) {
+    if (held !== bill) {
       throw new BadRequestException(
         `Payment account ${paymentAccountId} holds ${held}; the bill is in ${bill} (one currency, nothing converted: D-13)`,
       );
@@ -376,15 +376,42 @@ export class ExpensesService {
   async markBillPaid(input: {
     businessId: string;
     expenseId: string;
-    paymentMethod?: string;
-    paidAt?: string | Date;
+    paymentMethod?: string | null;
+    paidAt?: string | Date | null;
     paymentAccountId?: string | null;
   }) {
-    const trimmedPaymentAccountId =
-      typeof input.paymentAccountId === 'string' ? input.paymentAccountId.trim() : '';
-    const requestedPaidAt = input.paidAt ? new Date(input.paidAt) : new Date();
-    if (Number.isNaN(requestedPaidAt.getTime())) {
-      throw new BadRequestException('Invalid paidAt date');
+    let trimmedPaymentAccountId = '';
+    if (input.paymentAccountId !== undefined && input.paymentAccountId !== null) {
+      if (typeof input.paymentAccountId !== 'string' || input.paymentAccountId.trim().length === 0) {
+        throw new BadRequestException('paymentAccountId must be a non-empty string');
+      }
+      trimmedPaymentAccountId = input.paymentAccountId.trim();
+    }
+
+    let requestedPaidAt: Date;
+    if (input.paidAt !== undefined && input.paidAt !== null) {
+      if (
+        !(
+          (typeof input.paidAt === 'string' && input.paidAt.trim().length > 0) ||
+          input.paidAt instanceof Date
+        )
+      ) {
+        throw new BadRequestException('paidAt must be a valid date');
+      }
+      requestedPaidAt = input.paidAt instanceof Date ? input.paidAt : new Date(input.paidAt.trim());
+      if (Number.isNaN(requestedPaidAt.getTime())) {
+        throw new BadRequestException('paidAt must be a valid date');
+      }
+    } else {
+      requestedPaidAt = new Date();
+    }
+
+    let requestedPaymentMethod: string | undefined;
+    if (input.paymentMethod !== undefined && input.paymentMethod !== null) {
+      if (typeof input.paymentMethod !== 'string') {
+        throw new BadRequestException('paymentMethod must be a string');
+      }
+      requestedPaymentMethod = input.paymentMethod;
     }
 
     const { expense: updated, newlyPaid } = await this.prisma.client.$transaction(async (rawTx) => {
@@ -410,7 +437,7 @@ export class ExpensesService {
         ? await this.resolveBillPaymentCoa(tx, input.businessId, trimmedPaymentAccountId, existing.currency)
         : null;
 
-      const paymentMethod = input.paymentMethod ?? existing.paymentMethod;
+      const paymentMethod = requestedPaymentMethod ?? existing.paymentMethod;
       const claimed = await tx.expense.updateMany({
         where: { id: input.expenseId, businessId: input.businessId, status: 'BILL', deletedAt: null },
         data: { status: 'PAID', paidAt: requestedPaidAt, paymentMethod },
