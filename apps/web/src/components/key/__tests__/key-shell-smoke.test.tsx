@@ -27,6 +27,8 @@
  *                        it is not refused 401 on every load (it sent no Authorization header at all)
  *   KSS-W14  RED-BEFORE  under keyDisabled the awareness panel ("From KEY's background scans") renders nothing and
  *                        reads nothing
+ *   KSS-W15  RED-BEFORE  under keyDisabled the drawer does not render even when KEY's chat store is opened directly
+ *                        (as the Genome chip and the chat history do through openGenomeConversation, not an event)
  *
  * Each case uses its own session token: useKeyEnabled keeps one answer per session token, so a case never reads the
  * answer an earlier case was given.
@@ -74,7 +76,7 @@ vi.mock("@/hooks/use-genome-gate", async () => {
 import AppLayout from "@/app/app/layout";
 import { Providers } from "@/components/providers";
 import { TtsProvider } from "@/components/tts";
-import { KeyChatProvider } from "@/components/key/chat";
+import { KeyChatProvider, useKeyChat } from "@/components/key/chat";
 import { KeyAgent } from "@/components/key/key-agent";
 import { KeyAwarenessPanel } from "@/components/key/KeyAwarenessPanel";
 
@@ -196,12 +198,23 @@ async function renderShell(page: ReactNode = <p>Today</p>) {
   await settle(150);
 }
 
+/** Opens KEY's chat store directly, as openGenomeConversation does (no kf:open-key event). */
+function OpenStoreButton() {
+  const { setOpen } = useKeyChat();
+  return (
+    <button type="button" onClick={() => setOpen(true)}>
+      open the chat store
+    </button>
+  );
+}
+
 async function renderAgent() {
   render(
     <Providers>
       <TtsProvider>
         <KeyChatProvider>
           <KeyAgent />
+          <OpenStoreButton />
         </KeyChatProvider>
       </TtsProvider>
     </Providers>,
@@ -340,6 +353,14 @@ describe("SWP-KEY-SHELL-SMOKE: KeyAgent's own keys under keyDisabled", { timeout
     const overlay = screen.queryByText(/hold space to speak|listening\.\.\./i);
     fireEvent.keyUp(window, { key: " " });
     expect(overlay, "KEY's push-to-talk overlay under keyDisabled").toBeNull();
+  });
+
+  it("KSS-W15 RED-BEFORE: under keyDisabled the drawer does not render when the chat store is opened directly", async () => {
+    keyOff();
+    await renderAgent();
+    fireEvent.click(screen.getByRole("button", { name: "open the chat store" }));
+    await settle(200);
+    expect(drawer(), "KEY's drawer under keyDisabled").toBeNull();
   });
 
   it("KSS-W10 RED-BEFORE: for a new owner whose Genome needs work, the drawer does not open by itself on Today", async () => {
