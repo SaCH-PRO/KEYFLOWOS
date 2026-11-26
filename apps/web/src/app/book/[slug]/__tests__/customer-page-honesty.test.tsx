@@ -20,7 +20,7 @@
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 const nav = vi.hoisted(() => ({
   redirect: vi.fn((url: string) => {
@@ -54,6 +54,8 @@ vi.mock("next/navigation", () => ({
 import { BusinessHero } from "../components/business-hero";
 import { TrustBar, SecurityFooter } from "../components/trust-bar";
 import ProductPage from "../product/[productId]/page";
+import { CheckoutFlow } from "../components/checkout-flow";
+import { ItemDetailModal } from "../components/item-detail-modal";
 import type { Business, BusinessHours } from "../components/types";
 import { OrderConfirmation } from "../components/order-confirmation";
 import PublicSitePage from "../../../site/[slug]/page";
@@ -280,5 +282,52 @@ describe("store footer and product page: no unearned badges", () => {
       expect(text, `the product page says '${claim}'`).not.toMatch(new RegExp(claim, "i"));
     }
     expect(text).toContain("Made in Trinidad");
+  });
+});
+
+describe("checkout and item details: no guarantee wording", () => {
+  it("the checkout's payment step does not say 'Guaranteed by KeyFlowOS' (or any guarantee)", async () => {
+    api.apiGet.mockImplementation(async () => ({ data: [], error: null }));
+    render(
+      <CheckoutFlow
+        business={business(null)}
+        cart={[{ id: "pkg_honest_1", name: "Pepper sauce gift box", price: 45, currency: "TTD", itemType: "package", requiresBooking: false, quantity: 1 }]}
+        staff={[]}
+        primaryColor="#f97316"
+        secondaryColor="#0ea5e9"
+        accentColor="#22c55e"
+        cartTotal={45}
+        cartCurrency="TTD"
+        promoCode={null}
+        shippingZones={[]}
+        onBack={vi.fn()}
+        onUpdateQuantity={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText("John"), { target: { value: "Cee" } });
+    fireEvent.change(screen.getByPlaceholderText("john@example.com"), { target: { value: "cee@test.local" } });
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await waitFor(() => expect(screen.getByText(/I agree to the terms of service/)).toBeTruthy());
+    expect(pageText(), "a guarantee at checkout").not.toMatch(/guarantee/i);
+  });
+
+  it("the item details do not say 'Quality Guaranteed' (or any guarantee)", () => {
+    render(
+      <ItemDetailModal
+        item={{ id: "prod_honest_1", name: "Scorpion pepper sauce", description: "Made in Trinidad", price: 45, currency: "TTD", duration: null, imageUrl: null, itemType: "product", requiresBooking: false }}
+        primaryColor="#f97316"
+        secondaryColor="#0ea5e9"
+        accentColor="#22c55e"
+        isInCart={false}
+        addToCart={vi.fn()}
+        removeFromCart={vi.fn()}
+        relatedItems={[]}
+        onClose={vi.fn()}
+        onSelectItem={vi.fn()}
+      />,
+    );
+    expect(pageText()).toContain("Scorpion pepper sauce");
+    expect(pageText(), "a guarantee in the item details").not.toMatch(/guarantee/i);
   });
 });
