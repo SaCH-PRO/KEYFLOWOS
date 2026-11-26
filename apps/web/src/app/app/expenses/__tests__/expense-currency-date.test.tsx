@@ -21,6 +21,7 @@ import type { Expense, ExpenseBudget, ExpenseSummary } from "@/lib/client";
 const BUSINESS = "biz_hub2_usd";
 const ZONE_FOR_DISPLAY = "America/Port_of_Spain";
 const cachedBusiness = vi.hoisted(() => ({ value: { id: "biz_hub2_usd", name: "Hub2 USD Co", currency: "USD" } as Record<string, unknown> | null }));
+const storedBusinessId = vi.hoisted(() => ({ value: null as string | null }));
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
@@ -30,7 +31,7 @@ vi.mock("@/hooks/use-drive-upload", () => ({ useDriveUpload: () => ({ uploadToDr
 vi.mock("@/lib/api", () => ({ API_BASE: "http://api.test" }));
 vi.mock("@/lib/workspace", () => ({
   getCachedBusiness: () => cachedBusiness.value,
-  getStoredBusinessId: () => (cachedBusiness.value?.id as string | undefined) ?? null,
+  getStoredBusinessId: () => storedBusinessId.value ?? (cachedBusiness.value?.id as string | undefined) ?? null,
 }));
 vi.mock("@/lib/api/finance", () => ({ createBill: vi.fn(), payBill: vi.fn(), voidBill: vi.fn() }));
 vi.mock("@/lib/client", () => ({
@@ -63,6 +64,7 @@ function mountForm(form: Form) {
 
 beforeEach(() => {
   cachedBusiness.value = { id: BUSINESS, name: "Hub2 USD Co", currency: "USD" };
+  storedBusinessId.value = null;
 });
 
 afterEach(() => {
@@ -172,5 +174,78 @@ describe("BUG-028: an expense's date shows as the day it was dated, in Port of S
     } as never);
     render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
     await waitFor(() => expect(screen.getByText(/Next: Dec 25/)).toBeTruthy());
+  });
+});
+
+describe("COR-F2: a stored instant is shown as its day in the business zone; a calendar day as itself", () => {
+  let tz: string | undefined;
+  beforeEach(() => {
+    tz = process.env.TZ;
+    process.env.TZ = "UTC";
+  });
+  afterEach(() => {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  });
+
+  it("21:00 on 25 November in Port of Spain, stored as 2026-11-26T01:00Z, reads Nov 25", () => {
+    expect(formatDate("2026-11-26T01:00:00.000Z")).toBe("Nov 25, 2026");
+  });
+
+  it("a calendar day (date-only, or exactly midnight UTC) reads as that day", () => {
+    expect(formatDate("2026-11-26")).toBe("Nov 26, 2026");
+    expect(formatDate("2026-11-26T00:00:00.000Z")).toBe("Nov 26, 2026");
+    expect(formatDate("2026-11-26T00:00:00Z")).toBe("Nov 26, 2026");
+  });
+
+  it("the recurring panel shows a schedule's instant as its day in the business zone", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValueOnce({
+      data: [{ id: "r2", name: "Rent", description: "Rent", amount: 4500, currency: "USD", frequency: "MONTHLY", nextRunDate: "2026-12-26T01:00:00.000Z", isActive: true, runCount: 1, failureCount: 0, createsBill: false, businessId: BUSINESS, createdAt: "", updatedAt: "" }],
+      error: null,
+    } as never);
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
+    await waitFor(() => expect(screen.getByText(/Next: Dec 25/)).toBeTruthy());
+  });
+});
+
+describe("COR-F5: a business in another zone gets its own today", () => {
+  it.each<Form>(["modal", "sidesheet"])("the %s of a Tokyo business at 16:00 UTC defaults to the next day in Tokyo", (form) => {
+    cachedBusiness.value = { id: BUSINESS, name: "Tokyo Co", currency: "JPY", timezone: "Asia/Tokyo" };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T16:00:00.000Z"));
+    const { container } = mountForm(form);
+    expect((container.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-11-26");
+  });
+
+  it("a Tokyo business's stored instant is shown as its Tokyo day", () => {
+    cachedBusiness.value = { id: BUSINESS, name: "Tokyo Co", currency: "JPY", timezone: "Asia/Tokyo" };
+    expect(formatDate("2026-11-25T16:00:00.000Z")).toBe("Nov 26, 2026");
+  });
+
+  it("an unknown zone falls back to Trinidad", () => {
+    cachedBusiness.value = { id: BUSINESS, name: "Odd Co", currency: "USD", timezone: "Mars/Olympus" };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-26T01:00:00.000Z"));
+    const { container } = mountForm("sidesheet");
+    expect((container.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-11-25");
+  });
+});
+
+describe("SEC-EXH2-1: another business's cached currency never labels this business's form", () => {
+  it.each<Form>(["modal", "sidesheet"])("the %s for business X, with Y (USD) cached, does not say USD", (form) => {
+    cachedBusiness.value = { id: "biz_other_y", name: "Y Co", currency: "USD", timezone: "Asia/Tokyo" };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T16:00:00.000Z"));
+    const { container } = mountForm(form);
+    expect(container.textContent).not.toMatch(/USD/);
+    expect(screen.getByText(/Amount \(TTD\)/)).toBeTruthy();
+    expect((container.querySelector('input[type="date"]') as HTMLInputElement).value, "nor Y's zone its date").toBe("2026-11-25");
+  });
+
+  it("formatCurrency does not use a cached business that is not the stored one", () => {
+    cachedBusiness.value = { id: "biz_other_y", name: "Y Co", currency: "USD" };
+    storedBusinessId.value = BUSINESS;
+    expect(formatCurrency(150)).not.toMatch(/USD/);
   });
 });

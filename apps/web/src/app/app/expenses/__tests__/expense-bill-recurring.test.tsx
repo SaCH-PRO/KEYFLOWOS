@@ -169,7 +169,17 @@ describe("BUG-059: the expense sheet records a bill to pay later", () => {
   });
 });
 
+/** The browser's clock, at `iso`, still moving (waitFor keeps its timeouts). */
+function pinClock(iso: string) {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(new Date(iso));
+}
+
 describe.each<Form>(["modal", "sidesheet"])("BUG-061: in the %s, 'Recurring' creates a real schedule", (form) => {
+  // 10:00 on 25 November in Port of Spain: the expenses below are dated today or ahead.
+  beforeEach(() => pinClock("2026-11-25T14:00:00.000Z"));
+  afterEach(() => vi.useRealTimers());
+
   it("a new monthly recurring expense creates its schedule, due one month after the expense's date", async () => {
     const { container } = mount(form);
     fillBasics(container, "Office rent", "4500", "2026-11-25");
@@ -190,7 +200,8 @@ describe.each<Form>(["modal", "sidesheet"])("BUG-061: in the %s, 'Recurring' cre
     ["BIWEEKLY", "2026-11-25", "2026-12-09"],
     ["QUARTERLY", "2026-11-25", "2027-02-25"],
     ["YEARLY", "2026-11-25", "2027-11-25"],
-    ["MONTHLY", "2026-01-31", "2026-02-28"],
+    ["MONTHLY", "2026-12-31", "2027-01-31"],
+    ["MONTHLY", "2027-01-31", "2027-02-28"],
   ])("%s from %s is next due %s", async (frequency, date, next) => {
     const { container } = mount(form);
     fillBasics(container, "Subscription", "10", date);
@@ -249,6 +260,8 @@ describe.each<Form>(["modal", "sidesheet"])("BUG-061: in the %s, 'Recurring' cre
 });
 
 describe("BUG-061 with BUG-059: a recurring bill's schedule generates bills", () => {
+  beforeEach(() => pinClock("2026-11-25T14:00:00.000Z"));
+  afterEach(() => vi.useRealTimers());
   it("the schedule of a recurring bill creates bills, due as many days after their date as this one", async () => {
     const { container } = mount("sidesheet", { kind: "bill" });
     fillBasics(container, "Internet", "399", "2026-11-25");
@@ -257,5 +270,83 @@ describe("BUG-061 with BUG-059: a recurring bill's schedule generates bills", ()
     fireEvent.click(screen.getByRole("button", { name: /^record bill$/i }));
     await waitFor(() => expect(createRecurringExpense).toHaveBeenCalledTimes(1));
     expect(createRecurringExpense.mock.calls[0][1]).toMatchObject({ createsBill: true, dueOffsetDays: 10, nextRunDate: "2026-12-25" });
+  });
+});
+
+describe.each<Form>(["modal", "sidesheet"])("COR-F1: in the %s, a back-dated recurring expense never catches up", (form) => {
+  // 10:00 on 26 November 2026 in Port of Spain. The server generates one expense per due period from nextRunDate,
+  // so a schedule whose first run is already past would book every missed period at once: the first run is the
+  // first period boundary after today.
+  beforeEach(() => pinClock("2026-11-26T14:00:00.000Z"));
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    ["MONTHLY", "2026-03-10", "2026-12-10"],
+    ["MONTHLY", "2026-01-31", "2026-11-30"],
+    ["MONTHLY", "2026-10-26", "2026-12-26"],
+    ["MONTHLY", "2026-11-26", "2026-12-26"],
+    ["YEARLY", "2024-02-29", "2027-02-28"],
+    ["YEARLY", "2025-12-01", "2026-12-01"],
+    ["QUARTERLY", "2025-11-30", "2027-02-28"],
+    ["WEEKLY", "2026-11-01", "2026-11-29"],
+    ["BIWEEKLY", "2026-10-01", "2026-12-10"],
+  ])("%s dated %s is first due %s, after today, with no catch-up", async (frequency, date, next) => {
+    const { container } = mount(form);
+    fillBasics(container, "Internet", "399", date);
+    tickRecurring(container, frequency);
+    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
+    await waitFor(() => expect(createRecurringExpense).toHaveBeenCalledTimes(1));
+    expect(createRecurringExpense.mock.calls[0][1]).toMatchObject({ frequency, nextRunDate: next });
+  });
+});
+
+describe.each<Form>(["modal", "sidesheet"])("COR-F3: in the %s, a double click saves once", (form) => {
+  it("a second click while the save is in flight sends nothing", async () => {
+    let release: (v: unknown) => void = () => {};
+    createExpense.mockImplementation(() => new Promise((r) => { release = r; }));
+    const { container } = mount(form);
+    fillBasics(container, "Office rent", "4500");
+    tickRecurring(container);
+    const save = screen.getByRole("button", { name: "Add Expense" });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    await waitFor(() => expect(createExpense).toHaveBeenCalledTimes(1));
+    expect((save as HTMLButtonElement).disabled, "the save is disabled while it is in flight").toBe(true);
+    release({ data: { ...EXISTING, id: "exp_new" }, error: null });
+    await waitFor(() => expect(createRecurringExpense).toHaveBeenCalledTimes(1));
+    expect(createExpense).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("COR-F3: a double click on Record bill records one bill", () => {
+  it("one bill, one PATCH, one schedule", async () => {
+    let release: (v: unknown) => void = () => {};
+    createBill.mockImplementation(() => new Promise((r) => { release = r; }));
+    const { container } = mount("sidesheet", { kind: "bill" });
+    fillBasics(container, "Internet", "399");
+    fireEvent.change(screen.getByPlaceholderText(/tag1/i), { target: { value: "utilities" } });
+    tickRecurring(container);
+    const save = screen.getByRole("button", { name: /^record bill$/i });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    fireEvent.click(save);
+    await waitFor(() => expect(createBill).toHaveBeenCalledTimes(1));
+    release({ data: { ...EXISTING, id: "bill_new", status: "BILL" }, error: null });
+    await waitFor(() => expect(createRecurringExpense).toHaveBeenCalledTimes(1));
+    expect(createBill).toHaveBeenCalledTimes(1);
+    expect(updateExpense).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("COR-F5: a bill whose receipt and tags are refused says so", () => {
+  it("the refused PATCH after the bill is shown, not 'Bill recorded' alone", async () => {
+    updateExpense.mockResolvedValue({ data: null, error: "Forbidden", status: 403 });
+    const { container, onSaved } = mount("sidesheet", { kind: "bill" });
+    fillBasics(container, "Water bill", "75");
+    fireEvent.change(screen.getByPlaceholderText(/tag1/i), { target: { value: "utilities" } });
+    fireEvent.click(screen.getByRole("button", { name: /^record bill$/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^Bill recorded, but its receipt and tags were not saved: Forbidden/)));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onSaved, "the bill exists: the sheet closes and the list reloads").toHaveBeenCalled();
   });
 });
