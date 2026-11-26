@@ -67,13 +67,16 @@ export class BillsController {
   payBill(
     @Param('businessId') businessId: string,
     @Param('billId') billId: string,
-    @Body() body: { paymentMethod?: string; paidAt?: string },
+    @Body() body: { paymentMethod?: string; paidAt?: string; paymentAccountId?: string },
   ) {
+    const paymentAccountId =
+      typeof body?.paymentAccountId === 'string' ? body.paymentAccountId.trim() || undefined : undefined;
     return this.expenses.markBillPaid({
       businessId,
       expenseId: billId,
-      paymentMethod: body?.paymentMethod,
-      paidAt: body?.paidAt,
+      paymentMethod: typeof body?.paymentMethod === 'string' ? body.paymentMethod : undefined,
+      paidAt: typeof body?.paidAt === 'string' ? body.paidAt : undefined,
+      paymentAccountId,
     });
   }
 
