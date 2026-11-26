@@ -227,6 +227,18 @@ describe("COR-R3-3 the inventory fields go with a new PRODUCT only", () => {
     expect(bodyOf(0).outOfStockBehavior).toBeUndefined();
   });
 
+  it("Tracked with 'Show as sold out' chosen, then switched to Package: no behaviour is sent", async () => {
+    const form = await openNew();
+    fireEvent.change(within(form).getByLabelText(/^inventory mode/i), { target: { value: "tracked" } });
+    fireEvent.change(within(form).getByLabelText(/^when out of stock/i), { target: { value: "show_oos" } });
+    fireEvent.click(within(form).getByRole("button", { name: /package/i }));
+    fillNameAndPrice(form, "Party tray");
+    fireEvent.click(within(form).getByRole("button", { name: /^create product$/i }));
+    await waitFor(() => expect(api.apiPost).toHaveBeenCalledTimes(1));
+    expect(bodyOf(0).inventoryMode).toBeUndefined();
+    expect(bodyOf(0).outOfStockBehavior).toBeUndefined();
+  });
+
   it("Save & Add Another as a Package: neither the first nor the next package sends an inventory mode", async () => {
     const form = await openNew();
     fireEvent.click(within(form).getByRole("button", { name: /package/i }));

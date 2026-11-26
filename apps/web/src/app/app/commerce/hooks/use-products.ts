@@ -70,10 +70,15 @@ function buildProductPayload(form: ProductForm, mode: "create" | "update" = "cre
   // shown on the store with no stock (Tracked with no stock and "hide" was hidden, with nothing saying why). The
   // out-of-stock behaviour goes with Tracked only. An edit sends only what the form holds, so a stored null mode
   // stays null unless the owner picks one.
-  const shownMode = mode === "create" && form.category === "PRODUCT" ? (form.inventoryMode || "untracked") : (form.inventoryMode || undefined);
-  const shownBehavior = mode === "create" && form.category === "PRODUCT"
+  // Round 4 (COR-R3-3): the inventory fields belong to PRODUCT (the form shows them for a product only). A new
+  // product of another category sends neither, whatever the form still holds from the Product card, so a PACKAGE is
+  // not stored as explicitly untracked (resolveInventoryMode would then ignore stock added later).
+  const createsProduct = mode === "create" && form.category === "PRODUCT";
+  const createsOther = mode === "create" && form.category !== "PRODUCT";
+  const shownMode = createsProduct ? (form.inventoryMode || "untracked") : createsOther ? undefined : (form.inventoryMode || undefined);
+  const shownBehavior = createsProduct
     ? (shownMode === "tracked" ? (form.outOfStockBehavior || "hide") : undefined)
-    : (form.outOfStockBehavior || undefined);
+    : createsOther ? undefined : (form.outOfStockBehavior || undefined);
   return {
     name: form.name,
     price: Number(form.price),

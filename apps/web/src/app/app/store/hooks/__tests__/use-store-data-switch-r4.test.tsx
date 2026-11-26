@@ -268,6 +268,42 @@ describe.each(["event", "storage"] as const)("SEC-CAT-R3-1 / COR-R3-1: after a s
   });
 });
 
+describe.each(["event", "storage"] as const)("a read of B that failed keeps what it would write off (%s)", (how) => {
+  it("B's business read failed: no hours, slug or publish write is sent for B", async () => {
+    bizReadOf[B] = async () => failed();
+    const hook = await loadA();
+    selectB(how);
+    await waitFor(() => expect(hook.result.current.businessId).toBe(B));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await waitFor(() => expect(hook.result.current.commerceProducts.map((p) => p.id)).toEqual([`p_${B}_1`]));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    act(() => { hook.result.current.setStoreSlug("b-slug"); });
+    await act(async () => {
+      await hook.result.current.handleSaveHours();
+      await hook.result.current.handleSaveSlug();
+      await hook.result.current.toggleStoreEnabled();
+    });
+    expect(writesTo(client.updateBusiness, B)).toEqual([]);
+    expect(hook.result.current.canSaveBusiness).toBe(false);
+  });
+
+  it("B's store listing read failed: no item is added to or removed from B's store", async () => {
+    graphReadOf[B] = async () => failed();
+    const hook = await loadA();
+    selectB(how);
+    await bLanded(hook);
+    await act(async () => {
+      await hook.result.current.handleToggleStoreItem(product(B, 1) as never);
+      await hook.result.current.handleSelectAll();
+      await hook.result.current.handleDeleteServiceFromStore(`svc_p_${B}_1`);
+      await hook.result.current.handleDeleteServiceFromStore(`svc_p_${B}_1`);
+    });
+    expect(writesTo(client.createService, B)).toEqual([]);
+    expect(writesTo(client.deleteService, B)).toEqual([]);
+    expect(hook.result.current.canChangeListing).toBe(false);
+  });
+});
+
 describe("COR-R3-1: hours are B's own answer, every time", () => {
   it("a reload where the business no longer has hours shows DEFAULT_HOURS, not the hours read before", async () => {
     const hook = await loadA();
@@ -289,6 +325,7 @@ describe("SEC-CAT-R3-2: a write asked for A and answered after the switch is not
     selectB("event");
     await bLanded(hook);
     await act(async () => { save.release(ok({ id: A })); await new Promise((r) => setTimeout(r, 20)); });
+    expect(hook.result.current.slugSaving, "A's slug save in progress on B's page").toBe(false);
     expect(hook.result.current.storeSlug).toBe("shop-b");
     expect(hook.result.current.businessData?.slug).toBe("shop-b");
     expect(toast.success).not.toHaveBeenCalledWith("Public booking URL saved!");
@@ -320,6 +357,8 @@ describe("SEC-CAT-R3-2: a write asked for A and answered after the switch is not
     act(() => { void hook.result.current.handleSaveHours(); void hook.result.current.handleSaveConfig(); });
     selectB("event");
     await bLanded(hook);
+    expect(hook.result.current.hoursSaving, "A's hours save in progress on B's page").toBe(false);
+    expect(hook.result.current.configSaving, "A's storefront save in progress on B's page").toBe(false);
     await act(async () => { hours.release(ok({ id: A })); config.release(ok({})); await new Promise((r) => setTimeout(r, 20)); });
     expect(toast.success).not.toHaveBeenCalledWith("Business hours saved!");
     expect(toast.success).not.toHaveBeenCalledWith("Storefront saved!");

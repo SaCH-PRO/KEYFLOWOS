@@ -165,6 +165,11 @@ export default function StorePage() {
   const hasHeroImage = !!(hero?.imageUrl || hero?.coverImageUrl);
   const hoursConfigured = Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled);
   const hasTestimonials = !!((cfg.socialProof as SocialProofSection | undefined)?.testimonials?.length);
+  const notLoaded = [
+    !s.canSaveStorefront && "storefront settings",
+    !s.canSaveBusiness && "business details",
+    !s.canChangeListing && "store listing",
+  ].filter((part): part is string => !!part);
 
   return (
     <div className="space-y-4" aria-label="Presence Studio">
@@ -222,6 +227,14 @@ export default function StorePage() {
       <div data-walkthrough="store-setup">
         <StoreTabs activeView={activeTab} onViewChange={handleTabChange} />
       </div>
+
+      {notLoaded.length > 0 && (
+        // Round 4 (SEC-CAT-R3-1): what did not load for this business is not saved (useStoreData refuses it).
+        <p role="status" className="rounded-xl border border-border/60 bg-card px-4 py-3 text-caption text-muted-foreground">
+          This business&apos;s {notLoaded.join(" and ")} did not load, so {notLoaded.length > 1 ? "they" : "it"} cannot be
+          changed here. Refresh the page to try again.
+        </p>
+      )}
 
       {s.commerceProducts.length === 0 && s.services.length === 0 && (
         <EmptyState

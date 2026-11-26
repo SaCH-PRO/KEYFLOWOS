@@ -41,6 +41,9 @@ function businessCurrencyOf(value: unknown): string | null {
 type CategoryValue = "SERVICE" | "PRODUCT" | "PACKAGE";
 const NEW_PRODUCT_CATEGORIES: readonly CategoryValue[] = ["PRODUCT", "PACKAGE"];
 
+/** lib/workspace keeps the selected business under this localStorage key (another tab's change arrives as storage). */
+const BUSINESS_ID_STORAGE_KEY = "kf_business_id";
+
 function ProductsPageInner() {
   const searchParams = useSearchParams();
   const levels = useMemberModuleLevels();
@@ -122,8 +125,20 @@ function ProductsPageInner() {
       actionHandled.current = true;
       void start();
     };
+    // Round 4: a business selected in another tab reaches this one as a storage event on kf_business_id (as Your
+    // page and useMemberModuleLevels follow it); the same business, or another key, changes nothing.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== BUSINESS_ID_STORAGE_KEY && e.key !== null) return;
+      const next = getStoredBusinessId();
+      if (!next || next === currentId.current) return;
+      onChange();
+    };
     window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [start, closeProductForm]);
 
   // SEC-CAT-4: a browser that kept product photos (the old IndexedDB store) is told once; the store is not opened.

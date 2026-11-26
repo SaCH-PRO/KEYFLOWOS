@@ -36,6 +36,17 @@ import type { StockByProduct } from "../components/launch-mode";
 import type { BusinessHoursMap } from "../components/hours-editor";
 import { DEFAULT_HOURS } from "../components/hours-editor";
 
+/** The storefront before any read: what a business with nothing saved shows. */
+function emptyStorefront(): StorefrontConfig {
+  return { hero: {}, appearance: {}, merchandising: {}, promotions: {}, socialProof: {}, seo: {} };
+}
+
+/**
+ * Round 4 (SEC-CAT-R3-1): which of the selected business's own reads have landed. A write is made only from what
+ * that business answered: its details and hours (business), its storefront (storefront), its store listing (graph).
+ */
+type Landed = { businessId: string; business: boolean; storefront: boolean; graph: boolean };
+
 export function useStoreData() {
   const emitEvent = useModuleEmit();
 
@@ -84,15 +95,9 @@ export function useStoreData() {
   const [storeGraph, setStoreGraph] = useState<StoreGraph | null>(null);
   const [readiness, setReadiness] = useState<StoreReadinessResult | null>(null);
 
-  const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
-    hero: {},
-    appearance: {},
-    merchandising: {},
-    promotions: {},
-    socialProof: {},
-    seo: {},
-  });
+  const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>(emptyStorefront);
   const [configSaving, setConfigSaving] = useState(false);
+  const [landed, setLanded] = useState<Landed | null>(null);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -135,6 +140,9 @@ export function useStoreData() {
    * storage event for another tab), as useMemberModuleLevels does. It kept the business it mounted with, so after a
    * switch the stock read went out for the old business under the new business's level. On a switch everything of
    * the previous business is dropped and the new one loads; an answer for the previous business is not applied.
+   *
+   * Round 4 (SEC-CAT-R3-1, COR-R3-1): "everything" is every field set from a business read or a write's answer, so
+   * nothing of A's is shown for B or written to B when one of B's reads answers nothing.
    */
   const currentBusiness = useRef<string | null>(null);
   useEffect(() => {
@@ -155,6 +163,20 @@ export function useStoreData() {
       setDriftedItems([]);
       setReadiness(null);
       setOverviewAnalytics(null);
+      setStoreSlug("");
+      setStoreEnabled(true);
+      setBusinessHours(DEFAULT_HOURS);
+      setStorefrontConfig(emptyStorefront());
+      setActiveDeliveryMethodsCount(0);
+      setLoadError(null);
+      setProcessingItems(new Set());
+      setConfirmRemove(null);
+      setSlugSaving(false);
+      setHoursSaving(false);
+      setConfigSaving(false);
+      setSyncing(false);
+      setLanded(null);
+      setLoading(true);
       setBusinessId(next);
     };
     window.addEventListener(BUSINESS_CHANGED_EVENT, follow);
@@ -199,9 +221,8 @@ export function useStoreData() {
         setBusinessData(bizRes.data);
         setStoreSlug(bizRes.data.slug ?? "");
         setStoreEnabled(biz.storeEnabled ?? true);
-        if (biz.businessHours) {
-          setBusinessHours({ ...DEFAULT_HOURS, ...biz.businessHours });
-        }
+        // COR-R3-1: Business.businessHours is nullable; a business with none shows DEFAULT_HOURS, never hours read before.
+        setBusinessHours({ ...DEFAULT_HOURS, ...(biz.businessHours ?? {}) });
       }
 
       const graph = graphRes.data;
@@ -236,7 +257,19 @@ export function useStoreData() {
         setActiveDeliveryMethodsCount(count);
       }
       if (readinessRes.data) setReadiness(readinessRes.data);
+      // A read that landed once for this business stays landed; a later reload that fails keeps this business's data.
+      setLanded((prev) => {
+        const kept = prev?.businessId === businessId ? prev : null;
+        return {
+          businessId,
+          business: !!kept?.business || !!bizRes.data,
+          storefront: !!kept?.storefront || !!configRes.data,
+          graph: !!kept?.graph || !!graph,
+        };
+      });
     } catch (e) {
+      // COR-R3-2: a failure of a load for a business no longer selected says nothing on this one's page.
+      if (stale()) return;
       console.error("Failed to load store data:", e);
       setLoadError("Failed to load store data. Please refresh the page.");
       toast.error("Failed to load store data");
@@ -296,6 +329,24 @@ export function useStoreData() {
     };
   }, [loadData]);
 
+  /**
+   * Round 4 (SEC-CAT-R3-1, SEC-CAT-R3-2): a save, a reorder or a store toggle is made only once the selected business's
+   * own read of what it writes has landed, and stays off if that read failed; an answer that arrives after the
+   * business changed is not applied (the write was for the other business).
+   */
+  const landedHere = landed !== null && landed.businessId === businessId ? landed : null;
+  const canSaveBusiness = !!landedHere?.business;
+  const canSaveStorefront = !!landedHere?.storefront;
+  const canChangeListing = !!landedHere?.graph;
+  const isCurrent = (askedFor: string) => currentBusiness.current === askedFor;
+
+  function refuse(ready: boolean, what: string): boolean {
+    if (ready) return false;
+    if (!landedHere) toast.info("This store is still loading. Try again in a moment.");
+    else toast.error(`This business's ${what} did not load, so nothing was saved. Refresh the page to try again.`);
+    return true;
+  }
+
   function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
     const identifier = storeSlug || businessId;
@@ -304,10 +355,13 @@ export function useStoreData() {
 
   async function handleSaveSlug() {
     if (!businessId || !storeSlug.trim()) return;
+    if (!isCurrent(businessId) || refuse(canSaveBusiness, "details")) return;
+    const askedFor = businessId;
     setSlugSaving(true);
     const slug = storeSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
     setStoreSlug(slug);
-    const res = await updateBusiness({ businessId, slug });
+    const res = await updateBusiness({ businessId: askedFor, slug });
+    if (!isCurrent(askedFor)) return;
     if (res.error) {
       toast.error(`Failed to save URL: ${res.error}`);
     } else {
@@ -319,8 +373,11 @@ export function useStoreData() {
 
   async function toggleStoreEnabled() {
     if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canSaveBusiness, "details")) return;
+    const askedFor = businessId;
     const newValue = !storeEnabled;
-    const res = await updateBusiness({ businessId, storeEnabled: newValue } as Parameters<typeof updateBusiness>[0]);
+    const res = await updateBusiness({ businessId: askedFor, storeEnabled: newValue } as Parameters<typeof updateBusiness>[0]);
+    if (!isCurrent(askedFor)) return;
     if (res.error) {
       toast.error(`Failed to update store status: ${res.error}`);
     } else {
@@ -337,8 +394,11 @@ export function useStoreData() {
 
   async function handleSaveHours() {
     if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canSaveBusiness, "details")) return;
+    const askedFor = businessId;
     setHoursSaving(true);
-    const res = await updateBusiness({ businessId, businessHours } as Parameters<typeof updateBusiness>[0]);
+    const res = await updateBusiness({ businessId: askedFor, businessHours } as Parameters<typeof updateBusiness>[0]);
+    if (!isCurrent(askedFor)) return;
     if (res.error) {
       toast.error(`Failed to save hours: ${res.error}`);
     } else {
@@ -350,15 +410,19 @@ export function useStoreData() {
 
   async function syncDriftedItems() {
     if (!businessId || driftedItems.length === 0) return;
+    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    const askedFor = businessId;
     setSyncing(true);
     let synced = 0;
     for (const drift of driftedItems) {
+      if (!isCurrent(askedFor)) return;
       const data: { price?: number; duration?: number } = {};
       if (drift.priceDiff) data.price = drift.commercePrice;
       if (drift.durationDiff && drift.commerceDuration != null) data.duration = drift.commerceDuration;
-      const res = await updateService(drift.serviceId, data, businessId);
+      const res = await updateService(drift.serviceId, data, askedFor);
       if (!res.error) synced++;
     }
+    if (!isCurrent(askedFor)) return;
     toast.success(`Synced ${synced} item${synced !== 1 ? "s" : ""} with Commerce prices.`);
     setSyncing(false);
     await loadData();
@@ -375,6 +439,8 @@ export function useStoreData() {
 
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    const askedFor = businessId;
     if (graphProductToServiceMap.has(product.id)) {
       toast.warning(`"${product.name}" is already in your store.`);
       return;
@@ -382,13 +448,14 @@ export function useStoreData() {
     setProcessingItems((prev) => new Set(prev).add(product.id));
     try {
       const res = await createService({
-        businessId,
+        businessId: askedFor,
         name: product.name,
         durationMins: product.duration ?? 30,
         price: product.price,
         description: product.description ?? undefined,
         sourceProductId: product.id,
       });
+      if (!isCurrent(askedFor)) return;
       if (res.error) {
         toast.error(`Failed to add: ${res.error}`);
       } else {
@@ -397,16 +464,19 @@ export function useStoreData() {
         await loadData();
       }
     } finally {
-      setProcessingItems((prev) => {
-        const n = new Set(prev);
-        n.delete(product.id);
-        return n;
-      });
+      if (isCurrent(askedFor))
+        setProcessingItems((prev) => {
+          const n = new Set(prev);
+          n.delete(product.id);
+          return n;
+        });
     }
   }
 
   async function handleDeleteServiceFromStore(serviceId: string, _productName?: string) {
     if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    const askedFor = businessId;
     const mapping = storeGraph?.mappings.find((m) => m.serviceId === serviceId);
     const productId = mapping?.productId;
     if (productId && confirmRemove !== productId) {
@@ -416,7 +486,8 @@ export function useStoreData() {
     setConfirmRemove(null);
     if (productId) setProcessingItems((prev) => new Set(prev).add(productId));
     try {
-      const res = await deleteService(serviceId, businessId);
+      const res = await deleteService(serviceId, askedFor);
+      if (!isCurrent(askedFor)) return;
       if (res.error) {
         toast.error(`Failed to remove: ${res.error}`);
       } else {
@@ -424,7 +495,7 @@ export function useStoreData() {
         await loadData();
       }
     } finally {
-      if (productId)
+      if (productId && isCurrent(askedFor))
         setProcessingItems((prev) => {
           const n = new Set(prev);
           n.delete(productId);
@@ -443,16 +514,25 @@ export function useStoreData() {
   }
 
   async function handleSelectAll() {
+    if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
+    const askedFor = businessId;
     const notAdded = commerceProducts.filter((p) => !graphProductToServiceMap.has(p.id));
     for (const p of notAdded) {
+      // An "Add all" running when the business changes stops there.
+      if (!isCurrent(askedFor)) return;
       await handleQuickAddProduct(p);
     }
   }
 
   async function handleDeselectAll() {
+    if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canChangeListing, "store listing")) return;
     if (!storeGraph) return;
+    const askedFor = businessId;
     const liveEntries = storeGraph.mappings.filter((m) => m.isLive && m.serviceId);
     for (const entry of liveEntries) {
+      if (!isCurrent(askedFor)) return;
       setConfirmRemove(null);
       await handleDeleteServiceFromStore(entry.serviceId!);
     }
@@ -477,15 +557,17 @@ export function useStoreData() {
   }
 
   function handleReorderProducts(orderedIds: string[]) {
+    if (!businessId) return;
+    // The order is saved with the storefront it belongs to: only this business's, once it has been read.
+    if (!isCurrent(businessId) || refuse(canSaveStorefront, "storefront settings")) return;
+    const askedFor = businessId;
     handleConfigChange("catalog", { productOrder: orderedIds });
-    if (businessId) {
-      updateStorefrontConfig(businessId, {
-        ...storefrontConfig,
-        catalog: { ...storefrontConfig.catalog, productOrder: orderedIds },
-      }).then((res) => {
-        if (!res.error) toast.success("Display order saved");
-      });
-    }
+    updateStorefrontConfig(askedFor, {
+      ...storefrontConfig,
+      catalog: { ...storefrontConfig.catalog, productOrder: orderedIds },
+    }).then((res) => {
+      if (isCurrent(askedFor) && !res.error) toast.success("Display order saved");
+    });
   }
 
   function handleItemOverrideChange(productId: string, override: Partial<CatalogItemOverride>) {
@@ -504,8 +586,11 @@ export function useStoreData() {
 
   async function handleSaveConfig() {
     if (!businessId) return;
+    if (!isCurrent(businessId) || refuse(canSaveStorefront, "storefront settings")) return;
+    const askedFor = businessId;
     setConfigSaving(true);
-    const res = await updateStorefrontConfig(businessId, storefrontConfig);
+    const res = await updateStorefrontConfig(askedFor, storefrontConfig);
+    if (!isCurrent(askedFor)) return;
     if (res.error) {
       toast.error("Failed to save storefront config");
     } else {
@@ -580,5 +665,8 @@ export function useStoreData() {
     readiness,
     liveProductIds,
     graphProductToServiceMap,
+    canSaveBusiness,
+    canSaveStorefront,
+    canChangeListing,
   };
 }
