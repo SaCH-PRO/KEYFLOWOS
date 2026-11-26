@@ -81,10 +81,10 @@
  * dynamic code, comments inside string code, string code nested deeper than 3, a `d = document` alias, nested const
  * objects, a destructured jar and `globalThis.Cache` types; from round 8 (CSC8-SEC-3, FU-CENSUS-HARDENING): a
  * cookie set through ternaries reads as a clear (`document.cookie = \`kf_session=${on ? token : ""};
- * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0); from round 9: a
- * ternary of two plain-named consts keeps only its first resolvable branch (`const A = "kf_x_token",
- * B = "kf_x_prefs"; setItem(on ? B : A, v)` reads as kf_x_prefs), in direct code and in string code alike; in the
- * text scanner only (a file with parse errors), a
+ * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0): a ternary KEY is
+ * every branch since round 11 (keyCandidates: one write per branch, or one UNRESOLVED credential write when a branch
+ * cannot be resolved), but a ternary in a value, a cookie string or a function's return still resolves to its first
+ * resolvable branch; in the text scanner only (a file with parse errors), a
  * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
  * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
@@ -772,6 +772,31 @@ const isClear = (value: string, attrs: string[]) =>
   value === "" && attrs.some((a) => a === "max-age=0" || /^expires=thu, 01 jan 1970/.test(a));
 
 /** `scanSource(file, src, { files })`: `files` (path relative to apps/web → source) serves imported consts. */
+/**
+ * A key expression's possible values when it is a ternary (SEC-R10-1): every branch, through parentheses, nested
+ * ternaries and a const one hop away (`const K = on ? B : A`), each resolved by literalValue, null for a branch that
+ * cannot be resolved. A null / undefined branch is no key and is skipped. Not a ternary: null.
+ */
+function keyCandidates(ctx: Ctx, text: string, depth = 0): Array<string | null> | null {
+  let t = text.trim();
+  while (t.startsWith("(") && t.endsWith(")") && splitTop(t.slice(1, -1), ",").length === 1 && ternaryBranches(t) === null) t = t.slice(1, -1).trim();
+  if (depth > MAX_DEPTH) return null;
+  const branches = ternaryBranches(t);
+  if (!branches) {
+    if (!IDENT.test(t)) return null;
+    const own = ctx.bindings?.[t] ?? constText(ctx.src, t, ctx.at);
+    return own === null || own === undefined ? null : keyCandidates(ctx, own, depth + 1);
+  }
+  const out: Array<string | null> = [];
+  for (const b of branches) {
+    if (/^(?:null|undefined)$/.test(b.trim())) continue;
+    const nested = keyCandidates(ctx, b, depth + 1);
+    if (nested) out.push(...nested);
+    else out.push(literalValue(ctx, b, depth + 1));
+  }
+  return out;
+}
+
 /** Each write's offset in the source it was found in (kept out of the Write objects, so they keep their shape). */
 const writeOffsets = new WeakMap<Write, number>();
 
@@ -781,6 +806,14 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
   const keyed = (store: Store, keyExpr: string, valueExpr: string, at: number) => {
     const id = IDENT.test(keyExpr.trim()) ? keyExpr.trim() : undefined;
     for (const c of contexts({ ...base, at }, at, id)) {
+      // A ternary key is every branch: one write each, or, when a branch cannot be resolved, one write under the
+      // UNRESOLVED (credential) key, failing closed (SEC-R10-1).
+      const cands = keyCandidates(c, keyExpr);
+      if (cands) {
+        const keys = cands.includes(null) ? [UNRESOLVED] : [...new Set(cands as string[])];
+        for (const key of keys) push({ store, key, expr: keyExpr, value: valueText(c, valueExpr) }, at);
+        continue;
+      }
       const key = literalValue(c, keyExpr) ?? keyExpr;
       const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${key})` : keyExpr;
       push({ store, key, expr, value: valueText(c, valueExpr) }, at);
@@ -1351,14 +1384,17 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
   /**
    * A template substitution's text, resolved in the host file; UNRESOLVED (a credential) when it cannot be resolved
    * in full ("*" piece), or when its own source names a credential (CSC8-SEC-1/2: `${token ? token : ""}`,
-   * `${AUTH_KEY}`). A ternary is covered only in that second case: `${on ? B : A}` of two plain-named consts still
-   * resolves to its first resolvable branch (a known gap, see the header).
+   * `${AUTH_KEY}`). A ternary is every branch (keyCandidates): one that cannot be resolved, or names a credential,
+   * fails closed; of plain branches the first is spliced in.
    */
   function resolveSubstitution(e: ts.Expression): string {
     const t = text(e);
     if (CREDENTIAL_PATTERN.test(t) || VALUE_PATTERN.test(t)) return UNRESOLVED;
     const c = { ...base, at: e.getStart(sf) };
     const json = t.match(/^JSON\s*\.\s*stringify\s*\(([\s\S]*)\)$/);
+    // A ternary is every branch: one that cannot be resolved, or that names a credential, fails closed (SEC-R10-1).
+    const cands = keyCandidates(c, json ? json[1] : t);
+    if (cands && cands.some((x) => x === null || x.includes("*") || CREDENTIAL_PATTERN.test(x))) return UNRESOLVED;
     const v = literalValue(c, json ? json[1] : t);
     if (v === null || v.includes("*")) return UNRESOLVED;
     return json ? JSON.stringify(v) : v;
@@ -1877,7 +1913,9 @@ describe("CSC-15 each resolution step decides a result", () => {
     expect(keysOf(scan("src/fixture-nearest.ts", fixture))).toEqual(["localStorage:kf_first_view", "localStorage:kf_second_token"]);
   });
 
-  it("a ternary resolves to its first resolvable branch", () => {
+  // Round 11 (SEC-R10-1): a ternary KEY is every branch (kf_tern_token and kf_other); a function's ternary return
+  // still resolves to its first resolvable branch (keyFor → kf_owner_secret:*), which is what this case pins.
+  it("a ternary resolves: a key to each branch, a function return to its first resolvable branch", () => {
     const fixture = [
       `const OWNER_KEY = "kf_owner_secret";`,
       `function keyFor(owner: string | null) {`,
@@ -1888,7 +1926,7 @@ describe("CSC-15 each resolution step decides a result", () => {
       `  localStorage.setItem(keyFor(owner), t);`,
       `}`,
     ].join("\n");
-    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_owner_secret:*"]);
+    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_other", "localStorage:kf_owner_secret:*"]);
   });
 
   it("an inline https-only Secure, and one through a const, are recorded as secure-on-https", () => {
