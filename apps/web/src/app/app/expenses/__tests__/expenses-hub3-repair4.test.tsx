@@ -161,7 +161,9 @@ describe("R4-4: disguised API-host and encoded /objects/ paths are never a link"
     "http://api.test:80/objects/uploads/biz_A/obj1",
     "https://elsewhere.test/%6Fbjects/uploads/biz2/x.png",
     "https://elsewhere.test/obj%65cts/x.png",
-    // On the API's origin nothing is a link, whatever its path, however the origin is written.
+    // On the API's origin nothing is a link, whatever its path, however the origin is written. (These pin the
+    // parsed-origin comparison against the raw string "http://api.test/"; the URL parser itself lower-cases the host,
+    // so they do not test hostKey's toLowerCase.)
     "http://API.test/files/x.png",
     "http://api.test:80/x.png",
     "http://api.test/x.png",

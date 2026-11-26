@@ -4,8 +4,8 @@
  *   MAJOR-2 two switches in one batch (B then A while A's read is in flight; C then B during B's first read) leave
  *           the business state unchanged; the page must still read afresh, exactly once, and settle with its rows
  *   MINOR-1 a stale call leaves loading alone: B's spinner stays until B's own read lands
- *   MINOR-2 a stale loadData from before A → B → A (an old filter in its closure) is refused: it neither fetches
- *           nor replaces the fresh read
+ *   MINOR-2 a stale loadData from before A → B → A (an old filter in its closure) never fetches with its old
+ *           filter nor shows its rows (repair round 6, C-4: it asks for one fresh read with the current filters)
  *   MINOR-3 the API host spelled with a trailing dot or another scheme is still the API host: never a link
  *   MINOR-4 on another host, a path that decodes (repeatedly) to /objects, or has doubled slashes before objects,
  *           is never a link
@@ -132,8 +132,8 @@ describe("MINOR-1: a stale call leaves loading alone", () => {
   });
 });
 
-describe("MINOR-2: a stale loadData from before A → B → A is refused", () => {
-  it("its old filter neither fetches nor replaces the fresh read", async () => {
+describe("MINOR-2: a stale loadData from before A → B → A never uses its old filter", () => {
+  it("it makes one fresh read with the current filters, never one with its old filter", async () => {
     client.fetchExpenses.mockImplementation(async (b: string, params?: { categoryId?: string }) =>
       b === "biz_B" ? page("b1") : params?.categoryId ? page("a_c1_only") : page("a1", "a2"),
     );
@@ -149,9 +149,12 @@ describe("MINOR-2: a stale loadData from before A → B → A is refused", () =>
     expect(result.current.filterCategory).toBe("");
     const before = client.fetchExpenses.mock.calls.length;
     await act(async () => { await staleFiltered(); });
-    expect(client.fetchExpenses.mock.calls.length).toBe(before);
+    // Repair round 6 (C-4): the stale call asks for one fresh read of the current view instead of being dropped.
+    await waitFor(() => expect(client.fetchExpenses.mock.calls.length).toBe(before + 1));
+    const fresh = client.fetchExpenses.mock.calls.slice(before);
+    expect(fresh.every((c) => c[0] === "biz_A" && !(c[1] as { categoryId?: string }).categoryId), "no read with the old c1 filter").toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.expenses.map((e) => e.id)).toEqual(["a1", "a2"]);
-    expect(result.current.loading).toBe(false);
   });
 });
 
@@ -159,6 +162,7 @@ describe("MINOR-3 / MINOR-4: receiptKind, absolute API base", () => {
   it.each([
     "http://api.test./files/x.png",
     "https://api.test/files/x.png",
+    // (The URL parser lower-cases hostnames; this case checks the trailing dot, not the case.)
     "https://API.TEST./objects/uploads/biz_A/obj1",
     "https://elsewhere.test/%256Fbjects/uploads/biz2/x.png",
     "https://elsewhere.test//objects/x",
