@@ -4,6 +4,7 @@
  *   CFR-01  (COR-2) a refused Place Order drops the cached answers, so going back re-reads the slots route and no
  *           longer offers the time that was taken
  *   CFR-02  (COR-3) a failed read offers "Try again", which asks again and shows "Loading times…" while it runs
+ *   CFR-04  after a refused Place Order, Place Order stays disabled until every row has a time its fresh answer offers
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -144,5 +145,32 @@ describe("SWP-BOOKING-SLOTS repair round 1", () => {
 
     await act(async () => pending[0]({ data: { date: "2026-12-15", slots: BEFORE }, error: null }));
     expect(await screen.findByRole("button", { name: "09:00" })).toBeInTheDocument();
+  });
+
+  it("CFR-04 after a refused Place Order, Place Order stays disabled until every row has a freshly offered time", async () => {
+    let answer = BEFORE;
+    apiGet.mockImplementation(async (path: string) =>
+      path.startsWith(SLOTS_ROUTE) ? { data: { date: "2026-12-15", slots: answer }, error: null } : { data: [], error: null },
+    );
+    const onSubmit = vi.fn(async () => {
+      throw new Error("That time slot has already been booked. Please choose another.");
+    });
+    renderToSchedule(onSubmit);
+    fireEvent.click(await screen.findByRole("button", { name: "11:00" }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    fireEvent.click(screen.getByText(/I agree to the terms of service/));
+    answer = AFTER;
+    fireEvent.click(screen.getByRole("button", { name: /Place Order/i }));
+    await screen.findByText(/already been booked/);
+
+    // Still on the review step: the refused 11:00 is no longer offered, so the order cannot be placed again with it.
+    await waitFor(() => expect(slotCalls().length).toBe(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Place Order/i })).toBeDisabled());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Back$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "12:00" }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    expect(screen.getByRole("button", { name: /Place Order/i })).toBeEnabled();
   });
 });

@@ -11,12 +11,14 @@
  *
  *   BSI-01  a visitor in another zone books the instant the server offered (startIso), not the wall time on their clock
  *   BSI-02  (SEC-M2) a row with no server instant is refused, not posted on the visitor's clock
+ *   BSI-03  every row with no server instant is named, not only the first
+ *   BSI-04  the confirmation's Google Calendar link starts at the booked instant and ends a service's length later
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const { SLUG, BUSINESS, SERVICE, nothing, passthrough } = vi.hoisted(() => ({
+const { SLUG, BUSINESS, SERVICE, SERVICE_2, nothing, passthrough } = vi.hoisted(() => ({
   SLUG: "bsi-shop",
   BUSINESS: { id: "bsi_biz_1", name: "BSI Studio", slug: "bsi-shop", currency: "TTD", timezone: "America/Port_of_Spain", storeEnabled: true },
   SERVICE: {
@@ -27,6 +29,18 @@ const { SLUG, BUSINESS, SERVICE, nothing, passthrough } = vi.hoisted(() => ({
     itemType: "service" as const,
     requiresBooking: true,
     quantity: 1,
+    duration: 45,
+  },
+  /** A second service, for a cart with two rows (BSI-03). */
+  SERVICE_2: {
+    id: "bsi_svc_2",
+    name: "BSI Follow-up",
+    price: 60,
+    currency: "TTD",
+    itemType: "service" as const,
+    requiresBooking: true,
+    quantity: 1,
+    duration: 30,
   },
   nothing: () => null,
   passthrough: ({ children }: { children?: ReactNode }) => children ?? null,
@@ -159,5 +173,27 @@ describe("SWP-BOOKING-SLOTS: the storefront books the instant the server offered
     await waitFor(() => expect(row.error).not.toBe(""));
     expect(row.error).toMatch(/pick a time/i);
     expect(net.posts.filter((p) => p.path === `/bookings/public/businesses/${BUSINESS.id}`)).toHaveLength(0);
+  });
+
+  it("BSI-03 every row with no server instant is named, not only the first", async () => {
+    row.startIso = undefined;
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, SERVICE_2]));
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Checkout" }, { timeout: 3000 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Place booking" }));
+    await waitFor(() => expect(row.error).not.toBe(""));
+    expect(row.error).toContain("BSI Session");
+    expect(row.error).toContain("BSI Follow-up");
+    expect(net.posts.filter((p) => p.path === `/bookings/public/businesses/${BUSINESS.id}`)).toHaveLength(0);
+  });
+
+  it("BSI-04 the Google Calendar link starts at the booked instant and ends a service's length later", async () => {
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Checkout" }, { timeout: 3000 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Place booking" }));
+    const link = await screen.findByRole("link", { name: /Add to Calendar/i }, { timeout: 3000 });
+    const dates = new URL(link.getAttribute("href") ?? "").searchParams.get("dates");
+    // At base: 11:00 read on Kiritimati's clock, 20261214T210000Z/20261214T220000Z.
+    expect(dates).toBe("20261215T150000Z/20261215T154500Z");
   });
 });
