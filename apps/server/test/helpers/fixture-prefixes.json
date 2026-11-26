@@ -773,6 +773,11 @@
       "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
     },
     {
+      "prefix": "v87m_",
+      "owner": "apps/server/test/memory-class-columns.integration.test.ts",
+      "packet": "V1-87 (MEM-CLASS-COLUMNS)"
+    },
+    {
       "prefix": "v88a_",
       "owner": "apps/server/test/booking-attribution-currency.integration.test.ts",
       "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
