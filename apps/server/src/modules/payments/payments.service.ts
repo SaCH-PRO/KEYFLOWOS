@@ -1584,11 +1584,11 @@ export class PaymentsService {
     const obj = (event.data?.object ?? {}) as Record<string, unknown>;
     const meta = obj.metadata && typeof obj.metadata === 'object' ? (obj.metadata as Record<string, unknown>) : null;
     const namedOrderId: unknown = meta?.orderId;
-    if (typeof namedOrderId === 'string' && namedOrderId) {
+    if (typeof namedOrderId === 'string' && namedOrderId && this.prisma.client.marketplaceOrder?.findUnique) {
       const order = await this.prisma.client.marketplaceOrder.findUnique({
         where: { id: namedOrderId },
         select: { id: true, businessId: true },
-      }).catch(() => null);
+      });
       if (order) {
         await this.refuseStripePaymentEvent(
           event,
@@ -1599,7 +1599,7 @@ export class PaymentsService {
       }
     }
     const lookupIds = PaymentsService.stripeRefundLookupIds(obj);
-    if (lookupIds.length === 0) return;
+    if (lookupIds.length === 0 || !this.prisma.client.payment?.findMany) return;
     const matches = await this.prisma.client.payment.findMany({
       where: {
         provider: 'stripe',
@@ -1609,7 +1609,7 @@ export class PaymentsService {
         OR: [{ providerPaymentId: { in: lookupIds } }, { reference: { in: lookupIds } }],
       },
       select: { providerPaymentId: true, invoiceId: true, businessId: true },
-    }).catch(() => []);
+    });
     if (matches.length === 0) return;
     let firstStore: { orderId: string; businessId: string } | null = null;
     for (const match of matches) {
@@ -1985,7 +1985,15 @@ export class PaymentsService {
       // settlement payment row predates Payment.reference stashing (reference is
       // null), map directly to that store order's checkout invoice payment.
       if (!found && signedForBusinessId && typeof obj?.metadata?.orderId === 'string' && obj.metadata.orderId) {
-        found = await this.stripeStoreOrderPaymentByOrderId(obj.metadata.orderId, signedForBusinessId, lookupIds);
+        const fallback = await this.stripeStoreOrderPaymentByOrderId(obj.metadata.orderId, signedForBusinessId, lookupIds);
+        if (fallback.unsettledOrder) {
+          // COR-W1FS-NB1: store's own webhook verified this refund for an unsettled order
+          // (checkout.session.completed not yet recorded); throw 409 so the claim is released for retry.
+          throw new ConflictException(
+            `Stripe refund ${refund.id ?? charge} targets unsettled store order ${obj.metadata.orderId}; retry after settlement`,
+          );
+        }
+        found = fallback.payment;
       }
 
       if (!found) {
@@ -2039,6 +2047,12 @@ export class PaymentsService {
         );
         continue;
       }
+      if (store && !this.storeOrderService) {
+        // COR-W1FS-2: the refund of a store order is recorded with its order, or not at all (Stripe redelivers it).
+        throw new Error(
+          `Stripe refund ${refund.id ?? charge} of storefront order ${store.orderId} not recorded: the store orders are unavailable`,
+        );
+      }
 
       // The synthetic id names the payment it refunds (review SEC-V29C-3).
       const refundId = refund.cumulative
@@ -2059,7 +2073,7 @@ export class PaymentsService {
         // Stripe refund rows written before V1-29c reference the charge id.
         [charge],
         undefined,
-        store && this.storeOrderService
+        store
           ? async (tx, recorded) => {
               ({ flipped } = await this.storeOrderService!.recordProviderRefundOnOrder(tx, {
                 orderId: store.orderId,
@@ -2087,7 +2101,7 @@ export class PaymentsService {
           this.logger.warn(`Stripe refund reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
         });
       }
-      if (flipped && store) {
+      if (persisted && flipped && store) {
         await this.storeOrderService?.announceProviderRefund(store.orderId, store.businessId, original.invoiceId).catch((e) => {
           this.logger.warn(`store_order.refunded for order ${store.orderId} not sent: ${e instanceof Error ? e.message : e}`);
         });
@@ -2104,10 +2118,13 @@ export class PaymentsService {
   private async stripeStorefrontSettlementOf(
     payment: { providerPaymentId: string; invoiceId: string; businessId: string },
   ): Promise<{ orderId: string; businessId: string } | null> {
+    if (!this.prisma.client.invoice?.findUnique || !this.prisma.client.marketplaceOrder?.findUnique) {
+      return null;
+    }
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: payment.invoiceId },
       select: { businessId: true, invoiceNumber: true },
-    }).catch(() => null);
+    });
     const invoiceNumber = invoice?.invoiceNumber;
     if (!invoice || invoice.businessId !== payment.businessId || !invoiceNumber?.startsWith('INV-')) {
       return null;
@@ -2115,7 +2132,7 @@ export class PaymentsService {
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { orderNumber: invoiceNumber.slice('INV-'.length) },
       select: { id: true, businessId: true, paymentRef: true },
-    }).catch(() => null);
+    });
     if (!order || order.businessId !== payment.businessId || order.paymentRef !== payment.providerPaymentId) {
       return null;
     }
@@ -2132,17 +2149,25 @@ export class PaymentsService {
     orderId: string,
     businessId: string,
     lookupIds: string[],
-  ): Promise<RefundOriginal | null> {
+  ): Promise<{ payment: RefundOriginal | null; unsettledOrder: boolean }> {
+    if (
+      !this.prisma.client.marketplaceOrder?.findFirst ||
+      !this.prisma.client.invoice?.findFirst ||
+      !this.prisma.client.payment?.findFirst
+    ) {
+      return { payment: null, unsettledOrder: false };
+    }
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
       select: { orderNumber: true, paymentRef: true },
-    }).catch(() => null);
-    if (!order?.paymentRef) return null;
+    });
+    if (!order) return { payment: null, unsettledOrder: false };
+    if (!order.paymentRef) return { payment: null, unsettledOrder: true };
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { businessId, invoiceNumber: `INV-${order.orderNumber}` },
       select: { id: true },
-    }).catch(() => null);
-    if (!invoice) return null;
+    });
+    if (!invoice) return { payment: null, unsettledOrder: false };
     const row = await this.prisma.client.payment.findFirst({
       where: {
         businessId,
@@ -2154,16 +2179,21 @@ export class PaymentsService {
         NOT: { providerPaymentId: { startsWith: MANUAL_PAYMENT_ID_PREFIX } },
       },
       select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true, reference: true },
-    }).catch(() => null);
-    if (!row) return null;
-    if (row.reference && lookupIds.length > 0 && !lookupIds.includes(row.reference)) return null;
+    });
+    if (!row) return { payment: null, unsettledOrder: false };
+    if (row.reference && lookupIds.length > 0 && !lookupIds.includes(row.reference)) {
+      return { payment: null, unsettledOrder: false };
+    }
     return {
-      id: row.id,
-      providerPaymentId: row.providerPaymentId,
-      invoiceId: row.invoiceId,
-      businessId: row.businessId,
-      currency: row.currency,
-      amount: row.amount,
+      payment: {
+        id: row.id,
+        providerPaymentId: row.providerPaymentId,
+        invoiceId: row.invoiceId,
+        businessId: row.businessId,
+        currency: row.currency,
+        amount: row.amount,
+      },
+      unsettledOrder: false,
     };
   }
 
