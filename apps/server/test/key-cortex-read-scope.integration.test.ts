@@ -950,8 +950,9 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     expect(r.opportunities.map((o: any) => o.title)).toContain(`Collect $1,000 from ${NAME.alicia}`);
     expect(r.churnRisks.map((c: any) => c.contactName).sort()).toEqual([NAME.alicia, NAME.maraval, NAME.marcus].sort());
     expect(r.pipeline.totalPipelineValue).toBe(2500);
-    // Paid invoices of this business (400 + 600 + 500 + 300 + 350; all rows were written this month).
-    expect(r.cashFlow.moneyIn).toBe(2150);
+    // P119 (FU-CORTEX-INSIGHT-CASH-TRUTH, D-14): monthly cash-in reads real payment rows by date
+    // (the 400 SUCCESSFUL payment on paidA; excludes FAILED 999 and rowless/old PAID invoices with no paidAt this month).
+    expect(r.cashFlow.moneyIn).toBe(400);
     expect(r.cashFlow.upcomingPaymentsDue).toEqual([
       expect.objectContaining({ id: INV.upcoming, contactName: NAME.alicia, amount: 120 }),
     ]);
@@ -1055,7 +1056,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
       const res = await get2('report', R.owner, R.biz).query({ scope: 'monthly' });
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.body.cashFlow.moneyOut).toBe(300);
-      expect(res.body.cashFlow.netFlow).toBe(2150 - 300);
+      expect(res.body.cashFlow.netFlow).toBe(400 - 300);
     } finally {
       await db.$executeRawUnsafe(`DELETE FROM expenses WHERE business_id = $1`, R.biz);
     }

@@ -460,8 +460,8 @@ export class DiagnosticsService {
         ? `packages/db token-encryption derives from ${source}`
         : 'packages/db token-encryption is running on the IN-REPO DEV FALLBACK key',
       detail: source
-        ? 'Safe to land the production guard once this has read pass in production.'
-        : 'Do NOT land the boot-time guard while this is the state: rows encrypted under the fallback become undecryptable.',
+        ? 'This pass confirms the active key-source half only; also run apps/server/scripts/token-encryption-key-census.ts (the stored-row half) and confirm zero fallback or core-chain rows before landing the production key guard.'
+        : 'Do NOT land the boot-time production key guard while this is the state: rows encrypted under the fallback become undecryptable. Run apps/server/scripts/token-encryption-key-census.ts to audit stored rows before landing the guard.',
     };
   }
 

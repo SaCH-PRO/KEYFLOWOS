@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -62,6 +62,22 @@ export class RevenueAttributionService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  private async assertContactInBusiness(
+    businessId: string,
+    contactId: unknown,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || contactId.trim().length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
+    const where = { id: contactId, businessId, deletedAt: null };
+    const contact = tx
+      ? await tx.contact.findFirst({ where, select: { id: true } })
+      : await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   async record(
     input: RecordRevenueInput,
     tx?: Prisma.TransactionClient,
@@ -70,6 +86,8 @@ export class RevenueAttributionService {
     if (!Number.isFinite(input.amount) || input.amount <= 0) {
       return;
     }
+
+    await this.assertContactInBusiness(input.businessId, input.contactId, tx);
 
     // Referral lookup failures are tolerated — a missing referral contact
     // never blocks attribution. The attribution row write itself is a hard
@@ -142,6 +160,8 @@ export class RevenueAttributionService {
     revenueId: string,
     patch: UpdateRevenueAttributionInput,
   ) {
+    await this.assertContactInBusiness(businessId, patch.contactId);
+
     const existing = await this.prisma.client.revenueAttribution.findUnique({
       where: {
         businessId_revenueType_revenueId: { businessId, revenueType, revenueId },
@@ -159,7 +179,7 @@ export class RevenueAttributionService {
         revenueId,
         amount: seed.amount,
         currency: seed.currency,
-        contactId: seed.contactId,
+        contactId: patch.contactId !== undefined ? patch.contactId : seed.contactId,
         source: (patch.source as RevenueSource) ?? 'manual',
         sourceDetail: patch.sourceDetail ?? null,
         campaignId: patch.campaignId ?? null,
@@ -205,26 +225,48 @@ export class RevenueAttributionService {
     if (revenueType === 'INVOICE') {
       const inv = await this.prisma.client.invoice.findFirst({
         where: { id: revenueId, businessId, deletedAt: null },
-        select: { total: true, currency: true, contactId: true, paidAt: true, issueDate: true, createdAt: true },
+        select: {
+          total: true,
+          currency: true,
+          contactId: true,
+          contact: { select: { businessId: true, deletedAt: true } },
+          paidAt: true,
+          issueDate: true,
+          createdAt: true,
+        },
       });
       if (!inv) return null;
+      const liveContactId =
+        inv.contactId && inv.contact?.businessId === businessId && inv.contact?.deletedAt === null
+          ? inv.contactId
+          : null;
       return {
         amount: Math.max(0.01, Number(inv.total ?? 0)),
         currency: inv.currency ?? 'TTD',
-        contactId: inv.contactId ?? null,
+        contactId: liveContactId,
         occurredAt: inv.paidAt ?? inv.issueDate ?? inv.createdAt,
       };
     }
     if (revenueType === 'BOOKING') {
       const b = await this.prisma.client.booking.findFirst({
         where: { id: revenueId, businessId, deletedAt: null },
-        select: { contactId: true, startTime: true, createdAt: true, invoice: { select: { total: true, currency: true } } },
+        select: {
+          contactId: true,
+          contact: { select: { businessId: true, deletedAt: true } },
+          startTime: true,
+          createdAt: true,
+          invoice: { select: { total: true, currency: true } },
+        },
       });
       if (!b) return null;
+      const liveContactId =
+        b.contactId && b.contact?.businessId === businessId && b.contact?.deletedAt === null
+          ? b.contactId
+          : null;
       return {
         amount: Math.max(0.01, Number(b.invoice?.total ?? 0)),
         currency: b.invoice?.currency ?? 'TTD',
-        contactId: b.contactId ?? null,
+        contactId: liveContactId,
         occurredAt: b.startTime ?? b.createdAt,
       };
     }

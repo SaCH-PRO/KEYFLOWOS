@@ -111,6 +111,13 @@ export const MONEY_STATE_WRITERS: Inventory = {
     ops: { create: 1 },
     why: 'completeCheckout: storefront order payment',
   },
+  'apps/server/src/modules/marketplace/commerce-integration.service.ts': {
+    ops: { create: 1 },
+    why:
+      'V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120, D-249/D-75): createRevenueRecord records one own-tenant ' +
+      'SUCCESSFUL Payment row inside the same $transaction as the PAID INV-ORD-* invoice (idempotent via advisory ' +
+      'lock + deterministic providerPaymentId)',
+  },
 };
 
 /** Ratchet: findings against the inventory, as messages naming the file. */
