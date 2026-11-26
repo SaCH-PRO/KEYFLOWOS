@@ -1510,6 +1510,11 @@
       "prefix": "v72b_",
       "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
       "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
+    },
+    {
+      "prefix": "v72c_",
+      "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
     }
   ],
   "pendingRenames": [],
