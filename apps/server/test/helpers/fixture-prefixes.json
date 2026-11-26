@@ -1480,6 +1480,11 @@
       "prefix": "v64l_",
       "owner": "apps/server/test/census-key-b.integration.test.ts",
       "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v71h_",
+      "owner": "apps/server/test/merge-contacts-unique.integration.test.ts",
+      "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE, P112)"
     }
   ],
   "pendingRenames": [],
