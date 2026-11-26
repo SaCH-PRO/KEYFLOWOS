@@ -93,6 +93,8 @@ async function cleanup() {
     `DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM presence_daily_stats WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM public_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -356,6 +358,42 @@ beforeAll(async () => {
       },
     ],
   });
+
+  // Seed a service and 2 today bookings in bizA (one TEAM contact, one OWNER PRIVATE contact)
+  // for R1-SEC-02 today-stats PII/visibility checks.
+  const now = new Date();
+  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
+  await db.service.create({
+    data: {
+      id: `${P}svcA1`,
+      businessId: ID.bizA,
+      name: 'V97P Consultation',
+      price: 100,
+      duration: 60,
+    },
+  });
+  await db.booking.createMany({
+    data: [
+      {
+        id: `${P}bkTeam`,
+        businessId: ID.bizA,
+        contactId: ID.leadTeam,
+        serviceId: `${P}svcA1`,
+        startTime: now,
+        endTime: inOneHour,
+        status: 'CONFIRMED',
+      },
+      {
+        id: `${P}bkPriv`,
+        businessId: ID.bizA,
+        contactId: ID.leadPrivate,
+        serviceId: `${P}svcA1`,
+        startTime: now,
+        endTime: inOneHour,
+        status: 'CONFIRMED',
+      },
+    ],
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -534,5 +572,100 @@ describe('FU-PRESENCE-REVENUE-SCOPE (P100, D-100 / D-104)', () => {
       const res = await reqAs(null, url);
       expect(res.status).toBe(401);
     });
+  });
+
+  describe('R1 security repair regressions (R1-SEC-01, R1-SEC-02)', () => {
+    it('[R1-SEC-01] direct getOverviewForReader(bizA, undefined), listStorefrontLeads(bizA, {}, undefined), and getTodayStats(bizA, undefined) all fail closed', async () => {
+      const overview = await overviewService.getOverviewForReader(ID.bizA, undefined);
+      expect(has(overview?.kpis, 'revenue')).toBe(false);
+      expect(overview?.kpis?.ordersCreated).toBe(1);
+
+      const leads = await overviewService.listStorefrontLeads(ID.bizA, {}, undefined);
+      expect(leads).toEqual({ items: [] });
+
+      const stats = await overviewService.getTodayStats(ID.bizA, undefined);
+      expect(has(stats?.events, 'revenue')).toBe(false);
+      expect(Array.isArray(stats?.recentOrders)).toBe(true);
+      expect(stats.recentOrders.length).toBeGreaterThanOrEqual(1);
+      for (const o of stats.recentOrders) {
+        expect(has(o, 'total')).toBe(false);
+        expect(has(o, 'customerName')).toBe(false);
+      }
+      expect(Array.isArray(stats?.recentBookings)).toBe(true);
+      expect(stats.recentBookings.length).toBeGreaterThanOrEqual(2);
+      for (const b of stats.recentBookings) {
+        expect(has(b, 'contactName')).toBe(false);
+      }
+    });
+
+    it.each([
+      ['STAFF with { crm: "none" }', ID.staffCrmNone],
+      ['STAFF with explicit map omitting crm ({ storefront: "read" })', ID.staffStoreOnly],
+      ['ADMIN with explicit { crm: "none" }', ID.adminRevCrmNone],
+      ['STAFF with JSON array [] permissionScopes', ID.staffArrayScopes],
+    ])(
+      '[R1-SEC-02] GET today-stats withholds recentOrders[].customerName and recentBookings[].contactName for %s',
+      async (_label, userId) => {
+        const res = await reqAs(userId, `/site/presence/businesses/${ID.bizA}/today-stats`);
+        expect(res.status).toBe(200);
+        expect(res.body.recentOrders.length).toBeGreaterThanOrEqual(1);
+        for (const o of res.body.recentOrders) {
+          expect(has(o, 'customerName')).toBe(false);
+        }
+        expect(res.body.recentBookings.length).toBeGreaterThanOrEqual(2);
+        for (const b of res.body.recentBookings) {
+          expect(has(b, 'contactName')).toBe(false);
+        }
+        const serialized = JSON.stringify(res.body);
+        expect(serialized).not.toContain('V97P Buyer');
+        expect(serialized).not.toContain('Team Lead');
+        expect(serialized).not.toContain('Private Lead');
+      },
+    );
+
+    it.each([
+      ['STAFF with explicit { revenue: "read", crm: "read" }', ID.staffExplicitRead],
+      ['STAFF with role defaults (permissionScopes: null)', ID.staffDefaults],
+    ])(
+      '[R1-SEC-02] GET today-stats hides OWNER PRIVATE booking contactName while showing TEAM booking contactName for %s',
+      async (_label, userId) => {
+        const res = await reqAs(userId, `/site/presence/businesses/${ID.bizA}/today-stats`);
+        expect(res.status).toBe(200);
+        expect(res.body.recentOrders[0]?.customerName).toBe('V97P Buyer');
+        const teamBk = res.body.recentBookings.find((b: any) => b.id === `${P}bkTeam`);
+        const privBk = res.body.recentBookings.find((b: any) => b.id === `${P}bkPriv`);
+        expect(teamBk?.contactName).toBe('Team Lead');
+        expect(privBk).toBeDefined();
+        expect(has(privBk, 'contactName')).toBe(false);
+        expect(JSON.stringify(res.body)).not.toContain('Private Lead');
+      },
+    );
+
+    it('[R1-SEC-02] GET today-stats hides non-owned booking contactNames for STAFF with { crm: "read", crm_view: "owned" }', async () => {
+      const res = await reqAs(ID.staffOwned, `/site/presence/businesses/${ID.bizA}/today-stats`);
+      expect(res.status).toBe(200);
+      const teamBk = res.body.recentBookings.find((b: any) => b.id === `${P}bkTeam`);
+      const privBk = res.body.recentBookings.find((b: any) => b.id === `${P}bkPriv`);
+      expect(has(teamBk, 'contactName')).toBe(false);
+      expect(has(privBk, 'contactName')).toBe(false);
+      expect(JSON.stringify(res.body)).not.toContain('Team Lead');
+      expect(JSON.stringify(res.body)).not.toContain('Private Lead');
+    });
+
+    it.each([
+      ['OWNER with membership', ID.ownerA],
+      ['SUPER_ADMIN with no membership', ID.superAdmin],
+    ])(
+      '[R1-SEC-02] CONTROL: %s sees customerName and both TEAM and OWNER PRIVATE booking contactNames on today-stats',
+      async (_label, userId) => {
+        const res = await reqAs(userId, `/site/presence/businesses/${ID.bizA}/today-stats`);
+        expect(res.status).toBe(200);
+        expect(res.body.recentOrders[0]?.customerName).toBe('V97P Buyer');
+        const teamBk = res.body.recentBookings.find((b: any) => b.id === `${P}bkTeam`);
+        const privBk = res.body.recentBookings.find((b: any) => b.id === `${P}bkPriv`);
+        expect(teamBk?.contactName).toBe('Team Lead');
+        expect(privBk?.contactName).toBe('Private Lead');
+      },
+    );
   });
 });

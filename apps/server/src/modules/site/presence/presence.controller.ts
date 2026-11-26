@@ -90,7 +90,7 @@ export class PresenceController {
     @Query('days') days?: string,
   ) {
     const d = days ? Math.min(Math.max(parseInt(days, 10) || 30, 1), 365) : 30;
-    return this.overview.getOverview(businessId, d, presenceActor(req));
+    return this.overview.getOverviewForReader(businessId, presenceActor(req) ?? null, d);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -110,7 +110,7 @@ export class PresenceController {
     return this.overview.listStorefrontLeads(
       businessId,
       { limit: limit ? parseInt(limit, 10) : undefined },
-      presenceActor(req),
+      presenceActor(req) ?? null,
     );
   }
 
@@ -149,7 +149,7 @@ export class PresenceController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/today-stats')
   getTodayStats(@Param('businessId') businessId: string, @Req() req: any) {
-    return this.overview.getTodayStats(businessId, presenceActor(req));
+    return this.overview.getTodayStats(businessId, presenceActor(req) ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
