@@ -58,8 +58,9 @@ const VALID_TENANT_SOURCES = new Set<WebhookTenantSource>([
 ]);
 
 const AUTH_GUARDS = new Set(['AuthGuard', 'BusinessGuard']);
-const WEBHOOK_PATH_RE = /(?:^|\/)(?:webhooks?|hooks?|inbound|callbacks?)(?:\/|$)/i;
+const WEBHOOK_PATH_RE = /(?:^|[/_-])(?:webhooks?|hooks?|inbound|callbacks?)(?:$|[/_-])/i;
 const WEBHOOK_FILE_RE = /(?:webhook|inbound)/i;
+const INBOUND_VERB_DECORATORS = new Set(['Post', 'All']);
 
 function walkTsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -151,13 +152,15 @@ export function scanSourceForUnauthenticatedWebhooks(
         for (const member of node.members) {
           if (!ts.isMethodDeclaration(member)) continue;
           const methodDecs = getDecorators(member);
-          const postDec = methodDecs.find((d) => decoratorName(d, sf) === 'Post');
-          if (!postDec) continue;
+          const verbDec = methodDecs.find((d) =>
+            INBOUND_VERB_DECORATORS.has(decoratorName(d, sf)),
+          );
+          if (!verbDec) continue;
 
           const allGuards = [...classGuards, ...extractGuardNames(methodDecs, sf)];
           if (allGuards.some((g) => AUTH_GUARDS.has(g))) continue;
 
-          const methodSubPath = firstStringArg(postDec, sf);
+          const methodSubPath = firstStringArg(verbDec, sf);
           const fullPath = normalizeRoutePath(controllerPrefix, methodSubPath);
           const isWebhookOrInbound =
             WEBHOOK_PATH_RE.test(fullPath) || WEBHOOK_FILE_RE.test(relFile);
@@ -310,7 +313,7 @@ export const WEBHOOK_INGRESS_CENSUS: readonly WebhookIngressCensusRow[] = [
     file: 'modules/phone-voice/phone-voice.controller.ts',
     path: '/api/v1/cortex/phone/inbound',
     verification:
-      'Twilio X-Twilio-Signature HMAC-SHA1 over full URL (including businessId query) and form params via twilio.validateRequest using TWILIO_AUTH_TOKEN (fails closed 403)',
+      'Twilio X-Twilio-Signature HMAC-SHA1 over full URL (including businessId query) and form params via twilio.validateRequest using TWILIO_AUTH_TOKEN (fails closed 403 when unconfigured / 400 on invalid signature; explicit dev override PHONE_VOICE_ALLOW_UNVERIFIED=1)',
     replayDedup:
       'None (stateless TwiML response minting short-lived signed stream token bound to CallSid and businessId)',
     tenantSource: 'signed-metadata',
@@ -437,17 +440,29 @@ describe('Inbound webhook ingress census (RR-WEBHOOK-INGRESS-CENSUS)', () => {
       join(SRC, 'modules/social/social.controller.ts'),
       'utf8',
     );
-    expect(socialCtrlSrc).toContain('await this.assertMetaPageIsBusiness(businessId, body)');
+    expect(socialCtrlSrc).toMatch(
+      /await\s+this\.assertMetaPageIsBusiness\(\s*businessId\s*,\s*body\s*\)/,
+    );
   });
 
-  it('synthetic fixture: detects an unlisted public @Post("webhook") and ignores guarded or non-webhook routes', () => {
+  it('synthetic fixture: detects unlisted public @Post/@All webhook routes (including compound names) and ignores guarded or non-webhook routes', () => {
     const fixtureSource = `
-      import { Controller, Post, UseGuards } from '@nestjs/common';
+      import { All, Controller, Post, UseGuards } from '@nestjs/common';
 
       @Controller('acme')
       export class AcmeController {
         @Post('webhook')
         unlistedWebhook() {
+          return { ok: true };
+        }
+
+        @Post('stripe-webhook')
+        compoundWebhook() {
+          return { ok: true };
+        }
+
+        @All('hooks/acme')
+        allVerbHook() {
           return { ok: true };
         }
 
@@ -487,12 +502,16 @@ describe('Inbound webhook ingress census (RR-WEBHOOK-INGRESS-CENSUS)', () => {
     );
     expect(fixtureRoutes.map((r) => `${r.key}:${r.path}`)).toEqual([
       'AcmeController.unlistedWebhook:/acme/webhook',
+      'AcmeController.compoundWebhook:/acme/stripe-webhook',
+      'AcmeController.allVerbHook:/acme/hooks/acme',
       'RogueWebhookController.ingest:/webhooks/rogue/:businessId',
     ]);
 
     const { unlisted } = diffAgainstCensus(fixtureRoutes, WEBHOOK_INGRESS_CENSUS);
     expect(unlisted.map((r) => r.key)).toEqual([
       'AcmeController.unlistedWebhook',
+      'AcmeController.compoundWebhook',
+      'AcmeController.allVerbHook',
       'RogueWebhookController.ingest',
     ]);
   });

@@ -217,16 +217,23 @@ export class SocialController {
   }
 
   /**
-   * Verify that every entry and messaging recipient named in a Meta social webhook
+   * Verify that every entry and messaging event named in a Meta social webhook
    * payload belongs to a Facebook or Instagram SocialConnection of `businessId`.
+   * For outbound echoes (`message.is_echo === true`), Meta puts the business's
+   * Page/IG ID in `sender.id` and the customer PSID/IGSID in `recipient.id`;
+   * otherwise the business's Page/IG ID is in `recipient.id`.
    * Fails closed with 403 ForbiddenException when `entry` is missing/empty, any entry
-   * names no page/recipient ID, or any referenced ID is not owned by `businessId`.
+   * names no page/account ID, or any referenced ID is not owned by `businessId`.
    */
   private async assertMetaPageIsBusiness(businessId: string, body: unknown): Promise<void> {
     const payload = body as {
       entry?: Array<{
         id?: unknown;
-        messaging?: Array<{ recipient?: { id?: unknown } }>;
+        messaging?: Array<{
+          sender?: { id?: unknown };
+          recipient?: { id?: unknown };
+          message?: { is_echo?: unknown };
+        }>;
       }>;
     } | null | undefined;
 
@@ -242,8 +249,11 @@ export class SocialController {
 
       if (Array.isArray(entry?.messaging)) {
         for (const event of entry.messaging) {
-          const recipientId = this.normalizeMetaPageId(event?.recipient?.id);
-          if (recipientId) entryIds.push(recipientId);
+          const isEcho = event?.message?.is_echo === true;
+          const ownedPartyId = this.normalizeMetaPageId(
+            isEcho ? event?.sender?.id : event?.recipient?.id,
+          );
+          if (ownedPartyId) entryIds.push(ownedPartyId);
         }
       }
 
@@ -261,6 +271,7 @@ export class SocialController {
         businessId,
         platform: { in: ['FACEBOOK', 'INSTAGRAM'] },
         platformId: { in: [...referencedIds] },
+        status: { notIn: ['DISCONNECTED', 'REVOKED'] },
       },
       select: { platformId: true },
     });
