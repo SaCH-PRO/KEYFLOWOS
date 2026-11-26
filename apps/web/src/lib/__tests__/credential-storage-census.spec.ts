@@ -1049,3 +1049,188 @@ describe("CSC-12 cookie attributes are pinned", () => {
     }
   });
 });
+
+/* ------------------------------------------------------- repair round 2 */
+
+/**
+ * Repair round 2 (both reviews ACCEPT WITH MINORS, #80 7182060236 follow-up). Each case plants an in-memory sample
+ * the round-1 scanner (8bc5833) misses, or kills a resolution step that could be removed with every case passing.
+ *
+ *   CSC-13 (CSC-SEC-1) a session or auth object in the value is a credential write, through JSON.stringify(x) and a
+ *          const one hop away too.
+ *   CSC-14 (CSC-COR-1) an assignment continued by an operator at the END of the line (Prettier's shape) is read whole.
+ *   CSC-15 (CSC-COR-4) the nearest const before the write, ternary branches and an inline https-only Secure each
+ *          decide a result.
+ *   CSC-16 (CSC-SEC-3 / CSC-COR-2) res.setHeader("Set-Cookie", …), new Headers([["Set-Cookie", …]]) and
+ *          document.cookie = [NAME, "=", t].join("").
+ *   CSC-17 (CSC-SEC-2) Cache Storage puts and IndexedDB put/add/cursor.update are scanned for their values, also in a
+ *          file that does not open the database itself.
+ */
+describe("CSC-13 a session or auth object in the value counts", () => {
+  const fixture = [
+    `export function save(data: { session: unknown; auth: unknown }) {`,
+    `  localStorage.setItem("kf_cache", JSON.stringify(data.session));`,
+    `  localStorage.setItem("kf_cache2", JSON.stringify(data.auth));`,
+    `  const blob = JSON.stringify(data.session);`,
+    `  localStorage.setItem("kf_cache3", blob);`,
+    `  const payload = { s: data.session };`,
+    `  localStorage.setItem("kf_cache4", JSON.stringify(payload));`,
+    `  localStorage.setItem("kf_plain_view", JSON.stringify({ view: "grid" }));`,
+    `}`,
+  ].join("\n");
+  const { unregistered } = compare(scan("src/fixture-session-value.ts", fixture), []);
+
+  it("flags each, including through JSON.stringify(x) and a const one hop away", () => {
+    for (const k of ["kf_cache", "kf_cache2", "kf_cache3", "kf_cache4"]) {
+      expect(unregistered.some((u) => u.startsWith(`localStorage ${k} @`)), k).toBe(true);
+    }
+  });
+
+  it("does not flag a plain value", () => {
+    expect(unregistered.some((u) => u.includes("kf_plain_view"))).toBe(false);
+  });
+});
+
+describe("CSC-14 an operator at the end of the line continues the assignment", () => {
+  const fixture = [
+    `export function save(session: { access_token: string }, s: { refresh_token: string }) {`,
+    `  document.cookie =`,
+    `    "kf_mirror=" +`,
+    `    session.access_token +`,
+    `    "; path=/";`,
+    `  localStorage["kf_blob2"] =`,
+    `    "v1:" +`,
+    `    s.refresh_token;`,
+    `  window.name =`,
+    `    "x" +`,
+    `    s.refresh_token;`,
+    `}`,
+  ].join("\n");
+  const ws = scan("src/fixture-eol.ts", fixture);
+  const { unregistered } = compare(ws, []);
+
+  it("reads the cookie's key, value and attributes across the lines", () => {
+    const w = ws.find((x) => x.store === "cookie" && x.key === "kf_mirror");
+    expect(w, "kf_mirror is found").toBeTruthy();
+    expect(w!.attrs).toEqual(["path=/"]);
+    expect(unregistered.some((u) => u.startsWith("cookie kf_mirror @"))).toBe(true);
+  });
+
+  it("reads a bracket assignment's value across the lines", () => {
+    expect(unregistered.some((u) => u.startsWith("localStorage kf_blob2 @"))).toBe(true);
+    expect(ws.find((x) => x.key === "window.name")?.value).toMatch(/refresh_token/);
+  });
+});
+
+describe("CSC-15 each resolution step decides a result", () => {
+  it("the const declared nearest before the write wins over an earlier one", () => {
+    const fixture = [
+      `function a() {`,
+      `  const key = "kf_first_view";`,
+      `  localStorage.setItem(key, "1");`,
+      `}`,
+      `function b(t: string) {`,
+      `  const key = "kf_second_token";`,
+      `  localStorage.setItem(key, t);`,
+      `}`,
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-nearest.ts", fixture))).toEqual(["localStorage:kf_first_view", "localStorage:kf_second_token"]);
+  });
+
+  it("a ternary resolves to its first resolvable branch", () => {
+    const fixture = [
+      `const OWNER_KEY = "kf_owner_secret";`,
+      `function keyFor(owner: string | null) {`,
+      `  return owner ? \`\${OWNER_KEY}:\${owner}\` : null;`,
+      `}`,
+      `export function save(flag: boolean, owner: string, t: string) {`,
+      `  localStorage.setItem(flag ? "kf_tern_token" : "kf_other", t);`,
+      `  localStorage.setItem(keyFor(owner), t);`,
+      `}`,
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_owner_secret:*"]);
+  });
+
+  it("an inline https-only Secure, and one through a const, are recorded as secure-on-https", () => {
+    const fixture = [
+      `export function w(t: string) {`,
+      `  document.cookie = \`kf_inline_token=\${t}; Path=/\${location.protocol === "https:" ? "; Secure" : ""}\`;`,
+      `  const attrs = \`; Path=/; SameSite=Lax\${location.protocol === "https:" ? "; Secure" : ""}\`;`,
+      `  document.cookie = \`kf_viaconst_token=\${t}\${attrs}\`;`,
+      `}`,
+    ].join("\n");
+    const ws = scan("src/fixture-secure.ts", fixture);
+    expect(ws.find((w) => w.key === "kf_inline_token")?.attrs).toEqual(["path=/", "secure-on-https"]);
+    expect(ws.find((w) => w.key === "kf_viaconst_token")?.attrs).toEqual(["path=/", "samesite=lax", "secure-on-https"]);
+  });
+});
+
+describe("CSC-16 more Set-Cookie and cookie-building shapes", () => {
+  const fixture = [
+    `const NAME = "kf_joined_session";`,
+    `export function h(res: { setHeader(n: string, v: unknown): void }, t: string) {`,
+    `  res.setHeader("Set-Cookie", \`kf_node_session=\${t}; Path=/; HttpOnly\`);`,
+    `  res.setHeader("Set-Cookie", ["kf_arr1_token=a; Path=/", "kf_arr2_token=b; Path=/"]);`,
+    `  const h2 = new Headers([["Set-Cookie", "kf_tuple_session=1; Path=/"]]);`,
+    `  document.cookie = [NAME, "=", t].join("");`,
+    `}`,
+  ].join("\n");
+  const keys = keysOf(scan("src/fixture-headers.ts", fixture));
+
+  it("finds each", () => {
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "response-cookie:kf_node_session",
+        "response-cookie:kf_arr1_token",
+        "response-cookie:kf_arr2_token",
+        "response-cookie:kf_tuple_session",
+        "cookie:kf_joined_session",
+      ]),
+    );
+  });
+});
+
+describe("CSC-17 Cache Storage and IndexedDB values are scanned", () => {
+  it("a Cache Storage put that stores a token or the request headers is a credential write, named by its cache", () => {
+    const fixture = [
+      `async function f(request: Request, token: string) {`,
+      `  const cache = await caches.open("kf-api-cache");`,
+      `  cache.put(request, new Response(token));`,
+      `  caches.open("kf-hdr-cache").then((c) => c.put(request.url, new Response(JSON.stringify(request.headers))));`,
+      `  const plain = await caches.open("kf-static-cache");`,
+      `  plain.put(request, new Response("ok"));`,
+      `}`,
+    ].join("\n");
+    const { unregistered } = compare(scan("public/fixture-cache.js", fixture), []);
+    expect(unregistered.some((u) => u.startsWith("cacheStorage kf-api-cache @"))).toBe(true);
+    expect(unregistered.some((u) => u.startsWith("cacheStorage kf-hdr-cache @"))).toBe(true);
+    expect(unregistered.some((u) => u.includes("kf-static-cache"))).toBe(false);
+  });
+
+  it("IndexedDB put/add/cursor.update are scanned in a file that only uses a database opened elsewhere", () => {
+    const fixture = [
+      `import { getDb } from "./db";`,
+      `export async function save(token: string, refreshToken: string, session: unknown) {`,
+      `  const db = await getDb();`,
+      `  const store = db.transaction("s", "readwrite").objectStore("s");`,
+      `  store.put({ token });`,
+      `  db.transaction("t").objectStore("t").add(refreshToken);`,
+      `  cursor.update({ session });`,
+      `}`,
+    ].join("\n");
+    const ws = scan("src/fixture-idb-elsewhere.ts", fixture);
+    const cred = ws.filter((w) => w.store === "indexedDB" && isCredential(w));
+    expect(cred.length, "three credential writes").toBe(3);
+    expect(compare(ws, []).unregistered.some((u) => u.startsWith("indexedDB * @ src/fixture-idb-elsewhere.ts"))).toBe(true);
+  });
+
+  it("a Set's .add or a state store's .update is not an IndexedDB write", () => {
+    const fixture = [
+      `const names = new Set<string>();`,
+      `names.add(token);`,
+      `storeServiceNames.add(token);`,
+      `useStore.update({ token });`,
+    ].join("\n");
+    expect(scan("src/fixture-not-idb.ts", fixture).filter((w) => w.store === "indexedDB")).toEqual([]);
+  });
+});
