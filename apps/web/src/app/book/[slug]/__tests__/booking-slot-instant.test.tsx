@@ -17,6 +17,7 @@
  *   BSI-06  a service length that is not a sane number of minutes (1e13) gives the hour's fallback, never a crash
  *   BSI-07  a service with no length gives an hour
  *   BSI-08  a restored confirmation with no instant shows no link; a corrupted one (bad instant or length) never crashes
+ *   BSI-09  a hand-edited restored confirmation (service details of the wrong shape) never crashes the page
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -270,6 +271,25 @@ describe("SWP-BOOKING-SLOTS: the storefront books the instant the server offered
       } else {
         expect(link, `no link for ${JSON.stringify(details)}`).toBeNull();
       }
+      cleanup();
+    }
+  });
+
+  it("BSI-09 a hand-edited restored confirmation never crashes the page", async () => {
+    const shapes: unknown[] = [
+      { businessName: "BSI Studio" },
+      { serviceNames: "BSI Session", dates: "2026-12-15", times: "11:00", locations: null, businessName: "BSI Studio" },
+      { serviceNames: [42], dates: [null], times: [], locations: [], businessName: 7, starts: "2026-12-15T15:00:00.000Z" },
+      "not an object",
+    ];
+    for (const confirmedDetails of shapes) {
+      window.localStorage.setItem(
+        `kf_pending_checkout_${SLUG}`,
+        JSON.stringify({ bookingResults: [{ bookingId: "bsi_bk_9" }], bookingReuseKey: null, items: [SERVICE], orderTotal: 100, confirmedDetails }),
+      );
+      render(<PublicBookingPage />);
+      await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 });
+      expect(screen.queryByRole("link", { name: /Add to Calendar/i }), JSON.stringify(confirmedDetails)).toBeNull();
       cleanup();
     }
   });
