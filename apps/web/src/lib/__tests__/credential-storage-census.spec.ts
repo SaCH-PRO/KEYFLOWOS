@@ -157,6 +157,13 @@ interface RegistryRow {
    */
   keyExpr?: string;
   valueExpr?: string;
+  /**
+   * Round 15: a row read and found to hold no credential, although the census flags its write (an UNRESOLVED name in
+   * IndexedDB, Cache Storage or a header). Only such a row may pass CSC-05, and it pins `writes`, the number of writes
+   * it covers, so the same text copied to a new place fails.
+   */
+  nonCredential?: true;
+  writes?: number;
 }
 
 /**
@@ -235,10 +242,15 @@ const REGISTRY: RegistryRow[] = [
   // parameter (cacheFirst / networkFirstWithTimeout(request, cacheName)), so no name is proven. Each was read: the
   // caches hold the app shell, static assets and uncredentialed API GETs (a request with an authorization header is
   // never stored, line 276).
-  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(SHELL_CACHE), kf-shell-v3: the app shell, on install and on navigation.", keyExpr: "SHELL_CACHE", valueExpr: "" },
-  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The app shell put on a navigation response (SHELL_CACHE, kf-shell-v3).", keyExpr: "SHELL_CACHE", valueExpr: "request clone response.clone()" },
-  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(cacheName) in cacheFirst and networkFirstWithTimeout: STATIC_CACHE (kf-static-v3) or API_CACHE (kf-api-v4).", keyExpr: "cacheName", valueExpr: "" },
-  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The 200 responses those two helpers put: static assets, and API GETs with no authorization header.", keyExpr: "cacheName", valueExpr: "request response.clone()" },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(SHELL_CACHE), kf-shell-v3: the app shell, on install and on navigation.", keyExpr: "SHELL_CACHE", valueExpr: "", nonCredential: true, writes: 2 },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The app shell put on a navigation response (SHELL_CACHE, kf-shell-v3).", keyExpr: "SHELL_CACHE", valueExpr: "request clone response.clone()", nonCredential: true, writes: 1 },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(cacheName) in cacheFirst and networkFirstWithTimeout: STATIC_CACHE (kf-static-v3) or API_CACHE (kf-api-v4).", keyExpr: "cacheName", valueExpr: "", nonCredential: true, writes: 2 },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The 200 responses those two helpers put: static assets, and API GETs with no authorization header.", keyExpr: "cacheName", valueExpr: "request response.clone()", nonCredential: true, writes: 2 },
+
+  // src/lib/api.ts mergeHeaders (round 15): `new Headers(initHeaders).forEach((value, key) => headers.set(key, value))`
+  // copies a caller's request headers into the Headers object fetch sends. The name is a parameter, so on a headers
+  // receiver it may be Set-Cookie; but these are REQUEST headers held in memory for one fetch: no cookie is stored.
+  { store: "response-cookie", key: UNRESOLVED, file: "src/lib/api.ts", why: "mergeHeaders copies a caller's request headers into the outgoing fetch Headers (in memory); a request header stores no cookie.", keyExpr: "value", valueExpr: "value", nonCredential: true, writes: 1 },
 
   // The service worker's offline write queue, public/sw.js. enqueue() stores each queued request's headers, so the
   // user's Authorization bearer is written to IndexedDB in clear (security review follow-up, not fixed here).
@@ -1589,6 +1601,32 @@ function compare(writes: Write[], registry: RegistryRow[]) {
 
 /* -------------------------------------------------------------------- tests */
 
+/**
+ * CSC-05's check: a write to IndexedDB, Cache Storage, window.name or a response cookie that is a credential write
+ * fails unless the kf-sync-queue follow-up covers it (CSC-10), or a row marked nonCredential does (round 14, tightened
+ * in round 15): an UNRESOLVED name, neither the name's source nor the value naming a credential or request headers,
+ * and the row covering exactly its pinned number of writes, so the same text copied to a new place fails.
+ */
+function csc05Bad(writes: Write[], registry: RegistryRow[]): string[] {
+  const covered = (r: RegistryRow) => writes.filter((w) => covers(r, w)).length;
+  const admitted = (w: Write) =>
+    w.store !== "window.name" &&
+    w.key === UNRESOLVED &&
+    !CREDENTIAL_PATTERN.test(w.expr) &&
+    !VALUE_PATTERN.test(w.value) &&
+    !HEADERS_PATTERN.test(w.value) &&
+    registry.some((r) => r.nonCredential === true && r.writes !== undefined && covers(r, w) && covered(r) === r.writes);
+  return writes
+    .filter(
+      (w) =>
+        ["indexedDB", "cacheStorage", "window.name", "response-cookie"].includes(w.store) &&
+        isCredential(w) &&
+        !registry.some((r) => r.followUp && covers(r, w)) &&
+        !admitted(w),
+    )
+    .map((w) => `${id(w)}:${w.line}`);
+}
+
 describe("CSC-01 the scanner finds the writes it must", () => {
   const fixture = [
     `const TOKEN_KEY = "kf_token";`,
@@ -1682,26 +1720,9 @@ describe("CSC-02/03 the census matches the registry", () => {
   });
 
   it("CSC-05 no credential in IndexedDB, Cache Storage or window.name, and server cookie writes only clear", () => {
-    // The one known exception is registered with its follow-up (CSC-10). Round 14: a write there whose NAME is not
-    // proven is a credential write too; it passes only when it is registered (pinned) and neither its name's source
-    // nor its value names a credential or keeps request headers. Any other fails.
+    const bad = csc05Bad(writes, REGISTRY);
+    expect(bad).toEqual([]);
     const followUps = REGISTRY.filter((r) => r.followUp);
-    const unprovenOnly = (w: Write) =>
-      w.store !== "window.name" &&
-      w.store !== "response-cookie" &&
-      w.key === UNRESOLVED &&
-      REGISTRY.some((r) => covers(r, w)) &&
-      !CREDENTIAL_PATTERN.test(w.expr) &&
-      !VALUE_PATTERN.test(w.value) &&
-      !HEADERS_PATTERN.test(w.value);
-    const bad = writes.filter(
-      (w) =>
-        ["indexedDB", "cacheStorage", "window.name", "response-cookie"].includes(w.store) &&
-        isCredential(w) &&
-        !followUps.some((r) => covers(r, w)) &&
-        !unprovenOnly(w),
-    );
-    expect(bad.map((w) => `${id(w)}:${w.line}`)).toEqual([]);
     expect(followUps.map((r) => `${id(r)} (${r.keyExpr})`)).toEqual([`indexedDB ${UNRESOLVED} @ public/sw.js (DB_NAME)`]);
   });
 });
@@ -3622,5 +3643,127 @@ describe("CSC-75 (pin) a const cycle stops at the cycle guard, not at the depth 
     expect(n).toBe(1);
     // Without the guard each hop re-expands four ways until the depth cap (4^12 paths): far slower than this bound.
     expect(Date.now() - t0).toBeLessThan(3000);
+  });
+});
+
+/**
+ * Repair round 15 (correctness CONFIRMED on round 14; security: one MAJOR, one MINOR, and rulings on the asks).
+ *
+ *   CSC-79 F1: `eval` named anywhere but as a property name or a declaration's own name makes the file opaque.
+ *   CSC-80 F2: an enum member is a declaration (inside its enum body an unqualified name is the member).
+ *   CSC-81 CSC-05 admits only rows marked nonCredential, each covering exactly its pinned number of writes.
+ *   CSC-82 an unproven header name on a header-like receiver, or in a headers object, may be Set-Cookie.
+ *   CSC-83 F3: a cookie write is a clear only when every branch proves one.
+ */
+describe("CSC-79 eval anywhere makes a file prove no const (F1)", () => {
+  const K = 'const k = "kf_p";\n';
+  for (const [name, fixture] of [
+    ["(eval)(src)", "(eval)(src);"],
+    ["(eval as any)(src)", "(eval as any)(src);"],
+    ["eval!(src)", "eval!(src);"],
+    ["an alias: const e = eval", "const e = eval;\ne(src);"],
+    ["eval?.(src)", "eval?.(src);"],
+    ["[eval][0](src)", "[eval][0](src);"],
+    ["eval passed as a value", "run(eval);"],
+    ["{ eval } shorthand", "use({ eval });"],
+  ]) {
+    it(`${name}: unproven`, () => expectUnproven("src/fixture-r15e.ts", `${K}${fixture}\nlocalStorage.setItem(k, v);`));
+  }
+  it("eval as a property name, a member name or a method does not make the file opaque", () => {
+    const fixture = `${K}o.eval(src);\nconst x = { eval: 1 };\nclass C { eval() {} }\nlocalStorage.setItem(k, "1");`;
+    expect(keysOf(scan("src/fixture-r15f.ts", fixture))).toEqual(["localStorage:kf_p"]);
+  });
+});
+
+describe("CSC-80 an enum member is a declaration (F2)", () => {
+  it("a const and an enum member of the same name: unproven", () => {
+    expectUnproven("src/fixture-r15g.ts", 'const K = "kf_p";\nenum E { K = "kf_x_token", B = 1 }\nlocalStorage.setItem(K, v);');
+  });
+  it("a write inside the enum body reads the member, not the const: unproven", () => {
+    expectUnproven("src/fixture-r15h.ts", 'const K = "kf_p";\nenum E { K = "kf_x", B = localStorage.setItem(K, v) as unknown as number }');
+  });
+});
+
+describe("CSC-81 CSC-05 admits only nonCredential rows, by their pinned write count", () => {
+  const sw = fs.readFileSync(path.join(WEB_PUBLIC, "sw.js"), "utf8");
+  it("the real sw.js passes", () => {
+    expect(csc05Bad(scanSource("public/sw.js", sw), REGISTRY)).toEqual([]);
+  });
+  it("a second identical caches.open / put pair in sw.js fails", () => {
+    const line = "            caches.open(SHELL_CACHE).then((c) => c.put(request, clone));";
+    expect(sw.includes(line)).toBe(true);
+    const doubled = sw.replace(line, `${line}\n${line}`);
+    expect(csc05Bad(scanSource("public/sw.js", doubled), REGISTRY).length).toBeGreaterThan(0);
+  });
+  it("a row without nonCredential is not admitted", () => {
+    const stripped = REGISTRY.map((r) => ({ ...r, nonCredential: undefined }));
+    expect(csc05Bad(census(), stripped).length).toBeGreaterThan(0);
+  });
+  it("every nonCredential row pins its write count, and only UNRESOLVED keys carry the mark", () => {
+    for (const r of REGISTRY.filter((x) => x.nonCredential)) {
+      expect(r.writes, id(r)).toBeGreaterThan(0);
+      expect(r.key, id(r)).toBe(UNRESOLVED);
+      expect(census().filter((w) => covers(r, w)).length, id(r)).toBe(r.writes);
+    }
+  });
+});
+
+describe("CSC-82 an unproven header name on a header-like receiver may be Set-Cookie", () => {
+  const imp = 'import { HDR } from "./h";\n';
+  for (const [name, fixture] of [
+    ["headers.set(HDR, c)", "headers.set(HDR, c);"],
+    ["reqHeaders.append(HDR, c)", "reqHeaders.append(HDR, c);"],
+    ["new Headers().append(HDR, c)", "new Headers().append(HDR, c);"],
+    ["res.setHeader(HDR, c)", "res.setHeader(HDR, c);"],
+    ["response.headers.set(HDR, c)", "response.headers.set(HDR, c);"],
+    ["NextResponse.next().headers.set(HDR, c)", "NextResponse.next().headers.set(HDR, c);"],
+    ["fetch(u, { headers: { [HDR]: c } })", "fetch(u, { headers: { [HDR]: c } });"],
+    ["new Headers({ [HDR]: c })", "new Headers({ [HDR]: c });"],
+  ]) {
+    it(`${name}: a response-cookie write`, () => {
+      const ws = scan("src/fixture-r15s.ts", imp + fixture).filter((w) => w.store === "response-cookie");
+      expect(ws.length).toBe(1);
+      expect(isCredential(ws[0])).toBe(true);
+    });
+  }
+  for (const [name, fixture] of [
+    ["map.set(HDR, c)", "map.set(HDR, c);"],
+    ["params.append(HDR, c)", "params.append(HDR, c);"],
+    ["{ [HDR]: c } not under headers", "const o = { [HDR]: c };"],
+  ]) {
+    it(`${name}: not a header write`, () => {
+      expect(scan("src/fixture-r15t.ts", imp + fixture).filter((w) => w.store === "response-cookie")).toEqual([]);
+    });
+  }
+  it("the real tree's header copy is found and pinned (src/lib/api.ts mergeHeaders)", () => {
+    const w = census().filter((x) => x.store === "response-cookie" && x.file === "src/lib/api.ts");
+    expect(w.length).toBe(1);
+    expect(REGISTRY.some((r) => covers(r, w[0]) && r.nonCredential)).toBe(true);
+  });
+});
+
+describe("CSC-83 a clear only when every branch proves one (F3)", () => {
+  it('document.cookie = c ? "kf_x_token=; max-age=0" : tokenCookie is a write', () => {
+    // Both arms are writes: kf_x_token (its clear is not taken) and the unproven tokenCookie.
+    const ws = scan("src/fixture-r15c.ts", 'document.cookie = c ? "kf_x_token=; max-age=0" : tokenCookie;').filter((w) => w.store === "cookie");
+    expect(ws.map((w) => w.key)).toEqual(["kf_x_token", UNRESOLVED]);
+    expect(ws.every(isCredential)).toBe(true);
+  });
+  it('cookieStore.set(k, "", { maxAge: c ? 0 : 99 }) is a write', () => {
+    const ws = scan("src/fixture-r15d.ts", 'cookieStore.set("kf_view", "", { maxAge: c ? 0 : 99 });');
+    expect(keysOf(ws)).toEqual(["cookie:kf_view"]);
+  });
+  it('res.cookies.set("kf_view", "", { maxAge: c ? 0 : 99 }) is a write', () => {
+    expect(keysOf(scan("src/fixture-r15d2.ts", 'res.cookies.set("kf_view", "", { maxAge: c ? 0 : 99 });'))).toEqual(["response-cookie:kf_view"]);
+  });
+  it("a ternary Max-Age inside a cookie string is a write", () => {
+    expect(keysOf(scan("src/fixture-r15d3.ts", "document.cookie = `kf_view=; Max-Age=${c ? 0 : 99}`;"))).toEqual(["cookie:kf_view"]);
+  });
+  it("a ternary value inside a cookie string is a write", () => {
+    expect(keysOf(scan("src/fixture-r15d4.ts", 'document.cookie = `kf_view=${c ? "" : t}; Max-Age=0`;'))).toEqual(["cookie:kf_view"]);
+  });
+  it("pins: both branches clear, and a plain clear, are not writes", () => {
+    const fixture = 'document.cookie = c ? "kf_a=; max-age=0" : "kf_b=; Max-Age=0";\ndocument.cookie = "kf_c=; max-age=0";\ncookieStore.set("kf_d", "", { maxAge: 0 });';
+    expect(scan("src/fixture-r15d5.ts", fixture)).toEqual([]);
   });
 });
