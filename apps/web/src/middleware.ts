@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const TOKEN_COOKIE = "kf_token";
 const LOGIN_PATH = "/auth/login";
+const ADMIN_TOKEN_COOKIE = "kf_admin_token";
+const ADMIN_LOGIN_PATH = "/admin/login";
 
 /**
  * Decode a base64url-encoded JWT segment. Edge middleware has atob but not
@@ -29,6 +31,27 @@ function isTokenExpiredOrInvalid(token: string): boolean {
     return payload.exp < now - 60; // 60 second clock-skew leeway
   } catch {
     return true;
+  }
+}
+
+/**
+ * Is this cookie shaped like an unexpired token from buildAdminToken
+ * (apps/server/src/core/auth/admin-token.util.ts)? Three parts, a payload with
+ * type "admin" and an `exp` in MILLISECONDS (Date.now() + 24h) that is still
+ * ahead. The HMAC cannot be checked here (the secret stays on the server), so
+ * this grants nothing: it only keeps the admin shell's HTML from a browser that
+ * holds no admin session. Every admin read still goes to the API, where
+ * AuthGuard + AdminGuard decide.
+ */
+function isAdminTokenUsable(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(base64UrlDecode(parts[1])) as Record<string, unknown>;
+    if (payload.type !== "admin") return false;
+    return typeof payload.exp === "number" && payload.exp > Date.now();
+  } catch {
+    return false;
   }
 }
 
@@ -104,6 +127,9 @@ function getRedirect(pathname: string, search: string): string | null {
  *
  * Redirects run first (so moved URLs map to new URLs), then auth gating applies
  * to the destination.
+ *
+ * `/admin/*` (except /admin/login) is gated separately, on the admin session
+ * cookie rather than the user's (RR-ADMIN-SHELL-SERVER-GATE).
  */
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
@@ -122,7 +148,26 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL(redirectDest, req.url), 308);
   }
 
-  // 2. Auth gating — all /app/* routes require authentication.
+  // 2. Admin shell gating — every /admin page except the login page requires an
+  // unexpired admin-shaped kf_admin_token cookie. Without one, the shell's HTML
+  // is not served: redirect to /admin/login and clear the cookie.
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    if (pathname === ADMIN_LOGIN_PATH || pathname === `${ADMIN_LOGIN_PATH}/`) {
+      return NextResponse.next();
+    }
+    const adminCookie = req.cookies.get(ADMIN_TOKEN_COOKIE)?.value;
+    if (adminCookie && isAdminTokenUsable(adminCookie)) {
+      return NextResponse.next();
+    }
+    const adminLogin = req.nextUrl.clone();
+    adminLogin.pathname = ADMIN_LOGIN_PATH;
+    adminLogin.search = "";
+    const refused = NextResponse.redirect(adminLogin);
+    refused.cookies.set(ADMIN_TOKEN_COOKIE, "", { maxAge: 0, path: "/" });
+    return refused;
+  }
+
+  // 3. Auth gating — all /app/* routes require authentication.
   // Onboarding is part of the authenticated app shell; sign-up/sign-in flows
   // redirect authenticated users into it.
   const tokenCookie = req.cookies.get(TOKEN_COOKIE)?.value;
@@ -141,5 +186,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/app/:path*"],
+  matcher: ["/app/:path*", "/admin/:path*"],
 };
