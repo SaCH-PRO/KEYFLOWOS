@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Plus, Palette, X, TrendingUp, TrendingDown, Minus, Receipt, Target, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { ExpenseCategory, ExpenseBudget, ExpenseSummary, createExpenseCategory, deleteExpenseCategory } from "@/lib/client";
+import { useRefusal } from "@/lib/failure-kit";
 import { CATEGORY_COLORS, formatCurrency } from "./expense-utils";
 
 interface ExpenseCategoriesTabProps {
@@ -18,6 +19,9 @@ interface ExpenseCategoriesTabProps {
 export function ExpenseCategoriesTab({ businessId, categories, setCategories, summary, budgets }: ExpenseCategoriesTabProps) {
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0]);
+  // EXPENSES-HUB-3: the client answers a refused create as { error } and does not throw; it used to say
+  // "Category created" anyway. A refusal says why and keeps what was typed.
+  const { refused } = useRefusal();
 
   const categoryData = useMemo(() => {
     return categories.map(cat => {
@@ -50,14 +54,21 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
     if (!newCatName.trim()) return;
     try {
       const res = await createExpenseCategory(businessId, { name: newCatName.trim(), color: newCatColor });
-      if (res.data) setCategories(prev => [...prev, res.data!]);
+      if (refused(res, { what: "add expense categories" })) return;
+      if (!res.data) { toast.error("Failed to create category"); return; }
+      setCategories(prev => [...prev, res.data!]);
       setNewCatName(""); setNewCatColor(CATEGORY_COLORS[0]);
       toast.success("Category created");
     } catch { toast.error("Failed to create category"); }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
-    try { await deleteExpenseCategory(businessId, categoryId); setCategories(prev => prev.filter(c => c.id !== categoryId)); toast.success("Category deleted"); } catch { toast.error("Failed to delete category"); }
+    try {
+      const res = await deleteExpenseCategory(businessId, categoryId);
+      if (refused(res, { what: "delete expense categories" })) return;
+      setCategories(prev => prev.filter(c => c.id !== categoryId));
+      toast.success("Category deleted");
+    } catch { toast.error("Failed to delete category"); }
   };
 
   return (
@@ -82,13 +93,13 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
       <div className="kf-card rounded-xl p-4 space-y-4">
         <h3 className="text-sm font-semibold flex items-center gap-2"><Palette className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />Create Category</h3>
         <div className="flex items-center gap-2 flex-wrap">
-          <input placeholder="Category name..." value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddCategory()} className="flex-1 min-w-[140px] bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
+          <input placeholder="Category name..." aria-label="Category name" value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddCategory()} className="flex-1 min-w-[140px] bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
           <div className="flex items-center gap-1">
             {CATEGORY_COLORS.map(c => (
-              <button key={c} onClick={() => setNewCatColor(c)} className="w-5 h-5 rounded-full transition-transform" style={{ background: c, transform: newCatColor === c ? "scale(1.3)" : "scale(1)", boxShadow: newCatColor === c ? `0 0 0 2px ${c}40` : "none" }} />
+              <button key={c} onClick={() => setNewCatColor(c)} aria-label={`Colour ${c}`} aria-pressed={newCatColor === c} className="w-5 h-5 rounded-full transition-transform" style={{ background: c, transform: newCatColor === c ? "scale(1.3)" : "scale(1)", boxShadow: newCatColor === c ? `0 0 0 2px ${c}40` : "none" }} />
             ))}
           </div>
-          <button onClick={handleAddCategory} disabled={!newCatName.trim()} className="kf-btn-primary px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"><Plus className="w-4 h-4" /></button>
+          <button onClick={handleAddCategory} disabled={!newCatName.trim()} aria-label="Add category" className="kf-btn-primary px-4 py-2 min-h-[44px] sm:min-h-0 rounded-lg text-sm font-medium disabled:opacity-40"><Plus className="w-4 h-4" /></button>
         </div>
       </div>
 

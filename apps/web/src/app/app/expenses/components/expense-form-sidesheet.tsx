@@ -4,6 +4,7 @@ import React, { useState, useRef, useId } from "react";
 import {
   X,
   Upload,
+  Camera,
   Image as ImageIcon,
   Repeat,
   FileText,
@@ -634,11 +635,18 @@ export function ExpenseFormSideSheet({
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Receipt</p>
 
             {!formData.receiptUrl ? (
-              <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-xl border border-border/40 hover:border-rose-500/40 hover:bg-rose-500/5 transition-all cursor-pointer text-center">
-                  <Upload className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-[10px] font-medium text-muted-foreground">Upload File</span>
-                  <input type="file" accept="image/*,.pdf" className="hidden" onChange={handleReceiptUpload} />
+              <div className="grid grid-cols-3 gap-2">
+                {/* EXPENSES-HUB-3 (journey H4): on a phone a receipt is a photo, so Take photo opens the camera
+                    (capture); Upload file keeps any image or PDF from the gallery or the disk. */}
+                <label className="flex flex-col items-center gap-1.5 px-3 py-3 min-h-[44px] rounded-xl border border-border/40 hover:border-rose-500/40 hover:bg-rose-500/5 transition-all cursor-pointer text-center">
+                  <Camera className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-[10px] font-medium text-muted-foreground">Take photo</span>
+                  <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={handleReceiptUpload} />
+                </label>
+                <label className="flex flex-col items-center gap-1.5 px-3 py-3 min-h-[44px] rounded-xl border border-border/40 hover:border-rose-500/40 hover:bg-rose-500/5 transition-all cursor-pointer text-center">
+                  <Upload className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-[10px] font-medium text-muted-foreground">Upload file</span>
+                  <input type="file" accept="image/*,.pdf" className="sr-only" onChange={handleReceiptUpload} />
                 </label>
                 <button
                   onClick={() => setShowDrivePicker(true)}

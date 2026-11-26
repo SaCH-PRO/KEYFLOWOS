@@ -21,12 +21,19 @@ import {
   RecurringCandidate,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { readState, type ReadState } from "@/lib/failure-kit";
 
 export interface ProjectOption { id: string; name: string }
 export interface ServiceOption { id: string; name: string }
 export interface ContactOption { id: string; name: string }
 
+/** The expenses read as the page shows it: loading, the books, no access, or could not load (never zeros). */
+export type ExpensesRead = { kind: "loading" } | ReadState;
+
 export function useExpensesData() {
+  // EXPENSES-HUB-3 (BUG-064, journey J6): a refused or failed read was swallowed here, so the page showed
+  // its empty values (TTD 0.00, "No expenses found") as if nothing had been spent.
+  const [read, setRead] = useState<ExpensesRead>({ kind: "loading" });
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
@@ -103,6 +110,15 @@ export function useExpensesData() {
         fetchMarginAnalysis(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchRecurringCandidates(businessId),
       ]);
+      const state = readState(expRes, { what: "expenses" });
+      setRead(state);
+      if (state.kind !== "ok") {
+        // Nothing of an earlier read stays on screen behind a refusal or a failure.
+        setExpenses([]); setTotalExpenses(0); setSummary(null); setBudgets([]); setCategories([]);
+        setVendors([]); setMarginData(null); setRecurringCandidates([]);
+        setLoading(false);
+        return;
+      }
       if (expRes.data) { setExpenses(expRes.data.data); setTotalExpenses(expRes.data.total); }
       if (catRes.data) setCategories(catRes.data);
       if (sumRes.data) setSummary(sumRes.data);
@@ -110,7 +126,9 @@ export function useExpensesData() {
       if (budRes.data) setBudgets(budRes.data);
       if (margRes.data) setMarginData(margRes.data);
       if (recRes.data) setRecurringCandidates(recRes.data.candidates);
-    } catch {}
+    } catch {
+      setRead({ kind: "failed", message: "Couldn't load expenses." });
+    }
     setLoading(false);
   }, [businessId, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
@@ -121,7 +139,7 @@ export function useExpensesData() {
   const nearAlertCount = budgets.filter(b => b.isNearAlert && !b.isOverBudget).length;
 
   return {
-    businessId, expenses, totalExpenses, categories, setCategories,
+    businessId, read, expenses, totalExpenses, categories, setCategories,
     summary, vendors, budgets, marginData, recurringCandidates, loading, loadData,
     projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,

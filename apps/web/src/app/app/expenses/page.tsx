@@ -29,16 +29,27 @@ import {
   Expense,
   ExpenseBudget,
 } from "@/lib/client";
-import { getAuthHeaders } from "@/lib/api";
+import { API_BASE, getAuthHeaders } from "@/lib/api";
+import { useUpload } from "@/hooks/use-upload";
 import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill } from "./components/expense-form-sidesheet";
-import { formatCurrency, formatDate } from "./components/expense-utils";
+import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
+import RecurringExpensesPanel from "./components/recurring-expenses-panel";
+import { PERIODS, formatCurrency, formatDate } from "./components/expense-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { NoAccessState } from "@/components/ui/no-access-state";
 
 /* ───────────────────────────────────────────
    Types
    ─────────────────────────────────────────── */
 type ExpenseStatusTab = "inbox" | "needs_review" | "pending_approval" | "approved" | "reimbursed" | "all";
+/** EXPENSES-HUB-3 (BUG-060): the page's views. Categories and Recurring were built but never mounted. */
+type ExpensesView = "expenses" | "categories" | "recurring";
+const VIEWS: { key: ExpensesView; label: string }[] = [
+  { key: "expenses", label: "Expenses" },
+  { key: "categories", label: "Categories" },
+  { key: "recurring", label: "Recurring" },
+];
 
 interface DerivedStatus {
   key: string;
@@ -204,6 +215,12 @@ export default function ExpensesInboxPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [_actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [view, setView] = useState<ExpensesView>("expenses");
+  const [showFilters, setShowFilters] = useState(false);
+  const [recurringTrigger, setRecurringTrigger] = useState(0);
+  // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
+  // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
+  const { uploadFile, isUploading: uploadingReceipt } = useUpload();
 
   // Debounced search sync with hook
   useEffect(() => {
@@ -262,28 +279,18 @@ export default function ExpensesInboxPage() {
 
   // Stats
   const stats = useMemo(() => {
-    const spentThisMonth = d.summary?.total ?? 0;
+    const spentInPeriod = d.summary?.total ?? 0;
     const pendingApproval = d.expenses.filter((e) => e.status === "BILL").reduce((s, e) => s + e.amount, 0);
     const missingReceipts = d.expenses.filter((e) => e.status === "PAID" && !e.receiptUrl).length;
     const overBudget = d.budgets.filter((b) => b.isOverBudget).length;
-    return { spentThisMonth, pendingApproval, missingReceipts, overBudget };
+    return { spentInPeriod, pendingApproval, missingReceipts, overBudget };
   }, [d.summary, d.expenses, d.budgets]);
 
   // Attention queue
   const attentionItems = useMemo(() => {
     const items: { type: string; title: string; desc: string; color: string; bg: string }[] = [];
-
-    // Over policy (amount > 500 without receipt)
-    const overPolicy = d.expenses.find((e) => e.amount > 500 && !e.receiptUrl && e.status === "PAID");
-    if (overPolicy) {
-      items.push({
-        type: "over_policy",
-        title: "Over policy",
-        desc: `${overPolicy.vendor || "Expense"} exceeds travel policy by $${(overPolicy.amount - 500).toFixed(2)}.`,
-        color: "text-rose-700",
-        bg: "bg-rose-50",
-      });
-    }
+    // BUG-072 (fixed by removal): an "Over policy ... exceeds travel policy by $..." item was invented here from a
+    // 500 limit the business never set. There is no expense policy in v1, so nothing is said about one.
 
     // Missing receipts
     if (stats.missingReceipts > 0) {
@@ -346,13 +353,37 @@ export default function ExpensesInboxPage() {
   const handleExport = () => {
     if (!d.businessId) return;
     fetch(getExpenseExportUrl(d.businessId), { headers: getAuthHeaders() })
-      .then((r) => r.blob())
+      .then(async (r) => {
+        // A refused or failed export used to download the error body as the CSV.
+        if (!r.ok) throw new Error(r.status === 403 ? "You don't have access to export expenses. Ask the owner for access." : "Couldn't export expenses.");
+        return r.blob();
+      })
       .then((b) => {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b);
         a.download = `expenses-${new Date().toISOString().split("T")[0]}.csv`;
         a.click();
-      });
+      })
+      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Couldn't export expenses."));
+  };
+
+  const handleReceiptChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // The same photo can be chosen again after a failure.
+    e.target.value = "";
+    if (!file) return;
+    const uploaded = await uploadFile(file);
+    if (!uploaded) {
+      toast.error("Couldn't upload the receipt. Try again.");
+      return;
+    }
+    const path = uploaded.objectPath;
+    const receiptUrl = path.startsWith("http") ? path : `${API_BASE}${path}`;
+    toast.success("Receipt uploaded");
+    setEditingExpense(null);
+    setSheetKind("expense");
+    setPrefill({ receiptUrl });
+    setShowAddDrawer(true);
   };
 
   const openAdd = () => { setEditingExpense(null); setPrefill(null); setSheetKind("expense"); setShowAddDrawer(true); };
@@ -360,6 +391,7 @@ export default function ExpensesInboxPage() {
   const _openEdit = (exp: Expense) => { setEditingExpense(exp); setSheetKind("expense"); setShowAddDrawer(true); };
 
   const totalPages = Math.max(1, Math.ceil(d.totalExpenses / d.pageSize));
+  const periodLabel = PERIODS.find((p) => p.value === d.period)?.label ?? "this period";
 
   const tabs: { key: ExpenseStatusTab; label: string }[] = [
     { key: "inbox", label: "Inbox" },
@@ -401,6 +433,76 @@ export default function ExpensesInboxPage() {
           </div>
         </div>
 
+        {/* BUG-064 (journey J6): a refused read is "No access - ask the owner", a failed one says it could not load;
+            neither shows the page's empty values (TTD 0.00, "No expenses found", "All caught up"). */}
+        {d.read.kind === "loading" ? (
+          <div className="p-12 flex items-center justify-center" role="status" aria-label="Loading expenses">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : d.read.kind === "no-access" ? (
+          <NoAccessState message={d.read.message} what="expenses" />
+        ) : d.read.kind === "failed" ? (
+          <div role="alert" className="rounded-xl border border-border bg-card p-8 text-center">
+            <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+            <p className="text-sm font-medium text-foreground">{d.read.message}</p>
+            <button
+              onClick={() => void d.loadData()}
+              className="mt-3 inline-flex items-center gap-2 px-3 py-2 min-h-[44px] sm:min-h-0 rounded-lg border border-border text-sm text-foreground hover:bg-muted/50"
+            >
+              Try again
+            </button>
+          </div>
+        ) : (
+        <>
+        {/* Views (BUG-060) */}
+        <div role="tablist" aria-label="Expenses views" className="inline-flex items-center gap-1 p-1 mb-5 rounded-lg border border-border bg-card">
+          {VIEWS.map((v) => (
+            <button
+              key={v.key}
+              role="tab"
+              id={`expenses-view-${v.key}`}
+              aria-selected={view === v.key}
+              aria-controls={`expenses-panel-${v.key}`}
+              onClick={() => setView(v.key)}
+              className={cn(
+                "px-3 py-1.5 min-h-[44px] sm:min-h-0 rounded-md text-sm font-medium transition-colors",
+                view === v.key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {view === "categories" && d.businessId && (
+          <div role="tabpanel" id="expenses-panel-categories" aria-labelledby="expenses-view-categories">
+            <ExpenseCategoriesTab
+              businessId={d.businessId}
+              categories={d.categories}
+              setCategories={d.setCategories}
+              summary={d.summary}
+              budgets={d.budgets}
+            />
+          </div>
+        )}
+
+        {view === "recurring" && (
+          <div role="tabpanel" id="expenses-panel-recurring" aria-labelledby="expenses-view-recurring" className="space-y-4">
+            <div className="flex justify-end">
+              <button
+                onClick={() => setRecurringTrigger((n) => n + 1)}
+                className="inline-flex items-center gap-2 px-3 py-2 min-h-[44px] sm:min-h-0 rounded-lg border border-border bg-card text-sm font-medium text-foreground hover:bg-muted/50 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                New recurring expense
+              </button>
+            </div>
+            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} />
+          </div>
+        )}
+
+        {view === "expenses" && (
+        <div role="tabpanel" id="expenses-panel-expenses" aria-labelledby="expenses-view-expenses">
         {/* Search & actions */}
         <div className="flex flex-col sm:flex-row gap-3 mb-5">
           <div className="relative flex-1">
@@ -413,35 +515,96 @@ export default function ExpensesInboxPage() {
               className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-border bg-card text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20 focus:border-[hsl(var(--kf-accent1))]/40"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+          {/* BUG-073: every toolbar control does what it says. The month label was "May 2026" in every month and did
+              nothing; it is the period the server sums. "Import bank feed" downloaded the CSV export: it is named so. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              aria-expanded={showFilters}
+              aria-controls="expenses-filters"
+              aria-label="Filters"
+              className={cn(
+                "inline-flex items-center gap-2 px-3 py-2.5 min-h-[44px] sm:min-h-0 rounded-lg border border-border bg-card text-sm hover:text-foreground hover:bg-muted/50 transition-colors",
+                showFilters || d.filterCategory ? "text-foreground" : "text-muted-foreground"
+              )}
+            >
               <SlidersHorizontal className="w-4 h-4" />
               <span className="hidden sm:inline">Filters</span>
             </button>
-            <button className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-              <Calendar className="w-4 h-4" />
-              <span className="hidden sm:inline">May 2026</span>
-            </button>
+            <label className="relative inline-flex items-center">
+              <Calendar className="w-4 h-4 absolute left-3 text-muted-foreground pointer-events-none" aria-hidden="true" />
+              <select
+                value={d.period}
+                onChange={(e) => d.setPeriod(e.target.value)}
+                aria-label="Time period"
+                className="pl-9 pr-3 py-2.5 min-h-[44px] sm:min-h-0 rounded-lg border border-border bg-card text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
+              >
+                {PERIODS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+            </label>
             <button
               onClick={handleExport}
               className="hidden md:inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
             >
               <Download className="w-4 h-4" />
-              <span>Import bank feed</span>
+              <span>Export CSV</span>
             </button>
-            <button className="hidden md:inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-              <Upload className="w-4 h-4" />
-              <span>Upload receipts</span>
-            </button>
+            <label
+              className={cn(
+                "inline-flex items-center gap-2 px-3 py-2.5 min-h-[44px] sm:min-h-0 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer focus-within:ring-2 focus-within:ring-[hsl(var(--kf-accent1))]/30",
+                uploadingReceipt && "opacity-60 pointer-events-none"
+              )}
+            >
+              {uploadingReceipt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" aria-hidden="true" />}
+              <span className="hidden sm:inline">{uploadingReceipt ? "Uploading…" : "Upload receipt"}</span>
+              {/* On a phone this opens the camera (capture); the Add expense sheet's Upload file takes any image or PDF. */}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                aria-label="Upload receipt"
+                className="sr-only"
+                disabled={uploadingReceipt}
+                onChange={handleReceiptChosen}
+              />
+            </label>
           </div>
         </div>
 
+        {showFilters && (
+          <div id="expenses-filters" className="flex flex-wrap items-center gap-2 mb-5 p-3 rounded-lg border border-border bg-card">
+            <select
+              value={d.filterCategory}
+              onChange={(e) => d.setFilterCategory(e.target.value)}
+              aria-label="Category"
+              className="px-3 py-2 min-h-[44px] sm:min-h-0 rounded-lg border border-border bg-background text-sm text-foreground"
+            >
+              <option value="">All categories</option>
+              {d.categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {d.filterCategory && (
+              <button
+                onClick={() => d.setFilterCategory("")}
+                className="px-3 py-2 min-h-[44px] sm:min-h-0 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          {/* BUG-072 (fixed by removal): the line under this figure was "<n>% of monthly budget", the total divided
+              by 1.5 times itself (67% with any spend, budget or not). It now says only what the server counted. */}
           <StatCard
-            label="Spent this month"
-            value={formatCurrency(stats.spentThisMonth, undefined, d.businessId)}
-            sub={`${d.summary ? Math.round((stats.spentThisMonth / (d.summary.total * 1.5 || 1)) * 100) : 0}% of monthly budget`}
+            label={`Spent · ${periodLabel}`}
+            value={formatCurrency(stats.spentInPeriod, undefined, d.businessId)}
+            sub={d.summary ? `${d.summary.count} expense${d.summary.count !== 1 ? "s" : ""}` : ""}
             icon={TrendingUp}
             iconColor="text-blue-600"
             iconBg="bg-blue-50"
@@ -466,7 +629,7 @@ export default function ExpensesInboxPage() {
           />
           <StatCard
             label="Over budget"
-            value={`${stats.overBudget} category${stats.overBudget !== 1 ? "ies" : "y"}`}
+            value={`${stats.overBudget} ${stats.overBudget === 1 ? "category" : "categories"}`}
             sub={stats.overBudget > 0 ? "Forecast risk this month" : "All on track"}
             icon={AlertTriangle}
             iconColor="text-rose-600"
@@ -680,6 +843,10 @@ export default function ExpensesInboxPage() {
             </div>
           </div>
         </div>
+        </div>
+        )}
+        </>
+        )}
       </div>
 
       {/* Add/Edit Drawer */}

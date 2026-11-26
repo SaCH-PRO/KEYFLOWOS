@@ -20,7 +20,6 @@ import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { Expense } from "@/lib/client";
 
-const BUSINESS = "biz_hub3_truth";
 
 const client = vi.hoisted(() => ({
   fetchExpenses: vi.fn(),
@@ -174,7 +173,7 @@ describe("BUG-072: no figure the server did not send", () => {
   });
 
   it("no travel policy is invented for a large expense without a receipt", async () => {
-    allowed([expense({ amount: 600, receiptUrl: null })], 600);
+    allowed([expense({ amount: 600, receiptUrl: undefined })], 600);
     await mountPage();
     await waitFor(() => expect(text()).toMatch(/hotel stay/i));
     expect(text()).not.toMatch(/travel policy/i);
