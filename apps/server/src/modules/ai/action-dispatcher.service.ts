@@ -6,6 +6,8 @@ import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import { UndoService } from './undo.service';
+import { RetryableConflictException } from '../../core/utils/retryable-conflict';
+import { isReadOnlyTool } from './flow-tool-registry';
 
 export interface DispatchContext {
   businessId: string;
@@ -70,6 +72,28 @@ function isToolRefusal(err: unknown): boolean {
   return (
     status >= 400 && status < 500 && status !== HttpStatus.REQUEST_TIMEOUT && status !== HttpStatus.TOO_MANY_REQUESTS
   );
+}
+
+const OUTCOME_UNKNOWN_PREFIX = 'OUTCOME_UNKNOWN: ';
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * RR-DISPATCH-NO-BLIND-RETRY (D-261, D-262, D-263): a non-READ (WRITE or unknown) tool may be
+ * retried only when the thrown error (or a cause in its chain) proves the effect did not happen:
+ *   - a RetryableConflictException (optimistic-concurrency stale write, D-134), OR
+ *   - an explicit boolean `effectNotApplied: true` marker set by the throwing service.
+ */
+function isEffectNotAppliedError(err: unknown): boolean {
+  let cur: unknown = err;
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH && cur !== null && cur !== undefined; depth += 1) {
+    if (typeof cur !== 'object' || seen.has(cur)) break;
+    seen.add(cur);
+    if (cur instanceof RetryableConflictException) return true;
+    if ((cur as { effectNotApplied?: unknown }).effectNotApplied === true) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 @Injectable()
@@ -211,6 +235,15 @@ export class ActionDispatcherService {
         // reaches here as an HttpException (not yet through executeToolDirectly: SEC-W9DC-1, isToolRefusal).
         if (isToolRefusal(err)) {
           refused = true;
+          break;
+        }
+        // RR-DISPATCH-NO-BLIND-RETRY (D-261, D-262, D-263): never blindly retry a non-READ tool
+        // (WRITE or unknown) on an ambiguous error — only when the error proves the effect was
+        // not applied. Guarded by !boundaryAnswer so NC-P7-DISPATCHER-RETRIES-A-REFUSAL still
+        // observes retries if the boundary break above is mutated out.
+        if (!boundaryAnswer && !isReadOnlyTool(ctx.toolName) && !isEffectNotAppliedError(err)) {
+          const msg = lastError ?? 'unknown error';
+          lastError = msg.startsWith(OUTCOME_UNKNOWN_PREFIX) ? msg : `${OUTCOME_UNKNOWN_PREFIX}${msg}`;
           break;
         }
       }
