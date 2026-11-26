@@ -1,6 +1,6 @@
 import { apiGet } from "@/lib/api";
 import { isClosedOnDate } from "./store-hours";
-import type { BusinessHours, CartItem, PromoCode } from "./types";
+import type { BusinessHours, CartItem, HeldSlot, PromoCode, ServiceBookingData } from "./types";
 
 /**
  * SWP-BOOKING-SLOTS (BUG-122): the times a customer can book a service on a day, as HH:MM on the business's own
@@ -151,4 +151,56 @@ export function typeBadge(itemType: "service" | "product" | "package", primaryCo
     package: { label: "Package", icon: "\u{1F381}", color: accentColor || "#a78bfa" },
   }[itemType];
   return { label: `${cfg.icon} ${cfg.label}`, color: cfg.color };
+}
+
+/**
+ * SEC-W9WCN-1 (W9-WEB-COMMERCE-NAV review; D-07: the token link is the
+ * customer's own). A mixed cart books its services before it places the store
+ * order; when that order's payment fails or its provider redirect is
+ * abandoned, the bookings made are kept so the same customer who comes back
+ * (Try Again, or Back to Shop and another payment method) is not booked twice.
+ * They are kept under this key: the customer and the service lines they booked.
+ * The next checkout reuses them only under the same key; any other checkout
+ * (another customer in the tab or browser, or other services) books its own,
+ * so it neither skips its bookings nor shows the first customer's token link.
+ */
+export function bookingReuseKey(
+  data: { firstName: string; lastName: string; email: string; phone: string; serviceBookings: Record<string, ServiceBookingData> },
+  serviceItems: CartItem[],
+): string {
+  const services = serviceItems.flatMap((si) => {
+    const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+    return bd
+      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || "", bd.startIso ?? ""]]
+      : [];
+  });
+  const customer = [
+    (data.firstName || "").trim(),
+    (data.lastName || "").trim(),
+    (data.email || "").trim().toLowerCase(),
+    (data.phone || "").trim(),
+  ];
+  return JSON.stringify({ customer, services });
+}
+
+/**
+ * SWP-BOOKING-SLOTS: the slots the kept bookings hold, read from their reuse key (bookingReuseKey's service lines),
+ * so the same customer's next checkout offers and keeps them while it still matches that whole key; the slots route
+ * counts them as taken.
+ */
+export function heldSlotsOf(reuseKey: string | null | undefined): HeldSlot[] {
+  if (!reuseKey) return [];
+  try {
+    const { customer, services } = JSON.parse(reuseKey) as { customer?: unknown; services?: unknown };
+    if (!Array.isArray(services) || !Array.isArray(customer) || !customer.every((c) => typeof c === "string")) return [];
+    return services.flatMap((line): HeldSlot[] => {
+      if (!Array.isArray(line) || line.length < 7) return [];
+      const [serviceId, , date, time, staffId, location, startIso] = line as unknown[];
+      const text = [serviceId, date, time, staffId, location, startIso];
+      if (!text.every((v) => typeof v === "string") || !startIso || Number.isNaN(new Date(startIso as string).getTime())) return [];
+      return [{ customer, serviceId, date, time, staffId, location, startIso } as HeldSlot];
+    });
+  } catch {
+    return [];
+  }
 }

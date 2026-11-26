@@ -23,9 +23,8 @@ import type {
   DeliveryAddress,
   ShippingZone,
   StoreOrderResponse,
-  HeldSlot,
 } from "./components/types";
-import { loadCart, saveCart, loadPromoCode, savePromoCode } from "./components/utils";
+import { loadCart, saveCart, loadPromoCode, savePromoCode, bookingReuseKey } from "./components/utils";
 import { BusinessHero } from "./components/business-hero";
 import { todaysHoursLabel } from "./components/store-hours";
 import { CatalogGrid } from "./components/catalog-grid";
@@ -61,55 +60,38 @@ const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
  */
 type BookingRef = { bookingId: string; invoiceId?: string; invoiceUrl?: string };
 
-/**
- * SEC-W9WCN-1 (W9-WEB-COMMERCE-NAV review; D-07: the token link is the
- * customer's own). A mixed cart books its services before it places the store
- * order; when that order's payment fails or its provider redirect is
- * abandoned, the bookings made are kept so the same customer who comes back
- * (Try Again, or Back to Shop and another payment method) is not booked twice.
- * They are kept under this key: the customer and the service lines they booked.
- * The next checkout reuses them only under the same key; any other checkout
- * (another customer in the tab or browser, or other services) books its own,
- * so it neither skips its bookings nor shows the first customer's token link.
- */
-function bookingReuseKey(
-  data: { firstName: string; lastName: string; email: string; phone: string; serviceBookings: Record<string, ServiceBookingData> },
-  serviceItems: CartItem[],
-): string {
-  const services = serviceItems.flatMap((si) => {
-    const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
-    return bd
-      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || "", bd.startIso ?? ""]]
-      : [];
-  });
-  const customer = [
-    (data.firstName || "").trim(),
-    (data.lastName || "").trim(),
-    (data.email || "").trim().toLowerCase(),
-    (data.phone || "").trim(),
-  ];
-  return JSON.stringify({ customer, services });
-}
+type ConfirmedDetails = {
+  serviceNames: string[];
+  dates: string[];
+  times: string[];
+  /** SWP-BOOKING-SLOTS: each booking's instant as the slots route offered it, and the service's length in minutes. */
+  starts?: (string | null)[];
+  durations?: (number | null)[];
+  locations: (string | null)[];
+  businessName: string;
+};
 
 /**
- * SWP-BOOKING-SLOTS: the slots the kept bookings hold, read from their reuse key (bookingReuseKey's service lines),
- * so the same customer's next checkout offers and keeps them; the slots route counts them as taken.
+ * SWP-BOOKING-SLOTS (round 4): the service details a kf_pending_checkout record holds, only when they have the shape
+ * the confirmation reads; the record outlives the tab and can be edited by hand, so anything else is none.
  */
-function heldSlotsOf(reuseKey: string | null, bookingsKept: number): HeldSlot[] {
-  if (!reuseKey || bookingsKept === 0) return [];
-  try {
-    const { customer, services } = JSON.parse(reuseKey) as { customer?: unknown; services?: unknown };
-    if (!Array.isArray(services) || !Array.isArray(customer) || !customer.every((c) => typeof c === "string")) return [];
-    return services.flatMap((line): HeldSlot[] => {
-      if (!Array.isArray(line) || line.length < 7) return [];
-      const [serviceId, , date, time, staffId, location, startIso] = line as unknown[];
-      const text = [serviceId, date, time, staffId, location, startIso];
-      if (!text.every((v) => typeof v === "string") || !startIso || Number.isNaN(new Date(startIso as string).getTime())) return [];
-      return [{ customer, serviceId, date, time, staffId, location, startIso } as HeldSlot];
-    });
-  } catch {
-    return [];
-  }
+function confirmedDetailsOf(raw: unknown): ConfirmedDetails | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+  if (!strings(d.serviceNames) || !strings(d.dates) || !strings(d.times)) return null;
+  const locations = Array.isArray(d.locations)
+    ? d.locations.map((l) => (typeof l === "string" ? l : null))
+    : d.serviceNames.map(() => null);
+  return {
+    serviceNames: d.serviceNames,
+    dates: d.dates,
+    times: d.times,
+    starts: Array.isArray(d.starts) ? d.starts.map((v) => (typeof v === "string" ? v : null)) : undefined,
+    durations: Array.isArray(d.durations) ? d.durations.map((v) => (typeof v === "number" ? v : null)) : undefined,
+    locations,
+    businessName: typeof d.businessName === "string" ? d.businessName : "",
+  };
 }
 
 /** The bookings a pending checkout record keeps: never a token link (SEC-W9WCN-1). */
@@ -142,16 +124,7 @@ function PublicBookingPageInner() {
   const [paymentFailed, setPaymentFailed] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
   const [bookingResults, setBookingResults] = useState<BookingRef[]>([]);
-  const [confirmedDetails, setConfirmedDetails] = useState<{
-    serviceNames: string[];
-    dates: string[];
-    times: string[];
-    /** SWP-BOOKING-SLOTS: each booking's instant as the slots route offered it, and the service's length in minutes. */
-    starts?: (string | null)[];
-    durations?: (number | null)[];
-    locations: (string | null)[];
-    businessName: string;
-  } | null>(null);
+  const [confirmedDetails, setConfirmedDetails] = useState<ConfirmedDetails | null>(null);
   const [confirmedOrderItems, setConfirmedOrderItems] = useState<CartItem[]>([]);
   const [confirmedOrderTotal, setConfirmedOrderTotal] = useState(0);
   const [confirmedPaymentMethod, setConfirmedPaymentMethod] = useState<PaymentMethod | undefined>();
@@ -443,7 +416,7 @@ function PublicBookingPageInner() {
       const keepRefs = outcome !== "success";
       setCompletedBookingResults(keepRefs ? pendingRefs : []);
       setCompletedBookingKey(keepRefs && typeof pending.bookingReuseKey === "string" ? pending.bookingReuseKey : null);
-      setConfirmedDetails(pending.confirmedDetails ?? null);
+      setConfirmedDetails(confirmedDetailsOf(pending.confirmedDetails));
 
       const allResults: BookingRef[] = [...pendingRefs];
       if (pending.orderNumber) {
@@ -1006,7 +979,7 @@ function PublicBookingPageInner() {
           const start = firstStart;
           const end = firstEnd;
           const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-          const title = encodeURIComponent(`${confirmedDetails.serviceNames[0] || "Appointment"} - ${confirmedDetails.businessName}`);
+          const title = encodeURIComponent(`${confirmedDetails.serviceNames?.[0] || "Appointment"} - ${confirmedDetails.businessName}`);
           const firstBookingLocation = confirmedDetails.locations?.[0] || null;
           const location = encodeURIComponent(firstBookingLocation || business?.address || "");
           return `https://calendar.google.com/calendar/event?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&location=${location}`;
@@ -1149,7 +1122,7 @@ function PublicBookingPageInner() {
           onBack={() => setCheckoutMode(false)}
           onUpdateQuantity={updateQuantity}
           onSubmit={handleCheckoutSubmit}
-          heldSlots={heldSlotsOf(completedBookingKey, completedBookingResults.length)}
+          heldReuseKey={completedBookingResults.length > 0 ? completedBookingKey : null}
         />
       </main>
     );

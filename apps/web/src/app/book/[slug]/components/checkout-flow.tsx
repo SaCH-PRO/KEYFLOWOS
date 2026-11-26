@@ -36,7 +36,9 @@ import type {
   HeldSlot,
 } from "./types";
 import {
+  bookingReuseKey,
   fetchAvailableSlotTimes,
+  heldSlotsOf,
   isDayClosed,
   type SlotTime,
   calculateDiscount,
@@ -70,8 +72,11 @@ type Props = {
     shippingZoneId: string | null;
     termsAccepted: boolean;
   }) => Promise<void>;
-  /** SWP-BOOKING-SLOTS: slots this customer's kept bookings hold (SEC-W9WCN-1), offered and kept as scheduled. */
-  heldSlots?: HeldSlot[];
+  /**
+   * SWP-BOOKING-SLOTS: the reuse key of the bookings kept for this checkout after a failed or abandoned payment
+   * (SEC-W9WCN-1), null when none are kept. Their slots are offered and kept only while the whole key still matches.
+   */
+  heldReuseKey?: string | null;
 };
 
 const paymentMethods: { id: PaymentMethod; name: string; description: string; icon: typeof CreditCard }[] = [
@@ -214,10 +219,12 @@ export function CheckoutFlow({
   onBack,
   onUpdateQuantity: _onUpdateQuantity,
   onSubmit,
-  heldSlots = [],
+  heldReuseKey = null,
 }: Props) {
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>({});
+  /** The rows the kept bookings filled (cleared again if the customer turns out to be someone else). */
+  const filledFromHold = useRef(new Set<string>());
 
   const savedDetails = loadCheckoutDetails();
   const [firstName, setFirstName] = useState(savedDetails.firstName);
@@ -263,15 +270,31 @@ export function CheckoutFlow({
     business.timezone,
     serviceItemsInCart.map(slotRequestOf).filter((r): r is SlotRequest => r !== null),
   );
-  // SEC-W9WCN-1: a kept booking's slot is this checkout's only while it is the same customer's, as bookingReuseKey
-  // writes the customer; another customer at the same browser is neither handed it nor offered it.
+  // SEC-W9WCN-1: the kept bookings are reused only when the whole checkout matches their reuse key (the page books
+  // every line afresh otherwise, and the server refuses a held time, which the customer's own PENDING booking still
+  // takes). So their slots are this checkout's only while the key still matches: same customer, same service lines
+  // with the same quantity, date, time, staff, location and instant. Another customer is neither handed nor told.
+  const heldSlots = heldSlotsOf(heldReuseKey);
   const customerNow = [firstName.trim(), lastName.trim(), emailInput.trim().toLowerCase(), phoneInput.trim()];
-  const ownHeldSlots = heldSlots.filter(
-    (h) => h.customer.length === customerNow.length && h.customer.every((c, i) => c === customerNow[i]),
-  );
-  /** The slot a kept booking holds for this request, if any. */
+  const heldForThisCustomer = heldSlots.length > 0
+    && heldSlots[0].customer.length === customerNow.length
+    && heldSlots[0].customer.every((c, i) => c === customerNow[i]);
+  // Every service row has a line here, empty while unscheduled, as it will once each is booked: a cart that gained a
+  // service never matches a key kept without it.
+  const reuseKeyOf = (bookings: Record<string, ServiceBookingData>) => {
+    const everyRow: Record<string, ServiceBookingData> = {};
+    for (const si of serviceItemsInCart) {
+      const key = `${si.id}_${si.itemType}`;
+      everyRow[key] = bookings[key] ?? { serviceId: si.sourceServiceId || si.id, serviceName: si.name, staffId: "", date: "", time: "" };
+    }
+    return bookingReuseKey({ firstName, lastName, email: emailInput, phone: phoneInput, serviceBookings: everyRow }, serviceItemsInCart);
+  };
+  const heldKeyMatches = heldForThisCustomer && reuseKeyOf(serviceBookings) === heldReuseKey;
+  /** The customer's own hold no longer matches what they are booking: its times are released. */
+  const heldReleased = heldForThisCustomer && !heldKeyMatches;
+  /** The slot a kept booking holds for this request's service, while the whole key matches (so its date and staff too). */
   const heldFor = (r: SlotRequest): HeldSlot | undefined =>
-    ownHeldSlots.find((h) => h.serviceId === r.serviceId && h.date === r.date && h.staffId === r.staffId);
+    heldKeyMatches ? heldSlots.find((h) => h.serviceId === r.serviceId) : undefined;
   /** A row's offered times: its current answer, with a slot its kept booking holds (the server counts it as taken). */
   const offeredFor = (r: SlotRequest): SlotTime[] | null | undefined => {
     const answer = slotAnswers.answerFor(r);
@@ -396,29 +419,35 @@ export function CheckoutFlow({
         email: emailInput.trim(),
         phone: phoneInput.trim(),
       });
-      // A row not yet scheduled, whose service this customer's kept booking holds, starts with that booking's
-      // slot, so the customer reuses it instead of booking again.
-      if (ownHeldSlots.length > 0) {
-        setServiceBookings((prev) => {
-          const next = { ...prev };
-          for (const si of serviceItemsInCart) {
-            const key = `${si.id}_${si.itemType}`;
-            if (next[key]?.date) continue;
-            const serviceId = si.sourceServiceId || si.id;
-            const held = ownHeldSlots.find((h) => h.serviceId === serviceId);
-            if (!held) continue;
-            next[key] = {
-              serviceId,
-              serviceName: si.name,
-              staffId: held.staffId,
-              date: held.date,
-              time: held.time,
-              startIso: held.startIso,
-              ...(held.location ? { location: held.location } : {}),
-            };
-          }
-          return next;
-        });
+      // This customer's kept bookings fill the rows not yet scheduled with their slots, only when the checkout so
+      // filled matches their whole reuse key (so the page reuses them). For another customer, rows filled earlier
+      // are cleared: they never keep someone else's date, time or location.
+      if (heldForThisCustomer) {
+        const filled = { ...serviceBookings };
+        for (const si of serviceItemsInCart) {
+          const key = `${si.id}_${si.itemType}`;
+          if (filled[key]?.date) continue;
+          const serviceId = si.sourceServiceId || si.id;
+          const held = heldSlots.find((h) => h.serviceId === serviceId);
+          if (!held) continue;
+          filled[key] = {
+            serviceId,
+            serviceName: si.name,
+            staffId: held.staffId,
+            date: held.date,
+            time: held.time,
+            startIso: held.startIso,
+            ...(held.location ? { location: held.location } : {}),
+          };
+        }
+        if (reuseKeyOf(filled) === heldReuseKey) {
+          filledFromHold.current = new Set(Object.keys(filled).filter((k) => !serviceBookings[k]?.date));
+          setServiceBookings(filled);
+        }
+      } else if (filledFromHold.current.size > 0) {
+        const cleared = filledFromHold.current;
+        filledFromHold.current = new Set();
+        setServiceBookings((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !cleared.has(k))));
       }
     }
     setCheckoutStep((s) => s + 1);
@@ -779,6 +808,13 @@ export function CheckoutFlow({
                       <p className="text-xs text-gray-400">Pick a date and time for each service</p>
                     </div>
                   </div>
+
+                  {heldReleased && (
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
+                      <Clock className="w-4 h-4 flex-shrink-0" />
+                      Changing your booking releases the times we were holding; pick times again.
+                    </div>
+                  )}
 
                   {serviceItemsInCart.map((si) => {
                     const key = `${si.id}_${si.itemType}`;
