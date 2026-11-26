@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { KeyActionProposalService } from './key-action-proposal.service';
 import {
   KeyCortexApprovalOrchestratorService,
@@ -50,6 +50,7 @@ export class KeyActionProposalController {
   }
 
   @Post('proposals')
+  @RequireModuleScope('operations', 'write')
   create(
     @Param('businessId') businessId: string,
     @Body() body: CreateKeyActionProposalDto,
@@ -80,6 +81,7 @@ export class KeyActionProposalController {
   }
 
   @Post('proposals/:proposalId/approve')
+  @RequireModuleScope('operations', 'write')
   async approve(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
@@ -94,6 +96,7 @@ export class KeyActionProposalController {
   }
 
   @Post('proposals/:proposalId/reject')
+  @RequireModuleScope('operations', 'write')
   async reject(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
@@ -108,6 +111,7 @@ export class KeyActionProposalController {
   }
 
   @Post('proposals/:proposalId/cancel')
+  @RequireModuleScope('operations', 'write')
   async cancel(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
@@ -117,6 +121,7 @@ export class KeyActionProposalController {
   }
 
   @Post('proposals/:proposalId/execute')
+  @RequireModuleScope('operations', 'write')
   async execute(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,

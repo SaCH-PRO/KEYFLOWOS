@@ -257,6 +257,7 @@ beforeAll(async () => {
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const { IdentityService } = await import('../src/modules/identity/identity.service');
   const { SettingsAdapterService } = await import('../src/modules/key-cortex/adapters/settings-adapter.service');
   const controllerModule: any = await import('../src/modules/key-cortex/key-cortex.controller');
@@ -404,6 +405,7 @@ beforeAll(async () => {
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      ModuleScopeGuard,
       {
         provide: IdentityService,
         useFactory: (prisma: any) => new IdentityService(prisma, blueprint as any, defaultTriggers as any),
@@ -542,8 +544,10 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizA, ownerId: ID.ownerA, ...A_PROFILE, ...A_BRANDING } });
   await db.business.create({ data: { id: ID.bizB, name: 'K34C Biz B', ownerId: ID.outsider } });
   await db.membership.create({ data: { id: `${P}m_ownerA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
-  await db.membership.create({ data: { id: `${P}m_staffA`, userId: ID.staffA, businessId: ID.bizA, role: 'STAFF' } });
-  await db.membership.create({ data: { id: `${P}m_adminA`, userId: ID.adminA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { settings: 'write' } } });
+  // SWP-CENSUS-KEY-B (P109, Ruling B2 #80 7179130521): KEY cortex write routes now require ai:write;
+  // staffA keeps settings:none (D-11) and both staffA/adminA keep connect:none (ST-6).
+  await db.membership.create({ data: { id: `${P}m_staffA`, userId: ID.staffA, businessId: ID.bizA, role: 'STAFF', permissionScopes: { ai: 'write' } } });
+  await db.membership.create({ data: { id: `${P}m_adminA`, userId: ID.adminA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { settings: 'write', ai: 'write' } } });
   await db.membership.create({ data: { id: `${P}m_outsider`, userId: ID.outsider, businessId: ID.bizB, role: 'OWNER' } });
   await db.cortexSession.create({ data: { id: ID.sessionOwnerA, businessId: ID.bizA, userId: ID.ownerA, title: 'k34c owner session', messages: [note(`${P}msg_owner`, OWNER_PRIVATE)] } });
   await db.cortexSession.create({ data: { id: ID.sessionStaffA, businessId: ID.bizA, userId: ID.staffA, title: 'k34c staff session', messages: [note(`${P}msg_staff`, STAFF_NOTE)] } });

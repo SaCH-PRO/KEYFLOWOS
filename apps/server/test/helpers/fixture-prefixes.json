@@ -578,6 +578,11 @@
       "packet": "V1-61 (W11-STORE-OWN-PAYMENT-KEYS)"
     },
     {
+      "prefix": "v63b_",
+      "owner": "apps/server/test/knowledge-upload-scope.integration.test.ts",
+      "packet": "V1-63 (TOF-KNOWLEDGE-UPLOAD)"
+    },
+    {
       "prefix": "v70b_",
       "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
       "packet": "V1-70 (W1F-MEMORY-COPIES)"
@@ -1465,6 +1470,16 @@
       "prefix": "v63a_",
       "owner": "apps/server/test/key-cortex-self-model.integration.test.ts",
       "packet": "V1-63 (TOF-KEY-SELF-MODEL)"
+    },
+    {
+      "prefix": "v64f_",
+      "owner": "apps/server/test/decimal-quantity.integration.test.ts",
+      "packet": "V1-64 (DECIMALS-SERVER)"
+    },
+    {
+      "prefix": "v64l_",
+      "owner": "apps/server/test/census-key-b.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-KEY-B)"
     }
   ],
   "pendingRenames": [],
