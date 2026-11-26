@@ -1410,6 +1410,11 @@
       "prefix": "v91s_",
       "owner": "apps/server/test/flow-search-money-scope.integration.test.ts",
       "packet": "V1-91 (FU-SEARCH-MONEY-SCOPE)"
+    },
+    {
+      "prefix": "v97p_",
+      "owner": "apps/server/test/presence-scope.integration.test.ts",
+      "packet": "V1-97 (FU-PRESENCE-REVENUE-SCOPE, P100)"
     }
   ],
   "pendingRenames": [],
