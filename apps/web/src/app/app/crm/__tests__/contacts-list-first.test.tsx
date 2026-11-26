@@ -310,3 +310,57 @@ describe("CONTACTS-LIST-FIRST (D-289, C8): the customer list comes first", () =>
     expect(insightsToggle()).toHaveAccessibleName(/^insights and filters \(1 on\)$/i);
   });
 });
+
+/**
+ * Review repair (correctness review MINOR-1): the closed toggle's "(N on)" count covers every filter that lives in
+ * the panel, the segment chips and the All/Pinned/Recent tab as well as the smart chips, and only while it is closed.
+ *
+ *   CLF-08  an active segment chip, set and the panel closed, reads "(1 on)" (kills M5: activeSegment dropped)
+ *   CLF-09  the Pinned tab, chosen and the panel closed, reads "(1 on)" (kills M6: activeListTab dropped)
+ *   CLF-10  with filters on, the open toggle carries no count, and closed it sums them: a smart chip, a segment
+ *           and the Pinned tab read "(3 on)" (kills M9: the count shown while open)
+ */
+describe("CONTACTS-LIST-FIRST review repair: the closed toggle counts every filter inside the panel", () => {
+  async function openPanel() {
+    renderPage("list");
+    await screen.findAllByRole("option", { name: /byron|baker/i }, T);
+    expect(insightsToggle()).toHaveAccessibleName(/^insights and filters$/i);
+    fireEvent.click(insightsToggle());
+    expect(insightsToggle()).toHaveAttribute("aria-expanded", "true");
+  }
+  const segmentChip = () =>
+    within(document.querySelector<HTMLElement>('[data-walkthrough="crm-segments"]')!).getByRole("button", { name: /^at risk/i });
+  const pinnedTab = () =>
+    within(screen.getByRole("tablist", { name: "Contact list views" })).getByRole("tab", { name: /^pinned/i });
+
+  it("CLF-08 an active segment chip is counted on the closed toggle", async () => {
+    await openPanel();
+    fireEvent.click(segmentChip());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^at risk/i, pressed: true })).toBeInTheDocument(), T);
+    fireEvent.click(insightsToggle());
+    expect(insightsToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(insightsToggle()).toHaveAccessibleName(/^insights and filters \(1 on\)$/i);
+  });
+
+  it("CLF-09 the Pinned tab is counted on the closed toggle", async () => {
+    await openPanel();
+    fireEvent.click(pinnedTab());
+    await waitFor(() => expect(pinnedTab()).toHaveAttribute("aria-selected", "true"), T);
+    fireEvent.click(insightsToggle());
+    expect(insightsToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(insightsToggle()).toHaveAccessibleName(/^insights and filters \(1 on\)$/i);
+  });
+
+  it("CLF-10 the open toggle carries no count; closed, it sums a smart chip, a segment and the Pinned tab", async () => {
+    await openPanel();
+    fireEvent.click(screen.getByRole("button", { name: /unpaid invoices/i }));
+    fireEvent.click(segmentChip());
+    fireEvent.click(pinnedTab());
+    await waitFor(() => expect(pinnedTab()).toHaveAttribute("aria-selected", "true"), T);
+    await waitFor(() => expect(screen.getByRole("button", { name: /unpaid invoices/i })).toHaveAttribute("aria-pressed", "true"), T);
+    expect(insightsToggle()).toHaveAttribute("aria-expanded", "true");
+    expect(insightsToggle(), "no count while the panel is open").toHaveAccessibleName(/^insights and filters$/i);
+    fireEvent.click(insightsToggle());
+    expect(insightsToggle()).toHaveAccessibleName(/^insights and filters \(3 on\)$/i);
+  });
+});
