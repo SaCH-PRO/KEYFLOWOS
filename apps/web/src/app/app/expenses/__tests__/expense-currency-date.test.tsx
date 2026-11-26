@@ -430,3 +430,38 @@ describe("Round 3: the recurring builder's date is a real day; an edit keeps a p
     expect(container.textContent).not.toMatch(/TTD/);
   });
 });
+
+describe("Round 4: each schedule and the create form get their own builder state", () => {
+  const SCHEDULE: Record<string, unknown> = { id: "r_edit", name: "Office rent", description: "Office rent", amount: 4500, currency: "USD", frequency: "QUARTERLY", nextRunDate: "2027-01-10T00:00:00.000Z", isActive: true, runCount: 0, failureCount: 0, createsBill: false, businessId: BUSINESS, createdAt: "", updatedAt: "" };
+
+  it("New, pressed while an Edit sheet is still mounted, opens an empty Create form, not the edited schedule's fields", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValue({ data: [SCHEDULE], error: null } as never);
+    const view = render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await waitFor(() => expect((screen.getByPlaceholderText("e.g., Office Rent") as HTMLInputElement).value).toBe("Office rent"));
+
+    view.rerender(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create" })).toBeTruthy());
+    const names = screen.getAllByPlaceholderText("e.g., Office Rent") as HTMLInputElement[];
+    const create = names[names.length - 1];
+    expect(create.value, "the create form starts empty").toBe("");
+    expect((screen.getAllByPlaceholderText("0.00").at(-1) as HTMLInputElement).value).toBe("");
+    vi.mocked(client.fetchRecurringExpenses).mockReset().mockResolvedValue({ data: [], error: null } as never);
+  });
+
+  it("Edit, pressed while the Create form is still mounted, opens the schedule's own fields, not what was typed into Create", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValue({ data: [SCHEDULE], error: null } as never);
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} triggerNew={1} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create" })).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("e.g., Office Rent"), { target: { value: "Typed into create" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update" })).toBeTruthy());
+    const names = screen.getAllByPlaceholderText("e.g., Office Rent") as HTMLInputElement[];
+    expect(names[names.length - 1].value, "the edit form holds the schedule").toBe("Office rent");
+    vi.mocked(client.fetchRecurringExpenses).mockReset().mockResolvedValue({ data: [], error: null } as never);
+  });
+});
