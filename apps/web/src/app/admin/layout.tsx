@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminSignOut, isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
+import { isAdminLoginPath } from "@/lib/admin-session";
 import { toast } from "sonner";
 
 const navItems = [
@@ -32,8 +33,18 @@ const navItems = [
   { label: "Feature Flags", href: "/admin/feature-flags", icon: Flag },
 ];
 
+/**
+ * The sign-in page is the one admin route a browser without an admin session must reach (the edge middleware sends
+ * it there), so it is rendered bare: no shell and no isSuperAdmin guard. Guarding it left a logged-out admin with an
+ * "Access denied" toast and a blank page, unable to sign in (RR-ADMIN-SHELL-SERVER-GATE OBS-1).
+ */
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  if (isAdminLoginPath(pathname ?? "")) return <>{children}</>;
+  return <GuardedAdminShell pathname={pathname}>{children}</GuardedAdminShell>;
+}
+
+function GuardedAdminShell({ children, pathname }: { children: ReactNode; pathname: string | null }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [allowed, setAllowed] = useState(false);
