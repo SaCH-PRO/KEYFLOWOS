@@ -735,6 +735,7 @@ export class KeyCortexExecutorService {
     let proposalId: string = randomUUID();
 
     // Persist as a canonical KeyActionProposal via the unified orchestrator
+    const canonicalToolName = command.action.includes('.') ? command.action : `${command.module}.${command.action}`;
     if (this.approvalOrchestrator) {
       try {
         const proposal = await this.approvalOrchestrator.propose({
@@ -744,12 +745,12 @@ export class KeyCortexExecutorService {
           sourceId: command.correlationId,
           actionType: 'EXECUTE_TOOL',
           module: command.module,
-          toolName: command.action,
+          toolName: canonicalToolName,
           title: this.summarizeCommandForNotification(command),
           summary: `Pending approval for ${command.module}.${command.action}`,
           rationale: `Risk tier requires human approval`,
           parameters: {
-            toolName: `${command.module}.${command.action}`,
+            toolName: canonicalToolName,
             parameters: command.parameters,
             commandJson: command,
           },
@@ -773,8 +774,10 @@ export class KeyCortexExecutorService {
             title: this.summarizeCommandForNotification(command),
             summary: `Pending approval for ${command.module}.${command.action}`,
             actionType: 'EXECUTE_TOOL',
+            toolName: canonicalToolName,
+            module: command.module,
             payload: {
-              toolName: `${command.module}.${command.action}`,
+              toolName: canonicalToolName,
               parameters: command.parameters,
               correlationId,
               commandJson: command,

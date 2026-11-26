@@ -2026,6 +2026,11 @@ model KeyActionProposal {
   executedFor        String?   @map("executed_for")
   outcomeEvidence    Json?     @map("outcome_evidence") // claim, entity id and principal chain, written with the effect
 
+  // FU-PROPOSAL-MONEY-TAG (V1-88, D-238, D-227): structural money tag stamped
+  // at creation from tool authority, input schema, and writer provenance.
+  // null on pre-migration / untagged rows (readers fail closed via backstop).
+  carriesMoney       Boolean?  @map("carries_money")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

@@ -1,5 +1,10 @@
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../../core/prisma/prisma.service';
+import {
+  isStructurallyFinancialProposal,
+  structuredPayloadCarriesMoney,
+  structuralTextCarriesMoney,
+} from '../../key-autonomy/proposal-money-tag';
 import { keyOrganToolAuthority } from '../../key-cortex/key-cortex-organ-tool-authority';
 import type { GenomeRecommendationService } from './genome-recommendation.service';
 import type { GenomeSignalService } from './genome-signal.service';
@@ -259,6 +264,8 @@ export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
 
 /** The fields a KEY action proposal is classified by (KeyActionProposal: actionType, module, toolName, title). */
 export type ProposalFields = {
+  /** FU-PROPOSAL-MONEY-TAG (D-238, D-227): authoritative structural money tag stamped at creation (`null` on legacy rows). */
+  carriesMoney?: boolean | null;
   actionType?: string | null;
   module?: string | null;
   toolName?: string | null;
@@ -488,6 +495,17 @@ const MAX_CLASSIFIED_CONTENT = 50_000;
 
 export function isFinancialProposal(proposal: ProposalFields | null | undefined): boolean {
   if (!proposal) return true;
+  // FU-PROPOSAL-MONEY-TAG (V1-88, D-238, D-227): read the structural money tag stamped at creation first.
+  if (proposal.carriesMoney === true) return true;
+  if (proposal.carriesMoney === false) {
+    // Structural safety backstop: a financial/unmapped tool, financial module/action/requestType,
+    // or post-creation money executionResult/rejectionReason can never be suppressed by carriesMoney=false.
+    if (isStructurallyFinancialProposal(proposal)) return true;
+    if (proposal.executionResult != null && structuredPayloadCarriesMoney(proposal.executionResult)) return true;
+    if (typeof proposal.rejectionReason === 'string' && proposal.rejectionReason && structuralTextCarriesMoney(proposal.rejectionReason)) return true;
+    return false;
+  }
+  // Untagged / legacy rows (carriesMoney === null | undefined): fail closed via the existing text/provenance heuristic.
   if (hasUnreadableContent(proposal)) return true;
   const content = proposalContent(proposal);
   if ([proposal.title, ...content].reduce((n, v) => n + (typeof v === 'string' ? v.length : 0), 0) > MAX_CLASSIFIED_CONTENT) return true;
@@ -567,6 +585,7 @@ export function redactedProposalView(proposal: { id: string; status?: unknown; f
  */
 export const PROPOSAL_CLASSIFY_SELECT = {
   id: true,
+  carriesMoney: true,
   sourceType: true,
   actionType: true,
   module: true,
@@ -692,7 +711,13 @@ export async function readableMemoryEvents<T extends GenomeRowFields & { sourceE
 function proposalFieldsOfEvent(row: GenomeRowFields): ProposalFields {
   const meta = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata) ? (row.metadata as Record<string, unknown>) : {};
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
-  return { actionType: str(meta.actionType), module: str(meta.module), toolName: str(meta.toolName), title: row.title ?? null };
+  return {
+    carriesMoney: typeof meta.carriesMoney === 'boolean' ? meta.carriesMoney : undefined,
+    actionType: str(meta.actionType),
+    module: str(meta.module),
+    toolName: str(meta.toolName),
+    title: row.title ?? null,
+  };
 }
 
 /**

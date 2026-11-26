@@ -354,7 +354,7 @@ export class OutcomeLearningService {
           },
         ],
         // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
-        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, executionResult },
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney: row?.carriesMoney ?? null, executionResult },
       });
     }
 
@@ -375,7 +375,7 @@ export class OutcomeLearningService {
           },
         ],
         // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
-        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, executionResult },
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney: row?.carriesMoney ?? null, executionResult },
       });
     }
 
@@ -395,7 +395,7 @@ export class OutcomeLearningService {
         },
       ],
       // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
-        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, executionResult },
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney: row?.carriesMoney ?? null, executionResult },
     });
   }
 
