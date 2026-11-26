@@ -17,7 +17,7 @@
  * The view must show "loading" until the tab's own report arrives, then that
  * report, and never the boundary.
  */
-import { Component, type ReactNode } from "react";
+import { Component, useLayoutEffect, type ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -189,6 +189,107 @@ describe("Books report tabs: switching never crashes (BUG-039)", () => {
       expect(boundaryText(), `after ${kind} loaded`).toBeNull();
     }
     expect(await screen.findByText("Cash In")).toBeInTheDocument();
+  });
+});
+
+/** The view for one business (or none), START to END. */
+const viewFor = (businessId: string | null, kind: BooksReportKind, probe?: ReactNode) => (
+  <Boundary>
+    <BooksReportView businessId={businessId} kind={kind} startDate={START} endDate={END} />
+    {probe}
+  </Boundary>
+);
+
+/**
+ * Records what the screen holds at each commit, before passive effects run: a layout effect of a sibling rendered
+ * after the view runs once the DOM is updated and before the view's own useEffect starts the next fetch.
+ */
+function Probe({ seen }: { seen: string[] }) {
+  useLayoutEffect(() => {
+    seen.push(document.body.textContent ?? "");
+  });
+  return null;
+}
+
+describe("Books report tabs: review repair round 1", () => {
+  it("TAB-04 (SEC M1): switching business never shows the first business's figures under the second", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const x = slow({ ...PNL, netProfit: 111 });
+    const y = slow({ ...PNL, netProfit: 222 });
+    vi.mocked(fetchLedgerPnl).mockImplementation(((businessId: string) => (businessId === "biz_x" ? x.answer : y.answer)) as never);
+
+    const seen: string[] = [];
+    const { rerender } = render(viewFor("biz_x", "books-pnl", <Probe seen={seen} />));
+    await x.release();
+    expect(screen.getByText("Net Profit").parentElement).toHaveTextContent("111.00");
+
+    const before = seen.length;
+    rerender(viewFor("biz_y", "books-pnl", <Probe seen={seen} />));
+    // The first commit under business Y, before any effect has run, and every one after it.
+    expect(seen.length, "a commit was recorded for the switch").toBeGreaterThan(before);
+    for (const [i, text] of seen.slice(before).entries()) {
+      expect(text, `commit ${i} under business Y shows none of business X's figures`).not.toMatch(/111\.00/);
+    }
+    expect(seen[before], "the first commit under business Y says it is loading").toMatch(/Loading ledger data/);
+    expect(screen.getByText(/Loading ledger data/)).toBeInTheDocument();
+    await y.release();
+    expect(boundaryText()).toBeNull();
+    expect(screen.getByText("Net Profit").parentElement).toHaveTextContent("222.00");
+    for (const text of seen.slice(before)) expect(text).not.toMatch(/111\.00/);
+    expect(fetchLedgerPnl).toHaveBeenCalledWith("biz_y", START, END, "accrual");
+  });
+
+  it("TAB-05 (COR MINOR-1): the tab's own answer comes first, then the left tab's late one: the tab stays on its report", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const pnl = slow(PNL);
+    const cashflow = slow(CASHFLOW);
+    vi.mocked(fetchLedgerPnl).mockReturnValue(pnl.answer as never);
+    vi.mocked(fetchLedgerCashflow).mockReturnValue(cashflow.answer as never);
+
+    const { rerender } = render(view("books-pnl"));
+    rerender(view("books-cashflow"));
+    await cashflow.release();
+    expect(screen.getByText("Net Movement").parentElement).toHaveTextContent("245.00");
+    // The P&L the user left answers last; it must neither replace Cash flow nor leave it loading.
+    await pnl.release();
+    expect(boundaryText()).toBeNull();
+    expect(screen.queryByText(/Loading ledger data/), "Cash flow is not sent back to loading").toBeNull();
+    expect(screen.queryByText("Gross Profit"), "the late P&L is not drawn").toBeNull();
+    expect(screen.getByText("Net Movement").parentElement).toHaveTextContent("245.00");
+  });
+
+  it("TAB-06 (COR MINOR-2): the first commit after a tab switch, before any effect runs, already says loading (never blank)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(fetchLedgerPnl).mockResolvedValue({ data: PNL, error: null } as never);
+    const cashflow = slow(CASHFLOW);
+    vi.mocked(fetchLedgerCashflow).mockReturnValue(cashflow.answer as never);
+    const seen: string[] = [];
+
+    const { rerender } = render(viewFor("biz_tabs", "books-pnl", <Probe seen={seen} />));
+    expect(await screen.findByText("Gross Profit")).toBeInTheDocument();
+    const before = seen.length;
+    rerender(viewFor("biz_tabs", "books-cashflow", <Probe seen={seen} />));
+    const firstCommit = seen[before];
+    expect(firstCommit, "a commit was recorded for the switch").toBeDefined();
+    expect(firstCommit, "the first commit under Cash flow says it is loading").toMatch(/Loading ledger data/);
+    expect(firstCommit, "and draws no P&L").not.toMatch(/Gross Profit/);
+    await cashflow.release();
+    expect(screen.getByText("Net Movement")).toBeInTheDocument();
+  });
+
+  it("TAB-07 (SEC M2): the business goes away while a report is on the way: the view stops saying it is loading", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const pnl = slow(PNL);
+    vi.mocked(fetchLedgerPnl).mockReturnValue(pnl.answer as never);
+
+    const { rerender } = render(viewFor("biz_tabs", "books-pnl"));
+    expect(screen.getByText(/Loading ledger data/)).toBeInTheDocument();
+    rerender(viewFor(null, "books-pnl"));
+    expect(screen.queryByText(/Loading ledger data/), "no business, nothing loading").toBeNull();
+    await pnl.release();
+    expect(boundaryText()).toBeNull();
+    expect(screen.queryByText(/Loading ledger data/)).toBeNull();
+    expect(screen.queryByText("Gross Profit"), "the answer for the business that went away is not drawn").toBeNull();
   });
 });
 
