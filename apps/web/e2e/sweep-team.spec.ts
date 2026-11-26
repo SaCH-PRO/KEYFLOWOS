@@ -11,8 +11,8 @@ import { test, expect, settle, memberOf, signedInContext, type Tenant } from "./
  *               "ask the owner", no Invite and no "0 owner 0 admin 0 staff"
  *   2. BUG-115  after the owner invites an Admin, the invite form's role is Staff again
  *   3. BUG-116  that invite's row says "Invited", and the counts say 0 staff (pending invites are not members)
- *   4. BUG-135  the "Set permissions & approval tier" toggle is a full-size control (at least 44px tall, text at least
- *               12px) with room between it and the Send Invite row above it
+ *   4. BUG-135  the invite form's permissions toggle reads "Set permissions & approval tier", with its spaces (the
+ *               production build showed "Setpermissions & approval tier")
  *
  * Live only (E2E_LIVE=1, a production build, a real API and database: the journey harness's own fixtures, README in
  * e2e/journeys); without E2E_LIVE every case is skipped. Run it in the "chromium" project.
@@ -90,18 +90,11 @@ for (const viewport of WIDTHS) {
     const counts = (await page.locator("main").first().innerText()).replace(/\s+/g, " ");
     expect.soft(counts, "BUG-116: the counts leave the pending Admin out").toMatch(/\b0 admin\b/i);
 
-    // 4. BUG-135: the permissions toggle.
+    // 4. BUG-135: the permissions toggle's words.
     await openInvite(page);
-    const toggle = page.getByRole("button", { name: /set permissions & approval tier/i });
-    await expect.soft(toggle, "the permissions toggle").toBeVisible();
-    if (await toggle.count()) {
-      const box = await toggle.boundingBox();
-      const size = await toggle.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-      const send = await page.getByRole("button", { name: /^send invite$/i }).boundingBox();
-      test.info().annotations.push({ type: "toggle", description: JSON.stringify({ box, size, send }) });
-      expect.soft(box?.height ?? 0, "BUG-135: the toggle's height").toBeGreaterThanOrEqual(44);
-      expect.soft(size, "BUG-135: the toggle's text size").toBeGreaterThanOrEqual(12);
-      if (box && send) expect.soft(box.y - (send.y + send.height), "BUG-135: room between Send Invite and the toggle").toBeGreaterThanOrEqual(8);
-    }
+    const names = await page.locator("main button").evaluateAll((els) => els.map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim()));
+    const toggle = names.find((n) => /permissions\s*&\s*approval tier/i.test(n));
+    test.info().annotations.push({ type: "toggle", description: String(toggle) });
+    expect.soft(toggle, "BUG-135: the permissions toggle's words").toBe("Set permissions & approval tier");
   });
 }

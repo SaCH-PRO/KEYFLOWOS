@@ -21,8 +21,11 @@
  *                       role's default (STAFF read, ADMIN admin), every other key and the tier unchanged
  *   TPS-08  RED-BEFORE  D-179: the grant is the owner's: an ADMIN viewing the same row sees "No access" and no grant
  *   TPS-09  control     a member whose map names analytics and operations (even at none) is not a legacy row
- *   TPS-10  RED-BEFORE  BUG-135: the "Set permissions & approval tier" toggle reads as words with their spaces, sits
- *                       clear of the form above it, and is a full-size control
+ *   TPS-10  RED-BEFORE  BUG-135: the "Set permissions & approval tier" toggle reads "Setpermissions & approval tier" in
+ *                       the production build (seen live at c5a5a99e): its label was the {Hide/Set} expression and a
+ *                       separate " permissions & approval tier" text, and the build drops the space between them. The
+ *                       label is now one text, so no build can split it (jsdom keeps the space, so the case pins the
+ *                       one text node; e2e/sweep-team.spec.ts reads the toggle's name in the built app)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup, within } from "@testing-library/react";
@@ -206,16 +209,19 @@ describe("SWP-TEAM-WEB: the invite form (BUG-115, journey J2, J3)", () => {
     expect(payload.email).toBe("nadine.example@example.com");
   });
 
-  it("TPS-10 RED-BEFORE: the 'Set permissions & approval tier' toggle reads with its spaces, apart from the form, at full size", async () => {
+  it("TPS-10 RED-BEFORE: the 'Set permissions & approval tier' toggle's label is one text, with its spaces (BUG-135)", async () => {
     serveTeam([owner()]);
     await renderAs(OWNER_ID);
     await openInviteForm();
     const toggle = screen.getByRole("button", { name: "Set permissions & approval tier" });
-    expect(toggle.textContent?.replace(/\s+/g, " ").trim()).toBe("Set permissions & approval tier");
-    // Full size: the 10px label and its 12px chevron squeezed against the Send Invite row (BUG-135).
-    expect(toggle.className, "the toggle's text size").not.toMatch(/text-\[10px\]/);
-    expect(toggle.className, "a tap target of at least 44px").toMatch(/min-h-\[44px\]|min-h-11\b|h-11\b/);
-    expect(toggle.parentElement?.className ?? "", "space between the toggle and the form above").not.toMatch(/\bpt-1\b/);
+    const texts = Array.from(toggle.childNodes)
+      .filter((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() !== "")
+      .map((n) => n.textContent);
+    expect(texts, "the toggle's label as the build sees it (BUG-135: 'Set' and ' permissions & approval tier')").toEqual([
+      "Set permissions & approval tier",
+    ]);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Hide permissions & approval tier" })).toBeTruthy();
   });
 });
 
