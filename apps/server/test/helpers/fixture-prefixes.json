@@ -1565,6 +1565,11 @@
       "prefix": "v70f_",
       "owner": "apps/server/test/store-stripe-own-key.integration.test.ts",
       "packet": "V1-70 (W1F-STORE-STRIPE-R0)"
+    },
+    {
+      "prefix": "v71g_",
+      "owner": "apps/server/test/contact-audit-residual.integration.test.ts",
+      "packet": "V1-71 (FU-CONTACT-AUDIT-RESIDUAL)"
     }
   ],
   "pendingRenames": [],
