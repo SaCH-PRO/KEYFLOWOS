@@ -103,6 +103,9 @@ describe("MAG-03 a cookie that is not an unexpired admin token is refused", () =
   const cases: Array<[string, string]> = [
     ["malformed (one part)", "not-a-token"],
     ["malformed (payload not JSON)", "aaa.%%%%.ccc"],
+    // An unexpired admin payload, but not three parts: not what buildAdminToken issues.
+    ["two parts (header.payload, no signature)", `${b64url({ alg: "HS256" })}.${b64url({ type: "admin", exp: Date.now() + DAY_MS })}`],
+    ["four parts", `${adminToken({ type: "admin", exp: Date.now() + DAY_MS })}.extra`],
     ["empty", ""],
     ["type is not admin", adminToken({ sub: "u", type: "user", exp: Date.now() + DAY_MS })],
     ["no type", adminToken({ sub: "u", exp: Date.now() + DAY_MS })],
