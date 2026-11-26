@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { fenceUntrusted, withUntrustedContentRule } from '../ai/untrusted-content';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmTimelineService } from './crm-timeline.service';
@@ -449,7 +450,7 @@ Invoices: ${invoices.length} total (${invoices.filter(i => i.status === 'PAID').
 Bookings: ${bookings.length} total (${bookings.filter(b => b.status === 'COMPLETED').length} completed)
 
 NOTES (recent ${notes.length}):
-${notes.slice(0, 10).map(n => `- [${n.source ?? 'general'}] ${n.body.substring(0, 200)}`).join('\n') || 'No notes'}
+${fenceUntrusted('inbound_message', notes.slice(0, 10).map(n => `- [${n.source ?? 'general'}] ${n.body.substring(0, 200)}`).join('\n')) || 'No notes'}
 
 RECENT EVENTS (${events.length}):
 ${events.slice(0, 15).map(e => `- ${e.type} at ${e.createdAt.toISOString().split('T')[0]}`).join('\n') || 'No events'}
@@ -457,7 +458,7 @@ ${events.slice(0, 15).map(e => `- ${e.type} at ${e.createdAt.toISOString().split
 OPEN TASKS:
 ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'})`).join('\n') || 'None'}`;
 
-    const systemPrompt = buildContactSummaryPrompt(contextBlock);
+    const systemPrompt = withUntrustedContentRule(buildContactSummaryPrompt(contextBlock));
 
     try {
       const result = await this.aiUsage.callAi({
@@ -558,9 +559,9 @@ TASKS:
 Open: ${tasks.filter(t => t.status === 'OPEN').length} | Overdue: ${tasks.filter(t => t.status === 'OPEN' && t.dueDate && new Date(t.dueDate) < now).length}
 
 NOTES (sentiment context):
-${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No notes'}`;
+${fenceUntrusted('inbound_message', notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n')) || 'No notes'}`;
 
-    const systemPrompt = buildLeadScoringPrompt(contextBlock);
+    const systemPrompt = withUntrustedContentRule(buildLeadScoringPrompt(contextBlock));
 
     try {
       const result = await this.aiUsage.callAi({
@@ -619,18 +620,22 @@ ${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No 
     });
 
     const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed';
+    const fencedPreviousNotes =
+      fenceUntrusted('inbound_message', recentNotes.slice(0, 3).map(n => `- ${n.body.substring(0, 200)}`).join('\n')) ||
+      'No previous notes';
+    const fencedNewNote = fenceUntrusted('inbound_message', sanitizedNoteBody);
 
-    const systemPrompt = `You are a CRM note intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
+    const systemPrompt = withUntrustedContentRule(`You are a CRM note intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
 Analyze this note about a contact and extract actionable intelligence.
 
 CONTACT: ${name} | Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}
 Tags: ${(contact.tags ?? []).join(', ') || 'none'}
 
 PREVIOUS NOTES (for context):
-${recentNotes.slice(0, 3).map(n => `- ${n.body.substring(0, 200)}`).join('\n') || 'No previous notes'}
+${fencedPreviousNotes}
 
 NEW NOTE TO ANALYZE:
-"${sanitizedNoteBody}"
+${fencedNewNote}
 
 Respond in valid JSON:
 {
@@ -643,7 +648,7 @@ Respond in valid JSON:
   "riskFlags": ["Any concerns or red flags detected"],
   "keyEntities": ["Names, companies, amounts, dates mentioned"],
   "summary": "One sentence summary of what this note means for the relationship"
-}`;
+}`);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -651,7 +656,7 @@ Respond in valid JSON:
         feature: 'note_intelligence',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Analyze this note: "${sanitizedNoteBody}"` },
+          { role: 'user', content: `Analyze this note:\n${fencedNewNote}` },
         ],
         maxTokens: 500,
         temperature: 0.3,
@@ -958,12 +963,12 @@ Event types: ${eventTypes.join(', ') || 'none'}
 Total events: ${events.length}
 
 NOTES (${notes.length}):
-${notes.slice(0, 8).map(n => `- [${n.source ?? 'general'}] ${n.body.substring(0, 200)}`).join('\n') || 'No notes'}
+${fenceUntrusted('inbound_message', notes.slice(0, 8).map(n => `- [${n.source ?? 'general'}] ${n.body.substring(0, 200)}`).join('\n')) || 'No notes'}
 
 EXISTING TAGS IN BUSINESS (popular ones):
 ${popularTags.join(', ') || 'none yet'}`;
 
-    const systemPrompt = `You are a CRM tagging intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
+    const systemPrompt = withUntrustedContentRule(`You are a CRM tagging intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
 Analyze this contact's data, notes, events, and interaction patterns to suggest relevant tags.
 
 ${contextBlock}
@@ -985,7 +990,7 @@ Respond in valid JSON:
       "reasoning": "Has generated significant revenue with multiple paid invoices"
     }
   ]
-}`;
+}`);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -1107,12 +1112,12 @@ OPEN TASKS:
 ${openTasks.map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'}${t.dueDate && new Date(t.dueDate) < now ? ' OVERDUE' : ''})`).join('\n') || 'None'}
 
 NOTES (recent ${notes.length}):
-${notes.slice(0, 15).map(n => `- [${n.createdAt.toISOString().split('T')[0]}] [${n.source ?? 'general'}] ${n.body.substring(0, 300)}`).join('\n') || 'No notes'}
+${fenceUntrusted('inbound_message', notes.slice(0, 15).map(n => `- [${n.createdAt.toISOString().split('T')[0]}] [${n.source ?? 'general'}] ${n.body.substring(0, 300)}`).join('\n')) || 'No notes'}
 
 RECENT EVENTS (${events.length}):
 ${events.slice(0, 20).map(e => `- ${e.type} at ${e.createdAt.toISOString().split('T')[0]}`).join('\n') || 'No events'}`;
 
-    const systemPrompt = `You are a CRM conversation preparation assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
+    const systemPrompt = withUntrustedContentRule(`You are a CRM conversation preparation assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
 Generate a comprehensive pre-interaction preparation brief for an upcoming conversation with this contact.
 
 ${contextBlock}
@@ -1141,7 +1146,7 @@ Respond in valid JSON with this exact structure:
   "talkingPoints": ["Key points to make sure to mention during the conversation"]
 }
 
-Be specific and reference actual data. Keep icebreakers relevant and professional. Focus on actionable intelligence.`;
+Be specific and reference actual data. Keep icebreakers relevant and professional. Focus on actionable intelligence.`);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -1771,11 +1776,11 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     const contextBlock = `Contact: ${name}
 Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}
 Channel: ${contact.preferredChannel ?? 'email'}
-Recent Notes: ${notes.map(n => n.body.substring(0, 100)).join('; ') || 'None'}
+Recent Notes: ${fenceUntrusted('inbound_message', notes.map(n => n.body.substring(0, 100)).join('; ')) || 'None'}
 Recent Events: ${events.map(e => e.type).join(', ') || 'None'}
 Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status === 'PENDING' ? 'PENDING — not yet sent; do not send a payment reminder' : i.status})`).join(', ') : 'None'}`;
 
-    const systemPrompt = `You are a Caribbean business communication specialist writing follow-up messages for a Trinidad & Tobago service business.
+    const systemPrompt = withUntrustedContentRule(`You are a Caribbean business communication specialist writing follow-up messages for a Trinidad & Tobago service business.
 Write in a warm, professional Caribbean style. Use TTD for currency. Be concise and actionable.
 
 ${contextBlock}
@@ -1800,7 +1805,7 @@ Respond in valid JSON:
   ],
   "context": "Brief explanation of why this follow-up is needed",
   "bestTime": "Suggested best time to send"
-}`;
+}`);
 
     try {
       const result = await this.aiUsage.callAi({
