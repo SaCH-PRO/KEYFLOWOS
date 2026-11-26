@@ -21,6 +21,8 @@ import { toast } from "sonner";
 import { readState, refusalMessage } from "@/lib/failure-kit";
 import { formatCurrency } from "./expense-utils";
 
+const FOCUSABLE = "select:not([disabled]), button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
+
 const BILL_PAYMENT_ACCOUNT_TYPES = new Set(["CASH", "BANK", "PAYMENT_PROCESSOR", "CREDIT_CARD"]);
 
 const norm = (c: string | null | undefined) => (c ?? "").trim().toUpperCase();
@@ -61,15 +63,64 @@ export function BillPayDialog({
   // Each read's answer and the account chosen from it are kept with the read they belong to (this business, this
   // bill, this attempt). When the business or the bill changes, or Retry is pressed, the dialog is loading again at
   // once and no earlier answer or account id can be shown or sent (review SEC MINOR-2, round 2).
-  const readKey = `${businessId}|${bill.id}|${norm(bill.currency)}|${attempt}`;
+  // The method chosen and a refusal shown belong to this business and bill (not to a read: Retry keeps them), so a
+  // change of business or bill starts from the new bill's defaults (review round 3).
+  const billKey = `${businessId}|${bill.id}|${norm(bill.currency)}`;
+  const readKey = `${billKey}|${attempt}`;
   const [loaded, setLoaded] = useState<{ key: string; accounts: Accounts } | null>(null);
   const [selected, setSelected] = useState<{ key: string; id: string } | null>(null);
   const accounts: Accounts = loaded?.key === readKey ? loaded.accounts : { kind: "loading" };
   const accountId = selected?.key === readKey ? selected.id : "";
-  const [method, setMethod] = useState(() => defaultMethod(bill));
+  const [chosenMethod, setChosenMethod] = useState<{ key: string; value: string } | null>(null);
+  const method = chosenMethod?.key === billKey ? chosenMethod.value : defaultMethod(bill);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [said, setSaid] = useState<{ key: string; text: string } | null>(null);
+  const message = said?.key === billKey ? said.text : null;
+
+  // Keyboard and focus (review round 3; no shared primitive offers all of it: @keyflow/ui Dialog handles Escape
+  // only). Focus moves into the dialog on open and returns to what opened it on close; Tab and Shift+Tab stay
+  // inside; Escape closes it, except while a pay is in flight, and never reaches the app's Escape shortcut.
+  const formRef = useRef<HTMLFormElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    formRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      const form = formRef.current;
+      if (!form) return;
+      if (e.key === "Escape") {
+        // Pay's Escape stays in Pay: the app's own Escape shortcut (use-keyboard-shortcuts, on window) would also go
+        // from this expense to the list, mid-pay included.
+        e.stopPropagation();
+        if (inFlight.current) return;
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = Array.from(form.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      // From outside the controls (the dialog itself, or elsewhere), Tab enters at the first and Shift+Tab at the last.
+      const outside = active === form || !form.contains(active);
+      const wrap = outside || (e.shiftKey ? active === first : active === last);
+      if (wrap) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (opener && opener.isConnected) opener.focus();
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -101,18 +152,19 @@ export function BillPayDialog({
     if (inFlight.current || !canPay) return;
     inFlight.current = true;
     setBusy(true);
-    setMessage(null);
+    setSaid(null);
     // A refusal keeps Pay open with the server's words beside the button, and says them in a toast (FAILURE-KIT).
-    const refused = (said: string) => {
-      setMessage(said);
-      toast.error(said);
+    const key = billKey;
+    const refused = (text: string) => {
+      setSaid({ key, text });
+      toast.error(text);
     };
     try {
       const body: { paymentAccountId?: string; paymentMethod: string } = { paymentMethod: method };
       if (accounts.kind === "ok" && accountId) body.paymentAccountId = accountId;
       const res = await payBill(businessId, bill.id, body);
-      const said = refusalMessage(res, { what: "pay this bill" });
-      if (said !== null) refused(said);
+      const refusal = refusalMessage(res, { what: "pay this bill" });
+      if (refusal !== null) refused(refusal);
       else onPaid(res.data ?? null);
     } catch {
       refused("Couldn't pay this bill.");
@@ -133,11 +185,13 @@ export function BillPayDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="bill-pay-title">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={busy ? undefined : onClose} aria-hidden="true" />
       <form
+        ref={formRef}
+        tabIndex={-1}
         onSubmit={(e) => {
           e.preventDefault();
           void pay();
         }}
-        className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-card p-6 shadow-2xl">
+        className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-card p-6 shadow-2xl outline-none">
         <h3 id="bill-pay-title" className="text-lg font-semibold text-foreground mb-1">Pay bill</h3>
         <p className="text-sm text-muted-foreground mb-4">
           {bill.vendor || bill.description} · {formatCurrency(bill.amount, bill.currency, businessId)}
@@ -185,7 +239,7 @@ export function BillPayDialog({
               <select
                 id="bill-pay-method"
                 value={method}
-                onChange={(e) => setMethod(e.target.value)}
+                onChange={(e) => setChosenMethod({ key: billKey, value: e.target.value })}
                 disabled={busy}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
               >
