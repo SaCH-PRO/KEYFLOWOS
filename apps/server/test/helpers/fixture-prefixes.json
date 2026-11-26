@@ -1480,6 +1480,11 @@
       "prefix": "v64l_",
       "owner": "apps/server/test/census-key-b.integration.test.ts",
       "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v67b_",
+      "owner": "apps/server/test/legacy-modules.integration.test.ts",
+      "packet": "V1-67 (NAV-B-LEGACY-SERVER)"
     }
   ],
   "pendingRenames": [],
