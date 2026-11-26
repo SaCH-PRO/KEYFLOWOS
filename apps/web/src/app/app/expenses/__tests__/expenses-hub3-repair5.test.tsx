@@ -164,6 +164,9 @@ describe("MINOR-3 / MINOR-4: receiptKind, absolute API base", () => {
     "https://elsewhere.test//objects/x",
     "https://elsewhere.test/%2Fobjects/x",
     "https://elsewhere.test/%252Fobjects/x",
+    // A path that will not percent-decode could be anything once a server decodes it differently: never a link.
+    "https://elsewhere.test/%E0%A4%A/objects/x",
+    "https://elsewhere.test/%25E0%A4%A.png",
   ])("%s is not a link", (url) => {
     expect(receiptKind(url, "biz_A")).not.toBe("link");
   });
