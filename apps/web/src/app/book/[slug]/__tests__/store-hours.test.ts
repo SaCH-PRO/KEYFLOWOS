@@ -197,3 +197,24 @@ describe("repair round 2: HH:MM:SS and a 24:00 close", () => {
     }
   });
 });
+
+describe("repair round 3: the shown time is HH:MM, from the time's own hour and minute", () => {
+  // Round 2 cut the shown text to its first five characters, so a one-digit hour with seconds ('9:00:00') showed
+  // '9:00:' in the trust bar and 'Opens at 9:00:' in the hero.
+  for (const open of ["9:00:00", "09:00:00", "9:00"]) {
+    it(`'${open}'-'17:00:00' shows 09:00 and 17:00`, () => {
+      const hours = every(open, "17:00:00");
+      at("2026-11-26T12:00:00Z"); // Thursday 08:00 in Port of Spain
+      expect(getOpenStatus(hours, POS)).toEqual({ isOpen: false, label: "Opens at 09:00" });
+      expect(todaysHoursLabel(hours, POS)).toBe("09:00 – 17:00");
+      at("2026-11-26T16:00:00Z"); // 12:00
+      expect(getOpenStatus(hours, POS)).toEqual({ isOpen: true, label: "Open · Closes 17:00" });
+    });
+  }
+
+  it("a 24:00:00 close shows 24:00", () => {
+    at("2026-11-27T03:30:00Z"); // Thursday 23:30
+    expect(getOpenStatus(every("18:00", "24:00:00"), POS)).toEqual({ isOpen: true, label: "Open · Closes 24:00" });
+    expect(todaysHoursLabel(every("18:00", "24:00:00"), POS)).toBe("18:00 – 24:00");
+  });
+});
