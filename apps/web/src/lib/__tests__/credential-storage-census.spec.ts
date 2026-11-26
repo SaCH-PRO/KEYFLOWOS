@@ -885,6 +885,10 @@ const isCredential = (w: Pick<Write, "store" | "key" | "expr" | "value">) =>
   VALUE_PATTERN.test(w.value) ||
   ((w.store === "indexedDB" || w.store === "cacheStorage") && HEADERS_PATTERN.test(w.value));
 
+/** Browser code the walk scans: .ts, .tsx, .js, .jsx and .mjs files, not tests and not declaration files. */
+const isScannedFile = (name: string) =>
+  /\.(?:ts|tsx|js|jsx|mjs)$/.test(name) && !/\.(?:test|spec)\.[jt]sx?$/.test(name) && !name.endsWith(".d.ts");
+
 function sourceFiles(): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
@@ -893,7 +897,7 @@ function sourceFiles(): string[] {
       if (e.isDirectory()) {
         if (e.name === "__tests__" || e.name === "node_modules" || e.name.startsWith(".")) continue;
         walk(p);
-      } else if (/\.(?:ts|tsx|js|jsx|mjs)$/.test(e.name) && !/\.(?:test|spec)\.[jt]sx?$/.test(e.name) && !e.name.endsWith(".d.ts")) {
+      } else if (isScannedFile(e.name)) {
         out.push(p);
       }
     }
@@ -1613,7 +1617,8 @@ describe("CSC-24 each of the comment pass's rules decides a case", () => {
  *   CSC-27 (CSC2-COR-D) only the Headers tuple shape is a Set-Cookie write: an array that merely starts with
  *          "set-cookie" (a hop-by-hop header list) is not.
  */
-describe("CSC-25 more shapes that must hide nothing", () => {
+// CSC-25 and CSC-26 are pins: they pass at b5a036f, before the round-3b fix, and guard what round 3 closed.
+describe("CSC-25 (pin) more shapes that must hide nothing", () => {
   const cases: Array<[string, string[]]> = [
     ['an object accept: "image/*", the write at the end of the file', [`const OPTS = { accept: "image/*", multiple: false };`, `export function a() { return OPTS; }`, `export const save = (t: string) => localStorage.setItem("kf_b_token", t);`]],
     ['"/api/*", the write, then a real comment', [`const R = "/api/*";`, `export const save = (t: string) => localStorage.setItem("kf_b_token", t);`, `/* a real comment */`]],
@@ -1627,7 +1632,7 @@ describe("CSC-25 more shapes that must hide nothing", () => {
   }
 });
 
-describe("CSC-26 String(x) of a const is followed one hop", () => {
+describe("CSC-26 (pin) String(x) of a const is followed one hop", () => {
   it("a session read through String(raw) is a credential write", () => {
     const fixture = [`export function save(data: { session: string }) {`, `  const raw = data.session;`, `  localStorage.setItem("kf_str", String(raw));`, `}`].join("\n");
     expect(compare(scan("src/fixture-str.ts", fixture), []).unregistered.some((u) => u.startsWith("localStorage kf_str @"))).toBe(true);
@@ -1793,5 +1798,41 @@ describe("CSC-32 the tuple look-back sees past a comment or a line break", () =>
       "response-cookie:kf_lb2_session",
       "response-cookie:kf_lb3_session",
     ]);
+  });
+});
+
+/* ------------------------------------------------------ repair round 5b */
+
+/**
+ * Repair round 5b (correctness review of round 4: CSC4-COR-2, CSC4-COR-3). Pins that kill mutants the round-4 cases
+ * left alive; each passes at 96537fb, and the commit records the mutant it kills.
+ *
+ *   CSC-33 a JSX text " // " that ends where a node ends opens nothing (M1b: the trailing-range JSX guard); a .ts file
+ *          is parsed as TS, not TSX, so an angle-bracket cast keeps its real comments (M4); the walk covers .mjs (M6).
+ */
+describe("CSC-33 (pins) parsing by extension and the trailing-range guard", () => {
+  it("JSX text ' // x ' right after an opening tag hides nothing (M1b)", () => {
+    const fixture = `export const F = ({ t }: { t: string }) => <p> // x <button onClick={() => localStorage.setItem("kf_jx_token", t)} /></p>;`;
+    expect(keysOf(scan("src/fixture-m1b.tsx", fixture))).toContain("localStorage:kf_jx_token");
+  });
+
+  it("a .ts file with an angle-bracket cast is parsed as TS: its write is found and its real comment still excluded (M4)", () => {
+    const fixture = [
+      `const w = <string>v;`,
+      `localStorage.setItem("kf_cast_token", t);`,
+      `// localStorage.setItem("kf_cast_commented_token", t);`,
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-cast.ts", fixture))).toEqual(["localStorage:kf_cast_token"]);
+  });
+
+  it("the correctness review's JSDoc fixture (CSC4-COR-1, closed by CSC4-SEC-1's fix): the write is found", () => {
+    const fixture = `/** @type {string} // n */ const x = 1; localStorage.setItem("kf_p_token", t);`;
+    expect(keysOf(scan("src/fixture-cor1.ts", fixture))).toEqual(["localStorage:kf_p_token"]);
+  });
+
+  it("the walk covers .mjs, and skips tests and declaration files (M6)", () => {
+    for (const name of ["a.ts", "a.tsx", "a.js", "a.jsx", "a.mjs"]) expect(isScannedFile(name), name).toBe(true);
+    for (const name of ["a.test.ts", "a.spec.tsx", "a.test.js", "a.d.ts", "a.json", "a.css"]) expect(isScannedFile(name), name).toBe(false);
+    expect(keysOf(scan("public/fixture.mjs", `localStorage.setItem("kf_mjs_token", t);`))).toEqual(["localStorage:kf_mjs_token"]);
   });
 });
