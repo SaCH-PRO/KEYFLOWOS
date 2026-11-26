@@ -166,3 +166,67 @@ describe("MAG-06 guard: the /app branch is unchanged", () => {
     expect(new URL(res.headers.get("location")!).pathname).toBe("/auth/login");
   });
 });
+
+/*
+ * Repair round 1 (orchestrator reviews of 1c4ff81d):
+ *   MAG-07 SEC-GATE-1: an encoded admin path (/%61dmin/users, /admin%2Fusers) is decided on the decoded pathname, so
+ *          a user kf_token does not carry it through the /app branch; a pathname that cannot be decoded is refused.
+ *   MAG-08 SEC-GATE-2: the static-file early return does not cover /admin (/admin/x.json is gated).
+ *   MAG-09 COR-GATE-2: /admin/login/ (trailing slash) is exempt, like /admin/login.
+ *   MAG-10 the refusal clears the whole admin session (kf_admin_token, kf_admin_user_cache, kf_auth_mode), as
+ *          clearAdminSession does.
+ * The MAG-07 cases call the middleware directly: whether Next's matcher hands it an encoded path is the browser
+ * check's question; this pins that the middleware refuses it when it does.
+ */
+const freshUserJwt = () =>
+  `${b64url({ alg: "none" })}.${b64url({ sub: "u", exp: Math.floor(Date.now() / 1000) + 3600 })}.x`;
+
+describe("MAG-07 encoded admin paths are gated on the decoded pathname", () => {
+  for (const path of ["/%61dmin/users", "/admin%2Fusers", "/%61dmin"]) {
+    it(`${path} with a valid user kf_token and no admin cookie is sent to /admin/login`, () => {
+      expectRefused(middleware(request(path, { kf_token: freshUserJwt() })), "kf_admin_token");
+    });
+  }
+  it("an encoded path with an unexpired admin cookie passes", () => {
+    expectPassed(middleware(request("/%61dmin/users", { kf_admin_token: validAdmin() })));
+  });
+  it("an encoded /admin/login is still exempt", () => {
+    expectPassed(middleware(request("/admin/%6Cogin")));
+  });
+  it("a pathname that cannot be decoded is refused to /admin/login", () => {
+    const res = middleware(request("/%E0%A4%A", { kf_token: freshUserJwt() }));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/admin/login");
+  });
+  it("an encoded /app path keeps the /app rules", () => {
+    expectPassed(middleware(request("/app/m%6Fney", { kf_token: freshUserJwt() })));
+  });
+});
+
+describe("MAG-08 the static-file skip does not cover /admin", () => {
+  for (const path of ["/admin/x.json", "/admin/users/export.pdf", "/admin/logo.png"]) {
+    it(`${path} with no admin cookie is refused`, () => {
+      expectRefused(run(path), "kf_admin_token");
+    });
+  }
+  it("/admin/x.json with an unexpired admin cookie passes", () => {
+    expectPassed(run("/admin/x.json", { kf_admin_token: validAdmin() }));
+  });
+});
+
+describe("MAG-09 /admin/login/ is exempt too", () => {
+  it("with no cookie", () => {
+    expectPassed(run("/admin/login/"));
+  });
+});
+
+describe("MAG-10 the refusal clears the whole admin session", () => {
+  it("kf_admin_token, kf_admin_user_cache and kf_auth_mode are each cleared", () => {
+    const res = run("/admin/users", { kf_admin_token: "bad", kf_admin_user_cache: "x", kf_auth_mode: "admin" });
+    expect(res.status).toBe(307);
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    for (const name of ["kf_admin_token", "kf_admin_user_cache", "kf_auth_mode"]) {
+      expect(setCookie, name).toMatch(new RegExp(`${name}=;[^,]*Max-Age=0`, "i"));
+    }
+  });
+});
