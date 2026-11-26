@@ -439,7 +439,10 @@ export interface TodayBlocksProps {
   data: TodayAggregate | null;
   loading: boolean;
   error: string | null;
-  /** True only once GET /identity/me said KEY is switched off; the KEY kinds of Needs you are then not shown. */
+  /**
+   * True whenever KEY may not render: until GET /identity/me answered keyDisabled: false (useKeyEnabled, fail closed),
+   * so while that read is in flight, after it failed, and under KEY_DISABLED. The KEY kinds of Needs you are then not shown.
+   */
   keyDisabled: boolean;
   /** The business's currency from its cached record (the sample preview's, when Pulse is not there to say). */
   businessCurrency?: string | null;

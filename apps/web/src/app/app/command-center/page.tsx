@@ -8,7 +8,8 @@
  *
  * Kept, inside the blocks: the command queue with its operations gating (W7-WEB-OPS-SCOPE, D-40; WOS-C01..C07) and
  * the approved KEY actions panel with Run (D-72) in Needs you, and what is due this week in Today. Under
- * KEY_DISABLED (keyDisabled on GET /identity/me) no KEY UI renders here.
+ * KEY_DISABLED no KEY UI renders here: the one KEY switch reader is main's useKeyEnabled (hooks/use-key-enabled.ts,
+ * fail closed), the same one the header and the KEY shell read.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
@@ -32,8 +33,9 @@ import {
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
-import { getStoredBusinessId, ensureWorkspace, getCachedBusiness } from "@/lib/workspace";
-import { fetchToday, fetchKeyDisabled, type TodayAggregate } from "@/lib/api/today";
+import { getStoredBusinessId, ensureWorkspace, getCachedBusiness, BUSINESS_CHANGED_EVENT } from "@/lib/workspace";
+import { fetchToday, type TodayAggregate } from "@/lib/api/today";
+import { retryKeySwitch, useKeyEnabled, useKeySwitchFailed } from "@/hooks/use-key-enabled";
 import {
   fetchCommandItems,
   completeCommandItem,
@@ -124,11 +126,13 @@ export default function CommandCenterPage() {
   const [businessCurrency, setBusinessCurrency] = useState<string | null>(null);
   const [today, setToday] = useState<{ businessId: string; data: TodayAggregate } | null>(null);
   const [todayLoading, setTodayLoading] = useState(true);
-  const [todayError, setTodayError] = useState<string | null>(null);
-  /** null until GET /identity/me answers; true only when it says KEY is switched off. */
-  const [keyDisabled, setKeyDisabled] = useState<boolean | null>(null);
-  const [keyRead, setKeyRead] = useState(false);
+  /** A failed read, kept with the business it was for, so it never shows as another business's. */
+  const [todayFailure, setTodayFailure] = useState<{ businessId: string; message: string } | null>(null);
   const todayRequest = useRef(0);
+  // Repair round 2: one KEY_DISABLED reader for the whole app (FU-KEY-DISABLED-NAV-TODAY). KEY is on only once
+  // GET /identity/me answered keyDisabled: false; while it is in flight or after it failed, KEY is off here.
+  const keySwitch = useKeyEnabled();
+  const keySwitchFailed = useKeySwitchFailed();
 
   const [commandItems, setCommandItems] = useState<CommandItem[]>([]);
   const [queueTotal, setQueueTotal] = useState(0);
@@ -157,13 +161,19 @@ export default function CommandCenterPage() {
       if (!resolved) setTodayLoading(false);
     };
     void resolveBusinessId();
-    void fetchKeyDisabled().then((disabled) => {
-      if (cancelled) return;
-      setKeyDisabled(disabled);
-      setKeyRead(true);
-    });
+    // A switch of business in this tab (selectBusiness) moves Today to the new business; the reads below follow it.
+    const onBusinessChanged = (event: Event) => {
+      const next = (event as CustomEvent<{ businessId?: string }>).detail?.businessId ?? getStoredBusinessId();
+      if (!next || cancelled) return;
+      setBusinessId(next);
+      const cached = getCachedBusiness();
+      setBusinessName(cached && cached.id === next ? cached.name : null);
+      setBusinessCurrency(cached && cached.id === next ? (cached.currency ?? null) : null);
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     };
   }, []);
 
@@ -171,19 +181,28 @@ export default function CommandCenterPage() {
     if (!businessId) return;
     const request = ++todayRequest.current;
     setTodayLoading(true);
-    const { data, error } = await fetchToday(businessId);
+    const { data, error, status } = await fetchToday(businessId);
+    // A reply for an older request (another business, or a refresh since) changes nothing: it neither clears the
+    // current business's Today nor raises its alert (repair round 2, item 4).
     if (request !== todayRequest.current) return;
     if (data) {
       setToday({ businessId, data });
-      setTodayError(null);
+      setTodayFailure(null);
     } else {
-      // SEC-T4B-2: any failed read (a refusal, a 5xx, no answer) clears what an earlier read showed, so no figure,
-      // Pulse or customer row stays on screen under the alert for a member the server no longer answers.
-      setToday(null);
-      setTodayError(error || "the server did not answer");
+      // SEC-T4B-2, narrowed in repair round 2: a refusal (401, 403) means this member may no longer see it, so what an
+      // earlier read showed is cleared. A 5xx or no answer keeps the last good read of this same business under the
+      // alert, with Retry.
+      if (status === 401 || status === 403) setToday(null);
+      setTodayFailure({ businessId, message: error || "the server did not answer" });
     }
     setTodayLoading(false);
   }, [businessId]);
+
+  /** Retry and Refresh read Today again, and the KEY switch too when its read failed (item 6). */
+  const refreshToday = useCallback(() => {
+    retryKeySwitch();
+    return loadToday();
+  }, [loadToday]);
 
   const loadQueue = useCallback(async () => {
     if (!businessId) return;
@@ -260,14 +279,16 @@ export default function CommandCenterPage() {
   };
 
   const refreshAll = () => {
-    void loadToday();
+    void refreshToday();
     void loadQueue();
   };
 
-  // KEY UI waits for GET /identity/me and shows only on an explicit keyDisabled: false. Before it answers, when it
-  // fails, or when it carries no boolean, KEY is off here (SEC-T4B-1: fail closed).
-  const keyOff = !keyRead || keyDisabled !== false;
+  // KEY UI shows only once GET /identity/me answered keyDisabled: false (SEC-T4B-1: fail closed). The read has settled
+  // when it answered or failed; data-key-read says so (tests wait on it before checking that nothing KEY shows).
+  const keyOff = !keySwitch.enabled;
+  const keyReadSettled = keySwitch.known || keySwitchFailed;
   const current = today && today.businessId === businessId ? today.data : null;
+  const todayError = todayFailure && todayFailure.businessId === businessId ? todayFailure.message : null;
 
   return (
     <WorkspaceShell
@@ -279,7 +300,7 @@ export default function CommandCenterPage() {
       onAction={refreshAll}
       headerRight={<CommandQuickLauncher keyDisabled={keyOff} />}
     >
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} data-key-read={keyReadSettled ? "settled" : "pending"}>
         {!businessId && !todayLoading ? (
           <p data-testid="today-unavailable" role="alert" className="text-sm text-destructive">
             No business selected.
@@ -293,7 +314,7 @@ export default function CommandCenterPage() {
               error={todayError}
               keyDisabled={keyOff}
               businessCurrency={businessCurrency}
-              onRefresh={loadToday}
+              onRefresh={refreshToday}
               needsYouExtra={
                 <>
                   {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps this member may run,

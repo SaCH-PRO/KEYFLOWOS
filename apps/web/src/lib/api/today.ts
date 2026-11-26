@@ -164,13 +164,3 @@ export function decideApprovalRequest(businessId: string, approvalId: string, de
     { decision },
   );
 }
-
-/**
- * Whether KEY is switched off for this deployment (KEY_DISABLED): GET /identity/me carries keyDisabled
- * (SWP-KEY-SHELL-SMOKE). null when it could not be read.
- */
-export async function fetchKeyDisabled(): Promise<boolean | null> {
-  const { data } = await apiGet<{ keyDisabled?: boolean }>("/identity/me");
-  if (!data || typeof data.keyDisabled !== "boolean") return null;
-  return data.keyDisabled;
-}
