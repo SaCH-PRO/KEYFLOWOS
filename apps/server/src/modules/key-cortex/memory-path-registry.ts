@@ -2707,15 +2707,6 @@ export const MEMORY_SERVICE_WRITERS: readonly MemoryServiceWriterEntry[] = [
     notes: 'Persists document extractions through UnifiedMemoryWriterService.storeDocumentExtraction (revenue-gated by MEM-DOC-EXTRACTION-SIGHT).',
   },
   {
-    file: 'modules/key-cortex/knowledge-ingestion.service.ts',
-    className: 'KnowledgeIngestionService',
-    methods: ['ingestText', 'ingestUrl'],
-    stores: ['AiMemoryEmbedding'],
-    dataClasses: ['GENERAL', 'MIXED'],
-    followUp: 'MEM-CLASS-COLUMNS',
-    notes: 'Chunks ingested text/URLs and writes knowledge embeddings into ai_memory_embeddings via SemanticMemoryService.store.',
-  },
-  {
     file: 'modules/key-cortex/key-cortex-event-bus.service.ts',
     className: 'KeyCortexEventBusService',
     methods: ['publish', 'emit'],

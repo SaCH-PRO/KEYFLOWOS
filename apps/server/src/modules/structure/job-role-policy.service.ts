@@ -199,8 +199,14 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   storefront: { inventory_adjust_stock: 'write', inventory_transfer_stock: 'write' },
   // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write; KeyflowCommandController.createNote requires ai write
   // SWP-CENSUS-V1-B (P90): OnboardingConciergeController.saveOnboardingStep requires settings write
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): KeyCortexGoalsController write routes require ai write
   settings: { save_onboarding_step: 'write', update_business_blueprint: 'write' },
-  ai: { keyflow_create_note: 'write' },
+  ai: {
+    goals_create: 'write',
+    goals_create_plan: 'write',
+    goals_delete: 'write',
+    keyflow_create_note: 'write',
+  },
   team: {
     structure_create_delegation_rule: 'write', structure_get_org_tree: 'read',
     structure_get_stats: 'read', structure_list_assignments: 'read',

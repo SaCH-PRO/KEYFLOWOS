@@ -81,7 +81,8 @@ const ID = {
 const m = (who: string) => `${P}m_${who.slice(P.length)}`;
 const BLIND_SCOPES = {
   crm: 'read', bookings: 'read', projects: 'read', content: 'read', automations: 'read', storefront: 'read',
-  analytics: 'read', operations: 'read', expenses: 'none', revenue: 'none',
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): proposal write routes require operations:write; keep revenue/expenses none so D-238 redaction stays proven.
+  analytics: 'read', operations: 'write', expenses: 'none', revenue: 'none',
 };
 const REVENUE_SCOPES = { crm: 'read', operations: 'read', revenue: 'read', expenses: 'none' };
 const PHONE = { blind: '+18685557101', revenue: '+18685557102', contact: '+18685557103' };

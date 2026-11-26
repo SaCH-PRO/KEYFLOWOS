@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeRecommendationActionBridgeService } from './genome-recommendation-action-bridge.service';
 import { requireBridgeRevenue } from './key-action-genome-projection';
@@ -45,6 +46,8 @@ export class KeyGenomeBridgeController {
   }
 
   @Post('bridge-action')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async bridgeRecommendationAction(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,

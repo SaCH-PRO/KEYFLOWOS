@@ -8,6 +8,13 @@ import { schedulersDisabled } from '../../core/config/env';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { isSystemActor } from '../../core/auth/system-actor';
+import { isStockTracked, ownStockRows } from '../../core/inventory/inventory-mode';
+import {
+  assertValidLineQuantity,
+  MAX_DOCUMENT_AMOUNT,
+  STOCK_TRACKED_WHOLE_UNITS_MESSAGE,
+} from './dto/document-line-item.dto';
+import { computeDocumentAmounts, lineAmount } from './money';
 
 /** lastError of a schedule whose contact belongs to another business (V1-12 review ST-12-3). */
 const CONTACT_OUTSIDE_BUSINESS = "the schedule's contact does not belong to its business; not billed";
@@ -100,6 +107,8 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     // V1-37d (D-13): the business currency unless one is named (it was the
     // literal 'TTD'); a named one is upper-cased and held to D-13.
     const currency = await this.scheduleCurrency(input.businessId, input.currency);
+    // P108 (D-166): validate metadata.items quantities, in-tenant products, and stock-tracked whole units.
+    await this.validateMetadataItems(input.businessId, input.metadata);
     const recurringInvoice = await this.prisma.client.recurringInvoice.create({
       data: {
         businessId: input.businessId,
@@ -122,6 +131,82 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       businessId: input.businessId,
     });
     return recurringInvoice;
+  }
+
+  /**
+   * P108 (V1-64 / DECIMALS-SERVER, D-166): validate `metadata.items` if present
+   * and non-empty. Enforces valid quantities (<= 2 decimals), non-negative
+   * finite unitPrice, in-tenant productId (404), and whole units for
+   * stock-tracked products via the canonical `isStockTracked` + `ownStockRows`.
+   */
+  private async validateMetadataItems(
+    businessId: string,
+    metadata: Record<string, unknown> | null | undefined,
+    client: Prisma.TransactionClient = this.prisma.client as unknown as Prisma.TransactionClient,
+  ): Promise<Array<{ description: string; quantity: number; unitPrice: number; productId: string | null }> | null> {
+    if (!metadata || typeof metadata !== 'object' || !('items' in metadata) || metadata.items === undefined || metadata.items === null) {
+      return null;
+    }
+    if (!Array.isArray(metadata.items)) {
+      throw new BadRequestException('metadata.items must be an array');
+    }
+    if (metadata.items.length === 0) return null;
+
+    const normalized: Array<{ description: string; quantity: number; unitPrice: number; productId: string | null }> = [];
+    for (let i = 0; i < metadata.items.length; i++) {
+      const raw = metadata.items[i] as Record<string, unknown> | null | undefined;
+      if (!raw || typeof raw !== 'object') {
+        throw new BadRequestException(`metadata.items.${i} must be an object`);
+      }
+      if (typeof raw.description !== 'string' || raw.description.trim().length === 0) {
+        throw new BadRequestException(`metadata.items.${i}.description should not be empty`);
+      }
+      const quantity = assertValidLineQuantity(raw.quantity, `metadata.items.${i}.quantity`);
+      if (typeof raw.unitPrice !== 'number' || !Number.isFinite(raw.unitPrice) || raw.unitPrice < 0 || raw.unitPrice > MAX_DOCUMENT_AMOUNT) {
+        throw new BadRequestException(`metadata.items.${i}.unitPrice must be a non-negative number`);
+      }
+      const productId = typeof raw.productId === 'string' && raw.productId.length > 0 ? raw.productId : null;
+      normalized.push({ description: raw.description, quantity, unitPrice: raw.unitPrice, productId });
+    }
+
+    const productIds = [...new Set(normalized.map((it) => it.productId).filter((id): id is string => id !== null))];
+    if (productIds.length > 0) {
+      const products = await client.product.findMany({
+        where: { id: { in: productIds }, businessId },
+        select: {
+          id: true,
+          inventoryMode: true,
+          _count: { select: { inventoryStocks: { where: ownStockRows(businessId) } } },
+        },
+      });
+      if (products.length !== productIds.length) {
+        throw new NotFoundException('Product not found');
+      }
+      const trackedIds = new Set(
+        products
+          .filter((p) => isStockTracked(p.inventoryMode, p._count.inventoryStocks > 0))
+          .map((p) => p.id),
+      );
+      for (const item of normalized) {
+        if (item.productId && trackedIds.has(item.productId) && !Number.isInteger(item.quantity)) {
+          throw new BadRequestException(STOCK_TRACKED_WHOLE_UNITS_MESSAGE);
+        }
+      }
+    }
+
+    // R1-SEC-02: bound the computed subtotal/total against the numeric(18,4)
+    // ledger limit (MAX_DOCUMENT_AMOUNT), matching CommerceService.assertInvoiceAmounts.
+    const computed = computeDocumentAmounts({
+      lines: normalized.map((it) => lineAmount(it.quantity, it.unitPrice)),
+      taxRate: 0,
+    });
+    for (const amount of [computed.subtotal, computed.total]) {
+      if (!Number.isFinite(amount) || amount > MAX_DOCUMENT_AMOUNT) {
+        throw new BadRequestException(`Invoice amount cannot exceed ${MAX_DOCUMENT_AMOUNT}`);
+      }
+    }
+
+    return normalized;
   }
 
   /**
@@ -221,7 +306,10 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null;
     if (input.nextRunDate !== undefined) data.nextRunDate = new Date(input.nextRunDate);
     if (input.status !== undefined) data.status = input.status;
-    if (input.metadata !== undefined) data.metadata = input.metadata ? (input.metadata as any) : null;
+    if (input.metadata !== undefined) {
+      await this.validateMetadataItems(input.businessId, input.metadata);
+      data.metadata = input.metadata ? (input.metadata as any) : null;
+    }
 
     const recurringInvoice = await this.prisma.client.recurringInvoice.update({
       where: { id: input.id },
@@ -480,6 +568,41 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             throw new Error(`${unsupportedCurrency(schedule.currency, business?.currency)}; not billed`);
           }
 
+          // P108 (V1-64 / DECIMALS-SERVER, D-166): when schedule.metadata.items
+          // is non-empty, validate each line under tx (including canonical
+          // stock-tracked whole-unit refusal) and preserve fractional quantities,
+          // unitPrices, productIds, and exact cent totals; otherwise keep the
+          // existing 1-line fallback.
+          const metadataItems = await this.validateMetadataItems(
+            schedule.businessId,
+            schedule.metadata as Record<string, unknown> | null,
+            tx as unknown as Prisma.TransactionClient,
+          );
+          const computed = metadataItems
+            ? computeDocumentAmounts({
+                lines: metadataItems.map((it) => lineAmount(it.quantity, it.unitPrice)),
+                taxRate: 0,
+              })
+            : null;
+          const subtotal = computed ? computed.subtotal : schedule.amount;
+          const total = computed ? computed.total : schedule.amount;
+          const invoiceItemsCreate = metadataItems && computed
+            ? metadataItems.map((it, idx) => ({
+                description: it.description,
+                quantity: it.quantity,
+                unitPrice: it.unitPrice,
+                total: computed.lineTotals[idx],
+                productId: it.productId,
+              }))
+            : [
+                {
+                  description: schedule.description || schedule.name,
+                  quantity: 1,
+                  unitPrice: schedule.amount,
+                  total: schedule.amount,
+                },
+              ];
+
           const invoice = await tx.invoice.create({
             data: {
               businessId: schedule.businessId,
@@ -487,25 +610,18 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
               invoiceNumber: await allocateDocumentNumber(tx, schedule.businessId, 'invoice'),
               status: 'DRAFT',
               issueDate: new Date(),
-              subtotal: schedule.amount,
+              subtotal,
               taxRate: 0,
               taxAmount: 0,
               discountType: null,
               discountValue: null,
               discountAmount: 0,
-              total: schedule.amount,
+              total,
               currency,
               notes: schedule.description,
               recurringInvoiceId: schedule.id,
               items: {
-                create: [
-                  {
-                    description: schedule.description || schedule.name,
-                    quantity: 1,
-                    unitPrice: schedule.amount,
-                    total: schedule.amount,
-                  },
-                ],
+                create: invoiceItemsCreate,
               },
             },
           });
