@@ -2860,3 +2860,63 @@ describe("CSC-56 the <script> text path needs no hint", () => {
     expect(inlineScans() - before).toBe(1);
   });
 });
+
+/* ------------------------------------------------------ repair round 10 */
+
+/**
+ * Repair round 10 (both confirmations of round 9 CONFIRMED; two minors).
+ *
+ *   CSC-57 a substitution whose resolved value holds a line break does not shift the reported line (MINOR 1).
+ *   CSC-58 line mapping pins (MINOR 2): inner code that does not parse, nested string code (in a string and in a
+ *          template with substitutions), \x / \u / \u{} escapes before a continuation, and the raw placeholder's length.
+ */
+const lineOfKey = (file: string, fixture: string, key: string) => scan(file, fixture).find((w) => w.key === key)?.line;
+
+describe("CSC-57 a resolved value's line breaks are not host line breaks", () => {
+  it("a write after ${A}, A a const holding a newline, is reported on its own host line", () => {
+    const fixture = ["const A = `x", "y`;", "const s = `${A}; localStorage.setItem('kf_nl2_token', t)`;"].join("\n");
+    expect(lineOfKey("src/fixture-r10a.ts", fixture, "kf_nl2_token")).toBe(3);
+  });
+});
+
+describe("CSC-58 line mapping pins", () => {
+  it("a host file with parse errors (the text scanner) reports host lines", () => {
+    const fixture = 'const f = <T>(x: T) => x;\n\nlocalStorage.setItem("kf_hb_token", t);';
+    expect(parseFile("src/fixture-r10g.tsx", fixture).ok, "the host does not parse").toBe(false);
+    expect(lineOfKey("src/fixture-r10g.tsx", fixture, "kf_hb_token")).toBe(3);
+  });
+
+  it("inner code that does not parse (the inner text scanner) maps its lines", () => {
+    const fixture = 'eval(`const f = <T>(x: T) => x;\nlocalStorage.setItem("kf_pe_token", t);`);';
+    expect(lineOfKey("src/fixture-r10b.ts", fixture, "kf_pe_token")).toBe(2);
+  });
+
+  it("nested string code inside a plain template maps through both levels", () => {
+    const fixture = ["const s = `a;", "eval(\"localStorage.setItem('kf_nest_token', t)\");`;"].join("\n");
+    expect(lineOfKey("src/fixture-r10c.ts", fixture, "kf_nest_token")).toBe(2);
+  });
+
+  it("nested string code inside a template with a substitution maps through both levels", () => {
+    const fixture = ['const V = "v";', "const s = `${V};", "eval(\"localStorage.setItem('kf_nest2_token', t)\");`;"].join("\n");
+    expect(lineOfKey("src/fixture-r10d.ts", fixture, "kf_nest2_token")).toBe(3);
+  });
+
+  for (const [name, esc] of [
+    ["\\x", "\\x41"],
+    ["\\u", "\\u0042"],
+    ["\\u{}", "\\u{43}"],
+  ]) {
+    it(`a ${name} escape before a continuation keeps the write on the next line`, () => {
+      // The host source holds the escape itself (\x41, \u0042, \u{43}) and a real backslash line continuation.
+      const fixture = `eval("${esc}${esc}; \\\nlocalStorage.setItem('kf_esc_token', t)");`;
+      expect(parseFile("src/fixture-r10e.ts", fixture).ok, "the host parses").toBe(true);
+      expect(lineOfKey("src/fixture-r10e.ts", fixture, "kf_esc_token")).toBe(2);
+    });
+  }
+
+  it("the raw placeholder is as long as the resolved value", () => {
+    const long = "kf_" + "a".repeat(80);
+    const fixture = [`const KEY = "${long}";`, 'const s = `var a = "${KEY}"; \\', 'localStorage.setItem("kf_ph_token", t);', "var b = 1;`;"].join("\n");
+    expect(lineOfKey("src/fixture-r10f.ts", fixture, "kf_ph_token")).toBe(3);
+  });
+});
