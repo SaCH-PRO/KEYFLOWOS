@@ -13,6 +13,10 @@
  *   BSI-02  (SEC-M2) a row with no server instant is refused, not posted on the visitor's clock
  *   BSI-03  every row with no server instant is named, not only the first
  *   BSI-04  the confirmation's Google Calendar link starts at the booked instant and ends a service's length later
+ *   BSI-05  the link's title and location are encoded: a crafted name or location adds no parameter
+ *   BSI-06  a service length that is not a sane number of minutes (1e13) gives the hour's fallback, never a crash
+ *   BSI-07  a service with no length gives an hour
+ *   BSI-08  a restored confirmation with no instant shows no link; a corrupted one (bad instant or length) never crashes
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -48,7 +52,7 @@ const { SLUG, BUSINESS, SERVICE, SERVICE_2, nothing, passthrough } = vi.hoisted(
 
 const net = vi.hoisted(() => ({ posts: [] as Array<{ path: string; body: Record<string, unknown> }> }));
 /** The instant the stubbed checkout submits for its row (undefined: a row with no server instant, SEC-M2). */
-const row = vi.hoisted(() => ({ startIso: "2026-12-15T15:00:00.000Z" as string | undefined, error: "" }));
+const row = vi.hoisted(() => ({ startIso: "2026-12-15T15:00:00.000Z" as string | undefined, error: "", location: undefined as string | undefined }));
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ slug: "bsi-shop" }),
@@ -109,7 +113,7 @@ vi.mock("../components/checkout-flow", () => ({
           serviceBookings: Object.fromEntries(
             cart.map((c) => [
               `${c.id}_${c.itemType}`,
-              { serviceId: c.id, serviceName: "BSI Session", staffId: "", date: "2026-12-15", time: "11:00", startIso: row.startIso },
+              { serviceId: c.id, serviceName: "BSI Session", staffId: "", date: "2026-12-15", time: "11:00", startIso: row.startIso, location: row.location },
             ]),
           ),
           firstName: "Bee",
@@ -146,6 +150,7 @@ beforeEach(() => {
   net.posts = [];
   row.startIso = "2026-12-15T15:00:00.000Z";
   row.error = "";
+  row.location = undefined;
   window.localStorage.clear();
   window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE]));
 });
@@ -195,5 +200,75 @@ describe("SWP-BOOKING-SLOTS: the storefront books the instant the server offered
     const dates = new URL(link.getAttribute("href") ?? "").searchParams.get("dates");
     // At base: 11:00 read on Kiritimati's clock, 20261214T210000Z/20261214T220000Z.
     expect(dates).toBe("20261215T150000Z/20261215T154500Z");
+  });
+
+  /** Books the cart's service through the stubbed checkout and returns the confirmation's calendar link, if any. */
+  async function calendarLink(): Promise<URL | null> {
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Checkout" }, { timeout: 3000 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Place booking" }));
+    await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 });
+    const link = screen.queryByRole("link", { name: /Add to Calendar/i });
+    return link ? new URL(link.getAttribute("href") ?? "") : null;
+  }
+
+  it("BSI-05 the link's title and location are encoded: a crafted name or location adds no parameter", async () => {
+    const crafted = "Cut&dates=20000101T000000Z/20000101T010000Z&location=Elsewhere";
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([{ ...SERVICE, name: crafted }]));
+    row.location = `Salon ${crafted}`;
+    const url = await calendarLink();
+    expect(url).not.toBeNull();
+    expect(url!.searchParams.get("text")).toBe(`${crafted} - BSI Studio`);
+    expect(url!.searchParams.get("location")).toBe(`Salon ${crafted}`);
+    expect(url!.searchParams.getAll("dates")).toEqual(["20261215T150000Z/20261215T154500Z"]);
+    expect(url!.searchParams.getAll("location")).toHaveLength(1);
+  });
+
+  it("BSI-06 a service length that is not a sane number of minutes gives the hour's fallback, never a crash", async () => {
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([{ ...SERVICE, duration: 1e13 }]));
+    const url = await calendarLink();
+    expect(url?.searchParams.get("dates")).toBe("20261215T150000Z/20261215T160000Z");
+  });
+
+  it("BSI-07 a service with no length gives an hour", async () => {
+    const { duration: _duration, ...withoutLength } = SERVICE;
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([withoutLength]));
+    const url = await calendarLink();
+    expect(url?.searchParams.get("dates")).toBe("20261215T150000Z/20261215T160000Z");
+  });
+
+  it("BSI-08 a restored confirmation with no instant shows no link; a corrupted one never crashes", async () => {
+    const record = (details: Record<string, unknown>) =>
+      JSON.stringify({
+        bookingResults: [{ bookingId: "bsi_bk_9" }],
+        bookingReuseKey: null,
+        orderPayload: null,
+        orderNumber: null,
+        orderId: null,
+        orderTotal: 100,
+        paymentMethod: "cash",
+        shippingZoneId: null,
+        items: [SERVICE],
+        customerEmail: null,
+        confirmedDetails: { serviceNames: ["BSI Session"], dates: ["2026-12-15"], times: ["11:00"], locations: [null], businessName: "BSI Studio", ...details },
+      });
+    const cases: Array<Record<string, unknown>> = [
+      {},
+      { starts: ["not-a-time"], durations: [45] },
+      { starts: ["2026-12-15T15:00:00.000Z"], durations: ["abc"] },
+      { starts: ["2026-12-15T15:00:00.000Z"], durations: [1e13] },
+    ];
+    for (const details of cases) {
+      window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, record(details));
+      render(<PublicBookingPage />);
+      await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 });
+      const link = screen.queryByRole("link", { name: /Add to Calendar/i });
+      if ("starts" in details && String((details.starts as string[])[0]).startsWith("2026")) {
+        expect(new URL(link!.getAttribute("href") ?? "").searchParams.get("dates"), JSON.stringify(details)).toBe("20261215T150000Z/20261215T160000Z");
+      } else {
+        expect(link, `no link for ${JSON.stringify(details)}`).toBeNull();
+      }
+      cleanup();
+    }
   });
 });

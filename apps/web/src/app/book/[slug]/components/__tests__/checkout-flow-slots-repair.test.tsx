@@ -5,6 +5,9 @@
  *           longer offers the time that was taken
  *   CFR-02  (COR-3) a failed read offers "Try again", which asks again and shows "Loading times…" while it runs
  *   CFR-04  after a refused Place Order, Place Order stays disabled until every row has a time its fresh answer offers
+ *   CFR-05  while that re-read runs Place Order stays disabled and the review step says "Checking times…", not that
+ *           the time is gone; the notice that it is gone shows only once a fresh answer omits it
+ *   CFR-06  a re-read that fails offers Try again on the review step, not the notice that the time is gone
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -172,5 +175,58 @@ describe("SWP-BOOKING-SLOTS repair round 1", () => {
     fireEvent.click(await screen.findByRole("button", { name: "12:00" }));
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     expect(screen.getByRole("button", { name: /Place Order/i })).toBeEnabled();
+  });
+
+  /** Books 11:00, then has Place Order refused; the re-read after it is answered by `reRead`. */
+  async function refusedOnce(reRead: (path: string) => Promise<unknown>) {
+    let first = true;
+    apiGet.mockImplementation((path: string) => {
+      if (!path.startsWith(SLOTS_ROUTE)) return Promise.resolve({ data: [], error: null });
+      if (first) {
+        first = false;
+        return Promise.resolve({ data: { date: "2026-12-15", slots: BEFORE }, error: null });
+      }
+      return reRead(path);
+    });
+    const onSubmit = vi.fn(async () => {
+      throw new Error("That time slot has already been booked. Please choose another.");
+    });
+    renderToSchedule(onSubmit);
+    fireEvent.click(await screen.findByRole("button", { name: "11:00" }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    fireEvent.click(screen.getByText(/I agree to the terms of service/));
+    fireEvent.click(screen.getByRole("button", { name: /Place Order/i }));
+    await screen.findByText(/already been booked/);
+    return onSubmit;
+  }
+  const GONE = "A time you chose is no longer available. Go back to pick another.";
+
+  it("CFR-05 while the re-read runs, Place Order is disabled and the step says Checking times…", async () => {
+    const pending: Array<(v: unknown) => void> = [];
+    await refusedOnce(() => new Promise((resolve) => pending.push(resolve)));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    expect(screen.getByRole("button", { name: /Place Order/i })).toBeDisabled();
+    expect(screen.getByText("Checking times…")).toBeInTheDocument();
+    expect(screen.queryByText(GONE), "not said before the fresh answer lands").toBeNull();
+
+    await act(async () => pending[0]({ data: { date: "2026-12-15", slots: AFTER }, error: null }));
+    expect(await screen.findByText(GONE)).toBeInTheDocument();
+    expect(screen.queryByText("Checking times…")).toBeNull();
+    expect(screen.getByRole("button", { name: /Place Order/i })).toBeDisabled();
+  });
+
+  it("CFR-06 a re-read that fails offers Try again on the review step, not the notice that the time is gone", async () => {
+    let fail = true;
+    await refusedOnce(async () =>
+      fail ? { data: null, error: "Service unavailable" } : { data: { date: "2026-12-15", slots: BEFORE }, error: null },
+    );
+    expect(await screen.findByRole("button", { name: /Try again/i })).toBeInTheDocument();
+    expect(screen.queryByText(GONE)).toBeNull();
+    expect(screen.getByRole("button", { name: /Place Order/i })).toBeDisabled();
+
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: /Try again/i }));
+    // 11:00 is still free: the row is scheduled again and the order can be placed.
+    await waitFor(() => expect(screen.getByRole("button", { name: /Place Order/i })).toBeEnabled());
   });
 });
