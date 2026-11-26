@@ -466,8 +466,20 @@ export class AiOversightService {
     }
     await this.prisma.client.aiMemory.upsert({
       where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
-      create: { businessId, category: 'settings', key: 'autonomy', value: JSON.stringify(merged), source: 'user' },
-      update: { value: JSON.stringify(merged) },
+      create: {
+        businessId,
+        category: 'settings',
+        key: 'autonomy',
+        value: JSON.stringify(merged),
+        source: 'user',
+        dataClass: 'GENERAL',
+        moduleScope: ['ai', 'settings'],
+      },
+      update: {
+        value: JSON.stringify(merged),
+        dataClass: 'GENERAL',
+        moduleScope: ['ai', 'settings'],
+      },
     });
 
     if (userId) {

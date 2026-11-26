@@ -597,7 +597,14 @@ export class TemporalFlowService {
   async updateMemoryIfUnchanged(
     businessId: string,
     row: { id: string; updatedAt: Date; content: string },
-    data: { content?: string; confidence?: number; sourceEventIds?: string[]; metadata?: Record<string, unknown> },
+    data: {
+      content?: string;
+      confidence?: number;
+      sourceEventIds?: string[];
+      metadata?: Record<string, unknown>;
+      dataClass?: string;
+      moduleScope?: string[];
+    },
   ) {
     try {
       return await this.prisma.client.temporalFlowMemory.update({
@@ -607,6 +614,8 @@ export class TemporalFlowService {
           confidence: data.confidence,
           sourceEventIds: data.sourceEventIds,
           metadata: data.metadata as never,
+          ...(data.dataClass !== undefined ? { dataClass: data.dataClass } : {}),
+          ...(data.moduleScope !== undefined ? { moduleScope: data.moduleScope } : {}),
         },
       });
     } catch (err) {

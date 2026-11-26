@@ -12,6 +12,13 @@ import {
   DOCUMENT_EXTRACTION_CATEGORY,
 } from './semantic-memory.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import {
+  classifyAiMemoryWrite,
+  isMemoryRowDataClass,
+  modulesFromIdentifiers,
+  unionModuleScopes,
+  type MemoryRowDataClass,
+} from './memory-classification';
 
 export type MemoryCategory =
   | 'goals'
@@ -71,6 +78,8 @@ export interface MemoryEntry {
   confidence: number;
   source: string;
   expiresAt: Date | null;
+  dataClass?: string | null;
+  moduleScope?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,6 +91,8 @@ export interface MemoryUpsertInput {
   confidence?: number;
   source?: MemorySource;
   expiresAt?: Date | null;
+  dataClass?: MemoryRowDataClass;
+  moduleScope?: string[];
 }
 
 export interface MemoryContextBlock {
@@ -213,11 +224,41 @@ export async function upsertAiMemoryDroppingStaleCopies(
   recopier: AiMemoryRecopier | undefined,
 ): Promise<{ row: AiMemory; dropped: DroppedAiMemoryCopy[] }> {
   const { category, key } = row;
+  const createValue = typeof write.create.value === 'string' ? write.create.value : null;
+  const updateValue = typeof write.update.value === 'string' ? write.update.value : createValue;
+  const rawCreateClass = write.create.dataClass;
+  const rawUpdateClass = typeof write.update.dataClass === 'string' ? write.update.dataClass : undefined;
+  const rawCreateScope = Array.isArray(write.create.moduleScope) ? write.create.moduleScope : undefined;
+  const rawUpdateScope = Array.isArray(write.update.moduleScope) ? write.update.moduleScope : undefined;
+  const classified = classifyAiMemoryWrite({
+    category,
+    key,
+    value: updateValue,
+    source: typeof write.create.source === 'string' ? write.create.source : null,
+    explicitDataClass: isMemoryRowDataClass(rawUpdateClass)
+      ? rawUpdateClass
+      : isMemoryRowDataClass(rawCreateClass)
+        ? rawCreateClass
+        : null,
+    explicitModuleScope: unionModuleScopes(rawCreateScope, rawUpdateScope),
+  });
+
   const rewritten = await prisma.client.$transaction(async (tx) => {
     const written = await tx.aiMemory.upsert({
       where: { businessId_category_key: { businessId, category, key } },
-      create: { ...write.create, businessId, category, key },
-      update: write.update,
+      create: {
+        ...write.create,
+        businessId,
+        category,
+        key,
+        dataClass: classified.dataClass,
+        moduleScope: classified.moduleScope,
+      },
+      update: {
+        ...write.update,
+        dataClass: classified.dataClass,
+        moduleScope: classified.moduleScope,
+      },
     });
     const dropped = await tx.$queryRaw<DroppedAiMemoryCopy[]>(
       Prisma.sql`DELETE FROM "ai_memory_embeddings" e
@@ -300,15 +341,46 @@ export class AiMemoryService {
    * writer (indexSemantic) start copying a row.
    */
   async upsert(businessId: string, input: MemoryUpsertInput): Promise<MemoryEntry> {
-    const { category, key, value, confidence = 1.0, source = 'user', expiresAt = null } = input;
+    const {
+      category,
+      key,
+      value,
+      confidence = 1.0,
+      source = 'user',
+      expiresAt = null,
+      dataClass,
+      moduleScope,
+    } = input;
+    const classified = classifyAiMemoryWrite({
+      category,
+      key,
+      value,
+      source,
+      explicitDataClass: dataClass ?? null,
+      explicitModuleScope: moduleScope ?? null,
+    });
 
     const { row } = await upsertAiMemoryDroppingStaleCopies(
       this.prisma,
       businessId,
       { category, key },
       {
-        create: { value, confidence, source, expiresAt },
-        update: { value, confidence, source, expiresAt },
+        create: {
+          value,
+          confidence,
+          source,
+          expiresAt,
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
+        },
+        update: {
+          value,
+          confidence,
+          source,
+          expiresAt,
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
+        },
       },
       this.semantic,
     );
@@ -463,6 +535,7 @@ export class AiMemoryService {
     try {
       const signalKey = `${resolution}_${toolName}`;
       const existing = await this.get(businessId, 'corrections', signalKey);
+      const toolModules = modulesFromIdentifiers(toolName);
 
       if (resolution === 'rejected') {
         const description = context?.rationale
@@ -475,6 +548,7 @@ export class AiMemoryService {
           value: description,
           confidence: existing ? Math.min(existing.confidence + 0.1, 1.0) : 0.7,
           source: 'approval_signal',
+          moduleScope: toolModules,
         });
       }
 
@@ -488,6 +562,7 @@ export class AiMemoryService {
             value: rejectionMemory.value,
             confidence: rejectionMemory.confidence - 0.15,
             source: 'approval_signal',
+            moduleScope: toolModules,
           });
         }
       }
@@ -520,7 +595,15 @@ export class AiMemoryService {
 
       if (logs.length < 5) return [];
 
-      const patterns: string[] = [];
+      const patternItems: Array<{ text: string; moduleScope: string[] }> = [];
+      const toolModules = new Map<string, Set<string>>();
+      for (const log of logs) {
+        if (!log.toolName) continue;
+        const set = toolModules.get(log.toolName) ?? new Set<string>();
+        if (log.module) set.add(log.module);
+        for (const m of modulesFromIdentifiers(log.toolName, log.action)) set.add(m);
+        toolModules.set(log.toolName, set);
+      }
 
       const toolCounts: Record<string, number> = {};
       for (const log of logs) {
@@ -532,7 +615,10 @@ export class AiMemoryService {
         .sort(([, a], [, b]) => b - a)
         .slice(0, 3);
       if (topTools.length > 0) {
-        patterns.push(`Most used tools: ${topTools.map(([name, count]) => `${name} (${count}x)`).join(', ')}`);
+        patternItems.push({
+          text: `Most used tools: ${topTools.map(([name, count]) => `${name} (${count}x)`).join(', ')}`,
+          moduleScope: unionModuleScopes(...topTools.map(([name]) => toolModules.get(name))),
+        });
       }
 
       const hourCounts: Record<number, number> = {};
@@ -546,7 +632,10 @@ export class AiMemoryService {
         const h = parseInt(peakHour[0]);
         const ampm = h >= 12 ? 'PM' : 'AM';
         const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-        patterns.push(`Peak activity hour: ${h12}${ampm}`);
+        patternItems.push({
+          text: `Peak activity hour: ${h12}${ampm}`,
+          moduleScope: [],
+        });
       }
 
       const dayCounts: Record<number, number> = {};
@@ -558,7 +647,10 @@ export class AiMemoryService {
       const peakDay = Object.entries(dayCounts)
         .sort(([, a], [, b]) => b - a)[0];
       if (peakDay) {
-        patterns.push(`Most active day: ${dayNames[parseInt(peakDay[0])]}`);
+        patternItems.push({
+          text: `Most active day: ${dayNames[parseInt(peakDay[0])]}`,
+          moduleScope: [],
+        });
       }
 
       const failedTools: Record<string, number> = {};
@@ -571,7 +663,10 @@ export class AiMemoryService {
         .filter(([, count]) => count >= 3)
         .sort(([, a], [, b]) => b - a);
       if (frequentFailures.length > 0) {
-        patterns.push(`Frequently failing tools: ${frequentFailures.map(([name, count]) => `${name} (${count} failures)`).join(', ')}`);
+        patternItems.push({
+          text: `Frequently failing tools: ${frequentFailures.map(([name, count]) => `${name} (${count} failures)`).join(', ')}`,
+          moduleScope: unionModuleScopes(...frequentFailures.map(([name]) => toolModules.get(name))),
+        });
       }
 
       const moduleCounts: Record<string, number> = {};
@@ -584,21 +679,25 @@ export class AiMemoryService {
         .sort(([, a], [, b]) => b - a)
         .slice(0, 3);
       if (topModules.length > 0) {
-        patterns.push(`Most active modules: ${topModules.map(([name, count]) => `${name} (${count}x)`).join(', ')}`);
-      }
-
-      for (const pattern of patterns) {
-        await this.upsert(businessId, {
-          category: 'patterns',
-          key: pattern.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '_') || 'general',
-          value: pattern,
-          confidence: 0.8,
-          source: 'pattern_analysis',
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        patternItems.push({
+          text: `Most active modules: ${topModules.map(([name, count]) => `${name} (${count}x)`).join(', ')}`,
+          moduleScope: unionModuleScopes(topModules.map(([name]) => name)),
         });
       }
 
-      return patterns;
+      for (const item of patternItems) {
+        await this.upsert(businessId, {
+          category: 'patterns',
+          key: item.text.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '_') || 'general',
+          value: item.text,
+          confidence: 0.8,
+          source: 'pattern_analysis',
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          moduleScope: item.moduleScope,
+        });
+      }
+
+      return patternItems.map((item) => item.text);
     } catch (err: any) {
       this.logger.error(`Pattern summarization failed: ${(err as Error).message}`);
       return [];

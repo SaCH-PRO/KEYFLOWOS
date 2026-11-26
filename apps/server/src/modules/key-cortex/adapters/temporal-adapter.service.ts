@@ -3,10 +3,14 @@ import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { TemporalFlowMemoryService } from '../../temporal-flow/temporal-flow-memory.service';
 import { TemporalFlowService, type TemporalFlowReader } from '../../temporal-flow/temporal-flow.service';
-import type {
-  TemporalFlowMemoryEntityType,
-  TemporalFlowMemoryType,
-} from '../../temporal-flow/temporal-flow-memory.types';
+import {
+  classifyTemporalMemoryWrite,
+  isMemoryRowDataClass,
+  mergeMemoryClassifications,
+  modulesFromIdentifiers,
+  unionModuleScopes,
+  type MemoryRowDataClass,
+} from '../../ai/memory-classification';
 
 const KEY_ERROR = 'Memory key must be a non-empty string';
 
@@ -60,6 +64,8 @@ export class TemporalAdapterService {
     ttlDays?: number;
     tags?: string[];
     importance?: string;
+    dataClass?: MemoryRowDataClass;
+    moduleScope?: string[];
   }) {
     const key = requireKey(input.key);
     const tags = stringTags(input.tags);
@@ -73,6 +79,8 @@ export class TemporalAdapterService {
       sourceEventIds: tags,
       metadata: { ttlDays: input.ttlDays, importance: input.importance, key },
       confidence: input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : 0.5,
+      dataClass: input.dataClass,
+      moduleScope: input.moduleScope,
     });
   }
 
@@ -126,10 +134,34 @@ export class TemporalAdapterService {
     importance?: string;
   } & ActorInput) {
     const confidence = input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : undefined;
-    const patch = { content: input.value ? JSON.stringify(input.value) : undefined, confidence };
+    const nextContent = input.value ? JSON.stringify(input.value) : undefined;
     // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): under an actor, written only onto the row that was checked, and the row
     // handed back is the one written (a row rewritten since the check is neither written nor handed back).
     const checked = await this.visibleRowFor(input);
+    const existing = checked ?? (await this.temporal.findById(input.businessId, input.memoryId));
+    const classified = existing
+      ? mergeMemoryClassifications([
+          {
+            dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
+              ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+              : null,
+            moduleScope: (existing as { moduleScope?: string[] }).moduleScope ?? null,
+          },
+          classifyTemporalMemoryWrite({
+            entityType: existing.entityType,
+            entityId: existing.entityId,
+            type: existing.type,
+            sourceModule: existing.sourceModule,
+            content: nextContent ?? existing.content,
+            sourceEventIds: Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [],
+          }),
+        ])
+      : undefined;
+    const patch = {
+      content: nextContent,
+      confidence,
+      ...(classified ? { dataClass: classified.dataClass, moduleScope: classified.moduleScope } : {}),
+    };
     if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
     return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
   }
@@ -150,12 +182,33 @@ export class TemporalAdapterService {
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
     const added = stringTags(input.tags);
     const tags = Array.from(new Set([...existingTags, ...added]));
+    const classified = mergeMemoryClassifications([
+      {
+        dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
+          ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+          : null,
+        moduleScope: unionModuleScopes(
+          (existing as { moduleScope?: string[] }).moduleScope,
+          modulesFromIdentifiers(...added),
+        ),
+      },
+      classifyTemporalMemoryWrite({
+        entityType: existing.entityType,
+        entityId: existing.entityId,
+        type: existing.type,
+        sourceModule: existing.sourceModule,
+        content: existing.content,
+        sourceEventIds: tags,
+      }),
+    ]);
     const patch = {
       sourceEventIds: tags,
       metadata: {
         ...(existing.metadata as Record<string, unknown> | undefined),
         tags,
       },
+      dataClass: classified.dataClass,
+      moduleScope: classified.moduleScope,
     };
     if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
     return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
@@ -170,21 +223,54 @@ export class TemporalAdapterService {
     const keys = requireKeys(input.keys);
     requireKey(input.summaryKey);
     const contents: string[] = [];
+    const sourceClassifications: Array<{ dataClass: MemoryRowDataClass; moduleScope: string[] }> = [];
     for (const key of keys) {
       // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: only memories the actor may see are merged (the merge is handed back).
       const found = await this.recallMemory({ businessId: input.businessId, key, ...(projected(input) ? { actor: input.actor } : {}) });
       if (found && (found as { content?: string }).content) {
         contents.push(String((found as { content: string }).content));
+        const row = found as {
+          entityType?: string;
+          entityId?: string | null;
+          type?: string;
+          sourceModule?: string;
+          content: string;
+          sourceEventIds?: string[];
+          dataClass?: string | null;
+          moduleScope?: string[];
+        };
+        if (isMemoryRowDataClass(row.dataClass)) {
+          sourceClassifications.push({
+            dataClass: row.dataClass,
+            moduleScope: Array.isArray(row.moduleScope) ? row.moduleScope : [],
+          });
+        } else {
+          sourceClassifications.push(
+            classifyTemporalMemoryWrite({
+              entityType: row.entityType ?? 'business',
+              entityId: row.entityId ?? key,
+              type: row.type ?? 'insight',
+              sourceModule: row.sourceModule ?? 'key_cortex',
+              content: row.content,
+              sourceEventIds: row.sourceEventIds ?? [],
+            }),
+          );
+        }
       }
     }
     const merged = contents.length
       ? `Consolidated memories:\n${contents.map((c, i) => `${i + 1}. ${c}`).join('\n')}`
       : 'No memories found to consolidate.';
+    const inherited = sourceClassifications.length
+      ? mergeMemoryClassifications(sourceClassifications)
+      : undefined;
     return this.storeMemory({
       businessId: input.businessId,
       key: input.summaryKey,
       value: { consolidatedFrom: keys, count: contents.length, summary: merged },
       importance: 'medium',
+      dataClass: inherited?.dataClass,
+      moduleScope: inherited?.moduleScope,
     });
   }
 
