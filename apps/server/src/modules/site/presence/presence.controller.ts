@@ -4,6 +4,7 @@ import { PresenceOverviewService } from './presence-overview.service';
 import { StorefrontIntelligenceService } from './storefront-intelligence.service';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../../core/guards/public-rate-limit.guard';
 
 /** The authenticated caller AuthMiddleware attached (id and platform role), or undefined. */
@@ -28,10 +29,12 @@ export class PresenceController {
   }
 
   /**
-   * Any member saves the draft; a new public slug is OWNER only (R0-09b, owner
-   * ruling D-11), decided in PresenceService from the authenticated caller.
+   * Members holding content:write save the draft (SWP-CENSUS-V1-B, owner
+   * ruling A1); a new public slug is OWNER only (R0-09b, owner ruling D-11),
+   * decided in PresenceService from the authenticated caller.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Put('businesses/:businessId/draft')
   saveDraft(
     @Param('businessId') businessId: string,
@@ -47,23 +50,27 @@ export class PresenceController {
     return this.presence.previewDiff(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/preview')
   createPreview(@Param('businessId') businessId: string) {
     return this.presence.createPreviewToken(businessId);
   }
 
   /**
-   * Any member publishes; only the owner's publish moves Business.slug, and a
-   * non-owner's goes live at the current address (R0-09b, owner ruling D-11).
+   * Members holding content:write publish (SWP-CENSUS-V1-B, owner ruling A1);
+   * only the owner's publish moves Business.slug, and a non-owner's goes live
+   * at the current address (R0-09b, owner ruling D-11).
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/publish')
   publish(@Param('businessId') businessId: string, @Req() req: any) {
     return this.presence.publish(businessId, presenceActor(req));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Delete('businesses/:businessId/publish')
   unpublish(@Param('businessId') businessId: string) {
     return this.presence.unpublish(businessId);
@@ -85,7 +92,8 @@ export class PresenceController {
     return this.overview.getOverview(businessId, d);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/action-cards/sync')
   syncActionCards(@Param('businessId') businessId: string) {
     return this.overview.syncActionCardsToQueue(businessId);
@@ -140,7 +148,8 @@ export class PresenceController {
     return this.overview.getTodayStats(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/insights/regenerate')
   regenerateInsights(
     @Param('businessId') businessId: string,
@@ -150,7 +159,8 @@ export class PresenceController {
     return this.intelligence.regenerate(businessId, d);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/insights/:insightId/delegate')
   delegateInsight(
     @Param('businessId') businessId: string,

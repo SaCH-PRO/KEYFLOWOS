@@ -14,6 +14,7 @@ import {
 import { Request as ExpressRequest } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { ApprovalRequestService } from './approval-request.service';
@@ -40,11 +41,12 @@ function principalOf(req: PrincipalRequest | undefined): string {
 }
 
 @Controller()
-@UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, RateLimitGuard)
 export class ApprovalController {
   constructor(private readonly approvals: ApprovalRequestService) {}
 
   @Post('businesses/:businessId/approvals')
+  @RequireModuleScope('operations', 'write')
   @RateLimit(20, 60_000)
   async create(
     @Param('businessId') businessId: string,
@@ -123,6 +125,7 @@ export class ApprovalController {
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/approve')
+  @RequireModuleScope('operations', 'write')
   @RateLimit(20, 60_000)
   async approve(
     @Param('businessId') businessId: string,
@@ -141,6 +144,7 @@ export class ApprovalController {
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/reject')
+  @RequireModuleScope('operations', 'write')
   @RateLimit(20, 60_000)
   async reject(
     @Param('businessId') businessId: string,
@@ -159,6 +163,7 @@ export class ApprovalController {
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/delegate')
+  @RequireModuleScope('operations', 'write')
   @RateLimit(20, 60_000)
   async delegate(
     @Param('businessId') businessId: string,
@@ -177,6 +182,7 @@ export class ApprovalController {
   }
 
   @Delete('businesses/:businessId/approvals/:approvalId')
+  @RequireModuleScope('operations', 'write')
   @RateLimit(20, 60_000)
   async cancel(
     @Param('businessId') businessId: string,
@@ -189,6 +195,7 @@ export class ApprovalController {
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/escalate')
+  @RequireModuleScope('operations', 'write')
   @RateLimit(10, 60_000)
   async escalate(
     @Param('businessId') businessId: string,
