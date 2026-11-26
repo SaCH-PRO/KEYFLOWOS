@@ -3825,6 +3825,10 @@ describe("CSC-83 a clear only when every branch proves one (F3)", () => {
   it('res.cookies.set("kf_view", "", { maxAge: c ? 0 : 99 }) is a write', () => {
     expect(keysOf(scan("src/fixture-r15d2.ts", 'res.cookies.set("kf_view", "", { maxAge: c ? 0 : 99 });'))).toEqual(["response-cookie:kf_view"]);
   });
+  it('cookieStore.set({ name, value: "", maxAge: c ? 0 : 99 }) (the object form) is a write', () => {
+    expect(keysOf(scan("src/fixture-r15d6.ts", 'cookieStore.set({ name: "kf_view", value: "", maxAge: c ? 0 : 99 });'))).toEqual(["cookie:kf_view"]);
+    expect(scan("src/fixture-r15d7.ts", 'cookieStore.set({ name: "kf_view", value: "", maxAge: 0 });')).toEqual([]);
+  });
   it("a ternary Max-Age inside a cookie string is a write", () => {
     expect(keysOf(scan("src/fixture-r15d3.ts", "document.cookie = `kf_view=; Max-Age=${c ? 0 : 99}`;"))).toEqual(["cookie:kf_view"]);
   });
