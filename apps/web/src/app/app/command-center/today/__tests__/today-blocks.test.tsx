@@ -773,6 +773,29 @@ describe("TODAY-4BLOCK repair round 3 (confirmation reviews at a173d9bc): nothin
     }
   }, CASE_MS);
 
+  it("[T4B-28] (MINOR 3) X's Today read failed, switch to Y: while Y's read is in flight, X's 'could not be loaded' alert is not shown as Y's", async () => {
+    const api = serveTwo(
+      {
+        [BIZ]: { today: { status: 500, body: { statusCode: 500, message: "Internal server error" } }, items: listedItems([]) },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([]) },
+      },
+      [[BIZ_Y, "today"]],
+    );
+    try {
+      await mountPage();
+      await screen.findByTestId("today-unavailable", {}, { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await waitFor(() => expect(api.wasRequested(BIZ_Y, "today")).toBe(true), { timeout: 5_000 });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(screen.queryByTestId("today-unavailable")).toBeNull();
+      api.release(BIZ_Y, "today");
+      await screen.findByRole("heading", { level: 2, name: /^get set up$/i }, { timeout: 10_000 });
+      expect(screen.queryByTestId("today-unavailable")).toBeNull();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
   it("[T4B-27] (MINOR 4) a refresh answering 401 clears what was shown, like a 403", async () => {
     serve({ today: [ok(busyToday()), { status: 401, body: { statusCode: 401, message: "Unauthorized" } }] });
     await renderToday();
