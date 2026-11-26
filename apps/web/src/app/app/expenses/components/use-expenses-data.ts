@@ -160,6 +160,8 @@ export function useExpensesData() {
     // the page would stay loading.
     // R5: and a load from before the latest switch (its closure holds that time's filters) is refused the same way,
     // leaving loading as it is for the current read.
+    // `refresh` is a trigger (R6 C-4): each bump makes a new loadData, so the read effect runs again.
+    void refresh;
     if (businessRef.current !== businessId) return;
     if (switchEpoch !== switchRef.current) {
       setRefresh((n) => n + 1);
@@ -207,8 +209,6 @@ export function useExpensesData() {
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-    // `refresh` is a trigger, not a value read here: a new loadData is what makes the read effect run again (R6 C-4).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearAll, businessId, switchEpoch, refresh, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
