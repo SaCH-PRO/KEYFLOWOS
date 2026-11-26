@@ -37,7 +37,11 @@ export function commitEvidence(id, commits) {
   );
   const code = named.filter((c) => CODE_TYPES.has(subjectType(c.subject)));
   const other = named.filter((c) => !CODE_TYPES.has(subjectType(c.subject)));
-  return { compacted, code, other };
+  // compact.sh gives a tests-only packet (gate and census packets) exactly one commit, its RED commit.
+  const testsOnly = named.filter(
+    (c) => subjectType(c.subject) === 'test' && c.subject.includes(`RED for pkt/V1-${id} (compacted)`),
+  );
+  return { compacted, code, other, testsOnly };
 }
 
 /** A prior "wave-2b" row counts as merged only when a wave 2b commit is on main. */
@@ -54,6 +58,9 @@ export function deriveStatus(packet, { priorRow, commits, wave2bOnMain, branches
   const shas = (list) => list.map((c) => c.sha.slice(0, 8));
   if (ev.compacted.length) {
     return { status: 'done', derived_from: 'compacted-commit', uncertain: false, evidence: shas(ev.compacted) };
+  }
+  if (ev.testsOnly.length) {
+    return { status: 'done', derived_from: 'compacted-tests-only', uncertain: false, evidence: shas(ev.testsOnly) };
   }
   if (priorRow?.status === 'merged-main') {
     return { status: 'done', derived_from: 'prior-status-file', uncertain: false, evidence: [] };
