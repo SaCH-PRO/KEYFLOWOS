@@ -530,4 +530,282 @@ describe('P113 (FU-KEY-OVERDUE-SENT-ONLY, D-260 / D-256)', () => {
     expect(bizBList.data.invoices.map((i: any) => i.id)).toEqual([ID.invBizB]);
     expect(bizBList.data.total).toBe(900);
   });
+
+  it('KO-08 (R1-SEC-01 / R1-COR-01 / R1-COR-04, D-13 / D-251): mixed-currency books keep top-level total in home currency, separate totalsByCurrency, and normalize currency codes', async () => {
+    const db = prisma.client;
+    const bizMulti = `${P}biz_multi`;
+    const contactMulti = `${P}contact_multi`;
+    const invTtd = `${P}inv_multi_ttd`;
+    const invUsd = `${P}inv_multi_usd`;
+    const invUsdPending = `${P}inv_multi_usd_pend`;
+
+    await db.business.create({
+      data: {
+        id: bizMulti,
+        name: 'V81O Multi Currency',
+        slug: `${P}biz-multi`,
+        currency: 'ttd',
+        accountingBasis: 'CASH',
+        ownerId: ID.ownerA,
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: contactMulti,
+        businessId: bizMulti,
+        firstName: 'Kendra',
+        lastName: 'Joseph',
+        email: `${P}kendra@test.local`,
+      },
+    });
+    await db.invoice.createMany({
+      data: [
+        {
+          id: invTtd,
+          businessId: bizMulti,
+          contactId: contactMulti,
+          invoiceNumber: `${P}INV-M-TTD`,
+          status: 'SENT',
+          subtotal: 250,
+          total: 250,
+          currency: 'ttd',
+          issueDate: daysAgo(15),
+          dueDate: daysAgo(5),
+        },
+        {
+          id: invUsd,
+          businessId: bizMulti,
+          contactId: contactMulti,
+          invoiceNumber: `${P}INV-M-USD`,
+          status: 'SENT',
+          subtotal: 100,
+          total: 100,
+          currency: 'usd',
+          issueDate: daysAgo(18),
+          dueDate: daysAgo(8),
+        },
+        {
+          id: invUsdPending,
+          businessId: bizMulti,
+          contactId: contactMulti,
+          invoiceNumber: `${P}INV-M-USDP`,
+          status: 'PENDING',
+          subtotal: 400,
+          total: 400,
+          currency: 'USD',
+          issueDate: daysAgo(20),
+          dueDate: daysAgo(10),
+        },
+      ],
+    });
+
+    const listRes = await toolRegistry.executeTool(
+      'finance.listOverdueInvoices',
+      { limit: 20 },
+      { businessId: bizMulti, userId: ID.ownerA, autonomyLevel: 4 },
+    );
+
+    expect(listRes.success).toBe(true);
+    expect(listRes.data.currency).toBe('TTD');
+    expect(listRes.data.total).toBe(250);
+    expect(listRes.data.totalsByCurrency).toEqual({ TTD: 250, USD: 100 });
+    expect(listRes.data.invoices.map((i: any) => ({ id: i.id, currency: i.currency }))).toEqual([
+      { id: invUsd, currency: 'USD' },
+      { id: invTtd, currency: 'TTD' },
+    ]);
+
+    const draftUsd = await toolRegistry.executeTool(
+      'finance.createInvoiceReminderDraft',
+      { invoiceId: invUsd, tone: 'friendly' },
+      { businessId: bizMulti, userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(draftUsd.success).toBe(true);
+    expect(draftUsd.data.draft).toContain('USD 100');
+  });
+
+  it('KO-09 (R1-SEC-02 / R1-COR-02): empty/missing ctx.businessId is refused and soft-deleted contacts fall back without leaking PII', async () => {
+    const emptyCtxDraft = await toolRegistry.executeTool(
+      'finance.createInvoiceReminderDraft',
+      { invoiceId: ID.invSent, tone: 'friendly' },
+      { businessId: '', userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(emptyCtxDraft.success).toBe(false);
+    expect(emptyCtxDraft.data).toBeUndefined();
+    expect(emptyCtxDraft.error).toBe('Invoice not found');
+
+    const undefinedCtxDraft = await toolRegistry.executeTool(
+      'finance.createInvoiceReminderDraft',
+      { invoiceId: ID.invSent, tone: 'friendly' },
+      { businessId: undefined as any, userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(undefinedCtxDraft.success).toBe(false);
+    expect(undefinedCtxDraft.data).toBeUndefined();
+    expect(undefinedCtxDraft.error).toBe('Invoice not found');
+
+    const emptyCtxList = await toolRegistry.executeTool(
+      'finance.listOverdueInvoices',
+      { limit: 10 },
+      { businessId: '', userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(emptyCtxList.success).toBe(true);
+    expect(emptyCtxList.data).toEqual({ invoices: [], total: 0, currency: 'TTD', totalsByCurrency: {} });
+
+    const db = prisma.client;
+    const bizDelContact = `${P}biz_delc`;
+    const contactDeleted = `${P}contact_del`;
+    const invDelContact = `${P}inv_delc`;
+
+    await db.business.create({
+      data: {
+        id: bizDelContact,
+        name: 'V81O Soft Deleted Contact Biz',
+        slug: `${P}biz-delc`,
+        currency: 'TTD',
+        accountingBasis: 'CASH',
+        ownerId: ID.ownerA,
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: contactDeleted,
+        businessId: bizDelContact,
+        firstName: 'SecretDeletedName',
+        lastName: 'Hidden',
+        email: `${P}deleted_contact@test.local`,
+        deletedAt: daysAgo(1),
+      },
+    });
+    await db.invoice.create({
+      data: {
+        id: invDelContact,
+        businessId: bizDelContact,
+        contactId: contactDeleted,
+        invoiceNumber: `${P}INV-DELC`,
+        status: 'SENT',
+        subtotal: 125,
+        total: 125,
+        currency: 'TTD',
+        issueDate: daysAgo(14),
+        dueDate: daysAgo(4),
+      },
+    });
+
+    const listRes = await toolRegistry.executeTool(
+      'finance.listOverdueInvoices',
+      { limit: 10 },
+      { businessId: bizDelContact, userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(listRes.success).toBe(true);
+    expect(listRes.data.invoices).toHaveLength(1);
+    expect(listRes.data.invoices[0].contactName).toBe('Unknown');
+
+    const draftRes = await toolRegistry.executeTool(
+      'finance.createInvoiceReminderDraft',
+      { invoiceId: invDelContact, tone: 'friendly' },
+      { businessId: bizDelContact, userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(draftRes.success).toBe(true);
+    expect(draftRes.data.draft).toContain('Hi there,');
+    expect(draftRes.data.draft).not.toContain('SecretDeletedName');
+  });
+
+  it('KO-10 (R1-SEC-03): listOverdueInvoices rejects non-positive/non-finite limits and caps large limits at 100', async () => {
+    for (const badLimit of [Infinity, -Infinity, -1, 0, 'not-a-number']) {
+      const res = await toolRegistry.executeTool(
+        'finance.listOverdueInvoices',
+        { limit: badLimit },
+        { businessId: ID.bizA, userId: ID.ownerA, autonomyLevel: 4 },
+      );
+      expect(res.success, `expected limit=${String(badLimit)} to be rejected`).toBe(false);
+      expect(res.data).toBeUndefined();
+      expect(res.error).toMatch(/limit/i);
+    }
+
+    const tool = toolRegistry.getTool('finance', 'listOverdueInvoices');
+    expect(tool.validateInput({ limit: 500 })).toEqual({ valid: true, parsed: { limit: 100 } });
+
+    const cappedRes = await toolRegistry.executeTool(
+      'finance.listOverdueInvoices',
+      { limit: 500 },
+      { businessId: ID.bizA, userId: ID.ownerA, autonomyLevel: 4 },
+    );
+    expect(cappedRes.success).toBe(true);
+    expect(cappedRes.data.invoices).toHaveLength(4);
+  });
+
+  it('KO-11 (R1-SEC-04): createInvoiceReminderDraft allowlists tone and never reads prototype properties like toString', async () => {
+    for (const badTone of ['toString', 'constructor', '__proto__', 'aggressive']) {
+      const res = await toolRegistry.executeTool(
+        'finance.createInvoiceReminderDraft',
+        { invoiceId: ID.invSent, tone: badTone },
+        { businessId: ID.bizA, userId: ID.ownerA, autonomyLevel: 4 },
+      );
+      expect(res.success, `expected tone=${badTone} to be rejected`).toBe(false);
+      expect(res.data).toBeUndefined();
+      expect(res.error).toMatch(/tone/i);
+    }
+
+    // Defense-in-depth: direct execute call bypassing validateInput still returns a string, never a function.
+    const tool = toolRegistry.getTool('finance', 'createInvoiceReminderDraft');
+    const directRes = await tool.execute(
+      { businessId: ID.bizA, userId: ID.ownerA, autonomyLevel: 4 },
+      { invoiceId: ID.invSent, tone: 'toString' as any },
+      { prisma } as any,
+    );
+    expect(directRes.success).toBe(true);
+    expect(typeof directRes.data.draft).toBe('string');
+    expect(directRes.data.draft).toContain('Hi Nadia,');
+  });
+
+  it('KO-12 (R1-COR-03): OVERDUE invoice with no dueDate (0 daysOverdue) never emits "0 days overdue" in friendly, firm, or urgent drafts', async () => {
+    const db = prisma.client;
+    const bizZero = `${P}biz_zero`;
+    const contactZero = `${P}contact_zero`;
+    const invNoDue = `${P}inv_overdue_nodue`;
+
+    await db.business.create({
+      data: {
+        id: bizZero,
+        name: 'V81O Zero Days Biz',
+        slug: `${P}biz-zero`,
+        currency: 'TTD',
+        accountingBasis: 'CASH',
+        ownerId: ID.ownerA,
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: contactZero,
+        businessId: bizZero,
+        firstName: 'Tasha',
+        lastName: 'Singh',
+        email: `${P}tasha@test.local`,
+      },
+    });
+    await db.invoice.create({
+      data: {
+        id: invNoDue,
+        businessId: bizZero,
+        contactId: contactZero,
+        invoiceNumber: `${P}INV-NODUE`,
+        status: 'OVERDUE',
+        subtotal: 320,
+        total: 320,
+        currency: 'TTD',
+        issueDate: daysAgo(5),
+        dueDate: null,
+      },
+    });
+
+    for (const tone of ['friendly', 'firm', 'urgent'] as const) {
+      const res = await toolRegistry.executeTool(
+        'finance.createInvoiceReminderDraft',
+        { invoiceId: invNoDue, tone },
+        { businessId: bizZero, userId: ID.ownerA, autonomyLevel: 4 },
+      );
+      expect(res.success, `expected ${tone} draft to succeed`).toBe(true);
+      expect(res.data.draft).toContain('overdue');
+      expect(res.data.draft).not.toContain('0 days overdue');
+    }
+  });
 });
