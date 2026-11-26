@@ -38,6 +38,9 @@
  *   BPD-19  RED  COR: Escape closes Pay, except while a pay is in flight
  *   BPD-20  RED  COR: focus moves into Pay on open, Tab and Shift+Tab stay inside it, and focus returns to Approve
  *                on close
+ *   BPD-21  RED  found in round 3: Escape in Pay stays in Pay. The app's Escape shortcut (use-keyboard-shortcuts,
+ *                a window keydown listener) goes to the list from a detail page, so without this Escape would also
+ *                leave the expense, even while a pay is in flight
  *
  * Mounted on the real ExpenseDetailPage and the real api clients (lib/api.ts, lib/client.ts, lib/api/finance.ts),
  * so the request body is read off the wire; only `fetch`, the toast, next/navigation and the stored business are
@@ -573,5 +576,31 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /pay bill/i })).toBeNull());
     expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Approve/ }));
+  });
+
+  it("BPD-21 Escape in Pay does not reach the app's window shortcut, idle or while a pay is in flight", async () => {
+    let release: (r: Response) => void = () => {};
+    renderDialog({ pay: () => new Promise<Response>((r) => { release = r; }) });
+    const appEscape = vi.fn();
+    const onWindowKey = (e: KeyboardEvent) => { if (e.key === "Escape") appEscape(); };
+    window.addEventListener("keydown", onWindowKey);
+    try {
+      const onClose = vi.fn();
+      render(<BillPayDialog businessId={BUSINESS} bill={BILL as unknown as Expense} onClose={onClose} onPaid={vi.fn()} />);
+      await screen.findByRole("combobox", { name: /pay from/i });
+
+      fireEvent.click(screen.getByRole("button", { name: /^Pay/ }));
+      await waitFor(() => expect((screen.getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(true));
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      expect(appEscape).not.toHaveBeenCalled();
+
+      release(jsonResponse(400, { statusCode: 400, message: "Bill changed status concurrently", error: "Conflict" }, "Conflict"));
+      await waitFor(() => expect((screen.getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(appEscape).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", onWindowKey);
+    }
   });
 });
