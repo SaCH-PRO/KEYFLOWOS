@@ -1425,6 +1425,11 @@
       "prefix": "v97p_",
       "owner": "apps/server/test/presence-scope.integration.test.ts",
       "packet": "V1-97 (FU-PRESENCE-REVENUE-SCOPE, P100)"
+    },
+    {
+      "prefix": "v98h_",
+      "owner": "apps/server/test/health-money-scope.integration.test.ts",
+      "packet": "V1-98 (FU-HEALTH-MONEY-SCOPE, P101)"
     }
   ],
   "pendingRenames": [],
