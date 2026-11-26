@@ -173,7 +173,9 @@ describe("CONTACTS-LIST-FIRST (D-289, C8): the customer list comes first", () =>
   it("CLF-02 RED-BEFORE: list view, no moved card comes before the first list row", async () => {
     renderPage("list");
     const rows = await screen.findAllByRole("option", { name: /byron|baker/i }, T);
-    await waitFor(() => expect(screen.getAllByText("Call Ada about her order").length).toBeGreaterThan(0), T).catch(() => {});
+    // Wait until the next actions have been read, so every card that main would draw is drawn.
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes("/next-actions"))).toBe(true), T);
+    await new Promise((r) => setTimeout(r, 50));
     const before = movedMarkers().filter(({ el }) => precedes(el, rows[0])).map(({ name }) => name);
     expect(before, "moved cards drawn before the first list row").toEqual([]);
   });
@@ -219,6 +221,9 @@ describe("CONTACTS-LIST-FIRST (D-289, C8): the customer list comes first", () =>
     // A Pulse tile still sets its segment (the toolbar's "At Risk" chip turns on).
     fireEvent.click(within(panel!).getByRole("button", { name: /^\d+\s*at risk$/i }));
     await waitFor(() => expect(screen.getByRole("button", { name: /^at risk/i, pressed: true })).toBeInTheDocument(), T);
+    // Clear it again (the segment filters the list, and the list is read below).
+    fireEvent.click(screen.getByRole("button", { name: /^at risk/i, pressed: true }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^at risk/i, pressed: true })).toBeNull(), T);
 
     // A smart chip still toggles.
     const chip = within(panel!).getByRole("button", { name: /unpaid invoices/i });
