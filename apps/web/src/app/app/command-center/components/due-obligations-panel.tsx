@@ -50,18 +50,28 @@ export function DueObligationsPanel({ businessId, onDischarge, dischargeDisabled
    */
   const [loaded, setLoaded] = useState<{ businessId: string; items: DueObligation[]; overdueCount: number; error: string | null } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const request = useRef(0);
+  /**
+   * The business on screen now (repair round 4): a re-read started for another business (a Done that ended after
+   * a switch) does nothing, so it never drops this business's read or leaves the panel loading.
+   */
+  const currentBusiness = useRef(businessId);
   const current = loaded && loaded.businessId === businessId ? loaded : null;
   const loading = current === null;
   const items = current?.items ?? [];
   const overdueCount = current?.overdueCount ?? 0;
   const error = current?.error ?? null;
 
+  useEffect(() => {
+    currentBusiness.current = businessId;
+  }, [businessId]);
+
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId || currentBusiness.current !== businessId) return;
     const mine = ++request.current;
     const { data, error: err } = await fetchDueObligations(businessId, { windowDays: 7 });
-    if (mine !== request.current) return;
+    if (mine !== request.current || currentBusiness.current !== businessId) return;
     // An error must not render as "nothing is due". Those look identical on a
     // dashboard and mean opposite things.
     setLoaded({ businessId, items: data?.items ?? [], overdueCount: data?.overdueCount ?? 0, error: err });
@@ -96,10 +106,16 @@ export function DueObligationsPanel({ businessId, onDischarge, dischargeDisabled
       <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-center">
         <p className="text-sm text-destructive">Could not load what is due: {error}</p>
         <button
-          onClick={() => void load()}
-          className="mt-2 text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+          onClick={() => {
+            setRetrying(true);
+            void load().finally(() => setRetrying(false));
+          }}
+          disabled={retrying}
+          aria-busy={retrying}
+          className="mt-2 text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 disabled:opacity-60"
         >
-          <RefreshCw className="h-3 w-3" /> Try again
+          {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          {retrying ? "Trying again…" : "Try again"}
         </button>
       </div>
     );

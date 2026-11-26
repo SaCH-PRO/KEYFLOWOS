@@ -138,9 +138,15 @@ export default function CommandCenterPage() {
    * The command queue, kept with the business it was read for (repair round 3): after a switch nothing of the old
    * business shows, and a reply for an older request (the old business, or a refresh since) is dropped.
    */
-  const [queue, setQueue] = useState<{ businessId: string; items: CommandItem[]; total: number } | null>(null);
+  const [queue, setQueue] = useState<{ businessId: string; items: CommandItem[]; total: number; error: string | null } | null>(null);
   const [queueLoadingFor, setQueueLoadingFor] = useState<string | null>(null);
   const queueRequest = useRef(0);
+  /**
+   * The business on screen now (repair round 4). An action, or a reload it starts, that was begun for another
+   * business never re-reads or writes for this one: an item action still in flight across a switch leaves the new
+   * business's state alone.
+   */
+  const currentBusiness = useRef<string | null>(null);
   /**
    * W7-WEB-OPS-SCOPE (D-40): the member's operations level as the server's refusals name it; the
    * queue disables the item actions below write. Today itself is every member's (D-96). Kept with its business: a
@@ -170,6 +176,7 @@ export default function CommandCenterPage() {
     const onBusinessChanged = (event: Event) => {
       const next = (event as CustomEvent<{ businessId?: string }>).detail?.businessId ?? getStoredBusinessId();
       if (!next || cancelled) return;
+      currentBusiness.current = next;
       setBusinessId(next);
       const cached = getCachedBusiness();
       setBusinessName(cached && cached.id === next ? cached.name : null);
@@ -210,21 +217,30 @@ export default function CommandCenterPage() {
   }, [loadToday]);
 
   const loadQueue = useCallback(async () => {
-    if (!businessId) return;
+    // A reload for a business that is no longer on screen (an action that ended after a switch) does nothing: it
+    // neither drops the current business's read nor writes its state.
+    if (!businessId || currentBusiness.current !== businessId) return;
     const request = ++queueRequest.current;
     setQueueLoadingFor(businessId);
     try {
       const res = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
-      if (request !== queueRequest.current) return;
+      if (request !== queueRequest.current || currentBusiness.current !== businessId) return;
       const { data } = res;
-      setQueue({ businessId, items: data?.items ?? [], total: data?.total ?? 0 });
       // A refused read names the level (none); a read that succeeds means at least read.
       const refused = operationsLevelFromAnswer(res);
+      // A read that failed for another reason (a 5xx, no answer) is said, with Retry; never shown as an empty queue
+      // (repair round 4, MINOR 3). A refusal is the queue's own "no operations access" state.
+      const failed = !data && !refused ? res.error || "the server did not answer" : null;
+      setQueue({ businessId, items: data?.items ?? [], total: data?.total ?? 0, error: failed });
       if (refused) setOps({ businessId, level: refused });
       else if (data) setOps((prev) => (prev && prev.businessId === businessId && prev.level !== "none" ? prev : { businessId, level: "unknown" }));
     } finally {
       if (request === queueRequest.current) setQueueLoadingFor(null);
     }
+  }, [businessId]);
+
+  useEffect(() => {
+    currentBusiness.current = businessId;
   }, [businessId]);
 
   useEffect(() => {
@@ -296,6 +312,7 @@ export default function CommandCenterPage() {
   const current = today && today.businessId === businessId ? today.data : null;
   const commandItems = queue && queue.businessId === businessId ? queue.items : [];
   const queueTotal = queue && queue.businessId === businessId ? queue.total : 0;
+  const queueError = queue && queue.businessId === businessId ? queue.error : null;
   const queueLoading = queueLoadingFor !== null && queueLoadingFor === businessId;
   const operationsLevel: OperationsLevel = ops && ops.businessId === businessId ? ops.level : "unknown";
   const todayError = todayFailure && todayFailure.businessId === businessId ? todayFailure.message : null;
@@ -330,8 +347,22 @@ export default function CommandCenterPage() {
                   {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps this member may run,
                       each with its D-70 Run action. /app/control-tower redirects here. Not under KEY_DISABLED. */}
                   {!keyOff && <ApprovedActionsPanel key={`approved-actions:${businessId}`} businessId={businessId} />}
-                  <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
-                    {/* COR-1: under KEY_DISABLED no card shows "KEY can handle" or Execute, and no execute handler is given. */}
+                  <CommandSection icon={LayoutDashboard} title={queueError ? "Command Queue" : `Command Queue (${queueTotal})`}>
+                    {queueError ? (
+                      <div role="alert" data-testid="command-queue-unavailable" className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-center">
+                        <p className="text-sm text-destructive">The command queue could not be loaded: {queueError}</p>
+                        <button
+                          type="button"
+                          onClick={() => void loadQueue()}
+                          disabled={queueLoading}
+                          aria-busy={queueLoading}
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                        >
+                          <RefreshCw className="h-3 w-3" /> {queueLoading ? "Retrying…" : "Retry"}
+                        </button>
+                      </div>
+                    ) : (
+                    /* COR-1: under KEY_DISABLED no card shows "KEY can handle" or Execute, and no execute handler is given. */
                     <CommandKeyDisabledContext.Provider value={keyOff}>
                     <CommandQueueV2
                       items={commandItems}
@@ -348,6 +379,7 @@ export default function CommandCenterPage() {
                       operationsLevel={operationsLevel}
                     />
                     </CommandKeyDisabledContext.Provider>
+                    )}
                   </CommandSection>
                 </>
               }
