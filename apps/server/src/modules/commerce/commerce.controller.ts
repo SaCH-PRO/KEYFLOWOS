@@ -33,7 +33,7 @@ import { ConfirmPendingPaymentDto } from './dto/confirm-pending-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { assertQuoteStatusAgreement } from './quote-workflow';
 import { buildInvoiceEmailHtml, emailLineItems } from './invoice-email.template';
-import type { InvoiceForEmail } from './invoice-email.types';
+import { visibleVatNumber, type InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SKIP_BUSINESS_EVENT_KEY, auditOnClaim } from '../business-events/business-event.interceptor';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -1823,6 +1823,7 @@ export class CommerceController {
         .recordInvoiceView(invoice.id, invoice.businessId, invoice.contactId)
         .catch(() => undefined);
     }
+    const vat = visibleVatNumber(invoice.business?.vatNumber, invoice.taxAmount);
     return {
       ok: true,
       token: link.token,
@@ -1837,7 +1838,16 @@ export class CommerceController {
         notes: invoice.notes,
         items: invoice.items,
         contact: invoice.contact ? { firstName: invoice.contact.firstName, lastName: invoice.contact.lastName } : null,
-        business: invoice.business ? { name: invoice.business.name, logoUrl: invoice.business.logoUrl, primaryColor: invoice.business.primaryColor, email: invoice.business.email, phone: invoice.business.phone } : null,
+        business: invoice.business
+          ? {
+              name: invoice.business.name,
+              logoUrl: invoice.business.logoUrl,
+              primaryColor: invoice.business.primaryColor,
+              email: invoice.business.email,
+              phone: invoice.business.phone,
+              ...(vat ? { vatNumber: vat } : {}),
+            }
+          : null,
       },
       balance,
       totals: {
