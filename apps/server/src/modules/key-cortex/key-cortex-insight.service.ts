@@ -13,10 +13,12 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
-import { CASH_NET_PAYMENT_WHERE, roundMoney } from '../commerce/invoice-workflow.service';
+import { InvoiceMoney, readInvoiceMoney } from '../commerce/commerce-stats.service';
+import { fromCents, remainingMoney, roundMoney, subtractMoney, sumMoney, toCents } from '../commerce/money';
+import { normalizeCurrency } from '../finance/posting.service';
 import { BookingStatus, DealStatus, InvoiceStatus, Prisma } from '@prisma/client';
 import { CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
-import { startOfMonth, startOfWeek, startOfDay, subDays, subMonths, subWeeks, format, differenceInDays } from 'date-fns';
+import { addDays, startOfMonth, startOfWeek, startOfDay, subDays, subMonths, subWeeks, format, differenceInDays } from 'date-fns';
 
 /* ─────────────────────────── Query vocabulary ───────────────────────────
  * W11-CORTEX-INSIGHT-QUERIES (review SEC-W11CRR-2). Every query below ran
@@ -54,16 +56,33 @@ function contactDisplayName(
  * count, but not groupBy, aggregate or a relation include, so it is spelled
  * here for all of them.
  */
+const NON_REVENUE_STATUSES: ReadonlySet<string> = new Set([
+  InvoiceStatus.DRAFT,
+  InvoiceStatus.VOID,
+  InvoiceStatus.FAILED,
+  InvoiceStatus.FULLY_CREDITED,
+]);
+
 const REVENUE_INVOICE: Prisma.InvoiceWhereInput = {
   status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID, InvoiceStatus.FAILED, InvoiceStatus.FULLY_CREDITED] },
   deletedAt: null,
 };
 
-/** Issued and not paid at all: the customer owes the whole total (OVERDUE is what the overdue pass sets). */
-const UNPAID_STATUSES: InvoiceStatus[] = [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.OVERDUE];
-
-/** Issued and not fully paid (the unpaid statuses and both part-paid spellings). */
-const OUTSTANDING_STATUSES: InvoiceStatus[] = [...UNPAID_STATUSES, InvoiceStatus.PARTIAL, InvoiceStatus.PARTIALLY_PAID];
+/**
+ * P119 (FU-CORTEX-INSIGHT-CASH-TRUTH, D-14, D-250): canonical remaining balance
+ * and overdue state from `readInvoiceMoney`, also covering legacy `PARTIAL` rows
+ * (e.g. Shopify sync) with the same cents-safe net-payment and owedCap arithmetic.
+ */
+function invoiceOwed(inv: InvoiceMoney, now: Date): { remaining: number; overdue: boolean } {
+  if (inv.status !== InvoiceStatus.PARTIAL) {
+    return { remaining: inv.remaining, overdue: inv.overdue };
+  }
+  const net = sumMoney(inv.cash.map((c) => c.amount));
+  const owedCap = Math.max(0, toCents(inv.total));
+  const remaining = fromCents(Math.min(toCents(remainingMoney(inv.total, Math.max(0, net))), owedCap));
+  const overdue = remaining > 0 && !!inv.dueDate && new Date(inv.dueDate) < now;
+  return { remaining, overdue };
+}
 
 /**
  * Contact.status vocabulary (crm.constants): a lead is LEAD; a customer is
@@ -79,10 +98,22 @@ const CLIENT_STATUSES = [CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STA
  */
 const AUTOMATED_TASK_CATEGORIES = ['workflow', 'automation', 'delegation_loop'];
 
-/** A contact's open deals: Contact has no estimatedValue; the value of its open deals is what it is worth now. */
-const OPEN_DEAL_VALUES = { where: { status: DealStatus.OPEN, deletedAt: null }, select: { value: true } } as const;
-const openDealValue = (deals: Array<{ value: number | null }>): number =>
-  deals.reduce((s, d) => s + (d.value ?? 0), 0);
+/** A contact's open deals (tenant-scoped; currency-checked against home currency per D-13/D-251). */
+const openDealSelect = (businessId: string) =>
+  ({
+    where: { businessId, status: DealStatus.OPEN, deletedAt: null },
+    select: { value: true, currency: true },
+  }) as const;
+
+const openDealValue = (
+  deals: Array<{ value: number | null; currency?: string | null }>,
+  homeCurrency: string,
+): number =>
+  sumMoney(
+    deals
+      .filter((d) => (normalizeCurrency(d.currency) || homeCurrency) === homeCurrency)
+      .map((d) => d.value ?? 0),
+  );
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -214,6 +245,30 @@ export class KeyCortexInsightService {
     private readonly contextService: KeyCortexContextV2Service,
   ) {}
 
+  /** Resolve the business's normalized home currency (D-13 / D-251; defaults to TTD). */
+  private async getHomeCurrency(businessId: string): Promise<string> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+    return normalizeCurrency(business?.currency) || 'TTD';
+  }
+
+  /** Own-tenant APPLIED credit-note sums for PARTIALLY_CREDITED invoices (D-75 / SEC-V44-6). */
+  private async appliedCreditsByInvoice(businessId: string, creditedIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (creditedIds.length === 0) return map;
+    const rows = await this.prisma.client.creditNote.groupBy({
+      by: ['invoiceId'],
+      where: { businessId, status: 'APPLIED', invoiceId: { in: creditedIds } },
+      _sum: { amount: true },
+    });
+    for (const r of rows) {
+      map.set(r.invoiceId, Number(r._sum.amount ?? 0) || 0);
+    }
+    return map;
+  }
+
   /* ─────── 1. Find Profit Opportunities ─────── */
 
   async findProfitOpportunities(businessId: string): Promise<ProfitOpportunity[]> {
@@ -222,28 +277,43 @@ export class KeyCortexInsightService {
     const opportunities: ProfitOpportunity[] = [];
 
     try {
-      // 1a. Overdue invoices = quick cash (unpaid, past due; OVERDUE is the status the overdue pass sets)
-      const overdueInvoices = await this.prisma.client.invoice.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: { in: UNPAID_STATUSES },
-          dueDate: { lt: new Date() },
-        },
-        include: {
-          contact: { select: { id: true, email: true, ...CONTACT_NAME_SELECT } },
-        },
-        orderBy: { dueDate: 'asc' },
-        take: 20,
-      });
+      const now = new Date();
+      const [homeCurrency, allInvoiceMoney] = await Promise.all([
+        this.getHomeCurrency(businessId),
+        readInvoiceMoney(this.prisma.client, businessId, now),
+      ]);
 
-      overdueInvoices.forEach((inv) => {
-        const amount = inv.total || 0;
-        const daysOverdue = differenceInDays(new Date(), inv.dueDate ?? new Date());
+      // 1a. Overdue invoices = quick cash (remaining balance on home-currency open receivables, D-14/D-13/D-75)
+      const overdueItems = allInvoiceMoney
+        .filter((inv) => inv.currency === homeCurrency)
+        .map((inv) => ({ inv, ...invoiceOwed(inv, now) }))
+        .filter((item) => item.remaining > 0 && item.overdue)
+        .sort((a, b) => {
+          const at = a.inv.dueDate ? new Date(a.inv.dueDate).getTime() : Number.POSITIVE_INFINITY;
+          const bt = b.inv.dueDate ? new Date(b.inv.dueDate).getTime() : Number.POSITIVE_INFINITY;
+          return at - bt;
+        })
+        .slice(0, 20);
+
+      const overdueContactIds = [
+        ...new Set(overdueItems.map((x) => x.inv.contactId).filter((id): id is string => Boolean(id))),
+      ];
+      const overdueContacts = overdueContactIds.length
+        ? await this.prisma.client.contact.findMany({
+            where: { businessId, id: { in: overdueContactIds } },
+            select: { id: true, email: true, ...CONTACT_NAME_SELECT },
+          })
+        : [];
+      const overdueContactMap = new Map(overdueContacts.map((c) => [c.id, c]));
+
+      overdueItems.forEach(({ inv, remaining }) => {
+        const amount = remaining;
+        const daysOverdue = differenceInDays(now, inv.dueDate ?? now);
+        const contact = inv.contactId ? overdueContactMap.get(inv.contactId) : undefined;
         opportunities.push({
           id: `inv-${inv.id}`,
           type: 'overdue_invoice',
-          title: `Collect $${amount.toLocaleString()} from ${contactDisplayName(inv.contact)}`,
+          title: `Collect $${amount.toLocaleString()} from ${contactDisplayName(contact)}`,
           description: `Invoice ${inv.invoiceNumber || inv.id} is ${daysOverdue} days overdue. Follow up to collect payment.`,
           estimatedValue: amount,
           confidence: Math.min(0.9, 0.5 + daysOverdue * 0.01),
@@ -260,7 +330,7 @@ export class KeyCortexInsightService {
           businessId,
           deletedAt: null,
           status: LEAD_STATUS,
-          lastInteractionAt: { lt: subDays(new Date(), 14) },
+          lastInteractionAt: { lt: subDays(now, 14) },
           leadScore: { gte: 50 },
         },
         orderBy: { leadScore: 'desc' },
@@ -272,7 +342,7 @@ export class KeyCortexInsightService {
           leadScore: true,
           lastInteractionAt: true,
           pipelineStage: true,
-          deals: OPEN_DEAL_VALUES,
+          deals: openDealSelect(businessId),
         },
       });
 
@@ -280,10 +350,10 @@ export class KeyCortexInsightService {
         const name = contactDisplayName(lead);
         const score = lead.leadScore ?? 0;
         const daysStale = lead.lastInteractionAt
-          ? differenceInDays(new Date(), lead.lastInteractionAt)
+          ? differenceInDays(now, lead.lastInteractionAt)
           : 30;
-        // The lead's open deals are its value; a lead with none has no invented figure.
-        const estValue = openDealValue(lead.deals);
+        // The lead's open deals in home currency are its value; a lead with none has no invented figure.
+        const estValue = openDealValue(lead.deals, homeCurrency);
         opportunities.push({
           id: `lead-${lead.id}`,
           type: 'stale_lead',
@@ -300,7 +370,7 @@ export class KeyCortexInsightService {
         });
       });
 
-      // 1c. Underutilized products (Product has isActive, not a status)
+      // 1c. Underutilized products (Product has isActive, not a status; home currency only)
       const underutilized = await this.prisma.client.product.findMany({
         where: {
           businessId,
@@ -308,22 +378,22 @@ export class KeyCortexInsightService {
           isActive: true,
         },
         include: {
-          // Sold = on an issued invoice (not a draft, void or deleted one).
-          _count: { select: { invoiceItems: { where: { invoice: REVENUE_INVOICE } } } },
+          // Sold = on an issued invoice of this business (not a draft, void or deleted one).
+          _count: { select: { invoiceItems: { where: { invoice: { ...REVENUE_INVOICE, businessId } } } } },
         },
         orderBy: { price: 'desc' },
         take: 10,
       });
 
       underutilized
-        .filter((p) => p._count.invoiceItems < 3 && p.price > 100)
+        .filter((p) => (normalizeCurrency(p.currency) || homeCurrency) === homeCurrency && p._count.invoiceItems < 3 && p.price > 100)
         .forEach((product) => {
           opportunities.push({
             id: `prod-${product.id}`,
             type: 'underutilized_product',
             title: `Promote "${product.name}" — only sold ${product._count.invoiceItems} times`,
             description: `Premium product at $${(product.price || 0).toLocaleString()} is underutilized. Create a targeted campaign.`,
-            estimatedValue: (product.price || 0) * 10,
+            estimatedValue: roundMoney((product.price || 0) * 10),
             confidence: 0.6,
             recommendedAction: `Feature ${product.name} in next email campaign. Create bundle with popular products.`,
             sourceData: { productId: product.id, salesCount: product._count.invoiceItems },
@@ -337,7 +407,7 @@ export class KeyCortexInsightService {
         where: {
           businessId,
           category: { notIn: AUTOMATED_TASK_CATEGORIES },
-          createdAt: { gte: subDays(new Date(), 30) },
+          createdAt: { gte: subDays(now, 30) },
         },
       });
 
@@ -366,15 +436,15 @@ export class KeyCortexInsightService {
         select: {
           id: true,
           ...CONTACT_NAME_SELECT,
-          // A purchase is an issued invoice (relation reads are not soft-delete filtered).
+          // A purchase is an issued invoice of this business (relation reads are not soft-delete filtered).
           _count: {
-            select: { invoices: { where: REVENUE_INVOICE } },
+            select: { invoices: { where: { ...REVENUE_INVOICE, businessId } } },
           },
           invoices: {
-            where: REVENUE_INVOICE,
+            where: { ...REVENUE_INVOICE, businessId },
             orderBy: { createdAt: 'desc' },
-            take: 1,
-            select: { total: true, createdAt: true },
+            take: 10,
+            select: { total: true, createdAt: true, currency: true },
           },
         },
         orderBy: { invoices: { _count: 'desc' } },
@@ -385,18 +455,22 @@ export class KeyCortexInsightService {
         .filter((c) => c._count.invoices >= 2)
         .forEach((customer) => {
           const name = contactDisplayName(customer);
-          const lastInvoice = customer.invoices[0];
-          const daysSincePurchase = lastInvoice?.createdAt
-            ? differenceInDays(new Date(), lastInvoice.createdAt)
+          const homeCustomerInvoices = customer.invoices.filter(
+            (i) => (normalizeCurrency(i.currency) || homeCurrency) === homeCurrency,
+          );
+          const lastInvoice = homeCustomerInvoices[0];
+          if (!lastInvoice) return;
+          const daysSincePurchase = lastInvoice.createdAt
+            ? differenceInDays(now, lastInvoice.createdAt)
             : 0;
           if (daysSincePurchase > 30 && daysSincePurchase < 90) {
-            const avgValue = lastInvoice?.total || 500;
+            const avgValue = lastInvoice.total || 500;
             opportunities.push({
               id: `upsell-${customer.id}`,
               type: 'upsell',
               title: `Upsell ${name} — repeat buyer, ${daysSincePurchase}d since last purchase`,
               description: `Loyal customer with ${customer._count.invoices} purchases. Last order: $${avgValue.toLocaleString()}. Ready for next purchase.`,
-              estimatedValue: avgValue * 1.2,
+              estimatedValue: roundMoney(avgValue * 1.2),
               confidence: 0.7,
               recommendedAction: `Send personalized upsell offer to ${name}. Recommend premium tier or bundle.`,
               sourceData: { contactId: customer.id, purchaseCount: customer._count.invoices, daysSincePurchase },
@@ -445,15 +519,16 @@ export class KeyCortexInsightService {
           periodLabel = 'This Month';
       }
 
-      // Revenue = issued invoices: not drafts ('draft' was never an InvoiceStatus), voids or deleted rows.
-      const [currentInvoices, previousInvoices, topCustomersRaw] = await Promise.all([
+      // Revenue = issued invoices in home currency (D-13/D-251): not drafts, voids, failed, fully credited or deleted.
+      const [homeCurrency, currentInvoicesRaw, previousInvoicesRaw] = await Promise.all([
+        this.getHomeCurrency(businessId),
         this.prisma.client.invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: periodStart },
             ...REVENUE_INVOICE,
           },
-          select: { total: true, createdAt: true },
+          select: { id: true, total: true, status: true, currency: true, createdAt: true, contactId: true },
         }),
         this.prisma.client.invoice.findMany({
           where: {
@@ -461,24 +536,25 @@ export class KeyCortexInsightService {
             createdAt: { gte: previousStart, lt: periodStart },
             ...REVENUE_INVOICE,
           },
-          select: { total: true },
-        }),
-        this.prisma.client.invoice.groupBy({
-          by: ['contactId'],
-          where: {
-            businessId,
-            createdAt: { gte: periodStart },
-            ...REVENUE_INVOICE,
-          },
-          _sum: { total: true },
-          _count: { id: true },
-          orderBy: { _sum: { total: 'desc' } },
-          take: 5,
+          select: { id: true, total: true, status: true, currency: true },
         }),
       ]);
 
-      const totalRevenue = currentInvoices.reduce((s, i) => s + (i.total || 0), 0);
-      const previousRevenue = previousInvoices.reduce((s, i) => s + (i.total || 0), 0);
+      const currentInvoices = currentInvoicesRaw.filter((i) => normalizeCurrency(i.currency) === homeCurrency);
+      const previousInvoices = previousInvoicesRaw.filter((i) => normalizeCurrency(i.currency) === homeCurrency);
+
+      const creditedIds = [...currentInvoices, ...previousInvoices]
+        .filter((i) => i.status === InvoiceStatus.PARTIALLY_CREDITED)
+        .map((i) => i.id);
+      const creditedOf = await this.appliedCreditsByInvoice(businessId, creditedIds);
+      const billedOf = (inv: { id: string; total: number | null; status: InvoiceStatus }): number => {
+        const total = inv.total || 0;
+        if (inv.status !== InvoiceStatus.PARTIALLY_CREDITED) return roundMoney(total);
+        return fromCents(Math.max(0, toCents(total) - toCents(creditedOf.get(inv.id) ?? 0)));
+      };
+
+      const totalRevenue = sumMoney(currentInvoices.map(billedOf));
+      const previousRevenue = sumMoney(previousInvoices.map(billedOf));
       const growthRate = previousRevenue > 0
         ? Math.round(((totalRevenue - previousRevenue) / previousRevenue) * 100)
         : 0;
@@ -486,8 +562,25 @@ export class KeyCortexInsightService {
       const invoiceCount = currentInvoices.length;
       const avgInvoiceValue = invoiceCount > 0 ? Math.round(totalRevenue / invoiceCount) : 0;
 
-      // Top customers
-      const contactIds = topCustomersRaw.map((c) => c.contactId).filter(Boolean);
+      // Top customers (home currency, cents-safe)
+      const byContact = new Map<string, { amounts: number[]; count: number }>();
+      for (const inv of currentInvoices) {
+        if (!inv.contactId) continue;
+        const entry = byContact.get(inv.contactId) ?? { amounts: [], count: 0 };
+        entry.amounts.push(billedOf(inv));
+        entry.count += 1;
+        byContact.set(inv.contactId, entry);
+      }
+      const topCustomerEntries = Array.from(byContact.entries())
+        .map(([contactId, data]) => ({
+          contactId,
+          revenue: sumMoney(data.amounts),
+          invoices: data.count,
+        }))
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 5);
+
+      const contactIds = topCustomerEntries.map((c) => c.contactId);
       const contacts = contactIds.length
         ? await this.prisma.client.contact.findMany({
             where: { businessId, id: { in: contactIds } },
@@ -496,27 +589,25 @@ export class KeyCortexInsightService {
         : [];
       const contactMap = new Map(contacts.map((c) => [c.id, contactDisplayName(c)]));
 
-      const topCustomers = topCustomersRaw.map((c) => {
-        const revenue = c._sum?.total || 0;
-        const invoices = c._count?.id || 0;
-        return {
-          id: c.contactId || 'unknown',
-          name: contactMap.get(c.contactId || '') || 'Unknown',
-          revenue,
-          invoices,
-          avgInvoice: invoices > 0 ? Math.round(revenue / invoices) : 0,
-        };
-      });
+      const topCustomers = topCustomerEntries.map((c) => ({
+        id: c.contactId || 'unknown',
+        name: contactMap.get(c.contactId) || 'Unknown',
+        revenue: c.revenue,
+        invoices: c.invoices,
+        avgInvoice: c.invoices > 0 ? Math.round(c.revenue / c.invoices) : 0,
+      }));
 
-      // Revenue by day
-      const revenueByDayMap = new Map<string, number>();
+      // Revenue by day (home currency, cents-safe)
+      const revenueByDayMap = new Map<string, number[]>();
       currentInvoices.forEach((inv) => {
         const day = format(new Date(inv.createdAt), 'yyyy-MM-dd');
-        revenueByDayMap.set(day, (revenueByDayMap.get(day) || 0) + (inv.total || 0));
+        const list = revenueByDayMap.get(day) ?? [];
+        list.push(billedOf(inv));
+        revenueByDayMap.set(day, list);
       });
       const revenueByDay = Array.from(revenueByDayMap.entries())
-        .map(([date, amount]) => ({ date, amount }))
-        .sort((a: any, b: any) => a.date.localeCompare(b.date));
+        .map(([date, amounts]) => ({ date, amount: sumMoney(amounts) }))
+        .sort((a, b) => a.date.localeCompare(b.date));
 
       // Trends
       const trends: string[] = [];
@@ -554,21 +645,39 @@ export class KeyCortexInsightService {
       const thirtyDaysAgo = subDays(now, 30);
       const sixtyDaysAgo = subDays(now, 60);
 
-      // Get all customers (CLIENT, or a legacy spelling of it) with engagement signals
-      const customers = await this.prisma.client.contact.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: { in: CLIENT_STATUSES },
-        },
-        select: {
-          id: true,
-          ...CONTACT_NAME_SELECT,
-          email: true,
-          lastInteractionAt: true,
-          createdAt: true,
-        },
-      });
+      // Load home currency, canonical invoice money (remaining balances, D-14/D-75/D-13), and customers once
+      const [homeCurrency, allInvoiceMoney, customers] = await Promise.all([
+        this.getHomeCurrency(businessId),
+        readInvoiceMoney(this.prisma.client, businessId, now),
+        this.prisma.client.contact.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+            status: { in: CLIENT_STATUSES },
+          },
+          select: {
+            id: true,
+            ...CONTACT_NAME_SELECT,
+            email: true,
+            lastInteractionAt: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+      const homeInvoices = allInvoiceMoney.filter((inv) => inv.currency === homeCurrency);
+      const creditedIds = homeInvoices
+        .filter((inv) => inv.status === InvoiceStatus.PARTIALLY_CREDITED)
+        .map((inv) => inv.id);
+      const creditedOf = await this.appliedCreditsByInvoice(businessId, creditedIds);
+
+      const invoicesByContact = new Map<string, InvoiceMoney[]>();
+      for (const inv of homeInvoices) {
+        if (!inv.contactId) continue;
+        const list = invoicesByContact.get(inv.contactId) ?? [];
+        list.push(inv);
+        invoicesByContact.set(inv.contactId, list);
+      }
 
       const risks: ChurnRisk[] = [];
 
@@ -589,20 +698,13 @@ export class KeyCortexInsightService {
             factors.push(`No interaction in ${daysSinceInteraction} days`);
           }
 
-          // Outstanding invoices
-          const outstanding = await this.prisma.client.invoice.findMany({
-            where: {
-              businessId,
-              contactId: customer.id,
-              deletedAt: null,
-              status: { in: OUTSTANDING_STATUSES },
-            },
-            select: { total: true, dueDate: true },
-          });
-          const outstandingBalance = outstanding.reduce((s, i) => s + (i.total || 0), 0);
-          const overdueBalance = outstanding
-            .filter((i) => i.dueDate && i.dueDate < now)
-            .reduce((s, i) => s + (i.total || 0), 0);
+          // Outstanding / overdue balances from canonical remaining-balance arithmetic (D-14, D-13/D-251, D-75)
+          const custInvoices = invoicesByContact.get(customer.id) ?? [];
+          const owedList = custInvoices
+            .map((inv) => ({ inv, ...invoiceOwed(inv, now) }))
+            .filter((x) => x.remaining > 0);
+          const outstandingBalance = sumMoney(owedList.map((x) => x.remaining));
+          const overdueBalance = sumMoney(owedList.filter((x) => x.overdue).map((x) => x.remaining));
 
           if (overdueBalance > 0) {
             riskScore += 30;
@@ -640,16 +742,17 @@ export class KeyCortexInsightService {
             factors.push('No bookings in 60 days');
           }
 
-          // Calculate recovery value
-          const totalRevenue = await this.prisma.client.invoice.aggregate({
-            where: {
-              businessId,
-              contactId: customer.id,
-              ...REVENUE_INVOICE,
-            },
-            _sum: { total: true },
-          });
-          const recoveryValue = (totalRevenue._sum.total || 0) * 0.3;
+          // Recovery value: 30% of customer's home-currency net billed revenue
+          const custTotalRevenue = sumMoney(
+            custInvoices
+              .filter((inv) => !NON_REVENUE_STATUSES.has(inv.status))
+              .map((inv) =>
+                inv.status === InvoiceStatus.PARTIALLY_CREDITED
+                  ? fromCents(Math.max(0, toCents(inv.total) - toCents(creditedOf.get(inv.id) ?? 0)))
+                  : inv.total,
+              ),
+          );
+          const recoveryValue = roundMoney(custTotalRevenue * 0.3);
 
           if (riskScore >= 40) {
             let riskLevel: ChurnRisk['riskLevel'] = 'low';
@@ -690,35 +793,35 @@ export class KeyCortexInsightService {
 
   async analyzePipeline(businessId: string): Promise<PipelineAnalysis> {
     try {
-      // Get all leads grouped by stage (Contact's stage column is pipelineStage; groupBy is
-      // not soft-delete filtered by the db client, so deletedAt is spelled out)
-      const leadsByStage = await this.prisma.client.contact.groupBy({
-        by: ['pipelineStage'],
-        where: {
-          businessId,
-          deletedAt: null,
-          status: LEAD_STATUS,
-        },
-        _count: { pipelineStage: true },
-      });
-
-      // Each lead's value is its open deals (Contact has no estimatedValue)
-      const leads = await this.prisma.client.contact.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: LEAD_STATUS,
-        },
-        select: {
-          pipelineStage: true,
-          createdAt: true,
-          lastInteractionAt: true,
-          deals: OPEN_DEAL_VALUES,
-        },
-      });
+      // Get home currency, leads by stage, and leads with home-currency open deal values
+      const [homeCurrency, leadsByStage, leads] = await Promise.all([
+        this.getHomeCurrency(businessId),
+        this.prisma.client.contact.groupBy({
+          by: ['pipelineStage'],
+          where: {
+            businessId,
+            deletedAt: null,
+            status: LEAD_STATUS,
+          },
+          _count: { pipelineStage: true },
+        }),
+        this.prisma.client.contact.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+            status: LEAD_STATUS,
+          },
+          select: {
+            pipelineStage: true,
+            createdAt: true,
+            lastInteractionAt: true,
+            deals: openDealSelect(businessId),
+          },
+        }),
+      ]);
       const leadsWithValue = leads.map((l) => ({
         stage: l.pipelineStage,
-        value: openDealValue(l.deals),
+        value: openDealValue(l.deals, homeCurrency),
         createdAt: l.createdAt,
         lastInteractionAt: l.lastInteractionAt,
       }));
@@ -733,7 +836,7 @@ export class KeyCortexInsightService {
       for (const stageName of stageConfig) {
         const stageLeads = leadsWithValue.filter((l) => l.stage === stageName || (!l.stage && stageName === 'new'));
         const count = stageLeads.length;
-        const value = stageLeads.reduce((s, l) => s + l.value, 0);
+        const value = sumMoney(stageLeads.map((l) => l.value));
 
         const avgDaysInStage = stageLeads.length > 0
           ? Math.round(
@@ -770,7 +873,7 @@ export class KeyCortexInsightService {
       }
 
       const activeLeads = leadsWithValue.filter((l) => l.stage !== 'closed_won' && l.stage !== 'closed_lost');
-      const totalPipelineValue = activeLeads.reduce((s, l) => s + l.value, 0);
+      const totalPipelineValue = sumMoney(activeLeads.map((l) => l.value));
       const wonDeals = stages.find((s) => s.name === 'closed_won');
       const avgDealSize = wonDeals && wonDeals.count > 0 ? Math.round(wonDeals.value / wonDeals.count) : 0;
 
@@ -841,80 +944,91 @@ export class KeyCortexInsightService {
     try {
       const now = new Date();
       const monthStart = startOfMonth(now);
+      const thirtyDaysAgo = subDays(now, 30);
+      const thirtyDaysAhead = addDays(now, 30);
 
-      // Money in = paid invoices
-      const paidInvoices = await this.prisma.client.invoice.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: InvoiceStatus.PAID,
-          updatedAt: { gte: monthStart },
-        },
-        select: { total: true },
-      });
-      const moneyIn = paidInvoices.reduce((s, i) => s + (i.total || 0), 0);
+      // P119 (FU-CORTEX-INSIGHT-CASH-TRUTH, D-14, D-13/D-251, D-75):
+      // Read cash-in strictly from canonical payment rows by transaction date (and paidAt for
+      // rowless PAID invoices per D-249/D-250, never updatedAt), and outstanding/upcoming
+      // balances from canonical remaining balance (readInvoiceMoney + invoiceOwed), scoped to
+      // the business's home currency and own live invoices/payments.
+      const [homeCurrency, allInvoiceMoney, expenses] = await Promise.all([
+        this.getHomeCurrency(businessId),
+        readInvoiceMoney(this.prisma.client, businessId, now),
+        this.prisma.client.expense.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+            status: 'PAID',
+            date: { gte: monthStart },
+          },
+          select: { amount: true, currency: true },
+        }),
+      ]);
 
-      // Money out = paid, non-deleted expenses (if tracked) or estimated from costs
-      const expenses = await this.prisma.client.expense.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: 'PAID',
-          date: { gte: monthStart },
-        },
-        select: { amount: true },
-      });
-      const moneyOut = expenses.length > 0
-        ? expenses.reduce((s, e) => s + (e.amount || 0), 0)
-        : Math.round(moneyIn * 0.4); // Estimate 40% costs if no expense tracking
+      const homeInvoices = allInvoiceMoney.filter((inv) => inv.currency === homeCurrency);
+      const homeCash = homeInvoices.flatMap((inv) => inv.cash);
 
-      const netFlow = moneyIn - moneyOut;
+      // Money in = net home-currency cash received this month (SUCCESSFUL + negative REFUNDED, D-14)
+      const moneyIn = sumMoney(
+        homeCash
+          .filter((row) => !!row.at && new Date(row.at) >= monthStart)
+          .map((row) => row.amount),
+      );
 
-      // Days sales outstanding
-      const outstandingInvoices = await this.prisma.client.invoice.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: { in: OUTSTANDING_STATUSES },
-        },
-        select: { total: true, dueDate: true, createdAt: true },
-      });
-      const totalOutstanding = outstandingInvoices.reduce((s, i) => s + (i.total || 0), 0);
-      const avgDaysOutstanding = outstandingInvoices.length > 0
+      // Money out = paid, non-deleted home-currency expenses (if tracked) or estimated from positive cash-in
+      const homeExpenses = expenses.filter((e) => (normalizeCurrency(e.currency) || homeCurrency) === homeCurrency);
+      const moneyOut = homeExpenses.length > 0
+        ? sumMoney(homeExpenses.map((e) => e.amount || 0))
+        : Math.round(Math.max(0, moneyIn) * 0.4); // Estimate 40% costs if no expense tracking
+
+      const netFlow = subtractMoney(moneyIn, moneyOut);
+
+      // Outstanding & DSO from canonical remaining balances (excludes paid-off / deleted / other currencies)
+      const openOwed = homeInvoices
+        .map((inv) => ({ inv, ...invoiceOwed(inv, now) }))
+        .filter((x) => x.remaining > 0);
+      const totalOutstanding = sumMoney(openOwed.map((x) => x.remaining));
+
+      const openIds = openOwed.map((x) => x.inv.id);
+      const openMetaRows = openIds.length
+        ? await this.prisma.client.invoice.findMany({
+            where: { businessId, deletedAt: null, id: { in: openIds } },
+            select: { id: true, createdAt: true, contact: { select: CONTACT_NAME_SELECT } },
+          })
+        : [];
+      const openMetaMap = new Map(openMetaRows.map((row) => [row.id, row]));
+
+      const avgDaysOutstanding = openOwed.length > 0
         ? Math.round(
-            outstandingInvoices.reduce((sum, i) => {
-              const created = i.createdAt || new Date();
+            openOwed.reduce((sum, x) => {
+              const created = openMetaMap.get(x.inv.id)?.createdAt || now;
               return sum + differenceInDays(now, created);
-            }, 0) / outstandingInvoices.length,
+            }, 0) / openOwed.length,
           )
         : 0;
 
-      const collectionRate = (moneyIn + totalOutstanding) > 0
-        ? Math.round((moneyIn / (moneyIn + totalOutstanding)) * 100)
+      const collectedPositive = Math.max(0, moneyIn);
+      const collectionRate = (collectedPositive + totalOutstanding) > 0
+        ? Math.round((collectedPositive / (collectedPositive + totalOutstanding)) * 100)
         : 0;
 
-      // Upcoming payments due
-      const upcomingDue = await this.prisma.client.invoice.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: { in: OUTSTANDING_STATUSES },
-          dueDate: { gte: now, lte: subDays(now, -30) },
-        },
-        include: {
-          contact: { select: CONTACT_NAME_SELECT },
-        },
-        orderBy: { dueDate: 'asc' },
-        take: 10,
-      });
-
-      const upcomingPaymentsDue = upcomingDue.map((inv) => ({
-        id: inv.id,
-        contactName: contactDisplayName(inv.contact),
-        amount: inv.total || 0,
-        dueDate: inv.dueDate || new Date(),
-        daysUntilDue: differenceInDays(inv.dueDate || now, now),
-      }));
+      // Upcoming payments due (next 30 days, remaining balance in home currency)
+      const upcomingPaymentsDue = openOwed
+        .filter((x) => x.inv.dueDate && new Date(x.inv.dueDate) >= now && new Date(x.inv.dueDate) <= thirtyDaysAhead)
+        .sort((a, b) => new Date(a.inv.dueDate!).getTime() - new Date(b.inv.dueDate!).getTime())
+        .slice(0, 10)
+        .map((x) => {
+          const meta = openMetaMap.get(x.inv.id);
+          const dueDate = x.inv.dueDate ? new Date(x.inv.dueDate) : now;
+          return {
+            id: x.inv.id,
+            contactName: contactDisplayName(meta?.contact),
+            amount: x.remaining,
+            dueDate,
+            daysUntilDue: differenceInDays(dueDate, now),
+          };
+        });
 
       // Collection issues
       const collectionIssues: string[] = [];
@@ -925,26 +1039,16 @@ export class KeyCortexInsightService {
         collectionIssues.push(`Collection rate is ${collectionRate}% — improve follow-up`);
       }
 
-      // Simple forecast — project next 30 days from the cash received in the last 30, net of
-      // refunds (CASH_NET_PAYMENT_WHERE, the database form of balanceOfStoredRows, D-14).
-      // A SUCCESSFUL-only sum counted refunded money as received (BA-04); no writer records
-      // 'completed', the status main read before W11-CORTEX-INSIGHT-QUERIES.
-      const last30Days = await this.prisma.client.payment.aggregate({
-        where: {
-          businessId,
-          createdAt: { gte: subDays(now, 30) },
-          ...CASH_NET_PAYMENT_WHERE,
-        },
-        _sum: { amount: true },
-        _count: true,
-      });
-      const avgDailyInflow = last30Days._count > 0
-        ? roundMoney(Number(last30Days._sum.amount ?? 0)) / 30
+      // Simple forecast — project next 30 days from net home-currency cash received in the last 30
+      // over live own-tenant invoices (readInvoiceMoney cash rows match CASH_NET_PAYMENT_WHERE / D-14).
+      const last30Cash = homeCash.filter((row) => !!row.at && new Date(row.at) >= thirtyDaysAgo);
+      const avgDailyInflow = last30Cash.length > 0
+        ? sumMoney(last30Cash.map((row) => row.amount)) / 30
         : moneyIn / 30;
 
       const projectedInflow = Math.round(avgDailyInflow * 30);
       const projectedOutflow = moneyOut; // Assume similar outflow
-      const projectedNet = projectedInflow - projectedOutflow;
+      const projectedNet = subtractMoney(projectedInflow, projectedOutflow);
 
       // Runway (months at current burn rate)
       const monthlyBurn = moneyOut || 1;
@@ -1046,15 +1150,16 @@ export class KeyCortexInsightService {
       topPriorities.push(`Collect $${context.commerce.outstandingInvoices.overdueTotal.toLocaleString()} in overdue invoices (${context.commerce.outstandingInvoices.overdue} invoices)`);
     }
     if (churnRisks.length > 0) {
-      const critical = churnRisks.filter((r: any) => r.riskLevel === 'critical').length;
-      topPriorities.push(`Address ${critical} critical churn risk(s) — estimated $${churnRisks.filter((r: any) => r.riskLevel === 'critical').reduce((s: any, r: any) => s + r.estimatedRecoveryValue, 0).toLocaleString()} at risk`);
+      const criticalList = churnRisks.filter((r) => r.riskLevel === 'critical');
+      const criticalValue = sumMoney(criticalList.map((r) => r.estimatedRecoveryValue));
+      topPriorities.push(`Address ${criticalList.length} critical churn risk(s) — estimated $${criticalValue.toLocaleString()} at risk`);
     }
     if (pipeline.bottlenecks.length > 0) {
       topPriorities.push(`Fix pipeline bottleneck: ${pipeline.bottlenecks[0]}`);
     }
     if (opportunities.length > 0) {
       const topOpps = opportunities.slice(0, 3);
-      const oppValue = topOpps.reduce((s: any, o: any) => s + o.estimatedValue, 0);
+      const oppValue = sumMoney(topOpps.map((o) => o.estimatedValue));
       topPriorities.push(`Pursue top ${topOpps.length} profit opportunities (est. $${oppValue.toLocaleString()})`);
     }
 
@@ -1107,7 +1212,7 @@ export class KeyCortexInsightService {
         description: `Revenue is down ${Math.abs(revenue.growthRate)}% vs last period. Focus on converting existing pipeline and re-engaging past customers.`,
         category: 'revenue',
         priority: 'critical',
-        estimatedImpact: revenue.previousPeriodRevenue * 0.15,
+        estimatedImpact: roundMoney(revenue.previousPeriodRevenue * 0.15),
         effort: 'medium',
         actionItems: [
           'Call top 5 at-risk customers',
@@ -1145,7 +1250,7 @@ export class KeyCortexInsightService {
         description: `${pipeline.totalLeads} leads worth $${pipeline.totalPipelineValue.toLocaleString()} are stuck. Address bottlenecks to accelerate revenue.`,
         category: 'revenue',
         priority: 'high',
-        estimatedImpact: pipeline.totalPipelineValue * 0.25,
+        estimatedImpact: roundMoney(pipeline.totalPipelineValue * 0.25),
         effort: 'medium',
         actionItems: [
           `Fix bottleneck: ${pipeline.bottlenecks[0]}`,
@@ -1159,8 +1264,8 @@ export class KeyCortexInsightService {
 
     // ── Retention recommendations ──
     if (churnRisks.length > 0) {
-      const criticalRisks = churnRisks.filter((r: any) => r.riskLevel === 'critical');
-      const recoveryValue = churnRisks.reduce((s: any, r: any) => s + r.estimatedRecoveryValue, 0);
+      const criticalRisks = churnRisks.filter((r) => r.riskLevel === 'critical');
+      const recoveryValue = sumMoney(churnRisks.map((r) => r.estimatedRecoveryValue));
       recommendations.push({
         id: `rec-ret-1`,
         title: `Save ${criticalRisks.length} critical customer(s) from churning`,
@@ -1206,7 +1311,7 @@ export class KeyCortexInsightService {
         description: `No-show rate is ${context.bookings.noShows.rate}%. Each no-show wastes time and revenue.`,
         category: 'operations',
         priority: 'high',
-        estimatedImpact: context.bookings.todayBookings.totalValue * 0.15,
+        estimatedImpact: roundMoney(context.bookings.todayBookings.totalValue * 0.15),
         effort: 'quick',
         actionItems: [
           'Enable SMS reminders 24h and 1h before appointments',
@@ -1239,14 +1344,14 @@ export class KeyCortexInsightService {
     }
 
     // Profit opportunities as recommendations
-    opportunities.slice(0, 3).forEach((opp: any, idx: any) => {
+    opportunities.slice(0, 3).forEach((opp, idx) => {
       recommendations.push({
         id: `rec-opp-${idx}`,
         title: opp.title,
         description: opp.description,
         category: opp.type === 'stale_lead' || opp.type === 'upsell' ? 'revenue' : 'operations',
         priority: opp.priority === 'high' ? 'high' : 'medium',
-        estimatedImpact: opp.estimatedValue * opp.confidence,
+        estimatedImpact: roundMoney(opp.estimatedValue * opp.confidence),
         effort: opp.timeframe === 'immediate' ? 'quick' : 'medium',
         actionItems: [opp.recommendedAction],
         sourceInsights: ['profit_opportunities'],
