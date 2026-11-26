@@ -45,7 +45,7 @@ const client = vi.hoisted(() => ({
   extractReceipt: vi.fn(),
 }));
 const uploadFile = vi.hoisted(() => vi.fn());
-const uploadToDrive = vi.hoisted(() => vi.fn(async () => true));
+const uploadToDrive = vi.hoisted(() => vi.fn(async (_req: Record<string, unknown>) => true));
 
 vi.mock("@/lib/client", () => ({ ...client, PAYMENT_METHODS: [{ value: "cash", label: "Cash" }] }));
 vi.mock("next/navigation", () => ({
@@ -133,7 +133,13 @@ function switchTo(id: string) {
   });
 }
 
-const photo = () => new File([new Uint8Array([1, 2, 3])], "receipt.jpg", { type: "image/jpeg" });
+/** A photo as a browser gives it (jsdom's File has no arrayBuffer; the sheet's Drive copy reads the bytes). */
+const photo = () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  const file = new File([bytes], "receipt.jpg", { type: "image/jpeg" });
+  Object.defineProperty(file, "arrayBuffer", { value: async () => bytes.buffer });
+  return file;
+};
 
 describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
   it("drops every figure of the old business and re-reads for the new one", async () => {
@@ -280,7 +286,7 @@ describe("COR MINOR-5: page figures say what they are", () => {
     expect(pending, "the Pending approval card").toBeTruthy();
     expect(pending.textContent).toMatch(/on this page/i);
     const missing = screen.getByRole("button", { name: /missing receipts/i });
-    expect(missing.textContent).toMatch(/\b7\b/);
+    expect(within(missing).getByText("7"), "the server's missing-receipt count").toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: /^owner$/i })).toBeNull();
     expect(text()).not.toMatch(/forecast risk/i);
   });

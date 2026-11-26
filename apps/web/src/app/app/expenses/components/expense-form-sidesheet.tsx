@@ -54,7 +54,26 @@ export interface ExpensePrefill {
   date?: string;
   vendor?: string;
   receiptUrl?: string;
+  /** The photo behind receiptUrl when the page uploaded it (EXPENSES-HUB-3 COR MINOR-2: the save makes its Drive copy). */
+  receiptFile?: File;
 }
+
+/**
+ * EXPENSES-HUB-3 (COR MINOR-1): a receipt stored at the API's /objects/ path cannot be opened yet: no route serves it
+ * (server row P222). Such a receipt is said to be stored and is never linked; any other address (a Drive copy) is.
+ */
+export function receiptIsViewable(url: string | null | undefined): boolean {
+  if (!url) return false;
+  let path = url;
+  try {
+    path = new URL(url, "http://relative.invalid").pathname;
+  } catch {
+    return true;
+  }
+  return !path.startsWith("/objects/");
+}
+
+export const RECEIPT_STORED_NOTE = "Receipt stored — viewing isn't available yet";
 
 const ACCENT = "rgb(244,63,94)"; // rose-500
 const ACCENT_BG = "rgba(244,63,94,0.15)";
@@ -78,7 +97,7 @@ export function ExpenseFormSideSheet({
   const billToggleId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
   const { uploadToDrive } = useDriveUpload();
-  const selectedFileRef = useRef<File | null>(null);
+  const selectedFileRef = useRef<File | null>(prefill?.receiptFile ?? null);
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
       return {
@@ -289,7 +308,11 @@ export function ExpenseFormSideSheet({
     selectedFileRef.current = file;
     try {
       const uploaded = await uploadFile(file);
-      if (uploaded) {
+      if (uploaded && uploaded.objectPath.startsWith("/objects/uploads/") && !uploaded.objectPath.startsWith(`/objects/uploads/${businessId}/`)) {
+        // SEC-EXH3-1: a path issued for another business is never attached to this one's expense.
+        selectedFileRef.current = null;
+        toast.error("Couldn't attach the receipt: it was stored for another business. Try again.");
+      } else if (uploaded) {
         const path = uploaded.objectPath;
         const receiptUrl = path.startsWith("http") ? path : `${API_BASE}${path}`;
         setFormData((prev) => ({ ...prev, receiptUrl, receiptMimeType: file.type }));
@@ -664,7 +687,12 @@ export function ExpenseFormSideSheet({
                   ) : (
                     <FileText className="w-4 h-4 text-red-400 shrink-0" />
                   )}
-                  <span className="text-xs truncate flex-1">Receipt attached</span>
+                  <span className="text-xs flex-1 min-w-0">
+                    <span className="block truncate">Receipt attached</span>
+                    {!receiptIsViewable(formData.receiptUrl) && (
+                      <span className="block text-[10px] text-muted-foreground">{RECEIPT_STORED_NOTE}</span>
+                    )}
+                  </span>
                   <button
                     onClick={() => setFormData((prev) => ({ ...prev, receiptUrl: "", receiptMimeType: "" }))}
                     className="p-1 rounded hover:bg-white/[0.05] shrink-0"

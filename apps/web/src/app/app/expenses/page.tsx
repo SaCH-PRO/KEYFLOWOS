@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -30,6 +30,7 @@ import {
   ExpenseBudget,
 } from "@/lib/client";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { useUpload } from "@/hooks/use-upload";
 import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill } from "./components/expense-form-sidesheet";
@@ -280,11 +281,18 @@ export default function ExpensesInboxPage() {
   // Stats
   const stats = useMemo(() => {
     const spentInPeriod = d.summary?.total ?? 0;
+    // COR MINOR-5: a sum over the page of rows loaded is said to be one; the missing-receipt count is the server's,
+    // for the period it summed.
     const pendingApproval = d.expenses.filter((e) => e.status === "BILL").reduce((s, e) => s + e.amount, 0);
-    const missingReceipts = d.expenses.filter((e) => e.status === "PAID" && !e.receiptUrl).length;
+    const missingReceipts = d.summary?.missingReceiptCount ?? 0;
     const overBudget = d.budgets.filter((b) => b.isOverBudget).length;
     return { spentInPeriod, pendingApproval, missingReceipts, overBudget };
   }, [d.summary, d.expenses, d.budgets]);
+  const summaryOk = d.summaryRead.kind === "ok";
+  const budgetsOk = d.budgetsRead.kind === "ok";
+  /** What a block whose own read did not come back shows instead of a figure (COR MINOR-7). */
+  const blockState = (r: typeof d.summaryRead) =>
+    r.kind === "no-access" ? "No access" : r.kind === "failed" ? "Couldn't load" : "…";
 
   // Attention queue
   const attentionItems = useMemo(() => {
@@ -292,8 +300,8 @@ export default function ExpensesInboxPage() {
     // BUG-072 (fixed by removal): an "Over policy ... exceeds travel policy by $..." item was invented here from a
     // 500 limit the business never set. There is no expense policy in v1, so nothing is said about one.
 
-    // Missing receipts
-    if (stats.missingReceipts > 0) {
+    // Missing receipts (the server's count)
+    if (summaryOk && stats.missingReceipts > 0) {
       items.push({
         type: "missing_receipts",
         title: "Missing receipts",
@@ -321,7 +329,7 @@ export default function ExpensesInboxPage() {
     }
 
     return items.slice(0, 4);
-  }, [d.expenses, stats.missingReceipts]);
+  }, [d.expenses, stats.missingReceipts, summaryOk]);
 
   const handleDelete = async (id: string) => {
     if (!d.businessId) return;
@@ -367,22 +375,50 @@ export default function ExpensesInboxPage() {
       .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Couldn't export expenses."));
   };
 
+  // SEC-EXH3-1: the business this page shows. An upload started for it attaches only to it: the presign is sent for
+  // the stored business (hooks/use-upload.ts), so a mismatch is refused before sending, a switch while it runs drops
+  // its answer, and a path issued for another business is never attached.
+  const pageBusiness = useRef<string | null>(null);
+  useEffect(() => {
+    const was = pageBusiness.current;
+    pageBusiness.current = d.businessId;
+    // A sheet opened for the business the page has left closes with it (not on the first business: a device
+    // capture's prefill opens the sheet then).
+    if (was && was !== d.businessId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- a business switch closes what was open for the old one
+      setShowAddDrawer(false);
+      setPrefill(null);
+      setEditingExpense(null);
+    }
+  }, [d.businessId]);
+
   const handleReceiptChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     // The same photo can be chosen again after a failure.
     e.target.value = "";
     if (!file) return;
+    const bid = d.businessId;
+    if (!bid || getStoredBusinessId() !== bid) {
+      toast.error("The business changed in another tab. Reload this page, then upload the receipt.");
+      return;
+    }
     const uploaded = await uploadFile(file);
+    if (pageBusiness.current !== bid) return;
     if (!uploaded) {
       toast.error("Couldn't upload the receipt. Try again.");
       return;
     }
     const path = uploaded.objectPath;
+    if (path.startsWith("/objects/uploads/") && !path.startsWith(`/objects/uploads/${bid}/`)) {
+      toast.error("Couldn't attach the receipt: it was stored for another business. Try again.");
+      return;
+    }
     const receiptUrl = path.startsWith("http") ? path : `${API_BASE}${path}`;
     toast.success("Receipt uploaded");
     setEditingExpense(null);
     setSheetKind("expense");
-    setPrefill({ receiptUrl });
+    // COR MINOR-2: the photo goes with it, so the save makes the same Drive copy the sheet's own photo makes.
+    setPrefill({ receiptUrl, receiptFile: file });
     setShowAddDrawer(true);
   };
 
@@ -411,6 +447,8 @@ export default function ExpensesInboxPage() {
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Expenses</h1>
             <p className="text-sm text-muted-foreground mt-0.5">Capture, review, approve, and control company spend.</p>
           </div>
+          {/* COR MINOR-8: a member who may not read expenses is not offered expense writes (the server still gates). */}
+          {d.read.kind === "ok" && (
           <div className="flex items-center gap-2">
             <button
               onClick={openBill}
@@ -431,6 +469,7 @@ export default function ExpensesInboxPage() {
               <span className="hidden sm:inline">Add expense</span>
             </button>
           </div>
+          )}
         </div>
 
         {/* BUG-064 (journey J6): a refused read is "No access - ask the owner", a failed one says it could not load;
@@ -438,6 +477,11 @@ export default function ExpensesInboxPage() {
         {d.read.kind === "loading" ? (
           <div className="p-12 flex items-center justify-center" role="status" aria-label="Loading expenses">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : d.read.kind === "no-business" ? (
+          <div role="status" className="rounded-xl border border-border bg-card p-8 text-center">
+            <p className="text-sm font-medium text-foreground">No business is selected.</p>
+            <p className="text-xs text-muted-foreground mt-1">Choose a business from the switcher to see its expenses.</p>
           </div>
         ) : d.read.kind === "no-access" ? (
           <NoAccessState message={d.read.message} what="expenses" />
@@ -463,7 +507,12 @@ export default function ExpensesInboxPage() {
               id={`expenses-view-${v.key}`}
               aria-selected={view === v.key}
               aria-controls={`expenses-panel-${v.key}`}
-              onClick={() => setView(v.key)}
+              onClick={() => {
+                // COR MINOR-6: the panel opens its builder when triggerNew is set at mount, so a click from an
+                // earlier visit must not survive leaving the tab.
+                if (v.key !== view) setRecurringTrigger(0);
+                setView(v.key);
+              }}
               className={cn(
                 "px-3 py-1.5 min-h-[44px] sm:min-h-0 rounded-md text-sm font-medium transition-colors",
                 view === v.key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
@@ -603,8 +652,8 @@ export default function ExpensesInboxPage() {
               by 1.5 times itself (67% with any spend, budget or not). It now says only what the server counted. */}
           <StatCard
             label={`Spent · ${periodLabel}`}
-            value={formatCurrency(stats.spentInPeriod, undefined, d.businessId)}
-            sub={d.summary ? `${d.summary.count} expense${d.summary.count !== 1 ? "s" : ""}` : ""}
+            value={summaryOk ? formatCurrency(stats.spentInPeriod, undefined, d.businessId) : blockState(d.summaryRead)}
+            sub={summaryOk && d.summary ? `${d.summary.count} expense${d.summary.count !== 1 ? "s" : ""}` : ""}
             icon={TrendingUp}
             iconColor="text-blue-600"
             iconBg="bg-blue-50"
@@ -612,25 +661,25 @@ export default function ExpensesInboxPage() {
           <StatCard
             label="Pending approval"
             value={formatCurrency(stats.pendingApproval, undefined, d.businessId)}
-            sub={`${tabCounts.pending_approval} expense${tabCounts.pending_approval !== 1 ? "s" : ""} waiting`}
+            sub={`${tabCounts.pending_approval} bill${tabCounts.pending_approval !== 1 ? "s" : ""} on this page`}
             icon={Clock}
             iconColor="text-amber-600"
             iconBg="bg-amber-50"
             onClick={() => setActiveTab("pending_approval")}
           />
           <StatCard
-            label="Missing receipts"
-            value={String(stats.missingReceipts)}
-            sub={stats.missingReceipts > 0 ? "Needs follow-up" : "All receipts attached"}
+            label={`Missing receipts · ${periodLabel}`}
+            value={summaryOk ? String(stats.missingReceipts) : blockState(d.summaryRead)}
+            sub={!summaryOk ? "" : stats.missingReceipts > 0 ? "Needs follow-up" : "All receipts attached"}
             icon={Receipt}
             iconColor="text-orange-600"
             iconBg="bg-orange-50"
             onClick={() => setActiveTab("approved")}
           />
           <StatCard
-            label="Over budget"
-            value={`${stats.overBudget} ${stats.overBudget === 1 ? "category" : "categories"}`}
-            sub={stats.overBudget > 0 ? "Forecast risk this month" : "All on track"}
+            label="Over budget this month"
+            value={budgetsOk ? `${stats.overBudget} ${stats.overBudget === 1 ? "category" : "categories"}` : blockState(d.budgetsRead)}
+            sub={!budgetsOk ? "" : stats.overBudget > 0 ? "Over this month's budget" : "All on track"}
             icon={AlertTriangle}
             iconColor="text-rose-600"
             iconBg="bg-rose-50"
@@ -695,7 +744,7 @@ export default function ExpensesInboxPage() {
                         </th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">Merchant</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs hidden md:table-cell">Category</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs hidden lg:table-cell">Owner</th>
+                        {/* COR MINOR-5: an "Owner" column showed the vendor; an expense has no owner field. */}
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">Status</th>
                         <th className="px-4 py-3 text-right font-medium text-muted-foreground text-xs">Amount</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs hidden xl:table-cell">Budget impact</th>
@@ -730,9 +779,6 @@ export default function ExpensesInboxPage() {
                             </td>
                             <td className="px-4 py-3 hidden md:table-cell">
                               <span className="text-xs text-muted-foreground">{category?.name || "—"}</span>
-                            </td>
-                            <td className="px-4 py-3 hidden lg:table-cell">
-                              <span className="text-xs text-muted-foreground">{exp.vendor || "—"}</span>
                             </td>
                             <td className="px-4 py-3">
                               <StatusBadge status={status} />
@@ -807,7 +853,12 @@ export default function ExpensesInboxPage() {
               <h3 className="text-sm font-semibold text-foreground mb-1">Budget pulse</h3>
               <p className="text-xs text-muted-foreground mb-3">Monthly spend by category.</p>
               <div className="space-y-3">
-                {d.budgets
+                {!budgetsOk && (
+                  <p className="text-xs text-muted-foreground text-center py-2">
+                    {d.budgetsRead.kind === "no-access" ? "No access to budgets - ask the owner." : d.budgetsRead.kind === "failed" ? d.budgetsRead.message : "Loading budgets…"}
+                  </p>
+                )}
+                {budgetsOk && d.budgets
                   .filter((b) => b.amount > 0)
                   .sort((a, b) => b.percentUsed - a.percentUsed)
                   .slice(0, 6)
@@ -835,7 +886,7 @@ export default function ExpensesInboxPage() {
                       </div>
                     );
                   })}
-                {d.budgets.filter((b) => b.amount > 0).length === 0 && (
+                {budgetsOk && d.budgets.filter((b) => b.amount > 0).length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-2">No budgets set</p>
                 )}
               </div>

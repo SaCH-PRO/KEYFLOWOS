@@ -28,8 +28,8 @@ import {
 } from "@/lib/client";
 import { voidBill } from "@/lib/api/finance";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { businessCurrency, formatCurrency, formatDate } from "../components/expense-utils";
-import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
+import { businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate } from "../components/expense-utils";
+import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, receiptIsViewable } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { refusalMessage } from "@/lib/failure-kit";
 import { BillPayDialog } from "../components/bill-pay-dialog";
@@ -67,6 +67,16 @@ function deriveStatus(expense: Expense) {
   return { label: "Approved", color: "text-emerald-700", bg: "bg-emerald-50" };
 }
 
+/**
+ * The expense's own month, as { month, year } (COR MINOR-4: its budget is that month's). A calendar day (date-only, or
+ * exactly midnight UTC, as the forms store a date) is read as written; any other instant in the business's zone.
+ */
+function expenseMonth(date: string, businessId: string | null): { month: number; year: number } {
+  const calendar = /^(\d{4})-(\d{2})-\d{2}(?:T00:00(?::00(?:\.0+)?)?Z)?$/.exec(date);
+  const day = calendar ? date.slice(0, 10) : dayInZone(new Date(date), businessTimeZone(businessId));
+  return { year: Number(day.slice(0, 4)), month: Number(day.slice(5, 7)) };
+}
+
 export default function ExpenseDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -88,14 +98,18 @@ export default function ExpenseDetailPage() {
     (async () => {
       setLoading(true);
       try {
-        const [expRes, catRes, budRes] = await Promise.all([
+        const [expRes, catRes] = await Promise.all([
           getExpense(businessId, expenseId),
           fetchExpenseCategories(businessId),
-          fetchExpenseBudgets(businessId),
         ]);
         if (expRes.data) setExpense(expRes.data);
         if (catRes.data) setCategories(catRes.data);
-        if (budRes.data) setBudgets(budRes.data);
+        // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
+        if (expRes.data) {
+          const { month, year } = expenseMonth(expRes.data.date, businessId);
+          const budRes = await fetchExpenseBudgets(businessId, month, year);
+          if (budRes.data) setBudgets(budRes.data);
+        }
       } catch {
         toast.error("Failed to load expense");
       }
@@ -181,7 +195,10 @@ export default function ExpenseDetailPage() {
   // D-170: a posted expense (paid; a bill is corrected by Reject) offers Void.
   const canVoid = expense.status === "PAID";
   const percentUsed = budget ? Math.min(100, Math.round(budget.percentUsed)) : 0;
-  const remainingAfter = budget ? Math.max(0, budget.remaining - expense.amount) : 0;
+  // The server's remaining already counts this expense (spent is the month's paid expenses); it is shown as is.
+  const { month: budgetMonth, year: budgetYear } = expenseMonth(expense.date, businessId);
+  const budgetMonthLabel = new Date(Date.UTC(budgetYear, budgetMonth - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const receiptViewable = receiptIsViewable(expense.receiptUrl);
 
   return (
     <div className="min-h-screen bg-background">
@@ -259,7 +276,7 @@ export default function ExpenseDetailPage() {
           <div className="rounded-xl border border-border bg-card shadow-sm p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-foreground">Receipt preview</h3>
-              {expense.receiptUrl && (
+              {expense.receiptUrl && receiptViewable && (
                 <a
                   href={expense.receiptUrl}
                   target="_blank"
@@ -271,7 +288,13 @@ export default function ExpenseDetailPage() {
                 </a>
               )}
             </div>
-            {expense.receiptUrl ? (
+            {expense.receiptUrl && !receiptViewable ? (
+              // COR MINOR-1: no route serves an /objects/ path yet (server row P222): it is said, not linked.
+              <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-dashed border-border bg-muted/30 text-center px-4">
+                <FileText className="w-10 h-10 text-muted-foreground/40 mb-2" />
+                <p className="text-sm text-foreground">{RECEIPT_STORED_NOTE}</p>
+              </div>
+            ) : expense.receiptUrl ? (
               expense.receiptUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -340,7 +363,7 @@ export default function ExpenseDetailPage() {
             <div className="rounded-xl border border-border bg-card shadow-sm p-4">
               <h3 className="text-sm font-semibold text-foreground mb-1">Budget impact</h3>
               <p className="text-xs text-muted-foreground mb-3">
-                {category?.name || "Uncategorized"} · {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                {category?.name || "Uncategorized"} · {budgetMonthLabel}
               </p>
               {budget ? (
                 <div className="space-y-2">
@@ -357,9 +380,9 @@ export default function ExpenseDetailPage() {
                     <span className="font-semibold text-foreground">{formatCurrency(expense.amount, expense.currency, businessId)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Remaining after</span>
-                    <span className={cn("font-semibold", remainingAfter < 0 ? "text-rose-600" : "text-foreground")}>
-                      {formatCurrency(remainingAfter, undefined, businessId)}
+                    <span className="text-muted-foreground">Remaining</span>
+                    <span className={cn("font-semibold", budget.remaining < 0 ? "text-rose-600" : "text-foreground")}>
+                      {formatCurrency(budget.remaining, undefined, businessId)}
                     </span>
                   </div>
                   <div className="pt-1">

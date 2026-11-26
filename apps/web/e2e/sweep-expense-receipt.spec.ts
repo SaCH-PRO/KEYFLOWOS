@@ -11,8 +11,9 @@ import { test, expect, API_URL, settle } from "./journeys/journey-helpers";
  *   3. choosing a photo uploads it through the presigned upload and opens Add expense with the receipt attached;
  *      the expense is saved with the new category picked from the sheet's list, and the API answers it with
  *      receiptUrl = the API's object path;
- *   4. after a reload the uploader still finds that stored path on the expense (its detail page links it, and the
- *      API re-read holds it).
+ *   4. after a reload the uploader still finds that stored path on the expense: the API re-read holds it, and the
+ *      detail page says "Receipt stored — viewing isn't available yet" and links nothing at it (repair round 1,
+ *      COR MINOR-1: the link led nowhere until server row P222).
  *
  * What is stubbed, and why: only the object-storage provider. The presign route (POST /uploads/request-url) needs
  * S3 (core/object-storage is S3 only), which the local and CI stacks do not have, so this spec answers that one
@@ -137,8 +138,9 @@ for (const vp of VIEWPORTS) {
         await press(page.getByRole("button", { name: /^all\s*\d*$/i }).filter({ visible: true }).first(), "the All status tab");
         await press(page.getByText(description).filter({ visible: true }).first(), "the saved expense in the list");
         await page.waitForURL(new RegExp(`/app/expenses/${stored}$`), { timeout: 30_000 });
-        const link = page.getByRole("link", { name: /view receipt|download/i }).first();
-        await expect(link, "the detail page links the stored receipt").toHaveAttribute("href", `${API_URL}${storage.objectPath}`);
+        await expect(page.getByText(/receipt stored — viewing isn't available yet/i).first(), "the detail page says the receipt is stored").toBeVisible();
+        const hrefs = await page.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+        expect(hrefs, "nothing links the stored path, which no route serves yet (P222)").not.toContain(`${API_URL}${storage.objectPath}`);
         const reread = await request.get(`${API_URL}/expenses/businesses/${owner.businessId}/expenses/${stored}`, { headers: { Authorization: `Bearer ${owner.token}` } });
         expect(reread.status()).toBe(200);
         expect(((await reread.json()) as { receiptUrl?: string }).receiptUrl, "the API re-read holds the path").toBe(`${API_URL}${storage.objectPath}`);

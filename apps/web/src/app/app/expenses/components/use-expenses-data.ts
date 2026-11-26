@@ -20,7 +20,7 @@ import {
   MarginAnalysis,
   RecurringCandidate,
 } from "@/lib/client";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 import { readState, type ReadState } from "@/lib/failure-kit";
 
 export interface ProjectOption { id: string; name: string }
@@ -28,13 +28,25 @@ export interface ServiceOption { id: string; name: string }
 export interface ContactOption { id: string; name: string }
 
 /** The expenses read as the page shows it: loading, the books, no access, or could not load (never zeros). */
-export type ExpensesRead = { kind: "loading" } | ReadState;
+export type ExpensesRead = { kind: "loading" } | { kind: "no-business" } | ReadState;
+/** One block's own read (the summary, the budgets): a refusal of it is said in its block, never shown as zeros. */
+export type BlockRead = { kind: "loading" } | ReadState;
+
+/** The localStorage key the workspace keeps the chosen business under (lib/workspace.ts BUSINESS_ID_KEY). */
+const BUSINESS_ID_KEY = "kf_business_id";
 
 export function useExpensesData() {
   // EXPENSES-HUB-3 (BUG-064, journey J6): a refused or failed read was swallowed here, so the page showed
   // its empty values (TTD 0.00, "No expenses found") as if nothing had been spent.
   const [read, setRead] = useState<ExpensesRead>({ kind: "loading" });
+  const [summaryRead, setSummaryRead] = useState<BlockRead>({ kind: "loading" });
+  const [budgetsRead, setBudgetsRead] = useState<BlockRead>({ kind: "loading" });
   const [businessId, setBusinessId] = useState<string | null>(null);
+  // SEC-EXH3-1: the business every reply is checked against, and the generation of the latest read; a reply for
+  // another business, or for an older read, writes nothing.
+  // undefined until the stored business is first read, so "no business" (null) is adopted too.
+  const businessRef = useRef<string | null | undefined>(undefined);
+  const generationRef = useRef(0);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -59,8 +71,40 @@ export function useExpensesData() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- client-side hydration of stored value after mount
-  useEffect(() => { const bid = getStoredBusinessId(); if (bid) setBusinessId(bid); }, []);
+  const clearAll = useCallback(() => {
+    setExpenses([]); setTotalExpenses(0); setSummary(null); setBudgets([]); setCategories([]);
+    setVendors([]); setMarginData(null); setRecurringCandidates([]);
+  }, []);
+
+  // SEC-EXH3-1: the business is read on mount and again whenever it changes (this tab's switcher announces
+  // BUSINESS_CHANGED_EVENT; another tab writes the stored id). A switch drops every row of the old business at once,
+  // before the new one is read, and filters that named the old business's rows (its categories) are reset.
+  useEffect(() => {
+    const adopt = () => {
+      const next = getStoredBusinessId() ?? null;
+      if (next === businessRef.current) return;
+      businessRef.current = next;
+      generationRef.current += 1;
+      clearAll();
+      setProjects([]); setServices([]); setContacts([]);
+      setFilterCategory("");
+      setPage(1);
+      setSummaryRead({ kind: "loading" });
+      setBudgetsRead({ kind: "loading" });
+      // COR MINOR-7: with no business there is nothing to read; say so instead of spinning.
+      setRead(next ? { kind: "loading" } : { kind: "no-business" });
+      setLoading(Boolean(next));
+      setBusinessId(next);
+    };
+    adopt();
+    const onStorage = (e: StorageEvent) => { if (e.key === null || e.key === BUSINESS_ID_KEY) adopt(); };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, adopt);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, adopt);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [clearAll]);
 
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -75,11 +119,13 @@ export function useExpensesData() {
     if (!businessId) return;
     (async () => {
       try {
+        const still = () => businessRef.current === businessId;
         const [projRes, svcRes, ctRes] = await Promise.all([
           fetchProjects(businessId),
           fetchServices(businessId),
           fetchContacts(businessId),
         ]);
+        if (!still()) return;
         if (projRes.data) {
           setProjects(projRes.data.map((p) => ({ id: p.id, name: p.name })));
         }
@@ -98,6 +144,8 @@ export function useExpensesData() {
 
   const loadData = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
+    const generation = ++generationRef.current;
+    const current = () => generation === generationRef.current && businessRef.current === businessId;
     setLoading(true);
     try {
       const useCustom = period === "custom" && customStart && customEnd;
@@ -110,27 +158,35 @@ export function useExpensesData() {
         fetchMarginAnalysis(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchRecurringCandidates(businessId),
       ]);
+      // A reply for a business the page has left, or for a read a newer one replaced, is dropped.
+      if (!current()) return;
       const state = readState(expRes, { what: "expenses" });
       setRead(state);
       if (state.kind !== "ok") {
         // Nothing of an earlier read stays on screen behind a refusal or a failure.
-        setExpenses([]); setTotalExpenses(0); setSummary(null); setBudgets([]); setCategories([]);
-        setVendors([]); setMarginData(null); setRecurringCandidates([]);
+        clearAll();
         setLoading(false);
         return;
       }
       if (expRes.data) { setExpenses(expRes.data.data); setTotalExpenses(expRes.data.total); }
       if (catRes.data) setCategories(catRes.data);
-      if (sumRes.data) setSummary(sumRes.data);
+      // COR MINOR-7: the summary and the budgets each answer for their own block.
+      const sumState = readState(sumRes, { what: "the expense summary" });
+      setSummaryRead(sumState);
+      setSummary(sumState.kind === "ok" ? sumRes.data ?? null : null);
       if (venRes.data) setVendors(venRes.data);
-      if (budRes.data) setBudgets(budRes.data);
+      const budState = readState(budRes, { what: "the budgets" });
+      setBudgetsRead(budState);
+      setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
       if (margRes.data) setMarginData(margRes.data);
       if (recRes.data) setRecurringCandidates(recRes.data.candidates);
     } catch {
+      if (!current()) return;
+      clearAll();
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-  }, [businessId, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  }, [clearAll, businessId, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
@@ -139,7 +195,7 @@ export function useExpensesData() {
   const nearAlertCount = budgets.filter(b => b.isNearAlert && !b.isOverBudget).length;
 
   return {
-    businessId, read, expenses, totalExpenses, categories, setCategories,
+    businessId, read, summaryRead, budgetsRead, expenses, totalExpenses, categories, setCategories,
     summary, vendors, budgets, marginData, recurringCandidates, loading, loadData,
     projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,

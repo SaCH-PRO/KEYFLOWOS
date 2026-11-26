@@ -55,6 +55,7 @@ vi.mock("@/hooks/use-drive-upload", () => ({ useDriveUpload: () => ({ uploadToDr
 vi.mock("@/lib/api", () => ({ API_BASE: "http://api.test", getAuthHeaders: () => ({}) }));
 vi.mock("@/lib/api/finance", () => ({ createBill: vi.fn(), payBill: vi.fn(), voidBill: vi.fn() }));
 vi.mock("@/lib/workspace", () => ({
+  BUSINESS_CHANGED_EVENT: "kf:business-changed",
   getCachedBusiness: () => ({ id: "biz_hub3_receipt", name: "Receipt Co", currency: "TTD", timezone: "America/Port_of_Spain" }),
   getStoredBusinessId: () => "biz_hub3_receipt",
 }));
