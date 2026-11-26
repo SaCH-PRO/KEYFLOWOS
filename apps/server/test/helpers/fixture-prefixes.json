@@ -1493,6 +1493,10 @@
       "reason": "Runs the operator scripts' dry runs (no arguments) as child processes against DATABASE_URL; dry runs write no rows, so there is nothing to seed or clean up."
     },
     {
+      "file": "apps/server/test/contract-fetch-body-cap.integration.test.ts",
+      "reason": "Tests ContractClauseService decompressed body cap against a real local HTTP server with an in-memory Prisma double; touches no database rows."
+    },
+    {
       "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",
       "reason": "Seeds rows with random ids (createId) under an existing business and deletes them by those id lists; no LIKE cleanup."
     },
