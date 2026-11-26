@@ -69,6 +69,12 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
               business: {
                 findUnique: vi.fn().mockResolvedValue({ id: 'biz_smoke' }),
               },
+              socialConnection: {
+                findMany: vi.fn().mockResolvedValue([
+                  { platformId: 'page_1' },
+                  { platformId: 'ig_1' },
+                ]),
+              },
             },
           },
         },
@@ -187,7 +193,7 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
   it('returns error when ingestion fails', async () => {
     receiveInbound.mockRejectedValueOnce(new Error('Unrecognized Meta social webhook payload'));
 
-    const body = { unknown: 'payload' };
+    const body = { object: 'page', entry: [{ id: 'page_1', messaging: [] }] };
     const raw = JSON.stringify(body);
     const sig = metaSignature(raw, process.env.META_APP_SECRET!);
     const res = await request(app.getHttpServer())

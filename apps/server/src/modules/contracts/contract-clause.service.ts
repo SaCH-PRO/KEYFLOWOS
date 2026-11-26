@@ -212,6 +212,8 @@ async function readDocumentBody(
  * the guard (no HttpException), which the plan queue retries and counts. It names no host and no code.
  */
 export class DocumentHostUnresolvedError extends Error {
+  /** RR-DISPATCH-NO-BLIND-RETRY (D-263): DNS lookup failed before any fetch or contract write. */
+  readonly effectNotApplied = true;
   constructor() {
     super('The document host could not be resolved right now');
     this.name = 'DocumentHostUnresolvedError';
