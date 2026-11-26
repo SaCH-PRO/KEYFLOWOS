@@ -24,8 +24,8 @@ function minutesOf(value: unknown, asClose = false): number | null {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
-/** HH:MM as shown on the page (seconds dropped). */
-const shown = (value: unknown) => String(value).trim().slice(0, 5);
+/** HH:MM as shown on the page, built from the time's parsed hour and minute: zero-padded, seconds dropped. */
+const shown = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 
 /**
  * A day's hours under either spelling Business.businessHours is saved with: sun..sat (Your page's hours editor and
@@ -45,7 +45,7 @@ function readDay(hours: BusinessHours, dayKey: string): DaySpan | null {
   const open = minutesOf(e.open);
   const close = minutesOf(e.close, true);
   if (open === null || close === null || open === close) return null;
-  return { closed: false, open, close, openText: shown(e.open), closeText: shown(e.close) };
+  return { closed: false, open, close, openText: shown(open), closeText: shown(close) };
 }
 
 function hasHoursSet(hours?: BusinessHours | null): hours is BusinessHours {
