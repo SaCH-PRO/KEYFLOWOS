@@ -30,6 +30,7 @@ import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, t
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 import { motion, AnimatePresence } from "framer-motion";
@@ -68,16 +69,43 @@ export interface ExpensePrefill {
  *   "none"         no receipt.
  */
 export type ReceiptKind = "none" | "stored" | "unavailable" | "link";
+
+/** One object-key segment, as the server allows it (core/object-storage SAFE_KEY_SEGMENT): no "/", "\\", "%" or "..". */
+const SAFE_KEY_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/;
+
+/**
+ * Whether `path` is an upload of `businessId`, exactly as the server binds one (isObjectPathOfBusiness): the relative
+ * path /objects/uploads/<businessId>/<id>, three safe segments, the second equal to the business. This is the one test
+ * of an own upload: the page's and the sheet's upload checks and receiptKind all use it (repair round 3, S-M2).
+ */
+export function isOwnUploadPath(path: unknown, businessId: unknown): boolean {
+  if (typeof path !== "string" || typeof businessId !== "string" || !SAFE_KEY_SEGMENT.test(businessId)) return false;
+  if (!path.startsWith("/objects/")) return false;
+  const segments = path.slice("/objects/".length).split("/");
+  return segments.length === 3 && segments[0] === "uploads" && segments[1] === businessId && SAFE_KEY_SEGMENT.test(segments[2]);
+}
+
 export function receiptKind(url: string | null | undefined, businessId: string | null | undefined): ReceiptKind {
   if (!url || !url.trim()) return "none";
-  let path: string;
+  const raw = url.trim();
+  // An address on the API (as the sheets store an upload: API_BASE + objectPath), or a relative path, is judged by its
+  // path as written: only this business's upload is "stored"; anything else there is not claimed (S-m1).
+  const api = API_BASE.replace(/\/+$/, "");
+  let path: string | null = null;
+  if (api && raw.startsWith(`${api}/`)) path = raw.slice(api.length);
+  else if (raw.startsWith("/") && !raw.startsWith("//")) path = raw;
+  if (path !== null) return isOwnUploadPath(path, businessId) ? "stored" : "unavailable";
+  // Anywhere else, only an http(s) address is a link; javascript:, data:, //host and the like never are (S-m2).
+  let parsed: URL;
   try {
-    path = new URL(url, "http://relative.invalid").pathname;
+    parsed = new URL(raw);
   } catch {
     return "unavailable";
   }
-  if (!path.startsWith("/objects/")) return "link";
-  return businessId && path.startsWith(`/objects/uploads/${businessId}/`) ? "stored" : "unavailable";
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "unavailable";
+  // An object path on another host is not this business's receipt.
+  if (/^\/objects\//i.test(parsed.pathname)) return "unavailable";
+  return "link";
 }
 export const RECEIPT_UNAVAILABLE_NOTE = "This receipt can't be shown here";
 
@@ -320,10 +348,15 @@ export function ExpenseFormSideSheet({
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // S-m3: the presign is sent for the stored business (hooks/use-upload.ts); a sheet for another one refuses first.
+    if (getStoredBusinessId() !== businessId) {
+      toast.error("The business changed in another tab. Close this sheet and reload, then add the receipt.");
+      return;
+    }
     selectedFileRef.current = file;
     try {
       const uploaded = await uploadFile(file);
-      if (uploaded && uploaded.objectPath.startsWith("/objects/uploads/") && !uploaded.objectPath.startsWith(`/objects/uploads/${businessId}/`)) {
+      if (uploaded && !isOwnUploadPath(uploaded.objectPath, businessId)) {
         // SEC-EXH3-1: a path issued for another business is never attached to this one's expense.
         selectedFileRef.current = null;
         toast.error("Couldn't attach the receipt: it was stored for another business. Try again.");

@@ -33,7 +33,7 @@ import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useUpload } from "@/hooks/use-upload";
 import { useExpensesData } from "./components/use-expenses-data";
-import { ExpenseFormSideSheet, ExpensePrefill } from "./components/expense-form-sidesheet";
+import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
 import { PERIODS, formatCurrency, formatDate } from "./components/expense-utils";
@@ -300,12 +300,13 @@ export default function ExpensesInboxPage() {
     // BUG-072 (fixed by removal): an "Over policy ... exceeds travel policy by $..." item was invented here from a
     // 500 limit the business never set. There is no expense policy in v1, so nothing is said about one.
 
-    // Missing receipts (the server's count)
+    // Missing receipts: the server's count, over every status (C-m2: said so, as the card is).
     if (summaryOk && stats.missingReceipts > 0) {
+      const period = PERIODS.find((p) => p.value === d.period)?.label ?? "this period";
       items.push({
         type: "missing_receipts",
         title: "Missing receipts",
-        desc: `${stats.missingReceipts} receipt${stats.missingReceipts !== 1 ? "s" : ""} need${stats.missingReceipts === 1 ? "s" : ""} a reminder before close.`,
+        desc: `${stats.missingReceipts} expense${stats.missingReceipts !== 1 ? "s" : ""} without a receipt · ${period}, all statuses.`,
         color: "text-amber-700",
         bg: "bg-amber-50",
       });
@@ -329,7 +330,7 @@ export default function ExpensesInboxPage() {
     }
 
     return items.slice(0, 4);
-  }, [d.expenses, stats.missingReceipts, summaryOk]);
+  }, [d.expenses, d.period, stats.missingReceipts, summaryOk]);
 
   const handleDelete = async (id: string) => {
     if (!d.businessId) return;
@@ -409,7 +410,7 @@ export default function ExpensesInboxPage() {
       return;
     }
     const path = uploaded.objectPath;
-    if (path.startsWith("/objects/uploads/") && !path.startsWith(`/objects/uploads/${bid}/`)) {
+    if (!isOwnUploadPath(path, bid)) {
       toast.error("Couldn't attach the receipt: it was stored for another business. Try again.");
       return;
     }
