@@ -146,22 +146,26 @@ export function BillPayDialog({
           ) : null}
           {noAccountNote && <p className="text-xs text-amber-700">{noAccountNote}</p>}
 
-          <div>
-            <label htmlFor="bill-pay-method" className="text-xs font-medium text-muted-foreground mb-1 block">Payment method</label>
-            <select
-              id="bill-pay-method"
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              disabled={busy}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
-            >
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Asked together with the account, once the accounts have answered: a method alone while they load is
+              a question the owner answers without the account (live journey H5 paid from Cash that way). */}
+          {accounts.kind !== "loading" && (
+            <div>
+              <label htmlFor="bill-pay-method" className="text-xs font-medium text-muted-foreground mb-1 block">Payment method</label>
+              <select
+                id="bill-pay-method"
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                disabled={busy}
+                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {message && (
             <p role="alert" className="text-sm text-rose-600">

@@ -180,7 +180,10 @@ export default function ExpenseDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6">
+      {/* pb-28 below md: room above the fixed mobile navigation, so the last Actions (Delete, Void) can be scrolled
+          clear of it at 375 (the sweep found Delete covered: the app shell's own pb-28 sits under its h-full
+          PageTransition box, not under a page taller than it). */}
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 pt-6 pb-28 md:pb-6">
         {/* Back link */}
         <button
           onClick={() => router.push("/app/expenses")}
