@@ -126,7 +126,6 @@ function useSlotAnswers(businessId: string, timeZone: string | null | undefined,
       if (asked.current.has(id)) continue;
       asked.current.add(id);
       // A request asked again after a failure shows "Loading times…" while it runs, not the old failure.
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears this request's earlier failed answer as it is asked again
       setAnswers((prev) => {
         if (prev[id] !== null) return prev;
         const { [id]: _failed, ...rest } = prev;
