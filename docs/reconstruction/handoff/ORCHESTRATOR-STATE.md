@@ -1,8 +1,8 @@
 # Orchestrator state (live checkpoint)
 
 <<<<<<< HEAD
-Last written: 2026-11-26 ~00:05 UTC by the acting orchestrator (second-lane account, Claude Code), with M20 in the
-merge queue; main `6f67c91e`. Rewrite in place on every merge, packet return
+Last written: 2026-11-26 ~00:20 UTC by the acting orchestrator (second-lane account, Claude Code), right after M20
+merged; main `fd7772c5`. Rewrite in place on every merge, packet return
 =======
 Last written: 2026-11-25 ~21:45 UTC by the acting orchestrator (second-lane account, Claude Code), while wave M20
 is assembled; main `6f67c91e`. Rewrite in place on every merge, packet return
@@ -95,7 +95,7 @@ referred to on the board but is not yet a row.
 ## 0. Next session starts here (2026-11-25 ~21:05 UTC)
 
 >>>>>>> origin/main
-Main is `6f67c91e` (M18 merged 20:57, PR #250). V1-STATUS: 175 of 395 done, 46% of points; launch 87 done of 254.
+Main is `fd7772c5`: M25 (Antigravity, PR #252) and then M20 (Claude, PR #251) merged on 2026-11-25/26. V1-STATUS: 184 of 396 done, 48.1% of points; launch 96 done of 255.
 
 **The owner's standing instruction (2026-11-25):**
 - Keep both lanes as full as possible.
@@ -122,11 +122,7 @@ Antigravity's M25 is gathering P87, P88, P89, P91, P92 and P93. P90 is blocked o
 - A first base comparison flagged H2 desktop and B4 phone. Re-run 3× at head and base, both proved intermittent on main as well: head 10/12, main 5/12 (PR #250 comments).
 
 <<<<<<< HEAD
-**Wave M20 (Claude): ENQUEUED** (PR #251, head `33949ba3`, base main `6f67c91e`).
-- Packets: P85 refund, FU-UNDO-TOAST-SIGNOUT, P94 CRM polish, FU-E2E-MOCKED-SESSION-TOKEN, plus docs.
-- CI is green at the exact head, and both wave confirmations are CONFIRMED.
-- Live proof: release0 2/2 and sweeps 20/20. Journeys C and E show no new failures, and E10 now passes. VN-06 passed 22/22 alone, twice.
-- After the merge: status, then rewrite this file, update the board and post MERGED on #80.
+**M20 merged** (`fd7772c5`, PR #251, head `33949ba3`): P85 SWP-INV-REFUND-UI, FU-UNDO-TOAST-SIGNOUT, P94 SWP-CRM-WEB-POLISH, FU-E2E-MOCKED-SESSION-TOKEN, docs. Antigravity's M25 (PR #252: P87-P89, P91-P93) merged just before it.
 
 **Returned and waiting for the next Claude wave (M22).** All four are confirmed by both lenses at these heads:
 
@@ -150,7 +146,7 @@ Expect about 44 files plus the docs.
 | **P28 FU-CONTACT-PAGES-RAW-STATUS** | claim `13397315` | Building, cloud session_01TnVBvH393vm6vtetBUdtEh | Two reviews |
 | **P34 FU-KEY-CTRLJ-OWNERS** | claim `4716b3a5` | Building, cloud session_01TnVBvHETCGwk33Bpb8yi8d | Two reviews |
 | **RR-ADMIN-SHELL-SERVER-GATE**, then **RR-SESSION-STORAGE-CENSUS** | claims `4bb8c2c2`, `25b7f437` | Building, one after the other, in cloud session_01TnVBvEpu3HwDAmyBPKq3Qv | Two reviews each |
-| **CONTACTS-LIST-FIRST** (D-289, board P98) | not claimed | Waits for M20 on main, since it builds on P94 | Claim after M20 merges |
+| **CONTACTS-LIST-FIRST** (D-289, board P98) | not claimed | Free now (M20 on main) | Claim and build |
 
 If an agent or session is gone, start fresh reviewers on the branch head with ACCEPTANCE-REVIEW-BRIEF.md, or CONFIRMATION-REVIEW-BRIEF.md for a delta. Worker reports are on #80.
 =======
@@ -252,12 +248,12 @@ If an agent or session is gone, start fresh reviewers on the branch head with AC
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `6f67c91e`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `fd7772c5`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
 <<<<<<< HEAD
-| **M20 (Claude)** | `wave/v1-wave-m20` @ `33949ba3`, PR #251 | Enqueued | After the merge: status, this file, board, MERGED |
+| **M22 (Claude)** | to assemble from the four returned packets in section 0 | Next | Assemble, prove, PR, enqueue |
 | **Claude packets** | the five in section 0 | Repair, confirmation or building | RETURN, then the next wave |
 | **Antigravity** | M25: P87, P88, P89, P91, P92, P93; P90 blocked (question 52) | Building | Their wave |
 | **Owner** | - | - | Section 4 questions 40-50, 54 (51-53, 55, 56 answered: D-286 to D-289); production redeploy (D-266) |
@@ -267,7 +263,7 @@ Main is at `6f67c91e`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | **Antigravity** | M25: P87, P88, P89, P91, P92, P93; P90 blocked (question 52) | Building | Their wave |
 | **Owner** | - | - | Section 4 questions 40-55; production redeploy (D-266) |
 >>>>>>> origin/main
-| `wave/v1-docs-p19` | main 6f67c91e merged in | This file, V1-STATUS | Squashed into each Claude wave |
+| `wave/v1-docs-p19` | main fd7772c5 merged in | This file, V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in

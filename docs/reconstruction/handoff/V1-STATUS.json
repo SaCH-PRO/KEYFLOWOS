@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "14c3c36e3bcc994228ad0a10f159523ca8758666",
-  "main_commit_date": "2026-11-25T20:58:07+00:00",
+  "main_sha": "20df1cb4db2624cb693967b7791a0e29b20b4d5b",
+  "main_commit_date": "2026-11-26T00:13:08+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 395,
-  "points": 568.5,
+  "packets": 396,
+  "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 175,
-    "points": 261.5,
-    "pct_by_points": 46
+    "packets": 184,
+    "points": 274.5,
+    "pct_by_points": 48.1
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 220,
-    "points": 307,
-    "pct_by_points": 54
+    "packets": 212,
+    "points": 296,
+    "pct_by_points": 51.9
    }
   },
   "by_step": {
@@ -66,27 +66,27 @@
     "total": 7
    },
    "3": {
-    "done": 79,
+    "done": 81,
     "in-progress": 0,
-    "todo": 70,
+    "todo": 68,
     "total": 149
    },
    "4": {
-    "done": 24,
+    "done": 25,
     "in-progress": 0,
-    "todo": 29,
+    "todo": 28,
     "total": 53
    },
    "5": {
-    "done": 39,
+    "done": 42,
     "in-progress": 0,
-    "todo": 52,
-    "total": 91
+    "todo": 50,
+    "total": 92
    },
    "6": {
-    "done": 16,
+    "done": 19,
     "in-progress": 0,
-    "todo": 24,
+    "todo": 21,
     "total": 40
    },
    "7": {
@@ -110,10 +110,10 @@
     "total": 87
    },
    "launch": {
-    "done": 87,
+    "done": 96,
     "in-progress": 0,
-    "todo": 167,
-    "total": 254
+    "todo": 159,
+    "total": 255
    },
    "follow-on": {
     "done": 1,
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 105,
+   "prior-status-file": 100,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 59,
-   "compacted-commit": 69,
-   "no-evidence": 134
+   "code-commit-subject": 65,
+   "compacted-commit": 72,
+   "no-evidence": 131
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -136,6 +136,7 @@
    "W11-OWNER-HELPER-REST",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
+   "SWP-KEY-SHELL-SMOKE",
    "CATALOG-1",
    "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
@@ -156,9 +157,11 @@
    "W11-PLANTED-STOCK-CENSUS",
    "SWP-INV-SKU-COUNT",
    "QUICK-SALE-SERVER",
+   "SWP-CENSUS-MARKETPLACE",
    "SWP-CENSUS-OPEN-WRITES",
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
+   "SWP-CENSUS-V1-A",
    "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
    "FU-PROVIDER-ERROR-HYGIENE",
@@ -168,7 +171,9 @@
    "FU-PROPOSAL-REVENUE-SIGHT",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
+   "MEM-EXPIRED-NOT-SERVED",
    "FU-RESEARCH-CORPUS-YAML",
+   "FU-CONVERSION-REPS-REVENUE",
    "RR-UNKNOWN-COST-NOT-ZERO",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
@@ -185,17 +190,17 @@
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL",
    "FU-NOTIFICATIONS-PREFS-GUARD",
+   "FU-SEARCH-MONEY-SCOPE",
    "FU-CI-PG-NO-PASSWORD",
    "FU-INVOICE-REMAINING-CREDITS",
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 124,
-  "todo_with_dependencies_met_launch": 95
+  "todo_with_dependencies_met": 119,
+  "todo_with_dependencies_met_launch": 90
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "SWP-INV-REFUND-UI",
    "DEMO-PREVIEW",
    "TODAY-4BLOCK",
    "HARNESS-REMOVAL",
@@ -210,9 +215,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 26,
+   "weight": 25,
    "chain": [
-    "SWP-CRM-WEB-POLISH",
     "SWP-TEAM-WEB",
     "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
@@ -230,16 +234,6 @@
   }
  },
  "ready": [
-  {
-   "id": "SWP-INV-REFUND-UI",
-   "step": 4,
-   "priority": "P2",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": true,
-   "unblocks": 39
-  },
   {
    "id": "DEMO-PREVIEW",
    "step": 5,
@@ -261,24 +255,14 @@
    "unblocks": 50
   },
   {
-   "id": "SWP-KEY-SHELL-SMOKE",
-   "step": 3,
+   "id": "SWP-TEAM-WEB",
+   "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 32
-  },
-  {
-   "id": "SWP-CRM-WEB-POLISH",
-   "step": 5,
-   "priority": "P3",
-   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 20
   },
   {
    "id": "OWNER-ALERTS-WEB",
@@ -301,6 +285,16 @@
    "unblocks": 18
   },
   {
+   "id": "SWP-CENSUS-V1-B",
+   "step": 6,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 16
+  },
+  {
    "id": "EXPENSES-HUB-1",
    "step": 4,
    "priority": "P1",
@@ -316,6 +310,16 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "SWP-BOOKING-SLOTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
@@ -359,26 +363,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
-  },
-  {
-   "id": "SWP-CENSUS-V1-A",
-   "step": 6,
-   "priority": "P0",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
-   "id": "SWP-CENSUS-MARKETPLACE",
-   "step": 6,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
   },
   {
    "id": "RR-OWNER-RULINGS-RECORD",
@@ -561,6 +545,16 @@
    "unblocks": 0
   },
   {
+   "id": "CONTACTS-LIST-FIRST",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACT-AUDIT-RESIDUAL",
    "step": 3,
    "priority": "P1",
@@ -582,16 +576,6 @@
   },
   {
    "id": "FU-CONTACTID-WRITER-VALIDATION",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONVERSION-REPS-REVENUE",
    "step": 5,
    "priority": "P1",
    "size": "S",
@@ -691,16 +675,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-SEARCH-MONEY-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-STORE-ORDERS-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -735,16 +709,6 @@
    "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "MEM-EXPIRED-NOT-SERVED",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1161,16 +1125,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-UNDO-TOAST-SIGNOUT",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-ADMIN-SHELL-SERVER-GATE",
    "step": 7,
    "priority": "P3",
@@ -1473,16 +1427,6 @@
  ],
  "ready_launch": [
   {
-   "id": "SWP-INV-REFUND-UI",
-   "step": 4,
-   "priority": "P2",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": true,
-   "unblocks": 39
-  },
-  {
    "id": "DEMO-PREVIEW",
    "step": 5,
    "priority": "P1",
@@ -1503,24 +1447,14 @@
    "unblocks": 50
   },
   {
-   "id": "SWP-KEY-SHELL-SMOKE",
-   "step": 3,
+   "id": "SWP-TEAM-WEB",
+   "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 32
-  },
-  {
-   "id": "SWP-CRM-WEB-POLISH",
-   "step": 5,
-   "priority": "P3",
-   "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 20
   },
   {
    "id": "OWNER-ALERTS-WEB",
@@ -1543,6 +1477,16 @@
    "unblocks": 18
   },
   {
+   "id": "SWP-CENSUS-V1-B",
+   "step": 6,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 16
+  },
+  {
    "id": "EXPENSES-HUB-1",
    "step": 4,
    "priority": "P1",
@@ -1558,6 +1502,16 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "SWP-BOOKING-SLOTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
@@ -1601,26 +1555,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
-  },
-  {
-   "id": "SWP-CENSUS-V1-A",
-   "step": 6,
-   "priority": "P0",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
-   "id": "SWP-CENSUS-MARKETPLACE",
-   "step": 6,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
   },
   {
    "id": "RR-OWNER-RULINGS-RECORD",
@@ -1783,6 +1717,16 @@
    "unblocks": 0
   },
   {
+   "id": "CONTACTS-LIST-FIRST",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACT-AUDIT-RESIDUAL",
    "step": 3,
    "priority": "P1",
@@ -1804,16 +1748,6 @@
   },
   {
    "id": "FU-CONTACTID-WRITER-VALIDATION",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONVERSION-REPS-REVENUE",
    "step": 5,
    "priority": "P1",
    "size": "S",
@@ -1913,16 +1847,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-SEARCH-MONEY-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-STORE-ORDERS-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -1957,16 +1881,6 @@
    "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "MEM-EXPIRED-NOT-SERVED",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -2264,16 +2178,6 @@
   },
   {
    "id": "FU-NOTIFICATIONS-PAGE-REFUSED",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-UNDO-TOAST-SIGNOUT",
    "step": 6,
    "priority": "P3",
    "size": "S",
@@ -3368,16 +3272,18 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "c7d6af5d"
+   ],
    "depends_on": [
     "SWP-KEY-CHAT-WEB",
     "NAV-A1"
    ],
    "title": "KEY shell: no 401 loop from the awareness panel, the drawer never opens by itself, and no KEY UI renders when the server reports KEY disabled",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-BOOKING-SLOTS",
@@ -3394,7 +3300,7 @@
     "SWP-KEY-SHELL-SMOKE"
    ],
    "title": "Public booking offers only free slots that end before closing",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWEEP-RERUN-S3",
@@ -3633,15 +3539,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "83e6b45b"
+   ],
    "depends_on": [
     "SWP-INV-DETAIL"
    ],
    "title": "Refund a manual payment from the invoice and the Payments hub",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "DECIMALS-WEB",
@@ -4457,15 +4365,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "c899eb4d"
+   ],
    "depends_on": [
     "SWP-CONTACT-DETAIL"
    ],
    "title": "Contacts web: Table view honours the main search; CRM dashboard readable in dark mode with the right group label",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-TEAM-WEB",
@@ -4484,7 +4394,7 @@
     "FAILURE-KIT"
    ],
    "title": "Team page: no-access state for refused members, the role resets after an invite, pending invites look pending, emails normalised",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-FIN-WEB-CRASHES",
@@ -4906,16 +4816,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "96865546"
+   ],
    "depends_on": [
     "QUICK-SALE-SERVER",
     "W11-INV-SET-MOVEMENT"
    ],
    "title": "REST scope census, Marketplace batch: operator order create, post-purchase jobs, promote to content (3 open rows, 1 controllers)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "QUICK-SALE-WEB",
@@ -5108,10 +5020,12 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "3b143a32"
+   ],
    "depends_on": [
     "SWP-CENSUS-GENOME",
     "SWP-BOOKING-PAYMENT-GATE",
@@ -5119,7 +5033,7 @@
     "CATALOG-1"
    ],
    "title": "REST scope census, v1 hubs batch A: bookings, calendar, catalog, document templates, commerce insights, lead forms (47 open rows, 6 controllers)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-V1-B",
@@ -5136,7 +5050,7 @@
     "SWP-KEY-SHELL-SMOKE"
    ],
    "title": "REST scope census, v1 hubs batch B: site, presence, onboarding concierge, approvals, identity, actions, notifications, connectors (48 open rows, 9 controllers)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "TOF-TIER-PRICING-SCHEMA",
@@ -6539,13 +6453,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e96ae054"
+   ],
    "depends_on": [],
    "title": "Unified retrieval stops serving expired memories, and a confidence-0 row no longer scores like an unscored row",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-DOC-EXTRACTION-SIGHT",
@@ -6853,13 +6769,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "0cf6f875"
+   ],
    "depends_on": [],
    "title": "Conversion sales-reps figures need revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
@@ -9183,13 +9101,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "eb277e2b"
+   ],
    "depends_on": [],
    "title": "Cmd/K search shows no money figure to a member without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CI-PG-NO-PASSWORD",
@@ -9356,16 +9276,18 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "729522b1"
+   ],
    "depends_on": [
     "FU-BULK-DELETE-UNDO",
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "Undo toasts are dismissed when the session ends",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
@@ -9522,6 +9444,23 @@
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The contact Timeline loads older events",
+   "deps_met": true
+  },
+  {
+   "id": "CONTACTS-LIST-FIRST",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CRM-WEB-POLISH"
+   ],
+   "title": "The contacts list comes first on phones; the cards above it move below or collapse",
    "deps_met": true
   }
  ]
