@@ -2925,3 +2925,49 @@ describe("CSC-58 line mapping pins", () => {
     expect(lineOfKey("src/fixture-r10f.ts", fixture, "kf_ph_token")).toBe(3);
   });
 });
+
+/* ------------------------------------------------------ repair round 11 */
+
+/**
+ * Repair round 11 (security SEC-R10-1): a ternary key resolves to the set of all its branches. If any branch cannot
+ * be resolved the key is unresolved and the write fails closed; otherwise each branch is a write, so a credential
+ * branch makes a credential write. A null / undefined branch is no key and is skipped.
+ *
+ *   CSC-59 separate const declarations (q2), a ternary const one hop away (p7), string code (q3), a parameter branch
+ *          (p2/p3), and a ternary inside a template substitution in string code (q5).
+ */
+describe("CSC-59 a ternary key resolves to all its branches", () => {
+  const credentialWrites = (file: string, fixture: string) => scan(file, fixture).filter((w) => w.store === "localStorage" && isCredential(w));
+
+  it("q2: separate declarations, `on ? B : A`, the credential branch is seen", () => {
+    const fixture = ['const A = "kf_x_token";', 'const B = "kf_x_prefs";', "export const save = (on: boolean, v: string) => localStorage.setItem(on ? B : A, v);"].join("\n");
+    expect(keysOf(scan("src/fixture-q2.ts", fixture))).toEqual(expect.arrayContaining(["localStorage:kf_x_prefs", "localStorage:kf_x_token"]));
+    expect(credentialWrites("src/fixture-q2.ts", fixture).length).toBeGreaterThan(0);
+  });
+
+  it("p7: a ternary const one hop away", () => {
+    const fixture = ['const A = "kf_x_token";', 'const B = "kf_x_prefs";', "const K = on ? B : A;", "localStorage.setItem(K, v);"].join("\n");
+    expect(credentialWrites("src/fixture-p7.ts", fixture).length).toBeGreaterThan(0);
+  });
+
+  it("q3: in string code, a ternary of names the string does not define fails closed", () => {
+    const fixture = `eval("localStorage.setItem(on ? B : A, v)");`;
+    expect(credentialWrites("src/fixture-q3.ts", fixture).length).toBe(1);
+  });
+
+  it("p2/p3: a parameter branch fails closed (save(k) called with a session key)", () => {
+    const fixture = `export function save(k: string, flag: boolean, tok: string) { localStorage.setItem(flag ? "kf_prefs" : k, tok); }`;
+    expect(credentialWrites("src/fixture-p2.ts", fixture).length).toBe(1);
+  });
+
+  it("q5: a ternary inside a template substitution in string code fails closed", () => {
+    const fixture = ['const A = "kf_x_token";', 'const B = "kf_x_prefs";', 'const h = `localStorage.setItem("${on ? B : A}", "x")`;'].join("\n");
+    expect(credentialWrites("src/fixture-q5.ts", fixture).length).toBe(1);
+  });
+
+  it("pins: a ternary of two plain keys gives both, and a null branch is skipped", () => {
+    const fixture = ['const A = "kf_view_a";', 'const B = "kf_view_b";', "localStorage.setItem(on ? B : A, v);", 'localStorage.setItem(id ? `kf-section-${"x"}` : null, v);'].join("\n");
+    expect(keysOf(scan("src/fixture-tp.ts", fixture))).toEqual(["localStorage:kf_view_b", "localStorage:kf_view_a", "localStorage:kf-section-x"]);
+    expect(credentialWrites("src/fixture-tp.ts", fixture)).toEqual([]);
+  });
+});
