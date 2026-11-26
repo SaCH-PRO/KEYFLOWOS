@@ -1497,12 +1497,15 @@ export class FlowOrchestratorService {
    * mints a link for an invoice whose links were all revoked or expired. It was
    * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
    * leaves the email without a button (the template renders none), never a
-   * bare-id URL.
+   * bare-id URL — except on RetryableConflictException (FU-KEY-INVOICE-EMAIL-PAY-LINK,
+   * D-248 / D-134), which propagates before any mail or status flip so the plan
+   * queue retries boundedly rather than sending a button-less email.
    */
   private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
     try {
       return (await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
     } catch (e) {
+      if (e instanceof RetryableConflictException) throw e;
       Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, FlowOrchestratorService.name);
       return undefined;
     }
@@ -8173,7 +8176,7 @@ ${triage.standingContext}`;
           where: { id: args.invoiceId, businessId },
           include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
         });
-        if (!found) throw new Error('Invoice not found');
+        if (!found) throw new NotFoundException('Invoice not found');
         // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) is emailed
         // to no one: that contact is not this business's to write to.
         const invoice = ownRelations(businessId, found, ['contact']);
@@ -8181,10 +8184,11 @@ ${triage.standingContext}`;
         // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
         // VOID -> SENT transition. Refused before any mail.
         if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
-        // FU-PAY-LINK-STATUS-GATE (D-248): KEY does not email an invoice no pay link may be
-        // issued for. (When every link is revoked or expired, automatedInvoiceUrl answers null and
-        // the email goes without a button by design, V1-46b SEC-V46B-1/2; a transient conflict is
-        // FU-KEY-INVOICE-EMAIL-PAY-LINK's.)
+        // FU-PAY-LINK-STATUS-GATE & FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): KEY does not email an
+        // invoice no pay link may be issued for. (When every link is revoked or expired,
+        // automatedInvoiceUrl answers null and the email goes without a button by design, V1-46b
+        // SEC-V46B-1/2; on a transient pay-link conflict, customerInvoiceUrl rethrows
+        // RetryableConflictException before any mail or status flip so the plan queue retries.)
         // An invoice no pay link may be issued for (PENDING, FAILED, FULLY_CREDITED, any status
         // added later) is refused here, before any mail, link or status change, as the operator's
         // send-email refuses it. A DRAFT is admitted: this send issues it. PAID is left as it was.

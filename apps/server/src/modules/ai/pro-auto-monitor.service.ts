@@ -6,6 +6,10 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import {
+  MONEY_PRO_AUTO_CATEGORIES,
+  isStructurallyFinancialTool,
+} from '../key-autonomy/proposal-money-tag';
 import { schedulersDisabled } from '../../core/config/env';
 
 export type InsightSeverity = 'critical' | 'warning' | 'info' | 'opportunity';
@@ -252,6 +256,13 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      const insightCarriesMoney =
+        MONEY_PRO_AUTO_CATEGORIES.has(insight.category) ||
+        insight.module === 'revenue' ||
+        insight.module === 'expenses' ||
+        insight.id.startsWith('storefront_pricing_') ||
+        Boolean(insight.suggestedTool && isStructurallyFinancialTool(insight.suggestedTool));
+
       if (this.approvalOrchestrator) {
         await this.approvalOrchestrator.propose({
           businessId,
@@ -265,6 +276,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
           rationale: insight.suggestedAction || 'Proactive monitoring detected an issue requiring attention',
           expectedBenefit: insight.suggestedAction ?? undefined,
           risks: insight.severity === 'critical' ? 'Inaction may lead to revenue loss or operational disruption' : undefined,
+          carriesMoney: insightCarriesMoney,
           parameters: {
             category: insight.category,
             severity: insight.severity,
@@ -284,6 +296,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
           rationale: insight.suggestedAction || 'Proactive monitoring detected an issue requiring attention',
           expectedBenefit: insight.suggestedAction ?? undefined,
           risks: insight.severity === 'critical' ? 'Inaction may lead to revenue loss or operational disruption' : undefined,
+          carriesMoney: insightCarriesMoney,
           payload: {
             category: insight.category,
             severity: insight.severity,

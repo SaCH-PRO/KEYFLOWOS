@@ -146,6 +146,8 @@ export interface KeyActionProposalData {
   proposedBy?: string | null;
   executedFor?: string | null;
   outcomeEvidence?: Record<string, unknown> | null;
+  /** FU-PROPOSAL-MONEY-TAG (D-238, D-227): structural money classification stamped at creation (`null` on legacy rows). */
+  carriesMoney?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -180,6 +182,14 @@ export interface CreateKeyActionProposalInput {
   commandId?: string;
   sessionId?: string;
   businessEventId?: string;
+
+  /**
+   * Internal server-only structural provenance hint (FU-PROPOSAL-MONEY-TAG).
+   * Monotonic: `true` guarantees the proposal is tagged financial; `false`
+   * can never downgrade a structurally financial tool/module/payload.
+   * Never exposed on HTTP DTOs.
+   */
+  carriesMoney?: boolean;
 }
 
 export interface ListKeyActionProposalsQuery {
