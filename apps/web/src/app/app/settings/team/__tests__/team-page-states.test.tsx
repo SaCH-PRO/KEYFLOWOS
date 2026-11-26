@@ -148,18 +148,18 @@ describe("SWP-TEAM-WEB: a refused or failed team read (BUG-063, journey J6)", ()
     });
     await renderAs("usr_tps_staff");
     await waitFor(() => expect(screen.getByText(/no access/i)).toBeTruthy());
-    const text = document.body.textContent ?? "";
-    expect(text).toMatch(/ask the owner/i);
+    expect(document.body.textContent ?? "").toMatch(/ask the owner/i);
     expect(screen.queryByRole("button", { name: /^Invite$/ }), "Invite for a member refused the team").toBeNull();
-    expect(text, "the refused read shown as zeros").not.toMatch(/\b0 owner\b|\b0 admin\b|\b0 staff\b|no team members yet/i);
+    expect(screen.queryByText(/^\d+ (owner|admin|staff)$/), "the refused read shown as counts").toBeNull();
+    expect(screen.queryByText(/no team members yet/i), "the refused read shown as an empty team").toBeNull();
   });
 
   it("TPS-02 RED-BEFORE: a 500 says the team could not load, not that there are no members", async () => {
     api.apiGet.mockResolvedValue({ data: null, error: "Internal server error", status: 500 });
     await renderAs(OWNER_ID);
     await waitFor(() => expect(screen.getByText(/couldn't load your team/i)).toBeTruthy());
-    const text = document.body.textContent ?? "";
-    expect(text).not.toMatch(/no team members yet|\b0 owner\b/i);
+    expect(screen.queryByText(/^\d+ (owner|admin|staff)$/), "the failed read shown as counts").toBeNull();
+    expect(screen.queryByText(/no team members yet/i), "the failed read shown as an empty team").toBeNull();
     expect(screen.queryByRole("button", { name: /^Invite$/ })).toBeNull();
   });
 });
@@ -185,6 +185,7 @@ describe("SWP-TEAM-WEB: the invite form (BUG-115, journey J2, J3)", () => {
     await openInviteForm();
     const offered = Array.from(inviteRole().options).map((o) => o.text.trim());
     expect(offered).toEqual(["Staff", "Admin", "Front desk", "Bookkeeper"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Invite$/ }));
 
     const cases: Array<[string, string, Record<string, string>, number]> = [
       ["Admin", "ADMIN", { ...ROLE_DEFAULT_SCOPES.ADMIN }, 3],
@@ -192,7 +193,9 @@ describe("SWP-TEAM-WEB: the invite form (BUG-115, journey J2, J3)", () => {
       ["Bookkeeper", "STAFF", onlyThese({ revenue: ROLE_DEFAULT_SCOPES.STAFF.revenue, expenses: ROLE_DEFAULT_SCOPES.STAFF.expenses }), 0],
     ];
     for (const [label, role, scopes, tier] of cases) {
-      if (!screen.queryByLabelText("Team member email")) await openInviteForm();
+      // The form closes after each invite (with an exit animation); open it afresh.
+      await waitFor(() => expect(screen.queryByLabelText("Team member email")).toBeNull());
+      await openInviteForm();
       const option = Array.from(inviteRole().options).find((o) => o.text.trim() === label)!;
       const payload = await sendInvite(`${label.replace(/\s+/g, "").toLowerCase()}@example.com`, option.value);
       expect({ label, role: payload.role, scopes: payload.scopes, tier: payload.maxApprovalTier }).toEqual({ label, role, scopes, tier });
@@ -235,10 +238,10 @@ describe("SWP-TEAM-WEB: pending invites (BUG-116, journey J4)", () => {
     const row = rowAround(await screen.findByText("usr_tps_pending@example.com"));
     expect(row, "the member row").not.toBeNull();
     expect(within(row!).getByText(/^Invited$/), "the pending row is marked").toBeTruthy();
-    const text = document.body.textContent ?? "";
-    expect(text).toMatch(/\b1 owner\b/);
-    expect(text, "the pending invite counted as staff").toMatch(/\b0 staff\b/);
-    expect(text).toMatch(/\b1 invited\b/);
+    // Each count is its own badge (jsdom's textContent runs them together).
+    expect(screen.getByText(/^1 owner$/)).toBeTruthy();
+    expect(screen.getByText(/^0 staff$/), "the pending invite counted as staff").toBeTruthy();
+    expect(screen.getByText(/^1 invited$/)).toBeTruthy();
   });
 });
 
