@@ -94,6 +94,21 @@ function confirmedDetailsOf(raw: unknown): ConfirmedDetails | null {
   };
 }
 
+/** SWP-BOOKING-SLOTS (round 5): a restored record's order lines, only those shaped as cart lines. */
+function orderItemsOf(raw: unknown): CartItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is CartItem => {
+    const o = item as Record<string, unknown> | null;
+    return !!o && typeof o === "object" && typeof o.id === "string" && typeof o.name === "string"
+      && typeof o.price === "number" && Number.isFinite(o.price) && typeof o.quantity === "number" && Number.isFinite(o.quantity);
+  });
+}
+
+/** SWP-BOOKING-SLOTS (round 5): a restored record's payment method, only one the storefront offers. */
+function paymentMethodOf(raw: unknown): PaymentMethod | undefined {
+  return raw === "wipay" || raw === "paypal" || raw === "cash" ? raw : undefined;
+}
+
 /** The bookings a pending checkout record keeps: never a token link (SEC-W9WCN-1). */
 function withoutTokenLinks(refs: unknown): BookingRef[] {
   if (!Array.isArray(refs)) return [];
@@ -376,8 +391,18 @@ function PublicBookingPageInner() {
       const pendingKey = `kf_pending_checkout_${slug}`;
       const raw = localStorage.getItem(pendingKey);
       if (!raw) return;
-      const pending = JSON.parse(raw);
+      // SWP-BOOKING-SLOTS (round 5): the record outlives the tab and can be edited by hand. It is removed before it is
+      // read, and one that is not a JSON object is ignored, so a corrupt record never breaks every later load.
       localStorage.removeItem(pendingKey);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+      // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
+      const pending = parsed as ReturnType<typeof JSON.parse>;
 
       type PaymentOutcome = "success" | "failed" | "pending";
       let outcome: PaymentOutcome = "pending";
@@ -403,9 +428,9 @@ function PublicBookingPageInner() {
         outcome = "success";
       }
 
-      setConfirmedOrderItems(pending.items ?? []);
-      setConfirmedOrderTotal(pending.orderTotal ?? 0);
-      setConfirmedPaymentMethod(pending.paymentMethod ?? undefined);
+      setConfirmedOrderItems(orderItemsOf(pending.items));
+      setConfirmedOrderTotal(typeof pending.orderTotal === "number" && Number.isFinite(pending.orderTotal) ? pending.orderTotal : 0);
+      setConfirmedPaymentMethod(paymentMethodOf(pending.paymentMethod));
       setConfirmedOrderNumber(pending.orderNumber ?? null);
       setConfirmedOrderId(pending.orderId ?? null);
       setConfirmedCustomerEmail(pending.customerEmail ?? null);

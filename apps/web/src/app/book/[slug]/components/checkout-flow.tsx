@@ -812,7 +812,8 @@ export function CheckoutFlow({
                   {heldReleased && (
                     <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
                       <Clock className="w-4 h-4 flex-shrink-0" />
-                      Changing your booking releases the times we were holding; pick times again.
+                      Changing your booking releases the times we were holding; pick times again. To keep your
+                      earlier times, go back to the shop and open checkout again.
                     </div>
                   )}
 
