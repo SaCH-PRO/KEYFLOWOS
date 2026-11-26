@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Pencil,
   Trash2,
+  Ban,
   Check,
   Clock,
   Upload,
@@ -28,11 +29,21 @@ import {
   ExpenseCategory,
   ExpenseBudget,
 } from "@/lib/client";
-import { payBill, voidBill } from "@/lib/api/finance";
+import { voidBill } from "@/lib/api/finance";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { businessCurrency, formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { refusalMessage } from "@/lib/failure-kit";
+import { BillPayDialog } from "../components/bill-pay-dialog";
+
+/**
+ * EXPENSES-HUB-1 (BUG-031): the server refuses to delete a posted expense (expenses.service deleteExpense, FIN3) in
+ * words meant for a developer ("call POST /finance/.../void"). Said to the owner: why, and the way out, Void.
+ */
+const POSTED_DELETE_REFUSAL = /cannot delete a posted expense/i;
+const POSTED_DELETE_WORDS =
+  "This expense is posted to your books, so it can't be deleted. Void it instead: that reverses its entries and keeps it on record as voided.";
 
 function _getMerchantColor(vendor?: string): string {
   if (!vendor) return "#94a3b8";
@@ -63,6 +74,8 @@ export default function ExpenseDetailPage() {
   const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [showEdit, setShowEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmVoid, setConfirmVoid] = useState(false);
+  const [showPay, setShowPay] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,44 +102,49 @@ export default function ExpenseDetailPage() {
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);
   const status = useMemo(() => (expense ? deriveStatus(expense) : { label: "", color: "", bg: "" }), [expense]);
 
-  // FOLLOW3-B7 (owner ruling D-67): Approve pays the BILL (POST bills/:id/pay,
-  // Dr AP / Cr cash) and Reject voids it (POST bills/:id/void, the reversal).
-  // Both used to PATCH a `status` the server never reads and toast success
-  // regardless. The door answers the row as it now stands; an error is shown.
-  const runBillAction = async (
-    action: "approve" | "reject",
-    call: (businessId: string, billId: string) => Promise<{ data: Expense | null; error: string | null }>,
-    success: string,
-    failure: string,
-  ) => {
+  // FOLLOW3-B7 (owner ruling D-67): Approve pays the BILL (POST bills/:id/pay, Dr AP / Cr the account paid from)
+  // and Reject voids it (POST bills/:id/void, the reversal). EXPENSES-HUB-1 (D-168, BUG-025): Approve no longer pays
+  // at once from Cash; it opens Pay, which asks the account and the method (components/bill-pay-dialog.tsx). Each
+  // door answers the row as it now stands; a refusal is said in the server's words (FAILURE-KIT).
+  const runVoid = async (action: "reject" | "void", success: string) => {
     if (!businessId || !expense) return;
     setActionLoading(action);
     try {
-      const res = await call(businessId, expense.id);
-      if (res.error) {
-        toast.error(res.error);
+      const res = await voidBill(businessId, expense.id);
+      const refusal = refusalMessage(res, { what: action === "void" ? "void this expense" : "reject this bill" });
+      if (refusal !== null) {
+        toast.error(refusal);
       } else {
         toast.success(success);
         if (res.data) setExpense({ ...expense, ...res.data });
       }
     } catch {
-      toast.error(failure);
+      toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
     }
     setActionLoading(null);
+    setConfirmVoid(false);
   };
 
-  const handleApprove = () => runBillAction("approve", payBill, "Bill approved and paid", "Failed to approve");
-  const handleReject = () => runBillAction("reject", voidBill, "Bill rejected and voided", "Failed to reject");
+  const handleApprove = () => setShowPay(true);
+  const handleReject = () => runVoid("reject", "Bill rejected and voided");
+  const handleVoid = () => runVoid("void", "Expense voided");
 
+  // EXPENSES-HUB-1 (BUG-031): deleteExpense answers a refusal as { error } and does not throw, so the page reads
+  // the answer: "Expense deleted" only when it went through.
   const handleDelete = async () => {
     if (!businessId || !expense) return;
     setActionLoading("delete");
     try {
-      await deleteExpense(businessId, expense.id);
-      toast.success("Expense deleted");
-      router.push("/app/expenses");
+      const res = await deleteExpense(businessId, expense.id);
+      const refusal = refusalMessage(res, { what: "delete this expense" });
+      if (refusal !== null) {
+        toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? POSTED_DELETE_WORDS : refusal);
+      } else {
+        toast.success("Expense deleted");
+        router.push("/app/expenses");
+      }
     } catch {
-      toast.error("Failed to delete");
+      toast.error("Couldn't delete this expense.");
     }
     setActionLoading(null);
     setConfirmDelete(false);
@@ -155,6 +173,8 @@ export default function ExpenseDetailPage() {
   }
 
   const isPending = expense.status === "BILL";
+  // D-170: a posted expense (paid; a bill is corrected by Reject) offers Void.
+  const canVoid = expense.status === "PAID";
   const percentUsed = budget ? Math.min(100, Math.round(budget.percentUsed)) : 0;
   const remainingAfter = budget ? Math.max(0, budget.remaining - expense.amount) : 0;
 
@@ -191,7 +211,7 @@ export default function ExpenseDetailPage() {
                   disabled={!!actionLoading}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                 >
-                  {actionLoading === "approve" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  <Check className="w-4 h-4" />
                   Approve
                 </button>
                 <button
@@ -432,6 +452,16 @@ export default function ExpenseDetailPage() {
                   <Pencil className="w-4 h-4" />
                   Edit expense
                 </button>
+                {canVoid && (
+                  <button
+                    onClick={() => setConfirmVoid(true)}
+                    disabled={!!actionLoading}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-foreground border border-border hover:bg-muted disabled:opacity-50 transition-colors"
+                  >
+                    <Ban className="w-4 h-4" />
+                    Void expense
+                  </button>
+                )}
                 <button
                   onClick={() => setConfirmDelete(true)}
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-rose-600 border border-rose-200 hover:bg-rose-50 transition-colors"
@@ -469,7 +499,34 @@ export default function ExpenseDetailPage() {
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
+        busy={actionLoading === "delete"}
       />
+
+      {/* Confirm void (D-170) */}
+      <ConfirmDialog
+        open={confirmVoid}
+        title="Void this expense?"
+        message="Voiding reverses its entries in your books. The expense stays on record as voided, and this can't be undone."
+        confirmLabel="Void expense"
+        variant="danger"
+        onConfirm={handleVoid}
+        onCancel={() => setConfirmVoid(false)}
+        busy={actionLoading === "void"}
+      />
+
+      {/* Pay a bill: asks the account and the method (D-168) */}
+      {showPay && businessId && (
+        <BillPayDialog
+          businessId={businessId}
+          bill={expense}
+          onClose={() => setShowPay(false)}
+          onPaid={(paid) => {
+            setShowPay(false);
+            toast.success("Bill paid");
+            if (paid) setExpense({ ...expense, ...paid });
+          }}
+        />
+      )}
     </div>
   );
 }
