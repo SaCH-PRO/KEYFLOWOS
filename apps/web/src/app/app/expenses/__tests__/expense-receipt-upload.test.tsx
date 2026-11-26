@@ -105,7 +105,7 @@ function saveExpense(sheet: HTMLElement, description: string, amount: string) {
 describe("the Expenses page's Upload receipt works", () => {
   it("is a photo control that opens the camera on a phone", async () => {
     await mountPage();
-    const input = screen.getByLabelText(/^upload receipt$/i) as HTMLInputElement;
+    const input = (await screen.findByLabelText(/^upload receipt$/i)) as HTMLInputElement;
     expect(input.tagName).toBe("INPUT");
     expect(input.type).toBe("file");
     expect(input.accept).toMatch(/image\//);
@@ -115,7 +115,7 @@ describe("the Expenses page's Upload receipt works", () => {
   it("uploads the photo through the presigned upload and opens Add expense with it attached; the save writes receiptUrl", async () => {
     await mountPage();
     const file = photo();
-    fireEvent.change(screen.getByLabelText(/^upload receipt$/i), { target: { files: [file] } });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [file] } });
 
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
     expect(uploadFile.mock.calls[0][0]).toBe(file);
@@ -131,7 +131,7 @@ describe("the Expenses page's Upload receipt works", () => {
   it("a failed upload says so and opens no sheet claiming a receipt", async () => {
     uploadFile.mockResolvedValue(null);
     await mountPage();
-    fireEvent.change(screen.getByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(String(vi.mocked(toast.error).mock.calls[0][0])).toMatch(/receipt/i);
     expect(screen.queryByText(/receipt attached/i)).toBeNull();

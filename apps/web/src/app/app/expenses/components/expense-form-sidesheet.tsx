@@ -59,19 +59,27 @@ export interface ExpensePrefill {
 }
 
 /**
- * EXPENSES-HUB-3 (COR MINOR-1): a receipt stored at the API's /objects/ path cannot be opened yet: no route serves it
- * (server row P222). Such a receipt is said to be stored and is never linked; any other address (a Drive copy) is.
+ * What a receipt address is, for this business (EXPENSES-HUB-3 COR MINOR-1, repair round 2 R2-3):
+ *   "stored"       an upload of this business (/objects/uploads/<businessId>/...): no route serves it yet (server row
+ *                  P222), so it is said to be stored and never linked;
+ *   "unavailable"  any other /objects/ path (another business's upload, a non-upload object): neither linked nor said
+ *                  to be stored;
+ *   "link"         any other address (a Drive copy): linked as before;
+ *   "none"         no receipt.
  */
-export function receiptIsViewable(url: string | null | undefined): boolean {
-  if (!url) return false;
-  let path = url;
+export type ReceiptKind = "none" | "stored" | "unavailable" | "link";
+export function receiptKind(url: string | null | undefined, businessId: string | null | undefined): ReceiptKind {
+  if (!url || !url.trim()) return "none";
+  let path: string;
   try {
     path = new URL(url, "http://relative.invalid").pathname;
   } catch {
-    return true;
+    return "unavailable";
   }
-  return !path.startsWith("/objects/");
+  if (!path.startsWith("/objects/")) return "link";
+  return businessId && path.startsWith(`/objects/uploads/${businessId}/`) ? "stored" : "unavailable";
 }
+export const RECEIPT_UNAVAILABLE_NOTE = "This receipt can't be shown here";
 
 export const RECEIPT_STORED_NOTE = "Receipt stored — viewing isn't available yet";
 
@@ -261,8 +269,15 @@ export function ExpenseFormSideSheet({
       // Upload receipt to Google Drive if a file was selected
       if (expenseId && selectedFileRef.current && formData.receiptUrl) {
         const file = selectedFileRef.current;
-        const arr = await file.arrayBuffer();
-        uploadToDrive({
+        // R2-1: the expense is saved by now. A Drive copy that cannot be made is said with it, never as a failed save
+        // (which kept the sheet open, so a second Save made a duplicate).
+        let arr: ArrayBuffer | null = null;
+        try {
+          arr = await file.arrayBuffer();
+        } catch {
+          notices.push("its Drive copy was not made");
+        }
+        if (arr) uploadToDrive({
           businessId,
           entityType: "expense",
           entityId: expenseId,
@@ -273,7 +288,7 @@ export function ExpenseFormSideSheet({
           silent: true,
         }).then((ok) => {
           if (ok) toast.success("Receipt saved to Drive");
-        });
+        }).catch(() => toast.error("Expense saved, but its Drive copy was not made"));
       }
 
       const what = isBill ? "Bill recorded" : "Expense saved";
@@ -689,8 +704,11 @@ export function ExpenseFormSideSheet({
                   )}
                   <span className="text-xs flex-1 min-w-0">
                     <span className="block truncate">Receipt attached</span>
-                    {!receiptIsViewable(formData.receiptUrl) && (
+                    {receiptKind(formData.receiptUrl, businessId) === "stored" && (
                       <span className="block text-[10px] text-muted-foreground">{RECEIPT_STORED_NOTE}</span>
+                    )}
+                    {receiptKind(formData.receiptUrl, businessId) === "unavailable" && (
+                      <span className="block text-[10px] text-muted-foreground">{RECEIPT_UNAVAILABLE_NOTE}</span>
                     )}
                   </span>
                   <button

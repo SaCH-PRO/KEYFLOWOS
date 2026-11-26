@@ -670,11 +670,11 @@ export default function ExpensesInboxPage() {
           <StatCard
             label={`Missing receipts · ${periodLabel}`}
             value={summaryOk ? String(stats.missingReceipts) : blockState(d.summaryRead)}
-            sub={!summaryOk ? "" : stats.missingReceipts > 0 ? "Needs follow-up" : "All receipts attached"}
+            sub={!summaryOk ? "" : "All statuses, bills and voided included"}
             icon={Receipt}
             iconColor="text-orange-600"
             iconBg="bg-orange-50"
-            onClick={() => setActiveTab("approved")}
+            // R2-4: the server's count has no status filter; it opens no narrower list (it opened Approved).
           />
           <StatCard
             label="Over budget this month"

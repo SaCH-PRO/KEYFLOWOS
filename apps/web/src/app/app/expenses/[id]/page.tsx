@@ -29,7 +29,7 @@ import {
 import { voidBill } from "@/lib/api/finance";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate } from "../components/expense-utils";
-import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, receiptIsViewable } from "../components/expense-form-sidesheet";
+import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, RECEIPT_UNAVAILABLE_NOTE, receiptKind } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { refusalMessage } from "@/lib/failure-kit";
 import { BillPayDialog } from "../components/bill-pay-dialog";
@@ -198,7 +198,7 @@ export default function ExpenseDetailPage() {
   // The server's remaining already counts this expense (spent is the month's paid expenses); it is shown as is.
   const { month: budgetMonth, year: budgetYear } = expenseMonth(expense.date, businessId);
   const budgetMonthLabel = new Date(Date.UTC(budgetYear, budgetMonth - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-  const receiptViewable = receiptIsViewable(expense.receiptUrl);
+  const receipt = receiptKind(expense.receiptUrl, businessId);
 
   return (
     <div className="min-h-screen bg-background">
@@ -276,7 +276,7 @@ export default function ExpenseDetailPage() {
           <div className="rounded-xl border border-border bg-card shadow-sm p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-foreground">Receipt preview</h3>
-              {expense.receiptUrl && receiptViewable && (
+              {expense.receiptUrl && receipt === "link" && (
                 <a
                   href={expense.receiptUrl}
                   target="_blank"
@@ -288,11 +288,12 @@ export default function ExpenseDetailPage() {
                 </a>
               )}
             </div>
-            {expense.receiptUrl && !receiptViewable ? (
-              // COR MINOR-1: no route serves an /objects/ path yet (server row P222): it is said, not linked.
+            {receipt === "stored" || receipt === "unavailable" ? (
+              // COR MINOR-1 / R2-3: no route serves an /objects/ path yet (server row P222). This business's upload is
+              // said to be stored; any other /objects/ path is not claimed as this expense's receipt. Neither is linked.
               <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-dashed border-border bg-muted/30 text-center px-4">
                 <FileText className="w-10 h-10 text-muted-foreground/40 mb-2" />
-                <p className="text-sm text-foreground">{RECEIPT_STORED_NOTE}</p>
+                <p className="text-sm text-foreground">{receipt === "stored" ? RECEIPT_STORED_NOTE : RECEIPT_UNAVAILABLE_NOTE}</p>
               </div>
             ) : expense.receiptUrl ? (
               expense.receiptUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (

@@ -182,7 +182,7 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     uploadFile.mockImplementation(() => new Promise((r) => { finish = r; }));
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    fireEvent.change(screen.getByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
     await waitFor(() => expect(uploadFile).toHaveBeenCalled());
     switchTo("biz_B");
     await act(async () => { finish({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj1", metadata: {} }); });
@@ -194,7 +194,7 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     uploadFile.mockResolvedValue({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_OTHER/obj1", metadata: {} });
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    fireEvent.change(screen.getByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -203,7 +203,7 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()));
     ws.bid = "biz_B"; // stored behind the page's back, no event yet
-    fireEvent.change(screen.getByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(uploadFile).not.toHaveBeenCalled();
   });
@@ -244,7 +244,7 @@ describe("COR MINOR-2: the toolbar upload keeps the Drive copy", () => {
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
     const file = photo();
-    fireEvent.change(screen.getByLabelText(/^upload receipt$/i), { target: { files: [file] } });
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [file] } });
     const sheet = await screen.findByRole("dialog");
     fireEvent.change(within(sheet).getByPlaceholderText(/What was this expense for|description/i), { target: { value: "Flour" } });
     fireEvent.change(within(sheet).getByPlaceholderText("0.00"), { target: { value: "10" } });
