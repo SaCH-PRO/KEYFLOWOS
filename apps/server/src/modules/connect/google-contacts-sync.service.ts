@@ -512,35 +512,6 @@ export class GoogleContactsSyncService {
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }
 
-  /** The new contact with the rule's defaults applied, or null when none applied. */
-  private async applyDefaultsToNewContact(
-    businessId: string,
-    contactId: string,
-    rules: ContactMappingRules,
-  ): Promise<Contact | null> {
-    const data: Prisma.ContactUpdateInput = {};
-    if (rules.defaultTags.length > 0) {
-      data.tags = { set: rules.defaultTags };
-    }
-    // D-92: only a ContactStatus is written; a rule naming none leaves the LEAD the contact was created with.
-    const defaultStatus = canonicalContactStatus(rules.defaultStatus);
-    if (defaultStatus) data.status = defaultStatus;
-    if (rules.defaultLifecycleStage) data.lifecycleStage = rules.defaultLifecycleStage;
-    if (rules.defaultOwnerId) data.ownerId = rules.defaultOwnerId;
-    if (Object.keys(data).length === 0) return null;
-    return this.prisma.client.contact
-      .update({ where: { id: contactId }, data })
-      .catch((e) => {
-        this.logger.warn(`Apply defaults failed for ${contactId}: ${(e as Error).message}`);
-        return null;
-      });
-  }
-
-  /**
-   * Pulls connections from Google People API, optionally using a previously stored
-   * sync token for incremental updates. Upserts each into the Contact table and
-   * tracks the Google resource name in ContactExternalMapping.
-   */
   /** Update only `metadata.syncProgress` on the connector status row. */
   private async writeProgress(
     businessId: string,
@@ -674,8 +645,6 @@ export class GoogleContactsSyncService {
         });
 
         let contactId = mapping?.contactId;
-        let isNew = false;
-        let createdRow: Contact | null = null;
         if (!contactId) {
           // D-211: the holder of the email, else of the number in any spelling.
           contactId = await syncMatchedContactId(this.prisma, businessId, emailNorm, phoneRead, country);
@@ -704,20 +673,27 @@ export class GoogleContactsSyncService {
             phoneNormalized: phoneFields.phoneNormalized,
             companyName: company ?? undefined,
           };
-          updated += 1;
           // CR-CTM-3: a person read again whose values the contact already carries writes nothing.
+          // D-25 (FU-CONTACT-AUDIT-RESIDUAL): contact update and its audit entry commit atomically.
           if (!syncWritesNothing(before, data)) {
-            const after = await this.prisma.client.contact.update({ where: { id: contactId }, data });
-            await this.audit.write({
-              businessId,
-              contactId,
-              action: 'updated',
-              before,
-              after,
-              actor: syncAuditActor(actor),
-              reason: 'google_contacts sync',
+            const targetId = contactId;
+            await this.prisma.client.$transaction(async (tx) => {
+              const after = await tx.contact.update({ where: { id: targetId }, data });
+              await this.audit.write(
+                {
+                  businessId,
+                  contactId: targetId,
+                  action: 'updated',
+                  before,
+                  after,
+                  actor: syncAuditActor(actor),
+                  reason: 'google_contacts sync',
+                },
+                tx,
+              );
             });
           }
+          updated += 1;
         } else {
           // SEC-W6CTM-3: a contact is created only when the CRM create door
           // admits every member of the run; otherwise the person is skipped
@@ -728,24 +704,42 @@ export class GoogleContactsSyncService {
             refused += 1;
             continue;
           }
-          const created = await this.prisma.client.contact.create({
-            data: {
-              businessId,
-              firstName,
-              lastName,
-              email,
-              emailNormalized: emailNorm,
-              phone: phoneRead.phone,
-              phoneNormalized: phoneRead.phoneNormalized,
-              companyName: company,
-              source: 'google_contacts',
-              status: 'LEAD',
-            },
+          // D-92 / D-25 (FU-CONTACT-AUDIT-RESIDUAL): contact create (with mapping defaults)
+          // and its ContactAuditEntry commit atomically inside one transaction.
+          const defaultStatus = hasRules ? canonicalContactStatus(rules.defaultStatus) : null;
+          const created = await this.prisma.client.$transaction(async (tx) => {
+            const row = await tx.contact.create({
+              data: {
+                businessId,
+                firstName,
+                lastName,
+                email,
+                emailNormalized: emailNorm,
+                phone: phoneRead.phone,
+                phoneNormalized: phoneRead.phoneNormalized,
+                companyName: company,
+                source: 'google_contacts',
+                status: defaultStatus ?? 'LEAD',
+                ...(hasRules && rules.defaultLifecycleStage ? { lifecycleStage: rules.defaultLifecycleStage } : {}),
+                ...(hasRules && rules.defaultOwnerId ? { ownerId: rules.defaultOwnerId } : {}),
+                ...(hasRules && rules.defaultTags.length > 0 ? { tags: rules.defaultTags } : {}),
+              },
+            });
+            await this.audit.write(
+              {
+                businessId,
+                contactId: row.id,
+                action: 'created',
+                after: row,
+                actor: syncAuditActor(actor),
+                reason: 'google_contacts sync',
+              },
+              tx,
+            );
+            return row;
           });
           contactId = created.id;
           imported += 1;
-          isNew = true;
-          createdRow = created;
         }
 
         if (!mapping) {
@@ -766,19 +760,6 @@ export class GoogleContactsSyncService {
               data: { updatedAt: new Date() },
             })
             .catch(() => undefined);
-        }
-
-        if (isNew && contactId) {
-          const withDefaults = hasRules ? await this.applyDefaultsToNewContact(businessId, contactId, rules) : null;
-          // W6-CONNECT-TAG-MERGE: the contact a sync creates records the acting member too.
-          await this.audit.write({
-            businessId,
-            contactId,
-            action: 'created',
-            after: withDefaults ?? createdRow,
-            actor: syncAuditActor(actor),
-            reason: 'google_contacts sync',
-          });
         }
       }
 

@@ -849,12 +849,15 @@ export class CrmController {
     @Param('mergeId') mergeId: string,
     @Req() req: any,
   ) {
-    return this.crm.revertMerge({
-      businessId,
-      mergeId,
-      actorId: req?.user?.id,
-      actorType: req?.user?.id ? 'USER' : 'SYSTEM',
-    });
+    return this.crm.revertMerge(
+      {
+        businessId,
+        mergeId,
+        actorId: req?.user?.id,
+        actorType: req?.user?.id ? 'USER' : 'SYSTEM',
+      },
+      this.userAuditContext(req),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1027,13 +1030,16 @@ export class CrmController {
     @Req() req: any,
   ) {
     await this.assertVisibleContact(businessId, contactId, req);
-    return this.timeline.addNote({
-      businessId,
-      contactId,
-      body: body.body,
-      authorId: req?.user?.id,
-      source: body.source || 'crm',
-    });
+    return this.timeline.addNote(
+      {
+        businessId,
+        contactId,
+        body: body.body,
+        authorId: req?.user?.id,
+        source: body.source || 'crm',
+      },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1259,18 +1265,21 @@ export class CrmController {
     @Req() req: any,
   ) {
     await this.assertVisibleContact(businessId, contactId, req);
-    return this.timeline.addTask({
-      businessId,
-      contactId,
-      title: body.title,
-      dueDate: body.dueDate,
-      priority: body.priority,
-      assigneeId: body.assigneeId,
-      assigneeType: body.assigneeType,
-      remindAt: body.remindAt,
-      creatorId: req?.user?.id,
-      source: body.source || 'crm',
-    });
+    return this.timeline.addTask(
+      {
+        businessId,
+        contactId,
+        title: body.title,
+        dueDate: body.dueDate,
+        priority: body.priority,
+        assigneeId: body.assigneeId,
+        assigneeType: body.assigneeType,
+        remindAt: body.remindAt,
+        creatorId: req?.user?.id,
+        source: body.source || 'crm',
+      },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1306,11 +1315,14 @@ export class CrmController {
     @Req() req: any,
   ) {
     await this.assertVisibleContact(businessId, contactId, req);
-    return this.crm.completeNextAction({
-      businessId,
-      contactId,
-      actorId: req?.user?.id,
-    });
+    return this.crm.completeNextAction(
+      {
+        businessId,
+        contactId,
+        actorId: req?.user?.id,
+      },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1324,13 +1336,16 @@ export class CrmController {
     @Req() req: any,
   ) {
     await this.assertVisibleContact(businessId, contactId, req);
-    return this.crm.snoozeNextAction({
-      businessId,
-      contactId,
-      snoozeUntil: body?.snoozeUntil,
-      days: body?.days,
-      actorId: req?.user?.id,
-    });
+    return this.crm.snoozeNextAction(
+      {
+        businessId,
+        contactId,
+        snoozeUntil: body?.snoozeUntil,
+        days: body?.days,
+        actorId: req?.user?.id,
+      },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1344,7 +1359,10 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleChildRow(businessId, 'task', taskId, req);
-    return this.timeline.completeTask({ businessId, taskId, evidenceIds: body.evidenceIds });
+    return this.timeline.completeTask(
+      { businessId, taskId, evidenceIds: body.evidenceIds },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1357,7 +1375,7 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleChildRow(businessId, 'task', taskId, req);
-    return this.timeline.reopenTask({ businessId, taskId });
+    return this.timeline.reopenTask({ businessId, taskId }, this.userAuditContext(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1371,7 +1389,10 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleChildRow(businessId, 'note', noteId, req);
-    return this.timeline.updateNote({ businessId, noteId, body: body.body, source: body.source });
+    return this.timeline.updateNote(
+      { businessId, noteId, body: body.body, source: body.source },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1384,7 +1405,7 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleChildRow(businessId, 'note', noteId, req);
-    return this.timeline.deleteNote({ businessId, noteId });
+    return this.timeline.deleteNote({ businessId, noteId }, this.userAuditContext(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1398,14 +1419,17 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleChildRow(businessId, 'task', taskId, req);
-    return this.timeline.updateTask({
-      businessId,
-      taskId,
-      title: body.title,
-      dueDate: body.dueDate,
-      priority: body.priority,
-      remindAt: body.remindAt,
-    });
+    return this.timeline.updateTask(
+      {
+        businessId,
+        taskId,
+        title: body.title,
+        dueDate: body.dueDate,
+        priority: body.priority,
+        remindAt: body.remindAt,
+      },
+      this.userAuditContext(req),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1418,7 +1442,7 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleChildRow(businessId, 'task', taskId, req);
-    return this.timeline.deleteTask({ businessId, taskId });
+    return this.timeline.deleteTask({ businessId, taskId }, this.userAuditContext(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

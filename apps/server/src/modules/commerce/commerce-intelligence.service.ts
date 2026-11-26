@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ownStockRows } from '../../core/inventory/inventory-mode';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { LandedCostEngine } from './landed-cost-engine.service';
@@ -232,7 +233,10 @@ Respond in valid JSON:
             supplierProduct: { select: { leadTimeDays: true, availability: true } },
           },
         },
-        inventoryStocks: { include: { warehouse: { select: { name: true } } } },
+        inventoryStocks: {
+          where: ownStockRows(businessId),
+          include: { warehouse: { select: { name: true } } },
+        },
       },
     });
     if (!product) throw new NotFoundException('Product not found');

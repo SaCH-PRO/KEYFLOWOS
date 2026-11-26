@@ -1867,9 +1867,12 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       const sm = serviceMethod(wrapper);
       expect(sm, wrapper).not.toBeNull();
       expect(sm!.fields.get(via)).toBe(to.split('.')[0]);
-      expect(sm!.body).toContain(`this.${via}.${to.split('.')[1]}(input)`);
-      // its only other calls are its own audit helper, and it writes nothing itself
-      expect(serviceDelegates(wrapper).sort()).toEqual([to, `${wrapper.split('.')[0]}.auditContact`].sort());
+      // D-207 (FU-CONTACT-AUDIT-RESIDUAL): the wrapper forwards directly to
+      // CrmTimelineService, which writes the ContactAuditEntry inside the
+      // note/task transaction itself.
+      expect(sm!.body).toMatch(new RegExp(`this\\.${via}\\.${to.split('.')[1]}\\(input(?:,\\s*\\w+)?\\)`));
+      // its only call is the forwarded-to method, and it writes nothing itself
+      expect(serviceDelegates(wrapper)).toEqual([to]);
       expect(sm!.body).not.toMatch(/this\.prisma\.client\.[a-zA-Z]+\.(create|update|upsert|delete)/);
       // no member route calls the wrapper itself; the forwarded-to method is scoped crm:write
       expect(derived.byMethod.get(wrapper) ?? []).toEqual([]);

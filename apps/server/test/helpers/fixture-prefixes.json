@@ -1560,6 +1560,21 @@
       "prefix": "v72c_",
       "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
       "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
+    },
+    {
+      "prefix": "v70f_",
+      "owner": "apps/server/test/store-stripe-own-key.integration.test.ts",
+      "packet": "V1-70 (W1F-STORE-STRIPE-R0)"
+    },
+    {
+      "prefix": "v71g_",
+      "owner": "apps/server/test/contact-audit-residual.integration.test.ts",
+      "packet": "V1-71 (FU-CONTACT-AUDIT-RESIDUAL)"
+    },
+    {
+      "prefix": "v70e_",
+      "owner": "apps/server/test/settle-no-stock.integration.test.ts",
+      "packet": "V1-70 (W1F-SETTLE-NO-STOCK)"
     }
   ],
   "pendingRenames": [],
