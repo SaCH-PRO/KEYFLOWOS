@@ -321,25 +321,15 @@ export class CrmService {
   /**
    * Internal helper: write a per-contact audit entry.
    *
-   * With `tx` (owner ruling D-25: every contact write records a
-   * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT) the entry is written in that
-   * transaction, the contact write's own, and the caller awaits it: when the
-   * entry cannot be written the error propagates, the transaction rolls back
-   * with the contact rows and their ContactEvents, and the request fails. The
-   * contact writes that pass it: createContact, updateContact,
-   * softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
-   * reassignContacts, mergeContacts and the import merge
-   * (mergeContactDetails). Each writes its entries right
-   * after the contact rows and before any ContactEvent, so a refused entry
-   * also leaves no Activity feed copy or crm.contact_event.logged
-   * announcement behind (CrmTimelineService.logEvent makes both as it writes
-   * the event, inside the transaction or not).
-   *
-   * Without `tx` it stays fire-and-forget, never blocking or failing the write
-   * it reports (the returned promise is already settled): the note and task
-   * writes (the R0 job-role-tool-families ESC-1 wrapper pin keeps
-   * addNote/addTask to `this.timeline.addNote(input)` plus this helper, so
-   * their entry cannot join the note's transaction there).
+   * With `tx` (owner rulings D-25 & D-207: every contact write records a
+   * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT & FU-CONTACT-AUDIT-RESIDUAL)
+   * the entry is written in that transaction, the contact write's own, and the
+   * caller awaits it: when the entry cannot be written the error propagates,
+   * the transaction rolls back with the contact rows and their ContactEvents,
+   * and the request fails. Every contact write in CrmService (and note/task
+   * writes inside CrmTimelineService) passes `tx` and writes its audit row
+   * before any ContactEvent so a refused entry leaves no Activity feed copy
+   * or crm.contact_event.logged announcement behind.
    */
   private auditContact(opts: AuditContactInput, tx?: ContactAuditClient): Promise<void> {
     if (tx) return this.contactAudit.write(this.auditEntry(opts), tx);
@@ -1620,6 +1610,37 @@ export class CrmService {
           source: LIFECYCLE_SOURCE,
         },
       });
+      // D-25 (FU-CONTACT-AUDIT-RESIDUAL): both audit entries commit with the
+      // status move and follow-up task inside the same transaction, or roll
+      // back completely.
+      const actor: ContactAuditActor = { type: 'SYSTEM', label: LIFECYCLE_SOURCE };
+      await this.contactAudit.write(
+        {
+          businessId,
+          contactId,
+          action: 'updated',
+          entityType: 'invoice',
+          entityId: invoiceId,
+          before: { status: from },
+          after: { status: to },
+          actor,
+          reason: `invoice.paid ${invoiceNumber ?? invoiceId}: ${from} -> ${to} (D-81)`,
+        },
+        tx,
+      );
+      await this.contactAudit.write(
+        {
+          businessId,
+          contactId,
+          action: 'task_added',
+          entityType: 'task',
+          entityId: task.id,
+          after: { title: task.title, dueDate: dueDate.toISOString(), priority: task.priority, assigneeId: task.assigneeId },
+          actor,
+          reason: `invoice.paid ${invoiceNumber ?? invoiceId}: follow-up (D-81)`,
+        },
+        tx,
+      );
       return { contact, task, taskEvent, ownerNotMember: Boolean(contact.ownerId) && !ownerMembership };
     });
     if (!result) return null;
@@ -1628,28 +1649,6 @@ export class CrmService {
       this.logger.warn(`[CRM] D-81 follow-up for contact=${contactId} left unassigned: its owner is not a member of business=${businessId}`);
     }
 
-    const actor: ContactAuditActor = { type: 'SYSTEM', label: LIFECYCLE_SOURCE };
-    await this.contactAudit.write({
-      businessId,
-      contactId,
-      action: 'updated',
-      entityType: 'invoice',
-      entityId: invoiceId,
-      before: { status: from },
-      after: { status: to },
-      actor,
-      reason: `invoice.paid ${invoiceNumber ?? invoiceId}: ${from} -> ${to} (D-81)`,
-    });
-    await this.contactAudit.write({
-      businessId,
-      contactId,
-      action: 'task_added',
-      entityType: 'task',
-      entityId: task.id,
-      after: { title: task.title, dueDate: dueDate.toISOString(), priority: task.priority, assigneeId: task.assigneeId },
-      actor,
-      reason: `invoice.paid ${invoiceNumber ?? invoiceId}: follow-up (D-81)`,
-    });
     const payload: ContactUpdatedPayload = { contact: moved, businessId, fromStatus: from, toStatus: to };
     this.events.emit('contact.updated', payload);
     this.events.emit('contact_task.created', { task, businessId });
@@ -1746,7 +1745,11 @@ export class CrmService {
    * Undo an AI-created contact. If the contact has no related activity,
    * soft-delete it; otherwise revert it to LEAD for human review.
    */
-  async undoContact(input: { businessId: string; contactId: string }) {
+  async undoContact(
+    input: { businessId: string; contactId: string; actorId?: string | null },
+    _audit?: AuditContext,
+  ) {
+    const audit = this.memberAuditContext(_audit, input.actorId ?? undefined);
     const contact = await this.prisma.client.contact.findUnique({
       where: { id: input.contactId },
       include: {
@@ -1763,9 +1766,24 @@ export class CrmService {
       (contact._count.tasks ?? 0);
 
     if (totalActivity === 0) {
-      const deleted = await this.prisma.client.contact.update({
-        where: { id: input.contactId },
-        data: { deletedAt: new Date() },
+      const deleted = await this.prisma.client.$transaction(async (tx) => {
+        const row = await tx.contact.update({
+          where: { id: input.contactId },
+          data: { deletedAt: new Date() },
+        });
+        await this.auditContact(
+          {
+            businessId: input.businessId,
+            contactId: input.contactId,
+            action: 'deleted',
+            before: { deletedAt: contact.deletedAt },
+            after: { deletedAt: row.deletedAt },
+            ctx: audit,
+            extraReason: 'undo contact',
+          },
+          tx,
+        );
+        return row;
       });
       this.events.emit('contact.deleted', { contact: deleted, businessId: input.businessId });
       this.stats.invalidateCache(input.businessId);
@@ -1773,9 +1791,24 @@ export class CrmService {
       return { id: input.contactId, status: 'deleted' };
     }
 
-    const updated = await this.prisma.client.contact.update({
-      where: { id: input.contactId },
-      data: { status: 'LEAD' },
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const row = await tx.contact.update({
+        where: { id: input.contactId },
+        data: { status: 'LEAD' },
+      });
+      await this.auditContact(
+        {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          action: 'updated',
+          before: { status: contact.status },
+          after: { status: row.status },
+          ctx: audit,
+          extraReason: 'undo contact',
+        },
+        tx,
+      );
+      return row;
     });
     this.events.emit('contact.updated', { contact: updated, businessId: input.businessId });
     this.stats.invalidateCache(input.businessId);
@@ -2527,7 +2560,11 @@ export class CrmService {
     return { ...merged, mergeId: result.mergeId, revertableUntil: expiresAt.toISOString() };
   }
 
-  async revertMerge(input: { businessId: string; mergeId: string; actorId?: string; actorType?: string }) {
+  async revertMerge(
+    input: { businessId: string; mergeId: string; actorId?: string; actorType?: string },
+    _audit?: AuditContext,
+  ) {
+    const audit = this.memberAuditContext(_audit, input.actorType === 'USER' ? input.actorId : undefined);
     const op = await this.prisma.client.mergeOperation.findFirst({
       where: { id: input.mergeId, businessId: input.businessId },
     });
@@ -2557,21 +2594,15 @@ export class CrmService {
       return [];
     };
 
-    // Best-effort revert: each restoration step runs independently and any
-    // recoverable error is captured into a structured conflict report
-    // instead of aborting the whole undo. The report is persisted on the
-    // MergeOperation row, returned to the caller, and included in the
-    // contact.merge_reverted event payload.
+    // Best-effort revert: each child restoration step runs inside a savepoint so
+    // any recoverable conflict is captured into a structured conflict report
+    // instead of aborting the outer transaction. The duplicate restore and both
+    // ContactAuditEntry rows commit or roll back atomically (D-25).
     type RevertConflict = { table: string; id?: string; ids?: string[]; reason: string };
-    const conflicts: RevertConflict[] = [];
-    const restored: Record<string, number> = {};
-    const skipped: Record<string, number> = {};
     const reasonOf = (e: unknown): string =>
       e instanceof Error ? e.message : typeof e === 'string' ? e : 'unknown error';
 
-    const c = this.prisma.client;
-
-    // 1. Restore the duplicate contact (undelete + restore snapshot fields).
+    // 1. Prepare duplicate contact restoration (undelete + restore snapshot fields).
     const restoreData: Record<string, unknown> = {};
     const restorableFields = [
       'firstName','lastName','email','emailNormalized','phone','phoneNormalized',
@@ -2586,134 +2617,198 @@ export class CrmService {
     }
     restoreData.deletedAt = null;
     restoreData.mergedIntoId = null;
-    try {
-      await c.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
-      restored.contact = 1;
-    } catch (err: unknown) {
-      // Failing to restore the surviving "duplicate" row is the only true blocker:
-      // the rest of the revert depends on this row existing as a contact.
-      // Since D-16 the merged duplicate releases its email and phone during the
-      // undo window, so another live contact may hold one of them by now; the
-      // un-delete is then a P2002 on an identity unique and answers like every
-      // other identity conflict: 409 contact_email_taken / contact_phone_taken
-      // naming the live holder the actor may see. Nothing has been restored or
-      // stamped yet, so the merge stays revertable once the conflict is
-      // resolved. Any other failure is a 400 that carries no database text
-      // (Prisma's message names server paths, source lines and columns); the
-      // cause goes to the log.
-      if (contactIdentityViolation(err)) {
-        await this.rejectContactIdentityTaken(
-          err,
-          input.businessId,
-          {
-            emailNormalized: typeof restoreData.emailNormalized === 'string' ? restoreData.emailNormalized : null,
-            phoneNormalized: typeof restoreData.phoneNormalized === 'string' ? restoreData.phoneNormalized : null,
-          },
-          input.actorType === 'USER' ? input.actorId : null,
-        );
-      }
-      this.logger.warn(`revertMerge ${op.id}: restoring duplicate contact ${op.duplicateId} failed: ${reasonOf(err)}`);
-      throw new BadRequestException('Failed to restore duplicate contact');
-    }
 
-    // 2. Move every previously-repointed row back to the duplicate, table by
-    //    table. Each updateMany is its own statement so a row-level conflict
-    //    in one table does not abort the others.
-    const movePairs: Array<[string, (ids: string[]) => Promise<{ count: number }>]> = [
-      ['events', (ids) => c.contactEvent.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['notes', (ids) => c.contactNote.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['tasks', (ids) => c.contactTask.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['enrollments', (ids) => c.crmSequenceEnrollment.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['quotes', (ids) => c.quote.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['invoices', (ids) => c.invoice.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['bookings', (ids) => c.booking.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['media', (ids) => c.contactMedia.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['playbooks', (ids) => c.contactPlaybook.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['recurringInvoices', (ids) => c.recurringInvoice.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['externalMappings', (ids) => c.contactExternalMapping.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['momentumRecommendations', (ids) => c.momentumRecommendation.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['whatsappContacts', (ids) => c.whatsAppContact.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['importRecords', (ids) => c.contactImportContact.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['journeyTouchpoints', (ids) => c.journeyTouchpoint.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-      ['listMembers', (ids) => c.contactListMember.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
-    ];
-    for (const [label, fn] of movePairs) {
-      const ids = idsFor(label);
-      if (ids.length === 0) continue;
+    let restoreErr: unknown = null;
+    const { revertedAt, conflictReport } = await this.prisma.client.$transaction(async (tx) => {
+      const conflicts: RevertConflict[] = [];
+      const restored: Record<string, number> = {};
+      const skipped: Record<string, number> = {};
+
       try {
-        const r = await fn(ids);
-        restored[label] = r.count;
-        if (r.count < ids.length) {
-          // Some rows were edited/deleted post-merge.
-          skipped[label] = (skipped[label] ?? 0) + (ids.length - r.count);
-          conflicts.push({ table: label, ids, reason: `${ids.length - r.count} row(s) missing or already moved` });
-        }
-      } catch (err: any) {
-        skipped[label] = (skipped[label] ?? 0) + ids.length;
-        conflicts.push({ table: label, ids, reason: reasonOf(err) });
+        await tx.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
+        restored.contact = 1;
+      } catch (err: unknown) {
+        restoreErr = err;
+        throw err;
       }
-    }
 
-    // 3. Restore unique-per-contact rows deleted during merge, one at a time
-    //    so a single row conflict (e.g. someone re-created a CustomerJourney
-    //    after the merge) doesn't block the rest of the undo.
-    const recreate = async <T,>(
-      table: string,
-      rows: Array<Record<string, unknown>>,
-      create: (row: Record<string, unknown>) => Promise<T>,
-    ) => {
-      for (const row of rows) {
-        try {
-          await create(row);
-          restored[table] = (restored[table] ?? 0) + 1;
-        } catch (err: any) {
-          skipped[table] = (skipped[table] ?? 0) + 1;
-          conflicts.push({ table, id: typeof row.id === 'string' ? row.id : undefined, reason: reasonOf(err) });
-        }
-      }
-    };
-    await recreate('contactMomentum', deletedSnapshots.contactMomentum ?? [],
-      (row) => c.contactMomentum.create({ data: row as Prisma.ContactMomentumUncheckedCreateInput }));
-    await recreate('contactMomentumSnapshot', deletedSnapshots.contactMomentumSnapshot ?? [],
-      (row) => c.contactMomentumSnapshot.create({ data: row as Prisma.ContactMomentumSnapshotUncheckedCreateInput }));
-    await recreate('customerJourney', deletedSnapshots.customerJourney ?? [],
-      (row) => c.customerJourney.create({ data: row as Prisma.CustomerJourneyUncheckedCreateInput }));
-    await recreate('contactListMembers', deletedSnapshots.contactListMembers ?? [],
-      (row) => c.contactListMember.create({ data: row as Prisma.ContactListMemberUncheckedCreateInput }));
-
-    const conflictReport = { restored, skipped, conflicts };
-
-    try {
-      await c.mergeOperation.update({
-        where: { id: op.id },
-        data: {
-          revertedAt: new Date(),
-          revertedActorId: input.actorId,
-          // Persist the conflict report inside repointedCounts so it's
-          // queryable later without changing the schema.
-          repointedCounts: { ...(stored as Record<string, unknown>), _revertReport: conflictReport } as Prisma.InputJsonValue,
+      // D-25 (FU-CONTACT-AUDIT-RESIDUAL): both audit entries commit with the
+      // revert or nothing does, before any child repoints or ContactEvent.
+      await this.auditContact(
+        {
+          businessId: input.businessId,
+          contactId: op.duplicateId,
+          action: 'restored',
+          entityType: 'contact',
+          entityId: op.id,
+          before: { mergedIntoId: op.primaryId, deletedAt: op.createdAt.toISOString() },
+          after: { mergedIntoId: null, deletedAt: null },
+          ctx: audit,
+          extraReason: `reverted merge ${op.id} from primary ${op.primaryId}`,
         },
-      });
-    } catch (err: any) {
+        tx,
+      );
+      await this.auditContact(
+        {
+          businessId: input.businessId,
+          contactId: op.primaryId,
+          action: 'restored',
+          entityType: 'contact',
+          entityId: op.id,
+          before: { mergedDuplicateId: op.duplicateId },
+          after: { mergedDuplicateId: null },
+          ctx: audit,
+          extraReason: `reverted merge ${op.id} restoring duplicate ${op.duplicateId}`,
+        },
+        tx,
+      );
+
+      let spSeq = 0;
+      const runIsolated = async <T,>(fn: () => Promise<T>): Promise<T> => {
+        const sp = `sp_revert_${++spSeq}`;
+        await tx.$executeRawUnsafe(`SAVEPOINT ${sp}`);
+        try {
+          const val = await fn();
+          await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${sp}`);
+          return val;
+        } catch (err) {
+          await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${sp}`);
+          throw err;
+        }
+      };
+
+      // 2. Move every previously-repointed row back to the duplicate, table by
+      //    table. Each updateMany runs inside its own savepoint so a row-level
+      //    conflict in one table does not abort the others.
+      const movePairs: Array<[string, (ids: string[]) => Promise<{ count: number }>]> = [
+        ['events', (ids) => tx.contactEvent.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['notes', (ids) => tx.contactNote.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['tasks', (ids) => tx.contactTask.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['enrollments', (ids) => tx.crmSequenceEnrollment.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['quotes', (ids) => tx.quote.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['invoices', (ids) => tx.invoice.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['bookings', (ids) => tx.booking.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['media', (ids) => tx.contactMedia.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['playbooks', (ids) => tx.contactPlaybook.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['recurringInvoices', (ids) => tx.recurringInvoice.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['externalMappings', (ids) => tx.contactExternalMapping.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['momentumRecommendations', (ids) => tx.momentumRecommendation.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['whatsappContacts', (ids) => tx.whatsAppContact.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['importRecords', (ids) => tx.contactImportContact.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['journeyTouchpoints', (ids) => tx.journeyTouchpoint.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+        ['listMembers', (ids) => tx.contactListMember.updateMany({ where: { id: { in: ids } }, data: { contactId: op.duplicateId } })],
+      ];
+      for (const [label, fn] of movePairs) {
+        const ids = idsFor(label);
+        if (ids.length === 0) continue;
+        try {
+          const r = await runIsolated(() => fn(ids));
+          restored[label] = r.count;
+          if (r.count < ids.length) {
+            // Some rows were edited/deleted post-merge.
+            skipped[label] = (skipped[label] ?? 0) + (ids.length - r.count);
+            conflicts.push({ table: label, ids, reason: `${ids.length - r.count} row(s) missing or already moved` });
+          }
+        } catch (err: any) {
+          skipped[label] = (skipped[label] ?? 0) + ids.length;
+          conflicts.push({ table: label, ids, reason: reasonOf(err) });
+        }
+      }
+
+      // 3. Restore unique-per-contact rows deleted during merge, one at a time
+      //    so a single row conflict (e.g. someone re-created a CustomerJourney
+      //    after the merge) doesn't block the rest of the undo.
+      const recreate = async <T,>(
+        table: string,
+        rows: Array<Record<string, unknown>>,
+        create: (row: Record<string, unknown>) => Promise<T>,
+      ) => {
+        for (const row of rows) {
+          try {
+            await runIsolated(() => create(row));
+            restored[table] = (restored[table] ?? 0) + 1;
+          } catch (err: any) {
+            skipped[table] = (skipped[table] ?? 0) + 1;
+            conflicts.push({ table, id: typeof row.id === 'string' ? row.id : undefined, reason: reasonOf(err) });
+          }
+        }
+      };
+      await recreate('contactMomentum', deletedSnapshots.contactMomentum ?? [],
+        (row) => tx.contactMomentum.create({ data: row as Prisma.ContactMomentumUncheckedCreateInput }));
+      await recreate('contactMomentumSnapshot', deletedSnapshots.contactMomentumSnapshot ?? [],
+        (row) => tx.contactMomentumSnapshot.create({ data: row as Prisma.ContactMomentumSnapshotUncheckedCreateInput }));
+      await recreate('customerJourney', deletedSnapshots.customerJourney ?? [],
+        (row) => tx.customerJourney.create({ data: row as Prisma.CustomerJourneyUncheckedCreateInput }));
+      await recreate('contactListMembers', deletedSnapshots.contactListMembers ?? [],
+        (row) => tx.contactListMember.create({ data: row as Prisma.ContactListMemberUncheckedCreateInput }));
+
+      const report = { restored, skipped, conflicts };
+      const now = new Date();
+      try {
+        await runIsolated(() =>
+          tx.mergeOperation.update({
+            where: { id: op.id },
+            data: {
+              revertedAt: now,
+              revertedActorId: input.actorId,
+              // Persist the conflict report inside repointedCounts so it's
+              // queryable later without changing the schema.
+              repointedCounts: { ...(stored as Record<string, unknown>), _revertReport: report } as Prisma.InputJsonValue,
+            },
+          }),
+        );
+      } catch (err: any) {
         this.logger.warn(`Don't fail the user-visible revert because we couldn't persist the: ${err instanceof Error ? err.message : err}`);
       }
 
-    const revertedAt = new Date().toISOString();
-    await this.timeline.logEvent(
-      input.businessId,
-      op.primaryId,
-      CONTACT_EVENT.CONTACT_MERGE_REVERTED,
-      {
-        mergeId: op.id,
-        primaryId: op.primaryId,
-        duplicateId: op.duplicateId,
-        revertedAt,
-        restored: conflictReport.restored,
-        skipped: conflictReport.skipped,
-        conflicts: conflictReport.conflicts,
-      },
-      { actorType: input.actorType ?? 'SYSTEM', actorId: input.actorId, source: 'crm' },
-    );
+      const iso = now.toISOString();
+      await this.timeline.logEvent(
+        input.businessId,
+        op.primaryId,
+        CONTACT_EVENT.CONTACT_MERGE_REVERTED,
+        {
+          mergeId: op.id,
+          primaryId: op.primaryId,
+          duplicateId: op.duplicateId,
+          revertedAt: iso,
+          restored: report.restored,
+          skipped: report.skipped,
+          conflicts: report.conflicts,
+        },
+        { actorType: input.actorType ?? 'SYSTEM', actorId: input.actorId, source: 'crm' },
+        tx,
+      );
+      return { revertedAt: iso, conflictReport: report };
+    }).catch(async (err: unknown) => {
+      if (restoreErr && err === restoreErr) {
+        // Failing to restore the surviving "duplicate" row is the only true blocker:
+        // the rest of the revert depends on this row existing as a contact.
+        // Since D-16 the merged duplicate releases its email and phone during the
+        // undo window, so another live contact may hold one of them by now; the
+        // un-delete is then a P2002 on an identity unique and answers like every
+        // other identity conflict: 409 contact_email_taken / contact_phone_taken
+        // naming the live holder the actor may see. Nothing has been restored or
+        // stamped yet, so the merge stays revertable once the conflict is
+        // resolved. Any other failure is a 400 that carries no database text
+        // (Prisma's message names server paths, source lines and columns); the
+        // cause goes to the log.
+        if (contactIdentityViolation(err)) {
+          await this.rejectContactIdentityTaken(
+            err,
+            input.businessId,
+            {
+              emailNormalized: typeof restoreData.emailNormalized === 'string' ? restoreData.emailNormalized : null,
+              phoneNormalized: typeof restoreData.phoneNormalized === 'string' ? restoreData.phoneNormalized : null,
+            },
+            input.actorType === 'USER' ? input.actorId : null,
+          );
+        }
+        this.logger.warn(`revertMerge ${op.id}: restoring duplicate contact ${op.duplicateId} failed: ${reasonOf(err)}`);
+        throw new BadRequestException('Failed to restore duplicate contact');
+      }
+      throw err;
+    });
+
     this.events.emit('contact.merge_reverted', {
       businessId: input.businessId,
       mergeId: op.id,
@@ -2766,9 +2861,7 @@ export class CrmService {
   }
 
   async addNote(input: { businessId: string; contactId: string; body: string; authorId?: string | null; source?: string }, _audit?: AuditContext) {
-    const note = await this.timeline.addNote(input);
-    await this.auditContact({ businessId: input.businessId, contactId: input.contactId, action: 'note_added', entityType: 'note', entityId: (note as { id?: string })?.id ?? null, after: { body: input.body, source: input.source }, ctx: _audit });
-    return note;
+    return this.timeline.addNote(input, _audit);
   }
 
   /**
@@ -2940,58 +3033,31 @@ export class CrmService {
     creatorId?: string | null;
     source?: string | null;
   }, _audit?: AuditContext) {
-    const task = await this.timeline.addTask(input);
-    await this.auditContact({ businessId: input.businessId, contactId: input.contactId, action: "task_added", entityType: "task", entityId: (task as { id?: string })?.id ?? null, after: { title: input.title, dueDate: input.dueDate, priority: input.priority, assigneeId: input.assigneeId }, ctx: _audit });
-    return task;
+    return this.timeline.addTask(input, _audit);
   }
 
   async updateNote(input: { businessId: string; noteId: string; body?: string; source?: string }, _audit?: AuditContext) {
-    const before = await this.prisma.client.contactNote.findUnique({ where: { id: input.noteId } });
-    const note = await this.timeline.updateNote(input);
-    if (before?.contactId) {
-      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "note_updated", entityType: "note", entityId: input.noteId, before: { body: before.body, source: before.source }, after: { body: input.body, source: input.source }, ctx: _audit });
-    }
-    return note;
+    return this.timeline.updateNote(input, _audit);
   }
 
   async deleteNote(input: { businessId: string; noteId: string }, _audit?: AuditContext) {
-    const before = await this.prisma.client.contactNote.findUnique({ where: { id: input.noteId } });
-    const result = await this.timeline.deleteNote(input);
-    if (before?.contactId) {
-      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "note_deleted", entityType: "note", entityId: input.noteId, before: { body: before.body, source: before.source }, ctx: _audit });
-    }
-    return result;
+    return this.timeline.deleteNote(input, _audit);
   }
 
   async updateTask(input: { businessId: string; taskId: string; title?: string; dueDate?: string; priority?: string; remindAt?: string }, _audit?: AuditContext) {
-    const before = await this.prisma.client.contactTask.findUnique({ where: { id: input.taskId } });
-    const task = await this.timeline.updateTask(input);
-    if (before?.contactId) {
-      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "task_updated", entityType: "task", entityId: input.taskId, before: { title: before.title, dueDate: before.dueDate, priority: before.priority }, after: { title: input.title, dueDate: input.dueDate, priority: input.priority }, ctx: _audit });
-    }
-    return task;
+    return this.timeline.updateTask(input, _audit);
   }
 
   async deleteTask(input: { businessId: string; taskId: string }, _audit?: AuditContext) {
-    const before = await this.prisma.client.contactTask.findUnique({ where: { id: input.taskId } });
-    const result = await this.timeline.deleteTask(input);
-    if (before?.contactId) {
-      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "task_deleted", entityType: "task", entityId: input.taskId, before: { title: before.title }, ctx: _audit });
-    }
-    return result;
+    return this.timeline.deleteTask(input, _audit);
   }
 
   async completeTask(input: { businessId: string; taskId: string }, _audit?: AuditContext) {
-    const before = await this.prisma.client.contactTask.findUnique({ where: { id: input.taskId } });
-    const result = await this.timeline.completeTask(input);
-    if (before?.contactId) {
-      await this.auditContact({ businessId: input.businessId, contactId: before.contactId, action: "task_completed", entityType: "task", entityId: input.taskId, before: { status: before.status }, after: { status: "completed" }, ctx: _audit });
-    }
-    return result;
+    return this.timeline.completeTask(input, _audit);
   }
 
-  reopenTask(input: { businessId: string; taskId: string }) {
-    return this.timeline.reopenTask(input);
+  reopenTask(input: { businessId: string; taskId: string }, _audit?: AuditContext) {
+    return this.timeline.reopenTask(input, _audit);
   }
 
   logCommunication(input: {
@@ -3115,43 +3181,66 @@ export class CrmService {
     };
   }
 
-  async completeNextAction(input: { businessId: string; contactId: string; actorId?: string | null }) {
+  async completeNextAction(
+    input: { businessId: string; contactId: string; actorId?: string | null },
+    _audit?: AuditContext,
+  ) {
     const existing = await this.assertContact(input.businessId, input.contactId);
     if (!existing.nextActionAt && !existing.nextActionType) {
       return existing;
     }
-    const updated = await this.prisma.client.contact.update({
-      where: { id: input.contactId },
-      data: { nextActionAt: null, nextActionType: null },
+    const audit = this.memberAuditContext(_audit, input.actorId ?? undefined);
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const row = await tx.contact.update({
+        where: { id: input.contactId },
+        data: { nextActionAt: null, nextActionType: null },
+      });
+      await this.auditContact(
+        {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          action: 'updated',
+          before: { nextActionAt: existing.nextActionAt, nextActionType: existing.nextActionType },
+          after: { nextActionAt: null, nextActionType: null },
+          ctx: audit,
+          extraReason: 'next_action.completed',
+        },
+        tx,
+      );
+      await this.timeline.logEvent(
+        input.businessId,
+        input.contactId,
+        'next_action.completed',
+        {
+          previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
+          previousNextActionType: existing.nextActionType ?? null,
+        },
+        { actorType: input.actorId ? 'USER' : 'SYSTEM', actorId: input.actorId ?? undefined, source: 'crm' },
+        tx,
+      );
+      return row;
     });
     this.events.emit('contact.next_action_cleared', {
       businessId: input.businessId,
       contactId: input.contactId,
     });
-    await this.timeline.logEvent(
-      input.businessId,
-      input.contactId,
-      'next_action.completed',
-      {
-        previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
-        previousNextActionType: existing.nextActionType ?? null,
-      },
-      { actorType: 'USER', actorId: input.actorId ?? undefined, source: 'crm' },
-    );
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return updated;
   }
 
-  async snoozeNextAction(input: {
-    businessId: string;
-    contactId: string;
-    snoozeUntil?: string | null;
-    days?: number | null;
-    actorId?: string | null;
-  }) {
+  async snoozeNextAction(
+    input: {
+      businessId: string;
+      contactId: string;
+      snoozeUntil?: string | null;
+      days?: number | null;
+      actorId?: string | null;
+    },
+    _audit?: AuditContext,
+  ) {
     const existing = await this.assertContact(input.businessId, input.contactId);
-    let target: Date | null;
+    let target: Date;
     if (input.snoozeUntil) {
       const parsed = new Date(input.snoozeUntil);
       if (Number.isNaN(parsed.getTime())) {
@@ -3166,26 +3255,43 @@ export class CrmService {
     } else {
       throw new BadRequestException('Provide snoozeUntil (ISO date) or days (1-60)');
     }
-    const updated = await this.prisma.client.contact.update({
-      where: { id: input.contactId },
-      data: { nextActionAt: target },
+    const audit = this.memberAuditContext(_audit, input.actorId ?? undefined);
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const row = await tx.contact.update({
+        where: { id: input.contactId },
+        data: { nextActionAt: target },
+      });
+      await this.auditContact(
+        {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          action: 'updated',
+          before: { nextActionAt: existing.nextActionAt },
+          after: { nextActionAt: target },
+          ctx: audit,
+          extraReason: 'next_action.snoozed',
+        },
+        tx,
+      );
+      await this.timeline.logEvent(
+        input.businessId,
+        input.contactId,
+        'next_action.snoozed',
+        {
+          previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
+          nextActionAt: target.toISOString(),
+          nextActionType: existing.nextActionType ?? null,
+        },
+        { actorType: input.actorId ? 'USER' : 'SYSTEM', actorId: input.actorId ?? undefined, source: 'crm' },
+        tx,
+      );
+      return row;
     });
     this.events.emit('contact.next_action_set', {
       businessId: input.businessId,
       contactId: input.contactId,
       nextActionAt: target.toISOString(),
     });
-    await this.timeline.logEvent(
-      input.businessId,
-      input.contactId,
-      'next_action.snoozed',
-      {
-        previousNextActionAt: existing.nextActionAt?.toISOString() ?? null,
-        nextActionAt: target.toISOString(),
-        nextActionType: existing.nextActionType ?? null,
-      },
-      { actorType: 'USER', actorId: input.actorId ?? undefined, source: 'crm' },
-    );
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return updated;

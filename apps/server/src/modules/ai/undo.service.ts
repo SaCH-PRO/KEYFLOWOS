@@ -198,7 +198,7 @@ export class UndoService {
           restored = await this.undoInvoice(action);
           break;
         case 'contact':
-          restored = await this.undoContact(action);
+          restored = await this.undoContact(action, userId);
           break;
         case 'booking':
           restored = await this.undoBooking(action);
@@ -355,10 +355,11 @@ export class UndoService {
     return { id: result.id, status: result.status };
   }
 
-  private async undoContact(action: UndoableAction): Promise<Record<string, any>> {
+  private async undoContact(action: UndoableAction, actorId?: string): Promise<Record<string, any>> {
     const result = await this.getCrm().undoContact({
       businessId: action.businessId,
       contactId: action.entityId,
+      ...(actorId ? { actorId } : {}),
     });
     return { id: result.id, status: result.status };
   }

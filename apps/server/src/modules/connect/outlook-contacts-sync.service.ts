@@ -415,20 +415,27 @@ export class OutlookContactsSyncService {
               companyName: company ?? undefined,
               jobTitle: jobTitle ?? undefined,
             };
-            updated += 1;
             // CR-CTM-3: a contact read again whose values it already carries is not written.
+            // D-25 (FU-CONTACT-AUDIT-RESIDUAL): contact update and its audit entry commit atomically.
             if (!syncWritesNothing(local, data)) {
-              const after = await this.prisma.client.contact.update({ where: { id: contactId }, data });
-              await this.audit.write({
-                businessId,
-                contactId,
-                action: 'updated',
-                before: local,
-                after,
-                actor: syncAuditActor(actor),
-                reason: 'outlook_contacts sync',
+              const targetId = contactId;
+              await this.prisma.client.$transaction(async (tx) => {
+                const after = await tx.contact.update({ where: { id: targetId }, data });
+                await this.audit.write(
+                  {
+                    businessId,
+                    contactId: targetId,
+                    action: 'updated',
+                    before: local,
+                    after,
+                    actor: syncAuditActor(actor),
+                    reason: 'outlook_contacts sync',
+                  },
+                  tx,
+                );
               });
             }
+            updated += 1;
             await this.prisma.client.contactSyncAudit
               .create({
                 data: {
@@ -465,38 +472,44 @@ export class OutlookContactsSyncService {
             refused += 1;
             continue;
           }
-          const created = await this.prisma.client.contact.create({
-            data: {
-              businessId,
-              firstName,
-              lastName,
-              email,
-              emailNormalized: emailNorm,
-              phone: phoneRead.phone,
-              phoneNormalized: phoneRead.phoneNormalized,
-              companyName: company,
-              jobTitle,
-              source: 'outlook_contacts',
-              // D-92: only a ContactStatus; a rule naming none creates a LEAD.
-              status: canonicalContactStatus(rules.defaultStatus) ?? 'LEAD',
-              ...(rules.defaultLifecycleStage
-                ? { lifecycleStage: rules.defaultLifecycleStage }
-                : {}),
-              ...(rules.defaultOwnerId ? { ownerId: rules.defaultOwnerId } : {}),
-              ...(rules.defaultTags.length > 0 ? { tags: rules.defaultTags } : {}),
-            },
+          // D-25 (FU-CONTACT-AUDIT-RESIDUAL): contact create and its audit entry commit atomically.
+          const created = await this.prisma.client.$transaction(async (tx) => {
+            const row = await tx.contact.create({
+              data: {
+                businessId,
+                firstName,
+                lastName,
+                email,
+                emailNormalized: emailNorm,
+                phone: phoneRead.phone,
+                phoneNormalized: phoneRead.phoneNormalized,
+                companyName: company,
+                jobTitle,
+                source: 'outlook_contacts',
+                // D-92: only a ContactStatus; a rule naming none creates a LEAD.
+                status: canonicalContactStatus(rules.defaultStatus) ?? 'LEAD',
+                ...(rules.defaultLifecycleStage
+                  ? { lifecycleStage: rules.defaultLifecycleStage }
+                  : {}),
+                ...(rules.defaultOwnerId ? { ownerId: rules.defaultOwnerId } : {}),
+                ...(rules.defaultTags.length > 0 ? { tags: rules.defaultTags } : {}),
+              },
+            });
+            await this.audit.write(
+              {
+                businessId,
+                contactId: row.id,
+                action: 'created',
+                after: row,
+                actor: syncAuditActor(actor),
+                reason: 'outlook_contacts sync',
+              },
+              tx,
+            );
+            return row;
           });
           contactId = created.id;
           imported += 1;
-          // W6-CONNECT-TAG-MERGE: the contact a sync creates records the acting member too.
-          await this.audit.write({
-            businessId,
-            contactId,
-            action: 'created',
-            after: created,
-            actor: syncAuditActor(actor),
-            reason: 'outlook_contacts sync',
-          });
           await this.prisma.client.contactSyncAudit
             .create({
               data: {
