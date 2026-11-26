@@ -1,4 +1,55 @@
+import { apiGet } from "@/lib/api";
 import type { BusinessHours, CartItem, PromoCode } from "./types";
+
+/**
+ * SWP-BOOKING-SLOTS (BUG-122): the times a customer can book a service on a day, as HH:MM on the business's own
+ * clock (Business.timezone; the visitor's when the business has none), read from the server's public slots route.
+ * That route puts every candidate through the guard the booking write paths use (existing bookings, buffer, lead
+ * time, business and staff hours, the appointment ending by closing), so the picker offers only what Place Order
+ * accepts. null when the route cannot be read, answers something else, or the zone is unknown: no local guess knows
+ * the bookings, so nothing is offered then.
+ */
+export async function fetchAvailableSlots(params: {
+  businessId: string;
+  serviceId: string;
+  date: string;
+  staffId?: string;
+  timeZone?: string | null;
+  signal?: AbortSignal;
+}): Promise<string[] | null> {
+  const { businessId, serviceId, date, staffId, timeZone, signal } = params;
+  if (!businessId || !serviceId || !/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) return null;
+  const query = new URLSearchParams({ serviceId, date });
+  if (staffId) query.set("staffId", staffId);
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat("en-US", { timeZone: timeZone || undefined, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  } catch {
+    return null;
+  }
+  try {
+    const res = await apiGet<{ date?: string; slots?: unknown }>(
+      `/bookings/public/businesses/${encodeURIComponent(businessId)}/slots?${query.toString()}`,
+      signal ? { signal } : undefined,
+    );
+    const slots = res?.data?.slots;
+    if (res?.error || !Array.isArray(slots)) return null;
+    const shown: string[] = [];
+    for (const s of slots) {
+      const at = typeof s === "string" ? new Date(s) : null;
+      if (!at || Number.isNaN(at.getTime())) return null;
+      const parts = format.formatToParts(at);
+      const hh = String(Number(parts.find((p) => p.type === "hour")?.value) % 24).padStart(2, "0");
+      const mm = parts.find((p) => p.type === "minute")?.value ?? "";
+      const text = `${hh}:${mm}`;
+      if (!/^\d{2}:\d{2}$/.test(text)) return null;
+      if (!shown.includes(text)) shown.push(text);
+    }
+    return shown.sort();
+  } catch {
+    return null;
+  }
+}
 
 const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
