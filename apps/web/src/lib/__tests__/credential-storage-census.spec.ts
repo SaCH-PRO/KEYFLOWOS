@@ -2718,3 +2718,102 @@ describe("CSC-51 the dump sorts by plain comparison (COR7-7)", () => {
     expect(dumpLines(ws)).toEqual(["CSC ---- localStorage B @ src/a.ts:1", "CSC ---- localStorage a @ src/a.ts:1"]);
   });
 });
+
+/* ------------------------------------------------------- repair round 9 */
+
+/**
+ * Repair round 9 (both reviews ACCEPT WITH MINORS on round 8: CSC8-SEC-1..3, COR8-1..4).
+ *
+ *   CSC-52 a substitution whose own text names a credential, or that resolves only partly, fails closed (CSC8-SEC-1/2).
+ *   CSC-53 each CODE_HINT branch, one store name per row, and the /i flag (COR8-1).
+ *   CSC-54 an unresolvable JSON.stringify(...) substitution fails closed (COR8-2).
+ *   CSC-55 rawLineOf: a backslash continuation, an escaped backslash, CRLF; nesting depth 3 is scanned, 4 is not
+ *          (COR8-3).
+ *   CSC-56 the JSX <script> text path needs no hint (COR8-4).
+ */
+const inlineScans = () => (globalThis as unknown as { __kfInlineScans?: number }).__kfInlineScans ?? 0;
+const credentialStorageWrites = (file: string, fixture: string) => scan(file, fixture).filter((w) => w.store === "localStorage" && isCredential(w));
+
+describe("CSC-52 a substitution that names a credential or resolves partly fails closed", () => {
+  for (const [name, fixture] of [
+    ["${token ? token : \"\"} in the value", 'const h = `localStorage.setItem("kf_plain", "${token ? token : ""}")`;'],
+    ['${user ? user.token : "anon"} in the value', 'const h = `localStorage.setItem("kf_plain", "${user ? user.token : "anon"}")`;'],
+    ["${a + b} (partly resolved) in the key", 'const h = `localStorage.setItem("${a + b}", "x")`;'],
+    ["${`${ns}:boot`} (partly resolved) in the key", 'const h = `localStorage.setItem("${`${ns}:boot`}", "x")`;'],
+    ["a resolved const named AUTH_KEY", 'const AUTH_KEY = "kf_a";\nconst h = `localStorage.setItem("${AUTH_KEY}", "x")`;'],
+    ["JSON.stringify(REFRESH_STORAGE_KEY)", 'const REFRESH_STORAGE_KEY = "kf_r";\nconst h = `localStorage.setItem(${JSON.stringify(REFRESH_STORAGE_KEY)}, "x")`;'],
+  ]) {
+    it(`${name}: a credential write`, () => {
+      expect(credentialStorageWrites("src/fixture-r9.ts", fixture).length).toBe(1);
+    });
+  }
+
+  it("a fully resolved, plain const still resolves (pin)", () => {
+    const fixture = 'const VIEW_KEY = "kf_view";\nconst h = `localStorage.setItem("${VIEW_KEY}", "grid")`;';
+    expect(keysOf(scan("src/fixture-r9b.ts", fixture))).toEqual(["localStorage:kf_view"]);
+  });
+});
+
+describe("CSC-53 each CODE_HINT branch sends its string to the code scanner", () => {
+  for (const [name, fixture, key] of [
+    ["document[", `const s = 'document["cookie"] = "kf_h1_session=1"';`, "cookie:kf_h1_session"],
+    ["window.name", `const s = "window.name = t";`, "window.name:window.name"],
+    ["cookies(", `const s = "cookies().set('kf_h2_session', t)";`, "response-cookie:kf_h2_session"],
+    ["objectStore", `const s = "tx.objectStore('s').put({ token })";`, "indexedDB:*"],
+    ["cookieStore", `const s = "cookieStore.set('kf_h3_session', t)";`, "cookie:kf_h3_session"],
+    ["setItem on an alias", `const s = "storage.setItem('kf_h4_token', t)";`, "storage:kf_h4_token"],
+    ["the /i flag (SET-COOKIE)", `const s = "headers.append('SET-COOKIE', 'kf_h5_session=1')";`, "response-cookie:kf_h5_session"],
+  ]) {
+    it(`${name}: found`, () => {
+      expect(keysOf(scan("src/fixture-h.ts", fixture))).toContain(key);
+    });
+  }
+
+  for (const name of ["self.name", "globalThis.name"]) {
+    it(`${name}: the string is parsed`, () => {
+      const before = inlineScans();
+      scan("src/fixture-h2.ts", `const s = "${name} = t";`);
+      expect(inlineScans() - before).toBe(1);
+    });
+  }
+});
+
+describe("CSC-54 an unresolvable JSON.stringify substitution fails closed", () => {
+  it("${JSON.stringify(pick())} is a credential write", () => {
+    expect(credentialStorageWrites("src/fixture-r9c.ts", "const h = `localStorage.setItem(${JSON.stringify(pick())}, \"x\")`;").length).toBe(1);
+  });
+});
+
+describe("CSC-55 rawLineOf and the nesting limit", () => {
+  it("a backslash line continuation moves the write to the next host line", () => {
+    const fixture = 'eval("var a = 1; \\\nlocalStorage.setItem(\'kf_lc_token\', t)");';
+    expect(scan("src/fixture-lc.ts", fixture).find((w) => w.key === "kf_lc_token")?.line).toBe(2);
+  });
+
+  it("an escaped backslash before n is not a line break", () => {
+    const fixture = `eval("var a = '\\\\\\\\n'; localStorage.setItem('kf_eb_token', t)");`;
+    expect(scan("src/fixture-eb.ts", fixture).find((w) => w.key === "kf_eb_token")?.line).toBe(1);
+  });
+
+  it("a CRLF line continuation counts as one host line", () => {
+    const fixture = 'eval("var a = 1; \\\r\nlocalStorage.setItem(\'kf_crlf_token\', t)");';
+    expect(scan("src/fixture-crlf.ts", fixture).find((w) => w.key === "kf_crlf_token")?.line).toBe(2);
+  });
+
+  const wrap = (code: string) => `eval(${JSON.stringify(code)})`;
+  const base = 'localStorage.setItem("kf_lv_token", t)';
+  it("a write nested three strings deep is found", () => {
+    expect(keysOf(scan("src/fixture-lv3.ts", wrap(wrap(wrap(base)))))).toContain("localStorage:kf_lv_token");
+  });
+  it("a write nested four strings deep is past the limit (documented)", () => {
+    expect(keysOf(scan("src/fixture-lv4.ts", wrap(wrap(wrap(wrap(base))))))).not.toContain("localStorage:kf_lv_token");
+  });
+});
+
+describe("CSC-56 the <script> text path needs no hint", () => {
+  it("script text naming no store is still parsed", () => {
+    const before = inlineScans();
+    scan("src/fixture-s.tsx", `export const P = () => <script>var a = 1</script>;`);
+    expect(inlineScans() - before).toBe(1);
+  });
+});
