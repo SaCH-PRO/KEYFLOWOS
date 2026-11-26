@@ -13,8 +13,7 @@ import {
   getUserInitials,
   refreshWorkspace,
   getCachedBusiness,
-  hasAdminSession,
-  isSuperAdmin,
+  canOpenOwnerConsole,
   BUSINESS_CHANGED_EVENT,
 } from "@/lib/workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
@@ -259,10 +258,10 @@ export function useAppLayout(): AppLayoutState {
     setDisplayName(getUserDisplayName());
     setInitials(getUserInitials());
     setAvatarUrl(user.avatarUrl ?? null);
-    // The Owner Console link (D-290): only where the admin shell would open, i.e. a local admin session the edge
-    // gate accepts (hasAdminSession) AND the role the admin layout checks (isSuperAdmin). A normally signed-in
-    // SUPER_ADMIN without the separate admin sign-in is never offered a link that ends at /admin/login.
-    setIsAdminUser(hasAdminSession() && isSuperAdmin());
+    // The Owner Console link (D-290): only where the admin shell would open (canOpenOwnerConsole, the admin layout's
+    // own guard). A normally signed-in SUPER_ADMIN without the separate admin sign-in is never offered a link that
+    // ends at /admin/login.
+    setIsAdminUser(canOpenOwnerConsole());
     setUserEmail(user.email ?? null);
   }, []);
 
