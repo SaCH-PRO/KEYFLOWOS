@@ -85,9 +85,43 @@ export function isOwnUploadPath(path: unknown, businessId: unknown): boolean {
   return segments.length === 3 && segments[0] === "uploads" && segments[1] === businessId && SAFE_KEY_SEGMENT.test(segments[2]);
 }
 
+/** How many times a path is percent-decoded when looking for a disguised /objects path (R5 MINOR-4). */
+const MAX_DECODE_ROUNDS = 4;
+
+/**
+ * Whether a path is, or decodes to, an object path: "/objects" after any run of slashes ("//objects/x"), raw or
+ * percent-decoded up to MAX_DECODE_ROUNDS times ("%256Fbjects", "/%2Fobjects/x"). A path that will not decode is
+ * treated as one: it is not a receipt anyone can be sent to.
+ */
+function isObjectLikePath(path: string): boolean {
+  let p = path;
+  for (let round = 0; round <= MAX_DECODE_ROUNDS; round += 1) {
+    if (/^\/+objects(\/|$)/i.test(p)) return true;
+    let next: string;
+    try {
+      next = decodeURIComponent(p);
+    } catch {
+      return true;
+    }
+    if (next === p) return false;
+    p = next;
+  }
+  return true;
+}
+
+/** A hostname as compared for "is this the API host": lower-cased, without a trailing dot (R5 MINOR-3). */
+const hostKey = (hostname: string) => hostname.toLowerCase().replace(/\.+$/, "");
+
 export function receiptKind(url: string | null | undefined, businessId: string | null | undefined): ReceiptKind {
   if (!url || !url.trim()) return "none";
   const raw = url.trim();
+  const api = API_BASE.replace(/\/+$/, "");
+  const apiIsRelative = api.startsWith("/") && !api.startsWith("//");
+  // R5 MAJOR-1: with a relative API base ("/__api", served by next.config's rewrite) the sheets store an upload as
+  // "/__api/objects/uploads/<biz>/<id>": the base is stripped and the rest judged as an object path.
+  if (apiIsRelative && raw.startsWith(`${api}/`)) {
+    return isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
+  }
   // A relative path is judged by its path as written: only this business's upload is "stored" (S-m1).
   if (raw.startsWith("/") && !raw.startsWith("//")) return isOwnUploadPath(raw, businessId) ? "stored" : "unavailable";
   // Anything else must be an absolute http(s) address; javascript:, data:, //host and the like never are (S-m2).
@@ -98,27 +132,21 @@ export function receiptKind(url: string | null | undefined, businessId: string |
     return "unavailable";
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "unavailable";
-  // R4-4: an address on the API's origin is judged by the parsed origin, not a string prefix (http://API.test and
-  // http://api.test:80 are the same origin). It is only ever "stored", for this business's upload written exactly as
-  // the sheets store it (API_BASE + objectPath); any other address there is never a link.
-  const api = API_BASE.replace(/\/+$/, "");
-  let apiOrigin: string | null = null;
+  // R4-4 / R5: the API's host, however it is spelled (case, a trailing dot, any scheme or port; for a relative base,
+  // the page's own host), is never a link. It is "stored" only for this business's upload written exactly as the
+  // sheets store it with an absolute base (API_BASE + objectPath); anything else there is "unavailable".
+  let apiHost: string | null = null;
   try {
-    apiOrigin = api ? new URL(api).origin : null;
+    const pageOrigin = typeof window !== "undefined" ? window.location.origin : undefined;
+    apiHost = api ? hostKey(new URL(api, pageOrigin).hostname) : null;
   } catch {
-    apiOrigin = null;
+    apiHost = null;
   }
-  if (apiOrigin && parsed.origin === apiOrigin) {
-    return raw.startsWith(`${api}/`) && isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
+  if (apiHost && hostKey(parsed.hostname) === apiHost) {
+    return !apiIsRelative && raw.startsWith(`${api}/`) && isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
   }
-  // An object path on another host is not this business's receipt, encoded or not.
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(parsed.pathname);
-  } catch {
-    return "unavailable";
-  }
-  if (/^\/objects(\/|$)/i.test(parsed.pathname) || /^\/objects(\/|$)/i.test(decoded)) return "unavailable";
+  // An object path on another host is not this business's receipt, however it is encoded or slashed.
+  if (isObjectLikePath(parsed.pathname)) return "unavailable";
   return "link";
 }
 export const RECEIPT_UNAVAILABLE_NOTE = "This receipt can't be shown here";

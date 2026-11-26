@@ -47,6 +47,11 @@ export function useExpensesData() {
   // undefined until the stored business is first read, so "no business" (null) is adopted too.
   const businessRef = useRef<string | null | undefined>(undefined);
   const generationRef = useRef(0);
+  // R5 MAJOR-2 / MINOR-2: every adopted switch bumps this epoch, in a ref (read at once) and in state (so loadData is
+  // a new function and the read effect runs again, even when two switches in one batch leave businessId as it was).
+  // A loadData from an older epoch is a stale closure (a delete started before the switch): it is refused.
+  const switchRef = useRef(0);
+  const [switchEpoch, setSwitchEpoch] = useState(0);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -85,6 +90,8 @@ export function useExpensesData() {
       if (next === businessRef.current) return;
       businessRef.current = next;
       generationRef.current += 1;
+      switchRef.current += 1;
+      setSwitchEpoch(switchRef.current);
       clearAll();
       setProjects([]); setServices([]); setContacts([]);
       setFilterCategory("");
@@ -147,7 +154,9 @@ export function useExpensesData() {
     // R4-1: a load for a business the page has left (a delete started in A returns after a switch to B and calls
     // A's loadData) writes nothing and takes no generation: taking one would drop B's read still in flight, and
     // the page would stay loading.
-    if (businessRef.current !== businessId) return;
+    // R5: and a load from before the latest switch (its closure holds that time's filters) is refused the same way,
+    // leaving loading as it is for the current read.
+    if (businessRef.current !== businessId || switchEpoch !== switchRef.current) return;
     const generation = ++generationRef.current;
     const current = () => generation === generationRef.current && businessRef.current === businessId;
     setLoading(true);
@@ -190,7 +199,7 @@ export function useExpensesData() {
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-  }, [clearAll, businessId, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  }, [clearAll, businessId, switchEpoch, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
