@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { AdminGuard } from '../../core/auth/admin.guard';
 import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { RiscService } from './risc.service';
 
@@ -18,7 +19,7 @@ import { RiscService } from './risc.service';
  * GDPR data subject rights (e.g. right to erasure) for security event data.
  */
 @Controller('admin/risc')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, AdminGuard)
 export class RiscAdminController {
   private readonly logger = new Logger(RiscAdminController.name);
 
@@ -27,14 +28,15 @@ export class RiscAdminController {
   /**
    * Erase all RISC security event records linked to a user.
    *
-   * Restricted to SUPER_ADMIN. Intended for GDPR right-to-erasure requests.
+   * Restricted to SUPER_ADMIN signed in via the separate admin login (D-291).
+   * Intended for GDPR right-to-erasure requests.
    */
   @Post('users/:userId/erase')
   async eraseUserEvents(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
   ): Promise<{ erased: number }> {
-    if (user?.role !== 'SUPER_ADMIN') {
+    if (user?.role !== 'SUPER_ADMIN' || user?.authKind !== 'admin') {
       throw new UnauthorizedException('Admin access required');
     }
 

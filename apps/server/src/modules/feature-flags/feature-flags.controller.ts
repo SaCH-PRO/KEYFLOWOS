@@ -12,6 +12,7 @@ import {
 import { Request } from 'express';
 import { FeatureFlagsService } from './feature-flags.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { AdminGuard, isAdminSignIn, type AdminRequestLike } from '../../core/auth/admin.guard';
 
 @Controller('api/feature-flags')
 export class FeatureFlagsController {
@@ -32,13 +33,13 @@ export class FeatureFlagsController {
 }
 
 @Controller('api/admin/feature-flags')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, AdminGuard)
 export class AdminFeatureFlagsController {
   constructor(@Inject(FeatureFlagsService) private readonly service: FeatureFlagsService) {}
 
   private assertSuperAdmin(req: Request) {
-    const user = (req as { user?: { role?: string } }).user;
-    if (!user || user.role !== 'SUPER_ADMIN') {
+    const r = req as unknown as AdminRequestLike;
+    if (!r.user || r.user.role !== 'SUPER_ADMIN' || !isAdminSignIn(r)) {
       throw new ForbiddenException('Super admin access required');
     }
   }

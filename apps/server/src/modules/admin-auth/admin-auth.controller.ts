@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UnauthorizedException, Inject, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, ForbiddenException, UnauthorizedException, Inject, UseGuards } from '@nestjs/common';
 import { AdminAuthService } from './admin-auth.service';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
@@ -58,6 +58,9 @@ export class AdminAuthController {
     if (!user) {
       throw new UnauthorizedException('Authentication required');
     }
+    if (user.authKind !== 'admin') {
+      throw new ForbiddenException('Admin sign-in required');
+    }
     // Revoke the current token via jti if available; otherwise fall back to user-wide revocation
     await this.adminAuth.revokeAllTokens(user.id);
     return { success: true };
@@ -67,6 +70,12 @@ export class AdminAuthController {
   async me(@CurrentUser() user: AuthenticatedUser | undefined) {
     if (!user) {
       throw new UnauthorizedException('Authentication required');
+    }
+    // D-291: only a local HMAC admin token may query /api/admin/auth/me.
+    // Does not require role === 'SUPER_ADMIN' so a demoted admin token still
+    // observes its updated DB role (Release 0 identity-boundary contract).
+    if (user.authKind !== 'admin') {
+      throw new ForbiddenException('Admin sign-in required');
     }
     return {
       id: user.id,
