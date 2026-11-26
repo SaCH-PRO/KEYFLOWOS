@@ -134,7 +134,7 @@ for (const vp of VIEWPORTS) {
         await page.reload();
         await settle(page, 1_500);
         // The list opens on Inbox; a paid expense with its receipt and category is Approved, so read All.
-        await press(page.getByRole("button", { name: /^all\b/i }).filter({ visible: true }).first(), "the All status tab");
+        await press(page.getByRole("button", { name: /^all\s*\d*$/i }).filter({ visible: true }).first(), "the All status tab");
         await press(page.getByText(description).filter({ visible: true }).first(), "the saved expense in the list");
         await page.waitForURL(new RegExp(`/app/expenses/${stored}$`), { timeout: 30_000 });
         const link = page.getByRole("link", { name: /view receipt|download/i }).first();
