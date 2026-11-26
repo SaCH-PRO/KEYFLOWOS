@@ -379,7 +379,7 @@ export class SemanticMemoryService {
                     THEN t.data_class
                     ELSE ${classified.dataClass}::text
                END,
-               ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(t.module_scope, ARRAY[]::text[]) || ${classified.moduleScope}::text[]) AS x ORDER BY x),
+               ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(t.module_scope, ARRAY[]::text[]) || ${classified.moduleScope}::text[]) AS x WHERE x IS NOT NULL ORDER BY x),
                NOW()
         FROM (VALUES (1)) AS _v(one)
         LEFT JOIN "temporal_flow_memories" t
@@ -411,7 +411,7 @@ export class SemanticMemoryService {
                     THEN source.data_class
                     ELSE ${classified.dataClass}::text
                END,
-               ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(source.module_scope, ARRAY[]::text[]) || ${classified.moduleScope}::text[]) AS x ORDER BY x),
+               ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(source.module_scope, ARRAY[]::text[]) || ${classified.moduleScope}::text[]) AS x WHERE x IS NOT NULL ORDER BY x),
                NOW()
         FROM source`,
     );
