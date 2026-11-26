@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -6,6 +6,18 @@ export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private async assertContactInBusiness(
+    businessId: string,
+    contactId: string | null | undefined,
+  ): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
 
   async listSignals(businessId: string, opts?: { module?: string; status?: string; severity?: string; limit?: number; offset?: number }) {
     const where: Record<string, unknown> = { businessId };
@@ -39,6 +51,7 @@ export class SignalsService {
     currency?: string;
     data?: Record<string, unknown>;
   }) {
+    await this.assertContactInBusiness(businessId, input.contactId);
     return this.prisma.client.businessSignal.create({
       data: {
         businessId,
@@ -72,6 +85,7 @@ export class SignalsService {
     currency?: string;
     data?: Record<string, unknown>;
   }) {
+    await this.assertContactInBusiness(businessId, input.contactId);
     const existing = await this.prisma.client.businessSignal.findFirst({
       where: {
         businessId,

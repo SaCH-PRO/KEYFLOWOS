@@ -105,12 +105,25 @@ export class CommandService {
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
   ) {}
 
+  private async assertContactInBusiness(
+    businessId: string,
+    contactId: string | null | undefined,
+  ): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   /**
    * actorUserId: the member who files the item (the POST items route, W7-OPS-AUDIT-ACTOR), named on
    * its feed row; the internal writers (the generator, message intake, KEY tools, devices) pass none
    * and the row stays a SYSTEM one, as before.
    */
   async create(businessId: string, dto: CreateCommandItemDto, actorUserId?: string) {
+    await this.assertContactInBusiness(businessId, dto.contactId);
     const item = await this.prisma.client.commandItem.create({
       data: {
         businessId,
