@@ -63,7 +63,8 @@ export class GenomeChatController {
     @Req() req: ChatRequest,
   ) {
     const userId = req.user?.id ?? 'unknown';
-    return this.chat.sendMessage(businessId, userId, body.message);
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    return this.chat.sendMessage(businessId, userId, body.message, { readsRevenue });
   }
 
   @RequireModuleScope('settings', 'write')

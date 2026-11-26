@@ -6,7 +6,11 @@ import type { DnaSectionKey, GenomeIntegrityResult } from '../blueprint/blueprin
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 import { DNA_TO_KEY_GENOME_SECTION } from '../business-genome/key-genome/key-genome.service';
-import { isServedDnaKey } from '../business-genome/key-genome/genome-composites-for-reader';
+import {
+  genomeIntegrityForReader,
+  isServedDnaKey,
+  type ProjectedGenome,
+} from '../business-genome/key-genome/genome-composites-for-reader';
 import {
   isMoneyLabel,
   proposalTextStatesMoney,
@@ -101,22 +105,51 @@ export class GenomeChatService {
       }
       const proposed = meta.proposedUpdates;
       if (proposed && typeof proposed === 'object' && !Array.isArray(proposed)) {
-        const proposedSection = (proposed as { section?: unknown }).section;
-        if (typeof proposedSection === 'string' && !isServedDnaKey(proposedSection)) {
+        const proposedRec = proposed as { section?: unknown; summary?: unknown };
+        if (typeof proposedRec.section === 'string' && !isServedDnaKey(proposedRec.section)) {
+          return null;
+        }
+        if (typeof proposedRec.summary === 'string' && proposalTextStatesMoney(proposedRec.summary)) {
           return null;
         }
       }
     }
 
-    // Legacy system messages for money DNA without metadata or mentioning money DNA explicitly.
+    let content = msg.content;
+    // Strip composite prose (Genome Integrity, Executive Readiness, Genome Stage) from legacy or assistant messages.
+    content = content
+      .replace(/\s*(?:Genome Integrity|Executive Readiness|Genome Stage)[^.]*\.?/gi, '')
+      .trim();
+
+    // System messages: drop money sections, and scrub money field names from mixed served sections (e.g. risk.financialRisks).
     if (msg.role === 'system') {
-      const sectionMatch = /^Updated\s+([a-z_]+)\s+DNA\b/i.exec(msg.content);
-      if (sectionMatch && !isServedDnaKey(sectionMatch[1])) {
-        return null;
+      const sectionMatch = /^Updated\s+([a-z_]+)\s+DNA(?:\s*:\s*([^.]+))?\.?/i.exec(content);
+      if (sectionMatch) {
+        const sec = sectionMatch[1];
+        if (!isServedDnaKey(sec)) {
+          return null;
+        }
+        if (sectionMatch[2]) {
+          const rawFields = sectionMatch[2]
+            .split(',')
+            .map((f) => f.trim())
+            .filter(Boolean);
+          const safeFields = rawFields.filter((f) => !isMoneyLabel(f) && !proposalTextStatesMoney(f));
+          if (rawFields.length > 0 && safeFields.length === 0) {
+            return null;
+          }
+          const rest = content.slice(sectionMatch[0].length).trim();
+          const prefix =
+            safeFields.length > 0 ? `Updated ${sec} DNA: ${safeFields.join(', ')}.` : `Updated ${sec} DNA.`;
+          content = rest ? `${prefix} ${rest}` : prefix;
+        }
       }
     }
 
-    const content = msg.content.replace(/\s*Genome Integrity[^.]*\.?/gi, '').trim();
+    // R1-SEC-02: withhold user/assistant/system messages whose remaining prose states money.
+    if (proposalTextStatesMoney(content)) {
+      return null;
+    }
 
     let nextMeta = meta;
     if (meta && typeof meta === 'object') {
@@ -151,19 +184,37 @@ export class GenomeChatService {
     return { ...msg, content, metadata: nextMeta };
   }
 
+  private sanitizeProposedUpdatesForNonRevenueReader(
+    proposed: ProposedGenomeUpdate | null,
+  ): ProposedGenomeUpdate | null {
+    if (!proposed) return null;
+    if (!isServedDnaKey(proposed.section)) return null;
+    if (proposalTextStatesMoney(proposed.summary)) return null;
+    const cleanedData: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(proposed.data)) {
+      if (isMoneyLabel(k) || proposalTextStatesMoney(k) || structuredValueStatesMoney(v)) continue;
+      cleanedData[k] = v;
+    }
+    if (Object.keys(cleanedData).length === 0) return null;
+    return { ...proposed, data: cleanedData };
+  }
+
   async sendMessage(
     businessId: string,
     userId: string,
     content: string,
+    options: { readsRevenue?: boolean } = {},
   ): Promise<SendGenomeMessageResult> {
+    const readsRevenue = options.readsRevenue !== false;
     await this.persistMessage(businessId, 'user', content);
 
-    const [history, genome] = await Promise.all([
-      this.getRecentHistory(businessId),
+    const [history, rawGenome] = await Promise.all([
+      this.getRecentHistory(businessId, readsRevenue),
       this.blueprint.calculateGenomeIntegrity(businessId),
     ]);
 
-    const messages = this.buildPrompt(genome, history, content);
+    const genome = genomeIntegrityForReader(rawGenome, readsRevenue);
+    const messages = this.buildPrompt(genome, history, content, readsRevenue);
 
     let assistantContent: string;
     try {
@@ -180,7 +231,16 @@ export class GenomeChatService {
       assistantContent = 'KEY is having trouble thinking right now. Please try again in a moment.';
     }
 
-    const { displayContent, proposedUpdates } = this.extractProposedUpdates(assistantContent);
+    const { displayContent: rawDisplayContent, proposedUpdates: rawProposed } =
+      this.extractProposedUpdates(assistantContent);
+    const proposedUpdates = readsRevenue
+      ? rawProposed
+      : this.sanitizeProposedUpdatesForNonRevenueReader(rawProposed);
+    const displayContent = readsRevenue
+      ? rawDisplayContent
+      : rawDisplayContent
+          .replace(/\s*(?:Genome Integrity|Executive Readiness|Genome Stage)[^.]*\.?/gi, '')
+          .trim();
 
     const message = await this.persistMessage(
       businessId,
@@ -206,17 +266,30 @@ export class GenomeChatService {
     await this.blueprint.updateDnaSection(businessId, section, data);
     const genome = await this.blueprint.calculateGenomeIntegrity(businessId);
 
-    const populatedFields = Object.keys(data).join(', ');
-    // SR-15 & SR-17: never persist genome integrity % or money DNA values in the shared chat history.
-    const metadata: Record<string, unknown> = isServedDnaKey(section)
-      ? { appliedSection: section, appliedData: data }
-      : { appliedSection: section };
-    await this.persistMessage(
-      businessId,
-      'system',
-      `Updated ${section} DNA: ${populatedFields}.`,
-      metadata,
-    );
+    // SR-15, SR-17 & R1-SEC-02: never persist genome integrity % or money DNA values/fields (even inside
+    // mixed served sections like `risk` containing `financialRisks`) in the shared chat history.
+    if (isServedDnaKey(section)) {
+      const safeData: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (isMoneyLabel(k) || proposalTextStatesMoney(k) || structuredValueStatesMoney(v)) continue;
+        safeData[k] = v;
+      }
+      const safeFields = Object.keys(safeData);
+      const summaryText =
+        safeFields.length > 0 ? `Updated ${section} DNA: ${safeFields.join(', ')}.` : `Updated ${section} DNA.`;
+      await this.persistMessage(businessId, 'system', summaryText, {
+        appliedSection: section,
+        ...(safeFields.length > 0 ? { appliedData: safeData } : {}),
+      });
+    } else {
+      const populatedFields = Object.keys(data).join(', ');
+      await this.persistMessage(
+        businessId,
+        'system',
+        `Updated ${section} DNA: ${populatedFields}.`,
+        { appliedSection: section },
+      );
+    }
 
     await this.writeEvidenceBackedFacts(businessId, userId, section, data, opts);
 
@@ -299,28 +372,39 @@ export class GenomeChatService {
     };
   }
 
-  private async getRecentHistory(businessId: string): Promise<GenomeChatMessage[]> {
+  private async getRecentHistory(businessId: string, readsRevenue = true): Promise<GenomeChatMessage[]> {
     const rows = await this.prisma.client.genomeChatMessage.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
-      take: this.maxHistory,
+      ...(readsRevenue ? { take: this.maxHistory } : {}),
     });
 
-    return rows
-      .map((row) => ({
-        id: row.id,
-        role: row.role as 'user' | 'assistant' | 'system',
-        content: row.content,
-        metadata: (row.metadata as Record<string, unknown>) || undefined,
-        createdAt: row.createdAt,
-      }))
-      .reverse();
+    const mapped: GenomeChatMessage[] = rows.map((row) => ({
+      id: row.id,
+      role: row.role as 'user' | 'assistant' | 'system',
+      content: row.content,
+      metadata: (row.metadata as Record<string, unknown>) || undefined,
+      createdAt: row.createdAt,
+    }));
+
+    if (readsRevenue) {
+      return mapped.reverse();
+    }
+
+    const projected: GenomeChatMessage[] = [];
+    for (const msg of mapped) {
+      const cleaned = this.projectMessageForNonRevenueReader(msg);
+      if (cleaned) projected.push(cleaned);
+      if (projected.length >= this.maxHistory) break;
+    }
+    return projected.reverse();
   }
 
   private buildPrompt(
-    genome: GenomeIntegrityResult,
+    genome: GenomeIntegrityResult | ProjectedGenome<GenomeIntegrityResult>,
     history: GenomeChatMessage[],
     userMessage: string,
+    readsRevenue = true,
   ): GatewayMessage[] {
     const sections = genome.dnaSections
       .map((s) => `- ${s.label}: ${s.integrity}% (${s.fieldsCaptured}/${s.fieldsTotal} fields)`)
@@ -330,13 +414,20 @@ export class GenomeChatService {
       .filter((s) => s.integrity < 100)
       .sort((a, b) => a.integrity - b.integrity)[0];
 
+    const compositeHeader =
+      readsRevenue && genome.genomeIntegrity !== null && genome.genomeStage !== null
+        ? `Current Genome Integrity: ${genome.genomeIntegrity}%\nStage: ${genome.genomeStage}\n`
+        : '';
+
+    const exampleJson = readsRevenue
+      ? '{"genome_update": {"section": "financial", "data": {"monthlyFixedCosts": 3000}, "summary": "Monthly fixed cost: 3000"}}'
+      : '{"genome_update": {"section": "operations", "data": {"coreWorkflows": ["client intake"]}, "summary": "Core workflow: client intake"}}';
+
     const systemPrompt = `You are KEY, an executive business advisor operating in **Genome Mode**.
 
 Your goal is to help the user build a complete Business Genome — the structured operating DNA of their company.
 
-Current Genome Integrity: ${genome.genomeIntegrity}%
-Stage: ${genome.genomeStage}
-Three-Pillar Minimum (Founder + Business + Market DNA ≥ 50%): ${genome.threePillarMinimumMet ? 'MET' : 'NOT YET MET'}
+${compositeHeader}Three-Pillar Minimum (Founder + Business + Market DNA ≥ 50%): ${genome.threePillarMinimumMet ? 'MET' : 'NOT YET MET'}
 
 DNA Sections:
 ${sections}
@@ -348,7 +439,7 @@ Rules:
 2. When the user gives you a business fact, you may propose a structured update by including a JSON block like this:
 
 \`\`\`json
-{"genome_update": {"section": "financial", "data": {"monthlyFixedCosts": 3000}, "summary": "Monthly fixed cost: 3000"}}
+${exampleJson}
 \`\`\`
 
 3. Do NOT tell the user the update has been saved. It is only a proposal until they confirm.

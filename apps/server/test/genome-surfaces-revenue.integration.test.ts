@@ -1163,4 +1163,260 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
     const owner = await get(`/genome-chat/businesses/${ID.biz}/messages`, ID.owner);
     expect(JSON.stringify(owner.body)).toMatch(/financial DNA/);
   });
+
+  it('SR-18 (R1-SEC-01) POST genome-chat/messages projects genome & history into LLM prompt and withholds money proposals for non-revenue readers', async () => {
+    const { GenomeChatService } = await import('../src/modules/business-genesis/genome-chat.service');
+    const chatService = moduleRef.get(GenomeChatService);
+    const originalGateway = (chatService as any).gateway;
+    const capturedCalls: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+
+    await db.genomeChatMessage.create({
+      data: {
+        businessId: ID.biz,
+        role: 'user',
+        content: 'Our monthly revenue is $50,000 and average ticket is 4500.25.',
+      },
+    });
+
+    (chatService as any).gateway = {
+      complete: vi.fn(async (req: { messages: Array<{ role: string; content: string }> }) => {
+        capturedCalls.push(req);
+        return {
+          content:
+            'Recorded your update. Genome Integrity is now 57%.\n```json\n{"genome_update":{"section":"financial","data":{"avgTicket":4500.25},"summary":"Average ticket 4500.25"}}\n```',
+          provider: 'openai',
+          model: 'gpt-4o',
+          usage: { promptTokens: 10, completionTokens: 10, totalTokens: 20, estimatedCost: 0 },
+          latencyMs: 1,
+          fallbackUsed: false,
+        };
+      }),
+    };
+
+    try {
+      const staffRes = await request(app.getHttpServer())
+        .post(`/genome-chat/businesses/${ID.biz}/messages`)
+        .set(HEADER, ID.staffNone)
+        .send({ message: 'Help me improve operations workflows' });
+      expect(staffRes.status).toBeLessThan(300);
+      expect(staffRes.body.proposedUpdates).toBeNull();
+      expect(staffRes.body.message.content).not.toMatch(/Genome Integrity|57%/);
+
+      expect(capturedCalls).toHaveLength(1);
+      const staffPromptText = JSON.stringify(capturedCalls[0].messages);
+      expect(staffPromptText).not.toMatch(
+        /Current Genome Integrity|Stage:|Financial DNA|Sales DNA|Business DNA|\$50,000|4500\.25|monthly revenue/i,
+      );
+      expect(staffPromptText).toMatch(/Operations DNA/);
+
+      const ownerRes = await request(app.getHttpServer())
+        .post(`/genome-chat/businesses/${ID.biz}/messages`)
+        .set(HEADER, ID.owner)
+        .send({ message: 'Review my financial metrics' });
+      expect(ownerRes.status).toBeLessThan(300);
+      expect(ownerRes.body.proposedUpdates?.section).toBe('financial');
+      expect(capturedCalls).toHaveLength(2);
+      const ownerPromptText = JSON.stringify(capturedCalls[1].messages);
+      expect(ownerPromptText).toMatch(/Current Genome Integrity:/);
+      expect(ownerPromptText).toMatch(/Financial DNA/);
+    } finally {
+      (chatService as any).gateway = originalGateway;
+    }
+  });
+
+  it('SR-19 (R1-SEC-02) GET genome-chat/messages redacts money prose & composite text; apply-updates strips financialRisks inside mixed served section risk', async () => {
+    await db.genomeChatMessage.create({
+      data: {
+        businessId: ID.biz,
+        role: 'user',
+        content: 'Confidential note: monthly revenue hit $72,000 last quarter.',
+      },
+    });
+    await db.genomeChatMessage.create({
+      data: {
+        businessId: ID.biz,
+        role: 'assistant',
+        content: 'I have a suggestion ready.',
+        metadata: {
+          proposedUpdates: {
+            section: 'operations',
+            data: { coreWorkflows: ['intake'] },
+            summary: 'Grow monthly revenue target to $72,000',
+          },
+        },
+      },
+    });
+    await db.genomeChatMessage.create({
+      data: {
+        businessId: ID.biz,
+        role: 'system',
+        content: 'Executive Readiness is 61%. Genome Stage is REVENUE_ENGINE. Updated operations DNA: coreWorkflows.',
+        metadata: { appliedSection: 'operations', appliedData: { coreWorkflows: ['intake'] } },
+      },
+    });
+
+    const appliedRisk = await request(app.getHttpServer())
+      .post(`/genome-chat/businesses/${ID.biz}/apply-updates`)
+      .set(HEADER, ID.owner)
+      .send({
+        section: 'risk',
+        data: {
+          financialRisks: [{ description: 'Runway 31.7 days' }],
+          legalRisks: ['compliance-check'],
+        },
+      });
+    expect(appliedRisk.status).toBeLessThan(300);
+
+    const riskRows = (await db.genomeChatMessage.findMany({ where: { businessId: ID.biz, role: 'system' } })).filter(
+      (r: any) => r.metadata?.appliedSection === 'risk',
+    );
+    expect(riskRows.length).toBeGreaterThan(0);
+    const riskRowText = JSON.stringify(riskRows);
+    expect(riskRowText).not.toMatch(/financialRisks|31\.7|Runway/);
+    expect(riskRowText).toMatch(/legalRisks/);
+
+    const staffMsgs = await get(`/genome-chat/businesses/${ID.biz}/messages`, ID.staffNone);
+    expect(staffMsgs.status).toBe(200);
+    const staffText = JSON.stringify(staffMsgs.body);
+    expect(staffText).not.toMatch(/\$72,000|monthly revenue|Executive Readiness|Genome Stage|REVENUE_ENGINE|financialRisks|31\.7/);
+    expect(staffMsgs.body.some((m: any) => m.content === 'Updated operations DNA: coreWorkflows.')).toBe(true);
+    expect(staffMsgs.body.some((m: any) => /Updated risk DNA: legalRisks/.test(m.content))).toBe(true);
+  });
+
+  it(
+    'SR-20 (R1-SEC-03) overdue-invoice temporal events are withheld from non-revenue readers across executive-brief, key-modes, and command-center snapshot',
+    async () => {
+      const overdueId = `${P}evt_overdue_r1`;
+      await db.temporalFlowEvent.create({
+        data: {
+          id: overdueId,
+          businessId: ID.biz,
+          source: 'APP',
+          type: 'invoice.overdue',
+          module: 'commerce',
+          title: 'Overdue invoice INV-80R for TTD 912',
+          summary: 'Invoice INV-80R is 14 days overdue',
+          importance: 'HIGH',
+          status: 'OPEN',
+          payload: { invoiceNumber: 'INV-80R', amount: 912 },
+        },
+      });
+      try {
+        const staffBrief = await get(`/intelligence/businesses/${ID.biz}/executive-brief`, ID.staffNone);
+        const staffCfo = await get(`/intelligence/businesses/${ID.biz}/key-modes/CFO`, ID.staffNone);
+        const staffRisk = await get(`/intelligence/businesses/${ID.biz}/key-modes/RISK_OFFICER`, ID.staffNone);
+        const staffSnap = await get(`/business-command-center/businesses/${ID.biz}/snapshot`, ID.staffNone);
+        for (const [name, res] of [
+          ['executive-brief', staffBrief],
+          ['key-modes/CFO', staffCfo],
+          ['key-modes/RISK_OFFICER', staffRisk],
+          ['snapshot', staffSnap],
+        ] as const) {
+          expect(res.status, name).toBe(200);
+          expect(JSON.stringify(res.body), name).not.toMatch(
+            /Overdue invoice|INV-80R|Cash flow risk from overdue|TTD 912/i,
+          );
+        }
+
+        const ownerSnap = await get(`/business-command-center/businesses/${ID.biz}/snapshot`, ID.owner);
+        expect(ownerSnap.status).toBe(200);
+        expect(JSON.stringify(ownerSnap.body)).toMatch(/Overdue invoice|Cash flow risk from overdue/i);
+        const ownerRisk = await get(`/intelligence/businesses/${ID.biz}/key-modes/RISK_OFFICER`, ID.owner);
+        expect(ownerRisk.status).toBe(200);
+        expect(JSON.stringify(ownerRisk.body)).toMatch(/Cash flow risk from overdue/i);
+      } finally {
+        await db.$executeRawUnsafe(`DELETE FROM temporal_flow_events WHERE id = '${overdueId}'`);
+      }
+    },
+    30_000,
+  );
+
+  it('SR-21 (R1-SEC-04) strips riskScore, vatThresholdWatch, money mitigation prose, closes risk financialRisks presence oracle, and projects bridge dna confidence', async () => {
+    const beforeBp = await db.businessBlueprint.findUnique({ where: { businessId: ID.biz } });
+    const bridgeSpy = vi.spyOn((tools.bridge as any).genomeBridge, 'getDnaScores').mockResolvedValue({
+      scores: { founder: 100, financial: 29, sales: 41, business: 88, operations: 50 },
+      confidence: { founder: 100, financial: 29, sales: 41, business: 88, operations: 50 },
+      stage: 'REVENUE_ENGINE',
+      executiveReadiness: 61,
+    });
+    try {
+      await db.businessBlueprint.update({
+        where: { businessId: ID.biz },
+        data: {
+          riskProfile: {
+            financialRisks: [{ description: 'Runway 31.7 days' }],
+            legalRisks: ['l'],
+            riskScore: 78,
+            mitigationPlan: ['Cut monthly burn by $12,000', 'Document SOP backup owners'],
+          },
+          taxProfile: {
+            estimatedAnnualRevenue: 8765.43,
+            taxIdStatus: 'done',
+            vatThresholdWatch: true,
+          },
+        },
+      });
+
+      const bpWithFin = await get(bp(), ID.staffNone);
+      expect(bpWithFin.status).toBe(200);
+      expect(bpWithFin.body.riskProfile.riskScore).toBeUndefined();
+      expect(bpWithFin.body.riskProfile.financialRisks).toBeUndefined();
+      expect(bpWithFin.body.riskProfile.mitigationPlan).toEqual(['Document SOP backup owners']);
+      expect(bpWithFin.body.taxProfile.vatThresholdWatch).toBeUndefined();
+      expect(bpWithFin.body.taxProfile.taxIdStatus).toBe('done');
+      expect(JSON.stringify(bpWithFin.body)).not.toMatch(/\$12,000|monthly burn|vatThresholdWatch|riskScore/);
+
+      const genomeWithFin = await get(bp('/genome'), ID.staffNone);
+      expect(genomeWithFin.status).toBe(200);
+      const riskWithFin = genomeWithFin.body.dnaSections.find((s: any) => s.key === 'risk');
+      expect(riskWithFin).toBeDefined();
+      expect(riskWithFin.fieldsTotal).toBe(5);
+      expect(JSON.stringify(riskWithFin)).not.toMatch(/financialRisks|financial risks/i);
+
+      // Clear financialRisks and confirm non-revenue reader gets byte-for-byte identical risk DNA & blueprint risk score.
+      await db.businessBlueprint.update({
+        where: { businessId: ID.biz },
+        data: {
+          riskProfile: {
+            legalRisks: ['l'],
+            riskScore: 78,
+            mitigationPlan: ['Cut monthly burn by $12,000', 'Document SOP backup owners'],
+          },
+        },
+      });
+
+      const genomeWithoutFin = await get(bp('/genome'), ID.staffNone);
+      const bpWithoutFin = await get(bp(), ID.staffNone);
+      const riskWithoutFin = genomeWithoutFin.body.dnaSections.find((s: any) => s.key === 'risk');
+      expect(riskWithoutFin).toEqual(riskWithFin);
+      expect(genomeWithoutFin.body.genomeDnaScores.risk).toBe(genomeWithFin.body.genomeDnaScores.risk);
+      expect(bpWithoutFin.body.genomeDnaScores.risk).toBe(bpWithFin.body.genomeDnaScores.risk);
+
+      // Bridge adapter genome.get_dna projects confidence as well as scores.
+      const bridgeRes = await tools.bridge.execute({
+        module: 'genome',
+        action: 'get_dna',
+        parameters: {},
+        businessId: ID.biz,
+        userId: ID.staffNone,
+        source: 'key_cortex',
+        timestamp: new Date(),
+        correlationId: 'c-r1',
+      });
+      expect(bridgeRes.success).toBe(true);
+      const bridgeData = bridgeRes.data as any;
+      expect(bridgeData.confidence?.founder).toBe(100);
+      expect(bridgeData.confidence?.financial).toBeUndefined();
+      expect(bridgeData.confidence?.sales).toBeUndefined();
+      expect(bridgeData.confidence?.business).toBeUndefined();
+    } finally {
+      bridgeSpy.mockRestore();
+      if (beforeBp) {
+        await db.businessBlueprint.update({
+          where: { businessId: ID.biz },
+          data: { riskProfile: beforeBp.riskProfile, taxProfile: beforeBp.taxProfile },
+        });
+      }
+    }
+  });
 });

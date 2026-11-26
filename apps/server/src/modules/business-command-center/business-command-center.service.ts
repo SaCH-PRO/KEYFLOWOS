@@ -9,6 +9,7 @@ import {
   type GenomeReader,
 } from '../business-genome/key-genome/genome-finance-scope';
 import {
+  analyzeTemporalForReader,
   constitutionVersionForReader,
   GENOME_COMPOSITES,
   genomeIntegrityForReader,
@@ -315,7 +316,13 @@ export class BusinessCommandCenterService {
       ),
       this.safeResolve(sources, 'pendingApprovals', businessId, () => proposals('PENDING'), []),
       this.safeResolve(sources, 'approvedAwaitingExecution', businessId, () => proposals('APPROVED'), []),
-      this.safeResolve(sources, 'temporalAnalysis', businessId, () => this.temporal.analyze(businessId), { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis),
+      this.safeResolve(
+        sources,
+        'temporalAnalysis',
+        businessId,
+        () => analyzeTemporalForReader(this.temporal, businessId, reader, readsRevenue),
+        { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis,
+      ),
       this.safeResolve(sources, 'genomeProposals', businessId, () => this.genomeEvolution.list(businessId, { status: 'PENDING' }), []),
       this.safeResolve(
         sources,
