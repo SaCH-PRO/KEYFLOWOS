@@ -1590,6 +1590,11 @@
       "prefix": "v91c_",
       "owner": "apps/server/test/key-invoice-email-pay-link.integration.test.ts",
       "packet": "V1-91 (FU-KEY-INVOICE-EMAIL-PAY-LINK)"
+    },
+    {
+      "prefix": "v91d_",
+      "owner": "apps/server/test/slots-hours-reader.integration.test.ts",
+      "packet": "V1-91 (FU-SLOTS-HOURS-READER, P227)"
     }
   ],
   "pendingRenames": [],
