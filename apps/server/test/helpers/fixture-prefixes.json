@@ -743,6 +743,11 @@
       "packet": "V1-86 (V1-38b-STATUS-READERS)"
     },
     {
+      "prefix": "v86u_",
+      "owner": "apps/server/test/untrusted-inbound-fence.integration.test.ts",
+      "packet": "V1-86 (FU-UNTRUSTED-INBOUND-FENCE)"
+    },
+    {
       "prefix": "v87a_",
       "owner": "apps/server/test/key-plan-reads.integration.test.ts",
       "packet": "V1-87 (KEY-R3a-PLAN-READS)"
@@ -1510,6 +1515,26 @@
       "prefix": "v72b_",
       "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
       "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
+    },
+    {
+      "prefix": "v67b_",
+      "owner": "apps/server/test/legacy-modules.integration.test.ts",
+      "packet": "V1-67 (NAV-B-LEGACY-SERVER)"
+    },
+    {
+      "prefix": "v84k_",
+      "owner": "apps/server/test/cortex-insight-cash-truth.integration.test.ts",
+      "packet": "V1-84 (FU-CORTEX-INSIGHT-CASH-TRUTH, P119)"
+    },
+    {
+      "prefix": "v85m_",
+      "owner": "apps/server/test/marketplace-paid-payment-row.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120)"
+    },
+    {
+      "prefix": "v85n_",
+      "owner": "apps/server/test/marketplace-paid-payment-row-r1.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120 R1)"
     }
   ],
   "pendingRenames": [],
