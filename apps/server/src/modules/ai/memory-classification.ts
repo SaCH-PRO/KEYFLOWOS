@@ -280,9 +280,13 @@ export function mergeMemoryClassifications(
     classes.push(item.dataClass);
     scopes.push(item.moduleScope);
   }
+  const moduleScope = unionModuleScopes(...scopes);
+  if (moduleScope.includes('revenue') || moduleScope.includes('expenses')) {
+    classes.push('REVENUE');
+  }
   return {
     dataClass: mostRestrictiveDataClass(classes, fallbackClass),
-    moduleScope: unionModuleScopes(...scopes),
+    moduleScope,
   };
 }
 
@@ -487,6 +491,8 @@ export interface TemporalMemoryClassificationInput {
   sourceEventIds?: readonly string[] | null;
   /** True when caller attempted to load sourceEventIds and one or more were missing. */
   hasMissingSourceEvents?: boolean;
+  /** Optional user/system tags attached to the memory row (inspected for module scope + money/expense taint). */
+  tags?: readonly string[] | null;
   explicitDataClass?: MemoryRowDataClass | null;
   explicitModuleScope?: readonly string[] | null;
 }
@@ -501,7 +507,7 @@ export function classifyTemporalMemoryWrite(
   const scopes = new Set<CanonicalModule>(
     explicitModuleScopeOf(input.explicitModuleScope),
   );
-  const classes: Array<MemoryRowDataClass | null | undefined> = [input.explicitDataClass];
+  const classes: Array<MemoryRowDataClass | string | null | undefined> = [input.explicitDataClass];
 
   // Structural modules from row itself (entityType, sourceModule, and entityId when channel/business key)
   for (const m of modulesFromIdentifiers(input.entityType, input.sourceModule)) {
@@ -513,11 +519,25 @@ export function classifyTemporalMemoryWrite(
 
   // Opaque KEY cortex business memories (TemporalAdapterService.storeMemory) store tags in sourceEventIds
   const isOpaqueCortexMemory = input.entityType === 'business' || input.sourceModule === 'key_cortex';
+  const inspectTag = (tag: string) => {
+    for (const m of modulesFromIdentifiers(tag)) scopes.add(m);
+    if (textStatesMoney(tag)) {
+      scopes.add('revenue');
+      classes.push('REVENUE');
+    }
+    if (textStatesExpense(tag)) {
+      scopes.add('expenses');
+      classes.push('REVENUE');
+    }
+  };
   if (isOpaqueCortexMemory) {
     for (const tag of input.sourceEventIds ?? []) {
-      for (const m of modulesFromIdentifiers(tag)) scopes.add(m);
+      inspectTag(tag);
     }
     classes.push('UNCLASSIFIED');
+  }
+  for (const tag of input.tags ?? []) {
+    inspectTag(tag);
   }
 
   // Classify every source event and union/restrict; unresolved non-opaque sourceEventIds fail closed

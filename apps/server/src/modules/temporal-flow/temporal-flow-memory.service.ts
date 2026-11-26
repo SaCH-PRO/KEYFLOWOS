@@ -286,6 +286,9 @@ export class TemporalFlowMemoryService {
           sourceEvents = resolved.sourceEvents;
           hasMissingSourceEvents = resolved.hasMissingSourceEvents;
         }
+        const patchTags = Array.isArray(patch.metadata?.tags)
+          ? patch.metadata.tags.filter((t): t is string => typeof t === 'string')
+          : [];
         const reclassified = classifyTemporalMemoryWrite({
           entityType: existing.entityType,
           entityId: existing.entityId,
@@ -295,6 +298,9 @@ export class TemporalFlowMemoryService {
           sourceEvents,
           sourceEventIds: effectiveSourceEventIds,
           hasMissingSourceEvents,
+          tags: patchTags,
+          explicitDataClass: patch.dataClass ?? null,
+          explicitModuleScope: patch.moduleScope ?? null,
         });
         const merged = mergeMemoryClassifications([
           {
@@ -306,10 +312,6 @@ export class TemporalFlowMemoryService {
               : null,
           },
           reclassified,
-          {
-            dataClass: patch.dataClass ?? null,
-            moduleScope: patch.moduleScope ?? null,
-          },
         ]);
         nextDataClass = merged.dataClass;
         nextModuleScope = merged.moduleScope;
