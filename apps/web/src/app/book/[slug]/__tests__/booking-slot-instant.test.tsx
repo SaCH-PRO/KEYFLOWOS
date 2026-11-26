@@ -257,6 +257,8 @@ describe("SWP-BOOKING-SLOTS: the storefront books the instant the server offered
       { starts: ["not-a-time"], durations: [45] },
       { starts: ["2026-12-15T15:00:00.000Z"], durations: ["abc"] },
       { starts: ["2026-12-15T15:00:00.000Z"], durations: [1e13] },
+      // The last instant a Date holds: any length past it is no time at all.
+      { starts: ["+275760-09-13T00:00:00.000Z"], durations: [45] },
     ];
     for (const details of cases) {
       window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, record(details));
