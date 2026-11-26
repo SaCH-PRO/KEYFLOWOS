@@ -13,19 +13,26 @@ const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "frida
 /** A day as the store pages read it: closed, open between two valid times, or (null) not set. */
 type DaySpan = { closed: true } | { closed: false; open: number; close: number; openText: string; closeText: string };
 
-const HHMM = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+const HHMM = /^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 
-function minutesOf(value: unknown): number | null {
+/** Minutes past midnight of an HH:MM (or HH:MM:SS) time; "24:00" only as a close, the end of the day. */
+function minutesOf(value: unknown, asClose = false): number | null {
   if (typeof value !== "string") return null;
-  const m = HHMM.exec(value.trim());
+  const text = value.trim();
+  if (asClose && /^24:00(?::00)?$/.test(text)) return 24 * 60;
+  const m = HHMM.exec(text);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
+
+/** HH:MM as shown on the page (seconds dropped). */
+const shown = (value: unknown) => String(value).trim().slice(0, 5);
 
 /**
  * A day's hours under either spelling Business.businessHours is saved with: sun..sat (Your page's hours editor and
  * the server's booking availability) or sunday..saturday (the profile editor). A day is set only when `closed` is
- * exactly true, or its open and close are valid HH:MM times (a close earlier than the open runs past midnight); any
- * other value (a `closed: "false"` string, '9am', a missing or equal time) is not set. Both the hero and the trust
+ * exactly true, or `closed` is false, undefined or null and its open and close are valid HH:MM (or HH:MM:SS) times;
+ * a close of 24:00 is the end of the day, and a close earlier than the open runs past midnight. Any other value (a
+ * `closed` of "true", 1 or "false", '9am', a missing or equal time) is not set. Both the hero and the trust
  * bar read days only through this, so they never disagree.
  */
 function readDay(hours: BusinessHours, dayKey: string): DaySpan | null {
@@ -33,10 +40,12 @@ function readDay(hours: BusinessHours, dayKey: string): DaySpan | null {
   if (!raw || typeof raw !== "object") return null;
   const e = raw as { open?: unknown; close?: unknown; closed?: unknown };
   if (e.closed === true) return { closed: true };
+  // Any other closed flag than false, undefined or null ("true", 1, "false") is unknown: the day says nothing.
+  if (e.closed !== false && e.closed !== undefined && e.closed !== null) return null;
   const open = minutesOf(e.open);
-  const close = minutesOf(e.close);
+  const close = minutesOf(e.close, true);
   if (open === null || close === null || open === close) return null;
-  return { closed: false, open, close, openText: String(e.open).trim(), closeText: String(e.close).trim() };
+  return { closed: false, open, close, openText: shown(e.open), closeText: shown(e.close) };
 }
 
 function hasHoursSet(hours?: BusinessHours | null): hours is BusinessHours {
