@@ -11,6 +11,11 @@
  *   MAG-13 /admin/%ZZ, /admin/users/%E0%A4%A and /%61dmin/%ZZ, malformed /admin paths, still fail closed to
  *          /admin/login with the admin cookies cleared, even with a valid admin cookie (pins).
  *
+ * Repair round 4 (correctness confirmation of round 3, MINOR-1): every escape in an undecodable path's /admin prefix
+ * is decoded, not only the first (kills the mutant that drops decodeAsciiEscapes' /g flag).
+ *   MAG-15 /%61%64min/%ZZ and /%61%64%6d%69%6e/%ZZ with a valid user kf_token and no admin cookie fail closed to
+ *          /admin/login with the admin cookies cleared.
+ *
  * COR-3: a refused /admin request lands on /admin/login with no query string (kills mutant M19, which drops
  * `adminLogin.search = ""`).
  *   MAG-14 /admin/users?tab=all&from=/x redirects to /admin/login with an empty search (a pin at 458243a).
@@ -69,4 +74,15 @@ describe("COR-3: the refusal drops the query string", () => {
     expect(location.pathname).toBe("/admin/login");
     expect(location.search).toBe("");
   });
+});
+
+describe("Round 4: every escape in the /admin prefix is decoded", () => {
+  for (const path of ["/%61%64min/%ZZ", "/%61%64%6d%69%6e/%ZZ"]) {
+    it(`MAG-15 ${path} with a valid user kf_token and no admin cookie fails closed to /admin/login`, () => {
+      const res = middleware(request(path, { kf_token: freshUserJwt() }));
+      expect(res.status).toBe(307);
+      expect(new URL(res.headers.get("location")!).pathname).toBe("/admin/login");
+      expect(clearedAdminCookies(res)).toEqual(["kf_admin_token", "kf_admin_user_cache", "kf_auth_mode"]);
+    });
+  }
 });
