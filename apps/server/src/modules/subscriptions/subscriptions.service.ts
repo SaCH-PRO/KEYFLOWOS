@@ -351,6 +351,13 @@ export class SubscriptionsService {
    * do not count toward the monthly invoice cap. Matching against the tenant's
    * actual `marketplace_orders` row (`type = 'QUICK_SALE'`) guarantees a forged
    * regular invoice carrying an `INV-QS-*` number is still counted.
+   *
+   * V1-65 (DEMO-PREVIEW, owner ruling D-157, BUG-094): legacy demo invoices
+   * (`DEMO-%` on a same-tenant `source = 'demo'` contact, even if that contact
+   * was later soft-deleted) do not count toward the monthly invoice cap.
+   * Requiring both `invoice_number LIKE 'DEMO-%'` and a matching `source = 'demo'`
+   * contact prevents forged `DEMO-*` numbers on real contacts or real `INV-*`
+   * invoices on a demo contact from bypassing the cap.
    */
   private async countMonthlyBillableInvoices(businessId: string, startOfMonth: Date): Promise<number> {
     const rows = await this.db.$queryRaw<Array<{ count: number }>>`
@@ -365,6 +372,16 @@ export class SubscriptionsService {
           WHERE o.business_id = i.business_id
             AND o.type = 'QUICK_SALE'
             AND i.invoice_number = 'INV-' || o.order_number
+        )
+        AND NOT (
+          i.invoice_number LIKE 'DEMO-%'
+          AND EXISTS (
+            SELECT 1
+            FROM contacts c
+            WHERE c.id = i.contact_id
+              AND c.business_id = i.business_id
+              AND c.source = 'demo'
+          )
         )
     `;
     return Number(rows[0]?.count ?? 0);

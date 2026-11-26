@@ -26,7 +26,7 @@ describe('OnboardingConciergeController', () => {
     dismissConcierge: vi.fn().mockResolvedValue({ dismissed: true }),
     resumeConcierge: vi.fn().mockResolvedValue({ resumed: true }),
     seedDemoData: vi.fn().mockResolvedValue({ contactId: 'c1', invoiceId: 'i1', invoiceNumber: 'DEMO-001' }),
-    markOnboardingComplete: vi.fn().mockResolvedValue({ complete: true, demoData: { contactId: 'c1', invoiceId: 'i1', invoiceNumber: 'DEMO-001' } }),
+    markOnboardingComplete: vi.fn().mockResolvedValue({ complete: true, demoData: null }),
   };
 
   const stateMock = {
@@ -120,10 +120,11 @@ describe('OnboardingConciergeController', () => {
     expect(paths.filter((path) => /seed/i.test(path))).toEqual(['seed-demo']);
   });
 
-  it('POST complete marks onboarding complete and seeds demo data', async () => {
+  it('POST complete marks onboarding complete without seeding demo data (D-157)', async () => {
     const result = await controller.markComplete('biz_1');
     expect(conciergeMock.markOnboardingComplete).toHaveBeenCalledWith('biz_1');
-    expect(result.complete).toBe(true);
+    expect(seederMock.seedDemoDataAsOwner).not.toHaveBeenCalled();
+    expect(result).toEqual({ complete: true, demoData: null });
   });
 
   it('GET templates returns available templates', async () => {
