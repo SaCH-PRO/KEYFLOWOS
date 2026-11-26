@@ -19,7 +19,6 @@ type BlueprintRequest = { user?: { id?: string; role?: string } };
 
 @Controller('blueprint/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-@UseInterceptors(BlueprintReaderInterceptor)
 export class BlueprintController {
   constructor(
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
@@ -40,6 +39,7 @@ export class BlueprintController {
   }
 
   @RequireModuleScope('settings', 'write')
+  @UseInterceptors(BlueprintReaderInterceptor)
   @Patch()
   async update(
     @Param('businessId') businessId: string,
@@ -49,6 +49,7 @@ export class BlueprintController {
   }
 
   @RequireModuleScope('settings', 'write')
+  @UseInterceptors(BlueprintReaderInterceptor)
   @Post('infer/onboarding')
   async inferFromOnboarding(
     @Param('businessId') businessId: string,
@@ -58,6 +59,7 @@ export class BlueprintController {
   }
 
   @RequireModuleScope('settings', 'write')
+  @UseInterceptors(BlueprintReaderInterceptor)
   @Post('infer/events')
   async inferFromEvents(@Param('businessId') businessId: string) {
     return this.blueprint.inferFromEvents(businessId);
@@ -145,6 +147,7 @@ export class BlueprintController {
   }
 
   @RequireModuleScope('settings', 'write')
+  @UseInterceptors(BlueprintReaderInterceptor)
   @Patch('genome/dna/:section')
   @UseGuards(GenomeGateGuard)
   async updateDnaSection(
