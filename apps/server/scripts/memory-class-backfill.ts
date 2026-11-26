@@ -786,7 +786,7 @@ async function processEmbeddingsBatch(
             module: proposal.module,
             type: proposal.action_type,
             source: proposal.tool_name,
-            entityType: 'key_action_proposal',
+            entityType: null,
             title: proposal.title,
             summary: proposal.summary,
             description: proposal.description,
@@ -799,6 +799,8 @@ async function processEmbeddingsBatch(
             ...(proposal.tool_name ? { toolName: meta?.toolName ?? proposal.tool_name } : {}),
             ...(proposal.action_type ? { action: meta?.action ?? proposal.action_type } : {}),
           };
+        } else {
+          sourceDataClass = 'UNCLASSIFIED';
         }
         break;
       }
@@ -851,9 +853,21 @@ export async function runMemoryClassBackfill(
   }
 
   const businessIds: string[] = [];
-  if (options.businessId) businessIds.push(options.businessId);
-  for (const id of options.businessIds ?? []) {
-    if (id && !businessIds.includes(id)) businessIds.push(id);
+  if (options.businessId !== undefined) {
+    const trimmed = typeof options.businessId === 'string' ? options.businessId.trim() : '';
+    if (!trimmed) {
+      throw new Error('Invalid businessId (cannot be empty or whitespace)');
+    }
+    businessIds.push(trimmed);
+  }
+  if (options.businessIds !== undefined) {
+    for (const rawId of options.businessIds) {
+      const trimmed = typeof rawId === 'string' ? rawId.trim() : '';
+      if (!trimmed) {
+        throw new Error('Invalid businessIds entry (cannot be empty or whitespace)');
+      }
+      if (!businessIds.includes(trimmed)) businessIds.push(trimmed);
+    }
   }
 
   const selectedTables: MemoryClassBackfillTable[] =
@@ -968,10 +982,11 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
       return value ? { value, nextIndex: index } : { error: `${flag} requires a value` };
     }
     const next = argv[index + 1];
-    if (!next || next.startsWith('--')) {
+    const trimmed = typeof next === 'string' ? next.trim() : '';
+    if (!trimmed || trimmed.startsWith('--')) {
       return { error: `${flag} requires a value` };
     }
-    return { value: next.trim(), nextIndex: index + 1 };
+    return { value: trimmed, nextIndex: index + 1 };
   };
 
   for (let i = 0; i < argv.length; i += 1) {
