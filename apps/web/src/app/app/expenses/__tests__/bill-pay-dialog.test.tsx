@@ -623,7 +623,11 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     expect(dialog.querySelectorAll("select:not([disabled]), button:not([disabled])")).toHaveLength(0);
 
     for (const shiftKey of [false, true]) {
+      // A browser drops focus from a control that becomes disabled to <body> (focus fixup); jsdom leaves it on the
+      // disabled Pay button. Start from where a real user is: outside the dialog's controls.
+      (document.activeElement as HTMLElement | null)?.blur();
       const from = document.activeElement ?? document.body;
+      expect(dialog.contains(from), "focus starts outside the dialog's controls").toBe(false);
       // fireEvent returns false when the handler called preventDefault (the browser would not move focus).
       const notPrevented = fireEvent.keyDown(from, { key: "Tab", shiftKey });
       expect(notPrevented, `Tab${shiftKey ? " with Shift" : ""} is kept in the dialog`).toBe(false);
