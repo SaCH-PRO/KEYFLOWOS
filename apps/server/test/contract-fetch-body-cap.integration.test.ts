@@ -348,7 +348,7 @@ beforeAll(async () => {
         gzip.write(oneMiB);
         gzip.flush(zlib.constants.Z_SYNC_FLUSH, () => {
           if (stopped || res.destroyed || gzip.destroyed) return;
-          const t = setTimeout(feedNext, 4);
+          const t = setTimeout(feedNext, 12);
           t.unref();
         });
       };
@@ -559,7 +559,7 @@ beforeAll(async () => {
     evaluateAutoApproval: async () => ({ ...ALLOW, autoApproved: true }),
     getToolTier: () => 1,
   };
-  const execLogStub = { log: async () => ({ id: 'doc-cap-exec' }) };
+  const execLogStub = { logToolExecution: async () => 'doc-cap-exec' };
   const eventsStub = { emit: () => true };
 
   makeDispatcher = () => {
