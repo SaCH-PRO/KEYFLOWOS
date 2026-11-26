@@ -23,10 +23,18 @@ type ProofChip = StorefrontHeroProofChip;
 
 const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
+/**
+ * A day's hours under either spelling Business.businessHours is saved with: sun..sat (Your page's hours editor and
+ * the server's booking availability) or sunday..saturday (the profile editor).
+ */
+function dayEntry(hours: BusinessHours, dayKey: string) {
+  return hours[dayKey.slice(0, 3)] ?? hours[dayKey];
+}
+
 function hasHoursSet(hours?: BusinessHours | null): hours is BusinessHours {
   if (!hours || typeof hours !== "object") return false;
   return DAY_KEYS.some((d) => {
-    const e = hours[d];
+    const e = dayEntry(hours, d);
     return !!e && (e.closed || (typeof e.open === "string" && typeof e.close === "string"));
   });
 }
@@ -56,7 +64,7 @@ function nowIn(timeZone?: string | null): { dayKey: string; mins: number } {
 function getOpenStatus(hours?: BusinessHours | null, timeZone?: string | null): { isOpen: boolean; label: string } | null {
   if (!hasHoursSet(hours)) return null;
   const { dayKey, mins: nowMins } = nowIn(timeZone);
-  const entry = hours[dayKey];
+  const entry = dayEntry(hours, dayKey);
   if (!entry || entry.closed) return { isOpen: false, label: "Closed Today" };
   if (typeof entry.open !== "string" || typeof entry.close !== "string") return null;
   const [openH, openM] = entry.open.split(":").map(Number);
