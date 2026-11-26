@@ -23,6 +23,7 @@ import type {
   DeliveryAddress,
   ShippingZone,
   StoreOrderResponse,
+  HeldSlot,
 } from "./components/types";
 import { loadCart, saveCart, loadPromoCode, savePromoCode } from "./components/utils";
 import { BusinessHero } from "./components/business-hero";
@@ -78,7 +79,7 @@ function bookingReuseKey(
   const services = serviceItems.flatMap((si) => {
     const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
     return bd
-      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || ""]]
+      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || "", bd.startIso ?? ""]]
       : [];
   });
   const customer = [
@@ -88,6 +89,27 @@ function bookingReuseKey(
     (data.phone || "").trim(),
   ];
   return JSON.stringify({ customer, services });
+}
+
+/**
+ * SWP-BOOKING-SLOTS: the slots the kept bookings hold, read from their reuse key (bookingReuseKey's service lines),
+ * so the same customer's next checkout offers and keeps them; the slots route counts them as taken.
+ */
+function heldSlotsOf(reuseKey: string | null, bookingsKept: number): HeldSlot[] {
+  if (!reuseKey || bookingsKept === 0) return [];
+  try {
+    const services = (JSON.parse(reuseKey) as { services?: unknown }).services;
+    if (!Array.isArray(services)) return [];
+    return services.flatMap((line): HeldSlot[] => {
+      if (!Array.isArray(line) || line.length < 7) return [];
+      const [serviceId, , date, time, staffId, location, startIso] = line as unknown[];
+      const text = [serviceId, date, time, staffId, location, startIso];
+      if (!text.every((v) => typeof v === "string") || !startIso || Number.isNaN(new Date(startIso as string).getTime())) return [];
+      return [{ serviceId, date, time, staffId, location, startIso } as HeldSlot];
+    });
+  } catch {
+    return [];
+  }
 }
 
 /** The bookings a pending checkout record keeps: never a token link (SEC-W9WCN-1). */
@@ -972,12 +994,17 @@ function PublicBookingPageInner() {
     const isOrder = hasStoreOrder || (bookingResults.length > 0 && bookingResults.every((br) => br.bookingId.startsWith("ORD-")));
     // SWP-BOOKING-SLOTS: the calendar event is the booked instant (the slots route's), never the date and time read
     // on the visitor's clock; it lasts the service's length (an hour when unknown). No instant, no link.
-    const firstStart = confirmedDetails?.starts?.[0] ? new Date(confirmedDetails.starts[0]) : null;
-    const calendarUrl = firstStart && !Number.isNaN(firstStart.getTime()) && confirmedDetails
+    // A length that is not a whole day's worth of minutes or less (a corrupted record, 1e13) is an hour.
+    const firstStart = typeof confirmedDetails?.starts?.[0] === "string" ? new Date(confirmedDetails.starts[0]) : null;
+    const rawMinutes = confirmedDetails?.durations?.[0];
+    const minutes = typeof rawMinutes === "number" && Number.isFinite(rawMinutes) && rawMinutes >= 1 && rawMinutes <= 1440
+      ? Math.round(rawMinutes)
+      : 60;
+    const firstEnd = firstStart ? new Date(firstStart.getTime() + minutes * 60 * 1000) : null;
+    const calendarUrl = firstStart && firstEnd && !Number.isNaN(firstStart.getTime()) && !Number.isNaN(firstEnd.getTime()) && confirmedDetails
       ? (() => {
           const start = firstStart;
-          const minutes = confirmedDetails.durations?.[0] ?? 60;
-          const end = new Date(start.getTime() + minutes * 60 * 1000);
+          const end = firstEnd;
           const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
           const title = encodeURIComponent(`${confirmedDetails.serviceNames[0] || "Appointment"} - ${confirmedDetails.businessName}`);
           const firstBookingLocation = confirmedDetails.locations?.[0] || null;
@@ -1122,6 +1149,7 @@ function PublicBookingPageInner() {
           onBack={() => setCheckoutMode(false)}
           onUpdateQuantity={updateQuantity}
           onSubmit={handleCheckoutSubmit}
+          heldSlots={heldSlotsOf(completedBookingKey, completedBookingResults.length)}
         />
       </main>
     );

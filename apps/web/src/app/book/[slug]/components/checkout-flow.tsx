@@ -33,6 +33,7 @@ import type {
   DeliveryAddress,
   PaymentMethod,
   ShippingZone,
+  HeldSlot,
 } from "./types";
 import {
   fetchAvailableSlotTimes,
@@ -69,6 +70,8 @@ type Props = {
     shippingZoneId: string | null;
     termsAccepted: boolean;
   }) => Promise<void>;
+  /** SWP-BOOKING-SLOTS: slots this customer's kept bookings hold (SEC-W9WCN-1), offered and kept as scheduled. */
+  heldSlots?: HeldSlot[];
 };
 
 const paymentMethods: { id: PaymentMethod; name: string; description: string; icon: typeof CreditCard }[] = [
@@ -211,9 +214,28 @@ export function CheckoutFlow({
   onBack,
   onUpdateQuantity: _onUpdateQuantity,
   onSubmit,
+  heldSlots = [],
 }: Props) {
   const [checkoutStep, setCheckoutStep] = useState(0);
-  const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>({});
+  // A row whose service a kept booking holds starts with that booking's slot, so the same customer reuses it.
+  const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>(() => {
+    const filled: Record<string, ServiceBookingData> = {};
+    for (const si of cart.filter((c) => c.requiresBooking)) {
+      const serviceId = si.sourceServiceId || si.id;
+      const held = heldSlots.find((h) => h.serviceId === serviceId);
+      if (!held) continue;
+      filled[`${si.id}_${si.itemType}`] = {
+        serviceId,
+        serviceName: si.name,
+        staffId: held.staffId,
+        date: held.date,
+        time: held.time,
+        startIso: held.startIso,
+        ...(held.location ? { location: held.location } : {}),
+      };
+    }
+    return filled;
+  });
 
   const savedDetails = loadCheckoutDetails();
   const [firstName, setFirstName] = useState(savedDetails.firstName);
@@ -259,12 +281,43 @@ export function CheckoutFlow({
     business.timezone,
     serviceItemsInCart.map(slotRequestOf).filter((r): r is SlotRequest => r !== null),
   );
-  // COR-2: a row is scheduled only by a time its current answer offers, by the server's own instant.
+  /** The slot a kept booking holds for this request, if any. */
+  const heldFor = (r: SlotRequest): HeldSlot | undefined =>
+    heldSlots.find((h) => h.serviceId === r.serviceId && h.date === r.date && h.staffId === r.staffId);
+  /** A row's offered times: its current answer, with a slot its kept booking holds (the server counts it as taken). */
+  const offeredFor = (r: SlotRequest): SlotTime[] | null | undefined => {
+    const answer = slotAnswers.answerFor(r);
+    const held = heldFor(r);
+    if (!Array.isArray(answer) || !held || answer.some((s) => s.startIso === held.startIso)) return answer;
+    return [...answer, { time: held.time, startIso: held.startIso }].sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  };
+  // COR-2: a row is scheduled only by a time its current answer offers, by the server's own instant, or by the
+  // slot its kept booking holds.
   const isRowScheduled = (si: CartItem): boolean => {
     const bd = serviceBookings[`${si.id}_${si.itemType}`];
     const request = slotRequestOf(si);
     if (!bd?.date || !bd.time || !bd.startIso || !request) return false;
+    if (heldFor(request)?.startIso === bd.startIso) return true;
     return (slotAnswers.answerFor(request) ?? []).some((s) => s.startIso === bd.startIso);
+  };
+  /**
+   * What the review step says about rows not scheduled: still reading their times, could not read them, or a fresh
+   * answer no longer offers the time chosen. Null when every row is scheduled.
+   */
+  const unscheduledState = ((): "checking" | "failed" | "gone" | null => {
+    const states = serviceItemsInCart.filter((si) => !isRowScheduled(si)).map((si) => {
+      const request = slotRequestOf(si);
+      const answer = request ? slotAnswers.answerFor(request) : [];
+      return answer === undefined ? "checking" : answer === null ? "failed" : "gone";
+    });
+    if (states.length === 0) return null;
+    return states.includes("checking") ? "checking" : states.includes("failed") ? "failed" : "gone";
+  })();
+  const retryFailedRows = () => {
+    for (const si of serviceItemsInCart) {
+      const request = slotRequestOf(si);
+      if (request && slotAnswers.answerFor(request) === null) slotAnswers.retry(request);
+    }
   };
   const allRowsScheduled = serviceItemsInCart.every(isRowScheduled);
   const hasPhysicalProducts = cart.some((c) => c.itemType === "product");
@@ -727,7 +780,7 @@ export function CheckoutFlow({
                     const closed = isDayClosed(bd.date, business.businessHours);
                     const slotRequest = slotRequestOf(si);
                     // undefined: still loading; null: the route could not be read. Neither offers a time.
-                    const slotAnswer = slotRequest ? slotAnswers.answerFor(slotRequest) : undefined;
+                    const slotAnswer = slotRequest ? offeredFor(slotRequest) : undefined;
                     const slots: SlotTime[] = slotAnswer ?? [];
                     const updateBd = (patch: Partial<ServiceBookingData>) => {
                       setServiceBookings((prev) => ({ ...prev, [key]: { ...bd, ...patch } }));
@@ -1206,7 +1259,26 @@ export function CheckoutFlow({
                   {error}
                 </div>
               )}
-              {!allRowsScheduled && (
+              {unscheduledState === "checking" && (
+                <div className="rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-400 flex items-center gap-2">
+                  <Clock className="w-4 h-4 flex-shrink-0" />
+                  Checking times…
+                </div>
+              )}
+              {unscheduledState === "failed" && (
+                <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  <span className="flex-1">Couldn&apos;t load times</span>
+                  <button
+                    type="button"
+                    onClick={retryFailedRows}
+                    className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium min-h-[44px]"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {unscheduledState === "gone" && (
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
                   <Clock className="w-4 h-4 flex-shrink-0" />
                   A time you chose is no longer available. Go back to pick another.
