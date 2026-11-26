@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from './ai-memory.service';
+import { modulesFromIdentifiers } from './memory-classification';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 export type BusinessRole = 'sales' | 'finance' | 'support' | 'operations' | 'marketing' | 'general' | 'operator' | 'executive';
@@ -836,6 +837,7 @@ You may use their tools in this turn. Each action is still judged against the ha
       value: JSON.stringify({ action, success, timestamp: new Date().toISOString() }),
       confidence: 1.0,
       source: 'role_engine',
+      moduleScope: modulesFromIdentifiers(role, action),
     }).catch(() => {});
 
     this.events.emit('role.action_executed', {

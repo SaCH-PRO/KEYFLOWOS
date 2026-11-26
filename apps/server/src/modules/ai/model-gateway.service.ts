@@ -3089,9 +3089,13 @@ export class ModelGatewayService {
         key: 'ai_preferences',
         value: JSON.stringify(toStore),
         source: 'user',
+        dataClass: 'SECRET_BEARING',
+        moduleScope: ['ai', 'settings'],
       },
       update: {
         value: JSON.stringify(toStore),
+        dataClass: 'SECRET_BEARING',
+        moduleScope: ['ai', 'settings'],
       },
     });
 
@@ -3247,9 +3251,13 @@ export class ModelGatewayService {
         key: 'routing_table',
         value: JSON.stringify(this.routingTable),
         source: 'admin',
+        dataClass: 'GENERAL',
+        moduleScope: ['ai', 'settings'],
       },
       update: {
         value: JSON.stringify(this.routingTable),
+        dataClass: 'GENERAL',
+        moduleScope: ['ai', 'settings'],
       },
     });
 

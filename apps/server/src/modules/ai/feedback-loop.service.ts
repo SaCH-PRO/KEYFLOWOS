@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiMemoryService } from './ai-memory.service';
+import { modulesFromIdentifiers } from './memory-classification';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { PlannerService } from './planner.service';
 import { AiOversightService } from './ai-oversight.service';
@@ -66,6 +67,7 @@ export class FeedbackLoopService {
         key: `${ctx.toolName}:${analysis.correction.category}`,
         value: JSON.stringify(analysis.correction),
         source: 'feedback_loop',
+        moduleScope: modulesFromIdentifiers(ctx.toolName),
       }).catch((e: unknown) => {
         this.logger.warn(`Failed to store correction: ${e instanceof Error ? e.message : String(e)}`);
       });

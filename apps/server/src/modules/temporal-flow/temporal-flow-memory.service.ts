@@ -1,6 +1,12 @@
 import { Injectable, Logger, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import {
+  classifyTemporalMemoryWrite,
+  normalizeModuleScope,
+  type MemoryRowDataClass,
+  type TemporalEventProvenance,
+} from '../ai/memory-classification';
 import type {
   CreateTemporalFlowMemoryInput,
   TemporalFlowMemoryData,
@@ -45,12 +51,54 @@ export class TemporalFlowMemoryService {
       },
     });
 
+    let sourceEvents: TemporalEventProvenance[] = input.sourceEvents ?? [];
+    let hasMissingSourceEvents = false;
+    if (
+      input.sourceEvents === undefined &&
+      (input.sourceEventIds?.length ?? 0) > 0 &&
+      input.entityType !== 'business' &&
+      input.sourceModule !== 'key_cortex'
+    ) {
+      const uniqueIds = Array.from(new Set(input.sourceEventIds));
+      const fetched =
+        (await this.prisma.client.temporalFlowEvent.findMany({
+          where: { businessId: input.businessId, id: { in: uniqueIds } },
+          select: {
+            id: true,
+            source: true,
+            type: true,
+            module: true,
+            entityType: true,
+            title: true,
+            summary: true,
+            description: true,
+          },
+        })) ?? [];
+      sourceEvents = fetched;
+      hasMissingSourceEvents = fetched.length < uniqueIds.length;
+    }
+
+    const classified = classifyTemporalMemoryWrite({
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      type: input.type,
+      sourceModule: input.sourceModule,
+      content: input.content,
+      sourceEvents,
+      sourceEventIds: input.sourceEventIds ?? [],
+      hasMissingSourceEvents,
+      explicitDataClass: input.dataClass ?? null,
+      explicitModuleScope: input.moduleScope ?? null,
+    });
+
     const data = {
       content: input.content,
       sourceEventIds: input.sourceEventIds ?? [],
       sourceModule: input.sourceModule,
       metadata: input.metadata ?? {},
       confidence: input.confidence ?? 0.5,
+      dataClass: classified.dataClass,
+      moduleScope: classified.moduleScope,
     };
 
     let record;
@@ -88,6 +136,8 @@ export class TemporalFlowMemoryService {
             sourceModule: record.sourceModule,
             confidence: record.confidence,
           },
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
         });
       } catch (err: any) {
         this.logger.warn(`Embedding failed for memory ${record.id}: ${(err as Error).message}`);
@@ -172,6 +222,8 @@ export class TemporalFlowMemoryService {
       confidence?: number;
       sourceEventIds?: string[];
       metadata?: Record<string, unknown>;
+      dataClass?: MemoryRowDataClass;
+      moduleScope?: string[];
     },
   ): Promise<TemporalFlowMemoryData> {
     if (!isKey(businessId) || !isKey(memoryId)) throw new NotFoundException('Memory not found');
@@ -183,6 +235,8 @@ export class TemporalFlowMemoryService {
           confidence: patch.confidence,
           sourceEventIds: patch.sourceEventIds,
           metadata: patch.metadata,
+          ...(patch.dataClass !== undefined ? { dataClass: patch.dataClass } : {}),
+          ...(patch.moduleScope !== undefined ? { moduleScope: normalizeModuleScope(patch.moduleScope) } : {}),
         },
       });
     } catch (err) {
@@ -248,6 +302,7 @@ export class TemporalFlowMemoryService {
       type: 'summary',
       content,
       sourceEventIds: events.map((e) => e.id),
+      sourceEvents: events,
       sourceModule: 'key_inbox',
       metadata: {
         eventCount: events.length,
@@ -293,6 +348,7 @@ export class TemporalFlowMemoryService {
       type: 'summary',
       content,
       sourceEventIds: events.map((e) => e.id),
+      sourceEvents: events,
       sourceModule: 'key_inbox',
       metadata: {
         eventCount: events.length,
@@ -336,6 +392,7 @@ export class TemporalFlowMemoryService {
       type: 'pattern',
       content,
       sourceEventIds: events.slice(0, 20).map((e) => e.id),
+      sourceEvents: events,
       sourceModule: 'key_inbox',
       metadata: {
         eventCount: events.length,
