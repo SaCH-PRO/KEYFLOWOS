@@ -1575,6 +1575,11 @@
       "prefix": "v70e_",
       "owner": "apps/server/test/settle-no-stock.integration.test.ts",
       "packet": "V1-70 (W1F-SETTLE-NO-STOCK)"
+    },
+    {
+      "prefix": "v91g_",
+      "owner": "apps/server/test/store-add-idempotent.integration.test.ts",
+      "packet": "V1-91 (FU-STORE-ADD-IDEMPOTENT, P204)"
     }
   ],
   "pendingRenames": [],
