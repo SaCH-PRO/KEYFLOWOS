@@ -311,4 +311,42 @@ describe('W11-ORDER-CANCEL-RELEASE StoreOrderService: CANCELLED releases the ord
     await expect(h.svc.updateOrderStatus('ord_v18_1', 'SHIPPED', BIZ)).rejects.toMatchObject({ status: 409 });
     expect(h.emitted).toEqual([]);
   });
+
+  it("SO-11 (W1F-ORDER-TRANSITIONS review R1-SEC-01) isClosedStorefrontOrder and completeCheckout FULFILMENT_PAST_CONFIRMED trim padded statuses: ' cancelled ' is closed and refused, and ' shipped ' is not rewound to CONFIRMED", async () => {
+    const { isClosedStorefrontOrder } = await import('./store-order.service');
+    expect(isClosedStorefrontOrder({ status: ' cancelled ', paymentStatus: 'UNPAID' })).toBe(true);
+    expect(isClosedStorefrontOrder({ status: ' refunded ', paymentStatus: 'PAID' })).toBe(true);
+    expect(isClosedStorefrontOrder({ status: 'PENDING', paymentStatus: ' refunded ' })).toBe(true);
+
+    // Padded ' shipped ' order settled via completeCheckout keeps trimmed 'shipped' (never rewound to CONFIRMED).
+    const hShipped = build(order({ status: ' shipped ', paymentStatus: 'UNPAID' }));
+    hShipped.tx.$queryRaw.mockResolvedValueOnce([{ id: 'ord_v18_1', status: ' shipped ', payment_status: 'UNPAID' }]);
+    const settled = await hShipped.svc.completeCheckout({
+      orderId: 'ord_v18_1',
+      paymentRef: 'ref_r1_shipped',
+      provider: 'stripe',
+      method: 'card',
+    });
+    expect(settled?.status).toBe('shipped');
+    expect(hShipped.tx.marketplaceOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'shipped', paymentStatus: 'PAID' }),
+      }),
+    );
+
+    // Padded ' cancelled ' order with refuseClosedOrder: true is refused 409 with nothing written.
+    const hCancelled = build(order({ status: ' cancelled ', paymentStatus: 'UNPAID' }));
+    hCancelled.tx.$queryRaw.mockResolvedValueOnce([{ id: 'ord_v18_1', status: ' cancelled ', payment_status: 'UNPAID' }]);
+    await expect(
+      hCancelled.svc.completeCheckout({
+        orderId: 'ord_v18_1',
+        paymentRef: 'ref_r1_cancelled',
+        provider: 'manual',
+        method: 'cash',
+        refuseClosedOrder: true,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(hCancelled.tx.invoice.create).not.toHaveBeenCalled();
+    expect(hCancelled.tx.marketplaceOrder.update).not.toHaveBeenCalled();
+  });
 });

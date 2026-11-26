@@ -257,8 +257,9 @@ export function canTransitionOrder(from: string, to: string): boolean {
  * of neither (e.g. 'on_hold'). PATCH /marketplace/.../status writes any status as sent, so a stored status is not
  * always spelled as canTransitionOrder's tables are.
  */
-export function namedOrderStatus(status: string): string | undefined {
-  const trimmed = status.trim();
+export function namedOrderStatus(status?: string | null): string | undefined {
+  const trimmed = (status ?? '').trim();
+  if (!trimmed) return undefined;
   for (const spelling of [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()]) {
     const named = Object.prototype.hasOwnProperty.call(LEGACY_STATUS_MAP, spelling) ? LEGACY_STATUS_MAP[spelling] : spelling;
     if (Object.prototype.hasOwnProperty.call(VALID_ORDER_TRANSITIONS, named)) return named;
@@ -368,11 +369,13 @@ export const ORDER_STATUS_CHANGED_DURING_EDIT =
  * meets the order cancelled and creates nothing. It releases reservations only: it restocks nothing a paid storefront
  * checkout decremented, and records no refund.
  *
- * Review repairs: `mayCancel` is the check on the status read. The fulfil 'cancel' keeps canTransitionOrder (the
- * default); the status edits pass statusEditMayCancel, which reads the status in any case with any surrounding spaces
- * (OCR-COR-1). It returns the status it read, on which the status edits' order write is a compare-and-set
- * (OCR-COR-2): a ship takes no claim, so one that commits while this waits for its stock rows is not written over
- * (ORDER_STATUS_CHANGED_DURING_CANCEL, 409, the transaction rolled back).
+ * W11-ORDER-CANCEL-RELEASE review repairs & W1F-ORDER-TRANSITIONS (D-198): `mayCancel` is the check on the status
+ * read; both the status-edit cancels and FulfillmentRoutingService.cancelOrderFulfilment pass `statusEditMayCancel`,
+ * which reads the status case-insensitively with any surrounding spaces and admits open labels such as 'on_hold'
+ * (OCR-COR-1). It returns the status it read, on which every cancel's order write is a compare-and-set (OCR-COR-2):
+ * a status-edit ship (which takes no routing claim) committing while this waits for stock rows is never overwritten
+ * (ORDER_STATUS_CHANGED_DURING_CANCEL, 409, the transaction rolled back), while fulfil 'ship' serializes on
+ * claimOrderRouting and likewise compare-and-sets on its readStatus.
  */
 export async function releaseOrderFulfilmentForCancel(
   tx: RoutingTx,
