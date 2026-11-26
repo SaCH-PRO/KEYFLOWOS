@@ -23,18 +23,10 @@ export type TimelineChannel = "whatsapp" | "email" | "sms" | "call" | "note";
 export type ChannelFilter = "all" | TimelineChannel;
 
 /**
- * COR-TCH-1: the most events GET .../contacts/:c/events serves. The page sends no limit, so the server reads its
- * default page (crm-timeline.service.ts listContactEvents, `params.limit ?? 20`; crm.controller.ts contactEvents
- * passes none). A read that comes back this full may have left older events out, so the page says it shows the
- * latest ones, and its counts and empty texts speak of those, never of the whole history. Paging is the server's to
- * add (an owner question), not this page's.
+ * COR-TCH-1, FU-TIMELINE-LOAD-OLDER (D-284): the events read pages (FU-TIMELINE-EVENTS-PAGING), and the page loads the
+ * newest page first and older pages on "Load older" while the read returns a cursor. While older records remain
+ * unloaded, the page's counts and empty texts speak of the records it has loaded, never of the whole history.
  */
-export const EVENTS_READ_PAGE = 20;
-
-/** Whether a read of `served` events came back full (older events may exist that it did not serve). */
-export function readIsFull(served: number): boolean {
-  return served >= EVENTS_READ_PAGE;
-}
 
 /** Each filter: its label; what it holds, in words; and what it says with nothing to show. */
 export const CHANNEL_FILTERS: ReadonlyArray<{ id: ChannelFilter; label: string; noun: string; empty: string }> = [
@@ -46,10 +38,13 @@ export const CHANNEL_FILTERS: ReadonlyArray<{ id: ChannelFilter; label: string; 
   { id: "note", label: "Notes", noun: "notes", empty: "No notes yet." },
 ];
 
-/** What a filter with nothing to show says: "No calls yet.", or after a full read "No calls in the latest 20 records." */
-export function emptyText(filter: ChannelFilter, full: boolean): string {
+/**
+ * What a filter with nothing to show says: "No calls yet." once the whole history is loaded, or, while older records
+ * remain unloaded (`loaded`: how many records are loaded), "No calls in the latest 40 records."
+ */
+export function emptyText(filter: ChannelFilter, loaded: number | null): string {
   const f = CHANNEL_FILTERS.find((c) => c.id === filter) ?? CHANNEL_FILTERS[0];
-  return full ? `No ${f.noun} in the latest ${EVENTS_READ_PAGE} records.` : f.empty;
+  return loaded === null ? f.empty : `No ${f.noun} in the latest ${loaded} records.`;
 }
 
 /** What the channel of an event is read from. */
