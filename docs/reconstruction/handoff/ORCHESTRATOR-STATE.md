@@ -48,7 +48,9 @@ confirmed by both lenses at these heads:
 - `lib/client.ts` (P67 + main's M20 refund) is a clean 3-way merge, checked as an exact union.
 - OWNER-ALERTS-WEB carries a **server hunk** (D-288: only an OWNER may change owner alerts), so the wave needs the
   server suite and Release 0. Say so in the PR.
-- The docs commit is re-made from this docs head (the earlier squash carried merge-conflict markers in this file).
+- **Wave head `e8f9e765`**: the docs commit was re-made from docs `36fbdf2b` (the earlier squash, `efbfb020`, carried
+  merge-conflict markers in this file). The writing session restarted the full proof at `e8f9e765` at ~00:55 UTC. If
+  no M22 PR is on GitHub and no proof result is on #80, run the proof again from the start at the wave head.
 - **Next:** finish the proof at the wave head (recipe step 4 in 0.5; live: release0-live, Journey C, the notifications,
   owner-alerts, timeline and send-quote sweeps; plus a base run on `fd7772c5`), open the PR (mirror PR #251's body),
   two wave confirmations (CONFIRMATION-REVIEW-BRIEF.md), subscribe to the PR, then enqueue.
@@ -59,7 +61,7 @@ confirmed by both lenses at these heads:
 | --- | --- | --- | --- |
 | **CATALOG-1 web** (P86, P0) | `pkt/V1-CATALOG-1-WEB` @ `98fd98eb` | Round 4 pushed (RED a76f1104, eb2fc00e; fix 98fd98eb). Fixes SEC-CAT-R3-1/2 and COR-R3-1/2/3: business switch resets all state, saves wait for that business's own reads (`landed`), every write re-checks the business after each await, Products follows `storage`, non-PRODUCT creates send no inventory fields. Full web suite 258 files / 2337 tests, live sweeps product-catalog-r1, product-create, product-store-visible all pass. Two fresh confirmations (security, correctness) were started on `36068fb0..98fd98eb`. | If their verdicts are not on #80, run both confirmations again; then RETURN, then its own wave |
 | **P34 FU-KEY-CTRLJ-OWNERS** | `pkt/V1-FU-KEY-CTRLJ-OWNERS` @ `6f48b89c` | **Both reviews ACCEPT WITH MINORS** (verdicts posted on #80 with this handover). Follow-ups, not blockers: SEC-CJ-1 (Ctrl+J reopens with an earlier `openKey` page context; reset context on Ctrl+J), COR-CJ-1 (no Ctrl+J-from-an-input case). The KEY_DISABLED clause is carried to SWP-KEY-SHELL-SMOKE: its premise was false (the header's Ask KEY button already fails that smoke on main). | RETURN posted with this handover; goes into the wave after M22, paired with SWP-KEY-SHELL-SMOKE web |
-| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `5f702297` | Security review **ACCEPT WITH FOLLOW-UPS** (posted on #80): SEC-CSC-1 to 5 (value-blind detection, the `kf-sync-queue` IndexedDB stores request headers/bodies, missing write channels, `public/` not recursive, cookie attributes not pinned) as one follow-up packet "census v2", and the admin cookie's `SameSite=Lax; Secure` belongs to RR-ADMIN-SHELL-SERVER-GATE. Correctness review was still running at handover. | If the correctness verdict is not on #80, run it again; then RETURN; add FU census v2 to the plan |
+| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `5f702297` | Security **ACCEPT WITH FOLLOW-UPS**; correctness **REPAIR**: CSC-1 MAJOR (a multi-line `setItem(` / `cookies.set(` / `indexedDB.open(` resolves to an empty key and is missed; Prettier makes that shape). Repair round sent to cloud `session_01TnVBvEpu3HwDAmyBPKq3Qv` (after its gate round): CSC-1, plus the minors in the same pass (more write channels, value matching, one-hop const resolution, register `kf-sync-queue`, recursive `public/`, pinned cookie attributes). Both verdicts are on #80. | Two fresh confirmations on the delta, then RETURN. Follow-up packet: the service worker must not queue the Authorization header (`public/sw.js`) |
 | **RR-ADMIN-SHELL-SERVER-GATE** (D-290) | `pkt/V1-RR-ADMIN-SHELL-SERVER-GATE` @ `b770170c` | Repair round 1 building in cloud `session_01TnVBvEpu3HwDAmyBPKq3Qv`; it should also set `SameSite=Lax; Secure` on the admin cookies (the census security review's MEDIUM note on `admin/login/page.tsx:48`) | Two fresh confirmations on the delta, RETURN |
 | **P28 FU-CONTACT-PAGES-RAW-STATUS** | `pkt/V1-FU-CONTACT-PAGES-RAW-STATUS` @ `69b165c3` | Building in cloud `session_01TnVBvH393vm6vtetBUdtEh` | Two reviews when its PACKET REPORT is on #80 |
 | **P98 CONTACTS-LIST-FIRST** (D-289) | `pkt/V1-CONTACTS-LIST-FIRST` @ `25c7bf64` | Building in cloud `session_01TnVBvFQEW1hpgap6ecVtk7` | Two reviews |
@@ -83,8 +85,8 @@ EXPENSES-HUB-1 and VAT-BASICS, the census and RR packets, FU-TEST-FLAKES. FU-REF
   RR-ADMIN-SHELL-SERVER-GATE and RR-SESSION-STORAGE-CENSUS as they return.
 - Owner-gated: RR-OWNER-RULINGS-RECORD (docs; answers to OQ-5/13/19/30 and two RR migrations).
 - After the server lane: EXPENSES-HUB-1 web, CLAIM-LOOP web (after DECIMALS-SERVER), TODAY-4BLOCK.
-- Follow-ups found in reviews, not yet in the plan: census v2 (SEC-CSC-1..5, plus the service worker must not queue
-  the Authorization header); SEC-CJ-1 and COR-CJ-1 (Ctrl+J); an invoice-for-customer URL (Create Invoice and
+- Follow-ups found in reviews, not yet in the plan: the service worker must not queue the Authorization header
+  (`public/sw.js`, census reviews); SEC-CJ-1 and COR-CJ-1 (Ctrl+J); an invoice-for-customer URL (Create Invoice and
   payment_reminder open New invoice prefilled); app-wide `h-5.5`/`h-4.5` classes; the bottom-bar clearance
   (question 46); `pwa-install-prompt` routed through `lib/install-prompt`; the server `getInventory` money
   projection; bulk product delete has no audit or events; https-only image links on the server DTO; refund-door scope
