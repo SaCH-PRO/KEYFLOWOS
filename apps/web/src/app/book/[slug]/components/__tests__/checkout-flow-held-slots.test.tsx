@@ -17,6 +17,7 @@
  *   HSF-07  a kept key with more lines than the cart (the cart lost a service) does not match: nothing is filled,
  *           only fresh times are offered, and the held time is never offered
  *   HSF-08  the release notice says how to keep the earlier times
+ *   HSF-09  a checkout whose cart loses a service while it is open releases the hold (the gate, not only the fill)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -68,7 +69,12 @@ const FRESH: Record<string, string[]> = {
 
 function renderFlow(cart: CartItem[], heldReuseKey: string | null, staff: Staff[] = []) {
   const onSubmit = vi.fn(async () => undefined);
-  render(
+  const view = render(flowElement(cart, heldReuseKey, staff, onSubmit));
+  return Object.assign(onSubmit, { rerenderWith: (next: CartItem[]) => view.rerender(flowElement(next, heldReuseKey, staff, onSubmit)) });
+}
+
+function flowElement(cart: CartItem[], heldReuseKey: string | null, staff: Staff[], onSubmit: ReturnType<typeof vi.fn>) {
+  return (
     <CheckoutFlow
       business={business}
       cart={cart}
@@ -84,9 +90,8 @@ function renderFlow(cart: CartItem[], heldReuseKey: string | null, staff: Staff[
       onUpdateQuantity={vi.fn()}
       onSubmit={onSubmit}
       {...({ heldReuseKey } as Record<string, unknown>)}
-    />,
+    />
   );
-  return onSubmit;
 }
 
 function fillInfo(firstName = CUSTOMER[0], email = CUSTOMER[2]) {
@@ -234,5 +239,18 @@ describe("SWP-BOOKING-SLOTS: held slots only while the whole reuse key matches",
     const location = rowOf("Service Alpha").card.querySelector('input[type="text"]') as HTMLInputElement;
     fireEvent.change(location, { target: { value: "Studio 3" } });
     expect(screen.getByText(KEEP_HOW)).toBeInTheDocument();
+  });
+
+  it("HSF-09 a checkout whose cart loses a service while it is open releases the hold", async () => {
+    const flow = renderFlow([A, B], keyOf([{ service: A, time: "11:00" }, { service: B, time: "09:00" }]));
+    fillInfo();
+    expect(await rowOf("Service Alpha").q.findByRole("button", { name: "11:00" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeEnabled();
+
+    flow.rerenderWith([A]);
+    const a = rowOf("Service Alpha");
+    expect(await screen.findByText(RELEASED)).toBeInTheDocument();
+    expect(a.q.queryByRole("button", { name: "11:00" }), "the held 11:00 is no longer offered").toBeNull();
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeDisabled();
   });
 });
