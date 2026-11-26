@@ -153,7 +153,8 @@ export class ActionDispatcherService {
   }
 
   async dispatch(ctx: DispatchContext): Promise<DispatchResult> {
-    const dispatchId = ctx.idempotencyKey ?? `disp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const idempotencyKey = ctx.idempotencyKey?.trim() || undefined;
+    const dispatchId = idempotencyKey ?? `disp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const startTime = Date.now();
 
     // Check circuit breaker (this business's, for this tool: W9-DISPATCH-CIRCUIT)
@@ -166,10 +167,14 @@ export class ActionDispatcherService {
     // RR-DISPATCH-ATOMIC-CLAIM (V1-72): take an atomic durable claim on `dispatch:<key>`
     // in idempotency_keys before the governance check and execution loop.
     let activeClaim: ActiveDispatchClaim | undefined;
-    if (ctx.idempotencyKey) {
+    if (idempotencyKey) {
       const idempotency = this.getIdempotencyService();
-      if (idempotency) {
-        const claimKey = `${DISPATCH_CLAIM_PREFIX}${ctx.idempotencyKey}`;
+      if (!idempotency) {
+        this.logger.warn(
+          `Dispatch ${dispatchId} has idempotency key "${idempotencyKey}" but KeyIdempotencyService is unavailable; proceeding without durable claim`,
+        );
+      } else {
+        const claimKey = `${DISPATCH_CLAIM_PREFIX}${idempotencyKey}`;
         let requestHash: string;
         try {
           requestHash = fingerprintToolRequest(ctx.toolName, ctx.args);
@@ -179,15 +184,19 @@ export class ActionDispatcherService {
           return { success: false, error: msg, dispatchId, durationMs: Date.now() - startTime };
         }
 
+        const correlationId = ctx.planStepId ?? ctx.planId;
         const check = await idempotency.check<DispatchClaimOutcome>({
           businessId: ctx.businessId,
           idempotencyKey: claimKey,
           requestHash,
-          audit: { toolName: ctx.toolName },
+          audit: {
+            toolName: ctx.toolName,
+            ...(correlationId ? { correlationId } : {}),
+          },
         });
 
         if (check.status === 'completed') {
-          this.logger.log(`Idempotent hit (completed) for key "${ctx.idempotencyKey}"`);
+          this.logger.log(`Idempotent hit (completed) for key "${idempotencyKey}"`);
           return {
             success: true,
             result: check.response?.result,
@@ -197,7 +206,7 @@ export class ActionDispatcherService {
         }
 
         if (check.status === 'failed') {
-          this.logger.log(`Idempotent hit (failed) for key "${ctx.idempotencyKey}"`);
+          this.logger.log(`Idempotent hit (failed) for key "${idempotencyKey}"`);
           return {
             success: false,
             error: check.error,
@@ -207,7 +216,7 @@ export class ActionDispatcherService {
         }
 
         if (check.status === 'pending') {
-          const msg = `Dispatch for idempotency key "${ctx.idempotencyKey}" is already in progress`;
+          const msg = `Dispatch for idempotency key "${idempotencyKey}" is already in progress`;
           this.logger.warn(msg);
           return {
             success: false,
@@ -241,27 +250,60 @@ export class ActionDispatcherService {
           complete: async (result: unknown) => {
             if (activeClaim!.settled) return;
             activeClaim!.settled = true;
-            await idempotency.complete<DispatchClaimOutcome>(
-              claimReq,
-              result !== undefined ? { result } : {},
-            );
+            const payload: DispatchClaimOutcome = result !== undefined ? { result } : {};
+            try {
+              await idempotency.complete<DispatchClaimOutcome>(claimReq, payload);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `Failed to settle dispatch claim "${claimKey}" as completed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+              if (result !== undefined) {
+                try {
+                  await idempotency.complete<DispatchClaimOutcome>(claimReq, {});
+                } catch (fallbackErr: unknown) {
+                  this.logger.warn(
+                    `Fallback empty settle for dispatch claim "${claimKey}" also failed: ${
+                      fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+                    }`,
+                  );
+                }
+              }
+            }
           },
           fail: async (error: string) => {
             if (activeClaim!.settled) return;
             activeClaim!.settled = true;
-            await idempotency.fail(claimReq, error);
+            try {
+              await idempotency.fail(claimReq, error);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `Failed to settle dispatch claim "${claimKey}" as failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
           },
           release: async () => {
             if (activeClaim!.settled) return;
             activeClaim!.settled = true;
-            await idempotency.release(claimReq);
+            try {
+              await idempotency.release(claimReq);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `Failed to release dispatch claim "${claimKey}": ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
           },
         };
       }
     }
 
     try {
-      return await this.executeClaimedDispatch(ctx, dispatchId, startTime, activeClaim);
+      return await this.executeClaimedDispatch(ctx, dispatchId, startTime, idempotencyKey, activeClaim);
     } catch (err: unknown) {
       if (activeClaim && !activeClaim.settled) {
         const errMsg =
@@ -271,21 +313,9 @@ export class ActionDispatcherService {
               ? String(err)
               : 'Dispatch failed';
         if (activeClaim.executionStarted) {
-          await activeClaim.fail(errMsg).catch((settleErr: unknown) => {
-            this.logger.warn(
-              `Failed to settle dispatch claim "${activeClaim.key}" after error: ${
-                settleErr instanceof Error ? settleErr.message : String(settleErr)
-              }`,
-            );
-          });
+          await activeClaim.fail(errMsg);
         } else {
-          await activeClaim.release().catch((releaseErr: unknown) => {
-            this.logger.warn(
-              `Failed to release dispatch claim "${activeClaim.key}" after error: ${
-                releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
-              }`,
-            );
-          });
+          await activeClaim.release();
         }
       }
       throw err;
@@ -296,6 +326,7 @@ export class ActionDispatcherService {
     ctx: DispatchContext,
     dispatchId: string,
     startTime: number,
+    idempotencyKey?: string,
     activeClaim?: ActiveDispatchClaim,
   ): Promise<DispatchResult> {
     // Governance check
@@ -392,7 +423,7 @@ export class ActionDispatcherService {
           planId: ctx.planId,
           planStepId: ctx.planStepId,
           riskTier: decision.tier,
-          idempotencyKey: ctx.idempotencyKey,
+          idempotencyKey,
         },
       );
 
@@ -462,7 +493,7 @@ export class ActionDispatcherService {
         planId: ctx.planId,
         planStepId: ctx.planStepId,
         riskTier: decision.tier,
-        idempotencyKey: ctx.idempotencyKey,
+        idempotencyKey,
       },
     );
 
