@@ -146,6 +146,8 @@ interface RegistryRow {
   valueExpr?: string;
 }
 
+const UNRESOLVED = "__kf_unresolved_secret__";
+
 const CREDENTIAL_PATTERN = /token|refresh|secret|session|auth|admin|verifier|password|passwd|jwt|bearer|credential|api[_-]?key|(?:^|[^a-z])sid(?:[^a-z]|$)/i;
 
 /**
@@ -175,7 +177,10 @@ const REGISTRY: RegistryRow[] = [
   // Public-site presence analytics, app/_lib/presence-sdk.ts. An analytics session id, not a sign-in credential.
   { store: "storage", key: "kf_sid", file: "src/app/_lib/presence-sdk.ts", why: "Presence analytics session id (30 minutes); grants nothing." },
   { store: "storage", key: "kf_sid_ts", file: "src/app/_lib/presence-sdk.ts", why: "Timestamp of the presence analytics session id." },
-  { store: "cookie", key: "kf_sid", file: "src/app/_lib/presence-sdk.ts", why: "Cookie copy of the presence analytics session id (via writeCookie).", attrs: ["path=/", "max-age=1800", "samesite=lax", "secure-on-https"] },
+  // writeCookie(name, value, maxAgeSec) is a wrapper: its name and Max-Age are parameters, so neither is proven (round
+  // 14). Its four callers (lines 102, 117, 128, 138) pass VISITOR_KEY (kf_vid, 365 days) and SESSION_KEY (kf_sid, 30
+  // minutes), both top-level consts of the file.
+  { store: "cookie", key: UNRESOLVED, file: "src/app/_lib/presence-sdk.ts", why: "writeCookie's cookie: the presence visitor id (kf_vid) and analytics session id (kf_sid), passed by its four callers; grants nothing.", attrs: ["path=/", "max-age=*", "samesite=lax", "secure-on-https"], keyExpr: "`${name}", valueExpr: "${encodeURIComponent(value)}" },
 
   // The public booking page's pending checkout, app/book/[slug]/page.tsx. Matched on its VALUE (CSC-08): the record
   // is built with withoutTokenLinks(bookingRefs), which strips the bookings' token links (SEC-W9WCN-1).
@@ -191,29 +196,43 @@ const REGISTRY: RegistryRow[] = [
   // Keys with a runtime part (repair round 12): the key resolver cannot resolve the suffix (a business id, a slug,
   // a route), so the write fails closed and must be written down. Each was read: it holds UI state, not a credential.
   { store: "localStorage", key: "kf_dunning_rules_*", file: "src/app/app/commerce/components/dunning-rules.tsx", why: "Dunning rule settings per business (JSON of the rules the owner set); the suffix is the business id.", keyExpr: "`kf_dunning_rules_${businessId}`", valueExpr: "JSON.stringify(rules)" },
-  { store: "localStorage", key: "kf:morning-briefing:dismissed:*:*", file: "src/app/app/control-tower/components/morning-briefing.tsx", why: `Morning briefing dismissed flag ("1") per business and day.`, keyExpr: "getDismissKey(businessId)", valueExpr: "\"1\"" },
-  { store: "localStorage", key: "kf-tower-pinned-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Pinned control-tower item ids per business.", keyExpr: "getPinKey(businessId)", valueExpr: "JSON.stringify([...ids])" },
-  { store: "localStorage", key: "kf-tower-dismissed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Dismissed control-tower item ids and dates per business.", keyExpr: "getDismissKey(businessId)", valueExpr: "JSON.stringify(Object.fromEntries(ids))" },
-  { store: "localStorage", key: "kf-tower-snoozed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Snoozed control-tower item ids and wake times per business.", keyExpr: "getSnoozedKey(businessId)", valueExpr: "JSON.stringify(Object.fromEntries(ids))" },
-  { store: "localStorage", key: "kf_finance_banner_dismissed_*", file: "src/app/app/finance/components/finance-banner.tsx", why: `Finance banner dismissed flag ("1"); the suffix names the banner.`, keyExpr: "storageKey", valueExpr: "\"1\"" },
-  { store: "localStorage", key: "kf_default_destinations_*", file: "src/app/app/marketing/components/unified/channel-selector.tsx", why: "Default marketing destination ids per business.", keyExpr: "PREF_KEY", valueExpr: "JSON.stringify(selectedDestinations.map((d) => d.id))" },
-  { store: "sessionStorage", key: "kf-genome-milestone-*-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `Business-genome milestone shown flag ("1") per business and threshold.`, keyExpr: "key", valueExpr: "\"1\"" },
-  { store: "sessionStorage", key: "kf-genome-milestone-anon-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `The same flag with no business yet ("anon", the ?? branch), per threshold.`, keyExpr: "key", valueExpr: "\"1\"" },
   { store: "localStorage", key: "dismissed-prompts-*", file: "src/app/app/profile/components/progressive-prompts.tsx", why: "Dismissed profile prompt ids per business.", keyExpr: "`dismissed-prompts-${businessId}`", valueExpr: "JSON.stringify([...next])" },
-  { store: "localStorage", key: "kf-section-*", file: "src/app/app/reports/components/shared-components.tsx", why: `Report section open/closed state ("1"/"0") per section.`, keyExpr: "storageKey", valueExpr: "next ? \"1\" : \"0\"" },
-  { store: "localStorage", key: "kf_wishlist_*", file: "src/app/book/[slug]/components/use-wishlist.ts", why: "Public booking-page wishlist items per business slug.", keyExpr: "getStorageKey(slug)", valueExpr: "JSON.stringify(items)" },
   { store: "localStorage", key: "kf_cart_*", file: "src/app/book/[slug]/components/utils.ts", why: "Public booking-page cart per business slug.", keyExpr: "`kf_cart_${slug}`", valueExpr: "JSON.stringify(cart)" },
   { store: "localStorage", key: "kf_promo_*", file: "src/app/book/[slug]/components/utils.ts", why: "Applied promo code details per business slug.", keyExpr: "`kf_promo_${slug}`", valueExpr: "JSON.stringify(promo)" },
-  { store: "localStorage", key: "kf_contacts_last_sync:*", file: "src/lib/contacts-db.ts", why: "Last contacts sync time (an ISO date) per cache owner.", keyExpr: "key", valueExpr: "new Date().toISOString()" },
   { store: "sessionStorage", key: "kf-scroll-*", file: "src/lib/use-return-navigation.ts", why: "Scroll position per route, to restore it on return.", keyExpr: "SCROLL_STORAGE_PREFIX + route", valueExpr: "String(scrollY)" },
+
+  // Keys from a call, a parameter or a block-scoped const (round 14: not proven, so UNRESOLVED). Each was read.
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/control-tower/components/morning-briefing.tsx", why: `Morning briefing dismissed flag ("1"): getDismissKey(businessId) is kf:morning-briefing:dismissed:<business>:<day>.`, keyExpr: "getDismissKey(businessId)", valueExpr: "\"1\"" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Pinned control-tower item ids: getPinKey(businessId) is kf-tower-pinned-<business>.", keyExpr: "getPinKey(businessId)", valueExpr: "JSON.stringify([...ids])" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Dismissed control-tower item ids and dates: getDismissKey(businessId) is kf-tower-dismissed-<business>.", keyExpr: "getDismissKey(businessId)", valueExpr: "JSON.stringify(Object.fromEntries(ids))" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Snoozed control-tower item ids and wake times: getSnoozedKey(businessId) is kf-tower-snoozed-<business>.", keyExpr: "getSnoozedKey(businessId)", valueExpr: "JSON.stringify(Object.fromEntries(ids))" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/finance/components/finance-banner.tsx", why: `Finance banner dismissed flag ("1"): storageKey is the component const kf_finance_banner_dismissed_<from>.`, keyExpr: "storageKey", valueExpr: "\"1\"" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/marketing/components/unified/channel-selector.tsx", why: "Default marketing destination ids: PREF_KEY is the component const kf_default_destinations_<business>.", keyExpr: "PREF_KEY", valueExpr: "JSON.stringify(selectedDestinations.map((d) => d.id))" },
+  { store: "sessionStorage", key: UNRESOLVED, file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `Business-genome milestone shown flag ("1"): storageKey(businessId, threshold) is kf-genome-milestone-<business or anon>-<threshold>.`, keyExpr: "key", valueExpr: "\"1\"" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/app/reports/components/shared-components.tsx", why: `Report section open/closed state ("1"/"0"): storageKey is kf-section-<persistKey>, written only when set.`, keyExpr: "storageKey", valueExpr: "next ? \"1\" : \"0\"" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/app/book/[slug]/components/use-wishlist.ts", why: "Public booking-page wishlist items: getStorageKey(slug) is WISHLIST_KEY_PREFIX + slug.", keyExpr: "getStorageKey(slug)", valueExpr: "JSON.stringify(items)" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/hooks/use-app-layout.ts", why: `Recent command-palette pages (label, href, time; at most 5): key is the block const "kf-command-recent".`, keyExpr: "key", valueExpr: "JSON.stringify(filtered.slice(0, 5))" },
+  { store: "localStorage", key: UNRESOLVED, file: "src/lib/contacts-db.ts", why: "Last contacts sync time (an ISO date): key is lastSyncStorageKey(owner), LAST_SYNC_KEY_PREFIX:<cache owner>, written only when set.", keyExpr: "key", valueExpr: "new Date().toISOString()" },
+
+  // public/sw.js: the cache names are consts inside the production `else` block, and the helpers take the name as a
+  // parameter (cacheFirst / networkFirstWithTimeout(request, cacheName)), so no name is proven. Each was read: the
+  // caches hold the app shell, static assets and uncredentialed API GETs (a request with an authorization header is
+  // never stored, line 276).
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(SHELL_CACHE), kf-shell-v3: the app shell, on install and on navigation.", keyExpr: "SHELL_CACHE", valueExpr: "" },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The app shell put on a navigation response (SHELL_CACHE, kf-shell-v3).", keyExpr: "SHELL_CACHE", valueExpr: "request clone response.clone()" },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(cacheName) in cacheFirst and networkFirstWithTimeout: STATIC_CACHE (kf-static-v3) or API_CACHE (kf-api-v4).", keyExpr: "cacheName", valueExpr: "" },
+  { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The 200 responses those two helpers put: static assets, and API GETs with no authorization header.", keyExpr: "cacheName", valueExpr: "request response.clone()" },
 
   // The service worker's offline write queue, public/sw.js. enqueue() stores each queued request's headers, so the
   // user's Authorization bearer is written to IndexedDB in clear (security review follow-up, not fixed here).
   {
     store: "indexedDB",
-    key: "kf-sync-queue",
+    // DB_NAME ('kf-sync-queue') is a const inside the production `else` block, so the name is not proven (round 14).
+    key: UNRESOLVED,
     file: "public/sw.js",
-    why: "Offline mutation queue: each entry keeps the request's headers, so the Authorization bearer lands in IndexedDB.",
+    why: "Offline mutation queue (DB_NAME, kf-sync-queue): each entry keeps the request's headers, so the Authorization bearer lands in IndexedDB.",
+    keyExpr: "DB_NAME",
+    valueExpr: "entry {\n    url: request.url,\n    method: request.method,\n    headers: Array.from(request.headers.entries()),\n    body: null,\n    timestamp: Date.now(),\n  }",
     followUp: "public/sw.js enqueue() must not store the Authorization header (security review of RR-SESSION-STORAGE-CENSUS)",
   },
 ];
@@ -1500,9 +1519,6 @@ export function scanSource(
 const CODE_HINT =
   /\bsetItem\b|\b(?:localStorage|sessionStorage|indexedDB|objectStore|caches|cookieStore)\b|\bdocument\s*(?:\.\s*cookie\b|\[)|\.cookies\b|\bcookies\s*\(|set-cookie|\b(?:window|self|globalThis)\s*\.\s*name\b/i;
 
-/** The unresolved-substitution placeholder: it names a secret, so a write built from it fails closed (CSC-44). */
-const UNRESOLVED = "__kf_unresolved_secret__";
-
 /**
  * The raw offset of cooked offset `cooked` in a string's raw text (COR7-4, COR8-3): an escape is one cooked character
  * for its raw sequence (\\n, \\", \\xHH, \\uHHHH, \\u{…}), a backslash line continuation (LF or CRLF) is none, and a raw
@@ -1977,7 +1993,7 @@ describe("CSC-01 the scanner finds the writes it must", () => {
   const writes = scanSource("src/fixture.ts", fixture);
   const keys = writes.map((w) => `${w.store}:${w.key}`);
 
-  it("resolves literals, consts, templates and wrapper call sites", () => {
+  it("resolves literals, consts and templates; a wrapper's cookie name is unresolved (round 14)", () => {
     expect(keys).toEqual(
       expect.arrayContaining([
         "localStorage:kf_new_token",
@@ -1988,7 +2004,7 @@ describe("CSC-01 the scanner finds the writes it must", () => {
         "response-cookie:kf_server_session",
         "indexedDB:kf-token-vault",
         "localStorage:kf-products-view",
-        "cookie:kf_wrapped_session",
+        `cookie:${UNRESOLVED}`,
       ]),
     );
   });
@@ -2008,6 +2024,7 @@ describe("CSC-01 the scanner finds the writes it must", () => {
 describe("CSC-02/03 the census matches the registry", () => {
   const writes = census();
   if (process.env.CSC_DUMP) for (const line of dumpLines(writes)) console.log(line);
+  if (process.env.CSC_PINS) for (const w of writes.filter((x) => isCredential(x) && !REGISTRY.some((r) => covers(r, x)))) console.log("PIN", JSON.stringify({ store: w.store, key: w.key, file: w.file, line: w.line, keyExpr: w.expr, valueExpr: w.value }));
 
   it("the scan reads the web app (sanity: it finds the session token writes)", () => {
     expect(writes.length).toBeGreaterThan(50);
@@ -2033,7 +2050,8 @@ describe("CSC-02/03 the census matches the registry", () => {
 
   it("every registry row says why", () => {
     for (const r of REGISTRY) expect(r.why.length, id(r)).toBeGreaterThan(10);
-    expect(new Set(REGISTRY.map(id)).size, "no duplicate rows").toBe(REGISTRY.length);
+    // Rows of one id are told apart by their pins (round 14: several UNRESOLVED writes in one file).
+    expect(new Set(REGISTRY.map((r) => `${id(r)}|${r.keyExpr ?? ""}|${r.valueExpr ?? ""}`)).size, "no duplicate rows").toBe(REGISTRY.length);
   });
 
   it("CSC-04 the stores the plan names are registered", () => {
@@ -2044,13 +2062,27 @@ describe("CSC-02/03 the census matches the registry", () => {
   });
 
   it("CSC-05 no credential in IndexedDB, Cache Storage or window.name, and server cookie writes only clear", () => {
-    // The one known exception is registered with its follow-up (CSC-10); any other fails.
-    const followUps = new Set(REGISTRY.filter((r) => r.followUp).map(id));
+    // The one known exception is registered with its follow-up (CSC-10). Round 14: a write there whose NAME is not
+    // proven is a credential write too; it passes only when it is registered (pinned) and neither its name's source
+    // nor its value names a credential or keeps request headers. Any other fails.
+    const followUps = REGISTRY.filter((r) => r.followUp);
+    const unprovenOnly = (w: Write) =>
+      w.store !== "window.name" &&
+      w.store !== "response-cookie" &&
+      w.key === UNRESOLVED &&
+      REGISTRY.some((r) => covers(r, w)) &&
+      !CREDENTIAL_PATTERN.test(w.expr) &&
+      !VALUE_PATTERN.test(w.value) &&
+      !HEADERS_PATTERN.test(w.value);
     const bad = writes.filter(
-      (w) => ["indexedDB", "cacheStorage", "window.name", "response-cookie"].includes(w.store) && isCredential(w) && !followUps.has(id(w)),
+      (w) =>
+        ["indexedDB", "cacheStorage", "window.name", "response-cookie"].includes(w.store) &&
+        isCredential(w) &&
+        !followUps.some((r) => covers(r, w)) &&
+        !unprovenOnly(w),
     );
     expect(bad.map((w) => `${id(w)}:${w.line}`)).toEqual([]);
-    expect([...followUps]).toEqual(["indexedDB kf-sync-queue @ public/sw.js"]);
+    expect(followUps.map((r) => `${id(r)} (${r.keyExpr})`)).toEqual([`indexedDB ${UNRESOLVED} @ public/sw.js (DB_NAME)`]);
   });
 });
 
@@ -2214,16 +2246,14 @@ describe("CSC-09 one-hop key resolution", () => {
   ].join("\n");
   const keys = keysOf(scan("src/lib/fixture-hop.ts", fixture, { files }));
 
-  it("resolves concatenation, imported consts and key functions", () => {
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "sessionStorage:kf-scroll-*",
-        "localStorage:kf_refresh_token_copy",
-        "localStorage:kf_plain",
-        "localStorage:kf_token_*",
-        "localStorage:kf_vault_secret_*",
-      ]),
-    );
+  it("resolves concatenation; an import or a key function is unresolved (round 14)", () => {
+    expect(keys).toEqual([
+      "sessionStorage:kf-scroll-*",
+      `localStorage:${UNRESOLVED}`,
+      `localStorage:${UNRESOLVED}`,
+      `localStorage:${UNRESOLVED}`,
+      `localStorage:${UNRESOLVED}`,
+    ]);
   });
 
   it("the census resolves the app's own concatenated key (use-return-navigation.ts)", () => {
@@ -2233,10 +2263,11 @@ describe("CSC-09 one-hop key resolution", () => {
 
 describe("CSC-10 kf-sync-queue keeps request headers, so it is a credential store", () => {
   it("public/sw.js kf-sync-queue is a credential write, registered with its follow-up", () => {
-    const w = census().find((x) => x.store === "indexedDB" && x.key === "kf-sync-queue");
+    // Round 14: DB_NAME is a block-scoped const, so the name is UNRESOLVED; the write is found by its key source.
+    const w = census().find((x) => x.store === "indexedDB" && x.file === "public/sw.js" && x.expr === "DB_NAME");
     expect(w, "the census finds kf-sync-queue").toBeTruthy();
     expect(isCredential(w!), "kf-sync-queue counts as a credential store").toBe(true);
-    const row = REGISTRY.find((r) => r.key === "kf-sync-queue");
+    const row = REGISTRY.find((r) => covers(r, w!));
     expect(row?.followUp, "registered as a follow-up").toMatch(/Authorization/);
   });
 });
@@ -2269,7 +2300,7 @@ describe("CSC-12 cookie attributes are pinned", () => {
     const writes = census() as Array<Write & { attrs?: string[] }>;
     for (const r of REGISTRY.filter((x) => x.store === "cookie")) {
       expect(r.attrs, `${id(r)} pins its attributes`).toBeDefined();
-      const w = writes.find((x) => id(x) === id(r));
+      const w = writes.find((x) => covers(r, x));
       expect(w?.attrs, id(r)).toEqual(r.attrs);
     }
   });
@@ -2359,12 +2390,13 @@ describe("CSC-15 each resolution step decides a result", () => {
       `  localStorage.setItem(key, t);`,
       `}`,
     ].join("\n");
-    expect(keysOf(scan("src/fixture-nearest.ts", fixture))).toEqual(["localStorage:kf_first_view", "localStorage:kf_second_token"]);
+    // Round 14: a const inside a function is not proven, so both keys are UNRESOLVED (credential writes).
+    expect(keysOf(scan("src/fixture-nearest.ts", fixture))).toEqual([`localStorage:${UNRESOLVED}`, `localStorage:${UNRESOLVED}`]);
   });
 
   // Round 11 (SEC-R10-1): a ternary KEY is every branch (kf_tern_token and kf_other); a function's ternary return
   // still resolves to its first resolvable branch (keyFor → kf_owner_secret:*), which is what this case pins.
-  it("a ternary resolves: a key to each branch, a function return to its first resolvable branch", () => {
+  it("a ternary resolves to each branch; a call is unresolved (round 14)", () => {
     const fixture = [
       `const OWNER_KEY = "kf_owner_secret";`,
       `function keyFor(owner: string | null) {`,
@@ -2375,11 +2407,10 @@ describe("CSC-15 each resolution step decides a result", () => {
       `  localStorage.setItem(keyFor(owner), t);`,
       `}`,
     ].join("\n");
-    // Round 13: keyFor's `: null` branch is the key "null" (JS stores setItem(null) under "null").
-    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_other", "localStorage:kf_owner_secret:*", "localStorage:null"]);
+    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_other", `localStorage:${UNRESOLVED}`]);
   });
 
-  it("an inline https-only Secure, and one through a const, are recorded as secure-on-https", () => {
+  it("an inline https-only Secure is recorded as secure-on-https; attributes held in a local const are not read", () => {
     const fixture = [
       `export function w(t: string) {`,
       `  document.cookie = \`kf_inline_token=\${t}; Path=/\${location.protocol === "https:" ? "; Secure" : ""}\`;`,
@@ -2389,7 +2420,8 @@ describe("CSC-15 each resolution step decides a result", () => {
     ].join("\n");
     const ws = scan("src/fixture-secure.ts", fixture);
     expect(ws.find((w) => w.key === "kf_inline_token")?.attrs).toEqual(["path=/", "secure-on-https"]);
-    expect(ws.find((w) => w.key === "kf_viaconst_token")?.attrs).toEqual(["path=/", "samesite=lax", "secure-on-https"]);
+    // Round 14: `attrs` is a const inside the function, so it is not proven and its attributes are not read.
+    expect(ws.find((w) => w.key === "kf_viaconst_token")?.attrs).toEqual([]);
   });
 });
 
@@ -3050,8 +3082,8 @@ describe("CSC-40 a key held in a const object or enum", () => {
     `  localStorage.setItem(E.A, t);`,
     `}`,
   ].join("\n");
-  it("resolves K.a, K[\"b\"] and E.A", () => {
-    expect(keysOf(scan("src/fixture-objkey.ts", fixture))).toEqual(["localStorage:kf_obj_token", "localStorage:kf_tpl_x_secret", "localStorage:kf_enum_token"]);
+  it("K.a, K[\"b\"] and E.A are unresolved (round 14: no member access is proven)", () => {
+    expect(keysOf(scan("src/fixture-objkey.ts", fixture))).toEqual([`localStorage:${UNRESOLVED}`, `localStorage:${UNRESOLVED}`, `localStorage:${UNRESOLVED}`]);
   });
 });
 
@@ -3216,9 +3248,9 @@ describe("CSC-48 inner lines map through the raw text", () => {
 });
 
 describe("CSC-49 bracketed property names are escaped in full", () => {
-  it('K["a(b"] does not throw, and K["a.b"] resolves to its own property', () => {
+  it('K["a(b"] and K["a.b"] do not throw, and are unresolved (round 14)', () => {
     const fixture = [`const K = { "a(b": "kf_paren_token", "a.b": "kf_dot_token", aXb: "kf_wrong" };`, `localStorage.setItem(K["a(b"], t);`, `localStorage.setItem(K["a.b"], t);`].join("\n");
-    expect(keysOf(scan("src/fixture-esc.ts", fixture))).toEqual(["localStorage:kf_paren_token", "localStorage:kf_dot_token"]);
+    expect(keysOf(scan("src/fixture-esc.ts", fixture))).toEqual([`localStorage:${UNRESOLVED}`, `localStorage:${UNRESOLVED}`]);
   });
 });
 
@@ -3499,9 +3531,9 @@ describe("CSC-61 a ternary inside a template or + key", () => {
     const fixture = 'export function s(k: string, on: boolean, v: string) { localStorage.setItem(`kf_${on ? "prefs" : k}`, v); }';
     expect(credWrites("src/fixture-r12d.ts", fixture, "localStorage").length).toBeGreaterThan(0);
   });
-  it("…and with a caller s(\"session_token\", …) it resolves to kf_session_token", () => {
+  it("…and with a caller s(\"session_token\", …) the parameter is still unresolved (round 14)", () => {
     const fixture = 'function s(k: string, on: boolean, v: string) { localStorage.setItem(`kf_${on ? "prefs" : k}`, v); }\ns("session_token", true, "v");';
-    expect(keysOf(scan("src/fixture-r12e.ts", fixture))).toEqual(expect.arrayContaining(["localStorage:kf_prefs", "localStorage:kf_session_token"]));
+    expect(keysOf(scan("src/fixture-r12e.ts", fixture))).toEqual(["localStorage:kf_prefs", "localStorage:kf_*"]);
   });
   it('"kf_" + (on ? B : A) is a credential write', () => {
     expect(credWrites("src/fixture-r12f.ts", [...AB2, 'localStorage.setItem("kf_" + (on ? B : A), v);'].join("\n"), "localStorage").length).toBeGreaterThan(0);
@@ -3520,7 +3552,8 @@ describe("CSC-62 || and ?? keys", () => {
   }
   it('setItem(k || "kf_prefs", v) with a caller passing "kf_session_token" is a credential write', () => {
     const fixture = 'function s(k: string, v: string) { localStorage.setItem(k || "kf_prefs", v); }\ns("kf_session_token", "v");';
-    expect(keysOf(scan("src/fixture-r12i.ts", fixture))).toEqual(expect.arrayContaining(["localStorage:kf_session_token"]));
+    // Round 14: the parameter is unresolved whatever its callers pass.
+    expect(keysOf(scan("src/fixture-r12i.ts", fixture))).toEqual([`localStorage:${UNRESOLVED}`, "localStorage:kf_prefs"]);
   });
 });
 
@@ -3673,11 +3706,12 @@ describe("CSC-70 exported functions and the enclosing function", () => {
 });
 
 describe("CSC-71 wildcard registry rows are pinned to their write", () => {
-  it("every registry row with a * key names its key and value source text", () => {
-    for (const r of REGISTRY.filter((x) => x.key.includes("*"))) {
+  it("every registry row with a * or UNRESOLVED key names its key and value source text", () => {
+    for (const r of REGISTRY.filter((x) => x.key.includes("*") || x.key === UNRESOLVED)) {
       const pinned = r as RegistryRow & { keyExpr?: string; valueExpr?: string };
       expect(pinned.keyExpr, `${id(r)} keyExpr`).toBeTruthy();
-      expect(pinned.valueExpr, `${id(r)} valueExpr`).toBeTruthy();
+      // A caches.open has no value: its pin is the empty value text, which must still be given.
+      expect(typeof pinned.valueExpr, `${id(r)} valueExpr`).toBe("string");
     }
   });
   it("a different write of the same key shape in that file is unregistered", () => {
@@ -3687,9 +3721,9 @@ describe("CSC-71 wildcard registry rows are pinned to their write", () => {
 });
 
 describe("CSC-66b a function that can end without a return", () => {
-  it("gives undefined as well as its returns", () => {
+  it("is a call, so unresolved (round 14)", () => {
     const fixture = 'function key(on: boolean) { if (on) return "kf_p"; }\nlocalStorage.setItem(key(x), "1");';
-    expect(keysOf(scan("src/fixture-r13k.ts", fixture))).toEqual(["localStorage:kf_p", "localStorage:undefined"]);
+    expect(keysOf(scan("src/fixture-r13k.ts", fixture))).toEqual([`localStorage:${UNRESOLVED}`]);
   });
 });
 
@@ -3701,67 +3735,251 @@ describe("CSC-72 prototype names in bindings", () => {
   });
 });
 
-describe("CSC-73 adversarial shapes (each a credential write)", () => {
+/** Round 14: a write whose key the resolver did not prove (UNRESOLVED, or a key with a "*" part). */
+const unproven = (w: Write) => w.key === UNRESOLVED || w.key.includes("*");
+/** The fixture's writes to `store`: at least one, and every one of them unproven (and so a credential write). */
+const expectUnproven = (file: string, fixture: string, store: Store = "localStorage", files?: Record<string, string>) => {
+  const ws = scan(file, fixture, files ? { files } : undefined).filter((w) => w.store === store);
+  expect(ws.length, "the write is found").toBeGreaterThan(0);
+  for (const w of ws) {
+    expect(unproven(w), `${w.key} (key source: ${w.expr}) is not proven`).toBe(true);
+    expect(isCredential(w)).toBe(true);
+  }
+};
+
+describe("CSC-73 adversarial shapes (round 13; round 14: the credential word is out of the key text)", () => {
+  // T holds the credential word, so a key's source text never names one (CREDENTIAL_PATTERN on the expression cannot
+  // carry the case): each shape passes only because the resolver proves nothing about its key.
+  const T = 'const T = "kf_x_token";\n';
   const shapes: Array<[string, string]> = [
-    ["a getter member", 'const K = { get a() { return "kf_x_token"; } };\nlocalStorage.setItem(K.a, v);'],
-    ["a computed member", "localStorage.setItem(K[name], v);"],
-    ["an optional call", "localStorage.setItem(fn?.(), v);"],
-    ["a comma expression", 'localStorage.setItem((0, "kf_x_token"), v);'],
-    ["an IIFE", 'localStorage.setItem((() => "kf_x_token")(), v);'],
-    ["a generic call", 'function mk<T>(k: T) { return k; }\nlocalStorage.setItem(mk<string>("kf_x_token"), v);'],
-    ["a tagged template", "localStorage.setItem(tag`kf_x`, v);"],
-    ["an assignment as the key", 'let k;\nlocalStorage.setItem((k = "kf_x_token"), v);'],
-    ["an async return awaited", 'async function mk() { return "kf_x_token"; }\nlocalStorage.setItem(await mk(), v);'],
-    ["a reassigned parameter", 'function s(k: string) { k = "kf_x_token"; localStorage.setItem(k, v); }\ns("kf_p");'],
-    ["a closure over a const", 'function outer() { const k = "kf_x_token"; return () => localStorage.setItem(k, v); }'],
-    ["a default export's parameter", "export default function (k: string, v: string) { localStorage.setItem(k, v); }"],
-    ["a destructured parameter", "function s({ k }: { k: string }) { localStorage.setItem(k, v); }\ns({ k: 'kf_x_token' });"],
-    ["a rest parameter", "function s(...ks: string[]) { localStorage.setItem(ks[0], v); }\ns('kf_x_token');"],
-    ["a method call in a template", "localStorage.setItem(`kf_${x.toString()}`, v);"],
-    ["String.raw", "localStorage.setItem(String.raw`kf_x_token`, v);"],
-    ["an array literal index", 'localStorage.setItem(["kf_x_token"][0], v);'],
-    ["an optional member", 'localStorage.setItem(K?.a, v);'],
-    ["new String", 'localStorage.setItem(new String("kf_x_token") as unknown as string, v);'],
-    ["a template of two literals", 'localStorage.setItem(`${"kf_x"}${"_token"}`, v);'],
-    ["&& in a const", 'const k = cond && "kf_x_token";\nlocalStorage.setItem(k, v);'],
-    ["an inner const shadows an outer plain one", 'const k = "kf_p";\nfunction f() { const k = "kf_x_token"; localStorage.setItem(k, v); }'],
-    ["var hoisting", 'localStorage.setItem(k, v);\nvar k = "kf_prefs";'],
-    ["a for-of variable", 'for (const k of ["kf_x_token"]) localStorage.setItem(k, v);'],
-    ["a catch parameter", "try { f(); } catch (k) { localStorage.setItem(k as string, v); }"],
-    ["a class field via this", 'class C { k = "kf_x_token"; s() { localStorage.setItem(this.k, v); } }'],
-    ["an enum built with +", 'enum E { A = "kf_x" + "_token" }\nlocalStorage.setItem(E.A, v);'],
-    ["a spread override", 'const O = { a: "kf_x_token" };\nconst K = { a: "kf_p", ...O };\nlocalStorage.setItem(K.a, v);'],
-    ["an imported function", 'import { mk } from "./keys";\nlocalStorage.setItem(mk(), v);'],
-    ["String(param) with no callers", "function s(k: string) { localStorage.setItem(String(k), v); }"],
-    ["globalThis.localStorage with a const", 'const K = "kf_x_token";\nglobalThis.localStorage.setItem(K, v);'],
-    ["a method on a template", "localStorage.setItem(`${k}`.trim(), v);"],
-    ["an arrow default", 'const s = (k = "kf_x_token") => localStorage.setItem(k, v);\ns();'],
-    ["an exported const arrow", "export const s = (k: string) => localStorage.setItem(k, v);"],
-    ["a function passed to forEach", 'function s(k: string) { localStorage.setItem(k, v); }\n["kf_p"].forEach(s);'],
+    ["a getter member", 'const K = { get a() { return T; } };\nlocalStorage.setItem(K.a, v);'],
+    ["a computed member", "const K = { a: T };\nlocalStorage.setItem(K[name], v);"],
+    ["an optional call", "const fn = () => T;\nlocalStorage.setItem(fn?.(), v);"],
+    ["a comma expression", "localStorage.setItem((0, T), v);"],
+    ["an IIFE", "localStorage.setItem((() => T)(), v);"],
+    ["a generic call", "function mk<X>(k: X) { return k; }\nlocalStorage.setItem(mk<string>(T), v);"],
+    ["a tagged template", "localStorage.setItem(tag`${T}`, v);"],
+    ["an assignment as the key", "let k;\nlocalStorage.setItem((k = T), v);"],
+    ["an async return awaited", "async function mk() { return T; }\nlocalStorage.setItem(await mk(), v);"],
+    ["a reassigned parameter", 'function s(k: string) { k = T; localStorage.setItem(k, v); }\ns("kf_p");'],
+    ["a closure over a const", "function outer() { const k = T; return () => localStorage.setItem(k, v); }"],
+    ["a default export's parameter", "export default function (k: string, v: string) { localStorage.setItem(k, v); }\nvoid T;"],
+    ["a destructured parameter", "function s({ k }: { k: string }) { localStorage.setItem(k, v); }\ns({ k: T });"],
+    ["a rest parameter", "function s(...ks: string[]) { localStorage.setItem(ks[0], v); }\ns(T);"],
+    ["a method call in a template", "localStorage.setItem(`kf_${T.toString()}`, v);"],
+    ["String.raw", "localStorage.setItem(String.raw`${T}`, v);"],
+    ["an array literal index", "localStorage.setItem([T][0], v);"],
+    ["an optional member", "const K = { a: T };\nlocalStorage.setItem(K?.a, v);"],
+    ["new String", "localStorage.setItem(new String(T) as unknown as string, v);"],
+    ["&& in a const", "const k = cond && T;\nlocalStorage.setItem(k, v);"],
+    ["an inner const shadows an outer plain one", 'const k = "kf_p";\nfunction f() { const k = T; localStorage.setItem(k, v); }'],
+    ["var hoisting", "localStorage.setItem(k, v);\nvar k = T;"],
+    ["a for-of variable", "for (const k of [T]) localStorage.setItem(k, v);"],
+    ["a catch parameter", "try { f(T); } catch (k) { localStorage.setItem(k as string, v); }"],
+    ["a class field via this", "class C { k = T; s() { localStorage.setItem(this.k, v); } }"],
+    ["an enum built with +", 'enum E { A = "kf_x" + "_y" }\nlocalStorage.setItem(E.A, v);\nvoid T;'],
+    ["a spread override", 'const O = { a: T };\nconst K = { a: "kf_p", ...O };\nlocalStorage.setItem(K.a, v);'],
+    ["an imported function", 'import { mk } from "./keys";\nlocalStorage.setItem(mk(T), v);'],
+    ["String(param) with no callers", "function s(k: string) { localStorage.setItem(String(k), v); }\nvoid T;"],
+    ["a method on a template", "localStorage.setItem(`${T}`.trim(), v);"],
+    ["an arrow default", "const s = (k = T) => localStorage.setItem(k, v);\ns();"],
+    ["an exported const arrow", "export const s = (k: string) => localStorage.setItem(k, v);\ns(T);"],
+    ["a function passed to forEach", "function s(k: string) { localStorage.setItem(k, v); }\n[T].forEach(s);"],
   ];
   for (const [name, fixture] of shapes) {
-    it(`${name}`, () => {
-      expect(credIn("src/fixture-adv.ts", fixture, "localStorage").length, name).toBeGreaterThan(0);
+    it(`${name}: unproven`, () => expectUnproven("src/fixture-adv.ts", T + fixture));
+  }
+  // Two round-13 shapes are inside the grammar: the resolver proves the credential key itself.
+  it("a template of two consts is proven: kf_x_token, through the resolver", () => {
+    const ws = scan("src/fixture-adv2.ts", 'const A = "kf_x";\nconst B = "_token";\nlocalStorage.setItem(`${A}${B}`, v);');
+    expect(keysOf(ws)).toEqual(["localStorage:kf_x_token"]);
+    expect(ws.filter(isCredential).length).toBe(1);
+  });
+  it("globalThis.localStorage with a top-level const is proven: kf_x_token", () => {
+    expect(keysOf(scan("src/fixture-adv3.ts", T + "globalThis.localStorage.setItem(T, v);"))).toEqual(["localStorage:kf_x_token"]);
+  });
+});
+
+/**
+ * Repair round 14 (both lenses NOT CONFIRMED on round 13: 20 security and 3 correctness shapes where the resolver
+ * claimed a key it had not proven). The approach is inverted: the resolver proves only a small grammar (see
+ * resolveKeySet) and everything else is "*".
+ *
+ *   CSC-76 the reviewers' shapes, and every way a top-level const can stop being proven (provenConsts), are unproven.
+ *   CSC-77 each grammar rule proves its keys (pins: with the rule off, a plain key would read as a credential).
+ *   CSC-78 names and attributes: database and cache names, Set-Cookie header names, and cookie attributes.
+ */
+describe("CSC-76 the round-13 review shapes and the const rules: unproven", () => {
+  const T = 'const T = "kf_x_token";\n';
+  const shapes: Array<[string, string]> = [
+    // The security lens.
+    ["var hoisting from a nested block", 'const k = "kf_p";\nfunction f() { { var k = T; } localStorage.setItem(k, v); }'],
+    ["a const object mutated: K.a = …", 'const K = { a: "kf_p" };\nK.a = T;\nlocalStorage.setItem(K.a, v);'],
+    ["a const object mutated: Object.assign", 'const K = { a: "kf_p" };\nObject.assign(K, { a: T });\nlocalStorage.setItem(K.a, v);'],
+    ["a const object mutated: defineProperty", 'const K = { a: "kf_p" };\nObject.defineProperty(K, "a", { value: T });\nlocalStorage.setItem(K.a, v);'],
+    ['a const object mutated: K["a"] = …', 'const K = { a: "kf_p" };\nK["a"] = T;\nlocalStorage.setItem(K["a"], v);'],
+    ["an enum mutated: (E as any).A = …", 'enum E { A = "kf_p" }\n(E as any).A = T;\nlocalStorage.setItem(E.A, v);'],
+    ["a computed property name", 'const K = { [N]: T, a: "kf_p" };\nlocalStorage.setItem(K.a, v);'],
+    ["a wrapper's bound name shadowed by an inner const", 'function w(k: string) { { const k = T; localStorage.setItem(k, v); } }\nw("kf_p");'],
+    ["a parameter reassigned by destructuring", 'function s(k: string) { [k] = [T]; localStorage.setItem(k, v); }\ns("kf_p");'],
+    ["a parameter reassigned by for…of", 'function s(k: string) { for (k of [T]) localStorage.setItem(k, v); }\ns("kf_p");'],
+    ["a call site s?.(T)", 'function s(k: string) { localStorage.setItem(k, v); }\ns("kf_p");\ns?.(T);'],
+    ["a call site s<number>(T)", 'function s<X>(k: string) { localStorage.setItem(k, v); }\ns("kf_p");\ns<number>(T);'],
+    ["a named function expression called through an alias", 'const alias = function s(k: string) { localStorage.setItem(k, v); };\nalias(T);'],
+    ["an imported `export let`", 'import { K } from "./keys";\nlocalStorage.setItem(K, v);\nvoid T;'],
+    ["an imported inner-scope const", 'import { K } from "./inner";\nlocalStorage.setItem(K, v);\nvoid T;'],
+    ["an imported `export { REAL as KEY }`", 'import { KEY } from "./reexport";\nlocalStorage.setItem(KEY, v);\nvoid T;'],
+    ["a commented-out import", '/* import { K } from "./plain"; */\nimport { K } from "./secret";\nlocalStorage.setItem(K, v);\nvoid T;'],
+    ["duplicate function declarations", 'function key() { return "kf_p"; }\nfunction key() { return T; }\nlocalStorage.setItem(key(), v);'],
+    ["sloppy arguments[0] = …", 'function s(k) { arguments[0] = T; localStorage.setItem(k, v); }\ns("kf_p");'],
+    ["a spread argument before the parameter's index", 'function s(a: string, k: string) { localStorage.setItem(k, v); }\ns(...xs, "kf_p");\nvoid T;'],
+    // The const rules (provenConsts): a top-level const stops being proven when it is written or declared twice.
+    ["a top-level const reassigned", 'const k = "kf_p";\nk = T;\nlocalStorage.setItem(k, v);'],
+    ["a top-level const += ", 'const k = "kf_p";\nk += T;\nlocalStorage.setItem(k, v);'],
+    ["a top-level const ++", 'const k = "kf_p";\nk++;\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level const --", 'const k = "kf_p";\n--k;\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level const in an array pattern", 'const k = "kf_p";\n[k] = [T];\nlocalStorage.setItem(k, v);'],
+    ["a top-level const in a rest pattern", 'const k = "kf_p";\n[...k] = [T];\nlocalStorage.setItem(k, v);'],
+    ["a top-level const in a shorthand pattern", 'const k = "kf_p";\n({ k } = { k: T });\nlocalStorage.setItem(k, v);'],
+    ["a top-level const in a property pattern", 'const k = "kf_p";\n({ a: k } = { a: T });\nlocalStorage.setItem(k, v);'],
+    ["a top-level const in a nested pattern", 'const k = "kf_p";\n({ a: [k] } = { a: [T] });\nlocalStorage.setItem(k, v);'],
+    ["a top-level const in a parenthesised target", 'const k = "kf_p";\n(k as string) = T;\nlocalStorage.setItem(k, v);'],
+    ["a top-level const as a for…of head", 'const k = "kf_p";\nfor (k of [T]) localStorage.setItem(k, v);'],
+    ["a top-level const as a for…in head", 'const k = "kf_p";\nfor (k in { [T]: 1 }) localStorage.setItem(k, v);'],
+    ["a top-level const deleted", 'const k = "kf_p";\ndelete k;\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level const and a parameter of the same name", 'const k = "kf_p";\nfunction g(k: string) { return k; }\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level const and a catch variable of the same name", 'const k = "kf_p";\ntry { f(T); } catch (k) { g(k); }\nlocalStorage.setItem(k, v);'],
+    ["a top-level const and an import of the same name", 'import { k } from "./keys";\nconst k = "kf_p";\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level const and a function of the same name", 'const k = "kf_p";\nfunction k() { return T; }\nlocalStorage.setItem(k, v);'],
+    ["a top-level const in a file with a with statement", 'const k = "kf_p";\nwith (o) { localStorage.setItem(k, v); }\nvoid T;'],
+    ["a top-level const in a file with an eval call", 'const k = "kf_p";\neval(src);\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level let", 'let k = "kf_p";\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level var", 'var k = "kf_p";\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level using", 'using k = "kf_p";\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a destructured top-level const", 'const { k } = { k: "kf_p" };\nlocalStorage.setItem(k, v);\nvoid T;'],
+    ["a top-level const holding an array", 'const k = ["kf_p"];\nlocalStorage.setItem(k as unknown as string, v);\nvoid T;'],
+    ["a top-level const holding a call", 'const k = String("kf_p");\nlocalStorage.setItem(k, v);\nvoid T;'],
+    // Outside the grammar.
+    ["a number", "localStorage.setItem(1 as unknown as string, v);\nvoid T;"],
+    ['"kf_" + a number', 'localStorage.setItem("kf_" + 1, v);\nvoid T;'],
+    ["&&", 'localStorage.setItem(on && "kf_p", v);\nvoid T;'],
+    ["void 0", "localStorage.setItem(void 0 as unknown as string, v);\nvoid T;"],
+    ["<string> assertion", 'localStorage.setItem(<string>"kf_p", v);\nvoid T;'],
+    ["await", 'localStorage.setItem(await "kf_p", v);\nvoid T;'],
+    ["a shadowed undefined", 'function f(undefined: string) { return undefined; }\nlocalStorage.setItem(undefined as unknown as string, v);\nvoid T;'],
+  ];
+  for (const [name, fixture] of shapes) {
+    it(`${name}: unproven`, () => expectUnproven("src/fixture-r14.ts", T + fixture));
+  }
+  it("a const in a file that does not parse: unproven", () => {
+    const fixture = 'const k = "kf_p";\nlocalStorage.setItem(k, v);\nconst broken = ;';
+    expect(parseFile("src/fixture-r14b.ts", fixture).ok).toBe(false);
+    expectUnproven("src/fixture-r14b.ts", fixture);
+  });
+  it("an import is unproven even when the imported file holds a plain const", () => {
+    expectUnproven("src/fixture-r14c.ts", 'import { K } from "./keys";\nlocalStorage.setItem(K, v);', "localStorage", { "src/keys.ts": 'export const K = "kf_p";' });
+  });
+});
+
+describe("CSC-77 the proven grammar: each rule proves its keys", () => {
+  for (const [name, fixture, keys] of [
+    ["a string literal", 'localStorage.setItem("kf_a", "1");', ["kf_a"]],
+    ["a no-substitution template", 'localStorage.setItem(`kf_b`, "1");', ["kf_b"]],
+    ["a top-level const", 'const K = "kf_c";\nlocalStorage.setItem(K, "1");', ["kf_c"]],
+    ["an exported top-level const", 'export const K = "kf_c2";\nlocalStorage.setItem(K, "1");', ["kf_c2"]],
+    ["a top-level const read in a function", 'const K = "kf_c3";\nfunction f() { localStorage.setItem(K, "1"); }', ["kf_c3"]],
+    ["a const of consts", 'const A = "kf_";\nconst B = A + "d";\nlocalStorage.setItem(B, "1");', ["kf_d"]],
+    ["+", 'localStorage.setItem((on ? "kf_e1" : "kf_e2") + "_x", "1");', ["kf_e1_x", "kf_e2_x"]],
+    ["a template", 'localStorage.setItem(`kf_${on ? "f1" : "f2"}`, "1");', ["kf_f1", "kf_f2"]],
+    ["a ternary", 'localStorage.setItem(on ? "kf_g1" : "kf_g2", "1");', ["kf_g1", "kf_g2"]],
+    ["||", 'const H = "kf_h0";\nlocalStorage.setItem(H || "kf_h1", "1");', ["kf_h0", "kf_h1"]],
+    ["??", 'const H = "kf_i0";\nlocalStorage.setItem(H ?? "kf_i1", "1");', ["kf_i0", "kf_i1"]],
+    ["parentheses", 'localStorage.setItem(("kf_j"), "1");', ["kf_j"]],
+    ["as", 'localStorage.setItem("kf_k" as string, "1");', ["kf_k"]],
+    ["satisfies", 'localStorage.setItem("kf_l" satisfies string, "1");', ["kf_l"]],
+    ["!", 'const K = "kf_m";\nlocalStorage.setItem(K!, "1");', ["kf_m"]],
+    ["null as a whole key", 'localStorage.setItem(null as unknown as string, "1");', ["null"]],
+    ["null in +", 'localStorage.setItem("kf_" + null, "1");', ["kf_null"]],
+    ["null in a template", 'localStorage.setItem(`kf_${null}`, "1");', ["kf_null"]],
+    ["undefined as a whole key", 'localStorage.setItem(undefined as unknown as string, "1");', ["undefined"]],
+    ["undefined in a template", 'localStorage.setItem(`kf_${undefined}`, "1");', ["kf_undefined"]],
+    ["a const read as an argument and exported by name", 'const K = "kf_n";\nexport { K };\ng(K);\nlocalStorage.setItem(K, "1");', ["kf_n"]],
+    ["a const used as a destructuring default", 'const K = "kf_o";\nconst { a = K } = o;\nlocalStorage.setItem(K, "1");', ["kf_o"]],
+    ["a const inside a type position", 'const K = "kf_q";\ntype X = typeof K;\nlocalStorage.setItem(K, "1");', ["kf_q"]],
+  ] as Array<[string, string, string[]]>) {
+    it(`${name}: ${keys.join(", ")}`, () => {
+      const ws = scan("src/fixture-r14g.ts", fixture);
+      expect(keysOf(ws)).toEqual(keys.map((k) => `localStorage:${k}`));
+      expect(ws.filter(isCredential)).toEqual([]);
     });
   }
+  it("a member name, property name or label equal to a const's name does not unprove it", () => {
+    const fixture = 'const K = "kf_r";\nconst o = { K: 1 };\no.K = 2;\nK: for (;;) break K;\nlocalStorage.setItem(K, "1");';
+    expect(keysOf(scan("src/fixture-r14h.ts", fixture))).toEqual(["localStorage:kf_r"]);
+  });
+  it("a const cycle is unproven", () => {
+    expectUnproven("src/fixture-r14i.ts", "const A = B;\nconst B = A;\nlocalStorage.setItem(A, v);");
+  });
+});
+
+describe("CSC-78 names and attributes (round 14)", () => {
+  it("indexedDB.open and caches.open names: one proven name, else UNRESOLVED", () => {
+    const fixture = 'const DB = "kf-db";\nindexedDB.open(DB, 1);\nindexedDB.open(on ? "kf-a" : "kf-b", 1);\ncaches.open(DB);\nfunction c(n: string) { return caches.open(n); }';
+    const ws = scan("src/fixture-r14n.ts", fixture);
+    expect(ws.filter((w) => w.store === "indexedDB").map((w) => w.key)).toEqual(["kf-db", UNRESOLVED]);
+    expect(ws.filter((w) => w.store === "cacheStorage").map((w) => w.key)).toEqual(["kf-db", UNRESOLVED]);
+  });
+  it("a cache put into a cache whose name is a parameter is UNRESOLVED, not the parameter's name", () => {
+    const fixture = "async function put(cacheName: string, r: Request, res: Response) { const c = await caches.open(cacheName); c.put(r, res); }";
+    const puts = scan("public/fixture-r14p.js", fixture).filter((w) => w.store === "cacheStorage");
+    expect(puts.map((w) => w.key)).toEqual([UNRESOLVED, UNRESOLVED]);
+  });
+  it("a Set-Cookie header name: a proven const, and an unproven name whose source names a set-cookie", () => {
+    const fixture = [
+      'const SC = "Set-Cookie";',
+      'h.set(SC, "kf_h1_session=1");',
+      'h.set(H.SET_COOKIE, "kf_h2_session=1");',
+      'h.append(imported.setCookie, "kf_h3_session=1");',
+      'h.set(name, "kf_h4_view=1");',
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-r14s.ts", fixture))).toEqual(["response-cookie:kf_h1_session", "response-cookie:kf_h2_session", "response-cookie:kf_h3_session"]);
+  });
+  it("cookie attributes: a proven Max-Age, the exact local https-only Secure, and nothing else from a local const", () => {
+    const fixture = [
+      "const AGE = 60;",
+      "function w(t: string) {",
+      '  const secure = isHttps() ? "; Secure" : "";',
+      '  const loose = isHttps() ? "; Secure; Path=/x" : "";',
+      "  document.cookie = `kf_a1_view=1; Max-Age=${AGE}${secure}`;",
+      "  document.cookie = `kf_a2_view=1; Max-Age=${AGE}${loose}`;",
+      "}",
+    ].join("\n");
+    const ws = scan("src/fixture-r14a.ts", fixture);
+    expect(ws.find((w) => w.key === "kf_a1_view")?.attrs).toEqual(["max-age=60", "secure-on-https"]);
+    expect(ws.find((w) => w.key === "kf_a2_view")?.attrs).toEqual(["max-age=60*"]);
+  });
+  it("a local let cannot make a write read as a clear (its value and Max-Age are not proven)", () => {
+    const fixture = 'function f(t: string) {\n  let e = "";\n  e = t;\n  let z = 0;\n  z = 600;\n  document.cookie = `kf_view=${e}; Max-Age=${z}`;\n}';
+    expect(keysOf(scan("src/fixture-r14c2.ts", fixture))).toEqual(["cookie:kf_view"]);
+  });
 });
 
 describe("CSC-74 (pins) round-13 rules a fail-closed '*' would otherwise hide", () => {
   it("undefined as a whole key is the key undefined (N2)", () => {
     expect(keysOf(scan("src/fixture-r13l.ts", 'localStorage.setItem(undefined, "1");'))).toEqual(["localStorage:undefined"]);
   });
-  it("a real duplicate property: the last one wins (N8)", () => {
-    expect(keysOf(scan("src/fixture-r13m.ts", 'const K = { a: "kf_prefs", a: "kf_x_token" };\nlocalStorage.setItem(K.a, "1");'))).toEqual(["localStorage:kf_x_token"]);
+  it("a duplicate property: unresolved (round 14: no member access is proven)", () => {
+    expect(keysOf(scan("src/fixture-r13m.ts", 'const K = { a: "kf_prefs", a: "kf_x_token" };\nlocalStorage.setItem(K.a, "1");'))).toEqual([`localStorage:${UNRESOLVED}`]);
   });
   it("a wrapper's cookie template naming valueOf does not throw (N12, literalValue bindings)", () => {
     const fixture = 'function w(name: string, value: string) { document.cookie = `${name}=${valueOf}`; }\nw("kf_a", "1");';
     expect(() => scan("src/fixture-r13n.ts", fixture)).not.toThrow();
   });
-  it("the innermost function that holds the write, not a nested one declared before it (N14)", () => {
+  it("a parameter of the function that holds the write is unresolved, whatever its callers pass (round 14)", () => {
     const fixture = 'function b(k: string) {\n  function c(k: string) { return k; }\n  c("kf_x_token");\n  localStorage.setItem(k, "1");\n}\nb("kf_view");';
     const ws = scan("src/fixture-r13o.ts", fixture);
-    expect(keysOf(ws)).toEqual(["localStorage:kf_view"]);
-    expect(ws.filter(isCredential)).toEqual([]);
+    expect(keysOf(ws)).toEqual([`localStorage:${UNRESOLVED}`]);
+    expect(ws.filter(isCredential).length).toBe(1);
   });
   it("a parameter with no callers takes * even beside a plain fallback (N17)", () => {
     expect(credIn("src/fixture-r13p.ts", 'function s(k: string) { localStorage.setItem(k || "kf_view", "1"); }', "localStorage").length).toBe(1);
