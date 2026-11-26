@@ -274,8 +274,7 @@ describe("SWP-KEY-SHELL-SMOKE repair: KEY stays on across a token refresh (COR-1
     expect(drawer(), "KEY's drawer after a token refresh").not.toBeNull();
 
     fireEvent.keyDown(window, { key: "j", ctrlKey: true });
-    await settle(100);
-    expect(drawer(), "Ctrl+J closes the drawer after the refresh").toBeNull();
+    await waitFor(() => expect(drawer(), "Ctrl+J closes the drawer after the refresh").toBeNull(), { timeout: 2000 });
     fireEvent.keyDown(window, { key: "j", ctrlKey: true });
     await waitFor(() => expect(drawer(), "Ctrl+J opens the drawer after the refresh").not.toBeNull(), { timeout: 2000 });
   });
@@ -344,7 +343,8 @@ describe("SWP-KEY-SHELL-SMOKE repair: the switch fails closed (SEC-M1, COR-5)", 
 
 describe("SWP-KEY-SHELL-SMOKE repair: Settings > KEY when the switch cannot be read (COR-4)", { timeout: 15_000 }, () => {
   it("KSR-04 RED-BEFORE: a failed read shows an error with Try again, reads none of KEY's settings, and Try again recovers", async () => {
-    serveMe({ status: 503, body: { message: "Service Unavailable" } });
+    // Refused (lib/fetch-with-retry retries a plain 503 for some seconds before it gives up; a 403 is final at once).
+    serveMe({ status: 403, body: { message: "Forbidden" } });
     nav.pathname = "/app/settings/ai";
     const { default: Page } = await import("@/app/app/settings/ai/page");
     render(<Page />);
