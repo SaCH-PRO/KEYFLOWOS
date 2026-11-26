@@ -315,11 +315,31 @@ export class TemporalFlowService {
   }
 
   /**
+   * FU-TIMELINE-CALLERS-SCOPE (matching genomeReaderRevenueLevel, D-238): a reader passed by id alone
+   * (KEY tool ctx.userId, connector command userId) is checked for platform SUPER_ADMIN so a SUPER_ADMIN
+   * without a membership row is not mistaken for a non-member, while any error fails closed.
+   */
+  private async isSuperAdmin(reader: TemporalFlowReader): Promise<boolean> {
+    if (!reader?.id) return false;
+    if (reader.role === 'SUPER_ADMIN') return true;
+    if (reader.role !== undefined) return false;
+    try {
+      const user = await this.prisma.client.user?.findUnique({
+        where: { id: reader.id },
+        select: { role: true },
+      });
+      return user?.role === 'SUPER_ADMIN';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * FU-TEMPORAL-FLOW-INBOX-SCOPE: the event-owning modules `reader` cannot read in `businessId` (read as readerFilter
    * says). [] for a reader of all of them and for a platform SUPER_ADMIN.
    */
   private async withheldOwners(businessId: string, reader: TemporalFlowReader): Promise<EventOwner[]> {
-    if (reader?.role === 'SUPER_ADMIN' && reader.id) return [];
+    if (await this.isSuperAdmin(reader)) return [];
     const membership = reader?.id
       ? await this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: reader.id, businessId } },
@@ -422,7 +442,7 @@ export class TemporalFlowService {
    */
   async memorySight(businessId: string, reader: TemporalFlowReader): Promise<TemporalMemorySight> {
     const filter = await this.readerMemoryFilter(businessId, reader);
-    if (reader?.role === 'SUPER_ADMIN' && reader.id) return { filter, who: { reader: reader.id, sight: () => true } };
+    if (await this.isSuperAdmin(reader)) return { filter, who: { reader: reader!.id!, sight: () => true } };
     const id = reader?.id ?? null;
     const { readersModuleSight } = await sightHelpers();
     const sight = await readersModuleSight(this.prisma, businessId, id, this.logger, 'temporalMemory');
@@ -727,12 +747,25 @@ export class TemporalFlowService {
   }
 
   /**
-   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-2): given the writer's filter, an event they cannot read is not
-   * resolved and answers { count: 0 }, as an event that does not exist does.
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-2) + FU-TIMELINE-CALLERS-SCOPE: given the writer's filter
+   * (and optional reader for D-238 financial proposal/genome-evolution projection), an event they cannot read is
+   * never resolved and answers { count: 0 }, identically to a missing or cross-tenant event.
    */
-  async markResolved(businessId: string, eventId: string, writerFilter?: Record<string, unknown>) {
+  async markResolved(
+    businessId: string,
+    eventId: string,
+    writerFilter?: Record<string, unknown>,
+    reader?: GenomeReader | null,
+  ) {
+    const where = this.scoped({ id: eventId, businessId }, writerFilter);
+    if (reader !== undefined) {
+      const existing = await this.prisma.client.temporalFlowEvent.findFirst({ where });
+      if (!existing) return { count: 0 };
+      const visible = await this.forReader(businessId, [existing], reader);
+      if (visible.length === 0) return { count: 0 };
+    }
     return this.prisma.client.temporalFlowEvent.updateMany({
-      where: this.scoped({ id: eventId, businessId }, writerFilter),
+      where,
       data: {
         status: 'RESOLVED',
         completedAt: new Date(),
@@ -900,8 +933,10 @@ export class TemporalFlowService {
   async findGenomeSignals(
     businessId: string,
     recent?: Awaited<ReturnType<typeof this.list>>,
+    reader?: GenomeReader | null,
+    readerFilter?: Record<string, unknown>,
   ): Promise<TemporalFlowGenomeCandidate[]> {
-    const events = recent ?? (await this.list(businessId, { limit: 500 }));
+    const events = recent ?? (await this.list(businessId, { limit: 500 }, reader, readerFilter));
     const candidates: TemporalFlowGenomeCandidate[] = [];
 
     const whatsappLeads = events.filter(

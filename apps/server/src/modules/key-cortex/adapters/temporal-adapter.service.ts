@@ -195,7 +195,7 @@ export class TemporalAdapterService {
   async getTimeline(input: { businessId: string; from?: string; to?: string; limit?: number; actorId?: string }) {
     // D-238 (round 3, security M4): the timeline is read for the command's actor (no actor is no reader), so a financial
     // KEY proposal's events are withheld from an actor without revenue read.
-    const reader = input.actorId ? { id: input.actorId } : null;
+    const reader = actorOf(input.actorId);
     // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (FU-TEMPORAL-FLOW-INBOX-SCOPE's rule, D-100): only the events of the modules the
     // actor may read, in the query before its limit (no actor: none a module owns).
     const readerFilter = await this.flow.readerFilter(input.businessId, reader);
