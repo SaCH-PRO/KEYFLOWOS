@@ -4041,18 +4041,22 @@ ${triage.standingContext}`;
         riskTier: envelope.riskTier,
         success: true,
       };
-    } catch (error: any) {
+    } catch (caught: unknown) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      const errMsg =
-        error instanceof Error
-          ? error.message
-          : typeof (error as { message?: unknown } | null | undefined)?.message === 'string'
-            ? (error as { message: string }).message
-            : error !== null && error !== undefined
-              ? String(error)
+      const error = (() => {
+        if (caught instanceof Error) return caught;
+        const errMsg =
+          typeof (caught as { message?: unknown } | null | undefined)?.message === 'string'
+            ? (caught as { message: string }).message
+            : caught !== null && caught !== undefined
+              ? String(caught)
               : 'unknown error';
-      const logged = this.executionLog.logToolExecution(businessId, toolName, args, errMsg, false, durationMs, {
+        const wrapped = new Error(errMsg);
+        if (hasEffectNotApplied(caught)) (wrapped as { effectNotApplied?: boolean }).effectNotApplied = true;
+        return wrapped;
+      })();
+      const logged = this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
@@ -4071,7 +4075,7 @@ ${triage.standingContext}`;
         family: errorEnvelope.family,
         riskTier: errorEnvelope.riskTier,
         success: false,
-        error: errMsg,
+        error: (error as Error).message,
         ...(error instanceof ActionNotClearedError
           ? { notCleared: { actionId: error.actionId, disposition: error.disposition, code: error.code } }
           : {}),
