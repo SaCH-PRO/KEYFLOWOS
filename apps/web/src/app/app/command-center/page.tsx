@@ -264,10 +264,9 @@ export default function CommandCenterPage() {
     void loadQueue();
   };
 
-  // KEY UI waits for GET /identity/me: nothing KEY shows before it answers, and none once it says KEY is off.
-  // SEC-T4B-1 (fail closed when the read fails) is held: it conflicts with approved-actions-mount.test.tsx (D-72, pass
-  // unchanged), whose harness answers /identity/me 503. Reported to the orchestrator.
-  const keyOff = !keyRead || keyDisabled === true;
+  // KEY UI waits for GET /identity/me and shows only on an explicit keyDisabled: false. Before it answers, when it
+  // fails, or when it carries no boolean, KEY is off here (SEC-T4B-1: fail closed).
+  const keyOff = !keyRead || keyDisabled !== false;
   const current = today && today.businessId === businessId ? today.data : null;
 
   return (
