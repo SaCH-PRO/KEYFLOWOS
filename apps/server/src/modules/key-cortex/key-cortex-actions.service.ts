@@ -750,12 +750,13 @@ export class KeyCortexActionsService implements OnModuleInit {
       const sources = await (this.prisma.client as any).knowledgeSource.findMany({
         where: {
           businessId,
+          status: 'approved',
           OR: [
             { title: { contains: String(query), mode: 'insensitive' } },
             { content: { contains: String(query), mode: 'insensitive' } },
           ],
         },
-        take: Math.min(Number(limit), 25),
+        take: Math.min(Math.max(Math.trunc(Number(limit) || 5), 1), 25),
         orderBy: { createdAt: 'desc' },
       });
       return {
