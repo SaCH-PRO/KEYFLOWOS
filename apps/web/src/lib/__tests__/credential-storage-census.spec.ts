@@ -1655,3 +1655,84 @@ describe("CSC-28 JSX text never opens a comment", () => {
     });
   }
 });
+
+/* ------------------------------------------------------- repair round 5 */
+
+/**
+ * Repair round 5 (security CSC4-SEC-1 MAJOR, CSC4-SEC-2..3 minors).
+ *
+ *   CSC-29 (CSC4-SEC-1) a JSDoc block holding "//" hides nothing after it: the walk does not read comment ranges at
+ *          positions inside JSDoc nodes (each tag shape, in .ts and .js). No comment range of the census tree starts
+ *          inside another and ends past it.
+ *   CSC-30 (CSC4-SEC-2) a file the parser cannot read cleanly gets no comment ranges at all (fail closed), and the
+ *          census tree parses with no diagnostics.
+ *   CSC-31 (CSC4-SEC-3) a regex literal in a value does not cut the value short.
+ *   CSC-32 (optional probe) the Set-Cookie tuple's outer-array look-back sees past a comment or a line break.
+ */
+describe("CSC-29 a JSDoc block holding // hides nothing", () => {
+  const tags = ["@type {string} //", "@param x //", "@see //", "@returns //", "@template T //", "@typedef {string} Foo //", "@type {// }"];
+  for (const ext of ["ts", "js"]) {
+    for (const tag of tags) {
+      it(`.${ext}: /** ${tag} */ then a write`, () => {
+        const fixture = [`/** ${tag} */ localStorage.setItem("kf_jsdoc_token", t);`, `/** ${tag} */ indexedDB.open("kf_jsdoc_session_db", 1);`].join("\n");
+        expect(keysOf(scan(`src/fixture-jsdoc.${ext}`, fixture))).toEqual(["localStorage:kf_jsdoc_token", "indexedDB:kf_jsdoc_session_db"]);
+      });
+    }
+  }
+
+  it("no comment range of the census tree starts inside another and ends past it", () => {
+    const bad: string[] = [];
+    for (const p of sourceFiles()) {
+      const rel = path.relative(WEB, p).split(path.sep).join("/");
+      const ranges = [...commentRanges(rel, fs.readFileSync(p, "utf8"))].sort((x, y) => x[0] - y[0]);
+      for (let i = 1; i < ranges.length; i++) {
+        if (ranges[i][0] < ranges[i - 1][1]) bad.push(`${rel}: [${ranges[i - 1]}] and [${ranges[i]}]`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+describe("CSC-30 a file with parse errors fails closed", () => {
+  it("a generic arrow parsed as JSX in a .tsx file: no comment range hides the write", () => {
+    const fixture = [`const f = <T>(x: T) => x;`, `const s = "{ /* "; localStorage.setItem("kf_pc_token", t); const z = " */ }";`].join("\n");
+    expect(keysOf(scan("src/fixture-pc.tsx", fixture))).toContain("localStorage:kf_pc_token");
+  });
+
+  it("every file of the census tree parses with no diagnostics", () => {
+    const bad: string[] = [];
+    for (const p of sourceFiles()) {
+      const rel = path.relative(WEB, p).split(path.sep).join("/");
+      const kind = /\.tsx$/.test(rel) ? ts.ScriptKind.TSX : /\.ts$/.test(rel) ? ts.ScriptKind.TS : /\.jsx$/.test(rel) ? ts.ScriptKind.JSX : ts.ScriptKind.JS;
+      const sf = ts.createSourceFile(rel, fs.readFileSync(p, "utf8"), ts.ScriptTarget.Latest, true, kind);
+      const n = (sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length;
+      if (n > 0) bad.push(`${rel}: ${n}`);
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+describe("CSC-31 a regex literal in a value does not cut it short", () => {
+  it("a value built from a regex's source and a session token is a credential write", () => {
+    const fixture = `export const s = (session: { access_token: string }) => localStorage.setItem("kf_pd2_plain", /a\\/\\//.source + session.access_token);`;
+    expect(compare(scan("src/fixture-pd.ts", fixture), []).unregistered.some((u) => u.startsWith("localStorage kf_pd2_plain @"))).toBe(true);
+  });
+});
+
+describe("CSC-32 the tuple look-back sees past a comment or a line break", () => {
+  it("finds each tuple", () => {
+    const fixture = [
+      `const a = new Headers([ /* first */ ["Set-Cookie", "kf_lb1_session=1; Path=/"]]);`,
+      `const b = new Headers([`,
+      `  ["Set-Cookie", "kf_lb2_session=1; Path=/"],`,
+      `  // the second`,
+      `  ["Set-Cookie", "kf_lb3_session=1; Path=/"],`,
+      `]);`,
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-lb.ts", fixture))).toEqual([
+      "response-cookie:kf_lb1_session",
+      "response-cookie:kf_lb2_session",
+      "response-cookie:kf_lb3_session",
+    ]);
+  });
+});
