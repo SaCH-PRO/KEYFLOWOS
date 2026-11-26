@@ -1430,6 +1430,11 @@
       "prefix": "v98h_",
       "owner": "apps/server/test/health-money-scope.integration.test.ts",
       "packet": "V1-98 (FU-HEALTH-MONEY-SCOPE, P101)"
+    },
+    {
+      "prefix": "v64f_",
+      "owner": "apps/server/test/decimal-quantity.integration.test.ts",
+      "packet": "V1-64 (DECIMALS-SERVER)"
     }
   ],
   "pendingRenames": [],
