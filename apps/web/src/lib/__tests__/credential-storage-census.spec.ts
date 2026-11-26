@@ -4,8 +4,12 @@
  * The first safe slice of "HttpOnly session cookies, no refresh token in localStorage". The move itself is an owner
  * question. This spec only pins today's set, so a new store cannot appear without someone writing down why.
  *
- * It reads the web app's browser code (apps/web/src, non-test files, and apps/web/public, recursively) and finds every
- * write to:
+ * It reads the web app's browser code (apps/web/src, non-test files, and apps/web/public, recursively). Each file is
+ * parsed once by the TypeScript parser and its writes are found on the AST (scanSourceAst, repair round 6, D-274): a
+ * call's method, receiver and argument nodes, an assignment's target, a Set-Cookie property and a Headers tuple are
+ * nodes, so no comment, line break or regex literal can hide or cut one. A file with parse diagnostics is scanned by
+ * the text scanner instead (scanSourceText), with no comment exclusions, so every match in it counts; CSC-30 pins that
+ * the tree has no such file. It finds every write to:
  *   - localStorage / sessionStorage: `.setItem(key, …)` on any receiver (`localStorage`, `window.sessionStorage`,
  *     or a wrapper such as `ls?.setItem`), and property or bracket assignment (`localStorage["k"] = v`);
  *   - a script-readable cookie: `document.cookie = "key=…"`, and the Cookie Store API (`cookieStore.set`);
@@ -55,9 +59,9 @@
  * receiver (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `self.name` /
  * `globalThis.name`; a cookie string built up in a variable (`let c = …; c += …; document.cookie = c`); Dexie / idb
  * library databases (contacts-db.ts `new Dexie(name)`); the registry pins keys and cookie attributes, not values;
- * and keys and values are read by a hand-written expression reader (readExpr: strings, templates, regex literals,
- * brackets), not from the TypeScript AST; FU-CENSUS-HARDENING takes argument text from the call's argument nodes.
- * A file with parse errors gets no comment ranges (every match in it counts), and CSC-30 pins that the tree has none.
+ * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
+ * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
+ * the AST too.
  *
  * Counting (CSC_DUMP=1 prints one line per write found): a write reached through a wrapper is one line per call site,
  * so the same id can print twice (cookie kf_sid @ presence-sdk.ts:93, once per writeCookie call). The registry has one
@@ -556,11 +560,12 @@ function callSites(src: string, fn: string): Array<{ args: string[]; at: number 
  * " // " in JSX text opens nothing. Strings, templates and regex literals are tokens, never trivia, so a "/*" or "//"
  * inside them opens nothing either.
  */
-const commentCache = new Map<string, Array<[number, number]>>();
-function commentRanges(file: string, src: string): Array<[number, number]> {
+/** One parse per file: the SourceFile, and whether it parsed with no diagnostics. */
+const parseCache = new Map<string, { sf: ts.SourceFile; ok: boolean }>();
+function parseFile(file: string, src: string): { sf: ts.SourceFile; ok: boolean } {
   const cacheKey = `${file}\u0000${src}`;
-  const cached = commentCache.get(cacheKey);
-  if (cached) return cached;
+  const hit = parseCache.get(cacheKey);
+  if (hit) return hit;
   const kind = /\.tsx$/.test(file)
     ? ts.ScriptKind.TSX
     : /\.ts$/.test(file)
@@ -569,9 +574,20 @@ function commentRanges(file: string, src: string): Array<[number, number]> {
         ? ts.ScriptKind.JSX
         : ts.ScriptKind.JS;
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
-  // Fail closed (CSC4-SEC-2): a file the parser cannot read cleanly gets no comment ranges, so every match in it
-  // counts. CSC-30 pins that the census tree parses with no diagnostics.
-  if ((sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length > 0) {
+  const parsed = { sf, ok: (sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length === 0 };
+  parseCache.set(cacheKey, parsed);
+  return parsed;
+}
+
+const commentCache = new Map<string, Array<[number, number]>>();
+function commentRanges(file: string, src: string): Array<[number, number]> {
+  const cacheKey = `${file}\u0000${src}`;
+  const cached = commentCache.get(cacheKey);
+  if (cached) return cached;
+  const { sf, ok } = parseFile(file, src);
+  // Fail closed (CSC4-SEC-2): a file the parser cannot read cleanly gets no comment ranges, so every match the text
+  // scanner finds in it counts. CSC-30 pins that the census tree parses with no diagnostics.
+  if (!ok) {
     commentCache.set(cacheKey, []);
     return [];
   }
@@ -606,14 +622,42 @@ function commentRanges(file: string, src: string): Array<[number, number]> {
   return ranges;
 }
 
-/** The character before `at`, past whitespace and real comments (commentRanges), or "" at the start of the file. */
+/**
+ * The character before `at`, past whitespace and comments, or "" at the start of the file. A file that parses uses
+ * its real comment ranges; a file with parse errors (text scanner only) skips comments lexically: a "*\/" goes back to
+ * its "/*", and a line whose "//" starts after whitespace, a line start or ; { } ( ) , [ is read only up to the "//"
+ * (CSC5-SEC-4, CSC5-COR-1, CSC-35).
+ */
 function prevSignificant(file: string, src: string, at: number): string {
   const ranges = commentRanges(file, src);
+  const lexical = !parseFile(file, src).ok;
+  /** In a broken file: where a // comment starts on the line holding j, or -1. */
+  const lineCommentStart = (j: number) => {
+    const ls = src.lastIndexOf("\n", j) + 1;
+    const line = src.slice(ls, j + 1);
+    const m = line.match(/(?:^|[\s;{}(),[])\/\//);
+    return m && m.index !== undefined ? ls + m.index + (m[0].length - 2) : -1;
+  };
   let j = at - 1;
   while (j >= 0) {
     if (/\s/.test(src[j])) {
       j--;
       continue;
+    }
+    if (lexical) {
+      if (src[j] === "/" && src[j - 1] === "*") {
+        const open = src.lastIndexOf("/*", j - 2);
+        if (open !== -1) {
+          j = open - 1;
+          continue;
+        }
+      }
+      const lc = lineCommentStart(j);
+      if (lc !== -1 && lc <= j) {
+        j = lc - 1;
+        continue;
+      }
+      return src[j];
     }
     const r = ranges.find(([a, b]) => a <= j && j < b);
     if (!r) return src[j];
@@ -679,15 +723,8 @@ const isClear = (value: string, attrs: string[]) =>
   value === "" && attrs.some((a) => a === "max-age=0" || /^expires=thu, 01 jan 1970/.test(a));
 
 /** `scanSource(file, src, { files })`: `files` (path relative to apps/web → source) serves imported consts. */
-export function scanSource(file: string, src: string, opts: { files?: Record<string, string>; read?: (rel: string) => string | null } = {}): Write[] {
-  const read = opts.read ?? (opts.files ? (rel: string) => opts.files![rel] ?? null : undefined);
-  const base: Ctx = { file, src, read };
-  const writes: Write[] = [];
-  // A match inside a comment is prose, not a write ("cache.put() below", sw.js).
-  const push = (w: Omit<Write, "file" | "line">, at: number) => {
-    if (!inComment(file, src, at)) writes.push({ ...w, file, line: lineOf(src, at) });
-  };
-
+/** The write handlers both scanners share: they resolve keys and values from argument TEXT and push the writes. */
+function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write, "file" | "line">, at: number) => void) {
   /** A keyed store write: key expression, value expression. */
   const keyed = (store: Store, keyExpr: string, valueExpr: string, at: number) => {
     const id = IDENT.test(keyExpr.trim()) ? keyExpr.trim() : undefined;
@@ -714,11 +751,18 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
     }
   };
 
-  /** A name/value/options cookie API call: (name, value, opts) or ({ name, value, … }). */
-  const cookieCall = (store: Store, at: number, argsAt: number) => {
-    const first = readExpr(src, argsAt);
-    if (first.text.startsWith("{")) {
-      const obj = first.text;
+  /** A Set-Cookie value: one cookie string, or an array of them. */
+  const setCookieValue = (text: string, at: number) => {
+    const t = text.trim();
+    const items = t.startsWith("[") && t.endsWith("]") ? splitTop(t.slice(1, -1), ",").filter((x) => x !== "") : [t];
+    for (const item of items) cookieString("response-cookie", item, at);
+  };
+
+  /** A name/value/options cookie API call, from its argument texts: (name, value, opts) or ({ name, value, … }). */
+  const cookieArgs = (store: Store, at: number, args: string[]) => {
+    const first = args[0] ?? "";
+    if (first.startsWith("{")) {
+      const obj = first;
       const prop = (k: string) => {
         const m = obj.match(new RegExp(`\\b${k}\\s*:\\s*`));
         return m && m.index !== undefined ? readExpr(obj, m.index + m[0].length, ",}").text : "";
@@ -729,11 +773,41 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
       push({ store, key: literalValue(base, prop("name")) ?? prop("name"), expr: prop("name"), value: valueText(base, value), attrs }, at);
       return;
     }
+    const second = args[1] ?? "";
+    const attrs = optionAttrs(base, args[2] ?? "");
+    if (/^(["'`])\1$/.test(second) && attrs.includes("max-age=0")) return;
+    push({ store, key: literalValue(base, first) ?? first, expr: first, value: valueText(base, second), attrs }, at);
+  };
+
+  /** A Cache Storage put into the cache opened as `nameExpr`. */
+  const cachePut = (at: number, reqText: string, resText: string, nameExpr: string) => {
+    const c = { ...base, at };
+    push({ store: "cacheStorage", key: literalValue(c, nameExpr) ?? nameExpr, expr: nameExpr, value: `${valueText(c, reqText)} ${valueText(c, resText)}` }, at);
+  };
+
+  return { keyed, cookieString, setCookieValue, cookieArgs, cachePut };
+}
+
+/**
+ * The text scanner: regexes over the source. Since repair round 6 it runs only for a file the TypeScript parser cannot
+ * read cleanly (scanSource), where every match counts: there are no comment ranges in such a file (commentRanges).
+ */
+function scanSourceText(file: string, src: string, base: Ctx): Write[] {
+  const writes: Write[] = [];
+  // A match inside a comment is prose, not a write ("cache.put() below", sw.js). A file with parse errors has no
+  // comment ranges, so in the text scanner every match counts.
+  const push = (w: Omit<Write, "file" | "line">, at: number) => {
+    if (!inComment(file, src, at)) writes.push({ ...w, file, line: lineOf(src, at) });
+  };
+  const { keyed, cookieString, setCookieValue, cookieArgs, cachePut: cachePutText } = handlersFor(file, src, base, push);
+
+  /** A name/value/options cookie API call read from the text. */
+  const cookieCall = (store: Store, at: number, argsAt: number) => {
+    const first = readExpr(src, argsAt);
+    if (first.text.startsWith("{")) return cookieArgs(store, at, [first.text]);
     const second = src[first.end] === "," ? readExpr(src, first.end + 1) : { text: "", end: first.end };
     const third = src[second.end] === "," ? readExpr(src, second.end + 1) : { text: "" };
-    const attrs = optionAttrs(base, third.text);
-    if (/^(["'`])\1$/.test(second.text) && attrs.includes("max-age=0")) return;
-    push({ store, key: literalValue(base, first.text) ?? first.text, expr: first.text, value: valueText(base, second.text), attrs }, at);
+    cookieArgs(store, at, [first.text, second.text, third.text]);
   };
 
   // localStorage / sessionStorage / any storage-like receiver: .setItem(key, value)
@@ -771,11 +845,6 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
 
   // Set-Cookie headers: headers.set/append(…), res.setHeader(…) (a string or an array of them), { "Set-Cookie": … }
   // and the tuple form new Headers([["Set-Cookie", …]]) (CSC-07, CSC-16)
-  const setCookieValue = (text: string, at: number) => {
-    const t = text.trim();
-    const items = t.startsWith("[") && t.endsWith("]") ? splitTop(t.slice(1, -1), ",").filter((x) => x !== "") : [t];
-    for (const item of items) cookieString("response-cookie", item, at);
-  };
   for (const m of src.matchAll(/\.(?:set|append|setHeader)\s*\(\s*(["'])set-cookie\1\s*,/gi)) {
     setCookieValue(readExpr(src, m.index! + m[0].length).text, m.index!);
   }
@@ -800,8 +869,7 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   const cachePut = (at: number, argsAt: number, nameExpr: string) => {
     const req = readExpr(src, argsAt);
     const res = src[req.end] === "," ? readExpr(src, req.end + 1).text : "";
-    const c = { ...base, at };
-    push({ store: "cacheStorage", key: literalValue(c, nameExpr) ?? nameExpr, expr: nameExpr, value: `${valueText(c, req.text)} ${valueText(c, res)}` }, at);
+    cachePutText(at, req.text, res, nameExpr);
   };
   for (const m of src.matchAll(/\bcaches\s*\.\s*open\s*\(/g)) {
     const nameExpr = readExpr(src, m.index! + m[0].length);
@@ -870,6 +938,240 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
     for (const p of puts) push({ store: "indexedDB", key: "*", expr: "* put", value: p.value }, p.at);
   }
 
+  return writes;
+}
+
+/**
+ * `scanSource(file, src, { files })`: `files` (path relative to apps/web → source) serves imported consts.
+ * A file the TypeScript parser reads cleanly is scanned on its AST (scanSourceAst); a file with parse diagnostics falls
+ * back to the text scanner (scanSourceText), where every match counts (CSC-30, CSC-35).
+ */
+export function scanSource(file: string, src: string, opts: { files?: Record<string, string>; read?: (rel: string) => string | null } = {}): Write[] {
+  const read = opts.read ?? (opts.files ? (rel: string) => opts.files![rel] ?? null : undefined);
+  const base: Ctx = { file, src, read };
+  const parsed = parseFile(file, src);
+  return parsed.ok ? scanSourceAst(file, src, parsed.sf, base) : scanSourceText(file, src, base);
+}
+
+/** The receiver as written, past parentheses, `!`, `await`, `as` and `satisfies` (and `<T>x` casts). */
+function unwrap(e: ts.Expression): ts.Expression {
+  for (;;) {
+    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAwaitExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isTypeAssertionExpression(e)) {
+      e = e.expression;
+    } else return e;
+  }
+}
+
+/** The last name of an expression: `x` → x, `a.b.c` → c, `a["c"]` → c, anything else "". */
+function lastName(e: ts.Expression): string {
+  const u = unwrap(e);
+  if (ts.isIdentifier(u)) return u.text;
+  if (ts.isPropertyAccessExpression(u)) return u.name.text;
+  if (ts.isElementAccessExpression(u) && ts.isStringLiteralLike(u.argumentExpression)) return u.argumentExpression.text;
+  return "";
+}
+
+/** A "Set-Cookie" name in any quote kind (string, or a template with no substitution), case-insensitive. */
+const isSetCookieName = (n: ts.Node | undefined) => !!n && ts.isStringLiteralLike(n) && n.text.toLowerCase() === "set-cookie";
+
+/** A property's name as text: identifier, string, number or a computed literal (`[\`Set-Cookie\`]`). */
+function propertyName(n: ts.PropertyName): ts.Node | string | undefined {
+  if (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) return n.text;
+  if (ts.isComputedPropertyName(n)) return n.expression;
+  return n;
+}
+
+/**
+ * The AST scanner (repair round 6, D-274): every write is a node, not a text match. A call's method name, receiver
+ * and arguments, an assignment's target, a Set-Cookie property and a Headers tuple are read from the tree, so comments,
+ * line breaks (U+2028, CR) and regex literals inside or around them cannot hide or cut a write. The argument TEXT
+ * (comments removed) then goes through the same resolution as before (handlersFor: literalValue, valueText,
+ * parseCookie), so keys, values, attributes and the census output are unchanged.
+ */
+function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx): Write[] {
+  const writes: Write[] = [];
+  const push = (w: Omit<Write, "file" | "line">, at: number) => writes.push({ ...w, file, line: lineOf(src, at) });
+  const { keyed, cookieString, cookieArgs, cachePut } = handlersFor(file, src, base, push);
+
+  const ranges = [...commentRanges(file, src)].sort((x, y) => x[0] - y[0]);
+  /** A node's source text with its comments blanked out. */
+  const text = (n: ts.Node | undefined): string => {
+    if (!n) return "";
+    const s0 = n.getStart(sf);
+    const e0 = n.end;
+    let out = "";
+    let k = s0;
+    for (const [a, b] of ranges) {
+      if (b <= s0 || a >= e0) continue;
+      if (a > k) out += src.slice(k, a);
+      out += " ";
+      k = Math.max(k, b);
+    }
+    if (k < e0) out += src.slice(k, e0);
+    return out.trim();
+  };
+  const at = (n: ts.Node) => n.getStart(sf);
+  const setCookieNode = (v: ts.Node | undefined, pos: number) => {
+    if (!v) return;
+    if (ts.isArrayLiteralExpression(v)) for (const el of v.elements) cookieString("response-cookie", text(el), pos);
+    else cookieString("response-cookie", text(v), pos);
+  };
+  const visitAll = (fn: (n: ts.Node) => void) => {
+    const go = (n: ts.Node) => {
+      fn(n);
+      ts.forEachChild(n, go);
+    };
+    go(sf);
+  };
+  const methodOf = (call: ts.CallExpression): { name: string; recv: ts.Expression } | null => {
+    const c = call.expression;
+    if (ts.isPropertyAccessExpression(c)) return { name: c.name.text, recv: c.expression };
+    if (ts.isElementAccessExpression(c) && ts.isStringLiteralLike(c.argumentExpression)) return { name: c.argumentExpression.text, recv: c.expression };
+    return null;
+  };
+  const isCall = (e: ts.Expression, recvName: string, method: string) => {
+    const u = unwrap(e);
+    if (!ts.isCallExpression(u)) return false;
+    const m = methodOf(u);
+    return !!m && m.name === method && lastName(m.recv) === recvName;
+  };
+
+  // Pass 1: the bindings later writes depend on.
+  const jars = new Set<string>(); // const jar = await cookies()
+  const storeVars = new Set<string>(); // bound from .objectStore(…) or typed IDBObjectStore
+  const cursorVars = new Set<string>(); // typed IDBCursor / IDBCursorWithValue
+  const cacheVars = new Map<string, string>(); // bound from caches.open(name): name text
+  const opens: Array<{ key: string; expr: string; at: number }> = [];
+  let objectStoreCalls = 0;
+  visitAll((n) => {
+    if ((ts.isVariableDeclaration(n) || ts.isParameter(n)) && ts.isIdentifier(n.name)) {
+      const name = n.name.text;
+      const type = n.type && ts.isTypeReferenceNode(n.type) ? n.type.typeName.getText(sf) : "";
+      if (type === "IDBObjectStore") storeVars.add(name);
+      if (type === "IDBCursor" || type === "IDBCursorWithValue") cursorVars.add(name);
+      if (ts.isVariableDeclaration(n) && n.initializer) {
+        const init = unwrap(n.initializer);
+        if (ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === "cookies" && init.arguments.length === 0) jars.add(name);
+        let hasObjectStore = false;
+        const find = (k: ts.Node) => {
+          if (ts.isCallExpression(k) && methodOf(k)?.name === "objectStore") hasObjectStore = true;
+          if (!hasObjectStore) ts.forEachChild(k, find);
+        };
+        find(n.initializer);
+        if (hasObjectStore) storeVars.add(name);
+      }
+    }
+    if (!ts.isCallExpression(n)) return;
+    const m = methodOf(n);
+    if (!m) return;
+    if (m.name === "objectStore") objectStoreCalls++;
+    if (m.name === "open" && lastName(m.recv) === "indexedDB") {
+      const t0 = text(n.arguments[0]);
+      opens.push({ key: literalValue({ ...base, at: at(n) }, t0) ?? t0, expr: t0, at: at(n) });
+    }
+    if (m.name === "open" && lastName(m.recv) === "caches") {
+      const nameText = text(n.arguments[0]);
+      let up: ts.Node = n.parent;
+      while (ts.isParenthesizedExpression(up) || ts.isAwaitExpression(up)) up = up.parent;
+      if (ts.isVariableDeclaration(up) && ts.isIdentifier(up.name)) cacheVars.set(up.name.text, nameText);
+      if (ts.isBinaryExpression(up) && up.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(up.left)) cacheVars.set(up.left.text, nameText);
+      const p = n.parent;
+      if (ts.isPropertyAccessExpression(p) && p.name.text === "then" && ts.isCallExpression(p.parent) && p.parent.expression === p) {
+        const fn = p.parent.arguments[0];
+        if (fn && (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && fn.parameters[0] && ts.isIdentifier(fn.parameters[0].name)) {
+          cacheVars.set(fn.parameters[0].name.text, nameText);
+        }
+      }
+    }
+  });
+  const idbFile = opens.length > 0 || objectStoreCalls > 0 || storeVars.size > 0 || cursorVars.size > 0;
+  const idbWrites: Array<{ value: string; at: number }> = [];
+
+  // Pass 2: the writes, in source order.
+  visitAll((n) => {
+    if (ts.isCallExpression(n)) {
+      const m = methodOf(n);
+      if (!m) return;
+      const a = n.arguments.map((x) => text(x));
+      const pos = at(n);
+      const u = unwrap(m.recv);
+      const recvText = text(m.recv);
+      if (m.name === "setItem") {
+        const store: Store = /sessionStorage/.test(recvText) ? "sessionStorage" : /localStorage/.test(recvText) ? "localStorage" : "storage";
+        keyed(store, a[0] ?? "", a[1] ?? "", pos);
+      }
+      if (m.name === "set" && lastName(m.recv) === "cookieStore") cookieArgs("cookie", pos, a);
+      if (
+        m.name === "set" &&
+        ((ts.isPropertyAccessExpression(u) && u.name.text === "cookies") ||
+          (ts.isCallExpression(u) && ts.isIdentifier(u.expression) && u.expression.text === "cookies" && u.arguments.length === 0) ||
+          (ts.isIdentifier(u) && jars.has(u.text)))
+      ) {
+        cookieArgs("response-cookie", pos, a);
+      }
+      if ((m.name === "set" || m.name === "append" || m.name === "setHeader") && isSetCookieName(n.arguments[0])) setCookieNode(n.arguments[1], pos);
+      if (m.name === "open" && lastName(m.recv) === "caches") keyed("cacheStorage", a[0] ?? "", "", pos);
+      if (m.name === "put") {
+        if (ts.isIdentifier(u) && cacheVars.has(u.text)) cachePut(pos, a[0] ?? "", a[1] ?? "", cacheVars.get(u.text)!);
+        else if (isCall(u, "caches", "open")) cachePut(pos, a[0] ?? "", a[1] ?? "", text((unwrap(u) as ts.CallExpression).arguments[0]));
+      }
+      if (idbFile && (m.name === "put" || m.name === "add")) {
+        const name = lastName(u);
+        const isStore =
+          (ts.isIdentifier(u) && storeVars.has(u.text)) ||
+          (ts.isCallExpression(u) && methodOf(u)?.name === "objectStore") ||
+          (opens.length > 0 && /[sS]tore/.test(name));
+        if (isStore) idbWrites.push({ value: valueText({ ...base, at: pos }, a[0] ?? ""), at: pos });
+      }
+      if (idbFile && m.name === "update") {
+        const name = lastName(u);
+        if (/[cC]ursor/.test(name) || name === "cur" || (ts.isIdentifier(u) && cursorVars.has(u.text))) {
+          idbWrites.push({ value: valueText({ ...base, at: pos }, a[0] ?? ""), at: pos });
+        }
+      }
+      return;
+    }
+    if (ts.isBinaryExpression(n)) {
+      const op = n.operatorToken.kind;
+      if (op !== ts.SyntaxKind.EqualsToken && op !== ts.SyntaxKind.PlusEqualsToken) return;
+      const left = n.left;
+      const pos = at(n);
+      if (ts.isPropertyAccessExpression(left) && left.name.text === "cookie" && lastName(left.expression) === "document") {
+        cookieString("cookie", text(n.right), pos);
+        return;
+      }
+      if (op !== ts.SyntaxKind.EqualsToken) return;
+      if (ts.isPropertyAccessExpression(left) && left.name.text === "name" && lastName(left.expression) === "window") {
+        push({ store: "window.name", key: "window.name", expr: "window.name", value: text(n.right) }, pos);
+        return;
+      }
+      if ((ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) && /^(?:localStorage|sessionStorage)$/.test(lastName(left.expression))) {
+        const store: Store = lastName(left.expression) === "sessionStorage" ? "sessionStorage" : "localStorage";
+        const keyExpr = ts.isElementAccessExpression(left) ? text(left.argumentExpression) : JSON.stringify(left.name.text);
+        keyed(store, keyExpr, text(n.right), pos);
+      }
+      return;
+    }
+    if (ts.isPropertyAssignment(n)) {
+      const name = propertyName(n.name);
+      const isSc = typeof name === "string" ? name.toLowerCase() === "set-cookie" : isSetCookieName(name);
+      if (isSc) setCookieNode(n.initializer, at(n));
+      return;
+    }
+    // The Headers tuple: a two-element ["Set-Cookie", value] that is an entry of an outer array (CSC2-COR-D).
+    if (ts.isArrayLiteralExpression(n) && n.elements.length === 2 && isSetCookieName(n.elements[0]) && ts.isArrayLiteralExpression(n.parent)) {
+      setCookieNode(n.elements[1], at(n));
+    }
+  });
+
+  // IndexedDB, as before: a file that opens one database lends it its writes' values (kf-sync-queue, CSC-10).
+  idbWrites.sort((x, y) => x.at - y.at);
+  if (opens.length === 1) {
+    push({ store: "indexedDB", key: opens[0].key, expr: opens[0].expr, value: idbWrites.map((p) => p.value).join(" ") }, opens[0].at);
+  } else {
+    for (const o of opens) push({ store: "indexedDB", key: o.key, expr: o.expr, value: "" }, o.at);
+    for (const p of idbWrites) push({ store: "indexedDB", key: "*", expr: "* put", value: p.value }, p.at);
+  }
   return writes;
 }
 
@@ -1739,6 +2041,16 @@ describe("CSC-29 a JSDoc block holding // hides nothing", () => {
     }
   }
 
+  it("a synthetic JSDoc block holding // gives exactly one, non-overlapping comment range (CSC5-COR-2)", () => {
+    const src = `/** @type {string} // */ const a = 1;\n/** @see // */ const b = 2;`;
+    const ranges = commentRanges("src/fixture-overlap.ts", src);
+    const second = src.indexOf("/** @see");
+    expect(ranges).toEqual([
+      [0, "/** @type {string} // */".length],
+      [second, second + "/** @see // */".length],
+    ]);
+  });
+
   it("no comment range of the census tree starts inside another and ends past it", () => {
     const bad: string[] = [];
     for (const p of sourceFiles()) {
@@ -1762,8 +2074,8 @@ describe("CSC-30 a file with parse errors fails closed", () => {
     const bad: string[] = [];
     for (const p of sourceFiles()) {
       const rel = path.relative(WEB, p).split(path.sep).join("/");
-      const kind = /\.tsx$/.test(rel) ? ts.ScriptKind.TSX : /\.ts$/.test(rel) ? ts.ScriptKind.TS : /\.jsx$/.test(rel) ? ts.ScriptKind.JSX : ts.ScriptKind.JS;
-      const sf = ts.createSourceFile(rel, fs.readFileSync(p, "utf8"), ts.ScriptTarget.Latest, true, kind);
+      // The census's own parse (parseFile, cached), so this reads the same SourceFile the scan used.
+      const { sf } = parseFile(rel, fs.readFileSync(p, "utf8"));
       const n = (sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length;
       if (n > 0) bad.push(`${rel}: ${n}`);
     }
@@ -1900,5 +2212,13 @@ describe("CSC-35 a file with parse errors falls back to the text scanner", () =>
   it("a broken file's Headers tuple behind a comment is found", () => {
     const fixture = [`const f = <T>(x: T) => x;`, `const h = new Headers([ /* c */ ["Set-Cookie", "kf_e1_session=1; Path=/"]]);`].join("\n");
     expect(keysOf(scan("src/fixture-e1.tsx", fixture))).toContain("response-cookie:kf_e1_session");
+  });
+});
+
+describe("CSC-36 (round 6) argument text has its comments removed", () => {
+  it("a comment inside a cookie string's expression does not become an attribute", () => {
+    const fixture = `document.cookie = "kf_cm_session=" /* ; Path=/; Secure */ + t;`;
+    const w = scan("src/fixture-cm.ts", fixture).find((x) => x.key === "kf_cm_session");
+    expect(w?.attrs).toEqual([]);
   });
 });
