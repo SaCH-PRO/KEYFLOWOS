@@ -221,7 +221,7 @@ function inviterEnvelope(members: TeamMember[]): InviterEnvelope | null {
   if (!me?.id || me.role === "SUPER_ADMIN") return null;
   const own = members.find((m) => m.userId === me.id);
   if (!own || own.role === "OWNER") return null;
-  return { role: own.role, scopes: own.permissionScopes ?? {}, tier: own.maxApprovalTier ?? 0 };
+  return { role: own.role, scopes: effectiveScopes(own), tier: own.maxApprovalTier ?? 0 };
 }
 
 function sameEnvelope(a: InviterEnvelope | null, b: InviterEnvelope | null): boolean {
@@ -263,6 +263,23 @@ function authorityExcess(role: string, scopes: Record<string, string>, tier: num
 }
 
 const CEILING_REFUSAL = /more authority than your own/i;
+
+/**
+ * Repair round 2 (SEC-TW-R1): a guard's refusal, in any of its sentences: ModuleScopeGuard's, and BusinessGuard's for a
+ * member who is no longer in the business. A reload refused like this (or with any 403) drops the team from the
+ * screen; only a 5xx, a network failure or an empty error keeps the last good list.
+ */
+const GUARD_REFUSAL = /no access to this business|not a member of this business|insufficient permissions/i;
+
+/**
+ * A member's map as the server reads it (memberModuleLevel, COR-TW-R2-2): its stored map when that is any object, else
+ * its role's defaults.
+ */
+function effectiveScopes(member: { role: string; permissionScopes?: unknown }): Record<string, string> {
+  return member.permissionScopes && typeof member.permissionScopes === "object"
+    ? (member.permissionScopes as Record<string, string>)
+    : DEFAULT_SCOPES[member.role] ?? DEFAULT_SCOPES.STAFF;
+}
 
 const roleConfig: Record<string, { label: string; color: string; icon: typeof Shield }> = {
   OWNER: { label: "Owner", color: "bg-amber-500/20 text-amber-300 border-amber-500/30", icon: Crown },
@@ -443,7 +460,7 @@ function MemberCard({
             </div>
           )}
           <div className="mt-1 flex items-center gap-2">
-            <ScopesSummary scopes={member.permissionScopes} />
+            <ScopesSummary scopes={effectiveScopes(member)} />
             {member.maxApprovalTier > 0 && (
               <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/20 text-[10px]">
                 Tier {member.maxApprovalTier}
@@ -519,7 +536,7 @@ function PermissionEditor({
   onSave: (membershipId: string, scopes: Record<string, string>, tier: number) => void;
   onClose: () => void;
 }) {
-  const [scopes, setScopes] = useState<Record<string, string>>({ ...member.permissionScopes });
+  const [scopes, setScopes] = useState<Record<string, string>>({ ...effectiveScopes(member) });
   const [tier, setTier] = useState(member.maxApprovalTier);
   const [saving, setSaving] = useState(false);
 
@@ -779,13 +796,20 @@ export default function TeamSettingsPage() {
     if (!businessId) { setLoading(false); return; }
     const res = await apiGet<DashboardData>(`/identity/businesses/${businessId}/team/dashboard`);
     const state = readState(res, { what: "your team" });
-    if (state.kind === "failed" && loadedOnce.current) {
+    const refused = res?.status === 403 || (typeof res?.error === "string" && GUARD_REFUSAL.test(res.error));
+    if (state.kind === "failed" && loadedOnce.current && !refused) {
       setReloadError(state.message);
       setLoading(false);
       return;
     }
     setReloadError(null);
     setTeamRead(state);
+    if (state.kind !== "ok") {
+      // A refusal, or a first load that failed: nothing of the team stays on screen.
+      setDashboard(null);
+      setActivityItems([]);
+      loadedOnce.current = false;
+    }
     if (state.kind === "ok" && res.data) {
       loadedOnce.current = true;
       setDashboard(res.data);
@@ -966,11 +990,12 @@ export default function TeamSettingsPage() {
   const viewerIsOwner = myRow?.role === "OWNER";
   // SEC-TW-M1: the server refuses an invite below team write (403), so the form is not offered there. A viewer the
   // page cannot find in the list keeps it: the server is the authority, and its refusal is shown as it is.
+  // SEC-TW-R2 (judged acceptable): with no cached user, or one absent from the list, the form stays; the server refuses.
   const canInvite =
     me?.role === "SUPER_ADMIN" ||
     !myRow ||
     myRow.role === "OWNER" ||
-    levelRank(ownLevel(myRow.permissionScopes ?? {}, "team")) >= LEVEL_RANK.write;
+    levelRank(ownLevel(effectiveScopes(myRow), "team")) >= LEVEL_RANK.write;
 
   return (
     <motion.div
@@ -1259,7 +1284,7 @@ export default function TeamSettingsPage() {
                             <span className="text-purple-400">{member.maxApprovalTier}</span>
                           </td>
                           {PERMISSION_MODULES.map((mod) => {
-                            const level = member.permissionScopes[mod.key] || "none";
+                            const level = ownLevel(effectiveScopes(member), mod.key);
                             const Icon = levelIcon[level];
                             return (
                               <td key={mod.key} className="py-2 px-1 text-center">
