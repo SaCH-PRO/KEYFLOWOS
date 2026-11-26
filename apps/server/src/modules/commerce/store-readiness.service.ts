@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
 
@@ -122,9 +122,17 @@ export class StoreReadinessService {
     for (const svc of services) {
       const productId = productByName.get(svc.name.toLowerCase().trim());
       if (productId && !alreadyLinked.has(productId)) {
-        await this.catalog.linkServiceToProduct(businessId, svc.id, productId);
-        alreadyLinked.add(productId);
-        backfilled++;
+        try {
+          await this.catalog.linkServiceToProduct(businessId, svc.id, productId);
+          alreadyLinked.add(productId);
+          backfilled++;
+        } catch (err) {
+          if (err instanceof ConflictException) {
+            alreadyLinked.add(productId);
+            continue;
+          }
+          throw err;
+        }
       }
     }
 
