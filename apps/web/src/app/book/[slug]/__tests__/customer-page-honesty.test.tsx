@@ -31,18 +31,29 @@ const nav = vi.hoisted(() => ({
   }),
 }));
 
+const api = vi.hoisted(() => ({ apiGet: vi.fn() }));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return { ...actual, apiGet: api.apiGet };
+});
+vi.mock("@/lib/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/client")>();
+  return { ...actual, trackStoreEvent: vi.fn() };
+});
+
 vi.mock("next/navigation", () => ({
   redirect: nav.redirect,
   permanentRedirect: nav.permanentRedirect,
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
-  useParams: () => ({ slug: "pepper-co" }),
+  useParams: () => ({ slug: "pepper-co", productId: "prod_honest_1" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(""),
   usePathname: () => "/book/pepper-co",
 }));
 
 import { BusinessHero } from "../components/business-hero";
-import { TrustBar } from "../components/trust-bar";
+import { TrustBar, SecurityFooter } from "../components/trust-bar";
+import ProductPage from "../product/[productId]/page";
 import type { Business, BusinessHours } from "../components/types";
 import { OrderConfirmation } from "../components/order-confirmation";
 import PublicSitePage from "../../../site/[slug]/page";
@@ -238,5 +249,36 @@ describe("order confirmation: no subscribe-to-updates promise, no call to a miss
   it("still confirms the order and its number", () => {
     renderOrderConfirmation(null);
     expect(document.body.textContent).toContain("ORD-0001");
+  });
+});
+
+describe("store footer and product page: no unearned badges", () => {
+  it("the store page's footer does not say 'Instant Booking'", () => {
+    render(<SecurityFooter primaryColor="#f97316" businessName="Pepper Co" />);
+    expect(pageText()).not.toMatch(/instant booking/i);
+    expect(pageText()).toContain("Pepper Co");
+  });
+
+  it("the product page claims neither 'Instant Booking' nor 'Quality Guaranteed', and still shows the product", async () => {
+    const BUSINESS = { id: "biz_honest_1", name: "Pepper Co", slug: "pepper-co", currency: "TTD", timezone: "America/Port_of_Spain", storeEnabled: true };
+    const PRODUCT = {
+      id: "prod_honest_1", name: "Scorpion pepper sauce", description: "Made in Trinidad", price: 45, currency: "TTD",
+      category: "PRODUCT", imageUrl: null, isActive: true, availableQuantity: 8, stockStatus: "in_stock", purchasable: true,
+    };
+    api.apiGet.mockImplementation(async (path: string) => {
+      if (path === "/identity/businesses/slug/pepper-co") return { data: BUSINESS, error: null };
+      if (path === "/site/storefront/public/pepper-co") return { data: { business: BUSINESS, storefront: {}, services: [], products: [PRODUCT] }, error: null };
+      if (path === `/bookings/public/businesses/${BUSINESS.id}/services`) return { data: [], error: null };
+      if (path === `/commerce/public/businesses/${BUSINESS.id}/products`) return { data: [PRODUCT], error: null };
+      return { data: null, error: null };
+    });
+    window.localStorage.clear();
+    render(<ProductPage />);
+    await screen.findAllByRole("heading", { name: PRODUCT.name });
+    const text = pageText();
+    for (const claim of ["Instant Booking", "Quality Guaranteed", ...UNEARNED]) {
+      expect(text, `the product page says '${claim}'`).not.toMatch(new RegExp(claim, "i"));
+    }
+    expect(text).toContain("Made in Trinidad");
   });
 });
