@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-26 ~15:10 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M30 merged. Main is `0f521913`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-26 ~17:35 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M32 merged. Main is `80608d82`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,7 +17,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-26 ~15:10 UTC)
+## 0. Current state: the next session starts here (2026-11-26 ~17:35 UTC)
 
 Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issue #80 and the
 pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this session is needed.
@@ -26,7 +26,7 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 which the owner paused (#80 7179133696). Cloud workers report there and post every PACKET REPORT on #80, so a new
 orchestrator reads #80.
 
-**State:** main `0f521913` (M30 #266 merged ~15:05 UTC; M28 #265 at 11:56; M26 #263 at 10:23). V1-STATUS: 213 of 396 done (55.9% of points; launch 124 of 255).
+**State:** main `80608d82` (M32 #267 merged 17:28 UTC; M30 #266 ~15:05; M28 #265 11:56; M26 #263 10:23). V1-STATUS: 215 of 396 done (56.8% of points; launch 126 of 255).
 Production still runs `f5d58ef7` (16 Nov); the owner redeploys (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set
 (D-290).
 
@@ -49,9 +49,11 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 - **M30** (#266, merged ~15:05 UTC): P201 SWP-TEAM-WEB + RR-ADMIN-SHELL-SERVER-GATE + docs (D-291 to D-298). Proof at
   `fd86859d`: server 16,393, R0 39/39, web 2,879; Journey J: J2-J4 red→green. The first proof attempt was void
   (container restart, Postgres down at migrate).
-- **M32 (assembling):** P200 TODAY-4BLOCK (`a2be7dbb`) + P208 EXPENSES-HUB-2 (`132ad399`) + docs; 30 packet files, no
-  overlap.
-- **Next waves:** P212 EXPENSES-HUB-1 web (stacked on P208), P215 CUSTOMER-PAGE-HONESTY, RR-SESSION-STORAGE-CENSUS.
+- **M32** (#267, merged 17:28 UTC): P200 TODAY-4BLOCK + P208 EXPENSES-HUB-2 + docs. Proof at `cb9a5a6f`: server 16,393, R0
+  39/39 (the D-295 AMEND in), web 3,023; live A5-A8, I1/I5/I6, H7a red→green under ai-disabled and key-disabled, no
+  head-only failure.
+- **M34 (next):** P212 EXPENSES-HUB-1 web (`38c6d77`, stacked on P208, now on main), P215 CUSTOMER-PAGE-HONESTY (round 3
+  in progress, a one-line display fix) and RR-SESSION-STORAGE-CENSUS (`d04c850e`, returned) + docs.
 - **Container restarts:** this container restarted three times on 2026-11-26 (~11:54, ~13:48, ~14:45 UTC). After each:
   `service postgresql start; service redis-server start`, then recover finished reviewers' reports from
   `subagents/agent-<id>.jsonl` (last SubagentHandback input). A proof running across a restart does not count.
@@ -62,11 +64,11 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 | --- | --- | --- | --- |
 | **P201 SWP-TEAM-WEB** | merged | M30 | — |
 | **RR-ADMIN-SHELL-SERVER-GATE** | merged | M30 (MAJOR-1 is server row P202, D-291) | — |
-| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `ea39d23` | Round 13 NOT CONFIRMED (20+ shapes the resolver claimed without proof). **Round 14 inverts the resolver** (orchestrator default, owner question 64 offered): it proves only literals, top-level never-touched string consts in the same file, and +/template/ternary/||/?? over those; everything else is "*" with a pinned registry row | Two confirmations, RETURN, a later wave |
-| **P200 TODAY-4BLOCK** | `pkt/V1-TODAY-4BLOCK` @ `a2be7dbb` | **RETURNed** (#80 7195568051). Rounds 1-5 each CONFIRMED by both lenses | Wave M32 |
-| **P208 EXPENSES-HUB-2** | `pkt/V1-EXPENSES-HUB-2` @ `132ad399` | **RETURNed** (#80 7192203370). Rounds 1-4 CONFIRMED x2; live sweep with Postgres re-read | Wave M32 |
-| **P212 EXPENSES-HUB-1 web** | `pkt/V1-EXPENSES-HUB-1-WEB` @ `35c72cb`, stacked on P208 | Acceptance ACCEPT WITH MINORS x2; repair round 1 (failed accounts read blocks Pay, write-refusal pins, BILL delete wording, dialog pins) | Confirmations, RETURN, a wave after M32 |
-| **P215 CUSTOMER-PAGE-HONESTY** | `pkt/V1-CUSTOMER-PAGE-HONESTY` @ claim `4c2b7ea2` | Building. Write set extended: order-confirmation.tsx (the plan named the wrong file for the notify call), use-store-data.ts and service-link-widget.tsx (share links from the saved slug only) | Two reviews when it reports |
+| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `d04c850e` | **RETURNed** (7198351985, addendum 7198578599) after 16 rounds; round 14 inverted the resolver to a provable grammar (orchestrator default; owner question 64 offered); final confirmations CONFIRMED x2. CSC-12: the three admin cookie rows pin `attrs: []` (the attributes live in a local const; main's admin-login cookie tests assert them) | Wave M34 |
+| **P200 TODAY-4BLOCK** | merged | M32 | — |
+| **P208 EXPENSES-HUB-2** | merged | M32 | — |
+| **P212 EXPENSES-HUB-1 web** | `pkt/V1-EXPENSES-HUB-1-WEB` @ `38c6d77` | **RETURNed** (7196510274 + addenda 7197197137, 7197873677); rounds 1-4 CONFIRMED x2; H5/H6 red→green | Wave M34 |
+| **P215 CUSTOMER-PAGE-HONESTY** | `pkt/V1-CUSTOMER-PAGE-HONESTY` @ `563fdfbb` | RETURN posted (7198615671); rounds 1-2 CONFIRMED x2; G10/G11 red→green. Round 3: shown time built from the parsed parts | Confirm round 3, wave M34 |
 
 **Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
 - `session_017o9EBfvTibjEvGQK5qTBwq`: census (round 14).
@@ -222,14 +224,14 @@ referred to on the board but is not yet a row.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `0f521913`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `80608d82`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
 | **Owner** | - | - | Section 4 questions 40 to 50 and 54; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
-| `wave/v1-docs-p19` | main `0f521913` merged in | This file and V1-STATUS | Squashed into each Claude wave |
+| `wave/v1-docs-p19` | main `80608d82` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in

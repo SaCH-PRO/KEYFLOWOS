@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "f951b4408add5fe4c4d054a922720922ea8cc4cf",
-  "main_commit_date": "2026-11-26T15:07:01+00:00",
+  "main_sha": "92bbb45a4610e8abdf6a48f091dfd0e508d374f9",
+  "main_commit_date": "2026-11-26T17:29:16+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 213,
-    "points": 319,
-    "pct_by_points": 55.9
+    "packets": 215,
+    "points": 324,
+    "pct_by_points": 56.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 183,
-    "points": 251.5,
-    "pct_by_points": 44.1
+    "packets": 181,
+    "points": 246.5,
+    "pct_by_points": 43.2
    }
   },
   "by_step": {
@@ -72,15 +72,15 @@
     "total": 149
    },
    "4": {
-    "done": 28,
+    "done": 29,
     "in-progress": 0,
-    "todo": 25,
+    "todo": 24,
     "total": 53
    },
    "5": {
-    "done": 55,
+    "done": 56,
     "in-progress": 0,
-    "todo": 37,
+    "todo": 36,
     "total": 92
    },
    "6": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 124,
+    "done": 126,
     "in-progress": 0,
-    "todo": 131,
+    "todo": 129,
     "total": 255
    },
    "follow-on": {
@@ -123,10 +123,10 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 89,
+   "prior-status-file": 87,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 84,
-   "compacted-commit": 82,
+   "compacted-commit": 84,
    "no-evidence": 113
   },
   "uncertain": [
@@ -220,7 +220,6 @@
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "TODAY-4BLOCK",
    "HARNESS-REMOVAL",
    "NAV-B-HIDE",
    "NAV-B-HIDE-2",
@@ -252,14 +251,14 @@
  },
  "ready": [
   {
-   "id": "TODAY-4BLOCK",
-   "step": 5,
-   "priority": "P0",
-   "size": "L",
-   "lane": "web",
+   "id": "HARNESS-REMOVAL",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 17
+   "unblocks": 12
   },
   {
    "id": "TOF-KNOWLEDGE-UPLOAD",
@@ -269,7 +268,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 46
+   "unblocks": 45
   },
   {
    "id": "SWP-FIN-WEB-CRASHES",
@@ -280,16 +279,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 19
-  },
-  {
-   "id": "EXPENSES-HUB-2",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 11
   },
   {
    "id": "W11-TRANSIENT-CONFLICT",
@@ -304,6 +293,16 @@
   {
    "id": "CUSTOMER-PAGE-HONESTY",
    "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "EXPENSES-HUB-3",
+   "step": 4,
    "priority": "P1",
    "size": "M",
    "lane": "web",
@@ -1314,14 +1313,14 @@
  ],
  "ready_launch": [
   {
-   "id": "TODAY-4BLOCK",
-   "step": 5,
-   "priority": "P0",
-   "size": "L",
-   "lane": "web",
+   "id": "HARNESS-REMOVAL",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 17
+   "unblocks": 12
   },
   {
    "id": "TOF-KNOWLEDGE-UPLOAD",
@@ -1331,7 +1330,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 46
+   "unblocks": 45
   },
   {
    "id": "SWP-FIN-WEB-CRASHES",
@@ -1342,16 +1341,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 19
-  },
-  {
-   "id": "EXPENSES-HUB-2",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 11
   },
   {
    "id": "W11-TRANSIENT-CONFLICT",
@@ -1366,6 +1355,16 @@
   {
    "id": "CUSTOMER-PAGE-HONESTY",
    "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "EXPENSES-HUB-3",
+   "step": 4,
    "priority": "P1",
    "size": "M",
    "lane": "web",
@@ -3365,15 +3364,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "8049d7d6"
+   ],
    "depends_on": [
     "EXPENSES-HUB-1"
    ],
    "title": "Expense form: business currency, today's Trinidad date, 'bill to pay later', and 'Recurring' creates a real schedule",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -3390,7 +3391,7 @@
     "EXPENSES-HUB-2"
    ],
    "title": "Expenses page: categories and recurring tabs mounted, no-access state for refused members, toolbar that works, receipt photo upload, no invented figures",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SEND-TO-ACCOUNTANT",
@@ -4059,10 +4060,12 @@
    "size": "L",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "2b97265e"
+   ],
    "depends_on": [
     "TODAY-AGGREGATE",
     "OWNER-ALERTS-WEB",
@@ -4071,7 +4074,7 @@
     "NAV-A3"
    ],
    "title": "Today in four blocks (Needs you, Today, Pulse, Get set up) on the one server read; the metaphor hero, genome readiness and 23 other widgets removed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "KEY-PASTE-BOX",
@@ -4431,7 +4434,7 @@
     "TODAY-4BLOCK"
    ],
    "title": "Remove the developer harness and fake-data pages customers and crawlers can reach, and the KF Store drawer",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-INV-SET-MOVEMENT",
