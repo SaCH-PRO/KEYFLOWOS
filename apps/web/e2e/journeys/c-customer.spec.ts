@@ -443,7 +443,8 @@ test.describe("journey C: one customer record", () => {
       for (const m of text.match(LOWER_EVENT_CODE) ?? []) findings.push(`${href}: event code "${m}"`);
       // A lower-case code printed as a badge of its own ("high", "pending").
       const leaves = await page.locator("body *").evaluateAll((els) =>
-        els.filter((e) => e.children.length === 0 && (e as HTMLElement).offsetParent !== null).map((e) => (e as HTMLElement).innerText.trim()),
+        // HTML elements only: an icon's SVG parts have no innerText.
+        els.filter((e): e is HTMLElement => e instanceof HTMLElement && e.children.length === 0 && e.offsetParent !== null).map((e) => e.innerText.trim()),
       );
       for (const leaf of leaves) if (LOWER_CODES.has(leaf)) findings.push(`${href}: stored value "${leaf}"`);
       if (text.includes(contact.id)) findings.push(`${href}: the contact's id is on screen`);
