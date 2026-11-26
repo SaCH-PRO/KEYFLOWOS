@@ -313,7 +313,13 @@ describe('GET public slots: the business day is read in Business.timezone (V1-16
       business: {
         findUnique: vi.fn(async ({ where }: any) =>
           where.id === 'biz_pos'
-            ? { businessHours: { mon: { open: '09:00', close: '11:00', closed: false } }, timezone: 'America/Port_of_Spain' }
+            ? {
+                businessHours: {
+                  mon: { open: '09:00', close: '11:00', closed: false },
+                  tue: { open: '00:00', close: '00:00', closed: true },
+                },
+                timezone: 'America/Port_of_Spain',
+              }
             : null,
         ),
       },
@@ -400,8 +406,8 @@ describe('GET public slots: the business day is read in Business.timezone (V1-16
     });
   }
 
-  it('a day the business has no hours for offers nothing, and reports the day asked for', async () => {
-    // Tuesday has no hours row. On a Tokyo server the route's local midnight
+  it('a day the business is closed on offers nothing, and reports the day asked for', async () => {
+    // Tuesday is explicitly closed. On a Tokyo server the route's local midnight
     // for the 8th is the 7th in UTC, and the reported date was read from that.
     process.env.TZ = 'Asia/Tokyo';
     const res = await request(slotsApp.getHttpServer())
@@ -409,5 +415,18 @@ describe('GET public slots: the business day is read in Business.timezone (V1-16
       .query({ serviceId: 'svc_pos', date: '2030-01-08' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ date: '2030-01-08', slots: [] });
+  });
+
+  it('a day omitted from businessHours falls back to 09:00-17:00 in Business.timezone (V1-91 / P227)', async () => {
+    // Wednesday has no entry in businessHours (not explicitly closed).
+    process.env.TZ = 'Asia/Tokyo';
+    const res = await request(slotsApp.getHttpServer())
+      .get('/bookings/public/businesses/biz_pos/slots')
+      .query({ serviceId: 'svc_pos', date: '2030-01-09' });
+    expect(res.status).toBe(200);
+    expect(res.body.date).toBe('2030-01-09');
+    expect(res.body.slots[0]).toBe('2030-01-09T13:00:00.000Z');
+    expect(res.body.slots[res.body.slots.length - 1]).toBe('2030-01-09T20:00:00.000Z');
+    expect(res.body.slots).toHaveLength(15);
   });
 });
