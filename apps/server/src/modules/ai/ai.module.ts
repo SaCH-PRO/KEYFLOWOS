@@ -28,6 +28,7 @@ import { BlueprintOnboardingService } from './blueprint-onboarding.service';
 import { BlueprintOnboardingController } from './blueprint-onboarding.controller';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService } from './model-gateway.service';
+import { MODEL_LIFECYCLE_CATALOG, MODEL_LIFECYCLE_CATALOG_TOKEN } from './model-lifecycle-catalog';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 import { BusinessMatchingService } from './business-matching.service';
@@ -163,6 +164,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     ChaserService,
     CrossBusinessIntelligenceService,
     KeyAgentConfigService,
+    { provide: MODEL_LIFECYCLE_CATALOG_TOKEN, useValue: MODEL_LIFECYCLE_CATALOG },
   ],
   exports: [
     ModelGatewayService,
