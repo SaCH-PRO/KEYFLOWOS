@@ -77,6 +77,16 @@ function freshToday() {
 
 const CONTACT = "ct_t4b_gina";
 
+/** A command item KEY could run (CommandItem, lib/api/command.ts), as COLLECT_RECEIVABLE seeds one for an overdue invoice. */
+const KEY_ITEM = {
+  id: "ci_t4b_key", businessId: BIZ, sourceModule: "finance", sourceType: "invoice", sourceId: "inv_9",
+  title: "Collect the overdue INV-0009", description: null, category: "MONEY", actionType: "COLLECT_RECEIVABLE",
+  status: "OPEN", priority: 70, urgency: 70, impactScore: 50, expectedValue: null, currency: null, riskTier: 1,
+  requiresApproval: false, executableByKey: true, executionTool: "send_reminder", executionPayload: null,
+  recommendedBy: null, ownerType: null, ownerId: null, dueAt: null, snoozedUntil: null, completedAt: null,
+  dismissedAt: null, createdAt: NOW, updatedAt: NOW,
+};
+
 /** A busy day: one of each Needs you kind and one of each Today row. */
 function busyToday() {
   const t = freshToday();
@@ -163,7 +173,7 @@ const TODAY_PATH = `/business-command-center/businesses/${BIZ}/today`;
  * `today` answers each GET .../today in turn (the last answer repeats); `me` answers GET /identity/me; every POST
  * answers 201 {} unless `post` says otherwise; the approved-actions queue answers empty; every other read 503.
  */
-function serve({ today, me, post }: { today: Answer[]; me?: Answer; post?: (path: string) => Answer }) {
+function serve({ today, me, post, items }: { today: Answer[]; me?: Answer; post?: (path: string) => Answer; items?: Answer }) {
   const sent: Sent[] = [];
   let todayReads = 0;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -189,7 +199,8 @@ function serve({ today, me, post }: { today: Answer[]; me?: Answer; post?: (path
       return jsonResponse(200, { items: [], counts: { pending: 0, approved: 0, scheduled: 0, active: 0, completed: 0, failed: 0 }, plans: [] });
     }
     if (method === "GET" && pathname.endsWith(`/command/businesses/${BIZ}/items`)) {
-      return jsonResponse(200, { items: [], total: 0 });
+      const answer = items ?? { status: 200, body: { items: [], total: 0 } };
+      return jsonResponse(answer.status, answer.body);
     }
     if (method === "POST") {
       const answer = post ? post(pathname) : { status: 201, body: {} };
@@ -373,20 +384,27 @@ describe("TODAY-4BLOCK: Today is four blocks from one server read", () => {
   }, CASE_MS);
 
   it("[T4B-09] RED-BEFORE: under KEY_DISABLED (keyDisabled on GET /identity/me) no KEY UI renders on Today: no KEY proposal, no approved KEY actions panel, no 'KEY' anywhere in the blocks", async () => {
-    serve({ today: [ok(busyToday())], me: ok({ id: "u_owner", email: "owner@t4b.test.local", keyDisabled: true }) });
+    // Repair round 1, COR-1: a queue item KEY could run (COLLECT_RECEIVABLE is seeded executableByKey for an overdue
+    // invoice), so the queue's "KEY can handle" badge and Execute action are under test too.
+    serve({ today: [ok(busyToday())], me: ok({ id: "u_owner", email: "owner@t4b.test.local", keyDisabled: true }), items: ok({ items: [KEY_ITEM], total: 1 }) });
     const container = await renderToday();
     await waitFor(() => expect(screen.getAllByText(/INV-0042/).length).toBeGreaterThan(0));
+    await screen.findByText(KEY_ITEM.title, {}, { timeout: 10_000 });
     await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("button", { name: /^execute$/i })).toBeNull();
     expect(screen.queryByText("Chase the overdue wholesale invoice")).toBeNull();
     expect(screen.queryByTestId("approved-actions-panel")).toBeNull();
     expect(container.textContent ?? "").not.toMatch(/\bKEY\b/);
   }, CASE_MS);
 
   it("[T4B-10] CONTROL: with KEY on, the KEY proposal and the approved KEY actions panel (D-72) are on Today", async () => {
-    serve({ today: [ok(busyToday())] });
+    serve({ today: [ok(busyToday())], items: ok({ items: [KEY_ITEM], total: 1 }) });
     await renderToday();
     expect(within(block(/^needs you$/i)).getByText("Chase the overdue wholesale invoice")).toBeTruthy();
     expect(await screen.findByTestId("approved-actions-panel")).toBeTruthy();
+    await screen.findByText(KEY_ITEM.title, {}, { timeout: 10_000 });
+    expect(screen.getByText("KEY can handle")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^execute$/i })).toBeTruthy();
   }, CASE_MS);
 
   it("[T4B-11] RED-BEFORE: a Today read that fails says so and offers Retry; it never says nothing needs you, never shows a zero Pulse", async () => {
@@ -417,5 +435,77 @@ describe("TODAY-4BLOCK: Today is four blocks from one server read", () => {
     await screen.findByRole("heading", { level: 2, name: /^get set up$/i });
     expect(within(block(/^get set up$/i)).getAllByText(/sample/i).length).toBeGreaterThan(0);
     expect((container.textContent ?? "").replace(/\s+/g, " ")).not.toMatch(/(TTD|TT\$|USD)\s?[\d,]+\.\d{2}/);
+  }, CASE_MS);
+});
+
+describe("TODAY-4BLOCK repair round 1 (acceptance reviews at e9e05754)", () => {
+  it("[T4B-13] RED-BEFORE (SEC-T4B-1, COR-5): a KEY_DISABLED read that fails (GET /identity/me 500) is KEY off: no KEY proposal, no approved KEY actions panel, no KEY Chat tile, no Execute", async () => {
+    const api = serve({ today: [ok(busyToday())], me: { status: 500, body: { statusCode: 500, message: "Internal server error" } }, items: ok({ items: [KEY_ITEM], total: 1 }) });
+    await renderToday();
+    await screen.findByText(KEY_ITEM.title, {}, { timeout: 10_000 });
+    // Only once GET /identity/me has been answered (with its 500): before that, KEY is off anyway. In jsdom that answer
+    // reaches the page after a few hundred ms (observed at e9e05754: hidden at 300 ms, every KEY surface shown by 3 s).
+    await waitFor(() => expect(api.sent.some((r) => r.path.endsWith("/identity/me"))).toBe(true));
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(screen.queryByText("Chase the overdue wholesale invoice")).toBeNull();
+    expect(screen.queryByTestId("approved-actions-panel")).toBeNull();
+    expect(screen.queryByText("KEY can handle")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^execute$/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open module launcher" }));
+    const pads = await screen.findAllByRole("dialog", { name: /launch pad/i });
+    for (const pad of pads) expect(within(pad).queryByRole("link", { name: /key chat/i })).toBeNull();
+  }, CASE_MS);
+
+  it("[T4B-14] RED-BEFORE (SEC-T4B-2): a refresh the server refuses (403) clears what was shown: no Pulse, no figure, no customer row under the alert", async () => {
+    serve({ today: [ok(busyToday()), { status: 403, body: { statusCode: 403, message: "Forbidden resource" } }] });
+    await renderToday();
+    await screen.findByRole("heading", { level: 2, name: /^pulse$/i });
+    fireEvent.click(screen.getAllByRole("button", { name: /^refresh$/i })[0]);
+    const alert = await screen.findByTestId("today-unavailable", {}, { timeout: 10_000 });
+    expect(alert.textContent).toMatch(/could not be loaded/i);
+    expect(screen.queryByRole("heading", { name: /^pulse$/i })).toBeNull();
+    expect(screen.queryByText(/INV-0042/)).toBeNull();
+    expect(screen.queryByText(/Gina Links/)).toBeNull();
+    expect(document.body.textContent ?? "").not.toMatch(/\d\.\d{2}/);
+  }, CASE_MS);
+
+  it("[T4B-15] (SEC-T4B-3, COR-4; D-295) a member without operations (queue read 403) with GET .../today answering 200 sees all four blocks", async () => {
+    serve({
+      today: [ok(freshToday())],
+      items: { status: 403, body: { statusCode: 403, message: "Insufficient permissions: operations requires read access (you have none)", error: "Forbidden" } },
+    });
+    await renderToday();
+    await screen.findByTestId("command-actions-withheld", {}, { timeout: 10_000 });
+    await screen.findByRole("heading", { level: 2, name: /^get set up$/i });
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent?.trim())).toEqual(["Needs you", "Today", "Pulse", "Get set up"]);
+  }, CASE_MS);
+
+  it("[T4B-16] RED-BEFORE (COR-3): an accepted quote in the Today block opens the quote the way /app/commerce reads it (recordType=quote&recordId=<id>)", async () => {
+    const t = busyToday();
+    t.today.acceptedQuotes = [{ id: "q_8", quoteNumber: "QUO-0008", total: 500, currency: "TTD", acceptedAt: NOW, customerName: "Gina Links", contactId: CONTACT }];
+    serve({ today: [ok(t)] });
+    await renderToday();
+    const quote = row(block(/^today$/i), "QUO-0008");
+    expect(within(quote).getByRole("link", { name: /QUO-0008/ }).getAttribute("href")).toBe("/app/commerce?recordType=quote&recordId=q_8");
+  }, CASE_MS);
+
+  it("[T4B-17] RED-BEFORE (COR-6): pulseStatus OK with no pulse fails visibly: the Pulse block says its figures could not be loaded, and shows no zero", async () => {
+    const t = freshToday();
+    t.pulse = null;
+    serve({ today: [ok(t)] });
+    await renderToday();
+    const pulse = await screen.findByRole("region", { name: /^pulse$/i });
+    expect(within(pulse).getByRole("alert").textContent).toMatch(/could not be loaded/i);
+    expect(pulse.textContent ?? "").not.toMatch(/\d\.\d{2}/);
+  }, CASE_MS);
+
+  it("[T4B-18] RED-BEFORE (COR-7): the sample preview is in the business's currency (USD), not a hard-coded TTD", async () => {
+    const t = freshToday();
+    t.pulse = { ...(t.pulse as Record<string, unknown>), currency: "USD", cashCurrency: "USD" };
+    serve({ today: [ok(t)] });
+    await renderToday();
+    const sample = await screen.findByRole("figure", { name: /sample invoice preview/i });
+    expect(sample.textContent).toMatch(/USD 250\.00/);
+    expect(sample.textContent).not.toMatch(/TTD/);
   }, CASE_MS);
 });
