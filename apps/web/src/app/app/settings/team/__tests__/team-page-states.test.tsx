@@ -21,6 +21,9 @@
  *                       role's default (STAFF read, ADMIN admin), every other key and the tier unchanged
  *   TPS-08  RED-BEFORE  D-179: the grant is the owner's: an ADMIN viewing the same row sees "No access" and no grant
  *   TPS-09  control     a member whose map names analytics and operations (even at none) is not a legacy row
+ *   TPS-11  RED-BEFORE  journey J2 (three presets in a row): after an invite the form stays open, its email empty and
+ *                       its role Staff, ready for the next one (it closed with an exit animation, and a second invite
+ *                       typed into the closing form was lost)
  *   TPS-10  RED-BEFORE  BUG-135: the "Set permissions & approval tier" toggle reads "Setpermissions & approval tier" in
  *                       the production build (seen live at c5a5a99e): its label was the {Hide/Set} expression and a
  *                       separate " permissions & approval tier" text, and the build drops the space between them. The
@@ -96,8 +99,10 @@ async function renderAs(meId: string) {
   render(<TeamSettingsPage />);
 }
 
+/** Opens the invite form with its Invite toggle, unless it is open already (the toggle would close it). */
 async function openInviteForm() {
-  fireEvent.click(await screen.findByRole("button", { name: /^Invite$/ }));
+  const toggle = await screen.findByRole("button", { name: /^Invite$/ });
+  if (!screen.queryByLabelText("Team member email")) fireEvent.click(toggle);
   return screen.getByLabelText("Team member email");
 }
 
@@ -185,7 +190,6 @@ describe("SWP-TEAM-WEB: the invite form (BUG-115, journey J2, J3)", () => {
     await openInviteForm();
     const offered = Array.from(inviteRole().options).map((o) => o.text.trim());
     expect(offered).toEqual(["Staff", "Admin", "Front desk", "Bookkeeper"]);
-    fireEvent.click(screen.getByRole("button", { name: /^Invite$/ }));
 
     const cases: Array<[string, string, Record<string, string>, number]> = [
       ["Admin", "ADMIN", { ...ROLE_DEFAULT_SCOPES.ADMIN }, 3],
@@ -193,8 +197,6 @@ describe("SWP-TEAM-WEB: the invite form (BUG-115, journey J2, J3)", () => {
       ["Bookkeeper", "STAFF", onlyThese({ revenue: ROLE_DEFAULT_SCOPES.STAFF.revenue, expenses: ROLE_DEFAULT_SCOPES.STAFF.expenses }), 0],
     ];
     for (const [label, role, scopes, tier] of cases) {
-      // The form closes after each invite (with an exit animation); open it afresh.
-      await waitFor(() => expect(screen.queryByLabelText("Team member email")).toBeNull());
       await openInviteForm();
       const option = Array.from(inviteRole().options).find((o) => o.text.trim() === label)!;
       const payload = await sendInvite(`${label.replace(/\s+/g, "").toLowerCase()}@example.com`, option.value);
@@ -202,6 +204,22 @@ describe("SWP-TEAM-WEB: the invite form (BUG-115, journey J2, J3)", () => {
     }
     expect(ROLE_DEFAULT_SCOPES.STAFF.bookings).toBe("write");
     expect(ROLE_DEFAULT_SCOPES.STAFF.crm).toBe("read");
+  });
+
+  it("TPS-11 RED-BEFORE: after an invite the form stays open, emptied, at Staff, for the next one", async () => {
+    serveTeam([owner()]);
+    await renderAs(OWNER_ID);
+    await openInviteForm();
+    await sendInvite("ade@example.com", "FRONT_DESK");
+    await new Promise((r) => setTimeout(r, 400));
+    const email = screen.queryByLabelText("Team member email") as HTMLInputElement | null;
+    expect(email, "the invite form after an invite").not.toBeNull();
+    expect(email!.value).toBe("");
+    expect(inviteRole().value).toBe("STAFF");
+    const next = await sendInvite("bea@example.com", "BOOKKEEPER");
+    expect(next.email).toBe("bea@example.com");
+    expect(next.role).toBe("STAFF");
+    expect(next.scopes).toEqual(onlyThese({ revenue: "read", expenses: "read" }));
   });
 
   it("TPS-06 RED-BEFORE: the invite email is sent trimmed and in lower case", async () => {
