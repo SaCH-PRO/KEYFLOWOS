@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { mergeOrderMetadataObject, removeOrderMetadataKeyIf, replaceOrderMetadataKeyIf, setOrderMetadataKeyOnce } from './order-metadata';
 import { memberMayRecordPayments } from '../site/store-order.service';
+import { roundMoney } from '../commerce/money';
 import { CrmService } from '../crm/crm.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -22,6 +23,12 @@ import {
 
 /** MarketplaceOrder.type of an order placed through the public storefront (StoreOrderService.createOrder). */
 const STOREFRONT_ORDER_TYPE = 'STOREFRONT';
+
+/**
+ * R1-SEC-05 (P120): order statuses that are closed/reversed and must never
+ * trigger revenue record creation or paid side effects on `store_order.paid`.
+ */
+const CLOSED_ORDER_STATUSES: ReadonlySet<string> = new Set(['CANCELLED', 'REFUNDED', 'VOID', 'VOIDED']);
 
 /**
  * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the order metadata key that claims its shipping Expense, once per
@@ -51,11 +58,16 @@ export function marketplaceOrderProviderPaymentId(businessId: string, orderId: s
 
 /**
  * Derive a normalized lowercase Payment.method from a marketplace order's
- * paymentMethod, falling back cleanly to 'manual' when absent or blank.
+ * stored paymentMethod, falling back cleanly to 'manual' when absent or blank
+ * (including punctuation-only strings like '---').
  */
 function deriveMarketplacePaymentMethod(raw: unknown): string {
   if (typeof raw !== 'string') return 'manual';
-  const normalized = raw.trim().toLowerCase().replace(/[\s/-]+/g, '_');
+  const normalized = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
   return normalized || 'manual';
 }
 
@@ -232,6 +244,7 @@ export class CommerceIntegrationService {
         where: { id: order.id, businessId: payload.businessId },
         select: {
           type: true,
+          status: true,
           paymentStatus: true,
           orderNumber: true,
           paymentMethod: true,
@@ -255,6 +268,12 @@ export class CommerceIntegrationService {
       if ((stored.paymentStatus ?? '').toUpperCase() !== 'PAID') {
         this.logger.warn(
           `[CommerceIntegration] store_order.paid for ${stored.type} order ${order.id} whose payment status is ${stored.paymentStatus}; ignored (an order is paid through the paid door)`,
+        );
+        return;
+      }
+      if (CLOSED_ORDER_STATUSES.has(String(stored.status ?? '').trim().toUpperCase())) {
+        this.logger.warn(
+          `[CommerceIntegration] store_order.paid for ${stored.type} order ${order.id} whose status is ${stored.status}; ignored`,
         );
         return;
       }
@@ -339,17 +358,19 @@ export class CommerceIntegrationService {
    *   3. Any other order with an invoice already (INV-<orderNumber>,
    *      INV-ORD-<orderNumber> or the notes marker): nothing.
    *   4. Otherwise (a marketplace order stored PAID outside completeCheckout):
-   *      in ONE `$transaction` (serialized per business+order via advisory lock),
-   *      create the PAID invoice and — when `total > 0` — exactly one own-tenant
-   *      `SUCCESSFUL` `Payment` row matching the invoice's currency and amount,
-   *      with method derived from the order and a deterministic
-   *      `providerPaymentId` so retries/replays are idempotent.
+   *      in ONE `$transaction` (serialized per business+order via 2-arg advisory
+   *      lock), check both existing invoice and existing `providerPaymentId`
+   *      BEFORE creating the PAID invoice, then create the PAID invoice and —
+   *      when rounded `total > 0` — exactly one own-tenant `SUCCESSFUL` `Payment`
+   *      row matching the invoice's normalized currency and rounded amount, with
+   *      method/reference derived strictly from the stored order.
    */
   private async createRevenueRecord(
     businessId: string,
     order: any,
     stored: {
       type: string;
+      status: string;
       orderNumber: string | null;
       paymentMethod: string | null;
       paymentRef: string | null;
@@ -395,22 +416,41 @@ export class CommerceIntegrationService {
       }));
 
       const computedSubtotal = items.reduce((s: number, i: any) => s + i.total, 0);
-      const subtotal = items.length > 0 ? computedSubtotal : Number(stored.subtotal ?? 0);
-      const taxAmount = Number(stored.taxAmount ?? order.taxAmount ?? 0);
-      const discountAmount = Number(stored.discountAmount ?? order.discountAmount ?? 0);
-      const invoiceTotal = Number(stored.total ?? order.total ?? subtotal);
-      const currency = String(stored.currency ?? order.currency ?? 'TTD').trim() || 'TTD';
-      const method = deriveMarketplacePaymentMethod(stored.paymentMethod ?? order.paymentMethod);
+      const rawSubtotal = items.length > 0 ? computedSubtotal : Number(stored.subtotal ?? 0);
+      const rawTaxAmount = Number(stored.taxAmount ?? order.taxAmount ?? 0);
+      const rawDiscountAmount = Number(stored.discountAmount ?? order.discountAmount ?? 0);
+      const rawInvoiceTotal = Number(stored.total ?? order.total ?? rawSubtotal);
+
+      if (!Number.isFinite(rawInvoiceTotal) || rawInvoiceTotal < 0) {
+        this.logger.warn(
+          `[CommerceIntegration] Refusing to create revenue record for order ${order.id}: invalid total (${rawInvoiceTotal})`,
+        );
+        return;
+      }
+
+      const subtotal = Number.isFinite(rawSubtotal) ? roundMoney(rawSubtotal) : 0;
+      const taxAmount = Number.isFinite(rawTaxAmount) ? roundMoney(rawTaxAmount) : 0;
+      const discountAmount = Number.isFinite(rawDiscountAmount) ? roundMoney(rawDiscountAmount) : 0;
+      const invoiceTotal = roundMoney(rawInvoiceTotal);
+      if (!Number.isFinite(invoiceTotal) || invoiceTotal < 0) {
+        this.logger.warn(
+          `[CommerceIntegration] Refusing to create revenue record for order ${order.id}: invalid rounded total (${invoiceTotal})`,
+        );
+        return;
+      }
+
+      const currency = String(stored.currency ?? order.currency ?? 'TTD').trim().toUpperCase() || 'TTD';
+      // R1-SEC-04: derive paymentMethod & paymentRef strictly from the stored order row.
+      const method = deriveMarketplacePaymentMethod(stored.paymentMethod);
       const paymentRef =
-        (typeof stored.paymentRef === 'string' && stored.paymentRef.trim() ? stored.paymentRef.trim() : null) ??
-        (typeof order.paymentRef === 'string' && order.paymentRef.trim() ? order.paymentRef.trim() : null);
+        typeof stored.paymentRef === 'string' && stored.paymentRef.trim() ? stored.paymentRef.trim() : null;
       const providerPaymentId = marketplaceOrderProviderPaymentId(businessId, order.id);
 
       const contactId = await this.resolveContactId(businessId, order);
       if (!contactId) throw new Error(`Cannot create invoice: no contact resolved for order ${order.id}`);
 
       const created = await this.prisma.client.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`marketplace-order-revenue:${businessId}:${order.id}`}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('marketplace-order-revenue'), hashtext(${`${businessId}:${order.id}`}))`;
 
         const existingInTx = await tx.invoice.findFirst({
           where: {
@@ -420,6 +460,21 @@ export class CommerceIntegrationService {
           select: { id: true },
         });
         if (existingInTx) return false;
+
+        // R1-COR-03: verify providerPaymentId is unused BEFORE creating the PAID invoice
+        // so we can never commit a rowless PAID invoice if the payment key already exists.
+        if (Number.isFinite(invoiceTotal) && invoiceTotal > 0) {
+          const existingPaymentByKey = await tx.payment.findFirst({
+            where: { providerPaymentId },
+            select: { id: true },
+          });
+          if (existingPaymentByKey) {
+            this.logger.warn(
+              `[CommerceIntegration] Payment with providerPaymentId ${providerPaymentId} already exists; skipping invoice/payment creation for order ${order.id}`,
+            );
+            return false;
+          }
+        }
 
         const now = new Date();
         const invoice = await tx.invoice.create({
@@ -443,32 +498,21 @@ export class CommerceIntegrationService {
         });
 
         if (Number.isFinite(invoiceTotal) && invoiceTotal > 0) {
-          const existingPayment = await tx.payment.findFirst({
-            where: {
-              OR: [
-                { providerPaymentId },
-                { businessId, invoiceId: invoice.id, status: 'SUCCESSFUL' },
-              ],
+          await tx.payment.create({
+            data: {
+              businessId,
+              invoiceId: invoice.id,
+              amount: invoiceTotal,
+              currency,
+              status: 'SUCCESSFUL',
+              provider: 'marketplace',
+              method,
+              providerPaymentId,
+              reference: paymentRef,
+              notes: `Auto-generated from marketplace order ${orderNumber ?? order.id}. order:${order.id}`,
+              createdAt: now,
             },
-            select: { id: true },
           });
-          if (!existingPayment) {
-            await tx.payment.create({
-              data: {
-                businessId,
-                invoiceId: invoice.id,
-                amount: invoiceTotal,
-                currency,
-                status: 'SUCCESSFUL',
-                provider: 'marketplace',
-                method,
-                providerPaymentId,
-                reference: paymentRef,
-                notes: `Auto-generated from marketplace order ${orderNumber ?? order.id}. order:${order.id}`,
-                createdAt: now,
-              },
-            });
-          }
         }
 
         return true;
