@@ -223,7 +223,14 @@ export class ActionDispatcherService {
 
         return { success: true, result, dispatchId, durationMs };
       } catch (err: any) {
-        lastError = (err as Error).message;
+        lastError =
+          err instanceof Error
+            ? err.message
+            : typeof (err as { message?: unknown } | null | undefined)?.message === 'string'
+              ? (err as { message: string }).message
+              : err !== null && err !== undefined
+                ? String(err)
+                : undefined;
         this.logger.warn(`Dispatch ${dispatchId} attempt ${attempt + 1} failed: ${lastError}`);
         // The action boundary answered: the action is waiting for a human or
         // was refused. Asking again gets the same answer.
@@ -242,7 +249,7 @@ export class ActionDispatcherService {
         // not applied. Guarded by !boundaryAnswer so NC-P7-DISPATCHER-RETRIES-A-REFUSAL still
         // observes retries if the boundary break above is mutated out.
         if (!boundaryAnswer && !isReadOnlyTool(ctx.toolName) && !isEffectNotAppliedError(err)) {
-          const msg = lastError ?? 'unknown error';
+          const msg = lastError && lastError.length > 0 ? lastError : 'unknown error';
           lastError = msg.startsWith(OUTCOME_UNKNOWN_PREFIX) ? msg : `${OUTCOME_UNKNOWN_PREFIX}${msg}`;
           break;
         }
