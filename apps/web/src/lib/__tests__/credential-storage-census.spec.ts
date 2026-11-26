@@ -1836,3 +1836,69 @@ describe("CSC-33 (pins) parsing by extension and the trailing-range guard", () =
     expect(keysOf(scan("public/fixture.mjs", `localStorage.setItem("kf_mjs_token", t);`))).toEqual(["localStorage:kf_mjs_token"]);
   });
 });
+
+/* ------------------------------------------------------- repair round 6 */
+
+/**
+ * Repair round 6, the root fix (D-274; security REJECT on round 5, CSC5-SEC-1..4, correctness CSC5-COR-1..2): writes
+ * are found on the TypeScript AST, not by regexes over text. Each plant below defeats the text matching at 314056a.
+ *
+ *   CSC-34 comments inside a write's tokens, template header names, regex literals after keywords, U+2028 and
+ *          CR-only line ends, and in-token comments on cookieStore.set, Cache put and IndexedDB put: each write found.
+ *   CSC-35 a file with parse errors falls back to the text scanner, and its tuple look-back skips comments lexically.
+ */
+describe("CSC-34 writes are found on the AST", () => {
+  const plants: Array<[string, string, string[]]> = [
+    ["a comment line inside headers.append(…)", "headers.append(\n  // the session cookie\n  \"Set-Cookie\",\n  `kf_x_session=${t}; Path=/`,\n);", ["response-cookie:kf_x_session"]],
+    ["a comment before a tuple's name", `const h = new Headers([[ /* c */ "Set-Cookie", "kf_x_session=1"]]);`, ["response-cookie:kf_x_session"]],
+    ["a comment after a tuple's name", `const h = new Headers([["Set-Cookie" /* c */, "kf_x_session=1"]]);`, ["response-cookie:kf_x_session"]],
+    ["a comment after a tuple's value", `const h = new Headers([["Set-Cookie", "kf_x_session=1", /* c */]]);`, ["response-cookie:kf_x_session"]],
+    ["a comment before append's first argument", `headers.append(/* c */ "Set-Cookie", "kf_x_session=1");`, ["response-cookie:kf_x_session"]],
+    ["a comment after set's first argument", `headers.set("Set-Cookie" /* c */, "kf_x_session=1");`, ["response-cookie:kf_x_session"]],
+    ["a comment before a Set-Cookie property's colon", `const o = { headers: { "Set-Cookie" /* c */ : "kf_x_session=1" } };`, ["response-cookie:kf_x_session"]],
+    ["a comment inside document.cookie", "document /* c */ .cookie = `kf_x_session=${t}`;", ["cookie:kf_x_session"]],
+    ["a comment before document.cookie's =", "document.cookie /* note */ = `kf_x_session=${t}`;", ["cookie:kf_x_session"]],
+    ["a comment before setItem's name", `localStorage./* c */setItem("kf_x_token", t);`, ["localStorage:kf_x_token"]],
+    ["a comment before setItem's arguments", `localStorage.setItem /* c */ ("kf_x_token", t);`, ["localStorage:kf_x_token"]],
+    ["a template header name", "headers.append(`Set-Cookie`, \"kf_x_session=1\");", ["response-cookie:kf_x_session"]],
+    ["a template property name", "const o = { [`Set-Cookie`]: \"kf_x_session=1\" };", ["response-cookie:kf_x_session"]],
+    ["a // comment ended by U+2028 inside the arguments", `localStorage.setItem(// c "kf_x_token", t);`, ["localStorage:kf_x_token"]],
+    ["a // comment ended by a lone CR inside the arguments", `localStorage.setItem(// c\r"kf_x_token", t);`, ["localStorage:kf_x_token"]],
+    ["cookieStore.set with in-token comments", `cookieStore /* c */ . /* c */ set(/* c */ "kf_x_session", t);`, ["cookie:kf_x_session"]],
+    ["a Cache put with in-token comments", `const cache = await caches.open("kf-x-cache"); cache /* c */ . /* c */ put(request, new Response(token));`, ["cacheStorage:kf-x-cache"]],
+    ["an IndexedDB put with in-token comments", `const db = indexedDB.open("kf-x-db", 1); const s = tx.objectStore("s"); s /* c */ . /* c */ put({ token });`, ["indexedDB:kf-x-db"]],
+  ];
+  for (const [name, fixture, expected] of plants) {
+    it(`${name}: found`, () => {
+      const keys = keysOf(scan("src/fixture-ast.ts", fixture));
+      expect(keys).toEqual(expect.arrayContaining(expected));
+    });
+  }
+
+  it("IndexedDB put with in-token comments: the database is a credential store", () => {
+    const fixture = `const db = indexedDB.open("kf-x-db", 1); const s = tx.objectStore("s"); s /* c */ . /* c */ put({ token });`;
+    expect(compare(scan("src/fixture-ast.ts", fixture), []).unregistered.some((u) => u.startsWith("indexedDB kf-x-db @"))).toBe(true);
+  });
+
+  it("a Cache put with in-token comments: the cache is a credential store", () => {
+    const fixture = `const cache = await caches.open("kf-x-cache"); cache /* c */ . /* c */ put(request, new Response(token));`;
+    expect(compare(scan("src/fixture-ast.ts", fixture), []).unregistered.some((u) => u.startsWith("cacheStorage kf-x-cache @"))).toBe(true);
+  });
+
+  for (const [name, value] of [
+    ["void /[)]/ || session.access_token", "void /[)]/ || session.access_token"],
+    ["typeof /[/*]/ && session.access_token", "typeof /[/*]/ && session.access_token"],
+  ]) {
+    it(`a regex literal after a keyword in a value (${name}): a credential write`, () => {
+      const fixture = `localStorage.setItem("kf_rx_plain", ${value});`;
+      expect(compare(scan("src/fixture-rx.ts", fixture), []).unregistered.some((u) => u.startsWith("localStorage kf_rx_plain @"))).toBe(true);
+    });
+  }
+});
+
+describe("CSC-35 a file with parse errors falls back to the text scanner", () => {
+  it("a broken file's Headers tuple behind a comment is found", () => {
+    const fixture = [`const f = <T>(x: T) => x;`, `const h = new Headers([ /* c */ ["Set-Cookie", "kf_e1_session=1; Path=/"]]);`].join("\n");
+    expect(keysOf(scan("src/fixture-e1.tsx", fixture))).toContain("response-cookie:kf_e1_session");
+  });
+});
