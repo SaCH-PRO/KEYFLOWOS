@@ -10,6 +10,9 @@ import { CommandService } from '../command/command.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { ConnectorIntelligenceService } from './connector-intelligence.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { readInvoiceMoney } from '../commerce/commerce-stats.service';
+import { balanceOfStoredRows, creditAwareBalance } from '../commerce/invoice-workflow.service';
+import { fromCents, sumMoney, toCents } from '../commerce/money';
 
 export interface ToolResult<T = unknown> {
   success: boolean;
@@ -111,9 +114,36 @@ const financeCalculateSafeToSpend: KeyToolDefinition<
   },
 };
 
+/**
+ * D-260 (FU-KEY-OVERDUE-SENT-ONLY): invoice statuses the customer was actually
+ * sent and that remain open for collection. Excludes never-sent PENDING and
+ * DRAFT, as well as settled/closed PAID, VOID, FAILED, FULLY_CREDITED.
+ *
+ * Distinct from OPEN_RECEIVABLE_STATUSES (D-256), which keeps PENDING in every
+ * owed total and in ReceivablesService.getAging.
+ */
+export const SENT_OVERDUE_INVOICE_STATUSES: ReadonlySet<string> = new Set([
+  'SENT',
+  'OVERDUE',
+  'PARTIALLY_PAID',
+  'PARTIALLY_CREDITED',
+]);
+
 const financeListOverdueInvoices: KeyToolDefinition<
   { limit?: number },
-  { invoices: Array<{ id: string; total: number; currency: string; dueDate: string; contactName: string; daysOverdue: number }>; total: number }
+  {
+    invoices: Array<{
+      id: string;
+      invoiceNumber?: string;
+      status: string;
+      total: number;
+      currency: string;
+      dueDate: string;
+      contactName: string;
+      daysOverdue: number;
+    }>;
+    total: number;
+  }
 > = {
   name: 'listOverdueInvoices',
   module: 'finance',
@@ -125,21 +155,53 @@ const financeListOverdueInvoices: KeyToolDefinition<
     return { valid: true, parsed: { limit } };
   },
   execute: async (ctx, input, deps) => {
-    const aging = await deps.receivables.getAging(ctx.businessId);
-    const allInvoices = (aging as any).totals?.flatMap((b: any) => b.invoices || []) || (aging as any).invoices || [];
-    const invoices = allInvoices
-      .filter((inv: any) => (inv.daysOverdue ?? 0) > 0)
-      .sort((a: any, b: any) => (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0))
-      .slice(0, input.limit)
-      .map((inv: any) => ({
-        id: inv.id,
-        total: inv.balanceDue ?? inv.total ?? 0,
-        currency: inv.currency ?? 'TTD',
-        dueDate: inv.dueDate,
-        contactName: inv.contactName ?? inv.contact?.firstName ?? 'Unknown',
-        daysOverdue: inv.daysOverdue ?? 0,
-      }));
-    return { success: true, data: { invoices, total: aging.totalOverdue } };
+    // D-260: read open receivables directly and restrict to sent open statuses
+    // (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) without altering
+    // ReceivablesService.getAging totals (which keep PENDING under D-256).
+    const now = new Date();
+    const openInvoices = await readInvoiceMoney(deps.prisma.client, ctx.businessId, now, { openOnly: true });
+    const overdueSent = openInvoices
+      .filter((inv) => SENT_OVERDUE_INVOICE_STATUSES.has(inv.status) && inv.overdue && inv.remaining > 0)
+      .map((inv) => {
+        const dueMs = inv.dueDate ? new Date(inv.dueDate).getTime() : null;
+        const daysOverdue =
+          dueMs !== null ? Math.max(0, Math.floor((now.getTime() - dueMs) / 86400000)) : 0;
+        return { inv, daysOverdue };
+      });
+
+    const contactIds = Array.from(
+      new Set(overdueSent.map(({ inv }) => inv.contactId).filter((id): id is string => Boolean(id))),
+    );
+    const contacts = contactIds.length
+      ? await deps.prisma.client.contact.findMany({
+          where: { businessId: ctx.businessId, id: { in: contactIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+    const contactOf = new Map(contacts.map((c) => [c.id, c]));
+
+    const limit = Math.max(0, Math.floor(input.limit ?? 10));
+    const total = sumMoney(overdueSent.map(({ inv }) => inv.remaining));
+    const invoices = overdueSent
+      .sort((a, b) => b.daysOverdue - a.daysOverdue)
+      .slice(0, limit)
+      .map(({ inv, daysOverdue }) => {
+        const contact = inv.contactId ? contactOf.get(inv.contactId) : undefined;
+        const contactName = contact
+          ? [contact.firstName, contact.lastName].filter(Boolean).join(' ').trim() || contact.email || 'Unknown'
+          : 'Unknown';
+        return {
+          id: inv.id,
+          invoiceNumber: inv.invoiceNumber ?? undefined,
+          status: inv.status,
+          total: inv.remaining,
+          currency: inv.currency || 'TTD',
+          dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString() : '',
+          contactName,
+          daysOverdue,
+        };
+      });
+    return { success: true, data: { invoices, total } };
   },
 };
 
@@ -194,24 +256,69 @@ const financeCreateInvoiceReminderDraft: KeyToolDefinition<
     return { valid: true, parsed: { invoiceId, tone } };
   },
   execute: async (ctx, input, deps) => {
-    const invoice = await deps.prisma.client.invoice.findUnique({
-      where: { id: input.invoiceId },
-      include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+    const invoice = await deps.prisma.client.invoice.findFirst({
+      where: {
+        id: input.invoiceId,
+        businessId: ctx.businessId,
+        deletedAt: null,
+      },
+      include: {
+        contact: { select: { firstName: true, lastName: true, email: true } },
+        payments: { where: { businessId: ctx.businessId }, select: { amount: true, status: true } },
+      },
     });
-    if (!invoice || invoice.businessId !== ctx.businessId) {
+    if (!invoice) {
       return { success: false, error: 'Invoice not found' };
     }
+    // D-260: never draft payment reminders for never-sent (PENDING, DRAFT) or
+    // settled/closed (PAID, VOID, FAILED, FULLY_CREDITED) invoices.
+    if (!SENT_OVERDUE_INVOICE_STATUSES.has(invoice.status)) {
+      return {
+        success: false,
+        error: `Cannot draft a payment reminder for invoice with status ${invoice.status}; only sent open invoices (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) can be reminded`,
+      };
+    }
+
+    const now = new Date();
+    const isOverdue = invoice.status === 'OVERDUE' || (!!invoice.dueDate && new Date(invoice.dueDate) < now);
+    if (!isOverdue) {
+      return {
+        success: false,
+        error: 'Cannot draft an overdue payment reminder for an invoice that is not yet past due',
+      };
+    }
+
+    // Compute own-tenant payment- and credit-aware remaining balance (D-75, D-78, D-250).
+    const grossTotal = Number(invoice.total ?? 0) || 0;
+    const rowsBalance = balanceOfStoredRows(grossTotal, invoice.payments ?? [], invoice.currency);
+    let appliedCredits = 0;
+    if (invoice.status === 'PARTIALLY_CREDITED') {
+      const creditAgg = await deps.prisma.client.creditNote.aggregate({
+        where: { businessId: ctx.businessId, invoiceId: invoice.id, status: 'APPLIED' },
+        _sum: { amount: true },
+      });
+      appliedCredits = Number(creditAgg._sum.amount ?? 0) || 0;
+    }
+    const balance = creditAwareBalance(rowsBalance, appliedCredits);
+    const owedCap = Math.max(0, toCents(rowsBalance.total) - toCents(balance.credited));
+    const amount = fromCents(Math.min(toCents(balance.remaining), owedCap));
+    if (amount <= 0) {
+      return {
+        success: false,
+        error: 'Cannot draft a payment reminder for an invoice with no remaining balance due',
+      };
+    }
+
     const name = invoice.contact?.firstName || 'there';
-    const amount = Number(invoice.total);
     const currency = invoice.currency;
     const daysOverdue = invoice.dueDate
-      ? Math.max(0, Math.floor((Date.now() - new Date(invoice.dueDate).getTime()) / 86400000))
+      ? Math.max(0, Math.floor((now.getTime() - new Date(invoice.dueDate).getTime()) / 86400000))
       : 0;
 
     const templates: Record<string, string> = {
-      friendly: `Hi ${name}, just a friendly reminder that invoice ${(invoice as any).invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${daysOverdue > 0 ? `${daysOverdue} days overdue` : 'due soon'}. Please let me know if you need anything.`,
-      firm: `Hi ${name}, this is a follow-up regarding invoice ${(invoice as any).invoiceNumber} for ${currency} ${amount.toLocaleString()}, which is now ${daysOverdue} days overdue. Please arrange payment at your earliest convenience.`,
-      urgent: `Hi ${name}, invoice ${(invoice as any).invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${daysOverdue} days overdue and requires immediate attention. Please contact us to arrange payment.`,
+      friendly: `Hi ${name}, just a friendly reminder that invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${daysOverdue > 0 ? `${daysOverdue} days overdue` : 'overdue'}. Please let me know if you need anything.`,
+      firm: `Hi ${name}, this is a follow-up regarding invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()}, which is now ${daysOverdue} days overdue. Please arrange payment at your earliest convenience.`,
+      urgent: `Hi ${name}, invoice ${invoice.invoiceNumber} for ${currency} ${amount.toLocaleString()} is ${daysOverdue} days overdue and requires immediate attention. Please contact us to arrange payment.`,
     };
     return { success: true, data: { draft: templates[input.tone] ?? templates.friendly, invoiceId: input.invoiceId } };
   },
