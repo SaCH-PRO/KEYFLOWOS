@@ -37,6 +37,7 @@ export const APP_PAGE_ROUTES: readonly string[] = [
   "/app/commerce/invoices/[id]",
   "/app/commerce/invoices/[id]/edit",
   "/app/commerce/invoices/new",
+  "/app/commerce/products",
   "/app/commerce/templates",
   "/app/communicate/campaigns",
   "/app/community",

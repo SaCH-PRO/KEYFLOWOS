@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   FileText,
@@ -16,6 +17,7 @@ import {
   Calendar,
   CreditCard,
   Inbox,
+  Package,
 } from "lucide-react";
 
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -424,6 +426,14 @@ export default function CommercePage() {
       /* AI centralized in Cockpit */
       headerRight={
         <div className="flex items-center gap-2">
+          {/* CATALOG-1: Sales > Products, what you sell (journey B1, B5, B6 read this door). */}
+          <Link
+            href="/app/commerce/products"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-border/60 hover:bg-muted/40 transition-colors"
+          >
+            <Package className="w-3.5 h-3.5" aria-hidden="true" />
+            Products
+          </Link>
           <CommerceQuickLauncher />
           <CommerceHeaderRight revenuePulse={overview.revenuePulse} />
           <RevenueActionMenu

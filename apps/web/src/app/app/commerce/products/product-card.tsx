@@ -62,7 +62,8 @@ export const ProductCard = React.memo(function ProductCard({
       className={`group relative rounded-xl border border-border/50 bg-card overflow-hidden transition-all duration-200 cursor-pointer text-left w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1))]/40 ${
         isInactive ? "opacity-50 grayscale-[40%]" : ""
       } hover:border-border/80 hover:shadow-lg hover:shadow-black/20`}
-      aria-label={`${product.name} — ${formatCurrency(product.price, displayCurrency)}`}
+      // CATALOG-1: "Open <product>", so a product named like a row action ("Archived item") is never taken for it.
+      aria-label={`Open ${product.name} — ${formatCurrency(product.price, displayCurrency)}`}
     >
       <div className="h-[72px] relative overflow-hidden">
         {displayImage && !imgError ? (

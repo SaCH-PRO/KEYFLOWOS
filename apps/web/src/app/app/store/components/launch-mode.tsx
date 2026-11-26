@@ -47,7 +47,71 @@ type Props = {
   hasFaq?: boolean;
   hasPolicies?: boolean;
   hasBookingCta?: boolean;
+  /** COR-CAT-8: the business's stock per product (useStoreData), for the count; undefined while not read. */
+  stockByProduct?: StockByProduct | null;
 };
+
+/** The business's stock per product: its own inventory rows summed (quantity, reserved), as the server sums them. */
+export type StockByProduct = Map<string, { quantity: number; reserved: number }>;
+
+/** The product categories /book draws (book/[slug]/page.tsx catalogItems); any other is not shown. */
+const BOOK_DRAWN_CATEGORIES = new Set(["PRODUCT", "PACKAGE", "SERVICE"]);
+
+/**
+ * Whether the public store leaves the product out for stock (CatalogService.projectAvailability): tracked (its
+ * inventory mode, or no mode and stock rows: resolveInventoryMode), nothing available, and out-of-stock behaviour
+ * "hide" (the default).
+ */
+function hiddenForStock(p: Product, stock: StockByProduct): boolean {
+  const ext = p as Product & { inventoryMode?: string | null; outOfStockBehavior?: string | null };
+  const row = stock.get(p.id);
+  const mode = ext.inventoryMode || (row ? "tracked" : "untracked");
+  if (mode !== "tracked") return false;
+  const available = Math.max(0, (row?.quantity ?? 0) - (row?.reserved ?? 0));
+  if (available > 0) return false;
+  // The server shows an out-of-stock product only for these two; any other value (null reads as "hide") hides it.
+  const behavior = ext.outOfStockBehavior ?? "hide";
+  return behavior !== "show_oos" && behavior !== "allow_backorder";
+}
+
+/** The ids /book drops because the storefront's catalog override says visibilityRule "hidden". */
+function hiddenByStorefront(config: StorefrontConfig | null | undefined): Set<string> {
+  const overrides = config?.catalog?.itemOverrides ?? {};
+  return new Set(Object.entries(overrides).filter(([, o]) => o?.visibilityRule === "hidden").map(([id]) => id));
+}
+
+/**
+ * CATALOG-1 (BUG-106, COR-CAT-8): the items a customer sees on /book/<slug>, each once. A bookable service (no
+ * sourceProductId) is one item; a product is one item when 'Add to store' listed it (a listing service names it in
+ * sourceProductId), it is active, /book draws its category, and its stock does not hide it, however many listing
+ * services name it. An item the storefront's catalog override hides (visibilityRule "hidden") is not counted, as
+ * /book drops it. A product never added to the store is not an item (ruling D-185). Without the stock (not read),
+ * the stock rule cannot be applied and a listed product counts. Not mirrored here (follow-up): /book's
+ * de-duplication of a SERVICE-category product against a bookable service of the same name.
+ */
+export function countStoreItems(
+  services: Service[],
+  commerceProducts: Product[],
+  stock?: StockByProduct | null,
+  storefrontConfig?: StorefrontConfig | null,
+): number {
+  const hidden = hiddenByStorefront(storefrontConfig);
+  const activeProducts = new Set(
+    commerceProducts
+      .filter((p) => p.isActive !== false && BOOK_DRAWN_CATEGORIES.has(p.category ?? "SERVICE") && !hidden.has(p.id) && !(stock && hiddenForStock(p, stock)))
+      .map((p) => p.id),
+  );
+  const listedProducts = new Set<string>();
+  let bookable = 0;
+  for (const s of services) {
+    if (s.sourceProductId) {
+      if (activeProducts.has(s.sourceProductId)) listedProducts.add(s.sourceProductId);
+    } else if (!hidden.has(s.id)) {
+      bookable++;
+    }
+  }
+  return bookable + listedProducts.size;
+}
 
 function StorefrontPreview({ slug, previewMode }: { slug: string | null; previewMode: "desktop" | "mobile" }) {
   if (!slug) {
@@ -238,11 +302,12 @@ export function LaunchMode({
   hasFaq = false,
   hasPolicies = false,
   hasBookingCta = false,
+  stockByProduct,
 }: Props) {
   const pc = businessData?.primaryColor || "#F97316";
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
 
-  const itemCount = services.length + commerceProducts.length;
+  const itemCount = countStoreItems(services, commerceProducts, stockByProduct, _storefrontConfig);
   const readinessPercent = readiness?.scores?.overall ?? 0;
   const totalItems = readiness?.items?.length ?? 0;
   const resolvedItems = readiness?.items?.filter((i) => i.resolved).length ?? 0;
@@ -315,7 +380,7 @@ export function LaunchMode({
               hasLogo={!!businessData?.logoUrl}
               hasPrimaryColor={!!businessData?.primaryColor}
               hasContactInfo={!!(businessData?.phone || businessData?.email)}
-              productCount={services.length + commerceProducts.length}
+              productCount={itemCount}
               hasTestimonials={_hasTestimonials}
               hasFaq={hasFaq}
               hasPolicies={hasPolicies}
