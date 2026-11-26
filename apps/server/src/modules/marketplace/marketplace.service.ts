@@ -1319,9 +1319,13 @@ export class MarketplaceService {
    */
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any, actorId: string | null = null) {
     this.assertPlainStatusBody(status, paymentData);
+    // W1F-ORDER-TRANSITIONS review R1-SEC-01 (exact SEC-W11OCR-1 pattern): strip leading/trailing whitespace on every
+    // status edit while preserving caller casing, so a padded status like ' shipped ' or ' delivered ' is never stored
+    // with spaces (which previously missed FULFILMENT_PAST_CONFIRMED and emitOrderLifecycleEvent).
+    const trimmedStatus = status.trim();
     // W11-ORDER-PAID-VALUES (D-117): the payment status as it is compared and written, trimmed and upper-cased.
     const paymentStatus = normalisedPaymentStatus(paymentData?.paymentStatus);
-    this.assertNotPaidAndCancelled(status, paymentStatus);
+    this.assertNotPaidAndCancelled(trimmedStatus, paymentStatus);
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
@@ -1331,9 +1335,9 @@ export class MarketplaceService {
         'A quick sale is already completed at checkout and cannot change fulfilment status; refund it through the refund door instead',
       );
     }
-    this.assertNotRefundingThroughStatus(status);
+    this.assertNotRefundingThroughStatus(trimmedStatus);
     const onDoors = await this.moneyOnTheDoors(order);
-    this.assertNotPayingDoorOrder(onDoors, status, paymentStatus);
+    this.assertNotPayingDoorOrder(onDoors, trimmedStatus, paymentStatus);
     this.assertNoDoorPaymentFields(onDoors, paymentData);
 
     // W10-STORE-ORDER-PAID (D-112, V18-T2c): paymentStatus PAID takes a member with revenue write (403 otherwise,
@@ -1355,14 +1359,14 @@ export class MarketplaceService {
       // them with 409 ('This order is cancelled and cannot be completed', V87-19).
       const fromNamed = namedOrderStatus(order.status);
       if (fromNamed !== 'cancelled' && fromNamed !== 'refunded') {
-        assertStatusEditTransition(order.status, status);
+        assertStatusEditTransition(order.status, trimmedStatus);
       }
       const { doorStatus } = await this.recordPaymentThroughDoor(order, {
         actorId,
         paymentMethod: paymentData?.paymentMethod,
         paymentRef: paymentData?.paymentRef,
         customer: paymentData,
-        paidStatus: status,
+        paidStatus: trimmedStatus,
       });
       if (doorStatus === null) {
         // W10-SOP-FIX (SOP-V2; D-112): a concurrent marking recorded the payment and this one recorded nothing. Its
@@ -1376,11 +1380,11 @@ export class MarketplaceService {
       // rewind one). Read from the door's own row (review CR-W10SOP-1): a read after its store_order.paid can already
       // show the routing listener's status, which is not undone here.
       let paid;
-      if (doorStatus !== status) {
-        assertStatusEditTransition(doorStatus, status);
+      if (doorStatus !== trimmedStatus) {
+        assertStatusEditTransition(doorStatus, trimmedStatus);
         const { count } = await this.prisma.client.marketplaceOrder.updateMany({
           where: { id: orderId, businessId, status: doorStatus },
-          data: { status },
+          data: { status: trimmedStatus },
         });
         if (count === 0) throw new ConflictException(ORDER_STATUS_CHANGED_DURING_EDIT);
         paid = await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
@@ -1388,14 +1392,14 @@ export class MarketplaceService {
         paid = await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
       }
       // The door has emitted store_order.paid with its invoice; any other status keeps its own lifecycle event.
-      this.emitOrderLifecycleEvent(businessId, paid, status);
+      this.emitOrderLifecycleEvent(businessId, paid, trimmedStatus);
       // W11-SHIPPING-EXPENSE-ONCE (D-126): this marking recorded the payment and wrote shipped (V18-T2l: the losing
       // marking above returned with nothing booked).
-      if (status.trim().toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
+      if (trimmedStatus.toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
       return paid;
     }
 
-    const updateData: any = { status };
+    const updateData: any = { status: trimmedStatus };
     if (paymentData) {
       // W11-ORDER-PAID-VALUES (D-117): the value is written upper-cased. PAID reaches here only for an order already
       // stored paid in any case (outside the door: the Shopify sync, a legacy row), REFUNDED only for one stored
@@ -1407,7 +1411,7 @@ export class MarketplaceService {
       updateData.paymentRef = paymentData.paymentRef;
     }
 
-    if (cancelsOrder(status)) {
+    if (cancelsOrder(trimmedStatus)) {
       // W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): a cancel is the fulfil 'cancel' action's, in one transaction
       // under the order's routing claim. releaseOrderFulfilmentForCancel waits for a router to commit, re-reads the
       // status (400 with nothing written for an order that can no longer be cancelled: shipped, delivered, completed,
@@ -1420,7 +1424,6 @@ export class MarketplaceService {
       // with its spaces (' cancelled '), it was released and announced cancelled, but isClosedStorefrontOrder (upper-
       // cased, not trimmed) did not read it as closed: the paid doors (PATCH paid, complete-offline, the public
       // checkout) then recorded a payment on the cancelled order.
-      updateData.status = status.trim();
       const cancelled = await this.prisma.client.$transaction(async (tx) => {
         // Review OCR-COR-1: the status read in any case, padded or not (statusEditMayCancel): an open order stored
         // 'processing' or 'on_hold' (this route writes any status as sent) was refused 400 by canTransitionOrder alone.
@@ -1456,9 +1459,9 @@ export class MarketplaceService {
       namedOrderStatus(order.status) === 'refunded' &&
       normalisedPaymentStatus(order.paymentStatus) === 'REFUNDED' &&
       paymentStatus === 'REFUNDED' &&
-      namedOrderStatus(status) === 'completed';
+      namedOrderStatus(trimmedStatus) === 'completed';
     if (!canonicalizingRefundedToCompleted) {
-      assertStatusEditTransition(order.status, status);
+      assertStatusEditTransition(order.status, trimmedStatus);
     }
 
     // W1F-ORDER-TRANSITIONS (D-198, reverse race) & W11-ORDER-PAID-VALUES (SEC-W11OPV-2): compare-and-set on the
@@ -1508,9 +1511,9 @@ export class MarketplaceService {
     }
     const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
 
-    this.emitOrderLifecycleEvent(businessId, updated, status);
+    this.emitOrderLifecycleEvent(businessId, updated, trimmedStatus);
     // W11-SHIPPING-EXPENSE-ONCE (D-126): after the shipped write has committed; store_order.shipped books nothing.
-    if (status.trim().toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
+    if (trimmedStatus.toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     return updated;
   }
@@ -2326,7 +2329,11 @@ export class MarketplaceService {
         throw new BadRequestException(`Unknown fulfillment action: ${action}`);
     }
 
-    updateData.status = newStatus;
+    // W1F-ORDER-TRANSITIONS review R1-SEC-02: add_tracking only appends tracking metadata/timeline and must never
+    // overwrite a concurrent status change (ship/deliver/cancel) back to stale order.status.
+    if (action !== 'add_tracking') {
+      updateData.status = newStatus;
+    }
 
     // W10-SOP-FIX (SOP-V4): the steps are appended in one statement, committed with the status (and, for a refund, the
     // payment status) in one transaction; the rest of the metadata is the row's own.
@@ -2338,14 +2345,15 @@ export class MarketplaceService {
     // W11-SHIP-STOCK-DECREMENT (F-26; D-136): a ship likewise runs under the order's routing claim in this transaction
     // (shipOrderFulfilment), locking its tracked stock rows in the global order and decrementing processed or reserved
     // LOCAL_STOCK routes once before the timeline step and shipped status commit.
-    // W1F-ORDER-TRANSITIONS (D-198): both 'cancel' and 'ship' compare-and-set on the status read under the routing claim
-    // (updateMany where status = readStatus), rolling back the entire transaction (route updates, stock release/decrement,
-    // shipment, movement, timeline step) with 409 if another writer committed a status change while waiting on locks.
+    // W1F-ORDER-TRANSITIONS (D-198; review R1-SEC-02): every status-writing fulfillOrder action compare-and-sets on
+    // (id, businessId, status: readStatus), rolling back the transaction with 409 if another writer committed a status
+    // change meanwhile ('cancel' and 'ship' use the status re-read under the routing claim; other actions use
+    // order.status). add_tracking writes only the timeline step and reads back the current order row.
     const fulfillInclude = { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } } as const;
     let decrementedStockIds: string[] = [];
     const updated = await this.prisma.client.$transaction(
       async (tx) => {
-        let readStatus: string | undefined;
+        let readStatus = order.status;
         if (action === 'cancel') {
           readStatus = await this.fulfillmentRoutingService.cancelOrderFulfilment(tx, businessId, orderId);
         } else if (action === 'ship') {
@@ -2360,24 +2368,23 @@ export class MarketplaceService {
           readStatus = shipped.readStatus;
         }
         await appendOrderTimeline(tx, businessId, orderId, steps);
-        if (readStatus !== undefined) {
-          const { count } = await tx.marketplaceOrder.updateMany({
-            where: { id: orderId, businessId, status: readStatus },
-            data: updateData,
-          });
-          if (count === 0) {
-            throw new ConflictException(
-              action === 'cancel' ? ORDER_STATUS_CHANGED_DURING_CANCEL : ORDER_STATUS_CHANGED_DURING_EDIT,
-            );
-          }
+        if (action === 'add_tracking') {
           return tx.marketplaceOrder.findFirstOrThrow({
             where: { id: orderId, businessId },
             include: fulfillInclude,
           });
         }
-        return tx.marketplaceOrder.update({
-          where: { id: orderId },
+        const { count } = await tx.marketplaceOrder.updateMany({
+          where: { id: orderId, businessId, status: readStatus },
           data: updateData,
+        });
+        if (count === 0) {
+          throw new ConflictException(
+            action === 'cancel' ? ORDER_STATUS_CHANGED_DURING_CANCEL : ORDER_STATUS_CHANGED_DURING_EDIT,
+          );
+        }
+        return tx.marketplaceOrder.findFirstOrThrow({
+          where: { id: orderId, businessId },
           include: fulfillInclude,
         });
       },
@@ -2735,7 +2742,7 @@ export class MarketplaceService {
    * invoice, another notification and timeline event, the webhook, routing).
    */
   private emitOrderLifecycleEvent(businessId: string, order: any, status: string, extra?: { refundAmount?: number }) {
-    const normalizedStatus = status.toLowerCase();
+    const normalizedStatus = status.trim().toLowerCase();
     switch (normalizedStatus) {
       case 'shipped':
         this.events.emit('store_order.shipped', { order, businessId } as StoreOrderShippedPayload);

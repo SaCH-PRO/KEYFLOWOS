@@ -234,8 +234,8 @@ const PROVIDER_LABEL: Record<string, string> = { wipay: 'WiPay', stripe: 'Stripe
  * generic storefront checkout sends it to no provider.
  */
 export function isClosedStorefrontOrder(order: { status?: string | null; paymentStatus?: string | null }): boolean {
-  const status = (order.status ?? '').toUpperCase();
-  return status === 'CANCELLED' || status === 'REFUNDED' || (order.paymentStatus ?? '').toUpperCase() === 'REFUNDED';
+  const status = (order.status ?? '').trim().toUpperCase();
+  return status === 'CANCELLED' || status === 'REFUNDED' || (order.paymentStatus ?? '').trim().toUpperCase() === 'REFUNDED';
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -1827,7 +1827,9 @@ export class StoreOrderService {
             where: { id: activeOrder.id },
             data: {
               paymentStatus: 'PAID',
-              status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : (input.paidStatus ?? 'CONFIRMED'),
+              status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.trim().toUpperCase())
+                ? currentStatus.trim()
+                : (input.paidStatus ?? 'CONFIRMED'),
               paymentRef,
             },
             include: { items: true },

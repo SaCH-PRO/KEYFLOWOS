@@ -3128,8 +3128,13 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
     for (const spelling of ['processing', 'pending', 'confirmed', 'Processing', ' routed ', 'on_hold']) {
       await setStock(ID.stockA, IN_STOCK);
       const order = await routedOrderOfA2();
-      // The marketplace route writes the status as sent (every PATCH status other than a cancel is unchanged).
-      expect(await statusAnswer(marketStatusByRoute(order.id, { status: spelling })), JSON.stringify(spelling)).toBe(`${spelling}/PAID`);
+      // W1F-ORDER-TRANSITIONS review R1-SEC-01: PATCH /marketplace/.../status trims surrounding spaces while keeping
+      // caller casing. For padded spellings (e.g. legacy pre-R1 rows stored ' routed '), seed the padded value directly
+      // after verifying PATCH trims it so cancel-of-padded-row coverage stays intact.
+      expect(await statusAnswer(marketStatusByRoute(order.id, { status: spelling })), JSON.stringify(spelling)).toBe(`${spelling.trim()}/PAID`);
+      if (spelling !== spelling.trim()) {
+        await db.marketplaceOrder.update({ where: { id: order.id }, data: { status: spelling } });
+      }
       seen = [];
       const answer = await statusAnswer(marketStatusByRoute(order.id, { status: 'cancelled' }));
       // At 3fdf2399: 400 'Cannot cancel order in <spelling> status', the order left open with its route RESERVED and A at
