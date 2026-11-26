@@ -627,14 +627,14 @@ export function hasAdminSession(): boolean {
 
 /**
  * May this browser open the Owner Console (owner ruling D-290)? Only on the separate admin sign-in: a local admin
- * session (hasAdminSession) whose own user is SUPER_ADMIN. The admin sign-in always writes kf_admin_user_cache, and
- * that user decides; only a session without it falls back to the app user's cached role. The app session alone never
- * opens it. Both the admin layout's guard and the Owner Console link (useAppLayout) use this one predicate, so the
- * link is offered exactly where the shell would open. Shape only; the API stays the authority.
+ * session (hasAdminSession) whose OWN user, kf_admin_user_cache as the admin sign-in writes it, is SUPER_ADMIN. The
+ * app session's user is never consulted (COR-1): a token without its admin user does not open it. Both the admin
+ * layout's guard and the Owner Console link (useAppLayout) use this one predicate, so the link is offered exactly
+ * where the shell would open. Shape only; the API stays the authority.
  */
 export function canOpenOwnerConsole(): boolean {
   if (!hasAdminSession()) return false;
-  return (getCachedAdminUser() ?? getCachedUser())?.role === "SUPER_ADMIN";
+  return getCachedAdminUser()?.role === "SUPER_ADMIN";
 }
 
 export function getUserDisplayName(): string {

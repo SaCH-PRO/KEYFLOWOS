@@ -116,13 +116,20 @@ function getRedirect(pathname: string, search: string): string | null {
  * `/admin/*` (except /admin/login) is gated separately, on the admin session
  * cookie rather than the user's (RR-ADMIN-SHELL-SERVER-GATE).
  */
+/** The pathname with only its valid ASCII escapes (%00-%7F) decoded; never throws. */
+function decodeAsciiEscapes(pathname: string): string {
+  return pathname.replace(/%([0-7][0-9A-Fa-f])/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   // 0. Admin shell gating runs first, on the DECODED pathname: Next routes
   // /%61dmin/users and /admin%2Fusers to the admin pages too, so a raw-path
   // check would let them fall through to the /app rules (where a user's
-  // kf_token passes). A pathname that cannot be decoded is refused, closed.
+  // kf_token passes). A pathname that cannot be decoded is refused, closed,
+  // when it is an /admin path, judged with its valid ASCII escapes decoded
+  // (so /%61dmin/%ZZ counts); any other keeps its own rules (COR-2).
   // Every /admin page except the login page requires an unexpired
   // admin-shaped kf_admin_token cookie (lib/admin-session.ts); otherwise the
   // shell's HTML is not served: redirect to /admin/login and clear the admin
@@ -133,7 +140,8 @@ export function middleware(req: NextRequest) {
   } catch {
     decoded = null;
   }
-  if (decoded === null || decoded === "/admin" || decoded.startsWith("/admin/")) {
+  const underAdmin = (p: string) => p === "/admin" || p.startsWith("/admin/");
+  if (underAdmin(decoded ?? decodeAsciiEscapes(pathname))) {
     if (decoded !== null && isAdminLoginPath(decoded)) {
       return NextResponse.next();
     }

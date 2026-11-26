@@ -83,6 +83,8 @@ describe("D-290: the Owner Console link needs a local admin session", () => {
   it("OCL-02 a SUPER_ADMIN with an unexpired admin token is offered the link", async () => {
     signIn("SUPER_ADMIN");
     window.localStorage.setItem("kf_admin_token", adminToken(Date.now() + HOUR));
+    // Repair round 3 (COR-1): the admin session as the admin sign-in writes it, token AND its own user.
+    window.localStorage.setItem("kf_admin_user_cache", JSON.stringify({ id: "a", email: "admin@ocl.test", role: "SUPER_ADMIN" }));
     expect(await isAdminUserAfterLoad()).toBe(true);
   });
 

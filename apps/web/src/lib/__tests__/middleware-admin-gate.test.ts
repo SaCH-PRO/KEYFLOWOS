@@ -193,8 +193,10 @@ describe("MAG-07 encoded admin paths are gated on the decoded pathname", () => {
   it("an encoded /admin/login is still exempt", () => {
     expectPassed(middleware(request("/admin/%6Cogin")));
   });
-  it("a pathname that cannot be decoded is refused to /admin/login", () => {
-    const res = middleware(request("/%E0%A4%A", { kf_token: freshUserJwt() }));
+  // Repair round 3 (COR-2): an undecodable pathname fails closed when it is an /admin path (an encoded prefix
+  // counts); a malformed /app path keeps the /app rules (middleware-admin-gate-r3.test.ts MAG-11/12).
+  it("an /admin pathname that cannot be decoded is refused to /admin/login", () => {
+    const res = middleware(request("/%61dmin/%E0%A4%A", { kf_token: freshUserJwt() }));
     expect(res.status).toBe(307);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/admin/login");
   });
