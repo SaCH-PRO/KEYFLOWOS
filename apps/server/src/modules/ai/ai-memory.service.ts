@@ -15,7 +15,9 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import {
   classifyAiMemoryWrite,
   isMemoryRowDataClass,
+  mergeMemoryClassifications,
   modulesFromIdentifiers,
+  mostRestrictiveDataClass,
   unionModuleScopes,
   type MemoryRowDataClass,
 } from './memory-classification';
@@ -225,25 +227,59 @@ export async function upsertAiMemoryDroppingStaleCopies(
 ): Promise<{ row: AiMemory; dropped: DroppedAiMemoryCopy[] }> {
   const { category, key } = row;
   const createValue = typeof write.create.value === 'string' ? write.create.value : null;
-  const updateValue = typeof write.update.value === 'string' ? write.update.value : createValue;
-  const rawCreateClass = write.create.dataClass;
-  const rawUpdateClass = typeof write.update.dataClass === 'string' ? write.update.dataClass : undefined;
+  const rawCreateClass = isMemoryRowDataClass(write.create.dataClass) ? write.create.dataClass : null;
+  const rawUpdateClass =
+    typeof write.update.dataClass === 'string' && isMemoryRowDataClass(write.update.dataClass)
+      ? write.update.dataClass
+      : null;
   const rawCreateScope = Array.isArray(write.create.moduleScope) ? write.create.moduleScope : undefined;
   const rawUpdateScope = Array.isArray(write.update.moduleScope) ? write.update.moduleScope : undefined;
-  const classified = classifyAiMemoryWrite({
+
+  const createClassified = classifyAiMemoryWrite({
     category,
     key,
-    value: updateValue,
+    value: createValue,
     source: typeof write.create.source === 'string' ? write.create.source : null,
-    explicitDataClass: isMemoryRowDataClass(rawUpdateClass)
-      ? rawUpdateClass
-      : isMemoryRowDataClass(rawCreateClass)
-        ? rawCreateClass
-        : null,
-    explicitModuleScope: unionModuleScopes(rawCreateScope, rawUpdateScope),
+    explicitDataClass: rawCreateClass,
+    explicitModuleScope: rawCreateScope ?? null,
   });
 
+  const explicitUpdateClass =
+    rawCreateClass || rawUpdateClass
+      ? mostRestrictiveDataClass([rawCreateClass, rawUpdateClass])
+      : null;
+  const explicitUpdateScope = unionModuleScopes(rawCreateScope, rawUpdateScope);
+
   const rewritten = await prisma.client.$transaction(async (tx) => {
+    const existing = await tx.aiMemory.findUnique({
+      where: { businessId_category_key: { businessId, category, key } },
+      select: { value: true, dataClass: true, moduleScope: true },
+    });
+
+    const effectiveUpdateValue =
+      typeof write.update.value === 'string'
+        ? write.update.value
+        : (existing?.value ?? createValue);
+
+    const updateClassifiedBase = classifyAiMemoryWrite({
+      category,
+      key,
+      value: effectiveUpdateValue,
+      source: typeof write.create.source === 'string' ? write.create.source : null,
+      explicitDataClass: explicitUpdateClass,
+      explicitModuleScope: explicitUpdateScope,
+    });
+
+    const updateClassified = existing
+      ? mergeMemoryClassifications([
+          {
+            dataClass: isMemoryRowDataClass(existing.dataClass) ? existing.dataClass : null,
+            moduleScope: Array.isArray(existing.moduleScope) ? existing.moduleScope : null,
+          },
+          updateClassifiedBase,
+        ])
+      : updateClassifiedBase;
+
     const written = await tx.aiMemory.upsert({
       where: { businessId_category_key: { businessId, category, key } },
       create: {
@@ -251,13 +287,13 @@ export async function upsertAiMemoryDroppingStaleCopies(
         businessId,
         category,
         key,
-        dataClass: classified.dataClass,
-        moduleScope: classified.moduleScope,
+        dataClass: createClassified.dataClass,
+        moduleScope: createClassified.moduleScope,
       },
       update: {
         ...write.update,
-        dataClass: classified.dataClass,
-        moduleScope: classified.moduleScope,
+        dataClass: updateClassified.dataClass,
+        moduleScope: updateClassified.moduleScope,
       },
     });
     const dropped = await tx.$queryRaw<DroppedAiMemoryCopy[]>(

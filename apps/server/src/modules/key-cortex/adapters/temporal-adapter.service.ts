@@ -136,24 +136,33 @@ export class TemporalAdapterService {
     // handed back is the one written (a row rewritten since the check is neither written nor handed back).
     const checked = await this.visibleRowFor(input);
     const existing = checked ?? (await this.temporal.findById(input.businessId, input.memoryId));
-    const classified = existing
-      ? mergeMemoryClassifications([
-          {
-            dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
-              ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
-              : null,
-            moduleScope: (existing as { moduleScope?: string[] }).moduleScope ?? null,
-          },
-          classifyTemporalMemoryWrite({
-            entityType: existing.entityType,
-            entityId: existing.entityId,
-            type: existing.type,
-            sourceModule: existing.sourceModule,
-            content: nextContent ?? existing.content,
-            sourceEventIds: Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [],
-          }),
-        ])
-      : undefined;
+    let classified: { dataClass: MemoryRowDataClass; moduleScope: string[] } | undefined;
+    if (existing) {
+      const existingEventIds = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
+      const isOpaque = existing.entityType === 'business' || existing.sourceModule === 'key_cortex';
+      const resolved =
+        !isOpaque && existingEventIds.length > 0 && typeof this.temporal.resolveSourceEvents === 'function'
+          ? await this.temporal.resolveSourceEvents(input.businessId, existingEventIds)
+          : { sourceEvents: [], hasMissingSourceEvents: false };
+      classified = mergeMemoryClassifications([
+        {
+          dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
+            ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+            : null,
+          moduleScope: (existing as { moduleScope?: string[] }).moduleScope ?? null,
+        },
+        classifyTemporalMemoryWrite({
+          entityType: existing.entityType,
+          entityId: existing.entityId,
+          type: existing.type,
+          sourceModule: existing.sourceModule,
+          content: nextContent ?? existing.content,
+          sourceEvents: resolved.sourceEvents,
+          sourceEventIds: existingEventIds,
+          hasMissingSourceEvents: resolved.hasMissingSourceEvents,
+        }),
+      ]);
+    }
     const patch = {
       content: nextContent,
       confidence,
@@ -179,6 +188,11 @@ export class TemporalAdapterService {
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
     const added = stringTags(input.tags);
     const tags = Array.from(new Set([...existingTags, ...added]));
+    const isOpaque = existing.entityType === 'business' || existing.sourceModule === 'key_cortex';
+    const resolved =
+      !isOpaque && existingTags.length > 0 && typeof this.temporal.resolveSourceEvents === 'function'
+        ? await this.temporal.resolveSourceEvents(input.businessId, existingTags)
+        : { sourceEvents: [], hasMissingSourceEvents: false };
     const classified = mergeMemoryClassifications([
       {
         dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
@@ -195,7 +209,9 @@ export class TemporalAdapterService {
         type: existing.type,
         sourceModule: existing.sourceModule,
         content: existing.content,
+        sourceEvents: resolved.sourceEvents,
         sourceEventIds: tags,
+        hasMissingSourceEvents: resolved.hasMissingSourceEvents,
       }),
     ]);
     const patch = {

@@ -520,14 +520,17 @@ export function classifyTemporalMemoryWrite(
     classes.push('UNCLASSIFIED');
   }
 
-  // Classify every source event and union/restrict
+  // Classify every source event and union/restrict; unresolved non-opaque sourceEventIds fail closed
   const sourceEvents = input.sourceEvents ?? [];
+  const hasUnresolvedSourceEvents =
+    Boolean(input.hasMissingSourceEvents) ||
+    (!isOpaqueCortexMemory && (input.sourceEventIds?.length ?? 0) > 0 && sourceEvents.length === 0);
   for (const ev of sourceEvents) {
     const evClass = classifyTemporalEvent(ev);
     classes.push(evClass.dataClass);
     for (const m of evClass.moduleScope) scopes.add(m);
   }
-  if (input.hasMissingSourceEvents) {
+  if (hasUnresolvedSourceEvents) {
     classes.push('UNCLASSIFIED');
   }
 
@@ -536,7 +539,7 @@ export function classifyTemporalMemoryWrite(
     [input.entityType, input.type, input.sourceModule, input.entityId].some((v) => isMoneyLabel(v)) ||
     textStatesMoney(input.content);
   const expenseTaint =
-    [input.entityType, input.type, input.sourceModule].some(textStatesExpense) ||
+    [input.entityType, input.type, input.sourceModule, input.entityId].some(textStatesExpense) ||
     textStatesExpense(input.content);
 
   if (moneyTaint) {
@@ -550,7 +553,7 @@ export function classifyTemporalMemoryWrite(
 
   if (scopes.has('revenue') || scopes.has('expenses')) {
     classes.push('REVENUE');
-  } else if (!isOpaqueCortexMemory && scopes.size > 0 && !input.hasMissingSourceEvents) {
+  } else if (!isOpaqueCortexMemory && scopes.size > 0 && !hasUnresolvedSourceEvents) {
     classes.push('GENERAL');
   }
 
@@ -603,31 +606,34 @@ export function classifyEmbeddingWrite(
 
   switch (input.sourceType) {
     case 'memory': {
-      // If source AiMemory classification wasn't provided, derive from metadata (category/key) + content
-      if (!isMemoryRowDataClass(input.sourceDataClass) && !isMemoryRowDataClass(input.explicitDataClass)) {
-        const category = typeof meta.category === 'string'
-          ? meta.category
-          : typeof meta.type === 'string'
-            ? meta.type
-            : '';
-        const key = typeof meta.key === 'string' ? meta.key : '';
-        if (category) {
-          const derived = classifyAiMemoryWrite({
-            category,
-            key,
-            value: input.content,
-            source: typeof meta.source === 'string' ? meta.source : null,
-          });
-          classes.push(derived.dataClass);
-          for (const m of derived.moduleScope) scopes.add(m);
-        } else {
-          classes.push('UNCLASSIFIED');
-        }
+      // Always derive structural provenance from metadata when category/type is present
+      // so a weaker caller explicitDataClass cannot downgrade a legacy or sensitive source.
+      const category = typeof meta.category === 'string'
+        ? meta.category
+        : typeof meta.type === 'string'
+          ? meta.type
+          : '';
+      const key = typeof meta.key === 'string' ? meta.key : '';
+      if (category) {
+        const derived = classifyAiMemoryWrite({
+          category,
+          key,
+          value: input.content,
+          source: typeof meta.source === 'string' ? meta.source : null,
+        });
+        classes.push(derived.dataClass);
+        for (const m of derived.moduleScope) scopes.add(m);
+      } else if (!isMemoryRowDataClass(input.sourceDataClass) && !isMemoryRowDataClass(input.explicitDataClass)) {
+        classes.push('UNCLASSIFIED');
       }
       break;
     }
     case 'temporal_memory': {
-      if (!isMemoryRowDataClass(input.sourceDataClass) && !isMemoryRowDataClass(input.explicitDataClass)) {
+      const hasMetaProvenance =
+        typeof meta.entityType === 'string' ||
+        typeof meta.entityId === 'string' ||
+        typeof meta.sourceModule === 'string';
+      if (hasMetaProvenance) {
         const derived = classifyTemporalMemoryWrite({
           entityType: typeof meta.entityType === 'string' ? meta.entityType : 'business',
           entityId: typeof meta.entityId === 'string' ? meta.entityId : null,
@@ -637,6 +643,8 @@ export function classifyEmbeddingWrite(
         });
         classes.push(derived.dataClass);
         for (const m of derived.moduleScope) scopes.add(m);
+      } else if (!isMemoryRowDataClass(input.sourceDataClass) && !isMemoryRowDataClass(input.explicitDataClass)) {
+        classes.push('UNCLASSIFIED');
       }
       break;
     }
