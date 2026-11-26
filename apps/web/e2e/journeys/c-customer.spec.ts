@@ -304,7 +304,11 @@ test.describe("journey C: one customer record", () => {
       const search = page.getByPlaceholder(/search/i).filter({ visible: true }).last();
       await expect(search).toBeVisible();
       await search.fill(last);
-      await page.getByRole("option", { name: new RegExp(last) }).or(page.getByRole("link", { name: new RegExp(last) })).first().click();
+      // The palette's own result, inside its dialog: Today links the same customer (FCP-COR-1) behind the palette's
+      // backdrop, and the first match in the document would be that link (FU-PALETTE-INERT: the palette does not make
+      // the page behind it inert).
+      const palette = page.getByRole("dialog").filter({ has: search });
+      await palette.getByRole("option", { name: new RegExp(last) }).or(palette.getByRole("link", { name: new RegExp(last) })).first().click();
       await expectContactPage(page, contact.id, name);
     });
 

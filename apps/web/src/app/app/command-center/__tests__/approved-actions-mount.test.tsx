@@ -170,6 +170,10 @@ function serve({
       executeCalls += 1;
       return jsonResponse(answer.status, answer.body);
     }
+    // TODAY-4BLOCK SEC-T4B-1: Today shows KEY UI only on an explicit keyDisabled: false; this states D-72's KEY-on premise.
+    if (method === "GET" && pathname.endsWith("/identity/me")) {
+      return jsonResponse(200, { id: "u_d72_owner", email: "owner@d72.test.local", keyDisabled: false });
+    }
     return jsonResponse(503, { message: "Service Unavailable" });
   }));
   return {

@@ -30,7 +30,7 @@ import {
 } from "@/lib/client";
 import { payBill, voidBill } from "@/lib/api/finance";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { formatCurrency, formatDate } from "../components/expense-utils";
+import { businessCurrency, formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -180,7 +180,7 @@ export default function ExpenseDetailPage() {
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              {formatCurrency(expense.amount)} · {category?.name || "Uncategorized"} · {expense.vendor || "—"} · {expense.paymentMethod || "—"}
+              {formatCurrency(expense.amount, expense.currency, businessId)} · {category?.name || "Uncategorized"} · {expense.vendor || "—"} · {expense.paymentMethod || "—"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -210,9 +210,9 @@ export default function ExpenseDetailPage() {
         {/* Info cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
           {[
-            { label: "Amount", value: formatCurrency(expense.amount), sub: expense.currency || "USD" },
+            { label: "Amount", value: formatCurrency(expense.amount, expense.currency, businessId), sub: expense.currency || businessCurrency(businessId) },
             { label: "Merchant", value: expense.vendor || "—", sub: expense.isRecurring ? "Recurring SaaS" : "One-time" },
-            { label: "Date", value: formatDate(expense.date), sub: "Uploaded today" },
+            { label: "Date", value: formatDate(expense.date, businessId), sub: "Uploaded today" },
             { label: "Status", value: status.label, sub: expense.status === "BILL" ? "Policy check passed" : "Recorded" },
             { label: "Approval", value: isPending ? "Manager" : "Self", sub: isPending ? "Jane → Finance" : "Auto-approved" },
           ].map((card, i) => (
@@ -328,20 +328,20 @@ export default function ExpenseDetailPage() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Monthly budget</span>
-                    <span className="font-semibold text-foreground">{formatCurrency(budget.amount)}</span>
+                    <span className="font-semibold text-foreground">{formatCurrency(budget.amount, undefined, businessId)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Spent so far</span>
-                    <span className="font-semibold text-foreground">{formatCurrency(budget.spent)}</span>
+                    <span className="font-semibold text-foreground">{formatCurrency(budget.spent, undefined, businessId)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">This expense</span>
-                    <span className="font-semibold text-foreground">{formatCurrency(expense.amount)}</span>
+                    <span className="font-semibold text-foreground">{formatCurrency(expense.amount, expense.currency, businessId)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Remaining after</span>
                     <span className={cn("font-semibold", remainingAfter < 0 ? "text-rose-600" : "text-foreground")}>
-                      {formatCurrency(remainingAfter)}
+                      {formatCurrency(remainingAfter, undefined, businessId)}
                     </span>
                   </div>
                   <div className="pt-1">

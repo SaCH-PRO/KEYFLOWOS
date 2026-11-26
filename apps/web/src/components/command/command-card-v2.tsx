@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
@@ -19,6 +19,13 @@ import { Surface } from "@/components/ui-v2/surface";
 import { Badge } from "@/components/ui-v2/badge";
 import { Button } from "@/components/ui-v2/button";
 import type { CommandItem } from "@/lib/api/command";
+
+/**
+ * TODAY-4BLOCK repair round 1 (COR-1, P211 FU-KEY-CARD-DISABLED): true while KEY is switched off (KEY_DISABLED, read from
+ * GET /identity/me) or not yet known. A card then shows neither the "KEY can handle" badge nor the Execute action. A
+ * screen that mounts the queue provides it; with no provider a card behaves as before.
+ */
+export const CommandKeyDisabledContext = createContext<boolean>(false);
 
 type V2AccentColor = "orange" | "teal" | "violet" | "gold" | "rose" | "mint" | "sky" | "muted";
 
@@ -89,8 +96,10 @@ export function CommandCardV2({
   actionsDisabledReason = null,
 }: CommandCardProps) {
   const router = useRouter();
+  const keyDisabled = useContext(CommandKeyDisabledContext);
   const [loading, setLoading] = useState<string | null>(null);
   const color = CATEGORY_COLORS[item.category] ?? "orange";
+  const keyCanRun = item.executableByKey && !keyDisabled;
   const actionsDisabled = !!loading || !!actionsDisabledReason;
 
   const handleAction = async (action: string, handler?: (id: string) => void | Promise<void>) => {
@@ -171,7 +180,7 @@ export function CommandCardV2({
                 Due {new Date(item.dueAt).toLocaleDateString()}
               </span>
             )}
-            {item.executableByKey && (
+            {keyCanRun && (
               <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-primary">
                 <Bot className="w-3 h-3" />
                 KEY can handle
@@ -221,7 +230,7 @@ export function CommandCardV2({
                 Approve
               </Button>
             )}
-            {item.executableByKey && onExecute && (
+            {keyCanRun && onExecute && (
               <Button
                 onClick={() => void handleAction("execute", onExecute)}
                 isLoading={loading === "execute"}

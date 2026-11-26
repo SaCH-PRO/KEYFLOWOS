@@ -200,6 +200,26 @@ export async function voidCreditNote(businessId: string, id: string) {
 // voids it (the reversal of its postings), through the existing bill doors.
 // Each answers the expense row as it now stands.
 
+// EXPENSES-HUB-2 (BUG-059): a bill to pay later, through the existing bill door
+// (POST /finance/.../bills: status BILL, credits payables, not cash). No
+// currency: the server writes the business currency (FOLLOW3-B4, D-13). The
+// door takes these fields only; a receipt or tags are written onto the bill
+// after it is created (PATCH .../expenses/:id).
+export interface CreateBillBody {
+  description: string;
+  amount: number;
+  date?: string;
+  dueDate?: string;
+  vendor?: string;
+  notes?: string;
+  categoryId?: string;
+  contactId?: string;
+}
+
+export async function createBill(businessId: string, body: CreateBillBody) {
+  return apiPost<Expense>({ path: `/finance/businesses/${encodeURIComponent(businessId)}/bills`, body });
+}
+
 export async function payBill(businessId: string, billId: string, body: { paymentMethod?: string; paidAt?: string } = {}) {
   return apiPost<Expense>({ path: `/finance/businesses/${encodeURIComponent(businessId)}/bills/${encodeURIComponent(billId)}/pay`, body });
 }

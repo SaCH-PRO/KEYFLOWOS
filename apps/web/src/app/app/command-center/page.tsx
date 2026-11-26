@@ -1,24 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+/**
+ * Today (/app/command-center; label 'Today', D-151). TODAY-4BLOCK (v1 step 5; BUG-069, BUG-010, FCP-COR-1): the page
+ * is the four blocks of today/today-blocks.tsx, read from one server read, GET .../today (TODAY-AGGREGATE). The
+ * mission-control hero, the health strip, the genome cards and readiness grid, the cockpit tiles and the KEY
+ * briefing cards are gone: nothing here scores the business (journeys A8, I5).
+ *
+ * Kept, inside the blocks: the command queue with its operations gating (W7-WEB-OPS-SCOPE, D-40; WOS-C01..C07) and
+ * the approved KEY actions panel with Run (D-72) in Needs you, and what is due this week in Today. Under
+ * KEY_DISABLED no KEY UI renders here: the one KEY switch reader is main's useKeyEnabled (hooks/use-key-enabled.ts,
+ * fail closed), the same one the header and the KEY shell read.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { useRouter } from "next/navigation";
-import { openKey, KeyAwarenessPanel, KeyNoticedStream } from "@/components/key";
 import {
   LayoutDashboard,
   CalendarClock,
-  Loader2,
-  AlertTriangle,
   RefreshCw,
-  Bot,
-  BrainCircuit,
   Clock,
   Inbox,
-  Target,
   TrendingUp,
   ShieldCheck,
-  Zap,
   LayoutGrid,
   Banknote,
   Users,
@@ -28,22 +30,12 @@ import {
   Store,
   Calendar,
   Settings,
-  Receipt,
-  CreditCard,
-  History,
-  type LucideIcon,
 } from "lucide-react";
-import { BusinessActivityFeed } from "@/components/timeline/business-timeline";
-import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
-import {
-  getBusinessCommandCenterSnapshot,
-  type BusinessCommandCenterSnapshot,
-  type CommandCenterResult,
-  type CommandCenterResults,
-  type CommandCenterSource,
-} from "@/lib/api/business-command-center";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
+import { getStoredBusinessId, ensureWorkspace, getCachedBusiness, BUSINESS_CHANGED_EVENT } from "@/lib/workspace";
+import { fetchToday, type TodayAggregate } from "@/lib/api/today";
+import { retryKeySwitch, useKeyEnabled, useKeySwitchFailed } from "@/hooks/use-key-enabled";
 import {
   fetchCommandItems,
   completeCommandItem,
@@ -59,31 +51,17 @@ import {
 import { DueObligationsPanel } from "./components/due-obligations-panel";
 import { ApprovedActionsPanel } from "../control-tower/components/approved-actions-queue";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
+import { CommandKeyDisabledContext } from "@/components/command/command-card-v2";
 import { commandActionsDisabledReason, operationsLevelFromAnswer, type OperationsLevel } from "@/lib/module-access";
-import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
-import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
-import { BusinessPulseCardV2 } from "./components-v2/business-pulse-card-v2";
-import { KeyBriefingCardV2 } from "./components-v2/key-briefing-card-v2";
-import { GovernanceSummaryCardV2 } from "./components-v2/governance-summary-card-v2";
-import { CommandItemCardV2 } from "./components-v2/command-item-card-v2";
-import { CommandExecutiveModeGridV2 } from "./components-v2/command-executive-mode-grid-v2";
-import { CommandGenomeOrbCard } from "./components/command-genome-orb-card";
-import { CommandKeyGenomeCardV2 } from "./components-v2/command-key-genome-card-v2";
-import { CommandModuleReadinessGrid } from "./components-v2/command-module-readiness-grid";
-import { CommandConstitutionCardV2 } from "./components-v2/command-constitution-card-v2";
-import { CrossDomainPanelV2 } from "./components-v2/cross-domain-panel-v2";
-import { CommandGenomeOutcomesCardV2 } from "./components-v2/command-genome-outcomes-card-v2";
-import { NudgesWidgetV2 } from "./components-v2/nudges-widget-v2";
-import { MissionControlHero } from "./components-v2/mission-control-hero";
 import { CommandSection } from "./components/command-section";
+import { TodayBlocks } from "./today/today-blocks";
 import {
   ModuleLauncherSheet,
   type ModuleLauncherSection,
 } from "@/components/ui/module-launcher-sheet";
 
-function CommandQuickLauncher() {
+function CommandQuickLauncher({ keyDisabled }: { keyDisabled: boolean }) {
   const [open, setOpen] = useState(false);
-
   const sections: ModuleLauncherSection[] = [
     {
       id: "flows",
@@ -101,7 +79,8 @@ function CommandQuickLauncher() {
       id: "core",
       label: "Core",
       items: [
-        { id: "key-chat", label: "KEY Chat", icon: MessageSquare, href: "/app/key/chat", tone: "primary" },
+        // KEY_DISABLED: no KEY door on Today.
+        ...(keyDisabled ? [] : [{ id: "key-chat", label: "KEY Chat", icon: MessageSquare, href: "/app/key/chat", tone: "primary" as const }]),
         { id: "commerce", label: "Commerce", icon: TrendingUp, href: "/app/commerce", tone: "orange" },
         { id: "events", label: "Events", icon: Calendar, href: "/app/events", tone: "teal" },
         // NAV-A3 (BUG-108): the store, not the Sales hub.
@@ -141,195 +120,174 @@ function CommandQuickLauncher() {
   );
 }
 
-/* ── V1-47-COCKPIT-TRUTH ─────────────────────────────────────────────────
-   The Release 0 records, each linked to its list, and a banner whenever a
-   source the server read did not answer. A count that is not known reads
-   "Unavailable" (the source failed) or "No access" (this member may not read
-   that list), never 0: a 0 here is always a real zero. */
-
-const RESULT_TILES: Array<{ key: keyof CommandCenterResults; icon: LucideIcon }> = [
-  { key: "contacts", icon: Users },
-  { key: "openInvoices", icon: Receipt },
-  { key: "payments", icon: CreditCard },
-];
-
-function resultValue(result: CommandCenterResult): string {
-  if (result.status === "OK" && result.count !== null) return String(result.count);
-  return result.status === "RESTRICTED" ? "No access" : "Unavailable";
-}
-
-function ReleaseResultTiles({ results }: { results: CommandCenterResults }) {
-  return (
-    <div data-testid="cockpit-results" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      {RESULT_TILES.map(({ key, icon: Icon }) => {
-        const result = results[key];
-        const known = result.status === "OK" && result.count !== null;
-        return (
-          <Link
-            key={key}
-            href={result.href}
-            data-testid={`cockpit-result-${key}`}
-            className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-4 py-3 hover:bg-card hover:border-primary/20 transition-colors focus-ring"
-          >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-              <Icon className="h-4 w-4 text-primary" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">{result.label}</p>
-              <p
-                data-testid="cockpit-result-count"
-                className={known ? "text-xl font-semibold text-foreground" : "text-sm font-medium text-muted-foreground"}
-              >
-                {resultValue(result)}
-              </p>
-            </div>
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-function DegradedBanner({ sources }: { sources: Record<string, CommandCenterSource> }) {
-  const failed = Object.values(sources)
-    .filter((source) => source.status === "FAILED")
-    .map((source) => source.label);
-  return (
-    <div
-      role="alert"
-      data-testid="cockpit-degraded-banner"
-      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3"
-    >
-      <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">Part of this cockpit could not be loaded</p>
-        <p className="text-xs text-muted-foreground">
-          {failed.length > 0 ? `Sources that did not answer: ${failed.join(", ")}. ` : "A source did not answer. "}
-          Figures that depend on them may be incomplete; a count that could not be read shows as Unavailable, not 0.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export default function CommandCenterPage() {
-  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<BusinessCommandCenterSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [businessName, setBusinessName] = useState<string | null>(null);
+  const [businessCurrency, setBusinessCurrency] = useState<string | null>(null);
+  const [today, setToday] = useState<{ businessId: string; data: TodayAggregate } | null>(null);
+  const [todayLoading, setTodayLoading] = useState(true);
+  /** A failed read, kept with the business it was for, so it never shows as another business's. */
+  const [todayFailure, setTodayFailure] = useState<{ businessId: string; message: string } | null>(null);
+  const todayRequest = useRef(0);
+  // Repair round 2: one KEY_DISABLED reader for the whole app (FU-KEY-DISABLED-NAV-TODAY). KEY is on only once
+  // GET /identity/me answered keyDisabled: false; while it is in flight or after it failed, KEY is off here.
+  const keySwitch = useKeyEnabled();
+  const keySwitchFailed = useKeySwitchFailed();
 
-  const [commandItems, setCommandItems] = useState<CommandItem[]>([]);
-  const [queueTotal, setQueueTotal] = useState(0);
-  const [queueLoading, setQueueLoading] = useState(false);
+  /**
+   * The command queue, kept with the business it was read for (repair round 3): after a switch nothing of the old
+   * business shows, and a reply for an older request (the old business, or a refresh since) is dropped.
+   */
+  const [queue, setQueue] = useState<{ businessId: string; items: CommandItem[]; total: number; error: string | null } | null>(null);
+  const [queueLoadingFor, setQueueLoadingFor] = useState<string | null>(null);
+  const queueRequest = useRef(0);
+  /**
+   * The business on screen now (repair round 4). An action, or a reload it starts, that was begun for another
+   * business never re-reads or writes for this one: an item action still in flight across a switch leaves the new
+   * business's state alone.
+   */
+  const currentBusiness = useRef<string | null>(null);
   /**
    * W7-WEB-OPS-SCOPE (D-40): the member's operations level as the server's refusals name it; the
-   * queue disables the item actions below write. The cockpit itself is every member's (D-96).
+   * queue disables the item actions below write. Today itself is every member's (D-96). Kept with its business: a
+   * level learned in one business is not applied in another (repair round 3).
    */
-  const [operationsLevel, setOperationsLevel] = useState<OperationsLevel>("unknown");
-  /** An item action's answer: a refusal names the level, and every item action needs write. */
-  const noteActionAnswer = (res: { error?: string | null; status?: number }) => {
+  const [ops, setOps] = useState<{ businessId: string; level: OperationsLevel } | null>(null);
+  /** An item action's answer, for the business it was sent for: a refusal names the level, and every item action needs write. */
+  const noteActionAnswer = (forBusiness: string, res: { error?: string | null; status?: number }) => {
     const refused = operationsLevelFromAnswer(res);
-    if (refused) setOperationsLevel(refused);
+    if (refused) setOps({ businessId: forBusiness, level: refused });
   };
 
   useEffect(() => {
     let cancelled = false;
     const resolveBusinessId = async () => {
       const stored = getStoredBusinessId() ?? null;
-      if (stored) {
-        if (!cancelled) setBusinessId(stored);
-        return;
-      }
-      const resolved = await ensureWorkspace();
-      if (!cancelled) setBusinessId(resolved);
+      const resolved = stored ?? (await ensureWorkspace());
+      if (cancelled) return;
+      setBusinessId(resolved);
+      const cached = getCachedBusiness();
+      setBusinessName(cached && cached.id === resolved ? cached.name : null);
+      setBusinessCurrency(cached && cached.id === resolved ? (cached.currency ?? null) : null);
+      if (!resolved) setTodayLoading(false);
     };
     void resolveBusinessId();
+    // A switch of business in this tab (selectBusiness) moves Today to the new business; the reads below follow it.
+    const onBusinessChanged = (event: Event) => {
+      const next = (event as CustomEvent<{ businessId?: string }>).detail?.businessId ?? getStoredBusinessId();
+      if (!next || cancelled) return;
+      currentBusiness.current = next;
+      setBusinessId(next);
+      const cached = getCachedBusiness();
+      setBusinessName(cached && cached.id === next ? cached.name : null);
+      setBusinessCurrency(cached && cached.id === next ? (cached.currency ?? null) : null);
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     };
   }, []);
 
-  const loadSnapshot = async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    const { data, error: apiError } = await getBusinessCommandCenterSnapshot(businessId);
-    if (apiError || !data) {
-      setError(apiError || "Failed to load command center");
-      setSnapshot(null);
-    } else {
-      setSnapshot(data);
-    }
-    setLoading(false);
-  };
-
-  const loadQueue = async () => {
+  const loadToday = useCallback(async () => {
     if (!businessId) return;
-    setQueueLoading(true);
+    const request = ++todayRequest.current;
+    setTodayLoading(true);
+    const { data, error, status } = await fetchToday(businessId);
+    // A reply for an older request (another business, or a refresh since) changes nothing: it neither clears the
+    // current business's Today nor raises its alert (repair round 2, item 4).
+    if (request !== todayRequest.current) return;
+    if (data) {
+      setToday({ businessId, data });
+      setTodayFailure(null);
+    } else {
+      // SEC-T4B-2, narrowed in repair round 2: a refusal (401, 403) means this member may no longer see it, so what an
+      // earlier read showed is cleared. A 5xx or no answer keeps the last good read of this same business under the
+      // alert, with Retry.
+      if (status === 401 || status === 403) setToday(null);
+      setTodayFailure({ businessId, message: error || "the server did not answer" });
+    }
+    setTodayLoading(false);
+  }, [businessId]);
+
+  /** Retry and Refresh read Today again, and the KEY switch too when its read failed (item 6). */
+  const refreshToday = useCallback(() => {
+    retryKeySwitch();
+    return loadToday();
+  }, [loadToday]);
+
+  const loadQueue = useCallback(async () => {
+    // A reload for a business that is no longer on screen (an action that ended after a switch) does nothing: it
+    // neither drops the current business's read nor writes its state.
+    if (!businessId || currentBusiness.current !== businessId) return;
+    const request = ++queueRequest.current;
+    setQueueLoadingFor(businessId);
     try {
       const res = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      if (request !== queueRequest.current || currentBusiness.current !== businessId) return;
       const { data } = res;
-      setCommandItems(data?.items ?? []);
-      setQueueTotal(data?.total ?? 0);
       // A refused read names the level (none); a read that succeeds means at least read.
       const refused = operationsLevelFromAnswer(res);
-      if (refused) setOperationsLevel(refused);
-      else if (data) setOperationsLevel((prev) => (prev === "none" ? "unknown" : prev));
+      // A read that failed for another reason (a 5xx, no answer) is said, with Retry; never shown as an empty queue
+      // (repair round 4, MINOR 3). A refusal is the queue's own "no operations access" state.
+      const failed = !data && !refused ? res.error || "the server did not answer" : null;
+      setQueue({ businessId, items: data?.items ?? [], total: data?.total ?? 0, error: failed });
+      if (refused) setOps({ businessId, level: refused });
+      else if (data) setOps((prev) => (prev && prev.businessId === businessId && prev.level !== "none" ? prev : { businessId, level: "unknown" }));
     } finally {
-      setQueueLoading(false);
+      if (request === queueRequest.current) setQueueLoadingFor(null);
     }
-  };
+  }, [businessId]);
 
   useEffect(() => {
-    void loadSnapshot();
-    void loadQueue();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    currentBusiness.current = businessId;
   }, [businessId]);
+
+  useEffect(() => {
+    void loadToday();
+    void loadQueue();
+  }, [loadToday, loadQueue]);
 
   const handleComplete = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await completeCommandItem(businessId, id));
+    noteActionAnswer(businessId, await completeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleApprove = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await approveCommandItem(businessId, id));
+    noteActionAnswer(businessId, await approveCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleExecute = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await executeCommandItem(businessId, id));
+    noteActionAnswer(businessId, await executeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleAssign = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await assignCommandItem(businessId, id, "USER", "me"));
+    noteActionAnswer(businessId, await assignCommandItem(businessId, id, "USER", "me"));
     await loadQueue();
   };
 
   const handleDismiss = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await dismissCommandItem(businessId, id));
+    noteActionAnswer(businessId, await dismissCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleSnooze = async (id: string) => {
     if (!businessId) return;
     const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    noteActionAnswer(await snoozeCommandItem(businessId, id, until));
+    noteActionAnswer(businessId, await snoozeCommandItem(businessId, id, until));
     await loadQueue();
   };
 
   const handleReopen = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await reopenCommandItem(businessId, id));
+    noteActionAnswer(businessId, await reopenCommandItem(businessId, id));
     await loadQueue();
   };
 
@@ -337,254 +295,107 @@ export default function CommandCenterPage() {
     if (!businessId) return;
     // W7-WEB-OPS-SCOPE review SEC-WOS-2 (D-40): discharge is an item action too (operations write);
     // its refusal names the level like the queue's actions do.
-    noteActionAnswer(await dischargeObligation(businessId, id, "manual"));
-    // The queue reads the same table, so a discharged obligation has to leave
-    // both lists — refreshing only the panel would show it gone in one place
-    // and present in the other.
+    noteActionAnswer(businessId, await dischargeObligation(businessId, id, "manual"));
+    // The queue reads the same table, so a discharged obligation has to leave both lists.
     await loadQueue();
   };
 
-  if (loading) {
-    return (
-      <WorkspaceShell icon={LayoutDashboard} title="Business Command Center" subtitle="Your operating cockpit">
-        <div className="rounded-2xl border border-border/40 bg-card/40 p-8 flex flex-col items-center justify-center gap-3 h-48 animate-pulse">
-          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Loading command center...</p>
-        </div>
-      </WorkspaceShell>
-    );
-  }
+  const refreshAll = () => {
+    void refreshToday();
+    void loadQueue();
+  };
 
-  if (error || !businessId || !snapshot) {
-    return (
-      <WorkspaceShell icon={LayoutDashboard} title="Business Command Center" subtitle="Your operating cockpit">
-        <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-8 text-center flex flex-col items-center gap-3">
-          <AlertTriangle className="w-6 h-6 text-destructive" />
-          <p className="text-sm text-destructive">{error || "No business selected"}</p>
-          {(error || businessId) && (
-            <button
-              type="button"
-              onClick={() => {
-                void loadSnapshot();
-                void loadQueue();
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" /> Retry
-            </button>
-          )}
-        </div>
-      </WorkspaceShell>
-    );
-  }
+  // KEY UI shows only once GET /identity/me answered keyDisabled: false (SEC-T4B-1: fail closed). The read has settled
+  // when it answered or failed; data-key-read says so (tests wait on it before checking that nothing KEY shows).
+  const keyOff = !keySwitch.enabled;
+  const keyReadSettled = keySwitch.known || keySwitchFailed;
+  const current = today && today.businessId === businessId ? today.data : null;
+  const commandItems = queue && queue.businessId === businessId ? queue.items : [];
+  const queueTotal = queue && queue.businessId === businessId ? queue.total : 0;
+  const queueError = queue && queue.businessId === businessId ? queue.error : null;
+  const queueLoading = queueLoadingFor !== null && queueLoadingFor === businessId;
+  const operationsLevel: OperationsLevel = ops && ops.businessId === businessId ? ops.level : "unknown";
+  const todayError = todayFailure && todayFailure.businessId === businessId ? todayFailure.message : null;
 
   return (
     <WorkspaceShell
       icon={LayoutDashboard}
-      title="Business Command Center"
-      subtitle="Your operating cockpit for priorities, risks, approvals, and KEY recommendations"
+      title={NAV_ROUTE_LABELS["/app/command-center"]}
+      subtitle={businessName ?? "What needs you, what is on today, and how the money stands"}
       actionLabel="Refresh"
       actionIcon={RefreshCw}
-      onAction={() => {
-        void loadSnapshot();
-        void loadQueue();
-      }}
-      headerRight={<CommandQuickLauncher />}
+      onAction={refreshAll}
+      headerRight={<CommandQuickLauncher keyDisabled={keyOff} />}
     >
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-        {snapshot.degraded && <DegradedBanner sources={snapshot.sources ?? {}} />}
-
-        <MissionControlHero businessId={businessId} hullScore={snapshot.keyGenome.overall} />
-
-        {/* A server that predates V1-47 sends no results: show nothing rather than zeros. */}
-        {snapshot.results && <ReleaseResultTiles results={snapshot.results} />}
-
-        <CommandHealthStripV2 health={snapshot.health} />
-
-        <CommandSummaryCardV2 summary={snapshot.summary} />
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <BusinessPulseCardV2
-            overallScore={snapshot.pulse.overallScore}
-            dimensions={snapshot.pulse.dimensions}
-          />
-          <KeyBriefingCardV2 briefing={snapshot.briefing} />
-          <GovernanceSummaryCardV2 governance={snapshot.governance} />
-        </div>
-
-        {/* What is OWED, before what is suggested. The queue below sorts by
-            priority and answers "what should I look at"; this sorts by date and
-            answers "what do I owe". Different questions, same table. */}
-        <CommandSection icon={CalendarClock} title="Due this week">
-          <DueObligationsPanel
-            businessId={businessId}
-            onDischarge={handleDischarge}
-            dischargeDisabledReason={commandActionsDisabledReason(operationsLevel)}
-          />
-        </CommandSection>
-
-        {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps
-            this member may run, each with its D-70 Run action (exactly the
-            stored step, through the bound execute route, no re-planning).
-            /app/control-tower redirects here, so this is where an approval
-            leads to the approved step running. */}
-        <ApprovedActionsPanel key={`approved-actions:${businessId}`} businessId={businessId} />
-
-        <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
-          <CommandQueueV2
-            items={commandItems}
-            total={queueTotal}
-            loading={queueLoading}
-            onRefresh={loadQueue}
-            onComplete={handleComplete}
-            onApprove={handleApprove}
-            onExecute={handleExecute}
-            onAssign={handleAssign}
-            onDismiss={handleDismiss}
-            onSnooze={handleSnooze}
-            onReopen={handleReopen}
-            operationsLevel={operationsLevel}
-          />
-        </CommandSection>
-
-        {/* V1-25-EVT-BUSINESS-FEED (M49): what happened in the business, newest
-            first: payments recorded, invoices paid, contacts, bookings. Read from
-            the tenant-guarded /timeline/businesses/:id/events (Activity rows,
-            D-08); a feed that could not be read says so, never "no activity".
-            That read is not scope-filtered, so it is shown only to a caller the
-            V1-47 tiles report able to read revenue and CRM (SEC-V125-1/2):
-            otherwise "No access", and nothing is read. */}
-        <CommandSection icon={History} title="Business activity">
-          <BusinessActivityFeed businessId={businessId} results={snapshot.results} compact />
-        </CommandSection>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-5">
-            <CommandSection icon={LayoutDashboard} title={`Top Priorities (${snapshot.topPriorities.length})`}>
-              <div className="space-y-2">
-                {snapshot.topPriorities.length === 0 && (
-                  <EmptyState
-                    icon={Target}
-                    title="No top priorities right now"
-                    description="KEY hasn't surfaced anything urgent. Ask KEY to scan for priorities."
-                    actionLabel="Ask KEY for priorities"
-                    actionIcon={Bot}
-                    onAction={() => router.push("/app/key-modes")}
-                    variant="compact"
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} data-key-read={keyReadSettled ? "settled" : "pending"}>
+        {!businessId && !todayLoading ? (
+          <p data-testid="today-unavailable" role="alert" className="text-sm text-destructive">
+            No business selected.
+          </p>
+        ) : (
+          businessId && (
+            <TodayBlocks
+              businessId={businessId}
+              data={current}
+              loading={todayLoading}
+              error={todayError}
+              keyDisabled={keyOff}
+              businessCurrency={businessCurrency}
+              onRefresh={refreshToday}
+              needsYouExtra={
+                <>
+                  {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps this member may run,
+                      each with its D-70 Run action. /app/control-tower redirects here. Not under KEY_DISABLED. */}
+                  {!keyOff && <ApprovedActionsPanel key={`approved-actions:${businessId}`} businessId={businessId} />}
+                  <CommandSection icon={LayoutDashboard} title={queueError ? "Command Queue" : `Command Queue (${queueTotal})`}>
+                    {queueError ? (
+                      <div role="alert" data-testid="command-queue-unavailable" className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-center">
+                        <p className="text-sm text-destructive">The command queue could not be loaded: {queueError}</p>
+                        <button
+                          type="button"
+                          onClick={() => void loadQueue()}
+                          disabled={queueLoading}
+                          aria-busy={queueLoading}
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                        >
+                          <RefreshCw className="h-3 w-3" /> {queueLoading ? "Retrying…" : "Retry"}
+                        </button>
+                      </div>
+                    ) : (
+                    /* COR-1: under KEY_DISABLED no card shows "KEY can handle" or Execute, and no execute handler is given. */
+                    <CommandKeyDisabledContext.Provider value={keyOff}>
+                    <CommandQueueV2
+                      items={commandItems}
+                      total={queueTotal}
+                      loading={queueLoading}
+                      onRefresh={loadQueue}
+                      onComplete={handleComplete}
+                      onApprove={handleApprove}
+                      onExecute={keyOff ? undefined : handleExecute}
+                      onAssign={handleAssign}
+                      onDismiss={handleDismiss}
+                      onSnooze={handleSnooze}
+                      onReopen={handleReopen}
+                      operationsLevel={operationsLevel}
+                    />
+                    </CommandKeyDisabledContext.Provider>
+                    )}
+                  </CommandSection>
+                </>
+              }
+              todayExtra={
+                /* What is OWED, by date: the queue above sorts by priority; this answers "what do I owe". */
+                <CommandSection icon={CalendarClock} title="Due this week">
+                  <DueObligationsPanel
+                    businessId={businessId}
+                    onDischarge={handleDischarge}
+                    dischargeDisabledReason={commandActionsDisabledReason(operationsLevel)}
                   />
-                )}
-                {snapshot.topPriorities.map((item, index) => (
-                  <CommandItemCardV2 key={item.id} item={item} index={index} />
-                ))}
-              </div>
-            </CommandSection>
-
-            <CommandSection icon={Inbox} title={`Pending Approvals (${snapshot.pendingApprovals.length})`}>
-              <div className="space-y-2">
-                {snapshot.pendingApprovals.length === 0 && (
-                  <EmptyState
-                    icon={Inbox}
-                    title="No pending approvals"
-                    description="You're all caught up. Approvals appear when KEY recommends actions that need your sign-off."
-                    variant="compact"
-                    tip="Check back after KEY runs its next business scan."
-                  />
-                )}
-                {snapshot.pendingApprovals.map((item, index) => (
-                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
-                ))}
-              </div>
-            </CommandSection>
-
-            <CommandSection icon={Clock} title={`Urgent Items (${snapshot.urgentItems.length})`}>
-              <div className="space-y-2">
-                {snapshot.urgentItems.length === 0 && (
-                  <EmptyState
-                    icon={Clock}
-                    title="No urgent Temporal Flow items"
-                    description="Your calendar and deadlines look clear."
-                    actionLabel="Go to Temporal Flow"
-                    actionIcon={BrainCircuit}
-                    onAction={() => router.push("/app/temporal-flow")}
-                    variant="compact"
-                  />
-                )}
-                {snapshot.urgentItems.map((item, index) => (
-                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
-                ))}
-              </div>
-            </CommandSection>
-          </div>
-
-          <div className="space-y-5">
-            <NudgesWidgetV2 businessId={businessId} />
-
-            <CommandSection icon={AlertTriangle} title="Risks">
-              <div className="space-y-2">
-                {snapshot.risks.length === 0 && (
-                  <EmptyState
-                    icon={AlertTriangle}
-                    title="No active risks"
-                    description="KEY isn't tracking any risks right now. Populate your Genome to surface them."
-                    actionLabel="Populate Genome"
-                    actionIcon={ShieldCheck}
-                    onAction={() => openKey({ mode: "onboarding" })}
-                    variant="compact"
-                  />
-                )}
-                {snapshot.risks.slice(0, 5).map((item, index) => (
-                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
-                ))}
-              </div>
-            </CommandSection>
-
-            <CommandSection icon={TrendingUp} title="Opportunities">
-              <div className="space-y-2">
-                {snapshot.opportunities.length === 0 && (
-                  <EmptyState
-                    icon={TrendingUp}
-                    title="No opportunities detected"
-                    description="KEY hasn't found growth opportunities yet. A quick scan can change that."
-                    actionLabel="Ask KEY for opportunities"
-                    actionIcon={Zap}
-                    onAction={() => router.push("/app/key-modes")}
-                    variant="compact"
-                  />
-                )}
-                {snapshot.opportunities.slice(0, 5).map((item, index) => (
-                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
-                ))}
-              </div>
-            </CommandSection>
-
-            <CommandKeyGenomeCardV2 keyGenome={snapshot.keyGenome} />
-            <CommandModuleReadinessGrid
-              modules={snapshot.moduleReadiness}
-              onReview={() => openKey({ mode: "onboarding" })}
+                </CommandSection>
+              }
             />
-            <CommandGenomeOrbCard />
-            <CommandConstitutionCardV2 constitution={snapshot.constitution} />
-
-            <CommandSection icon={LayoutDashboard} title="Executive Modes">
-              <CommandExecutiveModeGridV2 modes={snapshot.executiveModes} />
-            </CommandSection>
-          </div>
-        </div>
-
-        <CommandGenomeOutcomesCardV2 key={`genome-outcomes:${businessId}`} businessId={businessId} />
-
-        <CrossDomainPanelV2 businessId={businessId} />
-
-        {/* What KEY noticed on its own. The intuition and creativity layers
-            record weak signals, churn risk and ideas on a schedule; until this
-            panel there was no way to see any of it. */}
-        {/* Two complementary sources, deliberately both mounted:
-            KeyNoticedStream reacts to live module events (ProAutoMonitor),
-            KeyAwarenessPanel shows the scheduled cognition layer's findings.
-            Both were built and rendered nowhere before this. */}
-        <KeyNoticedStream businessId={businessId} />
-
-        <KeyAwarenessPanel businessId={businessId} />
+          )
+        )}
       </motion.div>
     </WorkspaceShell>
   );

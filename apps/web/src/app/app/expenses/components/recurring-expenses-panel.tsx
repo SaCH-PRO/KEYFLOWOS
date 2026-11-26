@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -21,6 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, todayInBusinessZone } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -64,10 +65,15 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     }
   }, [triggerNew]);
 
+  // SEC-r1-2: one save at a time (a double click creates one schedule); cleared however the save ends.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
   const handleSave = async (form: RecurringFormData) => {
-    if (!businessId) return;
+    if (!businessId || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: form.name,
         description: form.description,
         amount: parseFloat(form.amount),
@@ -81,18 +87,26 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
         createsBill: form.createsBill,
         dueOffsetDays: form.dueOffsetDays ? parseInt(form.dueOffsetDays) : null,
       };
-      if (editing) {
-        await updateRecurringExpense(businessId, editing.id, payload);
-        toast.success("Recurring expense updated");
-      } else {
-        await createRecurringExpense(businessId, payload);
-        toast.success("Recurring expense created");
+      // An edit that leaves a past next run as it was (a paused or failed schedule) does not send it back:
+      // the PATCH leaves nextRunDate untouched when it is absent (RecurringExpenseService.update).
+      if (editing && form.nextRunDate === storedDay(editing.nextRunDate)) delete payload.nextRunDate;
+      // A refused save is said, never reported as saved (EXPENSES-HUB-2: the schedule is real or it is not).
+      const res = editing
+        ? await updateRecurringExpense(businessId, editing.id, payload)
+        : await createRecurringExpense(businessId, payload);
+      if (res?.error) {
+        toast.error(res.error);
+        return;
       }
+      toast.success(editing ? "Recurring expense updated" : "Recurring expense created");
       setShowBuilder(false);
       setEditing(null);
       void load();
     } catch {
       toast.error("Failed to save");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -135,6 +149,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
             <RecurringCard
               key={item.id}
               item={item}
+              businessId={businessId}
               categories={categories}
               onEdit={() => { setEditing(item); setShowBuilder(true); }}
               onCancel={() => handleCancel(item.id)}
@@ -147,6 +162,12 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       <AnimatePresence>
         {showBuilder && (
           <RecurringBuilder
+            // Each schedule and the create form get their own builder state: without a key, a builder brought
+            // back (New during an Edit sheet, or its exit animation) kept the other's fields, and Update could
+            // PATCH create-form fields onto a schedule.
+            key={editing?.id ?? "new"}
+            businessId={businessId}
+            saving={saving}
             categories={categories}
             editing={editing}
             onClose={() => { setShowBuilder(false); setEditing(null); }}
@@ -159,6 +180,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
 }
 
 function RecurringCard({
+  businessId,
   item,
   categories,
   onEdit,
@@ -166,6 +188,7 @@ function RecurringCard({
   onRunNow,
 }: {
   item: RecurringExpense;
+  businessId: string | null;
   categories: ExpenseCategory[];
   onEdit: () => void;
   onCancel: () => void;
@@ -211,13 +234,13 @@ function RecurringCard({
               </>
             )}
             <span className="text-border">·</span>
-            <span>Next: {new Date(item.nextRunDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+            <span>Next: {formatShortDate(item.nextRunDate, businessId)}</span>
             <span className="text-border">·</span>
             <span>{item.runCount} runs</span>
           </div>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-sm font-bold text-foreground">{formatCurrency(item.amount, item.currency)}</p>
+          <p className="text-sm font-bold text-foreground">{formatAmount(item.amount, item.currency, businessId)}</p>
         </div>
       </div>
 
@@ -257,6 +280,11 @@ function ActionBtn({
   );
 }
 
+/** The YYYY-MM-DD the builder shows for a stored next run. */
+function storedDay(nextRunDate: string | null | undefined): string {
+  return nextRunDate ? nextRunDate.split("T")[0] : "";
+}
+
 interface RecurringFormData {
   name: string;
   description: string;
@@ -273,15 +301,19 @@ interface RecurringFormData {
 }
 
 function RecurringBuilder({
+  businessId,
+  saving,
   categories,
   editing,
   onClose,
   onSave,
 }: {
+  businessId: string | null;
+  saving: boolean;
   categories: ExpenseCategory[];
   editing: RecurringExpense | null;
   onClose: () => void;
-  onSave: (form: RecurringFormData) => void;
+  onSave: (form: RecurringFormData) => void | Promise<void>;
 }) {
   const [form, setForm] = useState<RecurringFormData>(() => {
     if (editing) {
@@ -290,7 +322,7 @@ function RecurringBuilder({
         description: editing.description,
         amount: String(editing.amount),
         frequency: editing.frequency,
-        nextRunDate: editing.nextRunDate ? editing.nextRunDate.split("T")[0] : "",
+        nextRunDate: storedDay(editing.nextRunDate),
         endDate: editing.endDate ? editing.endDate.split("T")[0] : "",
         vendor: editing.vendor || "",
         paymentMethod: editing.paymentMethod || "",
@@ -317,6 +349,28 @@ function RecurringBuilder({
   });
 
   const amountNum = parseFloat(form.amount || "0");
+  // BUG-027: the business currency (the server writes it on the schedule), never a literal TTD; this panel's
+  // business, never another cached one (SEC-r1-1).
+  const currency = businessCurrency(businessId);
+  // SEC-r1-2: the server generates one expense per due period from nextRunDate, so a run on or before today
+  // would book every missed period at once: the first run is tomorrow at the earliest, in the business zone.
+  const earliestRun = dayAfter(todayInBusinessZone(new Date(), businessId));
+  const [dateError, setDateError] = useState<string | null>(null);
+  const save = () => {
+    // On Create the floor applies; on Update only when the next run was changed (a paused schedule's past run
+    // can stay as it is while its amount changes).
+    const unchanged = editing !== null && form.nextRunDate === storedDay(editing.nextRunDate);
+    if (!unchanged && !isCalendarDay(form.nextRunDate)) {
+      setDateError("The next run must be a date (YYYY-MM-DD) after today.");
+      return;
+    }
+    if (!unchanged && form.nextRunDate < earliestRun) {
+      setDateError("The next run must be after today: a past run would book every missed period at once.");
+      return;
+    }
+    setDateError(null);
+    onSave(form);
+  };
 
   return (
     <SideSheet
@@ -335,7 +389,7 @@ function RecurringBuilder({
           <div className="text-xs text-muted-foreground">
             <span className="block">Per Invoice</span>
             <span className="font-semibold text-rose-400">
-              {amountNum > 0 ? formatCurrency(amountNum, "TTD") : "—"}
+              {amountNum > 0 ? formatCurrency(amountNum, currency) : "—"}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -346,8 +400,9 @@ function RecurringBuilder({
               Cancel
             </button>
             <button
-              onClick={() => onSave(form)}
-              disabled={!form.name.trim() || !form.amount || !form.nextRunDate}
+              onClick={save}
+              disabled={saving || !form.name.trim() || !form.amount || !form.nextRunDate}
+              aria-busy={saving || undefined}
               className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 bg-rose-500/10 text-rose-400 border border-rose-500/30"
             >
               {editing ? "Update" : "Create"}
@@ -377,7 +432,7 @@ function RecurringBuilder({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Amount (TTD) *</label>
+            <label className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency}) *</label>
             <input
               type="number"
               step="0.01"
@@ -406,9 +461,15 @@ function RecurringBuilder({
             <input
               type="date"
               value={form.nextRunDate}
-              onChange={(e) => setForm({ ...form, nextRunDate: e.target.value })}
+              min={earliestRun}
+              aria-invalid={dateError ? true : undefined}
+              aria-describedby={dateError ? "recurring-next-run-error" : undefined}
+              onChange={(e) => { setDateError(null); setForm({ ...form, nextRunDate: e.target.value }); }}
               className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-rose-500/40"
             />
+            {dateError && (
+              <p id="recurring-next-run-error" role="alert" className="text-[11px] text-red-400 mt-1">{dateError}</p>
+            )}
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">End Date (optional)</label>

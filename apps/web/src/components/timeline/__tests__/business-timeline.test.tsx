@@ -7,7 +7,7 @@
  * a real database. D-08: Activity rows power the user feed.
  *
  * Contract pinned here:
- *   BT-01  the cockpit (/app/command-center) mounts the business feed and renders
+ *   BT-01  (retired by TODAY-4BLOCK: Today no longer mounts the feed) the cockpit mounts the business feed and renders
  *          the payment_recorded and paid rows WITH their amounts, read from
  *          /timeline/businesses/:id/events (never the legacy flows route)
  *   BT-02  BusinessTimeline reads /timeline/businesses/:id/events?limit=50 by
@@ -22,7 +22,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, within, waitFor } from '@testing-library/react';
-import { GenomeProvider } from '@/contexts/genome-context';
 import { BusinessTimeline, BusinessActivityFeed, businessFeedAccess } from '../business-timeline';
 
 vi.mock('next/navigation', () => ({
@@ -176,71 +175,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** The V1-47 snapshot shape (business-command-center.types.ts), minimal and healthy. */
-function cockpitSnapshot() {
-  const ok = (label: string) => ({ label, status: 'OK', fetchedAt: NOW });
-  return {
-    businessId: BIZ,
-    generatedAt: NOW,
-    health: {
-      genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: 'SEED', criticalCount: 0, highPriorityCount: 0,
-      pendingApprovalCount: 0, approvedAwaitingExecutionCount: 0, urgentTemporalCount: 0, pendingGenomeProposalCount: 0,
-      assetRiskCount: 0, constitutionStale: false, keyGenomeOverall: 0, keyGenomeReadiness: 0, keyGenomeConfidence: 0,
-      blockedModuleCount: 0, lowReadinessModuleCount: 0, missingBlockingFactCount: 0,
-    },
-    summary: 'Cockpit summary.',
-    pulse: { overallScore: 0, dimensions: [] },
-    briefing: { headline: 'No urgent actions today.', bullets: [], warnings: [] },
-    governance: { autoReady: 0, needsApproval: 0, dueToday: 0, urgentRisks: 0 },
-    topPriorities: [], pendingApprovals: [], approvedAwaitingExecution: [], urgentItems: [], risks: [], opportunities: [],
-    genome: { integrity: 0, readiness: 0, stage: 'SEED', pendingProposals: [], weakestSections: [] },
-    keyGenome: { overall: 0, integrity: 0, readiness: 0, confidence: 0, computedAt: NOW, sections: [], weakestSections: [] },
-    moduleReadiness: [],
-    constitution: { latestVersion: null, stale: false, reason: null, href: '/app/profile?tab=business-genome&section=constitution' },
-    executiveModes: [],
-    recommendedActions: [],
-    degraded: false,
-    sources: { pendingApprovals: ok('pendingApprovals'), contacts: ok('contacts'), openInvoices: ok('openInvoices'), payments: ok('payments') },
-    results: {
-      contacts: { label: 'Contacts', count: 1, status: 'OK', href: '/app/crm/contacts' },
-      openInvoices: { label: 'Open invoices', count: 0, status: 'OK', href: '/app/commerce/invoices' },
-      payments: { label: 'Payments', count: 2, status: 'OK', href: '/app/payments' },
-    },
-  };
-}
-
-describe('V1-25: the cockpit mounts the business feed (M49)', () => {
-  it('BT-01: /app/command-center renders the payment_recorded and paid rows with their amounts, read from /timeline/businesses/:id/events', async () => {
-    serve([
-      { match: (url) => url.includes(`/business-command-center/businesses/${BIZ}/snapshot`), status: 200, body: cockpitSnapshot() },
-      timelineRoute(PAYMENT_FEED),
-    ]);
-    const { default: Page } = await import('@/app/app/command-center/page');
-    render(
-      <GenomeProvider>
-        <Page />
-      </GenomeProvider>,
-    );
-
-    const feed = await screen.findByTestId('business-timeline', {}, { timeout: 10_000 });
-    await waitFor(() => expect(within(feed).getAllByTestId('business-timeline-row')).toHaveLength(3), { timeout: 10_000 });
-
-    expect(amountOf(rowFor('payment_recorded', 'pay_partial'))).toBe('TTD 100.00');
-    expect(amountOf(rowFor('payment_recorded', 'pay_full'))).toBe('TTD 150.00');
-    expect(amountOf(rowFor('paid', 'inv_250'))).toBe('TTD 250.00');
-    expect(within(rowFor('paid', 'inv_250')).getByText('Payment received')).toBeTruthy();
-
-    const reads = timelineRequests();
-    expect(reads.length, 'the cockpit read the tenant timeline').toBeGreaterThan(0);
-    for (const url of reads) {
-      expect(url.pathname.endsWith(`/timeline/businesses/${BIZ}/events`)).toBe(true);
-      const limit = Number(url.searchParams.get('limit'));
-      expect(limit).toBeGreaterThanOrEqual(1);
-      expect(limit).toBeLessThanOrEqual(200);
-    }
-    expect(requested.some((u) => u.includes('/api/flows/businesses/') && u.includes('/activity')), 'legacy flows activity route').toBe(false);
-  }, 30_000);
-});
+// BT-01 retired by TODAY-4BLOCK: the plan entry removes the cockpit's widgets ("the metaphor hero, genome readiness and 23 other widgets removed"); Today no longer mounts the feed, and BT-02..BT-05 pin the feed's own read and amounts.
 
 describe('V1-25: BusinessTimeline reads the tenant timeline and shows amounts', () => {
   it('BT-02: reads /timeline/businesses/:id/events?limit=50 by default; payment rows show data.amount, the paid row data.total, in their currency', async () => {
@@ -309,7 +244,7 @@ describe('V1-25: BusinessTimeline reads the tenant timeline and shows amounts', 
 
 /**
  * V1-25 review repairs.
- *   BT-06  SEC-V125-1/2: the timeline read is tenant-guarded, not scope-filtered,
+ *   BT-06  (retired by TODAY-4BLOCK, as BT-01) SEC-V125-1/2: the timeline read is tenant-guarded, not scope-filtered,
  *          so the cockpit shows it only to a caller the V1-47 tiles report able
  *          to read revenue AND CRM; a member without either sees "No access" and
  *          the feed is never read (no amount, no contact name reaches the page)
@@ -324,41 +259,7 @@ describe('V1-25: BusinessTimeline reads the tenant timeline and shows amounts', 
  *          name, and never its JSON.stringify(data) detail
  */
 describe('V1-25 review repairs: the cockpit feed respects access, and shows each fact once and readably', () => {
-  /** The snapshot as V1-47 builds it for a caller whose access gives these tile statuses. */
-  function snapshotWith(status: { contacts: string; openInvoices: string; payments: string }) {
-    const snap = cockpitSnapshot();
-    for (const key of ['contacts', 'openInvoices', 'payments'] as const) {
-      const restricted = status[key] !== 'OK';
-      snap.results[key] = { ...snap.results[key], status: status[key], count: restricted ? null : snap.results[key].count } as never;
-    }
-    return snap;
-  }
-
-  it('BT-06: a member without revenue read, or without CRM read, sees "No access" in the cockpit and the feed is never read', async () => {
-    const { default: Page } = await import('@/app/app/command-center/page');
-    for (const [who, status] of [
-      ['revenue none', { contacts: 'OK', openInvoices: 'RESTRICTED', payments: 'RESTRICTED' }],
-      ['crm none', { contacts: 'RESTRICTED', openInvoices: 'OK', payments: 'OK' }],
-    ] as const) {
-      requested = [];
-      serve([
-        { match: (url) => url.includes(`/business-command-center/businesses/${BIZ}/snapshot`), status: 200, body: snapshotWith(status) },
-        timelineRoute(PAYMENT_FEED),
-      ]);
-      render(
-        <GenomeProvider>
-          <Page />
-        </GenomeProvider>,
-      );
-      const notice = await screen.findByTestId('business-timeline-restricted', {}, { timeout: 10_000 });
-      expect(notice.textContent, who).toContain('No access');
-      expect(screen.queryByTestId('business-timeline'), who).toBeNull();
-      expect(screen.queryAllByTestId('business-timeline-amount'), who).toEqual([]);
-      expect(screen.queryByText(/Payment recorded: TTD/), who).toBeNull();
-      expect(timelineRequests(), `${who}: the feed was read`).toEqual([]);
-      cleanup();
-    }
-  }, 60_000);
+  // BT-06 retired by TODAY-4BLOCK (as BT-01): Today no longer mounts the feed, so no page shows it; BT-07 pins the access gate (businessFeedAccess, BusinessActivityFeed) that any future mount must use.
 
   it('BT-07: the gate fails closed (no results, or a FAILED tile, is "Activity unavailable" with no read); all three tiles OK reads the feed', async () => {
     const ok = { label: 'x', count: 1, status: 'OK', href: '/' } as const;
