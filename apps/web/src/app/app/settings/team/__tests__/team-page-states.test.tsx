@@ -502,3 +502,120 @@ describe("SWP-TEAM-WEB repair 2", { timeout: 15_000 }, () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Insufficient permissions: team requires write access (you have read)"));
   });
 });
+
+/**
+ * Repair round 3 (the orchestrator's confirmations of a1e51c58):
+ *   TPR-09  a refused reload clears what was open: the permission editor (a full member record), the remove confirm
+ *           and the invite form do not come back when Try again loads the team again
+ *   TPR-10  each half of `refused`: a guard sentence with no status, or a non-403 status, is a refusal; a bare 403
+ *           with other words ("Forbidden") is a refusal; both drop the team
+ *   TPR-11  null maps: the inviter cap reads an ADMIN inviter with no map at the ADMIN defaults (nothing lowered); an
+ *           unedited save in the permission editor for a null-map member sends the role defaults, not {}; the
+ *           overview table shows a null-map member at the role defaults
+ *   TPR-12  an array map is an explicit map with every module absent (the server reads it so): no role defaults, so
+ *           an ADMIN viewer holding one is not offered Invite
+ *   TPR-13  loadedOnce is reset by a refusal: Try again after a refused reload that then fails 502 says the new
+ *           failure, not the old refusal
+ */
+describe("SWP-TEAM-WEB repair 3", { timeout: 15_000 }, () => {
+  const other = () => member("usr_tpr_other3", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0);
+  const refusedBy = (error: string, status?: number) => ({ data: null, error, ...(status === undefined ? {} : { status }) });
+
+  it("TPR-09: a refused reload clears the open editor, remove confirm and invite form", async () => {
+    serveTeam([owner(), other()]);
+    await renderAs(OWNER_ID);
+    const row = rowAround(await screen.findByText("usr_tpr_other3@example.com"))!;
+    fireEvent.click(within(row).getByRole("button", { name: "Edit permissions" }));
+    expect(screen.getByText(/Permissions for usr_tpr_other3/)).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Remove team member" }));
+    expect(screen.getByText(/Are you sure you want to remove/)).toBeTruthy();
+    await openInviteForm();
+    api.apiGet.mockResolvedValue(refusedBy("No access to this business", 403));
+    await sendInvite("gil@example.com");
+    const retry = await screen.findByRole("button", { name: /try again/i });
+
+    serveTeam([owner(), other()]);
+    fireEvent.click(retry);
+    await screen.findByText("usr_tpr_other3@example.com");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByText(/Permissions for usr_tpr_other3/), "the editor came back").toBeNull();
+    expect(screen.queryByText(/Are you sure you want to remove/), "the remove confirm came back").toBeNull();
+    expect(screen.queryByLabelText("Team member email"), "the invite form came back").toBeNull();
+  });
+
+  it("TPR-10: a guard sentence without a 403, and a bare 403, are both refusals that drop the team", async () => {
+    const answers: Array<[string, ReturnType<typeof refusedBy>]> = [
+      ["the guard sentence, no status", refusedBy("No access to this business")],
+      ["the guard sentence, status 404", refusedBy("Not a member of this business", 404)],
+      ["a bare 403 'Forbidden'", refusedBy("Forbidden", 403)],
+    ];
+    const kept: string[] = [];
+    for (const [name, answer] of answers) {
+      serveTeam([owner(), other()]);
+      await renderAs(OWNER_ID);
+      await screen.findByText("usr_tpr_other3@example.com");
+      await openInviteForm();
+      api.apiGet.mockResolvedValue(answer);
+      await sendInvite("hal@example.com");
+      await new Promise((r) => setTimeout(r, 200));
+      if (screen.queryByText("usr_tpr_other3@example.com")) kept.push(name);
+      cleanup();
+      api.apiPostSimple.mockClear();
+    }
+    expect(kept, "refusals that left the team on screen").toEqual([]);
+  });
+
+  it("TPR-11a: an ADMIN inviter with no map is capped at the ADMIN defaults, so nothing is lowered", async () => {
+    serveTeam([owner(), member("usr_tpr_nullinv", "ADMIN", null as unknown as Record<string, string>, 3)]);
+    await renderAs("usr_tpr_nullinv");
+    await openInviteForm();
+    expect(screen.queryByText(/start at your own access/), "rows lowered for a null-map ADMIN").toBeNull();
+    const payload = await sendInvite("ida@example.com");
+    expect(payload.scopes).toEqual(ROLE_DEFAULT_SCOPES.STAFF);
+  });
+
+  it("TPR-11b: an unedited save for a null-map member sends the role defaults, not {}", async () => {
+    serveTeam([owner(), member("usr_tpr_nullmem", "STAFF", null as unknown as Record<string, string>, 0)]);
+    await renderAs(OWNER_ID);
+    const row = rowAround(await screen.findByText("usr_tpr_nullmem@example.com"))!;
+    fireEvent.click(within(row).getByRole("button", { name: "Edit permissions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Permissions" }));
+    await waitFor(() => expect(api.apiPatch).toHaveBeenCalledTimes(1));
+    const [, body] = api.apiPatch.mock.calls[0] as [string, { scopes: Record<string, string> }];
+    expect(body.scopes).toEqual(ROLE_DEFAULT_SCOPES.STAFF);
+  });
+
+  it("TPR-11c: the overview table shows a null-map member at the role defaults", async () => {
+    serveTeam([owner(), member("usr_tpr_nulltab", "STAFF", null as unknown as Record<string, string>, 0)]);
+    await renderAs(OWNER_ID);
+    await screen.findByText("usr_tpr_nulltab@example.com");
+    // The Permissions tab (its label is the tab key, "permissions").
+    fireEvent.click(screen.getAllByRole("button").find((btn) => btn.textContent?.trim() === "permissions")!);
+    const cell = await screen.findByText("usr_tpr_nulltab", { selector: "td" });
+    const icons = Array.from(cell.closest("tr")!.querySelectorAll("svg")).map((i) => i.getAttribute("class") ?? "");
+    // STAFF defaults: bookings write (emerald), most modules read (blue), settings/team/ai/connect none.
+    expect(icons.filter((c) => c.includes("text-emerald-400")).length, "write cells").toBe(1);
+    expect(icons.filter((c) => c.includes("text-blue-400")).length, "read cells").toBe(9);
+  });
+
+  it("TPR-12: an ADMIN viewer holding an array map is not offered Invite", async () => {
+    serveTeam([owner(), member("usr_tpr_arr", "ADMIN", [] as unknown as Record<string, string>, 3)]);
+    await renderAs("usr_tpr_arr");
+    await screen.findByText("usr_tpr_arr@example.com");
+    expect(screen.queryByRole("button", { name: /^Invite$/ }), "Invite for an ADMIN with an array map").toBeNull();
+  });
+
+  it("TPR-13: after a refused reload, Try again that fails 502 says the new failure", async () => {
+    serveTeam([owner(), other()]);
+    await renderAs(OWNER_ID);
+    await screen.findByText("usr_tpr_other3@example.com");
+    await openInviteForm();
+    api.apiGet.mockResolvedValue(refusedBy("No access to this business", 403));
+    await sendInvite("jo@example.com");
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    api.apiGet.mockResolvedValue(refusedBy("Bad gateway", 502));
+    fireEvent.click(retry);
+    await waitFor(() => expect(document.body.textContent ?? "").toMatch(/Couldn't load your team: Bad gateway/));
+    expect(document.body.textContent ?? "").not.toMatch(/No access to this business/);
+  });
+});
