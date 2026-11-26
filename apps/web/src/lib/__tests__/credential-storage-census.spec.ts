@@ -1569,3 +1569,57 @@ describe("CSC-24 each of the comment pass's rules decides a case", () => {
     expect(scan("src/fixture-cur.ts", fixture).filter((w) => w.store === "indexedDB" && isCredential(w)).map((w) => w.line)).toEqual([3]);
   });
 });
+
+/* ------------------------------------------------------ repair round 3b */
+
+/**
+ * Repair round 3b (correctness review of round 2, also REJECT on CSC-A1, plus minors).
+ *
+ *   CSC-25 (CSC2-COR-A, CSC2-COR-C) more "/*" and "//" shapes that must hide nothing: an object `accept: "image/*"`
+ *          then a write at the end of the file; `"/api/*"`, a write, then a real comment later; JSX
+ *          `accept="image/*"`, an onClick write, then a JSX comment; and a multi-line template whose later line holds " // "
+ *          before a write on that line.
+ *   CSC-26 (CSC2-COR-B) the String(x) hop in valueText decides a case.
+ *   CSC-27 (CSC2-COR-D) only the Headers tuple shape is a Set-Cookie write: an array that merely starts with
+ *          "set-cookie" (a hop-by-hop header list) is not.
+ */
+describe("CSC-25 more shapes that must hide nothing", () => {
+  const cases: Array<[string, string[]]> = [
+    ['an object accept: "image/*", the write at the end of the file', [`const OPTS = { accept: "image/*", multiple: false };`, `export function a() { return OPTS; }`, `export const save = (t: string) => localStorage.setItem("kf_b_token", t);`]],
+    ['"/api/*", the write, then a real comment', [`const R = "/api/*";`, `export const save = (t: string) => localStorage.setItem("kf_b_token", t);`, `/* a real comment */`]],
+    ['JSX accept="image/*", an onClick write, then {/* */}', [`export const F = ({ t }: { t: string }) => (`, `  <div><input accept="image/*" /><button onClick={() => localStorage.setItem("kf_b_token", t)} />{/* note */}</div>`, `);`]],
+    ["a multi-line template whose later line holds ' // '", ["const s = `line one", "line two // not a comment`; localStorage.setItem(\"kf_b_token\", t);"]],
+  ];
+  for (const [name, lines] of cases) {
+    it(`a write with ${name} is found`, () => {
+      expect(keysOf(scan("src/fixture-b.tsx", lines.join("\n")))).toContain("localStorage:kf_b_token");
+    });
+  }
+});
+
+describe("CSC-26 String(x) of a const is followed one hop", () => {
+  it("a session read through String(raw) is a credential write", () => {
+    const fixture = [`export function save(data: { session: string }) {`, `  const raw = data.session;`, `  localStorage.setItem("kf_str", String(raw));`, `}`].join("\n");
+    expect(compare(scan("src/fixture-str.ts", fixture), []).unregistered.some((u) => u.startsWith("localStorage kf_str @"))).toBe(true);
+  });
+});
+
+describe("CSC-27 only the Headers tuple shape is a Set-Cookie write", () => {
+  it("a header-name list starting with set-cookie is not a cookie write", () => {
+    const fixture = [`const HOP = ["set-cookie", "content-length"];`, `const H2 = ['Set-Cookie', 'x-kf-session'];`].join("\n");
+    expect(scan("src/fixture-hop-list.ts", fixture).filter((w) => w.store === "response-cookie")).toEqual([]);
+  });
+
+  it("the tuple form still counts, as the first entry or a later one", () => {
+    const fixture = [
+      `const a = new Headers([["Set-Cookie", "kf_t1_session=1; Path=/"]]);`,
+      `const b = new Headers([["X-A", "1"], ["Set-Cookie", "kf_t2_session=1; Path=/"]]);`,
+      `const c = { headers: [["set-cookie", "kf_t3_session=1"]] };`,
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-tuples.ts", fixture))).toEqual([
+      "response-cookie:kf_t1_session",
+      "response-cookie:kf_t2_session",
+      "response-cookie:kf_t3_session",
+    ]);
+  });
+});
