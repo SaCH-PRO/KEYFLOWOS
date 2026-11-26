@@ -380,4 +380,41 @@ describe('UnifiedMemoryRetrievalService', () => {
     expect(cognitive.content).toBe(`task.assigned: ${JSON.stringify(payload)}`);
     expect(business.metadata).toMatchObject({ after: { status: 'PENDING', riskLevel: 'LOW' }, metadata: { title: 't' }, actorType: 'ai', action: 'propose' });
   });
+
+  // P92 (MEM-EXPIRED-NOT-SERVED): AiMemory reads must filter expired rows (expiresAt) and confidence-0 must score lowest.
+  it('filters expired AiMemory rows via expiresAt OR predicate', async () => {
+    const prisma = makePrisma();
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    await service.retrieveContext('biz_1', {});
+
+    expect(prisma.client.aiMemory.findMany).toHaveBeenCalledTimes(1);
+    const arg = (prisma.client.aiMemory.findMany as any).mock.calls[0][0];
+    expect(arg.where.OR).toEqual([{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }]);
+  });
+
+  it('scores confidence-0 below unscored (0.5) and below every positive-confidence row while keeping positive order unchanged', async () => {
+    const now = new Date();
+    const prisma = makePrisma({
+      temporalFlowMemory: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'tf_zero', entityType: 'business', entityId: 'biz_1', type: 'pattern', content: 'Zero confidence', confidence: 0, createdAt: now, metadata: null },
+          { id: 'tf_unscored', entityType: 'business', entityId: 'biz_1', type: 'pattern', content: 'Unscored', confidence: null, createdAt: now, metadata: null },
+          { id: 'tf_low', entityType: 'business', entityId: 'biz_1', type: 'pattern', content: 'Low positive', confidence: 0.1, createdAt: now, metadata: null },
+          { id: 'tf_high', entityType: 'business', entityId: 'biz_1', type: 'pattern', content: 'High positive', confidence: 0.9, createdAt: now, metadata: null },
+        ]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveContext('biz_1', { sourceTypes: ['temporal_flow_memory'] });
+
+    expect(fragments.map((f) => f.id)).toEqual(['tf_high', 'tf_low', 'tf_unscored', 'tf_zero']);
+    const byId = Object.fromEntries(fragments.map((f) => [f.id, f]));
+    expect(byId.tf_unscored.relevanceScore).toBe(0.5);
+    expect(byId.tf_zero.relevanceScore).toBeLessThan(byId.tf_unscored.relevanceScore);
+    expect(byId.tf_zero.relevanceScore).toBeLessThan(byId.tf_low.relevanceScore);
+    expect(byId.tf_zero.confidence).toBe(0);
+    expect(byId.tf_low.relevanceScore).toBeCloseTo(0.55, 6);
+    expect(byId.tf_high.relevanceScore).toBeCloseTo(0.95, 6);
+  });
 });

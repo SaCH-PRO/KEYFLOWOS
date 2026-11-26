@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuar
 import { LeadFormsService } from './lead-forms.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitizeObject } from '../../core/utils/sanitize';
@@ -27,7 +28,8 @@ export class LeadFormsController {
     return this.leadForms.getForm(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @Post('businesses/:businessId/lead-forms')
   createForm(
     @Param('businessId') businessId: string,
@@ -41,7 +43,8 @@ export class LeadFormsController {
     return this.leadForms.createForm({ ...body, businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @Patch('businesses/:businessId/lead-forms/:id')
   updateForm(
     @Param('businessId') businessId: string,
@@ -56,7 +59,8 @@ export class LeadFormsController {
     return this.leadForms.updateForm({ ...body, businessId, id });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @Delete('businesses/:businessId/lead-forms/:id')
   deleteForm(
     @Param('businessId') businessId: string,
@@ -65,7 +69,8 @@ export class LeadFormsController {
     return this.leadForms.deleteForm(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
   @Post('businesses/:businessId/lead-forms/:id/toggle')
   toggleActive(
     @Param('businessId') businessId: string,

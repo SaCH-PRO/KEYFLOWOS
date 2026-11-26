@@ -22,6 +22,7 @@ import { IdentitySignupService, isEmailVerificationRequired } from './identity-s
 import { AuthSecurityService, type RateLimitRule } from './auth-security.service';
 import { IdentityPasswordService } from './identity-password.service';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
+import { keyDisabled } from '../../core/config/env';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -828,7 +829,8 @@ export class IdentityController {
   @Get('me')
   async getMe(@CurrentUser() user: AuthenticatedUser) {
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
-    return this.identity.getUser(user.id);
+    const profile = await this.identity.getUser(user.id);
+    return { ...profile, keyDisabled: keyDisabled() };
   }
 
   @UseGuards(AuthGuard)

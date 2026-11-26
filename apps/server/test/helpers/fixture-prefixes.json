@@ -1133,9 +1133,19 @@
       "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
     },
     {
+      "prefix": "v92m_",
+      "owner": "apps/server/test/memory-expired-not-served.integration.test.ts",
+      "packet": "V1-92 (MEM-EXPIRED-NOT-SERVED)"
+    },
+    {
       "prefix": "v63m_",
       "owner": "apps/server/test/business-profile-save.integration.test.ts",
       "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
+    },
+    {
+      "prefix": "v63n_",
+      "owner": "apps/server/test/identity-me-key-disabled.integration.test.ts",
+      "packet": "V1-63 (SWP-KEY-SHELL-SMOKE)"
     },
     {
       "prefix": "v63g_",
@@ -1213,6 +1223,16 @@
       "packet": "V1-66 (W11-CALLS-LIST-PAGING)"
     },
     {
+      "prefix": "v66k_",
+      "owner": "apps/server/test/census-v1-a.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-V1-A)"
+    },
+    {
+      "prefix": "v66m_",
+      "owner": "apps/server/test/census-marketplace.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-MARKETPLACE)"
+    },
+    {
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
@@ -1230,6 +1250,11 @@
       "prefix": "v71t_",
       "owner": "apps/server/test/temporal-memory-scope.integration.test.ts",
       "packet": "V1-71 (MEM-TEMPORAL-SCOPE)"
+    },
+    {
+      "prefix": "v93c_",
+      "owner": "apps/server/test/conversion-reps-revenue-scope.integration.test.ts",
+      "packet": "V1-93 (FU-CONVERSION-REPS-REVENUE)"
     },
     {
       "prefix": "v71x_",
@@ -1380,6 +1405,11 @@
 "prefix": "v64a_",
       "owner": "apps/server/test/key-proposal-result-reader-scope.integration.test.ts",
       "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
+    },
+    {
+      "prefix": "v91s_",
+      "owner": "apps/server/test/flow-search-money-scope.integration.test.ts",
+      "packet": "V1-91 (FU-SEARCH-MONEY-SCOPE)"
     }
   ],
   "pendingRenames": [],
