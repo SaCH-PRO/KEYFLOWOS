@@ -1031,11 +1031,18 @@ describe('W8-GOOGLE-CONSENT-OWNER review repair: the Drive and calendar callback
 });
 
 describe('W9-GOOGLE-DOORS-SERVER: the generic connector doors of the Google Suite connections are the business owner\'s (D-99)', () => {
-  it('[V94D-T02] (W9-GOOGLE-DOORS-SERVER, was it.todo) RED-BEFORE (D-99): POST /connectors/businesses/:b/sync/:type, .../disconnect/:type and .../reconnect/:type for google_calendar, google_drive, google_contacts, google_forms and google_business_profile (the connections the Google Suite consent provisions) answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY before the registry is reached', async () => {
+  it('[V94D-T02] (W9-GOOGLE-DOORS-SERVER, was it.todo) RED-BEFORE (D-99): POST /connectors/businesses/:b/sync/:type, .../disconnect/:type and .../reconnect/:type for google_calendar, google_drive, google_contacts, google_forms and google_business_profile answer an ADMIN 403 GOOGLE_CONNECT_OWNER_ONLY, and a STAFF member / staff-owner 403 below settings admin on sync (P90 SWP-CENSUS-V1-B, D-181) or GOOGLE_CONNECT_OWNER_ONLY on disconnect/reconnect, before the registry is reached', async () => {
     clearConnectorRegistry();
     for (const type of GOOGLE_SUITE_CONNECTORS) {
       for (const op of CONNECTOR_DOORS) {
-        for (const member of REFUSED) expectGoogleOwnerOnly(await connectorDoor(op, ID.biz, type, member), `${member} ${op} ${type}`);
+        for (const member of REFUSED) {
+          const res = await connectorDoor(op, ID.biz, type, member);
+          if (op === 'sync') {
+            expectRefusedOnGatedWrite(res, 'settings', member, `${member} ${op} ${type}`);
+          } else {
+            expectGoogleOwnerOnly(res, `${member} ${op} ${type}`);
+          }
+        }
       }
     }
     expect(connectorRegistry.syncConnector).not.toHaveBeenCalled();
@@ -1056,13 +1063,13 @@ describe('W9-GOOGLE-DOORS-SERVER: the generic connector doors of the Google Suit
     }
   });
 
-  it('[V94D-F02] control (D-99, W9-GOOGLE-DOORS-SERVER): the ruling covers Google connections and their start, sync and disconnect only: an ADMIN still syncs, disconnects and reconnects a non-Google connector (typeform), a STAFF member still syncs it (disconnect and reconnect clear its credentials: settings admin, SWEEP-P0-SCOPES review SEC-1), and both test google_calendar (a credential check), and the registry is reached; a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401) before the registry', async () => {
+  it('[V94D-F02] control (D-99, W9-GOOGLE-DOORS-SERVER, amended P90 D-181 owner ruling A1): an ADMIN (settings:admin) still syncs, disconnects and reconnects a non-Google connector (typeform) and tests google_calendar, while a STAFF member (settings:none) is refused 403 settings:admin on sync, disconnect, reconnect, and test; a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401) before the registry', async () => {
     for (const member of [ID.admin, ID.staff]) {
       for (const op of CONNECTOR_DOORS) {
         clearConnectorRegistry();
         const res = await connectorDoor(op, ID.biz, NON_GOOGLE_CONNECTOR, member);
-        if (member === ID.staff && op !== 'sync') {
-          // SWEEP-P0-SCOPES review repair SEC-1: the STAFF member (bookings write, settings none) is refused.
+        if (member === ID.staff) {
+          // SWEEP-P0-SCOPES review SEC-1 + P90 SWP-CENSUS-V1-B (D-181, owner ruling A1): STAFF (settings:none) is refused.
           expect(res.status, `${member} ${op} ${JSON.stringify(res.body)}`).toBe(403);
           expect(String(res.body?.message ?? ''), `${member} ${op}`).toMatch(/settings requires admin access/);
           expect(connectorRegistry[REGISTRY_DOOR[op]]).not.toHaveBeenCalled();
@@ -1073,8 +1080,14 @@ describe('W9-GOOGLE-DOORS-SERVER: the generic connector doors of the Google Suit
       }
       clearConnectorRegistry();
       const tested = await connectorDoor('test', ID.biz, 'google_calendar', member);
-      expect(tested.status, `${member} test ${JSON.stringify(tested.body)}`).toBe(201);
-      expect(connectorRegistry.testConnector).toHaveBeenCalledWith('google_calendar', ID.biz);
+      if (member === ID.staff) {
+        expect(tested.status, `${member} test ${JSON.stringify(tested.body)}`).toBe(403);
+        expect(String(tested.body?.message ?? ''), `${member} test`).toMatch(/settings requires admin access/);
+        expect(connectorRegistry.testConnector).not.toHaveBeenCalled();
+      } else {
+        expect(tested.status, `${member} test ${JSON.stringify(tested.body)}`).toBe(201);
+        expect(connectorRegistry.testConnector).toHaveBeenCalledWith('google_calendar', ID.biz);
+      }
     }
     clearConnectorRegistry();
     for (const op of CONNECTOR_DOORS) {

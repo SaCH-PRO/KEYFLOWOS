@@ -117,6 +117,62 @@ export function FocusView({
 
   return (
     <div className="space-y-5">
+      {/* CONTACTS-LIST-FIRST (D-289): the list comes first. All contacts, then Contacts requiring action, then the
+          Next actions, which stood above the list and pushed the first row off a phone's first screen. */}
+      {/* Remaining contacts */}
+      {contactsWithActions.rest.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-muted-foreground/50" />
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+              All Contacts
+            </h2>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {contactsWithActions.rest.slice(0, 12).map((contact, i) => (
+              <motion.div
+                key={contact.id}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.02 }}
+              >
+                <ContactCard
+                  contact={contact}
+                  onClick={() => onViewContact(contact.id)}
+                />
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Prioritized contacts */}
+      {contactsWithActions.prioritized.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Flame className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Contacts Requiring Action
+            </h2>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {contactsWithActions.prioritized.slice(0, 8).map((contact, i) => (
+              <motion.div
+                key={contact.id}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+              >
+                <ContactCard
+                  contact={contact}
+                  onClick={() => onViewContact(contact.id)}
+                />
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Next Action Queue */}
       {sortedActions.length > 0 && (
         <div className="space-y-3">
@@ -228,60 +284,6 @@ export function FocusView({
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Prioritized contacts */}
-      {contactsWithActions.prioritized.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Flame className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Contacts Requiring Action
-            </h2>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {contactsWithActions.prioritized.slice(0, 8).map((contact, i) => (
-              <motion.div
-                key={contact.id}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-              >
-                <ContactCard
-                  contact={contact}
-                  onClick={() => onViewContact(contact.id)}
-                />
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Remaining contacts */}
-      {contactsWithActions.rest.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-muted-foreground/50" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
-              All Contacts
-            </h2>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {contactsWithActions.rest.slice(0, 12).map((contact, i) => (
-              <motion.div
-                key={contact.id}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.02 }}
-              >
-                <ContactCard
-                  contact={contact}
-                  onClick={() => onViewContact(contact.id)}
-                />
-              </motion.div>
-            ))}
           </div>
         </div>
       )}

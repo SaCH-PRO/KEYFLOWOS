@@ -76,10 +76,12 @@ interface ContactCardProps {
   onClick?: () => void;
   onDelete?: (contact: ContactCardData) => void;
   onQuickAction?: (contactId: string, action: QuickActionType) => void;
+  /** Whether Quick actions offer Send Quote: false for a member who may not write quotes (SEC-SQD-1). */
+  offerQuote?: boolean;
   index?: number;
 }
 
-function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, onClick, onDelete, onQuickAction, offerQuote = true, index = 0 }: ContactCardProps) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -265,10 +267,12 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                     <Calendar className="w-3.5 h-3.5 text-blue-400" />
                     Book Appointment
                   </button>
-                  <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
-                    <FileSignature className="w-3.5 h-3.5 text-violet-400" />
-                    Send Quote
-                  </button>
+                  {offerQuote && (
+                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
+                      <FileSignature className="w-3.5 h-3.5 text-violet-400" />
+                      Send Quote
+                    </button>
+                  )}
                   <button role="menuitem" onClick={(e) => handleQuickAction(e, "refer")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
                     <UserPlus className="w-3.5 h-3.5 text-amber-400" />
                     Refer / Link

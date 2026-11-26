@@ -775,10 +775,12 @@ describe('V1-21d IDS — every model-supplied id is resolved inside the business
   it('review SEC-V21D-1: a TENANT_UNBOUND_TOOLS case resolves every id it hands its service inside the business, in the dispatcher', () => {
     const unbound = Object.keys(TENANT_UNBOUND_TOOLS);
     // the rule is not vacuous: the job-role ceiling's list is read, and the census sees each of its cases
-    expect(unbound.length, 'TENANT_UNBOUND_TOOLS entries').toBeGreaterThanOrEqual(10);
+    // (SWP-CENSUS-V1-A P87 moved bookings_offer_waitlist_slot and SWP-CENSUS-V1-B P90 moved approval_decide_step to GOVERNED_UNGRANTED; keep both checked below)
+    expect(unbound.length, 'TENANT_UNBOUND_TOOLS entries').toBeGreaterThanOrEqual(8);
+    const checkedTools = [...unbound, 'bookings_offer_waitlist_slot', 'approval_decide_step'];
     const seen = new Set(live.cases.flatMap((t) => t.split('|')));
-    for (const tool of unbound) expect(seen, `${tool} is a dispatcher case`).toContain(tool);
-    const offenders = trustedServiceIds(live, unbound).filter((s) => !ID_ALLOWLIST[idKey(s)] && !SERVICE_BINDS_ALLOWLIST[idKey(s)]);
+    for (const tool of checkedTools) expect(seen, `${tool} is a dispatcher case`).toContain(tool);
+    const offenders = trustedServiceIds(live, checkedTools).filter((s) => !ID_ALLOWLIST[idKey(s)] && !SERVICE_BINDS_ALLOWLIST[idKey(s)]);
     expect(
       offenders.map(show),
       "these hand a service that finds its row by a bare id (TENANT_UNBOUND_TOOLS) an id the model chose, trusting the businessId beside it: resolve the id first (idWithinBusiness, a *WithinBusiness helper)",

@@ -4,6 +4,7 @@ import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../../ai/model-gateway.service';
 import { AiUsageService } from '../../ai/ai-usage.service';
+import { fenceUntrusted, withUntrustedContentRule } from '../../ai/untrusted-content';
 import type { PresenceInsightsContract } from '../../ai/ai-output-contracts';
 
 export const PRESENCE_INSIGHTS_SCHEMA_VERSION = 1;
@@ -1161,7 +1162,7 @@ export class StorefrontIntelligenceService {
       ),
     };
 
-    const systemPrompt = `You are KEYFLOW's storefront intelligence narrator for Caribbean small-business owners.
+    const systemPrompt = withUntrustedContentRule(`You are KEYFLOW's storefront intelligence narrator for Caribbean small-business owners.
 Return STRICT JSON matching:
 {
   "headline": "string (max 90 chars, plain English, NO emoji)",
@@ -1177,8 +1178,9 @@ Return STRICT JSON matching:
 Rules:
 - Use ONLY the metrics and insights provided — never invent products, services, numbers or dates.
 - Currency is ${a.business.currency}. Tone is calm, specific and encouraging.
-- If a category has no insights, write a single short sentence stating "Not enough signal yet."`;
-    const userPrompt = `Aggregates and insights:\n${JSON.stringify(compact)}`;
+- If a category has no insights, write a single short sentence stating "Not enough signal yet."`);
+    const fencedCompact = fenceUntrusted('storefront_signal', JSON.stringify(compact));
+    const userPrompt = `Aggregates and insights:\n${fencedCompact}`;
 
     try {
       const response = await this.aiUsage.trackAndComplete(

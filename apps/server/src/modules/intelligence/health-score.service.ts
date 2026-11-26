@@ -20,6 +20,40 @@ export interface HealthAreaResult {
   metrics: Record<string, number | string>;
 }
 
+/**
+ * FU-HEALTH-MONEY-SCOPE (P101, owner rulings D-259, D-100, D-234):
+ * Matches any money-area reason carrying numeric figures or cash/bills/overdue/tax status
+ * that must be withheld from readers without `revenue:read`.
+ */
+const MONEY_REASON_LEAK_RE = /\d|cash balance|bills due|overdue invoices|tax due/i;
+
+/**
+ * Pure read-time projection of health areas for a caller's revenue scope.
+ * Persisted snapshots always retain the full unredacted money metrics and reasons;
+ * when `hasRevenueRead` is false, the `money` area keeps its `score` and `status`,
+ * withholds all `metrics`, and filters amount/cash-disclosing `reasons`. Non-money
+ * areas are returned unchanged.
+ */
+export function projectHealthForReader(
+  results: HealthAreaResult[],
+  hasRevenueRead: boolean,
+): HealthAreaResult[] {
+  if (hasRevenueRead) return results;
+  return results.map((result) => {
+    if (result.area !== 'money') return result;
+    const reasons = Array.isArray(result.reasons)
+      ? result.reasons.filter((r) => typeof r === 'string' && !MONEY_REASON_LEAK_RE.test(r))
+      : [];
+    return {
+      area: result.area,
+      score: result.score,
+      status: result.status,
+      reasons,
+      metrics: {},
+    };
+  });
+}
+
 @Injectable()
 export class HealthScoreService {
   private readonly logger = new Logger(HealthScoreService.name);
@@ -33,6 +67,10 @@ export class HealthScoreService {
     @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
   ) {
     this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
+
+  projectHealthForReader(results: HealthAreaResult[], hasRevenueRead: boolean): HealthAreaResult[] {
+    return projectHealthForReader(results, hasRevenueRead);
   }
 
   async calculateAll(businessId: string): Promise<HealthAreaResult[]> {

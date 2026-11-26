@@ -578,6 +578,11 @@
       "packet": "V1-61 (W11-STORE-OWN-PAYMENT-KEYS)"
     },
     {
+      "prefix": "v63b_",
+      "owner": "apps/server/test/knowledge-upload-scope.integration.test.ts",
+      "packet": "V1-63 (TOF-KNOWLEDGE-UPLOAD)"
+    },
+    {
       "prefix": "v70b_",
       "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
       "packet": "V1-70 (W1F-MEMORY-COPIES)"
@@ -588,9 +593,29 @@
       "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
     },
     {
+      "prefix": "v70d_",
+      "owner": "apps/server/test/order-transitions.integration.test.ts",
+      "packet": "V1-70 (W1F-ORDER-TRANSITIONS)"
+    },
+    {
       "prefix": "v70h_",
       "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
+    },
+    {
+      "prefix": "v72d_",
+      "owner": "apps/server/test/social-webhook-tenant.integration.test.ts",
+      "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
+    },
+    {
+      "prefix": "v80m_",
+      "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
+    },
+    {
+      "prefix": "v80r_",
+      "owner": "apps/server/test/genome-surfaces-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
     },
     {
       "prefix": "v81a_",
@@ -721,6 +746,11 @@
       "prefix": "v86e_",
       "owner": "apps/server/test/contact-status-readers-import.integration.test.ts",
       "packet": "V1-86 (V1-38b-STATUS-READERS)"
+    },
+    {
+      "prefix": "v86u_",
+      "owner": "apps/server/test/untrusted-inbound-fence.integration.test.ts",
+      "packet": "V1-86 (FU-UNTRUSTED-INBOUND-FENCE)"
     },
     {
       "prefix": "v87a_",
@@ -1133,9 +1163,19 @@
       "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
     },
     {
+      "prefix": "v92m_",
+      "owner": "apps/server/test/memory-expired-not-served.integration.test.ts",
+      "packet": "V1-92 (MEM-EXPIRED-NOT-SERVED)"
+    },
+    {
       "prefix": "v63m_",
       "owner": "apps/server/test/business-profile-save.integration.test.ts",
       "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
+    },
+    {
+      "prefix": "v63n_",
+      "owner": "apps/server/test/identity-me-key-disabled.integration.test.ts",
+      "packet": "V1-63 (SWP-KEY-SHELL-SMOKE)"
     },
     {
       "prefix": "v63g_",
@@ -1213,6 +1253,16 @@
       "packet": "V1-66 (W11-CALLS-LIST-PAGING)"
     },
     {
+      "prefix": "v66k_",
+      "owner": "apps/server/test/census-v1-a.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-V1-A)"
+    },
+    {
+      "prefix": "v66m_",
+      "owner": "apps/server/test/census-marketplace.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-MARKETPLACE)"
+    },
+    {
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
@@ -1230,6 +1280,11 @@
       "prefix": "v71t_",
       "owner": "apps/server/test/temporal-memory-scope.integration.test.ts",
       "packet": "V1-71 (MEM-TEMPORAL-SCOPE)"
+    },
+    {
+      "prefix": "v93c_",
+      "owner": "apps/server/test/conversion-reps-revenue-scope.integration.test.ts",
+      "packet": "V1-93 (FU-CONVERSION-REPS-REVENUE)"
     },
     {
       "prefix": "v71x_",
@@ -1317,7 +1372,7 @@
       "packet": "V1-85 (FU-OUTBOUND-ATTACHMENT-URL)"
     },
     {
-"prefix": "v90n_",
+      "prefix": "v90n_",
       "owner": "apps/server/test/notifications-prefs-guard.integration.test.ts",
       "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
     },
@@ -1337,7 +1392,7 @@
       "packet": "V1-64 (SWP-CENSUS-GENOME)"
     },
     {
-"prefix": "v64n_",
+      "prefix": "v64n_",
       "owner": "apps/server/test/v1-hold-migration.integration.test.ts",
       "packet": "V1-64 (MIGRATION-SET-A)"
     },
@@ -1350,6 +1405,11 @@
       "prefix": "v65b_",
       "owner": "apps/server/test/today-aggregate.integration.test.ts",
       "packet": "V1-65 (TODAY-AGGREGATE)"
+    },
+    {
+      "prefix": "v65c_",
+      "owner": "apps/server/test/onboarding-no-demo-seed.integration.test.ts",
+      "packet": "V1-65 (DEMO-PREVIEW)"
     },
     {
       "prefix": "v65d_",
@@ -1372,14 +1432,124 @@
       "packet": "V1-65 (TOF-PAYROLL-DISCARD)"
     },
     {
-"prefix": "v91r_",
+      "prefix": "v65h_",
+      "owner": "apps/server/test/owner-alerts-owner-only.integration.test.ts",
+      "packet": "V1-65 (OWNER-ALERTS-WEB)"
+    },
+    {
+      "prefix": "v91r_",
       "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
       "packet": "V1-91 (FU-BULK-DELETE-UNDO, P37)"
     },
     {
-"prefix": "v64a_",
+      "prefix": "v64a_",
       "owner": "apps/server/test/key-proposal-result-reader-scope.integration.test.ts",
       "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
+    },
+    {
+      "prefix": "v66l_",
+      "owner": "apps/server/test/census-v1-b.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-V1-B)"
+    },
+    {
+      "prefix": "v91s_",
+      "owner": "apps/server/test/flow-search-money-scope.integration.test.ts",
+      "packet": "V1-91 (FU-SEARCH-MONEY-SCOPE)"
+    },
+    {
+      "prefix": "v96g_",
+      "owner": "apps/server/test/refund-gateway-refuse.integration.test.ts",
+      "packet": "V1-96 (FU-REFUND-GATEWAY-REFUSE)"
+    },
+    {
+      "prefix": "v97p_",
+      "owner": "apps/server/test/presence-scope.integration.test.ts",
+      "packet": "V1-97 (FU-PRESENCE-REVENUE-SCOPE, P100)"
+    },
+    {
+      "prefix": "v98h_",
+      "owner": "apps/server/test/health-money-scope.integration.test.ts",
+      "packet": "V1-98 (FU-HEALTH-MONEY-SCOPE, P101)"
+    },
+    {
+      "prefix": "v64c_",
+      "owner": "apps/server/test/bill-pay-account.integration.test.ts",
+      "packet": "V1-64 (EXPENSES-HUB-1)"
+    },
+    {
+      "prefix": "v66b_",
+      "owner": "apps/server/test/vat-number.integration.test.ts",
+      "packet": "V1-66 (VAT-BASICS)"
+    },
+    {
+      "prefix": "v63a_",
+      "owner": "apps/server/test/key-cortex-self-model.integration.test.ts",
+      "packet": "V1-63 (TOF-KEY-SELF-MODEL)"
+    },
+    {
+      "prefix": "v64f_",
+      "owner": "apps/server/test/decimal-quantity.integration.test.ts",
+      "packet": "V1-64 (DECIMALS-SERVER)"
+    },
+    {
+      "prefix": "v64l_",
+      "owner": "apps/server/test/census-key-b.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v71h_",
+      "owner": "apps/server/test/merge-contacts-unique.integration.test.ts",
+      "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE, P112)"
+    },
+    {
+      "prefix": "v81o_",
+      "owner": "apps/server/test/key-overdue-sent-only.integration.test.ts",
+      "packet": "V1-81 (FU-KEY-OVERDUE-SENT-ONLY, P113)"
+    },
+    {
+      "prefix": "v83c_",
+      "owner": "apps/server/test/contactid-writer-validation.integration.test.ts",
+      "packet": "V1-83 (FU-CONTACTID-WRITER-VALIDATION, P114)"
+    },
+    {
+      "prefix": "v72t_",
+      "owner": "apps/server/test/token-encryption-key-census.integration.test.ts",
+      "packet": "V1-72 (RR-DB-CRYPTO-KEY-CENSUS)"
+    },
+    {
+      "prefix": "v72b_",
+      "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
+    },
+    {
+      "prefix": "v67b_",
+      "owner": "apps/server/test/legacy-modules.integration.test.ts",
+      "packet": "V1-67 (NAV-B-LEGACY-SERVER)"
+    },
+    {
+      "prefix": "v84k_",
+      "owner": "apps/server/test/cortex-insight-cash-truth.integration.test.ts",
+      "packet": "V1-84 (FU-CORTEX-INSIGHT-CASH-TRUTH, P119)"
+    },
+    {
+      "prefix": "v85m_",
+      "owner": "apps/server/test/marketplace-paid-payment-row.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120)"
+    },
+    {
+      "prefix": "v85n_",
+      "owner": "apps/server/test/marketplace-paid-payment-row-r1.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120 R1)"
+    },
+    {
+      "prefix": "v86t_",
+      "owner": "apps/server/test/timeline-callers-scope.integration.test.ts",
+      "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE)"
+    },
+    {
+      "prefix": "v86r_",
+      "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
+      "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
     }
   ],
   "pendingRenames": [],
@@ -1391,6 +1561,10 @@
     {
       "file": "apps/server/test/backfill-scripts-cli.integration.test.ts",
       "reason": "Runs the operator scripts' dry runs (no arguments) as child processes against DATABASE_URL; dry runs write no rows, so there is nothing to seed or clean up."
+    },
+    {
+      "file": "apps/server/test/contract-fetch-body-cap.integration.test.ts",
+      "reason": "Tests ContractClauseService decompressed body cap against a real local HTTP server with an in-memory Prisma double; touches no database rows."
     },
     {
       "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",

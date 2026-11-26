@@ -171,6 +171,7 @@ const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 let db: any;
 let app: any;
 let redis: any;
+let commerceSvc: any;
 let paymentsSvc: any;
 let revenuePostingSvc: any;
 let ledgerReporting: any;
@@ -248,11 +249,30 @@ function chargeRefunded(evt: string, inv: string, n: string, amountRefunded: num
   }, secret);
 }
 
-function refund(paymentId: string, reason = 'v29c refund', business = ID.bizA, owner = ID.ownerA) {
-  return request(app.getHttpServer())
+/**
+ * P96 (FU-REFUND-GATEWAY-REFUSE, owner rulings A2 & B1): the manual HTTP route refuses API-refundable
+ * Stripe/PayPal payments with 409 pointing to POST /payments/businesses/:businessId/refunds. Verify
+ * that refusal first, then exercise the internal D-121 bookkeeping door (`allowApiGatewayBookkeeping`)
+ * so all cross-door ledger, audit, and over-refund convergence assertions remain proven.
+ */
+async function refund(paymentId: string, reason = 'v29c refund', business = ID.bizA, owner = ID.ownerA) {
+  const httpRes = await request(app.getHttpServer())
     .post(`/commerce/businesses/${business}/payments/${paymentId}/refund`)
     .set(HEADER, owner)
     .send({ reason });
+  expect(httpRes.status, JSON.stringify(httpRes.body)).toBe(409);
+  expect(String(httpRes.body?.message ?? '')).toMatch(new RegExp(`POST /payments/businesses/${business}/refunds`));
+  try {
+    const body = await commerceSvc.markPaymentRefunded(paymentId, business, reason, owner, undefined, undefined, {
+      allowApiGatewayBookkeeping: true,
+    });
+    return { status: 201, body };
+  } catch (err: any) {
+    const status = typeof err?.getStatus === 'function' ? err.getStatus() : 500;
+    const raw = typeof err?.getResponse === 'function' ? err.getResponse() : { message: err?.message };
+    const body = typeof raw === 'string' ? { message: raw } : raw;
+    return { status, body };
+  }
 }
 
 /** With the deployment's own Stripe webhook secret configured (Stripe's alone; no tenant binding). */
@@ -441,6 +461,7 @@ beforeAll(async () => {
     ],
   }).compile();
   const commerce = moduleRef.get(CommerceService);
+  commerceSvc = commerce;
   const workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   paymentsSvc = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, moduleRef.get(RevenuePostingService));
   revenuePostingSvc = moduleRef.get(RevenuePostingService);

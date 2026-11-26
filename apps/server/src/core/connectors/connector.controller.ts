@@ -179,6 +179,7 @@ export class ConnectorController {
   }
 
   @Post('businesses/:businessId/sync/:type')
+  @RequireModuleScope('settings', 'admin')
   async sync(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
@@ -254,6 +255,7 @@ export class ConnectorController {
   }
 
   @Post('businesses/:businessId/test/:type')
+  @RequireModuleScope('settings', 'admin')
   async test(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
@@ -267,6 +269,7 @@ export class ConnectorController {
   }
 
   @Post('businesses/:businessId/smoke/:type')
+  @RequireModuleScope('settings', 'admin')
   async smoke(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
@@ -289,6 +292,7 @@ export class ConnectorController {
   }
 
   @Post('businesses/:businessId/health-check/run')
+  @RequireModuleScope('settings', 'admin')
   async runHealthCheck(@Param('businessId') businessId: string) {
     return this.healthMonitor.tickBusiness(businessId);
   }
@@ -321,6 +325,7 @@ export class ConnectorController {
    * threshold, contact creation). Upserts the ConnectorStatus row if needed.
    */
   @Patch('businesses/:businessId/inbox-config/:type')
+  @RequireModuleScope('settings', 'admin')
   async updateInboxConfig(
     @Param('businessId') businessId: string,
     @Param('type') type: string,

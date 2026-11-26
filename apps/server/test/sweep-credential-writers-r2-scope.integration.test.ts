@@ -321,9 +321,9 @@ describe('CW-3: the Google Business Profile account and location the owner\'s to
 describe('CW-4: Connect (POST authenticate/:type) and a passed WhatsApp smoke test lift an explicit disconnect', () => {
   const conn = `/connectors/businesses/${ID.bizA}`;
 
-  // SWEEP-P0-FOLLOWUP, whatsappsmoke ruling (recommended option): the WhatsApp test only reports its result and never
-  // switches WhatsApp back on, so it is open to members again; the disconnect stands whoever runs it.
-  it('[CW2-CON-01] RED-BEFORE: after the owner\'s explicit WhatsApp disconnect, a member below settings admin is refused Connect (authenticate) with 403; the smoke test answers them (whatsappsmoke) and switches nothing on; the disconnect stands', async () => {
+  // P90 (SWP-CENSUS-V1-B, D-181, owner ruling A1 on #80): ConnectorController.smoke now requires settings:admin
+  // in ModuleScopeGuard before reaching the connector, so BELOW_SETTINGS_ADMIN is refused 403 on both authenticate and smoke.
+  it('[CW2-CON-01] RED-BEFORE: after the owner\'s explicit WhatsApp disconnect, a member below settings admin is refused Connect (authenticate) and smoke with 403; the disconnect stands', async () => {
     expect((await send('post', `${conn}/disconnect/whatsapp`, ID.owner)).status).toBe(201);
     const after = await whatsappRow();
     expect(after).toMatchObject({ status: 'disconnected', record: { state: 'disconnected' } });
@@ -332,8 +332,8 @@ describe('CW-4: Connect (POST authenticate/:type) and a passed WhatsApp smoke te
       expect(auth.status, `${actor} authenticate`).toBe(403);
       expect(String(auth.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
       const smoke = await send('post', `${conn}/smoke/whatsapp`, actor);
-      expect(smoke.status, `${actor} smoke`).toBe(201);
-      expect(smoke.body?.success, `${actor} smoke`).toBe(false);
+      expect(smoke.status, `${actor} smoke`).toBe(403);
+      expect(String(smoke.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
     }
     expect(await whatsappRow()).toEqual(after);
     expect((await send('get', `${conn}/health/whatsapp`, ID.owner)).body?.status).toBe('disconnected');

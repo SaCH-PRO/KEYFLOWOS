@@ -135,6 +135,8 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     nextActions = [callAda];
     window.localStorage.setItem("kf_pipeline_view", "list");
     render(<AppProviders><ContactsPage /></AppProviders>);
+    // CONTACTS-LIST-FIRST (D-289): the queue sits in the toolbar's "Insights and filters" panel, which starts closed.
+    fireEvent.click(await screen.findByRole("button", { name: /^insights and filters/i }, { timeout: 4000 }));
     const name = await screen.findAllByRole("button", { name: /^ada byron$/i }, { timeout: 4000 });
     fireEvent.click(name[0]);
     await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), { timeout: 4000 });

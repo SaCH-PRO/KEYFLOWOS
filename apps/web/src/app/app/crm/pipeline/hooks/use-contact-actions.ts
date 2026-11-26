@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
 import type { QuickActionType } from "@/components/contacts";
 import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
+import { memberModuleLevelsOf, type ModuleLevels } from "@/lib/nav-config";
+import { apiGet } from "@/lib/api";
 import {
   addContactNote,
   addContactTask,
@@ -27,6 +29,43 @@ import {
 import { moduleEvents } from "@/lib/module-events";
 import { showRefusal } from "@/lib/failure-kit";
 import { deleteContactsWithUndo } from "./contacts-bulk-delete";
+
+/**
+ * FU-CONTACT-SEND-QUOTE-DOOR (review SEC-SQD-1): whether a member with `levels` (useMemberModuleLevels) is offered a
+ * contact's Send Quote: only one who may write quotes (revenue write or admin), as the WhatsApp sheet's New quote
+ * (new-from-whatsapp.tsx). Unknown (no answer yet, a failed read, an answer that does not name revenue) hides nothing:
+ * the server still refuses.
+ */
+export function offersQuote(levels: ModuleLevels): boolean {
+  if (!levels) return true;
+  const revenue = levels.revenue;
+  return revenue === undefined || revenue === "write" || revenue === "admin";
+}
+
+/**
+ * Whether the Customers screen offers Send Quote (offersQuote), for the member's level on the business the screen is
+ * bound to: `businessId` is the screen's own (useContactsPipeline), read from my-access for that business only. Not
+ * useMemberModuleLevels, which follows the live selection: after another tab selects another business that would ask
+ * my-access for a business this screen does not work on (W9-CUSTOM-FIELDS-TENANT, SEC-R015c-1: the screen names only
+ * its own business). Unknown until answered, and on a failed read: hides nothing.
+ */
+export function useOffersQuote(businessId: string | null): boolean {
+  const [answered, setAnswered] = useState<{ businessId: string; levels: ModuleLevels } | null>(null);
+  useEffect(() => {
+    if (!businessId) return;
+    let disposed = false;
+    void apiGet(`/identity/businesses/${encodeURIComponent(businessId)}/my-access`)
+      .then((res) => (res.error ? null : memberModuleLevelsOf(res.data)))
+      .catch(() => null)
+      .then((levels) => {
+        if (!disposed) setAnswered({ businessId, levels });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [businessId]);
+  return offersQuote(answered !== null && answered.businessId === businessId ? answered.levels : null);
+}
 
 interface UseContactActionsParams {
   businessId: string | null;
@@ -505,8 +544,12 @@ export function useContactActions({
         break;
       case "book-appointment": router.push(`/app/bookings?contactId=${contactId}`); break;
       case "send-quote":
-        moduleEvents.emit("commerce:create_quote_for_contact", "crm", { contactId });
-        router.push(`/app/commerce?tab=billing&segment=quotes&contactId=${contactId}`);
+        // FU-CONTACT-SEND-QUOTE-DOOR: the Quotes door for this customer, which the commerce page reads and turns into
+        // an open New quote form with them chosen (page.tsx, ?tab=quotes&contactId=). ?tab=billing landed on the
+        // Snapshot and opened nothing; the event it also sent had no listener, as the commerce page is not mounted
+        // here. A client navigation is enough: the shell no longer remounts on a pathname change
+        // (FU-REQUIRE-AUTH-REMOUNT), so the page mounts once and reads the one-shot id.
+        router.push(`/app/commerce?tab=quotes&contactId=${encodeURIComponent(contactId)}`);
         break;
       case "refer":
         router.push(`/app/crm/contacts/${contactId}?action=refer`);

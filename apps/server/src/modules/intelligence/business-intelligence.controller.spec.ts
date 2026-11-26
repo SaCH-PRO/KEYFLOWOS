@@ -46,6 +46,9 @@ describe('BusinessIntelligenceController', () => {
     const result = await controller.executiveBrief('biz_1');
 
     expect(result).toEqual(brief);
-    expect(service.generateExecutiveBrief).toHaveBeenCalledWith('biz_1');
+    expect(service.generateExecutiveBrief).toHaveBeenCalledWith('biz_1', null);
+
+    await controller.executiveBrief('biz_1', { user: { id: 'user_1', role: 'USER' } });
+    expect(service.generateExecutiveBrief).toHaveBeenCalledWith('biz_1', { id: 'user_1', role: 'USER' });
   });
 });

@@ -864,7 +864,7 @@ describe('G6PUB-RC2-2: the site status route moves fulfilment only', () => {
     expect(expenses).toEqual([]);
   });
 
-  it('V87-04b (W11-ORDER-PAID-VALUES, D-117) PATCH /site/.../orders/:id/status takes a fulfilment status only: a body carrying paymentStatus, paymentMethod or paymentRef ({status:CONFIRMED, paymentStatus:PAID}, {status:SHIPPED, paymentStatus:COMPLETED}, {status:SHIPPED, paymentRef:x}, a null paymentMethod) is refused (400) naming the checkout doors, for the owner and a revenue:read member, with the order unchanged and no event; control: {status:SHIPPED} still moves the order', async () => {
+  it('V87-04b (W11-ORDER-PAID-VALUES, D-117; amended P90 storefront:write) PATCH /site/.../orders/:id/status takes a fulfilment status only: a body carrying paymentStatus, paymentMethod or paymentRef ({status:CONFIRMED, paymentStatus:PAID}, {status:SHIPPED, paymentStatus:COMPLETED}, {status:SHIPPED, paymentRef:x}, a null paymentMethod) is refused (400) naming the checkout doors for the owner, and refused (403 storefront:write) for a revenue:read-only member, with the order unchanged and no event; control: {status:SHIPPED} still moves the order', async () => {
     const order = await placeOrder('CASH');
     const state = await bookState(order);
     const before = await counts();
@@ -883,9 +883,15 @@ describe('G6PUB-RC2-2: the site status route moves fulfilment only', () => {
     for (const actor of [ID.owner, ID.staffRead]) {
       for (const body of bodies) {
         const res = await as(agent().patch(`/site/businesses/${ID.bizA}/orders/${order.id}/status`).send(body), actor);
-        const namesDoors = /complete-offline/.test(JSON.stringify(res.body)) && /refund/.test(JSON.stringify(res.body));
-        answers.push(`${actor} ${JSON.stringify(body)}: ${res.status}${namesDoors ? ' naming the checkout doors' : ` ${JSON.stringify(res.body)}`}`);
-        expected.push(`${actor} ${JSON.stringify(body)}: 400 naming the checkout doors`);
+        if (actor === ID.staffRead) {
+          const scopeRefused = /storefront requires write access/i.test(JSON.stringify(res.body));
+          answers.push(`${actor} ${JSON.stringify(body)}: ${res.status}${scopeRefused ? ' storefront:write' : ` ${JSON.stringify(res.body)}`}`);
+          expected.push(`${actor} ${JSON.stringify(body)}: 403 storefront:write`);
+        } else {
+          const namesDoors = /complete-offline/.test(JSON.stringify(res.body)) && /refund/.test(JSON.stringify(res.body));
+          answers.push(`${actor} ${JSON.stringify(body)}: ${res.status}${namesDoors ? ' naming the checkout doors' : ` ${JSON.stringify(res.body)}`}`);
+          expected.push(`${actor} ${JSON.stringify(body)}: 400 naming the checkout doors`);
+        }
       }
     }
     expect(answers).toEqual(expected);

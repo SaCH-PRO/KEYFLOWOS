@@ -302,7 +302,7 @@ describe('P82 R1-3, R1-4, R1-5, R1-7: blueprintForReader, moduleReadinessForRead
     expect(out.map((f) => f.id)).toEqual(['f_clean']);
   });
 
-  it('genomeIntegrityForReader enforces D-233 allowlist on readinessBreakdown and scrubs money missingFields/summary/recommendation on kept dnaSections', () => {
+  it('genomeIntegrityForReader enforces D-233/D-234 allowlist on readinessBreakdown and scrubs money missingFields/summary/recommendation on kept dnaSections', () => {
     const raw = {
       genomeIntegrity: 45,
       genomeDnaScores: { business: 70, operations: 80, financial: 10, unknownDim: 99 },
@@ -311,7 +311,7 @@ describe('P82 R1-3, R1-4, R1-5, R1-7: blueprintForReader, moduleReadinessForRead
       threePillarMinimumMet: true,
       dnaSections: [
         { key: 'business', label: 'Business', integrity: 70, confidence: 75, summary: 'Missing: revenueModel, deliveryMode', fieldsCaptured: 2, fieldsTotal: 4, missingFields: ['revenueModel', 'budgetRange', 'deliveryMode'], recommendation: 'Add revenue model' },
-        { key: 'operations', label: 'Operations', integrity: 80, confidence: 80, summary: 'Good SOPs', fieldsCaptured: 4, fieldsTotal: 5, missingFields: ['sopDoc'], recommendation: 'Add SOP doc' },
+        { key: 'operations', label: 'Operations', integrity: 80, confidence: 80, summary: 'Missing: revenueModel, deliveryMode', fieldsCaptured: 4, fieldsTotal: 5, missingFields: ['revenueModel', 'budgetRange', 'deliveryMode'], recommendation: 'Add revenue model' },
         { key: 'financial', label: 'Financial', integrity: 10, confidence: 90, summary: 'Low cash', fieldsCaptured: 1, fieldsTotal: 5, missingFields: ['cashBalance'], recommendation: 'Fix cash' },
       ],
       executiveReadinessScore: 45,
@@ -320,11 +320,13 @@ describe('P82 R1-3, R1-4, R1-5, R1-7: blueprintForReader, moduleReadinessForRead
 
     const out = genomeIntegrityForReader(raw, false) as any;
     expect(out.readinessBreakdown).toEqual({ operations: 80 });
-    expect(out.genomeDnaScores).toEqual({ business: 70, operations: 80 });
-    const bizSection = out.dnaSections.find((s: any) => s.key === 'business');
-    expect(bizSection.missingFields).toEqual(['deliveryMode']);
-    expect(bizSection.summary).toBe('');
-    expect(bizSection.recommendation).toBe('');
+    // D-234: business DNA (BUSINESS_MODEL) is money and withheld alongside financial/sales/unknownDim.
+    expect(out.genomeDnaScores).toEqual({ operations: 80 });
+    expect(out.dnaSections.find((s: any) => s.key === 'business')).toBeUndefined();
+    const opsSection = out.dnaSections.find((s: any) => s.key === 'operations');
+    expect(opsSection.missingFields).toEqual(['deliveryMode']);
+    expect(opsSection.summary).toBe('');
+    expect(opsSection.recommendation).toBe('');
   });
 
   it('R2-2: v2ContextForReader strips real receipt captures (no summary), crm.conversionRateThisMonth, temporal.patternsDetected, and object genome.recommendations with money in diagnosis', () => {

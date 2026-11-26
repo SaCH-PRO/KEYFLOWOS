@@ -342,16 +342,20 @@ describe('OnboardingConciergeService', () => {
       });
       const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
       expect(result.complete).toBe(true);
-      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
+      expect(result.demoData).toBeNull();
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
       expect(result).toMatchObject({ genomeRecommendation: { threePillarMinimumMet: false, missingPillars: ['founder'] } });
     });
 
+    // Title preserved verbatim for scripts/proof-admission/manifests/release0-edited-suites.json;
+    // D-157 (P102 DEMO-PREVIEW): completion writes zero demo rows and returns demoData: null.
     it('marks onboarding complete and seeds demo data when the gate passes', async () => {
       const { service, prisma, demoSeeder } = makeService({ business: minimalProfile, integrity: { threePillarMinimumMet: true } });
       const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
 
       expect(result.complete).toBe(true);
-      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
+      expect(result.demoData).toBeNull();
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
       expect(prisma.client.$transaction).toHaveBeenCalled();
     });
 
@@ -462,7 +466,7 @@ describe('OnboardingConciergeService', () => {
           action: 'onboarding_completed',
           entityType: 'business',
           entityId: 'biz_1',
-          meta: { demoContactId: 'c1', demoInvoiceId: 'i1', demoInvoiceNumber: 'DEMO-001' },
+          meta: { demoContactId: null, demoInvoiceId: null, demoInvoiceNumber: null },
         }),
       });
     });
@@ -508,7 +512,7 @@ describe('OnboardingConciergeService', () => {
     it('R0-SEC-03 SEC03-1: the owner\'s /complete on a business flagged complete without onboardingCompletedAt runs the whole completion', async () => {
       const { service, demoSeeder, tx } = makeService({ business: flaggedByPatch, membership: { role: 'OWNER', permissionScopes: null } });
       const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
-      expect(result).toMatchObject({ complete: true });
+      expect(result).toMatchObject({ complete: true, demoData: null });
       expect((result as { alreadyComplete?: boolean }).alreadyComplete).toBeUndefined();
       // R0-SEC-04 SEC03-2: the completion is written by the claim, a conditional
       // update that a flag without onboardingCompletedAt still matches.
@@ -516,7 +520,7 @@ describe('OnboardingConciergeService', () => {
         where: { id: 'biz_1', OR: [{ onboardingComplete: false }, { onboardingCompletedAt: null }] },
         data: expect.objectContaining({ onboardingComplete: true, onboardingCompletedAt: expect.any(Date) }),
       }));
-      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
       expect(tx.teamActivityLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ userId: 'user_owner', action: 'onboarding_completed' }),
       });
@@ -531,16 +535,16 @@ describe('OnboardingConciergeService', () => {
     it('R0-SEC-04 SEC03-2: completion claims the business with a conditional update, first in the transaction', async () => {
       const { service, tx, demoSeeder } = makeService({ business: { ...minimalProfile, ownerId: 'user_owner' } });
       const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
-      expect(result).toMatchObject({ complete: true });
+      expect(result).toMatchObject({ complete: true, demoData: null });
       expect((result as { alreadyComplete?: boolean }).alreadyComplete).toBeUndefined();
       expect(tx.business.updateMany).toHaveBeenCalledTimes(1);
       expect(tx.business.updateMany).toHaveBeenCalledWith({
         where: { id: 'biz_1', OR: [{ onboardingComplete: false }, { onboardingCompletedAt: null }] },
         data: { onboardingComplete: true, onboardingCompletedAt: expect.any(Date), onboardingStep: 'complete' },
       });
-      // The claim precedes the demo seed and the activity row.
+      // The claim precedes the activity row; D-157: no demo data is seeded.
       const claimedAt = tx.business.updateMany.mock.invocationCallOrder[0];
-      expect((demoSeeder.seedDemoData as unknown as { mock: { invocationCallOrder: number[] } }).mock.invocationCallOrder[0]).toBeGreaterThan(claimedAt);
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
       expect(tx.teamActivityLog.create.mock.invocationCallOrder[0]).toBeGreaterThan(claimedAt);
     });
 

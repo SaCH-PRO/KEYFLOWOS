@@ -46,11 +46,20 @@ function deriveOnce(secret: string): Buffer {
   return key;
 }
 
+const DEV_FALLBACK_SECRET = 'dev-only-local-key-not-for-production';
+const CORE_CHAIN_EXTRA_VAR = 'DRIVE_TOKEN_ENCRYPTION_SECRET';
+
+export type TokenEncryptionKeyLabel =
+  | 'plaintext'
+  | 'current'
+  | 'fallback'
+  | 'core-chain'
+  | 'undecryptable';
+
 function getDerivedKey(): Buffer {
-  const secret = tokenEncryptionKeySource()
-    ? process.env[tokenEncryptionKeySource() as TokenEncryptionKeyVar]
-    : undefined;
-  return deriveOnce(secret || 'dev-only-local-key-not-for-production');
+  const source = tokenEncryptionKeySource();
+  const secret = source ? process.env[source] : undefined;
+  return deriveOnce(secret || DEV_FALLBACK_SECRET);
 }
 
 export function encryptToken(plaintext: string | null | undefined): string | null {
@@ -83,6 +92,56 @@ export function decryptToken(ciphertext: string | null | undefined): string | nu
   decipher.setAuthTag(tag);
   const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   return decrypted.toString('utf8');
+}
+
+function canDecryptPayload(data: Buffer, secret: string): boolean {
+  try {
+    const { createDecipheriv } = getCrypto();
+    const iv = data.subarray(0, 16);
+    const tag = data.subarray(16, 32);
+    const encrypted = data.subarray(32);
+    const key = deriveOnce(secret);
+    const decipher = createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(tag);
+    decipher.update(encrypted);
+    decipher.final();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Classifies a stored token column value by which key decrypts it, returning ONLY
+ * a label — never a key, secret, or plaintext.
+ *
+ *   'plaintext'     no enc:v1: prefix
+ *   'current'       decrypts under the active packages/db env chain (only when an env var is set)
+ *   'fallback'      decrypts under the in-repo dev fallback literal (including when no env var is set)
+ *   'core-chain'    decrypts under the core/crypto-only DRIVE_TOKEN_ENCRYPTION_SECRET when it differs
+ *   'undecryptable' prefixed payload that does not authenticate under any known key
+ */
+export function classifyStoredToken(value: string): TokenEncryptionKeyLabel {
+  if (!value.startsWith(PREFIX)) return 'plaintext';
+
+  const data = Buffer.from(value.slice(PREFIX.length), 'base64');
+  // Minimum valid payload is 16-byte IV + 16-byte GCM auth tag.
+  if (data.length < 32) return 'undecryptable';
+
+  const source = tokenEncryptionKeySource();
+  const activeSecret = source ? process.env[source] : undefined;
+  if (activeSecret && activeSecret !== DEV_FALLBACK_SECRET) {
+    if (canDecryptPayload(data, activeSecret)) return 'current';
+  }
+
+  if (canDecryptPayload(data, DEV_FALLBACK_SECRET)) return 'fallback';
+
+  const coreExtra = process.env[CORE_CHAIN_EXTRA_VAR];
+  if (coreExtra && coreExtra !== activeSecret && coreExtra !== DEV_FALLBACK_SECRET) {
+    if (canDecryptPayload(data, coreExtra)) return 'core-chain';
+  }
+
+  return 'undecryptable';
 }
 
 /**

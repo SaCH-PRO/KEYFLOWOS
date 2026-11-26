@@ -180,6 +180,7 @@ export class MarketplaceController {
    * recorder (revenue write, D-46); never a body field.
    */
   @CrmRateLimit(20, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/orders')
   createOrder(@Param('businessId') businessId: string, @Body() body: any, @Req() req: { user?: { id?: string } }) {
     return this.marketplaceService.createOrder(businessId, body, req?.user?.id ?? null);
@@ -473,6 +474,7 @@ export class MarketplaceController {
     return this.commerceIntegration.getContactOrderHistory(businessId, contactId);
   }
 
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/products/:productId/promote')
   promoteProductToContent(
     @Param('businessId') businessId: string,
@@ -496,6 +498,7 @@ export class MarketplaceController {
     return this.commerceIntegration.createProjectForBundleOrder(businessId, orderId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/post-purchase/process')
   processPostPurchaseJobs(@Param('businessId') businessId: string) {
     return this.commerceIntegration.processPostPurchaseJobs(businessId);

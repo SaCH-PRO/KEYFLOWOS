@@ -133,6 +133,8 @@
  *  projects_create_task         ProjectsService          POST /projects/businesses/:businessId/projects/:projectId/tasks  projects:write
  *  projects_get_budget          ProjectsService          GET /projects/businesses/:businessId/projects/:projectId/budget  projects:read
  *  inventory_adjust_stock       MarketplaceService       POST /marketplace/businesses/:businessId/inventory/adjust     storefront:write
+ *  approval_create_request      ApprovalRequestService   POST /businesses/:businessId/approvals                        operations:write
+ *  save_onboarding_step         OnboardingStateService   POST /onboarding-concierge/businesses/:businessId/onboarding-step  settings:write
  *
  * NOT GRANTED although their family is (rule 4; UNGRANTED below): among them
  * payroll_set_rate and payroll_generate_run (PayrollService.setRate / generateRun back no
@@ -632,6 +634,31 @@ const ARGUMENT_BOUND: Array<{ file: string; verb: string; path: string; call: st
       /recipientEmail: user\.email,/,
     ],
     why: "mails the caller (or the business's first member) a fixed document_generated notice, never a customer",
+  },
+  // SWP-CENSUS-V1-B (P90): IdentityController.generateField and generateProfile are gated settings:write
+  // and fix their AiUsageService.callAi feature + prompt template to profile-copy generation; they do not
+  // stand in for general AI drafting or seo_apply_remediation (which also writes seoPage/seoIssue).
+  {
+    file: 'modules/identity/identity.controller.ts',
+    verb: 'POST',
+    path: '/identity/businesses/:businessId/ai-generate-field',
+    call: 'AiUsageService.callAi',
+    proof: [
+      /const prompt = fieldPrompts\[body\.field\];/,
+      /feature: 'profile-field-generate',/,
+    ],
+    why: 'fixes feature and prompt to profile-field-generate (tagline, description, or skills); does not stand in for general AiUsageService.callAi',
+  },
+  {
+    file: 'modules/identity/identity.controller.ts',
+    verb: 'POST',
+    path: '/identity/businesses/:businessId/generate-profile',
+    call: 'AiUsageService.callAi',
+    proof: [
+      /Generate a professional profile for this business\/entrepreneur\./,
+      /feature: 'profile-generate',/,
+    ],
+    why: 'fixes feature and prompt to profile-generate (headline and bio); does not stand in for general AiUsageService.callAi',
   },
 ];
 const BOUND = new Set(ARGUMENT_BOUND.map((b) => `${routeKey(b)} ${b.call}`));
@@ -1306,6 +1333,12 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'payroll_approve_run', service: 'PayrollService', route: 'POST /payroll/businesses/:businessId/runs/:runId/approve', scope: 'operations:write', file: 'modules/payroll/payroll.controller.ts' },
   { tool: 'payroll_list_rates', service: 'PayrollService', route: 'GET /payroll/businesses/:businessId/rates', scope: 'operations:read', file: 'modules/payroll/payroll.controller.ts' },
   { tool: 'performance_take_snapshot', service: 'StaffPerformanceService', route: 'POST /staff-performance/businesses/:businessId/snapshot', scope: 'operations:write', file: 'modules/staff-performance/staff-performance.controller.ts' },
+  { tool: 'approval_create_request', service: 'ApprovalRequestService', route: 'POST /businesses/:businessId/approvals', scope: 'operations:write', file: 'modules/approvals/approval.controller.ts' },
+  { tool: 'save_onboarding_step', service: 'OnboardingStateService', route: 'POST /onboarding-concierge/businesses/:businessId/onboarding-step', scope: 'settings:write', file: 'modules/onboarding-concierge/onboarding-concierge.controller.ts' },
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): KeyCortexGoalsController write routes require ai write
+  { tool: 'goals_create', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
+  { tool: 'goals_create_plan', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals/:goalId/plans', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
+  { tool: 'goals_delete', service: 'KeyCortexPlannerService', route: 'DELETE /api/v1/cortex/goals/:goalId', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
 ];
 
 /**
@@ -1313,23 +1346,23 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
  * either has a granted tool or is listed here, so a new family has to be placed on purpose.
  */
 const UNMAPPED: Record<string, string> = {
-  apply: 'CatalogService.updateProduct is also exposed unscoped by catalog.controller',
-  approval: 'approval.controller declares no module scope',
+  // apply: granted since SWP-CENSUS-V1-A (P87) gated CatalogController.updateProduct (revenue write)
+  // approval: granted since SWP-CENSUS-V1-B (P90) gated ApprovalController write routes (operations write)
   automations: 'FlowService.createAutomation/updateAutomation back no route; playbook routes (automation.controller) are unscoped',
-  bookings: 'bookings.controller declares no module scope (the legacy `bookings` key still grants bookings_*)',
+  // bookings: granted since SWP-CENSUS-V1-A (P87) gated BookingsController write routes (bookings write)
   comms: 'CommunicationsService.sendBroadcast backs no route',
   community: 'reads Prisma directly; no service call',
   content: 'content-ops.controller declares no module scope (the legacy `content` key still grants content_*)',
   delegation: 'DelegationLoopService is reached only through autopilot.controller, which declares no module scope',
   documents: 'reads Prisma directly; no service call',
-  draft: 'AiUsageService.callAi is reached by unscoped AI routes',
+  draft: 'AiUsageService.callAi has no general member route (IdentityController generate-field/generate-profile are ARGUMENT_BOUND)',
   drive: 'google-drive.controller declares no module scope',
   enable: 'FlowService.updateAutomation backs no route',
   evidence: 'evidence.controller declares no module scope',
   execute: 'execute_custom_logic re-enters the dispatcher for any tool (innerToolExecutor -> executeToolByName), so it is governed by every module the dispatcher reaches and granted by none',
   fetch: 'cross-module reads; already baseline (fetch_*) for every position',
   generate: 'seo.controller declares no module scope',
-  goals: 'key-cortex-goals.controller declares no module scope',
+  // goals: granted since SWP-CENSUS-KEY-B (P109, Ruling B2) gated KeyCortexGoalsController write routes (ai write)
   governance: 'governance.controller declares no module scope',
   helpdesk: 'helpdesk.controller declares no module scope',
   // inventory: granted since PR195-BOOKS-DOORS (inventory_advance_purchase_order, expenses write) and
@@ -1344,10 +1377,10 @@ const UNMAPPED: Record<string, string> = {
   queue: 'EmailMarketingService.queueCampaign backs no route',
   // reconcile: granted since PR195-BOOKS-DOORS (reconcile_run_auto_match, reconcile_match_line, revenue write)
   retainers: 'retainer.controller declares no module scope',
-  save: 'onboarding-concierge.controller declares no module scope',
+  // save: granted since SWP-CENSUS-V1-B (P90) gated OnboardingConciergeController.saveOnboardingStep (settings write)
   segment: 'reads Prisma directly; no service call',
   send: 'send_message_with_approval: crm:write (CrmService.addNote) beside AiMessageSenderService.sendMessage, which backs no route',
-  seo: 'reads Prisma and AiUsageService.callAi (unscoped AI routes)',
+  seo: 'reads Prisma and AiUsageService.callAi (no general member route; IdentityController AI routes are ARGUMENT_BOUND)',
   sequence: 'crm-sequence.controller declares no module scope',
   social: 'social.controller declares no module scope',
   store: 'reads Prisma directly; no service call',
@@ -1369,11 +1402,18 @@ const UNMAPPED_GOVERNED: Record<string, string[]> = {
  * granted exactly these (SEC-V21b-02: payroll_set_rate, payroll_generate_run, ...).
  */
 const UNGRANTED: Record<string, string> = {
+  // SWP-CENSUS-V1-B (P90): approval family now grants approval_create_request (operations write); list stays unscoped and decideStep is ambient-bound
+  approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; operations:write is only a floor)',
+  approval_list: 'ApprovalRequestService.listForBusiness is reached by approval.controller GET, which is unscoped',
+  // SWP-CENSUS-V1-A (P87): bookings family now grants its write tools (bookings write); reads stay ungranted and offerSlot is ambient-bound
+  bookings_list_bookings: 'reads Prisma directly; no service call',
+  bookings_list_services: 'reads Prisma directly; no service call',
+  bookings_list_waitlist: 'BookingWaitlistService.listWaitlist is reached by bookings.controller GET, which is unscoped',
+  bookings_offer_waitlist_slot: 'BookingWaitlistService.offerSlot finds the waitlist entry by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; bookings:write is only a floor)',
   calendar_check_conflicts: 'reads Prisma directly; no service call (baseline read for every position)',
   commerce_send_invoice:
     "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), with a pay link from CommerceService.automatedInvoiceUrl, which backs no route (V1-46b), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
-  commerce_create_product: 'CatalogService.createProduct is reached by catalog.controller, which is unscoped',
-  commerce_update_product: 'CatalogService.updateProduct is reached by catalog.controller and trash restore, both unscoped',
+  // commerce_create_product / commerce_update_product: granted (revenue write) since SWP-CENSUS-V1-A (P87) gated CatalogController product writes
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
   // finance_auto_match_bank: granted (revenue write) since PR195-BOOKS-DOORS (SEC-P195JS-1) gated the statement
   // import and the auto-match, the member routes to BankMatchingService.autoMatch
@@ -1385,6 +1425,9 @@ const UNGRANTED: Record<string, string> = {
   finance_list_coa: 'FinanceCoaService is reached by finance.controller, which is unscoped',
   // finance_post_journal_entry: granted (revenue write) since PR195-JOURNAL-SCOPE (CR-P195-4) gated POST
   // finance journal-entries, the one member route to PostingService.post
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): goals family now grants goals_create/goals_create_plan/goals_delete (ai write); GET reads stay unscoped
+  goals_get: 'KeyCortexPlannerService.getGoal is reached by key-cortex-goals.controller GET, which is unscoped',
+  goals_list: 'KeyCortexPlannerService.listGoals is reached by key-cortex-goals.controller GET, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
   // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
@@ -1507,6 +1550,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     // call updated the request by its bare id, rule 2b) until FOLLOW3-D15 bound ProcurementService's writes
     // to the business: they are operations write in the table below
     expect(derived.governedUngranted).toEqual([
+      'approval_decide_step',
+      'bookings_offer_waitlist_slot',
       'commerce_send_invoice',
       'execute_custom_logic',
       'send_message_with_approval',
@@ -1552,14 +1597,18 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         tag_contact: 'write',
       },
       revenue: {
+        // SWP-CENSUS-V1-A (P87): CatalogController product writes require revenue write
+        apply_storefront_recommendation: 'write',
         commerce_convert_quote: 'write',
         commerce_create_invoice: 'write',
+        commerce_create_product: 'write',
         commerce_create_quote: 'write',
         commerce_delete_invoice: 'write',
         commerce_list_invoices: 'read',
         commerce_mark_invoice_paid: 'write',
         // commerce_send_invoice: GOVERNED_UNGRANTED (review 7 DRV5-2)
         commerce_update_invoice: 'write',
+        commerce_update_product: 'write',
         // the report routes require revenue:read (owner ruling D-57, V1-81 FOLLOW3-A7 item 9)
         finance_balance_sheet: 'read',
         finance_cashflow: 'read',
@@ -1597,6 +1646,13 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         reports_generate: 'read',
       },
       bookings: {
+        // SWP-CENSUS-V1-A (P87): BookingsController write routes require bookings write
+        bookings_add_to_waitlist: 'write',
+        bookings_cancel_booking: 'write',
+        bookings_cancel_waitlist_entry: 'write',
+        bookings_create_booking: 'write',
+        bookings_mark_no_show: 'write',
+        bookings_reschedule_booking: 'write',
         calendar_create_event: 'write',
         calendar_list_events: 'read',
       },
@@ -1635,10 +1691,15 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         inventory_transfer_stock: 'write',
       },
       // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write; KeyflowCommandController.createNote requires ai write
+      // SWP-CENSUS-V1-B (P90): OnboardingConciergeController.saveOnboardingStep requires settings write
       settings: {
+        save_onboarding_step: 'write',
         update_business_blueprint: 'write',
       },
       ai: {
+        goals_create: 'write',
+        goals_create_plan: 'write',
+        goals_delete: 'write',
         keyflow_create_note: 'write',
       },
       team: {
@@ -1653,6 +1714,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       },
       analytics: {},
       operations: {
+        // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
+        approval_create_request: 'write',
         // command_* and procurement_*: D-40 put the command-centre item and procurement routes
         // under operations (R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
         command_discharge_obligation: 'write',
@@ -1847,9 +1910,15 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         }
         return null;
       };
+      const tenantUnbound = ((policyModule as Record<string, unknown>).TENANT_UNBOUND_TOOLS ?? {}) as Record<string, string>;
       const hidden: string[] = [];
       for (const t of reachable) {
         if (derived.toolLevels.get(t)?.size) continue; // governed: the legacy keys do not reach it
+        // SWP-CENSUS-V1-B (P90): TENANT_UNBOUND_TOOLS (e.g. content_assign_request / content_transition_status /
+        // content_submit_for_review, which call ApprovalRequestService.createRequest two calls deep) are denied
+        // to every key — canonical, legacy, and baseline — in JobRolePolicyService.toolMatchesGrant.
+        // If a tool leaves TENANT_UNBOUND_TOOLS, this guard fires immediately.
+        if (t in tenantUnbound) continue;
         for (const u of derived.unknownCalls.get(t) ?? []) {
           const deep = governedDeep(u, 0, new Set());
           if (deep) hidden.push(`${t}: ${u} -> ${deep}`);
@@ -2060,7 +2129,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       expect(writes.filter((t) => HOLDER_AWARE.includes(t))).toEqual(HOLDER_AWARE);
       // W9-KEY-OBLIGATIONS-CALLS (D-88): and the holder-aware call-log tools, asserted below too
       expect(writes.filter((t) => CALL_LOG_HOLDER_AWARE.includes(t))).toEqual(CALL_LOG_HOLDER_AWARE);
-      expect(withheld).toEqual(['crm_delete_contact', 'crm_update_contact', 'tag_contact']);
+      expect(withheld).toEqual(['bookings_create_booking', 'crm_delete_contact', 'crm_update_contact', 'tag_contact']);
       expect([...ROW].sort()).toEqual(withheld);
     });
 
@@ -2619,9 +2688,10 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     it('TENANT_UNBOUND_TOOLS is exactly the ungoverned tools with an AMBIENT-BOUND call: no key reaches them, the legacy families and the baseline included', () => {
       const ungoverned = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) === 0).sort();
       const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0).sort();
-      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: the three procurement transitions were, from
-      // D-40 (R0-13g) until FOLLOW3-D15 bound ProcurementService's writes to the business; none is now
-      expect(governed).toEqual([]);
+      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: bookings_offer_waitlist_slot moved here when
+      // SWP-CENSUS-V1-A (P87) gated BookingsController.offerWaitlistSlot (bookings:write) while offerSlot still looks up entryId bare;
+      // approval_decide_step moved here when SWP-CENSUS-V1-B (P90) gated ApprovalController.approve/reject (operations:write) while decideStep still looks up approvalRequest bare
+      expect(governed).toEqual(['approval_decide_step', 'bookings_offer_waitlist_slot']);
       for (const t of governed) {
         expect(derived.governedUngranted, t).toContain(t);
         expect(Object.keys(GOVERNED_UNGRANTED), t).toContain(t);

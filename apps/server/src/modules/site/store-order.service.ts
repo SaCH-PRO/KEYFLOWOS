@@ -29,9 +29,12 @@ import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-c
 import { CommerceIntegrationService } from '../marketplace/commerce-integration.service';
 import {
   ORDER_STATUS_CHANGED_DURING_CANCEL,
+  ORDER_STATUS_CHANGED_DURING_EDIT,
   ROUTING_CLAIM_TX_OPTIONS,
+  assertStatusEditTransition,
   releaseOrderFulfilmentForCancel,
   statusEditMayCancel,
+  statusEditMayTransition,
 } from '../marketplace/fulfillment-routing.service';
 import { appendOrderTimeline, recordOrderRefundedTotal } from '../marketplace/order-metadata';
 import {
@@ -231,8 +234,8 @@ const PROVIDER_LABEL: Record<string, string> = { wipay: 'WiPay', stripe: 'Stripe
  * generic storefront checkout sends it to no provider.
  */
 export function isClosedStorefrontOrder(order: { status?: string | null; paymentStatus?: string | null }): boolean {
-  const status = (order.status ?? '').toUpperCase();
-  return status === 'CANCELLED' || status === 'REFUNDED' || (order.paymentStatus ?? '').toUpperCase() === 'REFUNDED';
+  const status = (order.status ?? '').trim().toUpperCase();
+  return status === 'CANCELLED' || status === 'REFUNDED' || (order.paymentStatus ?? '').trim().toUpperCase() === 'REFUNDED';
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -1100,14 +1103,39 @@ export class StoreOrderService {
       );
     }
 
-    const order =
-      normalized === 'CANCELLED'
-        ? await this.cancelReleasingFulfilment(businessId, orderId)
-        : await this.prisma.client.marketplaceOrder.update({
-            where: { id: orderId },
+    let order;
+    if (normalized === 'CANCELLED') {
+      order = await this.cancelReleasingFulfilment(businessId, orderId);
+    } else {
+      // W1F-ORDER-TRANSITIONS (D-198 `orderstatus`, SEC-W11OCR-2): refuse backwards moves from SHIPPED, DELIVERED, or
+      // COMPLETED, and refuse reopening terminal CANCELLED/REFUNDED orders.
+      assertStatusEditTransition(existing.status, normalized);
+      // W1F-ORDER-TRANSITIONS (D-198, reverse race): compare-and-set on the status read above so a concurrent cancel,
+      // delivery, or ship is never overwritten by a stale status edit. Idempotent concurrent same-status PATCHes
+      // retry CAS against the committed same status when still permitted.
+      let { count } = await this.prisma.client.marketplaceOrder.updateMany({
+        where: { id: orderId, businessId, status: existing.status },
+        data: { status: normalized },
+      });
+      if (count === 0) {
+        const now = await this.prisma.client.marketplaceOrder.findFirst({
+          where: { id: orderId, businessId },
+          select: { status: true },
+        });
+        if (now && now.status === normalized && statusEditMayTransition(now.status, normalized)) {
+          const retry = await this.prisma.client.marketplaceOrder.updateMany({
+            where: { id: orderId, businessId, status: now.status },
             data: { status: normalized },
-            include: { items: true },
           });
+          count = retry.count;
+        }
+        if (count === 0) throw new ConflictException(ORDER_STATUS_CHANGED_DURING_EDIT);
+      }
+      order = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
+        where: { id: orderId, businessId },
+        include: { items: true },
+      });
+    }
 
     // CONFIRMED is the merchant's fulfilment status, not money (V1-18, CF-45).
     // `store_order.paid` is emitted only by completeCheckout, after the
@@ -1799,7 +1827,9 @@ export class StoreOrderService {
             where: { id: activeOrder.id },
             data: {
               paymentStatus: 'PAID',
-              status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : (input.paidStatus ?? 'CONFIRMED'),
+              status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.trim().toUpperCase())
+                ? currentStatus.trim()
+                : (input.paidStatus ?? 'CONFIRMED'),
               paymentRef,
             },
             include: { items: true },
@@ -2263,7 +2293,15 @@ export class StoreOrderService {
     if (!this.commerce) throw new ServiceUnavailableException('Refunds are unavailable');
     for (const payment of payments) {
       try {
-        await this.commerce.markPaymentRefunded(payment.id, order.businessId, `Storefront order ${order.orderNumber} refunded`, actorId);
+        await this.commerce.markPaymentRefunded(
+          payment.id,
+          order.businessId,
+          `Storefront order ${order.orderNumber} refunded`,
+          actorId,
+          undefined,
+          undefined,
+          { allowApiGatewayBookkeeping: true },
+        );
       } catch (err) {
         // 409: nothing is left of this payment to refund; an earlier refund holds it.
         if (!(err instanceof ConflictException)) throw err;

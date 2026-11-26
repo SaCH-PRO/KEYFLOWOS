@@ -50,7 +50,7 @@ export function useCommerce() {
 
   const [pendingPrefill, setPendingPrefill] = useState<CommercePrefill | null>(null);
 
-  const productHook = useProducts(businessId, setProducts, cachedImages, setCachedImages);
+  const productHook = useProducts(businessId, setProducts, { currency: businessCurrency });
   const integrations = useCommerceIntegrations(businessId);
 
   useEffect(() => {
@@ -219,6 +219,8 @@ export function useCommerce() {
 
     ...integrations,
     ...productHook,
+    // useProducts no longer returns the image cache (CATALOG-1); the shape this hook returned is kept.
+    cachedImages,
 
     refreshProducts,
     showGuide,

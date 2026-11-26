@@ -1111,9 +1111,11 @@ describe('TOF-GRAPH-SCOPE-ARRAY review repair (D-71, D-114, D-140, D-57): a JSON
     [R.admin, 'ADMIN', []],
     [R.staff, 'STAFF', []],
     [R.defStaff, 'STAFF', undefined],
-    [R.mapStaff, 'STAFF', { revenue: 'read', expenses: 'read', analytics: 'read' }],
+    // SWP-CENSUS-KEY-B (P109, Ruling B2): POST plans/:planId/execute requires ai:write; R.mapStaff keeps read-only revenue/expenses/analytics.
+    [R.mapStaff, 'STAFF', { revenue: 'read', expenses: 'read', analytics: 'read', ai: 'write' }],
     [R.revStaff, 'STAFF', { revenue: 'read' }],
   ];
+  const AI_WRITE_NONE = 'Insufficient permissions: ai requires write access (you have none)';
   const REVENUE_WRITE_NONE = 'Insufficient permissions: revenue requires write access (you have none)';
   const REVENUE_READ_NONE = 'Insufficient permissions: revenue requires read access (you have none)';
   const PLAN_REVENUE_WRITE_NONE = `${REVENUE_WRITE_NONE}; this plan writes the business's invoices or payments`;
@@ -1321,22 +1323,30 @@ describe('TOF-GRAPH-SCOPE-ARRAY review repair (D-71, D-114, D-140, D-57): a JSON
 
   /* ------------------ SEC-TGSA-1: POST api/v1/cortex/plans/:planId/execute ------------------ */
 
-  it('RED-BEFORE (SEC-TGSA-1, D-114): the ADMIN stored as [] is refused its own plan of money steps (an invoice write among them), 403 before the claim; the plan stays pending and no step reaches the connector (was run: completed, all three routed)', async () => {
+  it('RED-BEFORE (SEC-TGSA-1, D-114): the ADMIN stored as [] is refused its own plan of money steps (an invoice write among them), 403 (HTTP ai:write and planner revenue:write) before the claim; the plan stays pending and no step reaches the connector (was run: completed, all three routed)', async () => {
     await resetPlans();
     const routedBefore = routedFor(ADMIN_PLAN).length;
     const res = await executePlanAs(R.admin, ADMIN_PLAN);
     expect(res.status, describeBody(res)).toBe(403);
-    expect(JSON.stringify(res.body)).toContain(PLAN_REVENUE_WRITE_NONE);
+    expect(JSON.stringify(res.body)).toContain(AI_WRITE_NONE);
+    let caught: any;
+    await planner.executePlan(ADMIN_PLAN, {}, { userId: R.admin, role: 'USER', businessId: R.bizR }).catch((err: unknown) => { caught = err; });
+    expect(caught?.getStatus?.(), String(caught)).toBe(403);
+    expect(caught.message).toBe(PLAN_REVENUE_WRITE_NONE);
     expect(await planStatus(ADMIN_PLAN)).toBe('pending');
     expect(routedFor(ADMIN_PLAN).length).toBe(routedBefore);
   });
 
-  it('RED-BEFORE (SEC-TGSA-1, D-71): the STAFF member stored as [] is refused its own plan of expenses and analytics reads, 403 before the claim (was run on the STAFF defaults: completed, both routed)', async () => {
+  it('RED-BEFORE (SEC-TGSA-1, D-71): the STAFF member stored as [] is refused its own plan of expenses and analytics reads, 403 (HTTP ai:write and planner expenses:read) before the claim (was run on the STAFF defaults: completed, both routed)', async () => {
     await resetPlans();
     const routedBefore = routedFor(STAFF_PLAN).length;
     const res = await executePlanAs(R.staff, STAFF_PLAN);
     expect(res.status, describeBody(res)).toBe(403);
-    expect(res.body.message).toBe(PLAN_EXPENSES_READ_NONE);
+    expect(res.body.message).toBe(AI_WRITE_NONE);
+    let caught: any;
+    await planner.executePlan(STAFF_PLAN, {}, { userId: R.staff, role: 'USER', businessId: R.bizR }).catch((err: unknown) => { caught = err; });
+    expect(caught?.getStatus?.(), String(caught)).toBe(403);
+    expect(caught.message).toBe(PLAN_EXPENSES_READ_NONE);
     expect(await planStatus(STAFF_PLAN)).toBe('pending');
     expect(routedFor(STAFF_PLAN).length).toBe(routedBefore);
   });
@@ -1823,16 +1833,22 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS (D-140): an OWNER membership with an expl
 
   /* ------------------------------ an approved proposal, over HTTP ------------------------------ */
 
-  it('RED-BEFORE (D-140): POST key-autonomy/.../proposals/:id/execute of an approved EXECUTE_TOOL proposal of either unmapped tool, filed (MANUAL) and executed by either scoped owner, is FAILED with the refusal and never reaches the KEY cortex registry (was EXECUTED: the registry ran it)', async () => {
+  it('RED-BEFORE (D-140): POST key-autonomy/.../proposals/:id/execute of an approved EXECUTE_TOOL proposal of either unmapped tool, filed (MANUAL) and executed by either scoped owner, never reaches the KEY cortex registry (K.recMap FAILED with D-140 refusal; K.coArr [] refused 403 operations:write by ModuleScopeGuard)', async () => {
     for (const userId of SCOPED_OWNERS) {
       for (const tool of UNMAPPED) {
         const id = `${userId}_p_${slug(tool)}`;
         await seedProposal(id, K.bizK, userId, tool);
         const before = cortexRan.length;
         const res = await executeProposal(userId, K.bizK, id);
-        expect(res.status, describeBody(res)).toBe(201);
-        expect(res.body, id).toMatchObject({ id, status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}` });
-        expect(await proposalRow(id), id).toEqual({ status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}`, executedBy: userId });
+        if (userId === K.coArr) {
+          // SWP-CENSUS-KEY-B (P109, Ruling B2): K.coArr ([]) holds operations:none, so ModuleScopeGuard refuses 403 before execution.
+          expect(res.status, describeBody(res)).toBe(403);
+          expect(String(res.body.message), id).toMatch(/operations requires write/i);
+        } else {
+          expect(res.status, describeBody(res)).toBe(201);
+          expect(res.body, id).toMatchObject({ id, status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}` });
+          expect(await proposalRow(id), id).toEqual({ status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}`, executedBy: userId });
+        }
         expect(cortexRan.slice(before), id).toEqual([]);
       }
     }
@@ -1923,7 +1939,9 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1
     staff: `${P}pStaff`, // STAFF on role defaults (creates another member's plan)
     staffArr: `${P}pStaffArr`, // STAFF stored as [] (D-71 control)
   };
-  const OPERATIONS_WRITE_MAP = { operations: 'write' };
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): POST plans/:planId/execute requires ai:write; Q.coMap keeps revenue/expenses/genome absent.
+  const OPERATIONS_WRITE_MAP = { operations: 'write', ai: 'write' };
+  const AI_WRITE_NONE = 'Insufficient permissions: ai requires write access (you have none)';
   const MEMBERS: ReadonlyArray<readonly [string, string, unknown]> = [
     [Q.owner, 'OWNER', undefined],
     [Q.coArr, 'OWNER', []],
@@ -2029,6 +2047,7 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1
     const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
     const { AuthGuard } = await import('../src/core/auth/auth.guard');
     const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
     const { KeyCortexGoalsController } = await import('../src/modules/key-cortex/key-cortex-goals.controller');
     const { KeyCortexPlannerService } = await import('../src/modules/key-cortex/key-cortex-planner.service');
     const { KeyCortexTriggerService } = await import('../src/modules/key-cortex/key-cortex-trigger.service');
@@ -2043,6 +2062,7 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1
         PrismaService,
         AuthGuard,
         BusinessGuard,
+        ModuleScopeGuard,
         { provide: KeyCortexPlannerService, useValue: planner },
         { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
       ],
@@ -2092,16 +2112,24 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1
 
   /* ------------------ the OWNER membership stored as [] ------------------ */
 
-  it('RED-BEFORE (SEC-W11OMU-1 (a); D-140, D-46): the co-owner stored as [] executing another member\'s plan of money steps (an invoice write among them) is refused 403 at its revenue level, before the claim: the plan stays pending and nothing reaches the connector (was run: completed, all three routed as the co-owner)', async () => {
+  it('RED-BEFORE (SEC-W11OMU-1 (a); D-140, D-46): the co-owner stored as [] executing another member\'s plan of money steps (an invoice write among them) is refused 403 (HTTP ai:write and planner revenue:write), before the claim: the plan stays pending and nothing reaches the connector (was run: completed, all three routed as the co-owner)', async () => {
     await resetPlans();
     const planId = `${Q.staff}_money`;
-    await expectRefused(Q.coArr, planId, PLAN_REVENUE_WRITE_NONE);
+    await expectRefused(Q.coArr, planId, AI_WRITE_NONE);
+    let caught: any;
+    await planner.executePlan(planId, {}, { userId: Q.coArr, role: 'USER', businessId: Q.bizP }).catch((err: unknown) => { caught = err; });
+    expect(caught?.getStatus?.(), String(caught)).toBe(403);
+    expect(caught.message).toBe(PLAN_REVENUE_WRITE_NONE);
   });
 
-  it('RED-BEFORE (COR-W11OMU-1; D-140, D-71): the co-owner stored as [] executing its own plan of genome, activity and expenses steps is refused 403 at its first step, as the STAFF member stored as [] is (was run: completed, all three routed); GET cortex/plans/:planId shows it none of those steps, so the run rule and the read rule agree', async () => {
+  it('RED-BEFORE (COR-W11OMU-1; D-140, D-71): the co-owner stored as [] executing its own plan of genome, activity and expenses steps is refused 403 (HTTP ai:write and planner first step), as the STAFF member stored as [] is (was run: completed, all three routed); GET cortex/plans/:planId shows it none of those steps, so the run rule and the read rule agree', async () => {
     await resetPlans();
     for (const [userId, planId] of [[Q.coArr, `${Q.coArr}_probe`], [Q.staffArr, `${Q.staffArr}_probe`]] as const) {
-      await expectRefused(userId, planId, UNMAPPED_STEP('genome', 'get_dna'));
+      await expectRefused(userId, planId, AI_WRITE_NONE);
+      let caught: any;
+      await planner.executePlan(planId, {}, { userId, role: 'USER', businessId: Q.bizP }).catch((err: unknown) => { caught = err; });
+      expect(caught?.getStatus?.(), String(caught)).toBe(403);
+      expect(caught.message).toBe(UNMAPPED_STEP('genome', 'get_dna'));
       const read = await readAs(userId, planId);
       expect(read.status, describeBody(read)).toBe(200);
       expect(read.body.steps, planId).toEqual([]);
@@ -2111,7 +2139,11 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1
   it('RED-BEFORE (SEC-W11OMU-1 (b); D-140, D-46, ST-3): the co-owner stored as [] executing its own plan of an unmapped genome write and two payment writes with skipApproval is refused 403 before the claim: nothing reaches the connector (was run: completed, all three routed)', async () => {
     await resetPlans();
     const planId = `${Q.coArr}_pay`;
-    await expectRefused(Q.coArr, planId, PLAN_REVENUE_WRITE_NONE, { skipApproval: true });
+    await expectRefused(Q.coArr, planId, AI_WRITE_NONE, { skipApproval: true });
+    let caught: any;
+    await planner.executePlan(planId, { skipApproval: true }, { userId: Q.coArr, role: 'USER', businessId: Q.bizP }).catch((err: unknown) => { caught = err; });
+    expect(caught?.getStatus?.(), String(caught)).toBe(403);
+    expect(caught.message).toBe(PLAN_REVENUE_WRITE_NONE);
   });
 
   it('RED-BEFORE (COR-W11OMU-1; D-140, D-71, D-73): with no member (the query pipeline and the cortex triggers), the co-owner\'s plan runs as its creator and is held to the same map: refused 403 at its first step, nothing routed (was run: completed)', async () => {

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from '../crm/guards/feature-flag.guard';
 import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
@@ -150,7 +151,8 @@ export class CommerceInsightsController {
     return { productId, snapshots };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/products/:productId/insights/snapshot')
   async captureMarginSnapshot(
@@ -162,7 +164,8 @@ export class CommerceInsightsController {
     return { success: true, message: 'Margin snapshot captured' };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/products/:productId/ai-copy')
@@ -174,7 +177,8 @@ export class CommerceInsightsController {
     return this.intelligence.rewriteProductCopy(businessId, productId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/products/:productId/ai-pricing-recommendation')
@@ -186,7 +190,8 @@ export class CommerceInsightsController {
     return this.intelligence.recommendPricing(businessId, productId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/products/:productId/ai-fulfillment-strategy')
@@ -198,7 +203,8 @@ export class CommerceInsightsController {
     return this.intelligence.recommendFulfillmentStrategy(businessId, productId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-product-opportunities')

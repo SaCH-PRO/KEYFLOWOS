@@ -71,7 +71,12 @@ export class StorefrontInvoiceAttributionListener {
       revenueId: invoice.id,
       amount: invoice.total,
       currency: invoice.currency,
-      contactId: invoice.contactId,
+      contactId:
+        invoice.contactId &&
+        invoice.contact?.businessId === invoice.businessId &&
+        invoice.contact?.deletedAt === null
+          ? invoice.contactId
+          : null,
       referralCode,
     });
   }

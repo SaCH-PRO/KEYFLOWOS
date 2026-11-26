@@ -5,6 +5,9 @@ import { PresenceService } from './presence.service';
 import { RevenueActionService } from '../../commerce/revenue-action.service';
 import { StoreOrderService } from '../store-order.service';
 import { PresenceStatsService, PRESENCE_METRICS } from '../../public-events/presence-stats.service';
+import { memberModuleLevel, type ModuleLevelActor } from '../../../core/auth/member-module-level';
+import { LEVEL_RANK, rankOf } from '../../../core/authority/module-vocabulary';
+import { contactVisibilityFilter, resolveCrmAccess, visibilityClause } from '../../crm/crm-permissions.helper';
 
 /**
  * Presence Command Center backend.
@@ -77,7 +80,20 @@ export class PresenceOverviewService {
   // OVERVIEW (KPIs + Health Score + Action Cards)
   // -------------------------------------------------------------------------
 
-  async getOverview(businessId: string, days = 30) {
+  async getOverviewForReader(businessId: string, actor: ModuleLevelActor, days = 30) {
+    const readsRevenue =
+      rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
+    return this.overview(businessId, days, readsRevenue);
+  }
+
+  async getOverview(businessId: string, days = 30, actor?: ModuleLevelActor) {
+    const readsRevenue = actor === undefined
+      ? true
+      : rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
+    return this.overview(businessId, days, readsRevenue);
+  }
+
+  private async overview(businessId: string, days: number, readsRevenue: boolean) {
     const business = await this.prisma.client.business.findFirst({
       where: { id: businessId, deletedAt: null },
       select: {
@@ -218,16 +234,20 @@ export class PresenceOverviewService {
       }),
       this.prisma.client.marketplaceOrder.findMany({
         where: { businessId, createdAt: { gte: since } },
-        select: { id: true, status: true, paymentStatus: true, total: true, items: { select: { productId: true, quantity: true } } },
+        select: { id: true, status: true, paymentStatus: true, items: { select: { productId: true, quantity: true } } },
       }),
-      this.prisma.client.marketplaceOrder.findMany({
-        where: { businessId, createdAt: { gte: since }, paymentStatus: 'PAID' },
-        select: { total: true },
-      }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: since } },
-        select: { total: true },
-      }),
+      readsRevenue
+        ? this.prisma.client.marketplaceOrder.findMany({
+            where: { businessId, createdAt: { gte: since }, paymentStatus: 'PAID' },
+            select: { total: true },
+          })
+        : Promise.resolve([]),
+      readsRevenue
+        ? this.prisma.client.invoice.findMany({
+            where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: since } },
+            select: { total: true },
+          })
+        : Promise.resolve([]),
       this.prisma.client.contact.count({
         where: { businessId, deletedAt: null, source: 'storefront', createdAt: { gte: since } },
       }),
@@ -333,7 +353,7 @@ export class PresenceOverviewService {
         leadsCaptured: leadsInPeriod,
         bookingsCreated,
         ordersCreated,
-        revenue: totalRevenue,
+        ...(readsRevenue ? { revenue: totalRevenue } : {}),
         currency: 'TTD',
         conversionRate,
         abandoned,
@@ -603,7 +623,7 @@ export class PresenceOverviewService {
    * `PRESENCE_<KEY>` type so it's idempotent — re-syncing won't duplicate.
    */
   async syncActionCardsToQueue(businessId: string): Promise<{ synced: number }> {
-    const overview = await this.getOverview(businessId);
+    const overview = await this.getOverviewForReader(businessId, null, 30);
     const synced = await this.syncCardsToQueue(businessId, overview.actionCards);
     return { synced };
   }
@@ -670,10 +690,26 @@ export class PresenceOverviewService {
   // LEADS / ORDERS / BOOKINGS for the Presence tabs
   // -------------------------------------------------------------------------
 
-  async listStorefrontLeads(businessId: string, opts: { limit?: number } = {}) {
+  async listStorefrontLeads(businessId: string, opts: { limit?: number } = {}, actor?: ModuleLevelActor) {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
+    const readsCrm =
+      rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'crm')) >= LEVEL_RANK.read;
+    if (!readsCrm) {
+      return { items: [] };
+    }
+    let visClause: ReturnType<typeof visibilityClause> = null;
+    if (actor && actor.role !== 'SUPER_ADMIN' && actor.id) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actor.id);
+      visClause = visibilityClause(access, actor.id);
+    }
+    const where: Prisma.ContactWhereInput = {
+      businessId,
+      deletedAt: null,
+      source: 'storefront',
+      ...(visClause ? { AND: [visClause as Prisma.ContactWhereInput] } : {}),
+    };
     const items = await this.prisma.client.contact.findMany({
-      where: { businessId, deletedAt: null, source: 'storefront' },
+      where,
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
@@ -706,14 +742,20 @@ export class PresenceOverviewService {
     return { items };
   }
 
-  async getTodayStats(businessId: string) {
+  async getTodayStats(businessId: string, actor?: ModuleLevelActor) {
+    const [revLevel, crmLevel] = await Promise.all([
+      memberModuleLevel(this.prisma, businessId, actor, 'revenue'),
+      memberModuleLevel(this.prisma, businessId, actor, 'crm'),
+    ]);
+    const readsRevenue = rankOf(revLevel) >= LEVEL_RANK.read;
+    const readsCrm = rankOf(crmLevel) >= LEVEL_RANK.read;
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
     const [todayEvents, uniqueVisitors, sources, recentOrders, recentBookings] = await Promise.all([
       this.prisma.client.publicEvent.findMany({
         where: { businessId, ts: { gte: todayStart } },
-        select: { type: true, visitorId: true, source: true, medium: true, payload: true, ts: true },
+        select: { type: true, visitorId: true, source: true, medium: true, payload: readsRevenue, ts: true },
       }),
       this.prisma.client.publicEvent.findMany({
         where: { businessId, ts: { gte: todayStart }, type: { in: ['page_view', 'view'] } },
@@ -727,17 +769,57 @@ export class PresenceOverviewService {
       }),
       this.prisma.client.marketplaceOrder.findMany({
         where: { businessId, createdAt: { gte: todayStart } },
-        select: { id: true, total: true, currency: true, status: true, customerName: true, createdAt: true },
+        select: {
+          id: true,
+          total: readsRevenue,
+          currency: true,
+          status: true,
+          customerName: readsCrm,
+          createdAt: true,
+        },
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
-      this.prisma.client.booking.findMany({
-        where: { businessId, deletedAt: null, createdAt: { gte: todayStart } },
-        select: { id: true, status: true, startTime: true, contact: { select: { firstName: true, lastName: true, displayName: true } } },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-      }),
+      readsCrm
+        ? this.prisma.client.booking.findMany({
+            where: { businessId, deletedAt: null, createdAt: { gte: todayStart } },
+            select: {
+              id: true,
+              status: true,
+              startTime: true,
+              contactId: true,
+              contact: { select: { firstName: true, lastName: true, displayName: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+          })
+        : this.prisma.client.booking.findMany({
+            where: { businessId, deletedAt: null, createdAt: { gte: todayStart } },
+            select: { id: true, status: true, startTime: true },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+          }),
     ]);
+
+    const recentBookingRows: Array<{
+      id: string;
+      status: string;
+      startTime: Date;
+      contactId?: string | null;
+      contact?: { firstName: string | null; lastName: string | null; displayName: string | null } | null;
+    }> = recentBookings;
+
+    let canOpenBookingContact: ((contactId: string) => boolean) | null = null;
+    if (readsCrm && actor && actor.role !== 'SUPER_ADMIN' && actor.id) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actor.id);
+      canOpenBookingContact = await contactVisibilityFilter(
+        this.prisma,
+        businessId,
+        access,
+        actor.id,
+        recentBookingRows.map((b) => b.contactId),
+      );
+    }
 
     let views = 0;
     let cartAdds = 0;
@@ -777,14 +859,16 @@ export class PresenceOverviewService {
           shareClicks++;
           break;
       }
-      if (ev.type === 'payment.completed' && ev.payload && typeof ev.payload === 'object' && !Array.isArray(ev.payload)) {
+      if (readsRevenue && ev.type === 'payment.completed' && ev.payload && typeof ev.payload === 'object' && !Array.isArray(ev.payload)) {
         const p = ev.payload as Record<string, unknown>;
         revenue += Number(p.amount ?? 0) || 0;
       }
     }
 
-    for (const o of recentOrders) {
-      revenue += Number(o.total ?? 0);
+    if (readsRevenue) {
+      for (const o of recentOrders) {
+        revenue += Number(o.total ?? 0);
+      }
     }
 
     const topSources = sources
@@ -806,24 +890,43 @@ export class PresenceOverviewService {
 
     return {
       visitors: uniqueVisitors.length,
-      events: { views, cartAdds, checkouts, orders, bookings, revenue, whatsappClicks, shareClicks },
+      events: {
+        views,
+        cartAdds,
+        checkouts,
+        orders,
+        bookings,
+        ...(readsRevenue ? { revenue } : {}),
+        whatsappClicks,
+        shareClicks,
+      },
       funnel: { views, cartAdds, checkouts, orders, bookings },
       topSources,
       recentEvents,
       recentOrders: recentOrders.map((o) => ({
         id: o.id,
-        total: Number(o.total ?? 0),
+        ...(readsRevenue ? { total: Number(o.total ?? 0) } : {}),
         currency: o.currency,
         status: o.status,
-        customerName: o.customerName,
+        ...(readsCrm ? { customerName: o.customerName } : {}),
         createdAt: o.createdAt.toISOString(),
       })),
-      recentBookings: recentBookings.map((b) => ({
-        id: b.id,
-        status: b.status,
-        contactName: b.contact?.displayName ?? (`${b.contact?.firstName ?? ''} ${b.contact?.lastName ?? ''}`.trim() || 'Guest'),
-        startTime: b.startTime.toISOString(),
-      })),
+      recentBookings: recentBookingRows.map((b) => {
+        const showContact =
+          readsCrm &&
+          (!canOpenBookingContact || (typeof b.contactId === 'string' && canOpenBookingContact(b.contactId)));
+        return {
+          id: b.id,
+          status: b.status,
+          ...(showContact
+            ? {
+                contactName:
+                  b.contact?.displayName ?? (`${b.contact?.firstName ?? ''} ${b.contact?.lastName ?? ''}`.trim() || 'Guest'),
+              }
+            : {}),
+          startTime: b.startTime.toISOString(),
+        };
+      }),
     };
   }
 

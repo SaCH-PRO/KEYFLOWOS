@@ -898,9 +898,7 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       ['items not an array', (b) => ({ ...b, items: { description: 'x', quantity: 1, unitPrice: 1 } }), /^items must be an array$/],
       ['quantity 0', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 0 }] }), /^items\.0\.quantity must be a positive number$/],
       ['negative quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: -1 }] }), /^items\.0\.quantity must be a positive number$/],
-      ['string quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: '2' }] }), /^items\.0\.quantity must be an integer number$/],
-      // InvoiceItem.quantity is an Int column: 1.5 was stored as 1 under a line total computed from 1.5.
-      ['fractional quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 1.5 }] }), /^items\.0\.quantity must be an integer number$/],
+      ['string quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: '2' }] }), /^items\.0\.quantity must be a number/],
       ['NaN price (JSON null)', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: null }] }), /^items\.0\.unitPrice must be a number/],
       ['non-numeric price', (b) => ({ ...b, items: [b.items[0], { ...b.items[1], unitPrice: 'abc' }] }), /^items\.1\.unitPrice must be a number/],
       ['negative price', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: -5 }] }), /^items\.0\.unitPrice must not be less than 0$/],
@@ -924,6 +922,24 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
         expect(commerceMock.createInvoice).not.toHaveBeenCalled();
       });
     }
+
+    // P108 (V1-64 / DECIMALS-SERVER, D-166, Ruling B3 #80 7179130521):
+    // InvoiceItem.quantity is now Float; 2 decimal places pass DTO validation
+    // while > 2 decimal places (1.555) are refused 400 before the service.
+    it('CC-400 fractional quantity: 1.5 passes validation and reaches CommerceService.createInvoice; 1.555 (3 decimals) -> 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called', async () => {
+      const okBody = valid();
+      const ok = await create(ID.ownerA, { ...okBody, items: [{ ...okBody.items[0], quantity: 1.5 }] });
+      expect(ok.status).toBe(201);
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
+      commerceMock.createInvoice.mockClear();
+
+      const badBody = valid();
+      const bad = await create(ID.ownerA, { ...badBody, items: [{ ...badBody.items[0], quantity: 1.555 }] });
+      expect(bad.status).toBe(400);
+      expect(bad.body.code).toBe('BAD_REQUEST');
+      expect(messages(bad.body).some((m) => /^items\.0\.quantity must be a number/.test(m)), JSON.stringify(bad.body.message)).toBe(true);
+      expect(commerceMock.createInvoice).not.toHaveBeenCalled();
+    });
 
     it('CC-STRIP: client total, subtotal, taxAmount, discountAmount, status, invoiceNumber, items[].total and a body businessId never reach the service', async () => {
       const body = {

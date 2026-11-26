@@ -84,6 +84,8 @@ export interface PipelineContactListProps {
   onToggleFavorite?: (id: string) => void;
   onDelete: (contact?: ContactCardData) => void;
   onQuickAction: (contactId: string, action: QuickActionType) => void;
+  /** Whether the cards' Quick actions offer Send Quote (offersQuote; true when the member's level is unknown). */
+  offerQuote?: boolean;
   onLoadMore: () => void;
   onRetry?: () => void;
   onAddContact: () => void;
@@ -108,6 +110,7 @@ function PipelineContactListInner({
   onToggleFavorite,
   onDelete,
   onQuickAction,
+  offerQuote = true,
   onLoadMore,
   onRetry,
   onAddContact,
@@ -290,6 +293,7 @@ function PipelineContactListInner({
             }}
             onDelete={onDelete}
             onQuickAction={onQuickAction}
+            offerQuote={offerQuote}
             index={absoluteIndex}
           />
         </div>

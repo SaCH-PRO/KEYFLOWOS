@@ -14,6 +14,10 @@ import {
   isFinanceSignal,
   isMoneyLabel,
 } from '../business-genome/key-genome/genome-finance-scope';
+import {
+  isMoneyFact,
+  moduleReadinessForReader,
+} from '../business-genome/key-genome/genome-composites-for-reader';
 
 const UNSAFE_BLOCK_LIMIT = 3;
 
@@ -92,17 +96,13 @@ export class CommandCenterKeyGenomeBridgeService {
     const confidenceScore =
       readsRevenue && totalFacts > 0 ? Math.round((highConfidenceFacts / totalFacts) * 100) : 0;
 
-    const visibleModuleReadiness = readsRevenue
-      ? moduleReadiness
-      : moduleReadiness.filter((m) => !isMoneyLabel(m.module));
+    const visibleModuleReadiness = moduleReadinessForReader(moduleReadiness, readsRevenue);
 
     const criticalMissingFactCount = visibleModuleReadiness.reduce(
       (count, module) =>
         count +
         module.missingFacts.filter(
-          (fact) =>
-            fact.impact === 'BLOCKING' &&
-            (readsRevenue || (!isMoneyLabel(fact.section) && !isMoneyLabel(fact.field))),
+          (fact) => fact.impact === 'BLOCKING' && (readsRevenue || !isMoneyFact(fact)),
         ).length,
       0,
     );

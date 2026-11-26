@@ -1,14 +1,16 @@
 import { Body, Controller, Inject, Post, Req, UseGuards, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('actions')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class ActionsController {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   @Post('send-receipt')
+  @RequireModuleScope('revenue', 'write')
   async sendReceipt(
     @Body('businessId') businessId: string,
     @Body() body: { invoiceId: string; contactEmail?: string },
@@ -34,6 +36,7 @@ export class ActionsController {
   }
 
   @Post('remind-contact')
+  @RequireModuleScope('crm', 'write')
   async remindContact(
     @Body('businessId') businessId: string,
     @Body() body: { contactId: string; message?: string },
@@ -54,6 +57,7 @@ export class ActionsController {
   }
 
   @Post('booking-followup')
+  @RequireModuleScope('crm', 'write')
   async bookingFollowup(
     @Body('businessId') businessId: string,
     @Body() body: { bookingId: string },

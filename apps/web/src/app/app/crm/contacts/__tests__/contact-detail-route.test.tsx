@@ -188,9 +188,14 @@ function stubServer() {
       }
       if (pathname.endsWith(DETAIL_PATH)) return contactDetail();
       if (pathname.endsWith(EVENTS_PATH)) {
-        return jsonResponse(200, [
+        const events = [
           { id: "ev_call_1", contactId: CONTACT_ID, type: "call", data: { subject: CALL_SUBJECT }, createdAt: "2026-11-10T10:00:00.000Z" },
-        ]);
+        ];
+        // As the server answers since FU-TIMELINE-EVENTS-PAGING (D-284): a paged read (the Timeline's, since
+        // FU-TIMELINE-LOAD-OLDER) gets { events, nextCursor, hasMore }; the default read the plain array.
+        const q = parsed.searchParams;
+        const paged = q.has("paged") || q.has("limit") || q.has("cursor");
+        return jsonResponse(200, paged ? { events, nextCursor: null, hasMore: false } : events);
       }
       const ofThisCustomer = parsed.searchParams.get("contactId") === CONTACT_ID;
       if (pathname.endsWith(INVOICES_PATH)) {

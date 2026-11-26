@@ -47,6 +47,13 @@ interface ContactsDatabaseProps {
   onSelectContact?: (contactId: string) => void;
   favoriteIds?: Set<string>;
   onToggleFavorite?: (id: string) => void;
+  /**
+   * The screen's own search (the toolbar's "Search contacts"), when the table is one of the screen's views. The
+   * table reads with it and its own box shows it, so the rows and the count agree with what the screen searched
+   * (BUG-080); typing in the table's box changes it through onSearchChange. Without it the box searches alone.
+   */
+  search?: string;
+  onSearchChange?: (value: string) => void;
 }
 
 const STATUS_FILTER_OPTIONS = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"];
@@ -78,8 +85,10 @@ export function ContactsDatabase({
   onSelectContact,
   favoriteIds,
   onToggleFavorite,
+  search,
+  onSearchChange,
 }: ContactsDatabaseProps) {
-  const db = useDatabaseState({ businessId, contacts, onRefresh });
+  const db = useDatabaseState({ businessId, contacts, onRefresh, initialSearch: search });
 
   const exportDialogRef = useRef<HTMLDivElement>(null);
   const exportTriggerRef = useRef<HTMLButtonElement>(null);
@@ -89,7 +98,15 @@ export function ContactsDatabase({
   const [showSaveInput, setShowSaveInput] = useState(false);
 
   const setSearchInput = db.setSearchInput;
-  const handleClearSearch = useCallback(() => setSearchInput(""), [setSearchInput]);
+  // The screen's search drives the table's (BUG-080): one search, so the rows and the count agree with it.
+  useEffect(() => {
+    if (search !== undefined) setSearchInput(search);
+  }, [search, setSearchInput]);
+  const changeSearch = useCallback((value: string) => {
+    setSearchInput(value);
+    onSearchChange?.(value);
+  }, [setSearchInput, onSearchChange]);
+  const handleClearSearch = useCallback(() => changeSearch(""), [changeSearch]);
 
   // M2 Unified Inbox: per-user unread counts + filter
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
@@ -197,7 +214,7 @@ export function ContactsDatabase({
               type="text"
               placeholder="Search all fields..."
               value={db.searchInput}
-              onChange={(e) => db.setSearchInput(e.target.value)}
+              onChange={(e) => changeSearch(e.target.value)}
               className="w-full pl-9 pr-8 py-1.5 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
               aria-label="Search contacts database"
             />
@@ -259,7 +276,13 @@ export function ContactsDatabase({
                       }`}
                     >
                       <button
-                        onClick={() => db.applyView(view.id)}
+                        onClick={() => {
+                          db.applyView(view.id);
+                          // The view's search is the screen's search too (BUG-080), so the two never disagree.
+                          // A view with no string search searches for nothing (use-database-state applyView), so
+                          // the screen is handed "" too, never undefined (review SEC-CWP-1).
+                          onSearchChange?.(typeof view.config.search === "string" ? view.config.search : "");
+                        }}
                         className="flex-1 text-left flex items-center gap-2 min-w-0"
                       >
                         <Eye className="w-3.5 h-3.5 shrink-0 opacity-60" />

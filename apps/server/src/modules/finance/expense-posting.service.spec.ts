@@ -127,6 +127,37 @@ describe('ExpensePostingService.onBillCreated / onBillPaid', () => {
     expect(input.kind).toBe('bill_paid');
     expect(input.entries.find((e: any) => e.debit).accountId).toBe('coa_ap');
     expect(input.entries.find((e: any) => e.credit).accountId).toBe('coa_bank');
+    expect(input.metadata).toEqual({ paymentMethod: 'bank_transfer' });
+  });
+
+  it('bill_paid credits explicit paymentCoaId and records paymentAccountId in metadata (EXPENSES-HUB-1, D-168/D-170)', async () => {
+    const { svc, posting, coa } = makeStubs();
+    await svc.onBillPaid({
+      ...baseExpense,
+      paidAt: new Date('2026-05-15'),
+      paymentMethod: null,
+      paymentCoaId: 'coa_bank_checking',
+      paymentAccountId: 'fa_bank_checking',
+    });
+    const input = posting.post.mock.calls[0][0];
+    expect(input.kind).toBe('bill_paid');
+    expect(input.entries.find((e: any) => e.debit).accountId).toBe('coa_ap');
+    expect(input.entries.find((e: any) => e.credit).accountId).toBe('coa_bank_checking');
+    expect(input.metadata).toEqual({ paymentAccountId: 'fa_bank_checking' });
+    // Explicit paymentCoaId bypasses default paymentMethod lookup.
+    expect(coa.getBySystemKey).not.toHaveBeenCalledWith('biz_1', 'CASH');
+  });
+
+  it('bill_paid omits empty metadata when neither paymentAccountId nor paymentMethod is set (NIT-02)', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onBillPaid({
+      ...baseExpense,
+      paidAt: new Date('2026-05-15'),
+      paymentMethod: null,
+    });
+    const input = posting.post.mock.calls[0][0];
+    expect(input.entries.find((e: any) => e.credit).accountId).toBe('coa_cash');
+    expect(input.metadata).toBeUndefined();
   });
 });
 

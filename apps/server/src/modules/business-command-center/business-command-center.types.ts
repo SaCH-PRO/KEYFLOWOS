@@ -56,9 +56,10 @@ export interface CommandCenterItem {
 }
 
 export interface CommandCenterHealth {
-  genomeIntegrity: number;
-  executiveReadinessScore: number;
-  genomeStage: string;
+  genomeIntegrity: number | null;
+  executiveReadinessScore: number | null;
+  genomeStage: string | null;
+  withheldForRevenue?: string[];
   criticalCount: number;
   highPriorityCount: number;
   pendingApprovalCount: number;
@@ -67,9 +68,9 @@ export interface CommandCenterHealth {
   pendingGenomeProposalCount: number;
   assetRiskCount: number;
   constitutionStale: boolean;
-  keyGenomeOverall: number;
-  keyGenomeReadiness: number;
-  keyGenomeConfidence: number;
+  keyGenomeOverall: number | null;
+  keyGenomeReadiness: number | null;
+  keyGenomeConfidence: number | null;
   blockedModuleCount: number;
   lowReadinessModuleCount: number;
   missingBlockingFactCount: number;
@@ -92,9 +93,10 @@ export interface CommandCenterConstitution {
 }
 
 export interface CommandCenterGenome {
-  integrity: number;
-  readiness: number;
-  stage: string;
+  integrity: number | null;
+  readiness: number | null;
+  stage: string | null;
+  withheldForRevenue?: string[];
   pendingProposals: CommandCenterItem[];
   weakestSections: CommandCenterItem[];
 }
@@ -114,10 +116,11 @@ export interface CommandCenterKeyGenomeCrossDomain {
 }
 
 export interface CommandCenterKeyGenome {
-  overall: number;
-  integrity: number;
-  readiness: number;
-  confidence: number;
+  overall: number | null;
+  integrity: number | null;
+  readiness: number | null;
+  confidence: number | null;
+  withheldForRevenue?: string[];
   computedAt: string;
   sections: {
     section: string;

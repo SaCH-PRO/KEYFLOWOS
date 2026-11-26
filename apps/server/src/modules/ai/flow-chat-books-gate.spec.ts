@@ -258,9 +258,14 @@ describe('FB-07: which revenue writes admit a SUPER_ADMIN member (the doors they
     // chart-of-accounts, is a finance.controller door (ModuleScopeGuard revenue write and ensureAccess), which admits a
     // SUPER_ADMIN member whatever its membership's scopes, so KEY admits them to the tool as the route does
     expect(books).toEqual(['finance_auto_match_bank', 'finance_create_coa_account', 'finance_post_journal_entry', 'reconcile_match_line', 'reconcile_run_auto_match']);
+    // SWP-CENSUS-V1-A (P87): CatalogController product writes (`apply_storefront_recommendation`,
+    // `commerce_create_product`, `commerce_update_product`) are not FinanceController Books tools, so
+    // KEY holds a SUPER_ADMIN member to their membership's revenue:write just like invoice/quote/payment tools.
     expect(doorsHoldingMembers).toEqual([
-      'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
-      'commerce_mark_invoice_paid', 'commerce_update_invoice', 'payments_create_link', 'payments_refund_charge', 'payments_revoke_link',
+      'apply_storefront_recommendation', 'commerce_convert_quote', 'commerce_create_invoice',
+      'commerce_create_product', 'commerce_create_quote', 'commerce_delete_invoice',
+      'commerce_mark_invoice_paid', 'commerce_update_invoice', 'commerce_update_product',
+      'payments_create_link', 'payments_refund_charge', 'payments_revoke_link',
     ]);
     // The set names nothing outside the table.
     for (const t of KEY_BOOKS_REVENUE_TOOLS) expect(writes, t).toContain(t);

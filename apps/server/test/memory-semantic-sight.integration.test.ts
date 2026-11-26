@@ -185,7 +185,16 @@ async function seedRevenue(perKind: number) {
       category: 'document_extraction', key: `${P}doc_${i}`, value: JSON.stringify({ note: REV, total: Number(AMOUNT) }), source: 'inferred',
     });
 
-    await knowledge.ingestText({ businessId: ID.biz, title: `${REV} statement ${i}`, sourceType: 'document', content: `Balance owed TTD ${AMOUNT}` });
+    const ksTitle = `${REV} statement ${i}`;
+    const ksContent = `Balance owed TTD ${AMOUNT}`;
+    const sourceId = await knowledge.ingestText({ businessId: ID.biz, title: ksTitle, sourceType: 'document', content: ksContent });
+    await semantic.store({
+      businessId: ID.biz,
+      content: `[${ksTitle} chunk 1/1]\n${ksContent}`,
+      sourceType: 'document',
+      sourceId: `${sourceId}:0`,
+      metadata: { knowledgeSourceId: sourceId, title: ksTitle, sourceType: 'document', chunkIndex: 0 },
+    });
   }
   // The backfill copies every row again: the fact's copy is dropped first, so the fact keeps exactly one (the blind
   // readers' hits then differ only if a withheld hit changed them).
@@ -328,7 +337,7 @@ beforeAll(async () => {
   memory = new AiMemoryService(prisma, {} as any, { getBlueprint: async () => null } as any, semantic);
   temporalMemory = new TemporalFlowMemoryService(prisma, semantic);
   temporal = new TemporalFlowService(prisma, temporalMemory, semantic);
-  knowledge = new KnowledgeIngestionService(prisma, semantic);
+  knowledge = new KnowledgeIngestionService(prisma);
 
   // The flow orchestrator: the real chat() and streamChat() with the real semantic store; the other context reads answer
   // nothing (the perception block's unified read has a semantic store that answers nothing, so only the section under
@@ -640,7 +649,16 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
   it('V71U-09 RED (security review 4, correctness m4): a knowledge-source chunk is an unclassified document: it needs revenue and expenses read (as a document event does), so a member with revenue read and expenses none does not get it; the revenue-and-expenses reader does', async () => {
     await clearMemory();
     try {
-      await knowledge.ingestText({ businessId: ID.biz, title: `${REV} vendor bills`, sourceType: 'document', content: 'Bill from V71U Supplies' });
+      const ksTitle = `${REV} vendor bills`;
+      const ksContent = 'Bill from V71U Supplies';
+      const sourceId = await knowledge.ingestText({ businessId: ID.biz, title: ksTitle, sourceType: 'document', content: ksContent });
+      await semantic.store({
+        businessId: ID.biz,
+        content: `[${ksTitle} chunk 1/1]\n${ksContent}`,
+        sourceType: 'document',
+        sourceId: `${sourceId}:0`,
+        metadata: { knowledgeSourceId: sourceId, title: ksTitle, sourceType: 'document', chunkIndex: 0 },
+      });
       expect((await searchFor('revnoexp', 50)).join('\n').toLowerCase()).not.toContain(REV);
       expect((await searchFor('revenue', 50)).join('\n').toLowerCase()).toContain(REV);
     } finally {

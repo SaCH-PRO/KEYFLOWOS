@@ -2,7 +2,8 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuard
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
-import { assertMemberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { assertMemberModuleLevel, memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { LEVEL_RANK, rankOf } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RulesService } from './rules.service';
 import { SignalsService } from './signals.service';
@@ -80,24 +81,29 @@ export class IntelligenceController {
   }
 
   // ─── Health ───
+  // FU-HEALTH-MONEY-SCOPE (P101, D-259/D-100/D-234): snapshots always persist full money metrics
+  // and reasons; the response projects the money area to strip figures and amount-bearing reasons
+  // whenever the caller lacks revenue:read, leaving score, status, and other areas unchanged.
   @Get('health')
   @RequireModuleScope('settings', 'read')
-  async getHealth(@Param('businessId') businessId: string) {
+  async getHealth(@Param('businessId') businessId: string, @Req() req: { user?: ModuleLevelActor }) {
+    const hasRevenueRead = rankOf(await memberModuleLevel(this.prisma, businessId, req?.user, 'revenue')) >= LEVEL_RANK.read;
     const snapshots = await this.health.getLatestSnapshots(businessId);
     if (snapshots.length === 0) {
       const calculated = await this.health.calculateAll(businessId);
       for (const r of calculated) await this.health.saveSnapshot(businessId, r);
-      return calculated;
+      return this.health.projectHealthForReader(calculated, hasRevenueRead);
     }
-    return snapshots;
+    return this.health.projectHealthForReader(snapshots, hasRevenueRead);
   }
 
   @Post('health/refresh')
   @RequireModuleScope('settings', 'write')
-  async refreshHealth(@Param('businessId') businessId: string) {
+  async refreshHealth(@Param('businessId') businessId: string, @Req() req: { user?: ModuleLevelActor }) {
+    const hasRevenueRead = rankOf(await memberModuleLevel(this.prisma, businessId, req?.user, 'revenue')) >= LEVEL_RANK.read;
     const results = await this.health.calculateAll(businessId);
     for (const r of results) await this.health.saveSnapshot(businessId, r);
-    return results;
+    return this.health.projectHealthForReader(results, hasRevenueRead);
   }
 
   // ─── Entity Resolver ───

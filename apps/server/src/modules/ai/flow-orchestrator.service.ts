@@ -293,6 +293,26 @@ export function fillToolResultSlots(slots: Array<FlowToolResult | null>, execute
 const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
 
 /**
+ * RR-DISPATCH-NO-BLIND-RETRY (D-263): carries an explicit `effectNotApplied: true` marker beside
+ * the envelope (never mutating the envelope keys) so executeToolDirectly preserves it on rethrown
+ * plain Errors (e.g. DocumentHostUnresolvedError on transient DNS EAI_AGAIN).
+ */
+const TOOL_EFFECT_NOT_APPLIED = new WeakSet<FlowToolResult>();
+
+function hasEffectNotApplied(err: unknown): boolean {
+  let cur: unknown = err;
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth <= 5 && cur !== null && cur !== undefined; depth += 1) {
+    if (typeof cur !== 'object' || seen.has(cur)) break;
+    seen.add(cur);
+    if (cur instanceof RetryableConflictException) return true;
+    if ((cur as { effectNotApplied?: unknown }).effectNotApplied === true) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * W11-DISPATCH-REFUSAL-FINAL reviews SEC-1, COR-1, SEC2-1, COR2-1 (owner ruling D-134). A 400 is the
  * tool's final answer for the plan queue (answered once, counted toward no circuit), so a service that
  * answers 400 both for a request it refuses and for something that did not answer (a document's host,
@@ -305,7 +325,9 @@ const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
 function keyToolOutage(e: unknown): ServiceUnavailableException | null {
   if (!(e instanceof BadRequestException)) return null;
   if (!(e.cause instanceof DocumentHostUnavailableError || e.cause instanceof DocumentExtractionFailedError)) return null;
-  return new ServiceUnavailableException(e.message, { cause: e });
+  // RR-DISPATCH-NO-BLIND-RETRY (D-263): both errors fire during document fetch / AI read strictly
+  // before any contract write, so the throwing service proves the effect was not applied.
+  return Object.assign(new ServiceUnavailableException(e.message, { cause: e }), { effectNotApplied: true });
 }
 
 export interface PendingConfirmation {
@@ -3959,7 +3981,11 @@ ${triage.standingContext}`;
       // HttpException stays the plain Error it was.
       const httpException = TOOL_HTTP_EXCEPTIONS.get(result);
       if (httpException && !(httpException instanceof RetryableConflictException)) throw httpException;
-      throw new Error(result.error ?? `Tool ${toolName} failed`, httpException ? { cause: httpException } : undefined);
+      const rethrown = new Error(result.error ?? `Tool ${toolName} failed`, httpException ? { cause: httpException } : undefined);
+      if (TOOL_EFFECT_NOT_APPLIED.has(result)) {
+        Object.assign(rethrown, { effectNotApplied: true });
+      }
+      throw rethrown;
     }
     return result.result;
   }
@@ -4015,9 +4041,21 @@ ${triage.standingContext}`;
         riskTier: envelope.riskTier,
         success: true,
       };
-    } catch (error: any) {
+    } catch (caught: unknown) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
+      const error = (() => {
+        if (caught instanceof Error) return caught;
+        const errMsg =
+          typeof (caught as { message?: unknown } | null | undefined)?.message === 'string'
+            ? (caught as { message: string }).message
+            : caught !== null && caught !== undefined
+              ? String(caught)
+              : 'unknown error';
+        const wrapped = new Error(errMsg);
+        if (hasEffectNotApplied(caught)) (wrapped as { effectNotApplied?: boolean }).effectNotApplied = true;
+        return wrapped;
+      })();
       const logged = this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
@@ -4044,6 +4082,7 @@ ${triage.standingContext}`;
       };
       // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the status goes beside the envelope, not on it.
       if (error instanceof HttpException) TOOL_HTTP_EXCEPTIONS.set(failed, error);
+      if (hasEffectNotApplied(error)) TOOL_EFFECT_NOT_APPLIED.add(failed);
       return failed;
     }
   }
@@ -5064,6 +5103,7 @@ ${triage.standingContext}`;
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            ...(item.productId ? { productId: item.productId } : {}),
           })),
           currency: args.currency ?? 'TTD',
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
@@ -5112,6 +5152,7 @@ ${triage.standingContext}`;
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            ...(item.productId ? { productId: item.productId } : {}),
           })),
           currency: args.currency ?? 'TTD',
           expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,

@@ -442,8 +442,8 @@ beforeAll(async () => {
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_crmWrite`, userId: ID.crmWrite, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write' } } });
   await db.membership.create({ data: { id: `${P}m_crmRead`, userId: ID.crmRead, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read' } } });
-  await db.membership.create({ data: { id: `${P}m_approver_a`, userId: ID.approver, businessId: ID.bizA, role: 'STAFF' } });
-  await db.membership.create({ data: { id: `${P}m_approver_b`, userId: ID.approver, businessId: ID.bizB, role: 'STAFF' } });
+  await db.membership.create({ data: { id: `${P}m_approver_a`, userId: ID.approver, businessId: ID.bizA, role: 'STAFF', permissionScopes: { operations: 'write' } } });
+  await db.membership.create({ data: { id: `${P}m_approver_b`, userId: ID.approver, businessId: ID.bizB, role: 'STAFF', permissionScopes: { operations: 'write' } } });
   await db.membership.create({ data: { id: `${P}m_outsider_b`, userId: ID.outsider, businessId: ID.bizB, role: 'OWNER' } });
 
   // ---- deal stages and contacts (one pipeline per tenant) -----------------

@@ -818,7 +818,7 @@ describe('agreeing figures after a refund (CF-17)', () => {
     await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
   });
 
-  it('RF-10: a payment the provider already refunded in part (SUCCESSFUL 100 beside a provider -40 row) refunded manually refunds only the remaining 60; net 0; SENT', async () => {
+  it('RF-10: a payment the provider already refunded in part (SUCCESSFUL 100 beside a provider -40 row) refunded via D-121 bookkeeping refunds only the remaining 60 (HTTP manual route refuses Stripe with 409); net 0; SENT', async () => {
     const inv = ID.invProvider;
     const charge = await db.payment.create({
       data: {
@@ -834,9 +834,16 @@ describe('agreeing figures after a refund (CF-17)', () => {
     });
     await db.invoice.update({ where: { id: inv }, data: { status: 'PARTIALLY_PAID' } });
 
-    const res = await refund(charge.id, 'rest of the charge');
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toMatchObject({ amount: -60, status: 'REFUNDED', refundOfPaymentId: charge.id, invoiceStatus: 'SENT' });
+    // P96 (owner ruling A2): HTTP manual refund refuses Stripe so operators use POST /payments/businesses/:b/refunds.
+    const httpRefused = await refund(charge.id, 'rest of the charge');
+    expect(httpRefused.status, JSON.stringify(httpRefused.body)).toBe(409);
+    expect(httpRefused.body.message).toContain(`/payments/businesses/${ID.bizA}/refunds`);
+
+    // Internal D-121 bookkeeping door still caps at the remaining 60.
+    const res = await commerce.markPaymentRefunded(
+      charge.id, ID.bizA, 'rest of the charge', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true },
+    );
+    expect(res).toMatchObject({ amount: -60, status: 'REFUNDED', refundOfPaymentId: charge.id, invoiceStatus: 'SENT' });
     expect((await refundRowsOf(charge)).map((r) => r.amount).sort((a, b) => a - b)).toEqual([-60, -40]);
     expect((await paymentRow(charge.id)).status).toBe('SUCCESSFUL');
     expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
@@ -844,14 +851,14 @@ describe('agreeing figures after a refund (CF-17)', () => {
     // The seeded provider rows carry no posting: nothing to reverse, the ledger stays at 0 = net.
     await expectLedgerAgrees(inv, { net: 0, reversals: 0 });
 
-    const again = await refund(charge.id, 'again');
-    expect(again.status, JSON.stringify(again.body)).toBe(409);
-    expect(again.body.message).toMatch(/already refunded/i);
+    await expect(
+      commerce.markPaymentRefunded(charge.id, ID.bizA, 'again', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true }),
+    ).rejects.toThrow(/already refunded/i);
   });
 });
 
 describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / CR-V29-5)', () => {
-  it('RF-11: a Stripe Checkout payment (cs_, pi_ in reference) fully refunded by the real Stripe refund webhook (reference = the charge id) and then refunded manually -> 409 "already refunded"; nothing written, one reversal, net 0', async () => {
+  it('RF-11: a Stripe Checkout payment (cs_, pi_ in reference) fully refunded by the real Stripe refund webhook (reference = the charge id) and then refunded via D-121 bookkeeping -> 409 "already refunded" (HTTP manual route also refuses with 409); nothing written, one reversal, net 0', async () => {
     const inv = ID.invStripeFull;
     await paymentsSvc.processStripeChargeOrSession(
       'checkout.session.completed',
@@ -879,10 +886,15 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
     expect(balanceBefore).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
     await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
 
-    // RED-BEFORE (V1-29 head 3c8de27f): 201 with a second -100 row, net -100, remaining 200.
-    const res = await refund(original.id, 'operator refunds again');
-    expect(res.status, JSON.stringify(res.body)).toBe(409);
-    expect(res.body.message).toMatch(/already refunded/i);
+    // P96 (owner ruling A2): HTTP manual route refuses Stripe with 409 pointing to gateway refund route.
+    const httpRes = await refund(original.id, 'operator refunds again');
+    expect(httpRes.status, JSON.stringify(httpRes.body)).toBe(409);
+    expect(httpRes.body.message).toContain(`/payments/businesses/${ID.bizA}/refunds`);
+
+    // RED-BEFORE (V1-29 head 3c8de27f): internal D-121 bookkeeping door refuses as already refunded (409).
+    await expect(
+      commerce.markPaymentRefunded(original.id, ID.bizA, 'operator refunds again', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true }),
+    ).rejects.toThrow(/already refunded/i);
     expect(await paymentsOf(inv)).toEqual(afterWebhook);
     expect(await balanceOf(inv)).toEqual(balanceBefore);
     expect((await invoiceRow(inv)).status).toBe('SENT');
@@ -892,7 +904,7 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
     expect(list.body).toMatchObject({ paidAmount: 0, remaining: 100 });
   });
 
-  it('RF-12: a PaymentIntent payment part-refunded at Stripe (linked through the charge id in its reference) does not block refunding a second Stripe payment on the invoice in full; the PaymentIntent payment then refunds only what is left (30); a third refund -> 409', async () => {
+  it('RF-12: a PaymentIntent payment part-refunded at Stripe (linked through the charge id in its reference) does not block refunding a second Stripe payment via D-121 bookkeeping in full; the PaymentIntent payment then refunds only what is left (30); a third refund -> 409', async () => {
     const inv = ID.invStripeMixed;
     await paymentsSvc.processStripeChargeOrSession(
       'payment_intent.succeeded',
@@ -919,22 +931,28 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
     expect((await paymentsOf(inv)).find((r) => r.providerPaymentId === `${P}re_mixed`)).toMatchObject({ amount: -20, status: 'REFUNDED', reference: `${P}pi_mixed` });
     expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 20, net: 80 });
 
-    const whole = await refund(session.id, 'second stripe payment');
-    expect(whole.status, JSON.stringify(whole.body)).toBe(201);
-    expect(whole.body).toMatchObject({ amount: -50, status: 'REFUNDED', refundOfPaymentId: session.id, invoiceStatus: 'PARTIALLY_PAID' });
-    expect(whole.body.balance).toMatchObject({ net: 30, remaining: 70 });
+    // P96 (owner ruling A2): HTTP manual route refuses both Stripe rows with 409.
+    const httpRefused = await refund(session.id, 'second stripe payment');
+    expect(httpRefused.status, JSON.stringify(httpRefused.body)).toBe(409);
 
-    const rest = await refund(intent.id, 'rest of the intent');
-    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
-    expect(rest.body).toMatchObject({ amount: -30, status: 'REFUNDED', refundOfPaymentId: intent.id, invoiceStatus: 'SENT' });
+    const whole = await commerce.markPaymentRefunded(
+      session.id, ID.bizA, 'second stripe payment', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true },
+    );
+    expect(whole).toMatchObject({ amount: -50, status: 'REFUNDED', refundOfPaymentId: session.id, invoiceStatus: 'PARTIALLY_PAID' });
+    expect(whole.balance).toMatchObject({ net: 30, remaining: 70 });
+
+    const rest = await commerce.markPaymentRefunded(
+      intent.id, ID.bizA, 'rest of the intent', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true },
+    );
+    expect(rest).toMatchObject({ amount: -30, status: 'REFUNDED', refundOfPaymentId: intent.id, invoiceStatus: 'SENT' });
     expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
     expect((await invoiceRow(inv)).status).toBe('SENT');
 
-    const again = await refund(intent.id, 'again');
-    expect(again.status, JSON.stringify(again.body)).toBe(409);
-    expect(again.body.message).toMatch(/already refunded/i);
-    // V1-29c: the webhook posted its 20 as a partial refund, the manual rest (30) reversed the intent's posting
-    // and (review CRR-V29C-2) the partial refund posting; the manual refund reversed the session's. Each posting
+    await expect(
+      commerce.markPaymentRefunded(intent.id, ID.bizA, 'again', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true }),
+    ).rejects.toThrow(/already refunded/i);
+    // V1-29c: the webhook posted its 20 as a partial refund, the D-121 rest (30) reversed the intent's posting
+    // and (review CRR-V29C-2) the partial refund posting; the D-121 refund reversed the session's. Each posting
     // reversed once, nothing twice: the intent's recording and its partial refund, the session's recording.
     expect(await reversalsFor(intent.id)).toHaveLength(1);
     expect(await reversalsFor(session.id)).toHaveLength(1);
@@ -1337,13 +1355,19 @@ describe('V1-29 review findings outside the V1-29 and V1-29b write sets (owner d
     });
     await expectLedgerAgrees(inv, { net: 60, reversals: 0 });
 
-    const res = await refund(intent.id, 'what is left');
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toMatchObject({ amount: -60, refundOfPaymentId: intent.id, invoiceStatus: 'SENT' });
+    // P96 (owner ruling A2): HTTP manual route refuses Stripe with 409 pointing to gateway refund route.
+    const httpRefused = await refund(intent.id, 'what is left');
+    expect(httpRefused.status, JSON.stringify(httpRefused.body)).toBe(409);
+    expect(httpRefused.body.message).toContain(`/payments/businesses/${ID.bizA}/refunds`);
+
+    const res = await commerce.markPaymentRefunded(
+      intent.id, ID.bizA, 'what is left', ID.ownerA, undefined, undefined, { allowApiGatewayBookkeeping: true },
+    );
+    expect(res).toMatchObject({ amount: -60, refundOfPaymentId: intent.id, invoiceStatus: 'SENT' });
     const audit = await db.activity.findMany({ where: { businessId: ID.bizA, module: 'FINANCE', action: 'payment_refunded', entityId: intent.id } });
     expect(audit).toHaveLength(1);
     // RED-BEFORE (int/trial-I 7f4b81a2): data.amount 100 and no refund row named.
-    expect(audit[0].data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: res.body.id, refundedBy: ID.ownerA });
+    expect(audit[0].data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: res.id, refundedBy: ID.ownerA });
     // The recording and (review CRR-V29C-2) the provider's partial refund posting are each reversed once.
     await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
   });
@@ -1474,5 +1498,61 @@ describe('CR-29b-1 (FOLLOW3-A4-PUBLIC-PAID-NET): every public reader of the pay 
     // ignored on this base (DEP-R3-OWN-ROW-READS, D-75), so the figures they would give (25 / 75) appear nowhere.
     expect(readers).toEqual(everyReader({ paid: 60, due: 40 }));
     for (const [label, f] of Object.entries(readers)) expect(f.paid, `${label}: the ledger cash net`).toBe(cashNet);
+  });
+});
+
+describe('P96 review R1-COR-1: hand-recorded PayPal/PAYPAL/pre-D-55 manual_* payments stay manually refundable', () => {
+  it('RF-15 (R1-COR-1): manual web-form PayPal, evidence PAYPAL, and pre-D-55 manual_* stripe payments refund 201 via POST .../payments/:id/refund', async () => {
+    const inv = `${P}inv_manual_paypal_ctrl`;
+    await db.invoice.create({
+      data: {
+        id: inv,
+        businessId: ID.bizA,
+        contactId: ID.contact,
+        invoiceNumber: `${P}INV-R1COR1`,
+        status: 'SENT',
+        subtotal: 150,
+        total: 150,
+        currency: 'TTD',
+      },
+    });
+
+    // 1. Web Record Payment modal sends method='PayPal' -> provider='PayPal', providerPaymentId='manual_...' (D-55)
+    const webPaypal = await pay(inv, { amount: 50, method: 'PayPal', reference: 'V29A-WEB-PP' });
+    expect(webPaypal.status, JSON.stringify(webPaypal.body)).toBe(201);
+    expect(webPaypal.body.payment.provider).toBe('PayPal');
+    expect(webPaypal.body.payment.providerPaymentId).toMatch(/^manual_/);
+
+    // 2. Evidence confirm sends method='PAYPAL' -> provider='PAYPAL', providerPaymentId='manual_...'
+    const evPaypal = await pay(inv, { amount: 50, method: 'PAYPAL', reference: 'V29A-EV-PP' });
+    expect(evPaypal.status, JSON.stringify(evPaypal.body)).toBe(201);
+    expect(evPaypal.body.payment.provider).toBe('PAYPAL');
+    expect(evPaypal.body.payment.providerPaymentId).toMatch(/^manual_/);
+
+    // 3. Pre-D-55 legacy manual row with provider='stripe' and providerPaymentId='manual_...'
+    const legacyManual = await db.payment.create({
+      data: {
+        id: `${inv}_legacy_stripe`,
+        businessId: ID.bizA,
+        invoiceId: inv,
+        amount: 50,
+        currency: 'TTD',
+        status: 'SUCCESSFUL',
+        provider: 'stripe',
+        method: 'stripe',
+        providerPaymentId: `manual_${P}legacy_stripe`,
+      },
+    });
+
+    for (const [label, pid] of [
+      ['web PayPal', webPaypal.body.payment.id],
+      ['evidence PAYPAL', evPaypal.body.payment.id],
+      ['pre-D-55 manual stripe', legacyManual.id],
+    ] as const) {
+      const res = await refund(pid, `manual refund ${label}`);
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body).toMatchObject({ amount: -50, status: 'REFUNDED', refundOfPaymentId: pid });
+    }
+    expect(await balanceOf(inv)).toMatchObject({ paid: 150, refunded: 150, net: 0, remaining: 150 });
   });
 });

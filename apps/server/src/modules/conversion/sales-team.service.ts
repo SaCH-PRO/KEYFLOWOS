@@ -7,8 +7,8 @@ export interface SalesRep {
   id: string;
   name: string;
   commissionRate: number;
-  dealsClosed: number;
-  revenueAttributed: number;
+  dealsClosed: number | null;
+  revenueAttributed: number | null;
 }
 
 export interface DealAttribution {
@@ -38,7 +38,8 @@ export class SalesTeamService {
     });
   }
 
-  async getSalesReps(businessId: string): Promise<SalesRep[]> {
+  async getSalesReps(businessId: string, options?: { includeRevenue?: boolean }): Promise<SalesRep[]> {
+    const includeRevenue = options?.includeRevenue !== false;
     const staff = await this.prisma.client.staffMember.findMany({
       where: { businessId },
       select: { id: true, name: true },
@@ -54,6 +55,17 @@ export class SalesTeamService {
 
     const reps: SalesRep[] = [];
     for (const s of staff) {
+      if (!includeRevenue) {
+        reps.push({
+          id: s.id,
+          name: s.name,
+          commissionRate: commissionMap[s.id] ?? 0,
+          dealsClosed: null,
+          revenueAttributed: null,
+        });
+        continue;
+      }
+
       const repContacts = await this.prisma.client.contact.findMany({
         where: {
           businessId,

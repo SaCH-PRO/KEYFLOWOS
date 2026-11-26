@@ -6,9 +6,12 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import type { ConstitutionVersionData } from './constitution-version.types';
 
 describe('ConstitutionVersionController', () => {
+  const ownerReq = { user: { id: 'user_1', role: 'USER' } };
+
   async function makeController() {
     const version: ConstitutionVersionData = {
       id: 'const_1',
@@ -35,6 +38,15 @@ describe('ConstitutionVersionController', () => {
             archive: vi.fn().mockResolvedValue({ ...version, status: 'ARCHIVED' }),
           },
         },
+        {
+          provide: PrismaService,
+          useValue: {
+            client: {
+              user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER' }) },
+              membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) },
+            },
+          },
+        },
       ],
     })
       .overrideGuard(AuthGuard).useValue({ canActivate: vi.fn(() => true) })
@@ -50,42 +62,42 @@ describe('ConstitutionVersionController', () => {
 
   it('returns the latest version', async () => {
     const { controller, service, version } = await makeController();
-    const result = await controller.latest('biz_1');
+    const result = await controller.latest('biz_1', ownerReq);
     expect(result).toEqual(version);
     expect(service.latest).toHaveBeenCalledWith('biz_1');
   });
 
   it('lists versions', async () => {
     const { controller, service } = await makeController();
-    const result = await controller.versions('biz_1');
+    const result = await controller.versions('biz_1', ownerReq);
     expect(result).toHaveLength(1);
     expect(service.list).toHaveBeenCalledWith('biz_1');
   });
 
   it('fetches a specific version', async () => {
     const { controller, service, version } = await makeController();
-    const result = await controller.version('biz_1', '3');
+    const result = await controller.version('biz_1', '3', ownerReq);
     expect(result).toEqual(version);
     expect(service.getVersion).toHaveBeenCalledWith('biz_1', 3);
   });
 
   it('generates a new version', async () => {
     const { controller, service, version } = await makeController();
-    const result = await controller.generate('biz_1', { changeNotes: 'notes' }, { user: { id: 'user_1' } });
+    const result = await controller.generate('biz_1', { changeNotes: 'notes' }, ownerReq);
     expect(result).toEqual(version);
     expect(service.generate).toHaveBeenCalledWith('biz_1', { changeNotes: 'notes' }, 'user_1');
   });
 
   it('returns staleness', async () => {
     const { controller, service } = await makeController();
-    const result = await controller.staleness('biz_1');
+    const result = await controller.staleness('biz_1', ownerReq);
     expect(result.stale).toBe(false);
     expect(service.staleness).toHaveBeenCalledWith('biz_1');
   });
 
   it('archives a version', async () => {
     const { controller, service } = await makeController();
-    const result = await controller.archive('biz_1', '2');
+    const result = await controller.archive('biz_1', '2', ownerReq);
     expect(result.status).toBe('ARCHIVED');
     expect(service.archive).toHaveBeenCalledWith('biz_1', 2);
   });

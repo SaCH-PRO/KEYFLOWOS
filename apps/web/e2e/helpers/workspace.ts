@@ -2,7 +2,23 @@ import type { BrowserContext, Page, Route } from "@playwright/test";
 
 export const TEST_BUSINESS_ID = "biz_e2e";
 export const TEST_USER_ID = "user_e2e";
-export const TEST_TOKEN = "test-token-e2e";
+export const TEST_TOKEN = jwtShapedTestToken(TEST_USER_ID);
+
+/**
+ * An unsigned, JWT-shaped session token for the mocked specs (FU-E2E-MOCKED-SESSION-TOKEN, D-283).
+ *
+ * The edge middleware (apps/web/src/middleware.ts isTokenExpiredOrInvalid) lets /app/* through only when the
+ * kf_token cookie has three dot-separated parts and a payload that is not expired; it cannot check a signature at
+ * the edge and does not try. The old "test-token-e2e" was one part, so every /app/* request of a spec that relied on
+ * seedWorkspace alone was sent to /auth/login. This token passes that shape check and nothing more: alg "none",
+ * a placeholder signature, no secret. The mocked API (page.route) never verifies it; a real API would refuse it.
+ * exp is a day after the module loads, well past any run.
+ */
+function jwtShapedTestToken(sub: string): string {
+  const b64url = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  return `${b64url({ alg: "none", typ: "JWT" })}.${b64url({ sub, iat: now, exp: now + 24 * 3600 })}.e2e`;
+}
 
 const businessCache = {
   id: TEST_BUSINESS_ID,
@@ -39,7 +55,7 @@ export function e2eBaseURL(): string {
  * real API (e2e/journeys/). A signed-in session stored the way the web app
  * stores one (lib/workspace.ts setStoredToken / setStoredBusinessId:
  * localStorage kf_token and kf_business_id, plus the cookies of the same names
- * the edge proxy gates /app/* on), as a Playwright storageState. A context
+ * the edge middleware, src/middleware.ts, gates /app/* on), as a Playwright storageState. A context
  * starts from it once, so the app is free to change or clear the session
  * afterwards: sign-out really signs out, which an init script would undo.
  */
@@ -80,12 +96,13 @@ export function liveSessionState(
 
 /**
  * Seed localStorage AND the `kf_token` cookie so both the Next.js edge
- * proxy (`apps/web/src/proxy.ts`, which gates `/app/*` on cookie presence)
+ * middleware (`apps/web/src/middleware.ts`, which gates `/app/*` on a
+ * JWT-shaped, unexpired cookie: see TEST_TOKEN)
  * AND the in-page `<RequireAuth>` provider (which reads the token out of
  * localStorage to call `/identity/me`) treat the visitor as a signed-in,
  * onboarded user with an active workspace. Must be called before navigation.
  *
- * Without the cookie the edge proxy redirects every `/app/*` request to
+ * Without the cookie the edge middleware redirects every `/app/*` request to
  * `/auth/login` before the page hydrates, so localStorage alone is not
  * enough — that was the cause of the e2e suite flaking out wholesale.
  */
@@ -130,8 +147,9 @@ interface IdentityMockOptions {
 }
 
 /**
- * Mock the identity & notifications endpoints the `/app` layout calls on every
- * page load so it doesn't redirect to onboarding or hammer a real backend.
+ * Mock the identity, onboarding-state & notifications endpoints the `/app`
+ * layout calls on every page load so it doesn't redirect to onboarding or
+ * hammer a real backend.
  */
 export async function mockBaseLayout(
   page: Page,
@@ -173,6 +191,27 @@ export async function mockBaseLayout(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(businessPayload),
+      }),
+  );
+
+  // The onboarding gate (hooks/use-genome-gate.ts) reads this on every /app
+  // navigation. An onboarded business, matching the caches seedWorkspace
+  // stores: without it, mockCatchAll's empty [] reads as "not finished" and the
+  // gate sends the page to /app/onboarding (FU-E2E-MOCKED-SESSION-TOKEN).
+  await page.route(
+    `**/onboarding-concierge/businesses/${TEST_BUSINESS_ID}/onboarding-state**`,
+    (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          step: "complete",
+          onboardingComplete: true,
+          onboardingStartedAt: "2026-01-01T00:00:00.000Z",
+          onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+          threePillarMet: true,
+          setupStatus: null,
+        }),
       }),
   );
 

@@ -17,12 +17,14 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
+import { visibleVatNumber } from './invoice-email.types';
 import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
-import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
+import { assertValidLineQuantity, MAX_DOCUMENT_AMOUNT, STOCK_TRACKED_WHOLE_UNITS_MESSAGE } from './dto/document-line-item.dto';
+import { isStockTracked, ownStockRows } from '../../core/inventory/inventory-mode';
 import { allocateDocumentNumber, isDocumentNumberConflict, isSequenceNumber, retryDocumentNumber } from './document-number';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import {
@@ -117,6 +119,7 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
       instagram: true,
       twitter: true,
       whatsapp: true,
+      vatNumber: true,
     },
   },
 });
@@ -163,6 +166,7 @@ const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
       email: true,
       website: true,
       primaryColor: true,
+      vatNumber: true,
     },
   },
 });
@@ -386,6 +390,17 @@ const CREATE_IDEMPOTENCY_KEY_MAX = 255;
  * evidence confirm) are stored as before.
  */
 const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set(['stripe', 'paypal', 'wipay']);
+
+/**
+ * FU-REFUND-GATEWAY-REFUSE (P96, owner ruling A2 on #80): gateway providers
+ * that expose an API refund path (`POST /payments/businesses/:businessId/refunds`,
+ * PaymentsOpsController). The manual bookkeeping route
+ * (`POST /commerce/businesses/:businessId/payments/:paymentId/refund`) refuses
+ * these with 409 Conflict unless an internal D-121 order-refund door passes
+ * `allowApiGatewayBookkeeping: true`. WiPay has no refund API and remains
+ * eligible for manual bookkeeping refunds.
+ */
+const API_REFUNDABLE_GATEWAY_PROVIDERS: ReadonlySet<string> = new Set(['stripe', 'paypal']);
 
 /**
  * The create's claim, or null when it carries no key (absent or blank, as the
@@ -831,6 +846,50 @@ export class CommerceService {
   }
 
   /**
+   * P108 (V1-64 / DECIMALS-SERVER, D-166): validate every line's quantity
+   * (positive finite number, up to 2 decimal places, <= MAX_LINE_QUANTITY),
+   * verify every referenced productId belongs to `businessId` (404 otherwise),
+   * and enforce whole units on stock-tracked products using the canonical
+   * `isStockTracked(inventoryMode, ownStockCount > 0)` rule (ownStockRows).
+   */
+  private async assertDocumentLineItems(
+    items: ReadonlyArray<{ quantity: number; productId?: string | null }>,
+    businessId: string,
+    client: Prisma.TransactionClient = this.prisma.client as unknown as Prisma.TransactionClient,
+  ): Promise<void> {
+    for (let i = 0; i < items.length; i++) {
+      assertValidLineQuantity(items[i]?.quantity, `items.${i}.quantity`);
+      const pid = items[i]?.productId;
+      if (pid !== undefined && pid !== null && typeof pid !== 'string') {
+        throw new BadRequestException('productId must be a string');
+      }
+    }
+    const productIds = lineProductIds(items);
+    if (productIds.length === 0) return;
+    const products = await client.product.findMany({
+      where: { id: { in: productIds }, businessId },
+      select: {
+        id: true,
+        inventoryMode: true,
+        _count: { select: { inventoryStocks: { where: ownStockRows(businessId) } } },
+      },
+    });
+    if (products.length !== productIds.length) {
+      throw new NotFoundException('Product not found');
+    }
+    const trackedIds = new Set(
+      products
+        .filter((p) => isStockTracked(p.inventoryMode, p._count.inventoryStocks > 0))
+        .map((p) => p.id),
+    );
+    for (const item of items) {
+      if (item.productId && trackedIds.has(item.productId) && !Number.isInteger(item.quantity)) {
+        throw new BadRequestException(STOCK_TRACKED_WHOLE_UNITS_MESSAGE);
+      }
+    }
+  }
+
+  /**
    * V1-53: the lines a quote create or edit is about to write, checked before
    * anything is written. CreateQuoteDto and UpdateQuoteDto hold the HTTP
    * routes to the line rules; this holds every caller (KEY's create_quote
@@ -842,24 +901,17 @@ export class CommerceService {
    *    tenant's product (and convert copies it onto the invoice lines), and an
    *    unknown id failed the FK (500). Both answer the same 404 as invoice edit
    *    (R0-D3 review ST-D3-2). An empty productId is "no product".
+   *  - P108 (D-166): valid line quantities (<= 2 decimals) and whole units for
+   *    stock-tracked products.
    */
   private async assertQuoteLines(
-    items: ReadonlyArray<{ productId?: string | null }> | undefined,
+    items: ReadonlyArray<{ quantity: number; productId?: string | null }> | undefined,
     businessId: string,
   ): Promise<void> {
     if (!Array.isArray(items) || items.length === 0) {
       throw new BadRequestException('items must contain at least 1 elements');
     }
-    const productIds = lineProductIds(items);
-    if (productIds.length > 0) {
-      const products = await this.prisma.client.product.findMany({
-        where: { id: { in: productIds }, businessId },
-        select: { id: true },
-      });
-      if (products.length !== productIds.length) {
-        throw new NotFoundException('Product not found');
-      }
-    }
+    await this.assertDocumentLineItems(items, businessId);
   }
 
   /**
@@ -873,17 +925,40 @@ export class CommerceService {
    * raw because the soft-delete extension hides an archived product, and a
    * product of this tenant archived after it was quoted is still its own.
    * Same 404 as quote and invoice create.
+   *
+   * P108 (D-166): also re-validates stored line quantities and refuses
+   * fractional quantities on stock-tracked products (e.g. if a product became
+   * tracked after the quote was created).
    */
   private async assertStoredLineProductsInBusiness(
-    items: ReadonlyArray<{ productId: string | null }>,
+    items: ReadonlyArray<{ productId: string | null; quantity: number }>,
     businessId: string,
   ): Promise<void> {
+    for (let i = 0; i < items.length; i++) {
+      assertValidLineQuantity(items[i]?.quantity, `items.${i}.quantity`);
+    }
     const productIds = lineProductIds(items);
     if (productIds.length === 0) return;
-    const owned = await this.prisma.client.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join(productIds)})`;
+    const owned = await this.prisma.client.$queryRaw<Array<{ id: string; inventoryMode: string | null }>>`
+      SELECT id, inventory_mode AS "inventoryMode" FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join(productIds)})`;
     if (owned.length !== productIds.length) {
       throw new NotFoundException('Product not found');
+    }
+    const stockRows = await this.prisma.client.inventoryStock.findMany({
+      where: { ...ownStockRows(businessId), productId: { in: productIds } },
+      select: { productId: true },
+      distinct: ['productId'],
+    });
+    const hasStock = new Set(stockRows.map((r) => r.productId));
+    const trackedIds = new Set(
+      owned
+        .filter((p) => isStockTracked(p.inventoryMode, hasStock.has(p.id)))
+        .map((p) => p.id),
+    );
+    for (const item of items) {
+      if (item.productId && trackedIds.has(item.productId) && !Number.isInteger(item.quantity)) {
+        throw new BadRequestException(STOCK_TRACKED_WHOLE_UNITS_MESSAGE);
+      }
     }
   }
 
@@ -1044,6 +1119,10 @@ export class CommerceService {
     if (prior) return prior;
 
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
+    // P108 (V1-64 / DECIMALS-SERVER, D-166): validate quantities (<= 2 decimals),
+    // verify referenced productIds belong to this tenant (404), and enforce
+    // whole units for stock-tracked products (400) before any DB write.
+    await this.assertDocumentLineItems(input.items, input.businessId);
     const taxRate = input.taxRate ?? 0;
     // V1-22-DM-MONEY-CENTS (M23, D-13): every amount is computed and stored in
     // integer cents. The float form stored items 0.1 + 0.2 at 12.5% tax as
@@ -1087,6 +1166,7 @@ export class CommerceService {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           total: item.total != null ? roundMoney(item.total) : calculated.lineTotals[i],
+          productId: item.productId || null,
         })),
       },
     };
@@ -1799,6 +1879,7 @@ export class CommerceService {
             instagram: true,
             twitter: true,
             whatsapp: true,
+            vatNumber: true,
           },
         },
       },
@@ -1833,6 +1914,7 @@ export class CommerceService {
       (!invoice.subtotal || invoice.subtotal === 0) && invoice.items.length > 0
         ? invoice.taxAmount ?? (invoice.taxRate ? subtotal * (invoice.taxRate / 100) : 0)
         : invoice.taxAmount;
+    const vat = visibleVatNumber(invoice.business?.vatNumber, taxAmount);
 
     return {
       id: invoice.id,
@@ -1870,6 +1952,7 @@ export class CommerceService {
             instagram: invoice.business.instagram,
             twitter: invoice.business.twitter,
             whatsapp: invoice.business.whatsapp,
+            ...(vat ? { vatNumber: vat } : {}),
           }
         : null,
       // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the net received, max(0, net),
@@ -3010,14 +3093,32 @@ export class CommerceService {
             email: true,
             website: true,
             primaryColor: true,
+            vatNumber: true,
           },
         },
       },
     });
     if (!quote || quote.deletedAt) return null;
+    const vat = visibleVatNumber(quote.business?.vatNumber, quote.taxAmount);
+    const business = quote.business
+      ? {
+          id: quote.business.id,
+          name: quote.business.name,
+          logoUrl: quote.business.logoUrl,
+          address: quote.business.address,
+          phone: quote.business.phone,
+          email: quote.business.email,
+          website: quote.business.website,
+          primaryColor: quote.business.primaryColor,
+          ...(vat ? { vatNumber: vat } : {}),
+        }
+      : null;
     // V1-QUOTE-CHAIN-finish (review SEC-5): the version of the terms this view
     // shows; the customer's accept sends it back (respondToQuoteByToken).
-    return { ...this.decorateQuote(toOperatorQuote(quote)), termsVersion: quoteTermsVersion(quote) };
+    return {
+      ...this.decorateQuote(toOperatorQuote({ ...quote, business })),
+      termsVersion: quoteTermsVersion(quote),
+    };
   }
 
   async markQuoteViewedByToken(token: string, visitorId?: string | null) {
@@ -4540,6 +4641,7 @@ export class CommerceService {
     actorId?: string | null,
     amount?: number,
     once?: { providerPaymentId: string; refusal: string; reported?: string },
+    options?: { allowApiGatewayBookkeeping?: boolean },
   ) {
     if (amount !== undefined && !(Number.isFinite(amount) && toCents(amount) > 0 && fromCents(toCents(amount)) === amount)) {
       throw new BadRequestException('A refund amount is a number above 0 in whole cents');
@@ -4551,6 +4653,11 @@ export class CommerceService {
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
+    const preInvoice = await this.prisma.client.invoice.findFirst({
+      where: { id: payment.invoiceId, businessId },
+      select: { id: true },
+    });
+    if (!preInvoice) throw new NotFoundException('Invoice not found');
     const refusal = (row: { status: string; amount: number }) =>
       new ConflictException(
         row.status !== 'REFUNDED'
@@ -4559,7 +4666,21 @@ export class CommerceService {
             ? 'A refund cannot itself be refunded'
             : 'Payment is already refunded',
       );
+    const gatewayRefusal = (row: { provider: string | null | undefined; providerPaymentId?: string | null }) => {
+      if (options?.allowApiGatewayBookkeeping) return null;
+      // R1-COR-1 / D-55: hand-recorded payments (`recordPayment`, web-form `'PayPal'`,
+      // evidence `'PAYPAL'`, pre-D-55 manual rows) always carry a `manual_` providerPaymentId
+      // and have no provider charge/capture to refund at `/payments/businesses/:b/refunds`.
+      if ((row.providerPaymentId ?? '').startsWith('manual_')) return null;
+      const normalized = (row.provider ?? '').trim().toLowerCase();
+      if (!API_REFUNDABLE_GATEWAY_PROVIDERS.has(normalized)) return null;
+      return new ConflictException(
+        `This payment was settled through ${normalized}; use the gateway refund endpoint (POST /payments/businesses/${businessId}/refunds) so the customer is refunded at the provider.`,
+      );
+    };
     if (payment.status !== 'SUCCESSFUL') throw refusal(payment);
+    const preGatewayErr = gatewayRefusal(payment);
+    if (preGatewayErr) throw preGatewayErr;
     // FIN2 — write the refund row + reverse the original posting in one tx so
     // the refund and the offsetting ledger entries commit together.
     //
@@ -4572,10 +4693,22 @@ export class CommerceService {
       const txClient = tx as unknown as Prisma.TransactionClient;
       // Serialized with payments and other refunds of this invoice
       // (R0-PL-03): the reads below see every refund committed before ours.
-      await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      if (!locked || locked.businessId !== businessId) {
+        throw new NotFoundException('Invoice not found');
+      }
       const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
       if (!current) throw new NotFoundException('Payment not found');
+      if (current.invoiceId !== payment.invoiceId) {
+        const curInv = await tx.invoice.findFirst({
+          where: { id: current.invoiceId, businessId },
+          select: { id: true },
+        });
+        if (!curInv) throw new NotFoundException('Invoice not found');
+      }
       if (current.status !== 'SUCCESSFUL') throw refusal(current);
+      const lockedGatewayErr = gatewayRefusal(current);
+      if (lockedGatewayErr) throw lockedGatewayErr;
       // W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, D-121): this refund, already recorded (read under the lock), is
       // not recorded again; it is the more specific answer than what is left, so it is given first.
       if (once && (await tx.payment.findFirst({ where: { providerPaymentId: once.providerPaymentId, businessId }, select: { id: true } }))) {
@@ -5281,29 +5414,11 @@ export class CommerceService {
       if (issued) await this.assertIssuedInvoiceAmountsRestated(txClient, current, issuedAs, input);
 
       if (input.items && !issued) {
-        // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
-        // no tenant check, so a line could bind another tenant's product and
-        // downstream catalog/inventory consumers of invoice_items.product_id
-        // would act on it. Every referenced product must resolve inside the
-        // caller's tenant before the existing items are deleted below, so a
-        // denied path writes nothing. The validated set is exactly the set
-        // written: an empty productId is "no product", never an FK value.
-        const productIds = Array.from(
-          new Set(
-            input.items
-              .map((item) => item.productId)
-              .filter((id): id is string => typeof id === 'string' && id.length > 0),
-          ),
-        );
-        if (productIds.length > 0) {
-          const products = await tx.product.findMany({
-            where: { id: { in: productIds }, businessId: input.businessId },
-            select: { id: true },
-          });
-          if (products.length !== productIds.length) {
-            throw new NotFoundException('Product not found');
-          }
-        }
+        // R0-D3 review (ST-D3-2) & P108 (D-166): validate line quantities
+        // (<= 2 decimals), resolve every referenced productId inside the
+        // caller's tenant (404), and enforce whole units on stock-tracked
+        // products (400) before the existing items are deleted below.
+        await this.assertDocumentLineItems(input.items, input.businessId, txClient);
         const taxRate = input.taxRate ?? current.taxRate ?? 0;
         const discountType = input.discountType !== undefined ? input.discountType : current.discountType;
         const discountValue = input.discountValue !== undefined ? input.discountValue : current.discountValue;

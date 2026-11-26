@@ -528,8 +528,11 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
 
     const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
     expect(res.status, JSON.stringify(res.body)).toBe(403);
-    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
-    expect(res.body.message).toBe(OWNER_ONLY_MESSAGE);
+    // P90 (SWP-CENSUS-V1-B, owner ruling A1 on #80): OnboardingConciergeController.markComplete now enforces
+    // @RequireModuleScope('settings', 'write') in ModuleScopeGuard before reaching the owner-only check
+    // (R0-SEC-03 cases below verify ONBOARDING_COMPLETE_FORBIDDEN for settings:write/admin non-owners).
+    expect(res.body.code).toBe('FORBIDDEN');
+    expect(String(res.body.message ?? '')).toMatch(/settings requires write access/);
     expect(JSON.stringify(res.body)).not.toContain('demoData');
     const f = await footprint(S.bizA!);
     expectNothingWritten(f);
@@ -546,8 +549,7 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
     expect(res.body.complete).toBe(true);
     expect(res.body.alreadyComplete).toBeUndefined();
-    expect(res.body.demoData).toMatchObject({ contactId: expect.any(String), invoiceId: expect.any(String), invoiceNumber: expect.stringMatching(/^DEMO-/) });
-    S.demo = res.body.demoData;
+    expect(res.body.demoData).toBeNull();
   });
 
   it('the three-pillar score is reported as a recommendation, not a gate', async () => {
@@ -572,21 +574,14 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     expect(state.body).toMatchObject({ step: 'complete', onboardingComplete: true, onboardingCompletedAt: S.completedAt, threePillarMet: false });
   });
 
-  it('LEDGER: completion wrote exactly one demo contact and one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry', async () => {
-    expect(S.demo).toBeDefined();
+  it('LEDGER: completion wrote zero demo contacts, zero invoices, and no FinancialTransaction or LedgerEntry (D-157)', async () => {
     const f = await footprint(S.bizA!);
     expect({ contacts: f.contacts, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
-      .toEqual({ contacts: 1, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
-    const contact = await db.contact.findFirst({ where: { businessId: S.bizA } });
-    expect(contact).toMatchObject({ id: S.demo!.contactId, source: 'demo' });
-    const invoice = await db.invoice.findFirst({ where: { businessId: S.bizA }, include: { items: true } });
-    expect(invoice).toMatchObject({ id: S.demo!.invoiceId, invoiceNumber: S.demo!.invoiceNumber, status: 'DRAFT', contactId: S.demo!.contactId, currency: 'USD' });
-    expect(invoice.items).toHaveLength(1);
+      .toEqual({ contacts: 0, demoContacts: 0, invoices: 0, transactions: 0, ledger: 0 });
     expect(await db.payment.count({ where: { businessId: S.bizA } })).toBe(0);
   });
 
   it('ST-R032-1: completion and the legal disclaimer acceptance are recorded against the owner in team_activity_logs', async () => {
-    expect(S.demo).toBeDefined();
     const accepted = await disclaimerAcceptedAt(S.bizA!);
     expect(accepted).toEqual(expect.any(String));
     const rows = await activity(S.bizA!);
@@ -595,7 +590,7 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
       expect.objectContaining({ userId: ID.owner, module: 'settings', action: 'onboarding_completed', entityType: 'business', entityId: S.bizA }),
     ]);
     expect(rows[0].meta).toMatchObject({ disclaimerAcceptedAt: accepted });
-    expect(rows[1].meta).toMatchObject({ demoContactId: S.demo!.contactId, demoInvoiceId: S.demo!.invoiceId });
+    expect(rows[1].meta).toMatchObject({ demoContactId: null, demoInvoiceId: null, demoInvoiceNumber: null });
     // The STAFF member's refused attempt left no row naming them.
     expect(rows.filter((r: { userId: string }) => r.userId === ID.staff)).toEqual([]);
   });
@@ -607,14 +602,15 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     const f = await footprint(S.bizA!);
     expect((f.onboardingCompletedAt as Date).toISOString()).toBe(S.completedAt);
     expect({ contacts: f.contacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
-      .toEqual({ contacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+      .toEqual({ contacts: 0, invoices: 0, transactions: 0, ledger: 0 });
     expect(await activity(S.bizA!)).toHaveLength(2);
   });
 
   it('ST-R032-1: on a completed business, a STAFF member is still refused (authority is checked before the replay)', async () => {
     const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
     expect(res.status, JSON.stringify(res.body)).toBe(403);
-    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(res.body.code).toBe('FORBIDDEN');
+    expect(String(res.body.message ?? '')).toMatch(/settings requires write access/);
     expect(await activity(S.bizA!)).toHaveLength(2);
   });
 
@@ -660,9 +656,10 @@ describe('without the minimal profile, completion is refused with the missing fi
     const res = await call('post', routes.complete(S.bizX!), T[ID.blank]);
     expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
     expect(res.body.complete).toBe(true);
+    expect(res.body.demoData).toBeNull();
     const f = await footprint(S.bizX!);
     expect({ onboardingComplete: f.onboardingComplete, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
-      .toEqual({ onboardingComplete: true, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+      .toEqual({ onboardingComplete: true, demoContacts: 0, invoices: 0, transactions: 0, ledger: 0 });
   });
 });
 
@@ -713,9 +710,10 @@ describe('R0-SEC-03 (D-11): only the business owner may complete; settings:write
     expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
     expect(res.body.complete).toBe(true);
     expect(res.body.alreadyComplete).toBeUndefined();
+    expect(res.body.demoData).toBeNull();
     const f = await footprint(S.bizS!);
     expect({ onboardingComplete: f.onboardingComplete, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
-      .toEqual({ onboardingComplete: true, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+      .toEqual({ onboardingComplete: true, demoContacts: 0, invoices: 0, transactions: 0, ledger: 0 });
     const rows = await activity(S.bizS!);
     expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
       [ID.sowner, 'legal_disclaimer_accepted'],
@@ -768,16 +766,18 @@ describe('R0-SEC-03 (D-11): only the business owner may complete; settings:write
     expect(await activity(S.bizF)).toEqual([]);
   });
 
+  // Title preserved verbatim per Owner Ruling B3 (#80 7179130521); D-157 asserts zero demo rows written.
   it('SEC03-1: the owner\'s /complete on that flagged business is not alreadyComplete: it records completedAt, the demo data, the disclaimer and the owner as the actor', async () => {
     expect(S.bizF, 'bizF is bootstrapped by the previous case').toBeDefined();
     const res = await call('post', routes.complete(S.bizF!), T[ID.fowner]);
     expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
     expect(res.body.complete).toBe(true);
     expect(res.body.alreadyComplete).toBeUndefined();
+    expect(res.body.demoData).toBeNull();
     const f = await footprint(S.bizF!);
     expect(f.onboardingCompletedAt).toBeInstanceOf(Date);
     expect({ onboardingComplete: f.onboardingComplete, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
-      .toEqual({ onboardingComplete: true, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+      .toEqual({ onboardingComplete: true, demoContacts: 0, invoices: 0, transactions: 0, ledger: 0 });
     expect(await disclaimerAcceptedAt(S.bizF!)).toEqual(expect.any(String));
     const rows = await activity(S.bizF!);
     expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
@@ -870,7 +870,7 @@ describe('R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:
     expect(again.status, JSON.stringify(again.body)).toBe(COMPLETE_OK);
     expect(again.body).toEqual({ complete: true, alreadyComplete: true });
     const after = await footprint(S.bizN!);
-    expect({ demoContacts: after.demoContacts, invoices: after.invoices }).toEqual({ demoContacts: 1, invoices: 1 });
+    expect({ demoContacts: after.demoContacts, invoices: after.invoices }).toEqual({ demoContacts: 0, invoices: 0 });
     expect((await activity(S.bizN!)).map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
       [ID.nowner, 'legal_disclaimer_accepted'],
       [ID.nowner, 'onboarding_completed'],
@@ -882,7 +882,7 @@ describe('R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:
 // SEC03-2: concurrent completion by the owner writes once
 // ---------------------------------------------------------------------------
 describe('R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes once', () => {
-  it('three simultaneous /complete calls: all answer complete, exactly one is not alreadyComplete, and one onboarding_completed row, one disclaimer acceptance and one demo seed are written', async () => {
+  it('three simultaneous /complete calls: all answer complete, exactly one is not alreadyComplete, and one onboarding_completed row, one disclaimer acceptance and zero demo rows are written (D-157)', async () => {
     S.bizK = await bootstrap(ID.kowner, ID.bizKName);
     expectNothingWritten(await footprint(S.bizK));
     const results = await Promise.all([1, 2, 3].map(() => call('post', routes.complete(S.bizK!), T[ID.kowner])));
@@ -902,7 +902,7 @@ describe('R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes 
     expect(results.filter((r) => r.body.alreadyComplete !== true)).toHaveLength(1);
 
     expect({ onboardingComplete: f.onboardingComplete, contacts: f.contacts, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
-      .toEqual({ onboardingComplete: true, contacts: 1, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+      .toEqual({ onboardingComplete: true, contacts: 0, demoContacts: 0, invoices: 0, transactions: 0, ledger: 0 });
     expect(f.onboardingCompletedAt).toBeInstanceOf(Date);
     expect(await disclaimerAcceptedAt(S.bizK!)).toEqual(expect.any(String));
     expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
@@ -910,7 +910,8 @@ describe('R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes 
       [ID.kowner, 'onboarding_completed'],
     ]);
     const winner = results.find((r) => r.body.alreadyComplete !== true)!;
-    expect(rows[1].meta).toMatchObject({ demoContactId: winner.body.demoData.contactId, demoInvoiceId: winner.body.demoData.invoiceId });
+    expect(winner.body.demoData).toBeNull();
+    expect(rows[1].meta).toMatchObject({ demoContactId: null, demoInvoiceId: null, demoInvoiceNumber: null });
   });
 });
 

@@ -4,7 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RulesService, SYSTEM_RULES } from './rules.service';
 import { SignalsService } from './signals.service';
 import { CommandBridgeService } from './command-bridge.service';
-import { HealthScoreService } from './health-score.service';
+import { HealthScoreService, projectHealthForReader } from './health-score.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { runGuarded } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
@@ -68,15 +68,22 @@ export class ScheduledScansService implements OnModuleInit {
       await this.health.saveSnapshot(businessId, result);
     }
 
-    // Generate commands from low health scores
+    // Generate commands from low health scores.
+    // FU-HEALTH-MONEY-SCOPE (P101, D-259/D-100): CommandItem is served under operations:read
+    // rather than revenue:read, so money-area reasons are projected to strip amounts/cash figures
+    // before bridging while the persisted BusinessHealthSnapshot above stays complete.
     for (const result of healthResults) {
       if (result.score < 60) {
+        const bridgedReasons =
+          result.area === 'money'
+            ? projectHealthForReader([result], false)[0].reasons
+            : result.reasons;
         await this.bridge.bridge({
           businessId,
           sourceModule: 'intelligence',
           sourceType: 'health',
           title: `${result.area} health is ${result.status.toLowerCase()}`,
-          description: result.reasons.join('\n'),
+          description: bridgedReasons.join('\n'),
           category: this.areaToCategory(result.area),
           actionType: 'REVIEW_HEALTH',
           priority: result.score < 40 ? 80 : 60,
@@ -98,6 +105,7 @@ export class ScheduledScansService implements OnModuleInit {
               where: { businessId, status: 'SENT', deletedAt: null, dueDate: { lt: now } },
               select: {
                 id: true, contactId: true, total: true, currency: true, dueDate: true,
+                contact: { select: { businessId: true, deletedAt: true } },
                 // V1-41c: this tenant's own rows (M31), read by the balance contract below.
                 payments: { where: { businessId }, select: { amount: true, status: true } },
               },
@@ -110,6 +118,12 @@ export class ScheduledScansService implements OnModuleInit {
               // extracted rows as money received, and dropped overdue invoices.
               const remaining = balanceOfStoredRows(Number(inv.total ?? 0), inv.payments, inv.currency).remaining;
               if (remaining <= 0) continue;
+              const liveContactId =
+                inv.contactId &&
+                inv.contact?.businessId === businessId &&
+                inv.contact?.deletedAt === null
+                  ? inv.contactId
+                  : undefined;
               await this.signals.upsertSignal(
                 businessId,
                 { module: 'commerce', type: 'OVERDUE_INVOICE', entityType: 'invoice', entityId: inv.id },
@@ -121,7 +135,7 @@ export class ScheduledScansService implements OnModuleInit {
                   description: `Invoice ${inv.id.slice(0, 8)} is overdue by ${Math.ceil((now.getTime() - new Date(inv.dueDate!).getTime()) / 86400000)} days`,
                   entityType: 'invoice',
                   entityId: inv.id,
-                  contactId: inv.contactId ?? undefined,
+                  contactId: liveContactId,
                   value: remaining,
                 },
               );
@@ -130,7 +144,7 @@ export class ScheduledScansService implements OnModuleInit {
                 sourceModule: 'commerce',
                 sourceType: 'invoice',
                 sourceId: inv.id,
-                contactId: inv.contactId ?? undefined,
+                contactId: liveContactId,
                 title: `Collect overdue invoice (${remaining.toFixed(2)})`,
                 description: `Invoice is overdue. Remaining balance: ${remaining.toFixed(2)}`,
                 category: 'MONEY',

@@ -838,14 +838,15 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
         const stepId = await seedQueuePlan(planId, ID.owner, 'call_create_task', args);
         const result = await runQueueStep(planId, 'call_create_task', args, ID.biz, { retryCount: 2, worker });
         expect(result.ok, planId).toBe(false);
-        // A genuine failure is retried: three attempts, as the plan executor enqueues the step.
-        expect(dispatchedFor(stepId), planId).toHaveLength(3);
+        // RR-DISPATCH-NO-BLIND-RETRY (D-263): call_create_task is a WRITE tool, so an ambiguous
+        // error stops after 1 attempt (no blind retries) with OUTCOME_UNKNOWN and still counts on the circuit.
+        expect(dispatchedFor(stepId), planId).toHaveLength(1);
         const row = await planRow(planId);
         expect(row.steps[0].status, planId).toBe('failed');
-        expect(String(row.steps[0].errorMessage), planId).toBe(STORE_DOWN);
+        expect(String(row.steps[0].errorMessage), planId).toBe(`OUTCOME_UNKNOWN: ${STORE_DOWN}`);
       }
-      // Each failure reached the dispatcher as production delivers it: a plain Error, no HTTP status.
-      expect(delivered).toHaveLength(15);
+      // Each failure reached the dispatcher as production delivers it: a plain Error, no HTTP status (1 per step).
+      expect(delivered).toHaveLength(5);
       for (const e of delivered) {
         expect(e).toBeInstanceOf(Error);
         expect(e).not.toBeInstanceOf(HttpException);

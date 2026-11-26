@@ -1,8 +1,8 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-25 ~20:20 UTC by the acting orchestrator (second-lane account, Claude Code), while M18 opens its
-PR; main `0d75cd02`. Rewrite in place on every merge, packet return
-or owner ruling; never append. What you remove stays in git history and on issue #80.
+Last written: 2026-11-26 ~12:00 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M28 merged. Main is `0580db36`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
 conversation that produced it. Read `docs/development/agent-memory/README.md` first.
@@ -16,6 +16,133 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | Rulings | `docs/reconstruction/BUILD-MAP-001.md` (rulings given after the last rulings commit: section 2 below) |
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
+
+## 0. Current state: the next session starts here (2026-11-26 ~12:00 UTC)
+
+Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issue #80 and the
+pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this session is needed.
+
+**Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y`. It took over at ~00:50 UTC from `session_01TnVBvHV3mgiWBWgin4sgAf`,
+which the owner paused (#80 7179133696). Cloud workers report there and post every PACKET REPORT on #80, so a new
+orchestrator reads #80.
+
+**State:** main `0580db36` (M28 #265 merged 11:56 UTC; M26 #263 at 10:23). V1-STATUS: 211 of 396 done (55.5% of points; launch 122 of 255).
+Production still runs `f5d58ef7` (16 Nov); the owner redeploys (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set
+(D-290).
+
+**Board numbering (D-297):** Claude-lane rows number from P200 up; Antigravity keeps its own sequence below 200. Claude
+waves are even-numbered (M22, M24, ...), Antigravity's odd. Server follow-ups found in Claude reviews become
+antigravity board rows (P202 to P207), announced on #80 (7188549076).
+
+### 0.1 Waves this session
+
+- **M22** (#254, merged 05:03 UTC): P67, FU-CONTACT-SEND-QUOTE-DOOR, FU-NOTIFICATIONS-PAGE-REFUSED, P95. Dequeued once
+  by today-aggregate TD-01/02, which fail 02:00-04:00 UTC on any code (P203).
+- **M24** (#259, merged 07:41 UTC): P28 FU-CONTACT-PAGES-RAW-STATUS and P98 CONTACTS-LIST-FIRST.
+- **M26** (#263, merged 10:23 UTC): P34 FU-KEY-CTRLJ-OWNERS and P99 SWP-KEY-SHELL-SMOKE web. Proof green under the
+  ai-disabled and key-disabled variants, head and base; one tests-only integration commit `91d9a71d` (the KCJ test's
+  `/identity/me` stub answers `keyDisabled: false`, since P99's KEY fails closed). Two wave confirmations CONFIRMED.
+- **M28** (#265, merged 11:56 UTC): P86 CATALOG-1 web half alone. Proof at `442da715`: server 16,339 passed, R0 39/39;
+  post-merge web 317 files / 2,784 passed. Journey B: B5, B6 red→green; G unchanged vs base. Its compacted subjects name
+  `pkt/V1-CATALOG-1-WEB`, not the plan id `CATALOG-1`, so status.mjs keeps counting CATALOG-1 from P78's server commit
+  (uncertain): **always pass the plan id to compact.sh.**
+- **M30 (next):** P201 SWP-TEAM-WEB + RR-ADMIN-SHELL-SERVER-GATE + RR-SESSION-STORAGE-CENSUS (with CSC-12's wave
+  action: `samesite=lax` and `secure-on-https` on the three admin cookie rows) + the docs squash; keep under 50 files.
+- **M32 (after):** P200 TODAY-4BLOCK (L), with its r0_register AMEND row (already on this branch, `a43d1824`).
+
+### 0.2 Claude packets in flight (heads as of this file)
+
+| Packet | Branch @ head | State | Next |
+| --- | --- | --- | --- |
+| **P201 SWP-TEAM-WEB** | `pkt/V1-SWP-TEAM-WEB` @ `ed2cb03e` | RETURNed (#80 7188471746); D-296 keeps the role presets read-only | Wave M30 |
+| **RR-ADMIN-SHELL-SERVER-GATE** | `pkt/V1-RR-ADMIN-SHELL-SERVER-GATE` @ `d089921` | Returns as built: D-291 moves security MAJOR-1 (`/api/admin/*` checks the role only) to server packet P202 | Wave M30 |
+| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `7221721` | Round 12 (one structural key resolver, `resolveKeySet`) NOT CONFIRMED by both lenses: empty candidate sets drop the write (fail-open regression); `let`/shadowing; object members; exported callers; wildcard registry rows too broad. Round 13 sent: the resolver proves a finite key set or returns "*", never "no write"; 30+ self-attacks before reporting | Two confirmations, then RETURN, then wave M30. Keep fail-closed on "*" (both reviewers) |
+| **P200 TODAY-4BLOCK** | `pkt/V1-TODAY-4BLOCK` @ `14934c7c` | Round 1 (7 items incl. COR-1 KEY UI under KEY_DISABLED) CONFIRMED x2. Round 2 sent: merge main, use main's `useKeyEnabled` (one KEY reader), clear on 401/403 only, stale-reply guard, T4B-13 timing, Retry re-reads KEY. D-298 moved Journey I2/I3/I4 to P206/P205/P207 | Confirmations, RETURN, wave M32 |
+| **P208 EXPENSES-HUB-2** | `pkt/V1-EXPENSES-HUB-2` @ `f8d4c4aa` | Acceptance: security ACCEPT WITH MINORS, correctness REJECT (back-dated schedule catch-up flood). Rounds 1 and 2 CONFIRMED x2; round 3 (date format, past-dated edits, card currency) in two confirmations | RETURN, then a Claude wave |
+
+**Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
+- `session_017o9EBfvTibjEvGQK5qTBwq`: census (stopped after round 10).
+- `session_017o9EBgPURGAKurygwgEU8p`: TODAY-4BLOCK.
+- `session_017o9EBg5uEv5gUvm5sYpiG7`: EXPENSES-HUB-2.
+
+### 0.3 Antigravity (server lane)
+
+Active on #80 and on the board (rows below 200). Server rows Claude raised for them under D-297: P202
+RR-ADMIN-API-SIGNIN-KIND (D-291), P203 FU-TODAY-AGGREGATE-TZ-SEED, P204 FU-STORE-ADD-IDEMPOTENT, P205
+FU-TODAY-ORDERS-PREMISE, P206 FU-TODAY-APPROVALS-STAFF, P207 FU-TODAY-OVERVIEW-PARITY (absorbs FU-TODAY-PULSE-OVERVIEW), P213 FU-RECURRING-EXPENSE-SERVER, P214 FU-TODAY-QUOTE-HREF. Under D-298, Journey I2/I3/I4 are the done condition of P206/P205/P207.
+
+### 0.4 Queue and follow-ups (Claude lane)
+
+- Owner-gated: RR-OWNER-RULINGS-RECORD (docs; answers to OQ-5/13/19/30 and two RR migrations); NAV-B-HIDE needs the
+  owner to re-run USAGE-COUNT-SCRIPT on production, and its dependencies SWP-CALENDAR-TRUTH, W11-WEB-INVENTORY-REFUSALS
+  and HARNESS-REMOVAL are still todo.
+- Web rows on the board: P209 FU-PALETTE-INERT, P210 FU-CONTACT-PAGE-FLAKE, P212 EXPENSES-HUB-1-WEB (the Pay dialog; the plan counts EXPENSES-HUB-1 done on its server half only). P211 was absorbed into TODAY-4BLOCK.
+- **Follow-ups found in reviews, not yet in the plan:**
+  - FU-KEY-DISABLED-NAV-TODAY, FU-CENSUS-HARDENING, FU-SW-QUEUE-NO-AUTH (request bodies too),
+    FU-CONTACT-SOURCE-CHIPS-PLAIN (raw `source` on the timeline and notes, ai-insights `bestChannel`/`trend`).
+  - **Smaller items:**
+    - the CRM walkthrough targets hidden while the panel is closed (P98 MINOR-2);
+    - "Highest Revenue" sort and the High Value/Unpaid chips shown to every CRM viewer (already on main; a D-100 check);
+    - the `store-tab-deep-links` mock lacks `canSave*`/`listingRefused`;
+    - P28's C6 detector checks leaf HTML elements only.
+  - **Carried:** SEC-CJ-1 and COR-CJ-1 (Ctrl+J); an invoice-for-customer URL; app-wide `h-5.5`/`h-4.5`; the bottom-bar
+    clearance (question 46); `pwa-install-prompt` via `lib/install-prompt`; the server `getInventory` money projection;
+    bulk product delete has no audit or events; https-only image links on the server DTO; refund-door scope gating;
+    dead ContactDetail header actions; other Your page counters use the old sum; /book name-dedupe hides a listed
+    product; delete `next-actions-widget.tsx`; dark-mode `bg-white` dashboard cards; FU-REFRESH-AFTER-SIGNOUT; add
+    `seed-workspace-session.spec.ts` to CI's mocked list; the PKCE verifier's `Math.random` fallback.
+
+### 0.5 Resume recipe for the Claude lane (any account or AI)
+
+1. **Read the live state.**
+   - #80 since this file's time (`gh api 'repos/KEYFLOWOS/KEYFLOWOS/issues/80/comments?per_page=100&since=<ISO>'`).
+     `gh issue comment` is refused from cloud sessions (GraphQL): post with
+     `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/80/comments -F body=@<file>`.
+   - The board: `git show origin/coord/board:BOARD.md`.
+   - `git ls-remote origin 'refs/heads/pkt/V1-*' 'refs/heads/wave/*'`.
+2. **Finish a packet:** read its RETURN or PACKET REPORT on #80. If it has not returned, check out the pkt branch and
+   follow PACKET-WORKER-BRIEF.md. Claims are an atomic empty-commit push (CHECKLISTS B1) plus a CLAIM on #80.
+3. **Assemble a wave:**
+   1. `git worktree add -b wave/v1-wave-<N> <dir> origin/main`, and copy the main checkout's `.env` in (local DB and
+      Redis URLs only; no secrets).
+   2. For each packet: `COMMIT_TRAILER=... scripts/agent-memory/compact.sh pkt/V1-<branch> <PACKET-ID> web`. When two
+      packets conflict, squash-merge by hand and split the tests (RED) and fix commits the same way compact.sh does.
+   3. `git merge --squash origin/wave/v1-docs-p19`, committed as `docs: wave/v1-docs-p19 (compacted) at <sha>`. Check
+      that no file has conflict markers: `git grep -n '^<<<<<<< ' HEAD`.
+   4. Verify every packet file equals its pkt tip, or a clean 3-way merge you inspect (`git merge-file`).
+   5. `scripts/check-branch-divergence.sh origin/main HEAD --max-commits 25 --max-files 50`.
+4. **Wave proof** (one strict sequential script that checks the head before and after each step):
+   - **Fresh container:** run SECOND-ACCOUNT-SETUP.md's setup script, then create `keyflowos_e2e`, alias the
+     Playwright browsers and write `~/.kf-e2e-jwt-secret` (LIVE-PROOF-RUNBOOK §0).
+   - **Turbo trap:** in a second worktree, `pnpm db:generate` can be a turbo cache hit replayed from another worktree,
+     leaving `@prisma/client` empty. Use `TURBO_FORCE=1 pnpm db:generate`, or
+     `cd packages/db && npx prisma generate --schema=./prisma/schema.prisma`.
+   - **`next typegen`** needs `NEXT_PUBLIC_API_BASE_URL` set (as CI sets it), or tsc reports TS2688 and checks nothing.
+   - **Server:** `pnpm install --frozen-lockfile`, prisma generate, build the packages, server `tsc --noEmit`,
+     `NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter server build`, `vitest run` with `.env` loaded,
+     `pnpm proof:release0 -- --skip-build`. Avoid 02:00 to 04:00 UTC, or expect today-aggregate TD-01/02 to fail (0.3).
+   - **Web:** `next typegen` + `tsc --noEmit`, `vitest run --minWorkers=1 --maxWorkers=2`, `pnpm lint --max-warnings 26`.
+   - **Mocked build** (`NEXT_PUBLIC_API_BASE_URL=http://api.test.local`), then the 3 CI e2e specs and any mocked sweeps.
+   - **Live** per LIVE-PROOF-RUNBOOK §3, API on 3001 against `keyflowos_e2e`: release0-live, the touched journeys and
+     sweeps, and always a base run on main. Prove a flaky failure by re-running it alone at head and base.
+5. **PR and merge:** open the PR with `gh api -X POST repos/KEYFLOWOS/KEYFLOWOS/pulls` (mirror PR #254). Two wave
+   confirmations. When every required check is green at the exact head and the PR is mergeable, ENQUEUE with
+   `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f merge_method=merge`. Never merge directly;
+   never push to main. A failed job gets one re-run, after its run completes. If the queue dequeues it, find the root
+   cause; if the base moved and the PR conflicts, merge main into the wave branch (no rebase or force-push).
+6. **After a merge or return:** `node scripts/agent-memory/status.mjs` (commit, then `--ref HEAD` and amend), rewrite
+   this file in place, update the board row, post on #80.
+7. **Recreate session-only things** (they do not survive a session):
+   - **An hourly #80 check:** a scheduled task bound to the new orchestrator session. This session's is
+     `trig_01HUyoEU9w9zzJBNR3t5qFjL`. Delete it if you take over; it fires into this session.
+   - **A PR subscription** for each open wave PR.
+   - **Cloud workers:** tell each one, by `send_message` or on #80, the new orchestrator session id.
+   - **After a container restart:** `service postgresql start; service redis-server start`. Results from background
+     reviewers that finished during a restart are in their transcripts, under
+     `~/.claude/projects/<project>/<session>/subagents/agent-<id>.jsonl`. Look for the last SubagentHandback tool call.
+   - **Reviewers:** give each one its own worktree and scratch space inside it, never a shared `/tmp` path (two
+     reviewers collided there on 2026-11-26).
+
 
 ## 1. Standing instructions from the owner
 
@@ -72,141 +199,28 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 Every ruling to D-285 is on main (M16, PR #248). D-273 (Antigravity's FU-VITEST-DECORATOR-METADATA Release 0 AMENDs) is
 referred to on the board but is not yet a row.
+- **D-286 to D-290** reached main with M22's docs squash (merged 2026-11-26). Each is
+  on #80 (OWNER RULINGS 7178159751; D-290 7178888690). Summary in section 4's last paragraph.
+- **D-291 to D-297** (owner answers to questions 57 to 62, 2026-11-26) are on this branch (`007fcffa`) and reach main
+  with the next Claude wave's docs squash. D-291 `/api/admin/*` requires the admin sign-in (server packet P202);
+  D-292 favorites strip and duplicate banner stay above the search; D-293 CLIENT reads "Client"; D-294 a tab reads
+  KEY_DISABLED once, until reload; D-295 Release 0 AMEND of WOS-C01's final assertion only (TODAY-4BLOCK); D-296 the
+  role presets stay read-only; D-297 board numbering and server rows for Antigravity; D-298 (owner question 63) Journey I2/I3/I4 leave TODAY-4BLOCK for P206/P205/P207.
 - **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457).
 - **The merge queue is on for main** (D-278, ruleset 28066634). Lanes enqueue and never merge directly. From a cloud
   session, GraphQL is refused: enqueue with `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f
-  merge_method=merge` (M16 went in this way).
-
-## 0. Next session starts here (2026-11-25 ~20:15 UTC)
-
-Main is `0d75cd02` (M23 merged ~20:10: P82, P83, P84). V1-STATUS: 172 of 395 done, 45.5% of points; launch 84 done of 254.
-
-**The owner's standing instruction (2026-11-25):**
-- Keep both lanes as full as possible.
-- Coordinate with Antigravity on #80.
-- Keep everything resumable by any account or AI at all times.
-
-The throughput plan is on #80 7172896636. Server lane (Antigravity), in order:
-1. TOF-KEY-SELF-MODEL, which starts the chain TOF-KEY-SELF-MODEL → TOF-KNOWLEDGE-UPLOAD → KEY-TOOL-ALLOWLIST → DECIMALS-SERVER → CLAIM-LOOP web.
-2. DEMO-PREVIEW.
-3. FU-REFUND-GATEWAY-REFUSE (S-1): **held for the owner** (question 51). Antigravity found that Release 0 RF-10/RF-12 and D-121 use this door on purpose (#80 7172026342).
-4. The server halves of EXPENSES-HUB-1 and VAT-BASICS.
-5. The census and RR packets.
-6. FU-TEST-FLAKES.
-
-**M18 (Claude): proof green, PR opening.** Branch `wave/v1-wave-m18`, rebuilt at `19264b26` on main `977a265c`, then main `0d75cd02` (M23) merged in. M23 is server, scripts and docs only, with no web overlap. Packets:
-
-| Packet | Head |
-| --- | --- |
-| P62 FU-PUSH-OPTIN-MY-ACCOUNT | `53737d90` |
-| FU-SIDESHEET-MOBILE-OFFSET | `98a12002` |
-| FU-STUDIO-PAGE-SCOPE | **`79835e6b`** |
-| SWP-FIN-CASH-SOURCES web | `45418379` |
-| SWP-FIN-OVERVIEW-TRUTH web | `c93bc4f2` |
-| SWP-SERVICE-DEPOSIT web | `3c9554bc` |
-
-Plus docs.
-- The first head, `ecca24c5`, found one cross-packet test clash. P62's My account description now says "push notifications", and the /studio tests' name matcher counted that link as a settings entry.
-- It was fixed by two tests-only commits on the studio branch: 85a19ce8 (unit) and 79835e6b (e2e). Both lenses CONFIRMED both commits.
-- Rebuilt at `19264b26` (diff from `ecca24c5`: the two studio test files only). Proof there: web tsc 0, vitest 2361/2361, lint 0 errors, mocked build 0, CI e2e 25/25, mocked sweeps 37/37.
-- Proof at `ecca24c5`:
-  - server: tsc 0, build 0, 15,872 passed;
-  - 1 flake, WAH-R8 in `whatsapp.connector.spec`, which passes alone (59/59 twice);
-  - R0 MET; web tsc 0; lint 0 errors;
-  - CI e2e 25/25; live release0 2/2; live cash and deposit sweeps 8/8.
-- Journeys B, F and H: 51 of 56 failed at the M18 head. These look like tracked gaps: B2 has no New service dialog, Sales > Products is missing (CATALOG-1 web), and catalog items are missing from the invoice and quote pickers.
-- **A base run of B, F and H on main `977a265c`** (scratchpad `wt-m18base`, logs `m18base-*`) proves pre-existing failures step by step.
-- **Then:** the PR (look up `head=KEYFLOWOS:wave/v1-wave-m18` in the pulls API), two wave confirmations at the exact head, CI green, enqueue via ccr/auto_merge, subscribe to the PR.
-
-**Other packets in flight:**
-- **SWP-INV-REFUND-UI**, critical path #1, unblocks 39.
-  - Branch `pkt/V1-SWP-INV-REFUND-UI` @ `58423afe`; E10 passes at head.
-  - Both lenses ACCEPTED with minors. Repair round 1 is in progress:
-    - an allowlist of manual providers;
-    - re-read the amount before confirming;
-    - sub-cent parity;
-    - wording;
-    - pins for paypal, wipay and the unlinked refund;
-    - the /app/payments search re-read.
-  - Then two confirmations, then RETURN.
-- **CATALOG-1 web half**, P0, L. Branch `pkt/V1-CATALOG-1-WEB`, claim `67741f84`. Building. The worker may propose a split.
-
-**Queue after those:**
-- **In cloud sessions (claimed 19:55 UTC on main `977a265c`, #80 7172995787):**
-  - P67 FU-TIMELINE-LOAD-OLDER: claim `ecf7a0e1`, session_01TnVBvEKF6S66iYNwT5nAqe.
-  - FU-CONTACT-SEND-QUOTE-DOOR: claim `c067bf97`, session_01TnVBvEZbY4vXtvn1Rwe3fk.
-  - FU-UNDO-TOAST-SIGNOUT: claim `0022c0bf`, session_01TnVBvDxNUYEcwZ9waPUH4z.
-  - FU-E2E-MOCKED-SESSION-TOKEN: claim `7afe87e0`, session_01TnVBvHC6oFPFsYMTGeubVV (claimed 20:00).
-  - P94 SWP-CRM-WEB-POLISH: claim `68aafd49`, session_01TnVBvErbVSNdzvspLGA6vB (claimed 20:00).
-  - Each worker posts "PACKET REPORT (pre-review)" on #80. Then the orchestrator runs two reviews and posts RETURN.
-  - If a session is gone, resume from its pkt branch: every commit is pushed.
-- **Owner-gated:** RR-OWNER-RULINGS-RECORD (docs; it records the owner's answers to OQ-5/13/19/30 and two RR migrations, so ask in the owner batch).
-- **After M18:** OWNER-ALERTS-WEB and FU-NOTIFICATIONS-PAGE-REFUSED.
-- **After the server lane:** SWP-KEY-SHELL-SMOKE web (after P89), EXPENSES-HUB-1 web, CLAIM-LOOP web (after DECIMALS-SERVER), TODAY-4BLOCK.
-
-**Resume recipe for the Claude lane (any account or AI):**
-1. **Read the live state.**
-   - #80 since this file's time.
-   - The board (`git show origin/coord/board:BOARD.md`).
-   - `git ls-remote origin 'refs/heads/pkt/V1-*' 'refs/heads/wave/*'`.
-   - Every branch named above is pushed after every commit. Worktrees and logs in a scratchpad do not survive, and are not needed.
-2. **Finish a packet:** read its RETURN on #80. If it has not returned yet, check out the pkt branch and follow PACKET-WORKER-BRIEF.md. Reviews follow ACCEPTANCE-REVIEW-BRIEF.md and CONFIRMATION-REVIEW-BRIEF.md.
-3. **Assemble a wave:**
-   1. Create `git worktree add -b wave/v1-wave-<N> <dir> origin/main`.
-   2. Copy the main checkout's `.env` in (three local DB/Redis URLs; no secrets).
-   3. For each packet: `COMMIT_TRAILER=... scripts/agent-memory/compact.sh pkt/V1-<branch> <PACKET-ID> web`.
-   4. Run `git merge --squash origin/wave/v1-docs-p19` and commit it as `docs: wave/v1-docs-p19 (compacted) at <sha>`.
-   5. Verify every packet file equals its pkt tip, or a clean 3-way merge you inspect.
-   6. Run `scripts/check-branch-divergence.sh origin/main HEAD --max-commits 25 --max-files 50`.
-4. **Wave proof:**
-   - Server:
-     - `pnpm install --frozen-lockfile`
-     - prisma generate
-     - build the packages
-     - server `tsc --noEmit`
-     - `NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter server build`
-     - `vitest run` (with `.env`)
-     - `pnpm proof:release0 -- --skip-build`
-   - Web: `next typegen` + `tsc --noEmit`, `vitest run --minWorkers=1 --maxWorkers=2`, `pnpm lint --max-warnings 26`.
-   - Mocked build (`NEXT_PUBLIC_API_BASE_URL=http://api.test.local`), then the 3 CI e2e specs and any mocked sweeps.
-   - Live per LIVE-PROOF-RUNBOOK §3, with the API on 3001 and keyflowos_e2e: release0-live, the touched journeys and sweeps. Always run a base run on main for comparison.
-5. **PR and merge:**
-   - Open the PR with `gh api -X POST repos/KEYFLOWOS/KEYFLOWOS/pulls`, mirroring the M16 PR #248 body.
-   - Get two wave confirmations.
-   - When every required check is green at the exact head and the PR is mergeable/clean, ENQUEUE with `gh api -X PUT repos/KEYFLOWOS/KEYFLOWOS/pulls/<n>/ccr/auto_merge -f merge_method=merge`. GraphQL is refused from cloud sessions.
-   - A failed job gets one re-run, after its run completes.
-6. **After a merge or return:**
-   - `node scripts/agent-memory/status.mjs`
-   - rewrite this file in place
-   - update the board
-   - post on #80
-7. **Recreate session-only things:**
-   - The hourly #80 check, a scheduled task in the orchestrator session.
-   - The PR subscriptions.
-   - After a container restart, run `service postgresql start` (and redis if needed).
-
-**Lessons this session:**
-- Two packets confirmed alone can still clash in a wave (P62 + studio). The wave proof is the safety net, so never skip it.
-- A test that matches on link text is fragile; match on href or exact names.
-- A container restart kills agents: read their transcripts' last report and use fresh reviewers.
-- The server build needs an 8 GB heap.
-- Use 2 vitest workers under load.
-- A new wave worktree needs `.env` copied in.
-- When main moves while a wave PR waits, merge main in. A push cancels the old CI run, whose verdict then fails closed.
+  merge_method=merge`.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `0d75cd02`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `0580db36`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **M18 (Claude)** | `wave/v1-wave-m18` (rebuild from the six pkt heads in section 0) | Proof green at `19264b26`, main `0d75cd02` merged in; base run of journeys B/F/H on main in progress | PR, wave confirmations, enqueue |
-| **SWP-INV-REFUND-UI** | `pkt/V1-SWP-INV-REFUND-UI` @ 58423afe (+ repair) | Repair round 1 | Two confirmations, RETURN |
-| **CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ 67741f84 (claim) | Building | Two reviews |
-| **Claude cloud sessions** | `pkt/V1-FU-TIMELINE-LOAD-OLDER` (ecf7a0e1), `pkt/V1-FU-CONTACT-SEND-QUOTE-DOOR` (c067bf97), `pkt/V1-FU-UNDO-TOAST-SIGNOUT` (0022c0bf), `pkt/V1-FU-E2E-MOCKED-SESSION-TOKEN` (7afe87e0), `pkt/V1-SWP-CRM-WEB-POLISH` (68aafd49) | Building (#80 7172995787) | Wait for each PACKET REPORT, then two reviews, RETURN, next Claude wave |
-| **Antigravity** | M23 (P82-P84) in the merge queue; M25 gathering P87, P88, P89, P91, P92; P90 blocked (question 52) | Building | Their next wave |
-| **Owner** | - | - | Section 4 questions 40-52 (51 = refund door S-1, 52 = P90 Release 0 contradiction, P0); production redeploy (D-266) |
-| `wave/v1-docs-p19` | main 0d75cd02 merged in | This file, V1-STATUS | Squashed into each Claude wave |
+| **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
+| **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
+| **Owner** | - | - | Section 4 questions 40 to 50 and 54; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| `wave/v1-docs-p19` | main `0580db36` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -335,21 +349,14 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
 
-51. **Bookkeeping refunds on gateway payments (S-1, server, money).** `POST /commerce/businesses/:b/payments/:p/refund` (markPaymentRefunded) checks no provider. A member with revenue write can mark a Stripe payment refunded: the invoice reopens and the posting reverses while Stripe keeps the money. `StoreOrderService.refundCheckoutPayments` does the same for storefront orders. But Release 0 RF-10/RF-12 and D-121 use this door on purpose, for out-of-band provider refunds (WiPay has no refund API; PayPal pairs the webhook). Options:
-    - (a) refuse gateway rows with 409, keeping an explicit "refunded outside KEYFLOWOS" mode for providers without a refund API, and supersede RF-10/RF-12;
-    - (b) keep as is.
+54. **Journey B1 asks for Tax and Stock fields when creating a product.** The product model has neither: stock lives in InventoryStock, and there is no tax field. Add them (a server packet), or change B1? (Default: B1 stays red on those two fields until you rule.)
 
-    Also: should storefront refunds of gateway orders go through the gateway refund? (Default: hold, as today; #80 7171899154, 7172026342.)
-52. **P90 SWP-CENSUS-V1-B (P0) Release 0 contradiction.** 10 of the 46 open write rows are pinned by Release 0 cases in which a STAFF member on role defaults writes them:
-    - presence saveDraft and publish: D11-S02/S04/S05/S09/S13/S14/S15;
-    - onboarding concierge chat, dismiss, snooze and resume: D11-C07/C09;
-    - connector test, smoke, sync and inbox-config: R0-CMF6-K04/K05/M02, V94D-F02.
 
-    Options:
-    - **Option A:** gate all 46 and supersede those cases (the test actors get the scope, or expect 403).
-    - **Option B:** mark the 10 exempt-ruled in the census and gate the other 36.
+**Ruled 2026-11-26 (D-298, #80 7189605548):** 63 = D-298.
 
-    (No default for Release 0 evidence: Antigravity holds P90 until you rule; #80 7172637493.)
+**Ruled 2026-11-26 (D-291 to D-296, #80 7188960928):** 57 = D-291, 58 = D-292, 59 = D-293, 60 = D-294, 61 = D-295, 62 = D-296.
+
+**Ruled 2026-11-25/26 (D-286 to D-290, #80 7178159751 and 7178888690):** 52 (P90 gates all 46, Option A) = D-286; 51 and 55 (refunds stay as built; FU-REFUND-GATEWAY-REFUSE withdrawn) = D-287; 56 (only an OWNER changes owner alerts) = D-288; 53 (CONTACTS-LIST-FIRST, list first on phones, cards collapsed on desktop) = D-289; the Owner Console only via the separate admin sign-in = D-290 (owner step: set ADMIN_EMAIL and ADMIN_PASSWORD_HASH in production before the redeploy).
 
 ## 5. How to work here (learned the hard way)
 
@@ -386,4 +393,8 @@ this machine and this week.
 - jsdom cannot show React event timing between the capture and bubble listeners: a menu closed in the capture phase
   passed its unit test and broke every menu item in a browser. Menu, focus and animation changes need the live run.
 
-
+- Lessons from 2026-11-25/26: two packets confirmed alone can still clash in a wave, so never skip the wave proof;
+  match tests on href or exact names, not link text; a container restart kills local agents (read their transcript's
+  last report, then use fresh reviewers); the server build needs an 8 GB heap; when main moves while a wave PR waits,
+  merge main in (a push cancels the old CI run, whose verdict then fails closed); after any docs merge, grep for
+  conflict markers before committing (`git grep -n '^<<<<<<< '`): one slipped into this file on 2026-11-26.

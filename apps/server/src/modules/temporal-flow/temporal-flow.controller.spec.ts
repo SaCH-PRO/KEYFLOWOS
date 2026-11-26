@@ -103,16 +103,23 @@ describe('TemporalFlowController', () => {
       occurredAt: '2026-06-10T00:00:00Z',
     } as any, REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.emit).toHaveBeenCalledWith(expect.objectContaining({ businessId: 'biz_1', title: 'Note' }), FILTER);
+    expect(temporal.emit).toHaveBeenCalledWith(expect.objectContaining({ businessId: 'biz_1', title: 'Note' }), FILTER, READER);
     expect(result.id).toBe('tf_4');
   });
 
-  it('PATCH /:eventId/resolve marks resolved', async () => {
+  it('PATCH /:eventId/resolve marks resolved with writer filter and reader', async () => {
     const { controller, temporal } = makeController();
     const result = await controller.resolve('biz_1', 'tf_1', REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1', FILTER);
+    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1', FILTER, READER);
     expect(result).toEqual({ count: 1 });
+  });
+
+  it('PATCH /:eventId/resolve passes null reader when req.user is absent', async () => {
+    const { controller, temporal } = makeController();
+    await controller.resolve('biz_1', 'tf_1');
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1', FILTER, null);
   });
 
   it('POST /analyze returns analysis', async () => {

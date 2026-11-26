@@ -7,21 +7,26 @@ import {
   Headers,
   Inject,
   Logger,
+  Optional,
   Param,
   Patch,
   Post,
   Query,
   Req,
+  ServiceUnavailableException,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { isIPv4, isIPv6 } from 'node:net';
+import type { V1HiddenModuleKey } from '@keyflow/shared';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
 import { AuthSecurityService, type RateLimitRule } from './auth-security.service';
 import { IdentityPasswordService } from './identity-password.service';
+import { LegacyModulesService } from './legacy-modules.service';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
+import { keyDisabled } from '../../core/config/env';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -209,6 +214,7 @@ export class IdentityController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Optional() @Inject(LegacyModulesService) private readonly legacyModules?: LegacyModulesService,
   ) {}
 
   /**
@@ -828,7 +834,8 @@ export class IdentityController {
   @Get('me')
   async getMe(@CurrentUser() user: AuthenticatedUser) {
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
-    return this.identity.getUser(user.id);
+    const profile = await this.identity.getUser(user.id);
+    return { ...profile, keyDisabled: keyDisabled() };
   }
 
   @UseGuards(AuthGuard)
@@ -1002,7 +1009,8 @@ export class IdentityController {
     return this.identity.updateAdvancedSettings(businessId, body, user);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/ai-generate-field')
   async generateField(
     @Param('businessId') businessId: string,
@@ -1075,7 +1083,8 @@ export class IdentityController {
     return { context: ctx };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/generate-profile')
   async generateProfile(
     @Param('businessId') businessId: string,
@@ -1147,6 +1156,26 @@ export class IdentityController {
     return this.identity.getBusinessCommunityProfile(businessId);
   }
 
+  /**
+   * NAV-B-LEGACY-SERVER (V1-67, owner rulings D-152 'hide', D-156 'payroll',
+   * D-153 'whatsapp', D-158 'devhooks'): per-business live read of which hidden
+   * v1 modules this business already has live records in. Any live member
+   * (AuthGuard + BusinessGuard); answers sorted module key strings only —
+   * zero counts, zero names, zero amounts, zero writes (SWP-READ-SCOPE-CENSUS
+   * expected-applied exempt-own). Placed after literal-prefix routes
+   * (`businesses/slug/:slug`, `businesses/slug-check/:slug`,
+   * `businesses/public/:businessId`, `businesses/community-profile/:businessId`)
+   * so those never get intercepted at Express runtime.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/legacy-modules')
+  async getLegacyModules(@Param('businessId') businessId: string): Promise<V1HiddenModuleKey[]> {
+    if (!this.legacyModules) {
+      throw new ServiceUnavailableException('Legacy modules service unavailable');
+    }
+    return this.legacyModules.getLegacyModules(businessId);
+  }
+
   @Get('profile-completeness-fields')
   getProfileCompletenessFields() {
     return { fields: PROFILE_COMPLETENESS_FIELDS };
@@ -1179,7 +1208,8 @@ export class IdentityController {
     return { subProfile: subProfile, data };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Patch('businesses/:businessId/guidance/:subProfile')
   async upsertGuidanceSubProfile(
     @Param('businessId') businessId: string,

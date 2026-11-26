@@ -11,6 +11,10 @@ import { TimelineService } from '../timeline/timeline.service';
 
 type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
 
+/** FinancialAccount types eligible to settle a bill (EXPENSES-HUB-1, D-168/D-170). */
+const BILL_PAYMENT_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR', 'CREDIT_CARD']);
+const CASH_CLASS_SYSTEM_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
+
 /**
  * FOLLOW3-B4-EXPENSE-CURRENCY-CENTS (VL-07): a money value in whole cents, half
  * away from zero on its decimal value (the V1-22 rule, commerce/money.ts, that
@@ -309,35 +313,153 @@ export class ExpensesService {
   }
 
   /**
-   * Mark an existing BILL as paid: posts Dr AP / Cr Cash and stamps
-   * status=PAID + paidAt. Idempotent — calling twice on an already-paid
-   * bill is a no-op (the posting service deduplicates by external_ref).
+   * V1-64 (EXPENSES-HUB-1, D-168/D-170): validate an explicit `paymentAccountId`
+   * and return the ChartOfAccount.id to credit on `bill_paid`. Follows the
+   * `PayrollService.disbursementChartRow` pattern while also permitting
+   * `CREDIT_CARD` accounts (bill settlement via card liability). Never mutates
+   * `FinancialAccount.currentBalance` (V1-34: cash lives in the ledger).
+   */
+  private async resolveBillPaymentCoa(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    paymentAccountId: string,
+    billCurrency: string,
+  ): Promise<string> {
+    const account = await tx.financialAccount.findFirst({
+      where: { id: paymentAccountId, businessId },
+      select: { id: true, type: true, isActive: true, currency: true, chartOfAccountId: true },
+    });
+    if (!account) {
+      throw new BadRequestException(`Payment account ${paymentAccountId} not found in this business`);
+    }
+    if (!account.isActive) {
+      throw new BadRequestException(`Payment account ${paymentAccountId} is archived`);
+    }
+    if (!BILL_PAYMENT_ACCOUNT_TYPES.has(account.type)) {
+      throw new BadRequestException(
+        `Payment account ${paymentAccountId} is a ${account.type} account: bills may only be paid from CASH, BANK, PAYMENT_PROCESSOR, or CREDIT_CARD accounts`,
+      );
+    }
+    const bill = normalizeCurrency(billCurrency);
+    const held = normalizeCurrency(account.currency) || bill;
+    if (held !== bill) {
+      throw new BadRequestException(
+        `Payment account ${paymentAccountId} holds ${held}; the bill is in ${bill} (one currency, nothing converted: D-13)`,
+      );
+    }
+    const chart = account.chartOfAccountId
+      ? await tx.chartOfAccount.findFirst({
+          where: { id: account.chartOfAccountId, businessId, isActive: true },
+          select: { id: true, type: true, systemKey: true },
+        })
+      : null;
+    const isCreditCard = account.type === 'CREDIT_CARD';
+    const coaEligible =
+      chart !== null &&
+      (isCreditCard
+        ? chart.type === 'LIABILITY' && (chart.systemKey === null || chart.systemKey === 'CREDIT_CARD')
+        : chart.type === 'ASSET' && (chart.systemKey === null || CASH_CLASS_SYSTEM_KEYS.has(chart.systemKey)));
+    if (!coaEligible) {
+      throw new BadRequestException(
+        `Payment account ${paymentAccountId} is not linked to an active payment-eligible chart-of-account row of this business`,
+      );
+    }
+    return chart.id;
+  }
+
+  /**
+   * Mark an existing BILL as paid: posts Dr AP / Cr <chosen account COA or
+   * Cash/method default> and stamps status=PAID + paidAt. Idempotent — calling
+   * twice (sequentially or concurrently) on a bill posts once and preserves the
+   * original paymentMethod and paidAt.
    */
   async markBillPaid(input: {
     businessId: string;
     expenseId: string;
-    paymentMethod?: string;
-    paidAt?: string | Date;
+    paymentMethod?: string | null;
+    paidAt?: string | Date | null;
+    paymentAccountId?: string | null;
   }) {
-    const existing = await this.prisma.client.expense.findFirst({
-      where: { id: input.expenseId, businessId: input.businessId, deletedAt: null },
-    });
-    if (!existing) throw new NotFoundException('Expense not found');
-    if (existing.status === 'VOID') {
-      throw new BadRequestException('Cannot mark a voided expense as paid');
-    }
-    if (existing.status === 'PAID' && existing.paidAt) {
-      return existing; // idempotent
+    let trimmedPaymentAccountId = '';
+    if (input.paymentAccountId !== undefined && input.paymentAccountId !== null) {
+      if (typeof input.paymentAccountId !== 'string' || input.paymentAccountId.trim().length === 0) {
+        throw new BadRequestException('paymentAccountId must be a non-empty string');
+      }
+      trimmedPaymentAccountId = input.paymentAccountId.trim();
     }
 
-    const paidAt = input.paidAt ? new Date(input.paidAt) : new Date();
-    const paymentMethod = input.paymentMethod ?? existing.paymentMethod;
+    let requestedPaidAt: Date;
+    if (input.paidAt !== undefined && input.paidAt !== null) {
+      if (
+        !(
+          (typeof input.paidAt === 'string' && input.paidAt.trim().length > 0) ||
+          input.paidAt instanceof Date
+        )
+      ) {
+        throw new BadRequestException('paidAt must be a valid date');
+      }
+      requestedPaidAt = input.paidAt instanceof Date ? input.paidAt : new Date(input.paidAt.trim());
+      if (Number.isNaN(requestedPaidAt.getTime())) {
+        throw new BadRequestException('paidAt must be a valid date');
+      }
+    } else {
+      requestedPaidAt = new Date();
+    }
 
-    const updated = await this.prisma.client.$transaction(async (rawTx) => {
-      const tx = rawTx as unknown as import('@prisma/client').Prisma.TransactionClient;
-      const u = await tx.expense.update({
+    let requestedPaymentMethod: string | undefined;
+    if (input.paymentMethod !== undefined && input.paymentMethod !== null) {
+      if (typeof input.paymentMethod !== 'string') {
+        throw new BadRequestException('paymentMethod must be a string');
+      }
+      requestedPaymentMethod = input.paymentMethod;
+    }
+
+    const { expense: updated, newlyPaid } = await this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      // Serialize concurrent pay requests on the same expense row so double-pay
+      // cannot overwrite paidAt / paymentMethod or race the ledger posting.
+      await tx.$queryRaw`SELECT id FROM expenses WHERE id = ${input.expenseId} AND business_id = ${input.businessId} FOR UPDATE`;
+
+      const existing = await tx.expense.findFirst({
+        where: { id: input.expenseId, businessId: input.businessId },
+        include: { category: true },
+      });
+      if (!existing) throw new NotFoundException('Expense not found');
+      if (existing.status === 'VOID') {
+        throw new BadRequestException('Cannot mark a voided expense as paid');
+      }
+      if (existing.deletedAt) throw new NotFoundException('Expense not found');
+      if (existing.status === 'PAID') {
+        return { expense: existing, newlyPaid: false };
+      }
+
+      const paymentCoaId = trimmedPaymentAccountId
+        ? await this.resolveBillPaymentCoa(tx, input.businessId, trimmedPaymentAccountId, existing.currency)
+        : null;
+
+      const paymentMethod = requestedPaymentMethod ?? existing.paymentMethod;
+      const claimed = await tx.expense.updateMany({
+        where: { id: input.expenseId, businessId: input.businessId, status: 'BILL', deletedAt: null },
+        data: { status: 'PAID', paidAt: requestedPaidAt, paymentMethod },
+      });
+      if (claimed.count === 0) {
+        const current = await tx.expense.findFirst({
+          where: { id: input.expenseId, businessId: input.businessId },
+          include: { category: true },
+        });
+        if (!current) throw new NotFoundException('Expense not found');
+        if (current.status === 'VOID') {
+          throw new BadRequestException('Cannot mark a voided expense as paid');
+        }
+        if (current.deletedAt) throw new NotFoundException('Expense not found');
+        if (current.status === 'PAID') {
+          return { expense: current, newlyPaid: false };
+        }
+        throw new ConflictException('Bill changed status concurrently');
+      }
+
+      const u = await tx.expense.findUniqueOrThrow({
         where: { id: input.expenseId },
-        data: { status: 'PAID', paidAt, paymentMethod },
         include: { category: true },
       });
       await this.posting.onBillPaid(
@@ -346,28 +468,37 @@ export class ExpensesService {
           businessId: u.businessId,
           amount: u.amount,
           currency: u.currency,
-          paidAt,
+          paidAt: requestedPaidAt,
           paymentMethod: paymentMethod ?? null,
+          paymentCoaId,
+          paymentAccountId: trimmedPaymentAccountId || null,
           description: u.description,
           contactId: u.contactId,
           vendor: u.vendor,
         },
         tx,
       );
-      this.events.emit('bill.paid', { bill: u, businessId: input.businessId });
-      return u;
+      return { expense: u, newlyPaid: true };
     });
-    await this.timeline.recordEvent({
-      businessId: input.businessId,
-      module: 'EXPENSE',
-      action: 'paid',
-      entityType: 'expense',
-      entityId: input.expenseId,
-      title: 'Bill marked as paid',
-      detail: existing.description,
-      data: { amount: existing.amount, currency: existing.currency },
-      occurredAt: new Date(),
-    });
+
+    if (newlyPaid) {
+      this.events.emit('bill.paid', { bill: updated, businessId: input.businessId });
+      await this.timeline.recordEvent({
+        businessId: input.businessId,
+        module: 'EXPENSE',
+        action: 'paid',
+        entityType: 'expense',
+        entityId: input.expenseId,
+        title: 'Bill marked as paid',
+        detail: updated.description,
+        data: {
+          amount: updated.amount,
+          currency: updated.currency,
+          ...(trimmedPaymentAccountId ? { paymentAccountId: trimmedPaymentAccountId } : {}),
+        },
+        occurredAt: new Date(),
+      });
+    }
     return updated;
   }
 

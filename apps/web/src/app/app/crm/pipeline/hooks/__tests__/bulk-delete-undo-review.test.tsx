@@ -313,13 +313,18 @@ describe.each([listView, tableView])("FU-BULK-DELETE-UNDO review repair: $name",
     expect(server.restores().map((r) => r.body)).toEqual([{ ids: IDS }]);
   });
 
-  it("CONF-P37-1 pin: the person is recorded before the delete is sent: another person signed in mid-request cannot Undo", async () => {
+  // Superseded by FU-UNDO-TOAST-SIGNOUT review SEC-UTS-1 / COR-UTS-2 (orchestrator ruling, option A): a delete that
+  // answers after another person signed in mid-request no longer offers them an Undo that says "earlier session"; it
+  // says nothing at all to them. The undo-time guard (the person recorded before the delete is sent) is still pinned,
+  // for a toast that survives a session change some other way: contacts-bulk-delete-session-end.test.tsx BSE-08.
+  it("CONF-P37-1 pin: the person is recorded before the delete is sent: another person signed in mid-request is offered nothing", async () => {
     const server = installServer({ del: { status: 200, body: { deleted: 3 } }, onDelete: () => signInAs("user_b") });
     const screen = driver.mount(server);
     await screen.deleteSelected(IDS);
-    await pressUndo();
-    expect(server.restores(), "the Undo belongs to the person who sent the delete, not the one signed in when it answered").toHaveLength(0);
-    expect(shownWords().some((w) => /earlier session/i.test(w)), JSON.stringify(shownWords())).toBe(true);
+    expect(undoActions(), "no Undo is offered to the person signed in when the delete answered").toHaveLength(0);
+    expect(toastCalls(), "nothing is said to them").toEqual([]);
+    expect(shownWords().some((w) => /deleted/i.test(w)), JSON.stringify(shownWords())).toBe(false);
+    expect(server.restores(), "and nothing is restored").toHaveLength(0);
   });
 
   it("SEC-P37W-2 pin: after a business switch, Undo restores in the delete's business", async () => {

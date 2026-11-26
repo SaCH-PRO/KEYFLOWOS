@@ -19,10 +19,11 @@ import {
 } from '../../business-genome/key-genome/genome-finance-scope';
 import {
   blueprintForReader,
-  genomeFactsForReader,
   genomeIntegrityForReader,
+  isMoneyFact,
   moduleReadinessForReader,
-} from '../genome-read-projections';
+} from '../../business-genome/key-genome/genome-composites-for-reader';
+import { genomeFactsForReader } from '../genome-read-projections';
 import { GenomeFactService } from '../../business-genome/key-genome/genome-fact.service';
 import { GenomeModuleReadinessService } from '../../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeScoringService } from '../../business-genome/key-genome/genome-scoring.service';
@@ -129,7 +130,7 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           ]);
           return {
             success: true,
-            data: genomeIntegrityForReader(integrity as unknown as Record<string, unknown>, readsRevenue),
+            data: genomeIntegrityForReader(integrity, readsRevenue),
           };
         },
       ),
@@ -192,7 +193,9 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
             return { success: true, data: { facts: [], count: 0 } };
           }
           const rawFacts = await this.factService.listFacts(ctx.businessId, { section });
-          const visible = genomeFactsForReader(rawFacts, readsRevenue);
+          const visible = readsRevenue
+            ? rawFacts
+            : genomeFactsForReader(rawFacts, false).filter((f) => !isMoneyFact(f));
           const limit = typeof input.limit === 'number' && input.limit > 0 ? input.limit : undefined;
           const facts = limit ? visible.slice(0, limit) : visible;
           return { success: true, data: { facts, count: facts.length } };
@@ -213,8 +216,15 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           if (!readsRevenue && mod && isMoneyLabel(mod)) {
             return { success: true, data: { readiness: null } };
           }
-          const rawReadiness = await this.readinessService.getReadiness(ctx.businessId, mod as any);
-          const readiness = moduleReadinessForReader(rawReadiness as any, readsRevenue);
+          const rawReadiness = await this.readinessService.getReadiness(
+            ctx.businessId,
+            mod as Parameters<GenomeModuleReadinessService['getReadiness']>[1],
+          );
+          const readiness = Array.isArray(rawReadiness)
+            ? moduleReadinessForReader(rawReadiness, readsRevenue)
+            : rawReadiness
+              ? (moduleReadinessForReader([rawReadiness], readsRevenue)[0] ?? null)
+              : null;
           return { success: true, data: { readiness } };
         },
       ),
@@ -226,12 +236,18 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
         ['sectionKey', 'data'],
         {},
         async (ctx, input) => {
-          const updated = await this.blueprint.updateDnaSection(
-            ctx.businessId,
-            input.sectionKey as DnaSectionKey,
-            input.data as Record<string, unknown>,
-          );
-          return { success: true, data: updated };
+          const [updated, readsRevenue] = await Promise.all([
+            this.blueprint.updateDnaSection(
+              ctx.businessId,
+              input.sectionKey as DnaSectionKey,
+              input.data as Record<string, unknown>,
+            ),
+            this.readerReadsRevenue(ctx),
+          ]);
+          return {
+            success: true,
+            data: blueprintForReader(updated as unknown as Record<string, unknown>, readsRevenue),
+          };
         },
       ),
     ];

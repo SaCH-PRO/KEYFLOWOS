@@ -127,15 +127,16 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
       'finance_auto_match_bank', 'reconcile_run_auto_match', 'reconcile_match_line',
       // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): POST chart-of-accounts needs revenue write, so the chart tool (tier 2) is revenue write
       'finance_create_coa_account',
+      // SWP-CENSUS-V1-A (P87): CatalogController product writes require revenue write
+      'commerce_create_product', 'commerce_update_product',
     ],
     // finance_post_journal_entry: POST finance journal-entries needs revenue write since PR195-JOURNAL-SCOPE
     // (CR-P195-4), and the tool is tier 3, so KEY needs admin (D-36's ladder)
-    admin: ['commerce_delete_invoice', 'payments_refund_charge', 'finance_post_journal_entry'],
+    // apply_storefront_recommendation: CatalogController.updateProduct requires revenue write (P87), tier 3 -> admin
+    admin: ['commerce_delete_invoice', 'payments_refund_charge', 'finance_post_journal_entry', 'apply_storefront_recommendation'],
     deny: [
       // mails the customer through a call no member route makes for a customer: GOVERNED_UNGRANTED (review 7 DRV5-2)
       'commerce_send_invoice',
-      // reached unscoped (catalog.controller)
-      'commerce_create_product',
       // GET reports/expense-by carries no revenue and declares no scope (V1-81 D-57)
       'finance_expense_breakdown',
       'crm_create_contact',
@@ -144,12 +145,12 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     ],
   },
   bookings: {
-    // calendar_create_event is what the `bookings` scope governs over HTTP; bookings_* and
-    // calendar_* are the legacy `bookings` key's own grant (the key is in both vocabularies).
+    // SWP-CENSUS-V1-A (P87): BookingsController write routes require bookings write; bookings_create_booking is
+    // withheld by CRM_ROW_VISIBILITY_TOOLS (DRV-1: BookingsService.createBooking checks visibilityClause on contactId)
     read: ['calendar_list_events', 'bookings_list_bookings'],
-    write: ['calendar_create_event', 'bookings_create_booking'],
+    write: ['calendar_create_event', 'bookings_add_to_waitlist', 'bookings_cancel_waitlist_entry', 'bookings_mark_no_show', 'bookings_reschedule_booking'],
     admin: ['bookings_cancel_booking'],
-    deny: ['commerce_create_invoice', 'crm_create_contact', 'projects_create_task'],
+    deny: ['bookings_create_booking', 'bookings_offer_waitlist_slot', 'commerce_create_invoice', 'crm_create_contact', 'projects_create_task'],
   },
   projects: {
     // The legacy key's grant is kept (projects is both a canonical key and a legacy family, so the
@@ -200,16 +201,18 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
   settings: {
     read: [],
     // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write
-    write: ['update_business_blueprint'],
+    // SWP-CENSUS-V1-B (P90): OnboardingConciergeController.saveOnboardingStep requires settings write
+    write: ['save_onboarding_step', 'update_business_blueprint'],
     admin: [],
     deny: ['commerce_create_invoice', 'structure_get_org_tree'],
   },
   ai: {
     read: [],
     // SWP-CENSUS-GENOME (P84): KeyflowCommandController.createNote requires ai write
-    write: ['keyflow_create_note'],
+    // SWP-CENSUS-KEY-B (P109, Ruling B2): KeyCortexGoalsController write routes require ai write
+    write: ['goals_create', 'goals_create_plan', 'goals_delete', 'keyflow_create_note'],
     admin: [],
-    deny: ['goals_create', 'execute_custom_logic', 'commerce_create_invoice'],
+    deny: ['execute_custom_logic', 'commerce_create_invoice'],
   },
   team: {
     read: ['structure_get_org_tree', 'structure_list_job_roles', 'structure_list_assignments', 'structure_get_stats'],
@@ -232,6 +235,8 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     // contracts_acknowledge_alert / inbox_mark_resolved are tier 1, but their routes need operations:write
     // inbox_brief: GET brief generates only on a cache miss; POST brief/generate needs write (review 7 DRV-BRIEF)
     write: [
+      // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
+      'approval_create_request',
       'contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief',
       'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
       // FOLLOW3-D15: ProcurementService writes the request where { id, businessId }, so the three vendor
@@ -593,8 +598,9 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
       'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
     ]);
     expect(lost('commerce')).toEqual([
-      'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
-      'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice', 'commerce_update_invoice',
+      'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_product', 'commerce_create_quote',
+      'commerce_delete_invoice', 'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice',
+      'commerce_update_invoice', 'commerce_update_product',
     ]);
     expect(lost('calendar')).toEqual(['calendar_create_event', 'calendar_list_events']);
     expect(lost('sales').filter((t) => t.startsWith('crm_'))).toEqual([
@@ -820,9 +826,11 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
       expect(await evaluate({ revenue: 'write', commerce: 'read' }, 'commerce_update_invoice')).toMatchObject({ allowed: true });
     });
 
-    it('a legacy key keeps the tools a member reaches over HTTP with no module (finance_expense_breakdown, commerce_create_product, helpdesk_*)', async () => {
+    it('a legacy key keeps the tools a member reaches over HTTP with no module (finance_expense_breakdown, finance_list_coa, helpdesk_*)', async () => {
       expect(await evaluate({ finance: 'write' }, 'finance_expense_breakdown')).toMatchObject({ allowed: true });
-      expect(await evaluate({ sales: 'read' }, 'commerce_create_product')).toMatchObject({ allowed: true });
+      expect(await evaluate({ finance: 'read' }, 'finance_list_coa')).toMatchObject({ allowed: true });
+      // SWP-CENSUS-V1-A (P87): CatalogController.createProduct requires revenue:write, so legacy sales:read no longer reaches commerce_create_product
+      expect(await evaluate({ sales: 'read' }, 'commerce_create_product')).toMatchObject({ allowed: false });
       expect(await evaluate({ helpdesk: 'read' }, 'helpdesk_list_tickets')).toMatchObject({ allowed: true });
       expect(await evaluate({ helpdesk: 'write' }, 'helpdesk_create_ticket')).toMatchObject({ allowed: true });
     });
@@ -973,6 +981,8 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
     it('pins exactly which write-route tools need admin, so a change to the ladder is a reviewed change', () => {
       expect(tierCapped).toEqual(
         [
+          // SWP-CENSUS-V1-A (P87): POST bookings/:id/status requires bookings write, bookings_cancel_booking is tier 3
+          'bookings:bookings_cancel_booking',
           'content:assets_delete',
           'crm:crm_delete_contact',
           'crm:crm_merge_execute',
@@ -985,6 +995,8 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
           'operations:procurement_issue_po',
           // SWEEP-P0-SCOPES (BUG-014): DELETE .../tasks/:taskId needs projects write, the tool is tier 3
           'projects:projects_delete_task',
+          // SWP-CENSUS-V1-A (P87): PATCH catalog/products/:id requires revenue write, apply_storefront_recommendation is tier 3
+          'revenue:apply_storefront_recommendation',
           'revenue:commerce_delete_invoice',
           // PR195-JOURNAL-SCOPE (CR-P195-4): POST finance journal-entries needs revenue write; the tool is tier 3
           'revenue:finance_post_journal_entry',
@@ -1350,7 +1362,7 @@ describe('V1-21b review 4 — KEY never exceeds HTTP for the same holder (DRV-1,
   };
 
   const ROW_VISIBILITY = ((policyExports as Record<string, unknown>).CRM_ROW_VISIBILITY_TOOLS ?? []) as readonly string[];
-  const VISIBILITY_BOUND = ['crm_delete_contact', 'crm_update_contact', 'tag_contact'];
+  const VISIBILITY_BOUND = ['bookings_create_booking', 'crm_delete_contact', 'crm_update_contact', 'tag_contact'];
 
   describe("DRV-1 — crm_view 'all' is not the whole book: KEY does not edit, tag or delete contacts", () => {
     /** Just enough of Prisma's `where` to evaluate the tenant predicate and visibilityClause on one row. */
@@ -2903,8 +2915,8 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
     expect(Object.keys(UNBOUND).sort()).toEqual(
       [
         ...CONTENT,
-        'approval_decide_step',
-        'bookings_offer_waitlist_slot',
+        // approval_decide_step: governed by operations:write since SWP-CENSUS-V1-B (P90), so GOVERNED_UNGRANTED instead
+        // bookings_offer_waitlist_slot: governed by bookings:write since SWP-CENSUS-V1-A (P87), so GOVERNED_UNGRANTED instead; legacy bookings still reaches none of it (below)
         'evidence_verify',
         'people_assign_task',
         // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: governed by operations since
@@ -2956,7 +2968,8 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
   it('negative control: the same keys still reach the sibling tools that bind their rows, and crm:write the call tools', () => {
     expect(passes(envelope({ content: 'write' }), 'content_create_request')).toBe(true);
     expect(passes(envelope({ content: 'read' }), 'content_list_requests')).toBe(true);
-    expect(passes(envelope({ bookings: 'write' }), 'bookings_create_booking')).toBe(true);
+    // SWP-CENSUS-V1-A (P87): bookings_create_booking is withheld by CRM_ROW_VISIBILITY_TOOLS (DRV-1), so use sibling bookings_reschedule_booking
+    expect(passes(envelope({ bookings: 'write' }), 'bookings_reschedule_booking')).toBe(true);
     expect(passes(envelope({ projects: 'write' }), 'projects_create_task')).toBe(true);
     // PR196-PROJECTS-SERVER (D-87): updateTask binds the assignee to the business, so the key reaches it
     expect(passes(envelope({ projects: 'write' }), 'projects_update_task')).toBe(true);

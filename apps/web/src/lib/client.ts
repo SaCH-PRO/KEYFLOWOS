@@ -416,6 +416,9 @@ export type PaymentRecord = {
   invoiceId: string;
   evidenceUrl?: string | null;
   evidenceMimeType?: string | null;
+  /** SWP-INV-REFUND-UI: the rows carry these (a refund row's reference is its original's providerPaymentId, D-14). */
+  method?: string | null;
+  reference?: string | null;
 };
 
 export type Invoice = {
@@ -461,7 +464,16 @@ const fallbackInvoices: Invoice[] = DEMO_MODE_ENABLED
     ]
   : [];
 
-async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
+/**
+ * `opts.onStatus` (FU-TIMELINE-LOAD-OLDER, review COR-TLO-3) is told the HTTP status of the answer the result is read
+ * from, for a caller that must tell a refusal (a 4xx) from a failure worth retrying; the result itself is unchanged.
+ */
+async function apiGet<T>(
+  path: string,
+  schema?: z.ZodSchema<T>,
+  fallback?: T,
+  opts?: { signal?: AbortSignal; onStatus?: (status: number) => void },
+): Promise<ApiResult<T>> {
   // R0-15d: a read that names no business is not sent (see selectedBusinessId).
   if (namesNoBusiness(path)) return { data: fallback ?? null, error: NO_BUSINESS_SELECTED };
   // W10-WEB-CLIENT-MISSING-ID (FOLLOW3-D11): nor is a read that names a missing
@@ -492,6 +504,7 @@ async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, op
         res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
       }
     }
+    opts?.onStatus?.(res.status);
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
       let message: string = res.statusText;
@@ -763,6 +776,32 @@ export async function fetchProducts(businessId: string = selectedBusinessId()) {
   return { data: res.data?.data ?? null, error: res.error };
 }
 
+/**
+ * CATALOG-1 (COR-CAT-5): every product of the business, read page by page (the list route answers at most 100 a
+ * page, 50 when none is asked). fetchProducts reads only the first page. Any page failing fails the read.
+ */
+export async function fetchAllProducts(businessId: string = selectedBusinessId()) {
+  const envelopeSchema = z.object({
+    data: z.array(productSchema),
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+    totalPages: z.number(),
+  });
+  const all: Product[] = [];
+  const MAX_PAGES = 100;
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await apiGet(
+      `/commerce/businesses/${encodeURIComponent(businessId)}/products?page=${page}&pageSize=100`,
+      envelopeSchema,
+    );
+    if (res.error || !res.data) return { data: null, error: res.error ?? "Failed to load products" };
+    all.push(...(res.data.data as unknown as Product[]));
+    if (page >= res.data.totalPages || res.data.data.length === 0) break;
+  }
+  return { data: all, error: null as string | null };
+}
+
 export async function fetchInvoices(businessId: string = selectedBusinessId()) {
   const invoiceItemSchema = z.object({
     id: z.string(),
@@ -957,6 +996,55 @@ export async function fetchContactEvents(
     z.array(eventSchema),
     [],
   );
+}
+
+/**
+ * FU-TIMELINE-LOAD-OLDER (D-284): one page of a contact's events, newest first. GET .../contacts/:c/events with
+ * paged=true and a limit (FU-TIMELINE-EVENTS-PAGING, crm.controller.ts contactEvents) answers
+ * { events, nextCursor, hasMore }: `limit` events strictly older than `cursor` (opaque: the nextCursor of the page
+ * before; none for the newest page). nextCursor is null on the last page. The server withholds money events from a
+ * member without revenue read on every page (D-100).
+ *
+ * Review SEC-TLO-1 / COR-TLO-4: the answer is checked whole, and one that is not such a page (an array, {}, an event
+ * missing a field or whose createdAt is no date) is a failed read, never a page: apiGet would hand an answer that
+ * fails its schema through as data. Such a failure carries no server words (error ""), so it reads "Couldn't load
+ * ...". The answer carries the HTTP status, so the page can tell a refused cursor (a 4xx) from a
+ * failure worth retrying (apiGet's onStatus; this file's apiGet, not lib/api.ts's, which retries a 5xx three times).
+ */
+export const CONTACT_EVENTS_PAGE_SIZE = 20;
+
+const pageEventSchema = eventSchema.extend({
+  createdAt: z.string().refine((value) => !Number.isNaN(Date.parse(value)), "createdAt is not a date"),
+});
+const contactEventsPageSchema = z.object({
+  events: z.array(pageEventSchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+export type ContactEventsPage = z.infer<typeof contactEventsPageSchema>;
+export type ContactEventsPageResult = { data: ContactEventsPage | null; error: string | null; status?: number };
+
+export async function fetchContactEventsPage(
+  contactId: string,
+  options: { cursor?: string | null; limit?: number } = {},
+  businessId: string = selectedBusinessId(),
+): Promise<ContactEventsPageResult> {
+  const query = new URLSearchParams({ paged: "true", limit: String(options.limit ?? CONTACT_EVENTS_PAGE_SIZE) });
+  if (options.cursor) query.set("cursor", options.cursor);
+  let status: number | undefined;
+  const res = await apiGet<unknown>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events?${query.toString()}`,
+    undefined,
+    undefined,
+    { onStatus: (s) => (status = s) },
+  );
+  if (res.error !== null && res.error !== undefined) return { data: null, error: res.error, status };
+  const parsed = contactEventsPageSchema.safeParse(res.data);
+  if (!parsed.success) {
+    console.warn("[fetchContactEventsPage] the events read answered something that is not a page:", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", "));
+    return { data: null, error: "", status };
+  }
+  return { data: parsed.data, error: null, status };
 }
 
 export async function fetchContactNotes(
@@ -2176,6 +2264,8 @@ export async function createProduct(input: {
   imageUrl?: string | null;
   sku?: string | null;
   isActive?: boolean;
+  inventoryMode?: string | null;
+  outOfStockBehavior?: string | null;
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
 
@@ -2190,6 +2280,9 @@ export async function createProduct(input: {
   };
   if (input.imageUrl) body.imageUrl = input.imageUrl;
   if (input.sku) body.sku = input.sku;
+  // CATALOG-1 (COR-CAT-6): the form's inventory settings were dropped here.
+  if (input.inventoryMode) body.inventoryMode = input.inventoryMode;
+  if (input.outOfStockBehavior) body.outOfStockBehavior = input.outOfStockBehavior;
 
   const res = await apiPost<Product>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
@@ -2197,7 +2290,8 @@ export async function createProduct(input: {
   });
 
   if (res.data) return res;
-  return { data: null, error: res.error ?? "Failed to create product" };
+  // The status is kept, so a caller can tell a module-scope refusal (403) from any other failure.
+  return { data: null, error: res.error ?? "Failed to create product", status: res.status };
 }
 
 export async function updateProduct(input: {
@@ -2212,6 +2306,8 @@ export async function updateProduct(input: {
   imageUrl?: string | null;
   sku?: string | null;
   isActive?: boolean;
+  inventoryMode?: string | null;
+  outOfStockBehavior?: string | null;
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
 
@@ -2225,6 +2321,8 @@ export async function updateProduct(input: {
   if (input.imageUrl !== undefined) body.imageUrl = input.imageUrl;
   if (input.sku !== undefined) body.sku = input.sku;
   if (input.isActive !== undefined) body.isActive = input.isActive;
+  if (input.inventoryMode !== undefined) body.inventoryMode = input.inventoryMode;
+  if (input.outOfStockBehavior !== undefined) body.outOfStockBehavior = input.outOfStockBehavior;
 
   return apiPatch<Product>(
     `/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(input.productId)}`,
@@ -3340,6 +3438,8 @@ export type Service = {
   depositRequired?: boolean;
   depositType?: string | null;
   depositValue?: number | null;
+  /** The product this service lists on the store ('Add to store'); null for a bookable service. */
+  sourceProductId?: string | null;
 };
 
 export type StaffMember = {
@@ -3417,6 +3517,8 @@ export async function fetchServices(businessId: string = selectedBusinessId()) {
       depositRequired: z.boolean().optional(),
       depositType: z.string().nullable().optional(),
       depositValue: z.number().nullable().optional(),
+      // CATALOG-1 (BUG-106): kept, so a product's listing service is told from a bookable service.
+      sourceProductId: z.string().nullable().optional(),
     })),
     [],
   );
@@ -6180,9 +6282,28 @@ export async function fetchBusinessPayments(businessId: string, filters: Payment
     `/commerce/businesses/${encodeURIComponent(businessId)}/payments${qs ? `?${qs}` : ""}`,
   );
 }
-export async function refundPayment(businessId: string, paymentId: string, reason?: string): Promise<ApiResult<BusinessPayment>> {
-  return apiPost<BusinessPayment>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${paymentId}/refund`, body: { reason } });
+/**
+ * SWP-INV-REFUND-UI (BUG-049, D-169): what POST .../payments/:paymentId/refund answers: the refund row it wrote (a
+ * separate negative REFUNDED row, D-14; its amount is what was refunded), the payment it refunds and the invoice's
+ * status after the reconcile.
+ */
+export interface ManualPaymentRefund extends BusinessPayment {
+  refundOfPaymentId: string;
+  invoiceStatus: string;
+  balance?: unknown;
 }
+/**
+ * Refunds what is left of a SUCCESSFUL payment, whole (D-169: the route takes no amount). Local bookkeeping only: no
+ * provider is called. 403 without revenue write access; 409 when nothing is left of it. `error` carries the server's
+ * message and `status` the code.
+ */
+export async function refundPayment(businessId: string, paymentId: string, reason?: string) {
+  return apiPost<ManualPaymentRefund>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${encodeURIComponent(paymentId)}/refund`,
+    body: { reason },
+  });
+}
+
 export async function retryPayment(businessId: string, paymentId: string): Promise<ApiResult<BusinessPayment>> {
   return apiPost<BusinessPayment>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/payments/${paymentId}/retry`, body: {} });
 }

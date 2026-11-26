@@ -13592,6 +13592,40 @@
    "track_ruling": "D-284",
    "scope": "D-284. Once FU-TIMELINE-EVENTS-PAGING is on main, the Timeline (FU-CONTACT-TIMELINE-CHANNELS) offers 'Load older' while the read returns a cursor, folds pasted notes across pages, and keeps its counts and empty texts honest about what is loaded.",
    "definition_of_done": "RED: a customer with 45 events shows the newest 20, then all 45 after loading older; channel counts cover what is loaded and say so; a pasted message whose note and WhatsApp event fall on different pages shows once."
+  },
+  {
+   "id": "CONTACTS-LIST-FIRST",
+   "title": "The contacts list comes first on phones; the cards above it move below or collapse",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CRM-WEB-POLISH"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/page.tsx",
+    "apps/web/src/app/app/crm/pipeline/pipeline-tab-content.tsx",
+    "apps/web/src/app/app/crm/pipeline/pipeline-toolbar.tsx",
+    "apps/web/src/app/app/crm/pipeline/focus-view.tsx",
+    "apps/web/src/app/app/crm/__tests__/contacts-list-first.test.tsx"
+   ],
+   "decisions": [
+    "D-289"
+   ],
+   "r0_impact": "none: touches no required Release 0 case or closedBy evidence",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "owner ruling D-289",
+   "track_ruling": "D-289",
+   "scope": "D-289. On /app/crm/contacts at 375x812 the first list row is in the first viewport: header, search, then the list. Relationship Pulse, the Action Center, the Priority Queue, the smart chips and the focus view's leading sections (Next actions, Contacts requiring action) move below the list or into a collapsible panel; on desktop they start collapsed so that the first row is in view at 1440x900. Nothing is removed; every card stays reachable. Measured by SWP-CRM-WEB-POLISH's worker: the first row sits at y about 1660 at 375 today.",
+   "definition_of_done": "RED: journey C8 (first list row inside the first viewport) fails on phone and desktop at the base. GREEN: C8 passes at 375x812 and 1440x900; every moved card still renders and opens; a live sweep at 375/768/1024/1440 measures the first row's y."
   }
  ],
  "moot": [
@@ -14455,6 +14489,11 @@
    "packet": "TODAY-4BLOCK",
    "r0_case": "if the components WOS-C01 mounts move, re-pointing the test's import",
    "change": "Conditional AMEND: if the components WOS-C01 mounts move, re-pointing the test's import (never its assertions) uses the authority S1-RULINGS-RECORD requests in advance."
+  },
+  {
+   "packet": "TODAY-4BLOCK",
+   "r0_case": "command-actions-ops-scope.test.tsx '[WOS-C01] RED-BEFORE: a member without operations ...' (final assertion)",
+   "change": "AMEND (owner ruling D-295, #80 7188960928): WOS-C01's final assertion only. expect(screen.getByText(\"No urgent actions today.\")), the removed cockpit snapshot's briefing headline, becomes: the level-2 headings Needs you and Today render for a member without operations (D-96). In that case GET .../today answers 503, so Pulse and Get set up do not render. The case title that release0-index.json cites as closedBy (OPS-T02) is unchanged; WOS-C02..C07 and every other WOS-C01 assertion are unchanged. Commit e9e05754 on pkt/V1-TODAY-4BLOCK."
   },
   {
    "packet": "KEY-PASTE-BOX",

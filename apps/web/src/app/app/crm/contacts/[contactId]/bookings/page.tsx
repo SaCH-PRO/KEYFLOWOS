@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchBookings } from "@/lib/client";
 import { Card } from "@keyflow/ui";
+import { statusLabel } from "@/lib/status-labels";
 import { Calendar, Clock, MapPin, User, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 
 interface Booking {
@@ -75,7 +76,7 @@ export default function ContactBookingsPage() {
             <div className="flex items-center gap-2">
               {statusIcon(booking.status)}
               <span className="font-medium">{booking.service?.name || "Booking"}</span>
-              <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusBadge(booking.status)}`}>{booking.status}</span>
+              <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusBadge(booking.status)}`}>{statusLabel(booking.status)}</span>
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">

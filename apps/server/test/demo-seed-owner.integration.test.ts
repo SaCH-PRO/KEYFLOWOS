@@ -457,15 +457,15 @@ describe('the completion door never answers 500 on the sample email either (revi
     expect(f.audits).toEqual([]);
   });
 
-  // Before the repair, seed-demo first made /complete 500 (its insert waited
-  // on seed-demo's and then hit P2002 in the completion transaction, which has
-  // no retry); /complete first passed (seed-demo's own retry read
-  // completion's rows), so SD-15 is the control.
+  // D-157 (DEMO-PREVIEW): /complete writes zero demo rows (demoData: null) so
+  // explicit POST .../seed-demo is always the sole writer of demo rows, with
+  // alreadySeeded: false, 1 demo contact, 1 invoice, 1 audit entry, and 1
+  // demo_data_seeded activity row regardless of call ordering.
   for (const [label, tag, biz, order] of [
     ['SD-14', 'RED-BEFORE', ID.bizP, 'seed-demo first'],
     ['SD-15', 'control', ID.bizQ, '/complete first'],
   ] as const) {
-    it(`[${label}] ${tag}: seed-demo and /complete by the owner at once (${order}) both answer 201 (never 500) and name the one demo contact and invoice; the business is complete`, async () => {
+    it(`[${label}] ${tag}: seed-demo and /complete by the owner at once (${order}) both answer 201 (never 500); /complete returns demoData: null and seed-demo is the sole writer of the one demo contact and invoice; the business is complete`, async () => {
       const calls = order === 'seed-demo first'
         ? [seed(ID.owner, biz), complete(ID.owner, biz)]
         : [complete(ID.owner, biz), seed(ID.owner, biz)];
@@ -479,14 +479,11 @@ describe('the completion door never answers 500 on the sample email either (revi
       expect(f.demoContacts, 'exactly one demo contact').toHaveLength(1);
       expect(f.invoices, 'exactly one demo invoice').toHaveLength(1);
       const ids = { contactId: f.demoContacts[0].id, invoiceId: f.invoices[0].id, invoiceNumber: f.invoices[0].invoiceNumber };
-      expect(seeded.body).toMatchObject(ids);
-      expect(completed.body).toMatchObject({ complete: true, demoData: ids });
+      expect(seeded.body).toMatchObject({ ...ids, alreadySeeded: false });
+      expect(completed.body).toMatchObject({ complete: true, demoData: null });
       expect(f.activities.filter((a: any) => a.action === 'onboarding_completed')).toHaveLength(1);
-      // The seed-demo call wrote the demo data exactly when it ran first (its
-      // audit and actor row with it); otherwise it answered completion's rows.
-      const seedWrote = seeded.body.alreadySeeded === false;
-      expect(f.activities.filter((a: any) => a.action === 'demo_data_seeded')).toHaveLength(seedWrote ? 1 : 0);
-      expect(f.audits.filter((a: any) => a.action === 'created')).toHaveLength(seedWrote ? 1 : 0);
+      expect(f.activities.filter((a: any) => a.action === 'demo_data_seeded')).toHaveLength(1);
+      expect(f.audits.filter((a: any) => a.action === 'created')).toHaveLength(1);
 
       const state = await completionState(biz);
       expect(state?.onboardingComplete).toBe(true);

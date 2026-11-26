@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   FileText,
@@ -16,6 +17,7 @@ import {
   Calendar,
   CreditCard,
   Inbox,
+  Package,
 } from "lucide-react";
 
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -219,13 +221,14 @@ export default function CommercePage() {
   }, [paramTab, paramView, router]);
 
   // WEDGE-WA-INBOUND-CAPTURE (D-263): New quote for a customer from another screen ("+ New > From WhatsApp") is the
-  // Quotes door with ?contactId=<id>: the Quotes tab opens the New quote form with that customer chosen, as a
-  // contact's "Create quote" event does. It follows the URL while the page is mounted; the id then leaves the URL, so a
-  // reload or Back does not open a second form. A contactId on any other tab is left alone. The sheet reaches this
-  // with a full page load: a client navigation (router.push) mounts this page twice, because RequireAuth remounts the
-  // shell on every pathname change, and the first instance strips the id, so the contacts screens' router.push doors
-  // (?tab=quotes&contactId=, use-contacts-pipeline.ts) still open no form in a browser (review COR-1; follow-ups
-  // FU-REQUIRE-AUTH-REMOUNT and FU-CONTACT-SEND-QUOTE-DOOR).
+  // Quotes door with ?contactId=<id>: the Quotes tab opens the New quote form with that customer chosen. It follows
+  // the URL while the page is mounted; the id then leaves the URL, so a reload or Back does not open a second form. A
+  // contactId on any other tab is left alone. Every door to a new quote for a customer is this URL: the WhatsApp sheet
+  // (a full page load), a contact's Send quote (use-contact-actions.ts) and the next-action Send quote
+  // (use-contacts-pipeline.ts), both router.push; the "commerce:create_quote_for_contact" event this page also
+  // listened for had no sender left and is gone. A client navigation mounts this page once since
+  // FU-REQUIRE-AUTH-REMOUNT (RequireAuth no longer remounts the shell on a pathname change), so it reads the id
+  // (FU-CONTACT-SEND-QUOTE-DOOR).
   const paramContactId = searchParams.get("contactId");
   useEffect(() => {
     if (!paramContactId || !paramTab || landingFor(paramTab, paramView) !== "quotes") return;
@@ -277,8 +280,9 @@ export default function CommercePage() {
   }, [businessId, gmailParam, gmailPendingParam, gmailReasonParam, loadPendingGmail]);
 
   useEffect(() => {
-    // A quote prefill (a contact's "Create quote") opens the Quotes tab, where
-    // the panel reads it; an invoice prefill goes to the invoice list's builder.
+    // A quote prefill (a customer's ?contactId on the Quotes door) opens the
+    // Quotes tab, where the panel reads it; an invoice prefill goes to the
+    // invoice list's builder.
     if (billing.pendingPrefill?.targetSegment === "quotes") {
       if (activeTab !== "quotes") handleTabChange("quotes");
     } else if (billing.pendingPrefill?.targetSegment === "invoices") {
@@ -286,21 +290,6 @@ export default function CommercePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to new prefill arrivals
   }, [billing.pendingPrefill]);
-
-  useModuleEvent<{ contactId?: string; items?: import("./components/commerce-types").InvoiceLineItem[] }>(
-    "commerce:create_quote_for_contact",
-    useCallback(
-      (event) => {
-        const { contactId, items } = event.data ?? {};
-        if (contactId) {
-          billing.prefillForContact(contactId, "quotes", items);
-          handleTabChange("quotes");
-          toast.success("Opening quote builder for contact...");
-        }
-      },
-      [billing, handleTabChange],
-    ),
-  );
 
   useModuleEvent<{ contactId?: string; items?: import("./components/commerce-types").InvoiceLineItem[] }>(
     "commerce:create_invoice_for_contact",
@@ -437,6 +426,14 @@ export default function CommercePage() {
       /* AI centralized in Cockpit */
       headerRight={
         <div className="flex items-center gap-2">
+          {/* CATALOG-1: Sales > Products, what you sell (journey B1, B5, B6 read this door). */}
+          <Link
+            href="/app/commerce/products"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-border/60 hover:bg-muted/40 transition-colors"
+          >
+            <Package className="w-3.5 h-3.5" aria-hidden="true" />
+            Products
+          </Link>
           <CommerceQuickLauncher />
           <CommerceHeaderRight revenuePulse={overview.revenuePulse} />
           <RevenueActionMenu

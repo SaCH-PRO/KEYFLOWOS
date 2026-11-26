@@ -625,22 +625,33 @@ describe('R0-09b fixture sanity (real rows)', () => {
 });
 
 describe('R0-09b presence draft and publish cannot change Business.slug for a non-owner (D-11, review R09-ST-2)', () => {
-  it('[D11-S01] RED-BEFORE: a STAFF member (settings:none) saves a draft with a new slug and publishes it: the save is refused (403) and Business.slug and the Business row stay byte-identical', async () => {
+  it('[D11-S01] RED-BEFORE (amended P90 owner ruling A1): a STAFF member on role defaults (content:read) is refused draft save/publish (403 content:write), and a STAFF member with content:write (staffAll) saving a new slug is refused (403 PRESENCE_SLUG_OWNER_ONLY); Business.slug and the Business row stay byte-identical', async () => {
     await resetPresence(ID.bizP);
     const before = await businessRowText(ID.bizP);
-    const put = await putDraft(ID.staff, ID.bizP, payload({ slug: slugOf('staff-hijack') }));
-    const pub = await publish(ID.staff, ID.bizP);
+    const staffPut = await putDraft(ID.staff, ID.bizP, payload({ slug: slugOf('staff-hijack') }));
+    expect(staffPut.status, JSON.stringify(staffPut.body)).toBe(403);
+    expect(String(staffPut.body?.message ?? '')).toMatch(/content requires write access/);
+    const staffPub = await publish(ID.staff, ID.bizP);
+    expect(staffPub.status, JSON.stringify(staffPub.body)).toBe(403);
+    expect(String(staffPub.body?.message ?? '')).toMatch(/content requires write access/);
+
+    const put = await putDraft(ID.staffAll, ID.bizP, payload({ slug: slugOf('staff-hijack') }));
+    const pub = await publish(ID.staffAll, ID.bizP);
     expect((await businessRow(ID.bizP))?.slug, `PUT ${put.status}, publish ${pub.status}: Business.slug`).toBe(LIVE[ID.bizP]);
     expect(await businessRowText(ID.bizP), 'the Business row is byte-identical').toBe(before);
-    expectRefusal(put, SLUG_CODE, 'STAFF draft save with a new slug');
+    expectRefusal(put, SLUG_CODE, 'STAFF (content:admin) draft save with a new slug');
     expect(await draftRowText(ID.bizP), 'no draft was saved').toBeNull();
     expect(await publishedCount(ID.bizP)).toBe(0);
   });
 
-  it('[D11-S02] RED-BEFORE: a STAFF member (settings:none) publishing a draft that already carries another slug cannot change Business.slug: the page goes live at the current address (201), the Business row is byte-identical and the pending slug waits in the draft until the OWNER publishes it', async () => {
+  it('[D11-S02] RED-BEFORE (amended P90 owner ruling A1): a STAFF member with content:write (staffAll) publishing a draft that already carries another slug cannot change Business.slug: the page goes live at the current address (201), the Business row is byte-identical and the pending slug waits in the draft until the OWNER publishes it; STAFF on role defaults (content:read) is refused 403', async () => {
     await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug'), headline: 'k09b pending content' }));
     const before = await businessRowText(ID.bizP);
-    const pub = await publish(ID.staff, ID.bizP);
+    const denied = await publish(ID.staff, ID.bizP);
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect(String(denied.body?.message ?? '')).toMatch(/content requires write access/);
+
+    const pub = await publish(ID.staffAll, ID.bizP);
     expect((await businessRow(ID.bizP))?.slug, `publish ${pub.status}: Business.slug`).toBe(LIVE[ID.bizP]);
     expect(await businessRowText(ID.bizP), 'the Business row is byte-identical').toBe(before);
     expect(pub.status, JSON.stringify(pub.body)).toBe(201);
@@ -674,30 +685,34 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     }
   });
 
-  it("[D11-S04] today's rule kept, RED-BEFORE (publish rewrote an unchanged slug, bumping the row): a STAFF member (settings:none) edits the page keeping the current slug, saves (200) and publishes (201); the page carries the edit and the Business row is byte-identical", async () => {
+  it("[D11-S04] today's rule kept (amended P90 owner ruling A1), RED-BEFORE (publish rewrote an unchanged slug, bumping the row): a STAFF member with content:write (staffAll) edits the page keeping the current slug, saves (200) and publishes (201); the page carries the edit and the Business row is byte-identical; STAFF on role defaults (content:read) is refused 403", async () => {
     await resetPresence(ID.bizP);
     const before = await businessRowText(ID.bizP);
-    const put = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff edit' }));
+    const deniedPut = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff edit' }));
+    expect(deniedPut.status, JSON.stringify(deniedPut.body)).toBe(403);
+    expect(String(deniedPut.body?.message ?? '')).toMatch(/content requires write access/);
+
+    const put = await putDraft(ID.staffAll, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff edit' }));
     expect(put.status, JSON.stringify(put.body)).toBe(200);
-    const pub = await publish(ID.staff, ID.bizP);
+    const pub = await publish(ID.staffAll, ID.bizP);
     expect(pub.status, JSON.stringify(pub.body)).toBe(201);
     const page = await db.sitePagePublished.findUnique({ where: { businessId: ID.bizP } });
     expect(JSON.stringify(page?.payload)).toContain('k09b staff edit');
-    expect(page?.publishedById).toBe(ID.staff);
+    expect(page?.publishedById).toBe(ID.staffAll);
     expect(await businessRowText(ID.bizP), 'the Business row is byte-identical').toBe(before);
   });
 
-  it("[D11-S05] today's rule kept: a STAFF member (settings:none) saving a draft that keeps the draft's pending slug, or carries no slug, is not refused (200); the pending slug stays as the draft had it", async () => {
+  it("[D11-S05] today's rule kept (amended P90 owner ruling A1): a STAFF member with content:write (staffAll) saving a draft that keeps the draft's pending slug, or carries no slug, is not refused (200); the pending slug stays as the draft had it", async () => {
     await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug') }));
-    const keep = await putDraft(ID.staff, ID.bizP, payload({ slug: slugOf('pending-slug'), headline: 'k09b staff keeps pending' }));
+    const keep = await putDraft(ID.staffAll, ID.bizP, payload({ slug: slugOf('pending-slug'), headline: 'k09b staff keeps pending' }));
     expect(keep.status, JSON.stringify(keep.body)).toBe(200);
     expect(keep.body?.payload?.slug).toBe(slugOf('pending-slug'));
 
     const before = await businessRowText(ID.bizP);
-    const none = await putDraft(ID.staff, ID.bizP, payload({ headline: 'k09b staff no slug' }));
+    const none = await putDraft(ID.staffAll, ID.bizP, payload({ headline: 'k09b staff no slug' }));
     expect(none.status, JSON.stringify(none.body)).toBe(200);
     expect(none.body?.payload).not.toHaveProperty('slug');
-    const pub = await publish(ID.staff, ID.bizP);
+    const pub = await publish(ID.staffAll, ID.bizP);
     expect(pub.status, JSON.stringify(pub.body)).toBe(201);
     expect(await businessRowText(ID.bizP), 'a slug-less publish leaves the Business row byte-identical').toBe(before);
   });
@@ -734,14 +749,14 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
   });
 
-  it("[D11-S09] RED-BEFORE (review CR-1): after the OWNER moves Business.slug through the owner-only PATCH, a STAFF member (settings:none) whose draft still carries the old slug saves a content edit (200) and publishes it (201): the page goes live at the owner's address and the Business row is byte-identical", async () => {
+  it("[D11-S09] RED-BEFORE (review CR-1, amended P90 owner ruling A1): after the OWNER moves Business.slug through the owner-only PATCH, a STAFF member with content:write (staffAll) whose draft still carries the old slug saves a content edit (200) and publishes it (201): the page goes live at the owner's address and the Business row is byte-identical", async () => {
     await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP] }));
     // PATCH /identity/businesses/:id (owner-only since R0-09) as raw SQL: the draft is not told about the new slug.
     await db.$executeRawUnsafe('UPDATE businesses SET slug = $2 WHERE id = $1', ID.bizP, slugOf('owner-renamed'));
     const before = await businessRowText(ID.bizP);
-    const put = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff content edit' }));
+    const put = await putDraft(ID.staffAll, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff content edit' }));
     expect(put.status, JSON.stringify(put.body)).toBe(200);
-    const pub = await publish(ID.staff, ID.bizP);
+    const pub = await publish(ID.staffAll, ID.bizP);
     expect((await businessRow(ID.bizP))?.slug, `publish ${pub.status}: Business.slug`).toBe(slugOf('owner-renamed'));
     expect(pub.status, JSON.stringify(pub.body)).toBe(201);
     expect(await businessRowText(ID.bizP), 'the Business row is byte-identical').toBe(before);
@@ -808,8 +823,8 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect(JSON.stringify(draftAfterPatch), 'the draft keeps its content').toContain('k09b content before a long slug');
   });
 
-  it("[D11-S13] W7-SLUG-PRESENCE-DRAFT repair (D-11, review CR-1; SEC-W7SPD-2, CRR-1): after the OWNER moves Business.slug through PATCH /identity/businesses/:id (200), a non-owner (STAFF on role defaults or every scope admin, ADMIN on role defaults or with settings:write) whose editor still sends the replaced slug saves a content edit (200): the draft keeps the PATCHed slug and takes the content, their publish (201) goes live at the owner's address with the Business row byte-identical and the owner's next publish (201) keeps the PATCHed slug; a slug neither the business nor its draft has carried is still refused (403, draft row byte-identical)", async () => {
-    for (const { id, label } of NON_OWNERS) {
+  it("[D11-S13] W7-SLUG-PRESENCE-DRAFT repair (D-11, review CR-1; SEC-W7SPD-2, CRR-1; amended P90 owner ruling A1): after the OWNER moves Business.slug through PATCH /identity/businesses/:id (200), a non-owner holding content:write (STAFF every scope admin, ADMIN on role defaults or with settings:write) whose editor still sends the replaced slug saves a content edit (200): the draft keeps the PATCHed slug and takes the content, their publish (201) goes live at the owner's address with the Business row byte-identical and the owner's next publish (201) keeps the PATCHed slug; a slug neither the business nor its draft has carried is still refused (403, draft row byte-identical); STAFF on role defaults (content:read) is refused 403 content:write", async () => {
+    for (const { id, label } of NON_OWNERS.slice(1)) {
       await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b before the rename' }));
       const patch = await patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') });
       expect(patch.status, `${label}: PATCH ${JSON.stringify(patch.body)}`).toBe(200);
@@ -841,12 +856,17 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
       expect((await businessRow(ID.bizP))?.slug, `${label}: the owner's publish keeps the PATCHed slug`).toBe(slugOf('owner-patched'));
     }
 
+    // STAFF on role defaults (content:read) is refused by ModuleScopeGuard before reaching saveDraft.
+    const deniedStale = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff read denied' }));
+    expect(deniedStale.status, JSON.stringify(deniedStale.body)).toBe(403);
+    expect(String(deniedStale.body?.message ?? '')).toMatch(/content requires write access/);
+
     // A PATCHed slug the presence payload cannot carry took the slug out of the draft (S12): the stale save keeps it out.
     const longSlug = `${slugOf('long')}-${'a'.repeat(64)}`;
     await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP] }));
     const longPatch = await patchBusiness(ID.owner, ID.bizP, { slug: longSlug });
     expect(longPatch.status, JSON.stringify(longPatch.body)).toBe(200);
-    const slugless = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b stale after a long slug' }));
+    const slugless = await putDraft(ID.staffAll, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b stale after a long slug' }));
     expect(slugless.status, JSON.stringify(slugless.body)).toBe(200);
     const sluglessDraft = await draftPayload(ID.bizP);
     expect(sluglessDraft, 'the draft stays without a slug').not.toHaveProperty('slug');
@@ -859,7 +879,7 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     const lock = await holdDraftRowLock(ID.bizP);
     const patchP = settle(patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') }));
     await lockWaiters(1);
-    const putP = settle(putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff raced content' })));
+    const putP = settle(putDraft(ID.staffAll, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff raced content' })));
     await lockWaiters(2);
     await lock.release();
     const [patch, put] = await Promise.all([patchP, putP]);
@@ -880,7 +900,7 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b before the rename' }));
     // Only forces the interleaving: the save is held at the draft row it writes, then the PATCH arrives.
     const lock = await holdDraftRowLock(ID.bizP);
-    const putP = settle(putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff content first' })));
+    const putP = settle(putDraft(ID.staffAll, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff content first' })));
     await lockWaiters(1);
     const patchP = settle(patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') }));
     await lockWaiters(2);
@@ -967,8 +987,16 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     expect(await productCount(ID.bizL), 'no product created').toBe(0);
   });
 
-  it('[D11-C07] RED-BEFORE (review SEC-2): STAFF on role defaults (settings:none) or every scope admin, ADMIN on role defaults and ADMIN granted settings:write chat with the concierge and get the reply (201), but their answers are not persisted: businessIntent, industry, archetype and country stay unset, the Business row is byte-identical and no blueprint inference runs', async () => {
-    for (const { id, label } of NON_OWNERS) {
+  it('[D11-C07] RED-BEFORE (review SEC-2, amended P90 owner ruling A1): STAFF on role defaults (settings:none) is refused chat (403 settings:write); non-owners holding settings:write (STAFF every scope admin, ADMIN on role defaults and ADMIN granted settings:write) chat and get the reply (201), but their answers are not persisted: businessIntent, industry, archetype and country stay unset, the Business row is byte-identical and no blueprint inference runs', async () => {
+    await resetConcierge(ID.bizQ);
+    const beforeStaff = await businessRowText(ID.bizQ);
+    const denied = await chat(ID.staff, ID.bizQ, 'k09b staff denied intent');
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect(String(denied.body?.message ?? '')).toMatch(/settings requires write access/);
+    expect(await businessRowText(ID.bizQ)).toBe(beforeStaff);
+    expect(blueprintInferred).toEqual([]);
+
+    for (const { id, label } of NON_OWNERS.slice(1)) {
       await resetConcierge(ID.bizQ);
       const before = await businessRowText(ID.bizQ);
       const res = await chat(id, ID.bizQ, `k09b ${label} intent`);
@@ -997,16 +1025,23 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     expect(blueprintInferred).toEqual([]);
   });
 
-  it("[D11-C09] today's rule kept (review CR-2): a STAFF member (settings:none) dismisses the concierge, snoozes a nudge and resumes (201 each): only the concierge's display-state keys of Business.metaData change; every other column and every other metaData key stays as the owner left it", async () => {
+  it("[D11-C09] today's rule kept (review CR-2, amended P90 owner ruling A1): STAFF on role defaults (settings:none) is refused dismiss/snooze/resume (403 settings:write); a STAFF member with settings:write (staffAll) dismisses the concierge, snoozes a nudge and resumes (201 each): only the concierge's display-state keys of Business.metaData change; every other column and every other metaData key stays as the owner left it", async () => {
     await resetConcierge(ID.bizQ);
     const ownerMeta = { conciergeTemplateId: TEMPLATE, paymentMethodsConfigured: true, setupMilestones: ['conciergeSetupComplete'] };
     await db.$executeRawUnsafe('UPDATE businesses SET meta_data = $2::jsonb WHERE id = $1', ID.bizQ, JSON.stringify(ownerMeta));
     const before = await businessRowTextExceptMeta(ID.bizQ);
-    const dismiss = await conciergePost(ID.staff, ID.bizQ, 'dismiss');
+
+    for (const [subpath, body] of [['dismiss', {}], ['nudges/products/snooze', { days: 2 }], ['resume', {}]] as const) {
+      const denied = await conciergePost(ID.staff, ID.bizQ, subpath, body);
+      expect(denied.status, `staff ${subpath}: ${JSON.stringify(denied.body)}`).toBe(403);
+      expect(String(denied.body?.message ?? ''), subpath).toMatch(/settings requires write access/);
+    }
+
+    const dismiss = await conciergePost(ID.staffAll, ID.bizQ, 'dismiss');
     expect(dismiss.status, JSON.stringify(dismiss.body)).toBe(201);
-    const snooze = await conciergePost(ID.staff, ID.bizQ, 'nudges/products/snooze', { days: 2 });
+    const snooze = await conciergePost(ID.staffAll, ID.bizQ, 'nudges/products/snooze', { days: 2 });
     expect(snooze.status, JSON.stringify(snooze.body)).toBe(201);
-    const resume = await conciergePost(ID.staff, ID.bizQ, 'resume');
+    const resume = await conciergePost(ID.staffAll, ID.bizQ, 'resume');
     expect(resume.status, JSON.stringify(resume.body)).toBe(201);
 
     expect(await businessRowTextExceptMeta(ID.bizQ), 'every column but meta_data and updated_at is byte-identical').toBe(before);

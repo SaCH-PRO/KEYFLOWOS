@@ -1831,7 +1831,7 @@ describe('R0-CMF5 review 2: a confirmation links a whole mailbox and does not de
 describe('R0-CMF6 the business mailbox on the generic connector surface follows the Gmail owner rule (D-11)', () => {
   const MEMBERS = [ID.staff, ID.staffAdmin, ID.admin];
 
-  it('[R0-CMF6-K01] RED-BEFORE: POST /connectors/businesses/:b/smoke/gmail, which sends a marked self-test email from the business mailbox, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before the registry is reached: no message is sent, the mailbox token is not used and no gmail connector row is written; a non-member 403, anonymous 401', async () => {
+  it('[R0-CMF6-K01] RED-BEFORE (amended P90 D-181 owner ruling A1): POST /connectors/businesses/:b/smoke/gmail is refused for an ADMIN (403 GMAIL_OWNER_ONLY) and for a STAFF member / STAFF revenue:admin (403 settings:admin) before the registry is reached: no message is sent, the mailbox token is not used and no gmail connector row is written; a non-member 403, anonymous 401', async () => {
     await clearPending(ID.biz);
     await clearGmailConnector(ID.biz);
     const mailbox = googleAccount('cmf6_smoke_refused');
@@ -1840,7 +1840,12 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     const sentBefore = sends.length;
     const checksBefore = profileChecks.length;
 
-    for (const actor of MEMBERS) expectOwnerOnly(await connectorOp('smoke', ID.biz, 'gmail', actor));
+    expectOwnerOnly(await connectorOp('smoke', ID.biz, 'gmail', ID.admin));
+    for (const actor of [ID.staff, ID.staffAdmin]) {
+      const denied = await connectorOp('smoke', ID.biz, 'gmail', actor);
+      expect(denied.status, `${actor} smoke: ${JSON.stringify(denied.body)}`).toBe(403);
+      expect(String(denied.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
+    }
     const stranger = await connectorOp('smoke', ID.biz, 'gmail', ID.stranger);
     expect(stranger.status, JSON.stringify(stranger.body)).toBe(403);
     const anonymous = await connectorOp('smoke', ID.biz, 'gmail');
@@ -1854,13 +1859,18 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearMailbox(ID.biz);
   });
 
-  it('[R0-CMF6-K02] RED-BEFORE: POST .../sync/gmail, which reads the business inbox into Key Inbox, is refused for the same members (403 GMAIL_OWNER_ONLY) before the registry is reached; the inbox is not read', async () => {
+  it('[R0-CMF6-K02] RED-BEFORE (amended P90 D-181 owner ruling A1): POST .../sync/gmail, which reads the business inbox into Key Inbox, is refused for an ADMIN (403 GMAIL_OWNER_ONLY) and for STAFF members below settings:admin (403 settings:admin) before the registry is reached; the inbox is not read', async () => {
     const mailbox = googleAccount('cmf6_sync_refused');
     await seedMailbox(ID.biz, mailbox);
     registry.syncConnector.mockClear();
     inboxIngestion.syncInbox.mockClear();
 
-    for (const actor of MEMBERS) expectOwnerOnly(await connectorOp('sync', ID.biz, 'gmail', actor));
+    expectOwnerOnly(await connectorOp('sync', ID.biz, 'gmail', ID.admin));
+    for (const actor of [ID.staff, ID.staffAdmin]) {
+      const denied = await connectorOp('sync', ID.biz, 'gmail', actor);
+      expect(denied.status, `${actor} sync: ${JSON.stringify(denied.body)}`).toBe(403);
+      expect(String(denied.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
+    }
 
     expect(registry.syncConnector).not.toHaveBeenCalled();
     expect(inboxIngestion.syncInbox).not.toHaveBeenCalled();
@@ -1915,7 +1925,7 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearGmailConnector(ID.bizDist);
   });
 
-  it('[R0-CMF6-K04] control: the gmail routes that only read a status, or check the stored credential without sending or reading a message, stay open to every member: a STAFF member gets GET .../health/gmail, .../statuses and .../dashboard (connected, the mailbox address), POST .../test/gmail (the Gmail profile check: success and the account) and POST .../authenticate/gmail ({connected: true}); nothing is sent and the inbox is not read', async () => {
+  it('[R0-CMF6-K04] control (amended P90 D-181 owner ruling A1): gmail status reads stay open to every member (STAFF gets GET .../health/gmail, .../statuses, .../dashboard and POST .../authenticate/gmail {connected: true}); POST .../test/gmail requires settings:admin (ADMIN gets success and the account; STAFF gets 403 settings:admin); nothing is sent and the inbox is not read', async () => {
     const mailbox = googleAccount('cmf6_reads');
     await seedMailbox(ID.biz, mailbox);
     inboxIngestion.syncInbox.mockClear();
@@ -1937,7 +1947,11 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     const gmailEntry = (dashboard.body as any[]).find((e) => e.meta?.type === 'gmail');
     expect(gmailEntry?.health).toMatchObject({ status: 'connected', connectedAccount: mailbox.email });
 
-    const tested = await connectorOp('test', ID.biz, 'gmail', ID.staff);
+    const staffTested = await connectorOp('test', ID.biz, 'gmail', ID.staff);
+    expect(staffTested.status, JSON.stringify(staffTested.body)).toBe(403);
+    expect(String(staffTested.body?.message ?? '')).toMatch(/settings requires admin access/);
+
+    const tested = await connectorOp('test', ID.biz, 'gmail', ID.admin);
     expect([200, 201], JSON.stringify(tested.body)).toContain(tested.status);
     expect(tested.body).toEqual({ success: true, account: mailbox.email });
     expect(profileChecks.slice(checksBefore)).toEqual([mailbox.email]);
@@ -1951,13 +1965,22 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearMailbox(ID.biz);
   });
 
-  it('[R0-CMF6-K05] control: other connectors are not gated by the mailbox rule: a STAFF member syncs, tests and smoke-tests a non-Google connector (typeform; D-99 makes the Google connections\' sync the owner\'s, W9-GOOGLE-DOORS-SERVER), and the registry and the connector are reached (success)', async () => {
+  it('[R0-CMF6-K05] control (amended P90 D-181 owner ruling A1): other connectors are not gated by the mailbox rule: an ADMIN (settings:admin) syncs, tests and smoke-tests a non-Google connector (typeform) while a STAFF member (settings:none) is refused 403 settings:admin before the registry', async () => {
     nonGoogleControlConnector.sync.mockClear();
     nonGoogleControlConnector.testConnection.mockClear();
     nonGoogleControlConnector.smokeTest.mockClear();
     for (const op of ['sync', 'test', 'smoke'] as const) {
-      const res = await connectorOp(op, ID.biz, 'typeform', ID.staff);
-      expect([200, 201], `${op} ${JSON.stringify(res.body)}`).toContain(res.status);
+      const denied = await connectorOp(op, ID.biz, 'typeform', ID.staff);
+      expect(denied.status, `staff ${op} ${JSON.stringify(denied.body)}`).toBe(403);
+      expect(String(denied.body?.message ?? ''), `staff ${op}`).toMatch(/settings requires admin access/);
+    }
+    expect(nonGoogleControlConnector.sync).not.toHaveBeenCalled();
+    expect(nonGoogleControlConnector.testConnection).not.toHaveBeenCalled();
+    expect(nonGoogleControlConnector.smokeTest).not.toHaveBeenCalled();
+
+    for (const op of ['sync', 'test', 'smoke'] as const) {
+      const res = await connectorOp(op, ID.biz, 'typeform', ID.admin);
+      expect([200, 201], `admin ${op} ${JSON.stringify(res.body)}`).toContain(res.status);
       expect(res.body).toMatchObject({ success: true });
     }
     expect(nonGoogleControlConnector.sync).toHaveBeenCalledWith(ID.biz);
@@ -2550,7 +2573,7 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearMailbox(ID.biz);
   });
 
-  it('[R0-CMF6-M02] control (review SEC-CMF6-1, PATCH inbox-config decided open): PATCH .../inbox-config/gmail stays open to every member, as for every connector: a STAFF member changes the Key Inbox processing settings (intake, auto-approve threshold, contact creation) and nothing else; the row keeps status connected, its account and connection time, the nightly sync still selects it, nothing is sent and the inbox is not read', async () => {
+  it('[R0-CMF6-M02] control (amended P90 D-181 owner ruling A1): PATCH .../inbox-config/gmail requires settings:admin: a STAFF member (settings:none) is refused 403 settings:admin, while an ADMIN (settings:admin) changes the Key Inbox processing settings (intake, auto-approve threshold, contact creation) and nothing else; the row keeps status connected, its account and connection time, the nightly sync still selects it, nothing is sent and the inbox is not read', async () => {
     await clearGmailConnector(ID.biz);
     const mailbox = googleAccount('cmf6_inbox_config');
     await seedMailbox(ID.biz, mailbox);
@@ -2560,7 +2583,11 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     const sentBefore = sends.length;
     registry.get.mockImplementation((type: string) => liveRegistry.get(type));
     try {
-      const res = await patchInboxConfig(ID.biz, 'gmail', ID.staff, { intakeEnabled: false, autoApproveThreshold: 0.9, createContactsAutomatically: false });
+      const denied = await patchInboxConfig(ID.biz, 'gmail', ID.staff, { intakeEnabled: false, autoApproveThreshold: 0.9, createContactsAutomatically: false });
+      expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+      expect(String(denied.body?.message ?? '')).toMatch(/settings requires admin access/);
+
+      const res = await patchInboxConfig(ID.biz, 'gmail', ID.admin, { intakeEnabled: false, autoApproveThreshold: 0.9, createContactsAutomatically: false });
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.body).toEqual({ type: 'gmail', intakeEnabled: false, autoApproveThreshold: 0.9, createContactsAutomatically: false });
     } finally {

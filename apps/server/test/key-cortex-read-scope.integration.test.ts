@@ -950,8 +950,9 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     expect(r.opportunities.map((o: any) => o.title)).toContain(`Collect $1,000 from ${NAME.alicia}`);
     expect(r.churnRisks.map((c: any) => c.contactName).sort()).toEqual([NAME.alicia, NAME.maraval, NAME.marcus].sort());
     expect(r.pipeline.totalPipelineValue).toBe(2500);
-    // Paid invoices of this business (400 + 600 + 500 + 300 + 350; all rows were written this month).
-    expect(r.cashFlow.moneyIn).toBe(2150);
+    // P119 (FU-CORTEX-INSIGHT-CASH-TRUTH, D-14): monthly cash-in reads real payment rows by date
+    // (the 400 SUCCESSFUL payment on paidA; excludes FAILED 999 and rowless/old PAID invoices with no paidAt this month).
+    expect(r.cashFlow.moneyIn).toBe(400);
     expect(r.cashFlow.upcomingPaymentsDue).toEqual([
       expect.objectContaining({ id: INV.upcoming, contactName: NAME.alicia, amount: 120 }),
     ]);
@@ -1055,7 +1056,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
       const res = await get2('report', R.owner, R.biz).query({ scope: 'monthly' });
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.body.cashFlow.moneyOut).toBe(300);
-      expect(res.body.cashFlow.netFlow).toBe(2150 - 300);
+      expect(res.body.cashFlow.netFlow).toBe(400 - 300);
     } finally {
       await db.$executeRawUnsafe(`DELETE FROM expenses WHERE business_id = $1`, R.biz);
     }
@@ -1070,6 +1071,7 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     staffRevenueRead: `${P}s_staff_revread`,
     staffDefault: `${P}s_staff_default`, // STAFF, no explicit map: the role's defaults
     adminNoScopes: `${P}s_admin_noscopes`, // ADMIN, an explicit map naming no module (JSON array)
+    adminAiOnly: `${P}s_admin_aionly`, // ADMIN, explicit object map { ai: 'write' } omitting revenue
     paid: `${P}s_inv_paid`,
   };
   /** The PAID invoice total the real snapshot sums (keyMetrics.totalRevenue). */
@@ -1156,16 +1158,20 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     app3.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app3.init();
 
-    for (const id of [S.owner, S.staffNoRevenue, S.staffRevenueRead, S.staffDefault, S.adminNoScopes]) {
+    for (const id of [S.owner, S.staffNoRevenue, S.staffRevenueRead, S.staffDefault, S.adminNoScopes, S.adminAiOnly]) {
       await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
     }
     await db.business.create({ data: { id: S.biz, name: 'V97O Biz S', ownerId: S.owner } });
     for (const m of [
       { userId: S.owner, businessId: S.biz, role: 'OWNER' },
-      { userId: S.staffNoRevenue, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'none' } },
-      { userId: S.staffRevenueRead, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+      // SWP-CENSUS-KEY-B (P109, Ruling B2): POST chat requires ai:write; keep revenue none/read so KC-SEC-3 redaction remains proven.
+      { userId: S.staffNoRevenue, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'none', ai: 'write' } },
+      { userId: S.staffRevenueRead, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'read', ai: 'write' } },
       { userId: S.staffDefault, businessId: S.biz, role: 'STAFF' },
+      // R1-SEC-01: keep adminNoScopes as JSON array [] so POST sessions proves Array.isArray(permissionScopes) does not fall back to ADMIN defaults;
+      // use separate adminAiOnly ({ ai: 'write' }) to prove POST chat redacts contextUsed for an ADMIN whose explicit map omits revenue.
       { userId: S.adminNoScopes, businessId: S.biz, role: 'ADMIN', permissionScopes: [] },
+      { userId: S.adminAiOnly, businessId: S.biz, role: 'ADMIN', permissionScopes: { ai: 'write' } },
     ]) {
       await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}`, ...m } });
     }
@@ -1234,12 +1240,20 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
 
   it.each([
     ['a STAFF member holding revenue none', S.staffNoRevenue],
-    ['an ADMIN whose explicit scope map names no module (revenue none)', S.adminNoScopes],
+    ['an ADMIN whose explicit scope map grants ai write and omits revenue (revenue none)', S.adminAiOnly],
   ])('KC-SEC-3 RED-BEFORE (every other route that returns the snapshot): POST chat answers %s the reply with a contextUsed holding no money figure', async (_label, user) => {
     const res = await postChat(user);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.message.content).toBe('v97o chat answer');
     noMoney(res.body.contextUsed);
+  });
+
+  it('KC-SEC-3 (SWP-CENSUS-KEY-B, R1-SEC-01): POST chat refuses an ADMIN whose explicit scope map is [] with 403 ai:write and leaks no money figure', async () => {
+    const res = await postChat(S.adminNoScopes);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    const body = JSON.stringify(res.body);
+    expect(body).toMatch(/ai requires write/i);
+    for (const figure of [String(PAID_TOTAL), String(OUTSTANDING)]) expect(body).not.toContain(figure);
   });
 
   it.each([

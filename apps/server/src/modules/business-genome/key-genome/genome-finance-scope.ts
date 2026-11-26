@@ -151,7 +151,10 @@ export type GenomeRowFields = {
   signalType?: string | null;
   field?: string | null;
   title?: string | null;
+  insight?: string | null;
   diagnosis?: string | null;
+  recommendation?: string | null;
+  expectedGain?: string | null;
   /** A memory event's own metadata (a KEY_ACTION_PROPOSAL outcome carries its proposal's actionType, module, toolName). */
   metadata?: unknown;
   /** A genome signal's own text (Codex P1 on #228): its reason (served by the KEY bridge as `message`), evidence, proposed value. */
@@ -160,6 +163,20 @@ export type GenomeRowFields = {
   evidence?: unknown;
   proposedValue?: unknown;
 };
+
+/**
+ * FU-GENOME-SURFACES-REVENUE round 3 (D-234, D-100): marketing-growth snapshot signal fields computed strictly from
+ * content strategy / channel counts (an allow-list: every other MARKETING_GROWTH_GENOME snapshot signal fails closed).
+ */
+const NON_MONEY_MARKETING_SIGNAL_FIELDS: ReadonlySet<string> = new Set([
+  'NO_CONTENT_STRATEGY',
+  'MISSING_CONTENT_PILLARS',
+  'MISSING_CONTENT_CADENCE',
+]);
+
+/** Acquisition-cost, budget and conversion terms in recommendation prose (round 3, MGC-02). */
+const MARKETING_RECOMMENDATION_MONEY_TEXT =
+  /(?<![a-z])(?:acquisition[\s_-]+cost|target_?cac|cac|budgets?|conversions?)(?![a-z])/i;
 
 function mentionsMoney(...values: Array<string | null | undefined>): boolean {
   return values.some((v) => {
@@ -191,6 +208,10 @@ export function isMoneyLabel(value: string | null | undefined): boolean {
 
 /** A genome signal with money or sales provenance, or with nothing to classify it by: D-128, D-234. */
 export function isFinanceSignal(row: GenomeRowFields): boolean {
+  if (row.sourceEntityType === 'MARKETING_GROWTH_GENOME') {
+    const field = typeof row.field === 'string' ? row.field.trim() : '';
+    if (!NON_MONEY_MARKETING_SIGNAL_FIELDS.has(field)) return true;
+  }
   if (
     mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType, row.field, row.sourceEntityType) ||
     unclassified(row.section, row.domain)
@@ -214,7 +235,12 @@ export function isFinanceSignal(row: GenomeRowFields): boolean {
 
 /** A genome recommendation in a money or sales domain (FINANCIAL, SALES, ...), titled for a money figure, made from a money signal, or with no domain: D-128, D-234. */
 export function isFinanceRecommendation(row: GenomeRowFields): boolean {
-  return mentionsMoney(row.domain, row.title, signalDomainOf(row.diagnosis)) || unclassified(row.domain);
+  if (mentionsMoney(row.domain, row.title, signalDomainOf(row.diagnosis)) || unclassified(row.domain)) {
+    return true;
+  }
+  return [row.title, row.insight, row.diagnosis, row.recommendation, row.expectedGain].some(
+    (v) => typeof v === 'string' && MARKETING_RECOMMENDATION_MONEY_TEXT.test(v),
+  );
 }
 
 /** A memory event that carries a money, sales or composite signal, or that has nothing to classify it by: D-128, D-100, D-234. */
@@ -222,6 +248,7 @@ export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
   // D-238: a KEY proposal's outcome event is classified by its proposal (the event carries its action type,
   // module, tool and title); a financial or unclassifiable proposal is money.
   if (row.sourceType === 'KEY_ACTION_PROPOSAL') return isFinancialProposal(proposalFieldsOfEvent(row));
+  if (row.eventType === 'MARKETING_GROWTH_SNAPSHOT_COMPUTED') return true;
   return (
     mentionsMoney(row.sourceType, row.domain, row.section, row.eventType) ||
     row.sourceType === 'CROSS_DOMAIN_GENOME' ||
@@ -676,7 +703,7 @@ function proposalFieldsOfEvent(row: GenomeRowFields): ProposalFields {
  * with the marketing-growth figures, not through this score.
  */
 const NON_MONEY_DNA_KEYS: ReadonlySet<string> = new Set([
-  'execution', 'strategy', 'operations', 'marketing', 'founder', 'vision', 'business', 'market', 'legal',
+  'execution', 'strategy', 'operations', 'marketing', 'founder', 'vision', 'market', 'legal',
   'growth', 'technology', 'risk', 'customer_success', 'product', 'talent',
 ]);
 
@@ -711,7 +738,11 @@ export async function genomeReaderRevenueLevel(prisma: PrismaService, businessId
   if (reader.role === undefined) {
     let platformRole: string | undefined;
     try {
-      platformRole = (await prisma.client.user?.findUnique({ where: { id: reader.id }, select: { role: true } }))?.role;
+      const user = await prisma.client.user?.findUnique({
+        where: { id: reader.id },
+        select: { role: true, deletedAt: true, bannedAt: true },
+      });
+      platformRole = user && !user.deletedAt && !user.bannedAt ? user.role : undefined;
     } catch {
       platformRole = undefined;
     }

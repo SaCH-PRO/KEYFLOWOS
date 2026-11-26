@@ -260,8 +260,10 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.biz2, name: 'V73K Other', slug: `${P}biz2`, ownerId: ID.outsider, currency: 'TTD' } });
   for (const [user, biz, role, permissionScopes] of [
     [ID.owner, ID.biz, 'OWNER', undefined],
-    [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write' }],
-    [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write' }],
+    // SWP-CENSUS-KEY-B (P109, Ruling B2): bridge-action now requires ai:write before requireBridgeRevenue;
+    // keep revenue: 'none'/'read' so KAG-04 still proves requireBridgeRevenue 403.
+    [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write', ai: 'write' }],
+    [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write', ai: 'write' }],
     // Round 2 (security MINOR-2): an explicit map without a revenue key reads revenue 'none'.
     [ID.staffMissing, ID.biz, 'STAFF', { crm: 'read', operations: 'write' }],
     [ID.superAdmin, ID.biz, 'STAFF', { crm: 'read' }],
@@ -651,12 +653,21 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
     expect(JSON.stringify(read.body)).toMatch(/TTD 912/);
   });
 
-  it('KAG-11 round 4: recommendations as the marketing and operations genomes write them are still previewed for revenue none', async () => {
-    for (const id of [ID.recMkt, ID.recMktInputs, ID.recCapacity]) {
+  it('KAG-11 round 4: non-money marketing/operations recommendations are previewed for revenue none; CAC/conversion marketing-inputs recommendation needs revenue read (D-234, MGC-02)', async () => {
+    for (const id of [ID.recMkt, ID.recCapacity]) {
       const res = await get(`${bridgeUrl(id)}/action-preview`, ID.staffNone);
       expect(res.status, id).toBe(200);
       expect(res.body.recommendationId, id).toBe(id);
     }
+    // FU-GENOME-SURFACES-REVENUE (MGC-02, D-234): COMPLETE_MARKETING_INPUTS names target CAC and conversion rates
+    // and reflects whether withheld channel CAC/conversion inputs exist, so revenue:none is refused 403 while
+    // revenue:read previews it cleanly.
+    const denied = await get(`${bridgeUrl(ID.recMktInputs)}/action-preview`, ID.staffNone);
+    expect(denied.status, ID.recMktInputs).toBe(403);
+    expect(JSON.stringify(denied.body)).toContain(READ_DENIED);
+    const allowed = await get(`${bridgeUrl(ID.recMktInputs)}/action-preview`, ID.staffRead);
+    expect(allowed.status, ID.recMktInputs).toBe(200);
+    expect(allowed.body.recommendationId, ID.recMktInputs).toBe(ID.recMktInputs);
   });
 
   it('KAG-12 round 4: the blocked_by_autonomy row of a non-financial proposal is served (its rule trace counts uses, not money)', async () => {

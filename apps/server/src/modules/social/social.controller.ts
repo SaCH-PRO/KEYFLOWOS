@@ -168,6 +168,14 @@ export class SocialController {
       return { success: false, error: 'Business not found' };
     }
 
+    // RR-WEBHOOK-INGRESS-CENSUS (D-261 / D-262 / D-56): Meta signs every business's
+    // Messenger and Instagram payloads with the single app secret (META_APP_SECRET),
+    // so a valid signature proves Meta sent the body, not which business owns the page
+    // or account inside it. Refuse with 403 and ingest nothing unless every entry and
+    // recipient ID in the payload is a Facebook/Instagram SocialConnection.platformId
+    // owned by :businessId (matching WhatsAppController.assertMetaNumberIsBusiness).
+    await this.assertMetaPageIsBusiness(businessId, body);
+
     const headers = (req?.headers ?? {}) as Record<string, unknown>;
 
     try {
@@ -194,6 +202,90 @@ export class SocialController {
         errorMessage: message,
       });
       return { success: false, error: message };
+    }
+  }
+
+  private normalizeMetaPageId(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return null;
+  }
+
+  /**
+   * Verify that every entry and messaging event named in a Meta social webhook
+   * payload belongs to a Facebook or Instagram SocialConnection of `businessId`.
+   * For outbound echoes (`message.is_echo === true`), Meta puts the business's
+   * Page/IG ID in `sender.id` and the customer PSID/IGSID in `recipient.id`;
+   * otherwise the business's Page/IG ID is in `recipient.id`.
+   * Fails closed with 403 ForbiddenException when `entry` is missing/empty, any entry
+   * names no page/account ID, or any referenced ID is not owned by `businessId`.
+   */
+  private async assertMetaPageIsBusiness(businessId: string, body: unknown): Promise<void> {
+    const payload = body as {
+      entry?: Array<{
+        id?: unknown;
+        messaging?: Array<{
+          sender?: { id?: unknown };
+          recipient?: { id?: unknown };
+          message?: { is_echo?: unknown };
+        }>;
+      }>;
+    } | null | undefined;
+
+    if (!payload || !Array.isArray(payload.entry) || payload.entry.length === 0) {
+      throw new ForbiddenException('Meta social webhook payload names no page or recipient id');
+    }
+
+    const referencedIds = new Set<string>();
+    for (const entry of payload.entry) {
+      const entryIds: string[] = [];
+      const entryId = this.normalizeMetaPageId(entry?.id);
+      if (entryId) entryIds.push(entryId);
+
+      if (Array.isArray(entry?.messaging)) {
+        for (const event of entry.messaging) {
+          const isEcho = event?.message?.is_echo === true;
+          const ownedPartyId = this.normalizeMetaPageId(
+            isEcho ? event?.sender?.id : event?.recipient?.id,
+          );
+          if (ownedPartyId) entryIds.push(ownedPartyId);
+        }
+      }
+
+      if (entryIds.length === 0) {
+        throw new ForbiddenException('Meta social webhook entry names no page or recipient id');
+      }
+
+      for (const id of entryIds) {
+        referencedIds.add(id);
+      }
+    }
+
+    const owned = await this.prisma.client.socialConnection.findMany({
+      where: {
+        businessId,
+        platform: { in: ['FACEBOOK', 'INSTAGRAM'] },
+        platformId: { in: [...referencedIds] },
+        status: { notIn: ['DISCONNECTED', 'REVOKED'] },
+      },
+      select: { platformId: true },
+    });
+
+    const ownedIds = new Set(
+      owned
+        .map((c: { platformId: string | null }) => c.platformId)
+        .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0),
+    );
+
+    for (const id of referencedIds) {
+      if (!ownedIds.has(id)) {
+        throw new ForbiddenException('This social page or account is not connected to this business');
+      }
     }
   }
 

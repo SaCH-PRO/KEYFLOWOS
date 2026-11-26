@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Inject, Req, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { memberModuleLevel } from '../../core/auth/member-module-level';
+import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
 import { PublicRateLimitGuard } from '../../core/guards/public-rate-limit.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
@@ -65,8 +67,14 @@ export class ConversionController {
 
   // ─── Sales Team ───
   @Get('businesses/:businessId/sales-reps')
-  async getSalesReps(@Param('businessId') businessId: string) {
-    return this.salesTeam.getSalesReps(businessId);
+  async getSalesReps(
+    @Param('businessId') businessId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
+  ) {
+    // FU-CONVERSION-REPS-REVENUE (D-100): withhold per-rep paid revenue and deal counts below revenue:read.
+    const revenueLevel = await memberModuleLevel(this.prisma, businessId, req?.user, 'revenue');
+    const includeRevenue = LEVEL_RANK[revenueLevel] >= LEVEL_RANK.read;
+    return this.salesTeam.getSalesReps(businessId, { includeRevenue });
   }
 
   @Patch('businesses/:businessId/sales-reps/:repId/commission')

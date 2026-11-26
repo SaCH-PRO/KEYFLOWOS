@@ -7,13 +7,14 @@ import { useThemeColors } from "@/lib/theme-context";
 import { usePlanLimitHandler } from "./use-plan";
 import {
   clearStoredBusinessId,
+  dismissSessionToasts,
   getStoredBusinessId,
   getCachedUser,
   getUserDisplayName,
   getUserInitials,
   refreshWorkspace,
   getCachedBusiness,
-  isSuperAdmin,
+  canOpenOwnerConsole,
   BUSINESS_CHANGED_EVENT,
 } from "@/lib/workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
@@ -258,7 +259,10 @@ export function useAppLayout(): AppLayoutState {
     setDisplayName(getUserDisplayName());
     setInitials(getUserInitials());
     setAvatarUrl(user.avatarUrl ?? null);
-    setIsAdminUser(isSuperAdmin());
+    // The Owner Console link (D-290): only where the admin shell would open (canOpenOwnerConsole, the admin layout's
+    // own guard). A normally signed-in SUPER_ADMIN without the separate admin sign-in is never offered a link that
+    // ends at /admin/login.
+    setIsAdminUser(canOpenOwnerConsole());
     setUserEmail(user.email ?? null);
   }, []);
 
@@ -406,6 +410,9 @@ export function useAppLayout(): AppLayoutState {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    // FU-UNDO-TOAST-SIGNOUT (D-283): the member chose to leave, so the session's toasts (a pending Undo among them) go
+    // now, not once the server answers; clearStoredBusinessId below dismisses any raised meanwhile.
+    dismissSessionToasts();
     try {
       // apiPost takes ONE options object; apiPatch two lines up is positional.
       // That asymmetry is the whole bug — TS2554, which skipped every downstream

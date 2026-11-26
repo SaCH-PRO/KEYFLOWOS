@@ -28,6 +28,7 @@ import {
   Send,
 } from "lucide-react";
 import { toast } from "sonner";
+import { statusLabel } from "@/lib/status-labels";
 
 interface Recommendation {
   id: string;
@@ -265,7 +266,7 @@ export default function ContactRecommendationsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{rec.title}</span>
-                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${priorityColor(rec.priority)}`}>{rec.priority}</span>
+                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${priorityColor(rec.priority)}`}>{statusLabel(rec.priority)}</span>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">{rec.description}</p>
                       <div className="mt-3 flex items-center gap-2">

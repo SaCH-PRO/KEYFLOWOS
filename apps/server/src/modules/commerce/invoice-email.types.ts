@@ -27,6 +27,25 @@ export interface InvoiceEmailBusinessSlim {
   email?: string | null;
   phone?: string | null;
   primaryColor?: string | null;
+  vatNumber?: string | null;
+}
+
+/**
+ * V1-66 (VAT-BASICS, D-165): a business's VAT/tax registration number is shown
+ * on customer-facing documents and receipts ONLY when tax is actually charged
+ * (`taxAmount > 0`) and the business has a non-empty `vatNumber`. Callers MUST
+ * omit the `vatNumber` key (`...(vat ? { vatNumber: vat } : {})`) whenever this
+ * returns `undefined` so untaxed projections keep their exact key shapes.
+ */
+export function visibleVatNumber(
+  vatNumber: string | null | undefined,
+  taxAmount: unknown,
+): string | undefined {
+  if (typeof vatNumber !== 'string') return undefined;
+  const trimmed = vatNumber.trim();
+  if (!trimmed) return undefined;
+  const tax = Number(taxAmount ?? 0);
+  return Number.isFinite(tax) && tax > 0 ? trimmed : undefined;
 }
 
 export interface InvoiceForEmail {

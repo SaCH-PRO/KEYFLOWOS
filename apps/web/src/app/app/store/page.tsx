@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Store } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
@@ -56,6 +56,7 @@ const SLIDE = {
 
 export default function StorePage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const s = useStoreData();
   const ai = useStoreAiHub();
   // NAV-A3 (BUG-078): a linked tab is the first tab drawn, so the page does not flash Overview and slide over.
@@ -164,6 +165,11 @@ export default function StorePage() {
   const hasHeroImage = !!(hero?.imageUrl || hero?.coverImageUrl);
   const hoursConfigured = Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled);
   const hasTestimonials = !!((cfg.socialProof as SocialProofSection | undefined)?.testimonials?.length);
+  const notLoaded = [
+    !s.canSaveStorefront && "storefront settings",
+    !s.canSaveBusiness && "business details",
+    !s.canChangeListing && !s.listingRefused && "store listing",
+  ].filter((part): part is string => !!part);
 
   return (
     <div className="space-y-4" aria-label="Presence Studio">
@@ -222,13 +228,30 @@ export default function StorePage() {
         <StoreTabs activeView={activeTab} onViewChange={handleTabChange} />
       </div>
 
+      {notLoaded.length > 0 && (
+        // Round 4 (SEC-CAT-R3-1): what did not load for this business is not saved (useStoreData refuses it).
+        <p role="status" className="rounded-xl border border-border/60 bg-card px-4 py-3 text-caption text-muted-foreground">
+          This business&apos;s {notLoaded.join(" and ")} did not load, so {notLoaded.length > 1 ? "they" : "it"} cannot be
+          changed here. Refresh the page to try again.
+        </p>
+      )}
+      {s.listingRefused && (
+        // Round 5 (COR-R4-2): the listing read was refused (403). A refresh cannot fix it. Round 6 (COR-R5-4): the 403
+        // is the revenue read guard or BusinessGuard (a member just removed), so the notice names no module.
+        <p role="status" className="rounded-xl border border-border/60 bg-card px-4 py-3 text-caption text-muted-foreground">
+          You do not have permission to see this business&apos;s store listing, so it cannot be changed here. Ask the
+          business owner if you need it.
+        </p>
+      )}
+
       {s.commerceProducts.length === 0 && s.services.length === 0 && (
         <EmptyState
           icon={Store}
           title="Your storefront is empty"
           description="Add products or services to start selling online. Your customers will see them on your public booking page."
           actionLabel="Add Product"
-          onAction={() => handleTabChange("catalog")}
+          // CATALOG-1: a product is created in Sales > Products (the Catalog tab only lists what exists).
+          onAction={() => router.push("/app/commerce/products?action=add")}
         >
           <div className="mt-4 flex flex-col items-center gap-3">
             <Button variant="soft" onClick={() => handleTabChange("design")}>
@@ -312,6 +335,7 @@ export default function StorePage() {
                 onToggleItem={s.handleToggleStoreItem}
                 onSelectAll={s.handleSelectAll}
                 onDeselectAll={s.handleDeselectAll}
+                bulkRunning={s.bulkRunning}
                 onConfirmRemoveChange={s.setConfirmRemove}
                 onDeleteFromStore={s.handleDeleteServiceFromStore}
                 services={s.services}
@@ -355,6 +379,7 @@ export default function StorePage() {
                 businessData={s.businessData}
                 services={s.services}
                 commerceProducts={s.commerceProducts}
+                stockByProduct={s.stockByProduct}
                 storefrontConfig={cfg}
                 hasHeroImage={hasHeroImage}
                 hoursConfigured={hoursConfigured}

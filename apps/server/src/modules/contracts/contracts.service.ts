@@ -107,8 +107,33 @@ export class ContractsService {
     return contract;
   }
 
+  private async assertPartyContactsInBusiness(
+    businessId: string,
+    parties?: Array<{ contactId?: unknown }>,
+    tx?: Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0],
+  ): Promise<void> {
+    if (!parties?.length) return;
+    const contactIds = new Set<string>();
+    for (const party of parties) {
+      const id = party.contactId;
+      if (id === undefined || id === null || id === '') continue;
+      if (typeof id !== 'string' || id.trim().length === 0) {
+        throw new NotFoundException('Contact not found');
+      }
+      contactIds.add(id);
+    }
+    for (const contactId of contactIds) {
+      const where = { id: contactId, businessId, deletedAt: null };
+      const contact = tx
+        ? await tx.contact.findFirst({ where, select: { id: true } })
+        : await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+      if (!contact) throw new NotFoundException('Contact not found');
+    }
+  }
+
   async createContract(businessId: string, dto: CreateContractDto, userId?: string) {
     const contract = await this.prisma.client.$transaction(async (tx) => {
+      await this.assertPartyContactsInBusiness(businessId, dto.parties, tx);
       const created = await tx.contract.create({
         data: {
           businessId,
@@ -139,7 +164,7 @@ export class ContractsService {
               phone: p.phone,
               address: p.address,
               notes: p.notes,
-              contactId: p.contactId,
+              contactId: p.contactId || null,
             })),
           },
           tags: dto.tagIds?.length
@@ -174,6 +199,7 @@ export class ContractsService {
     if (!existing) throw new NotFoundException('Contract not found');
 
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      await this.assertPartyContactsInBusiness(businessId, dto.parties, tx);
       // Replace parties if supplied
       if (dto.parties) {
         await tx.contractParty.deleteMany({ where: { contractId } });
@@ -225,7 +251,7 @@ export class ContractsService {
               phone: p.phone,
               address: p.address,
               notes: p.notes,
-              contactId: p.contactId,
+              contactId: p.contactId || null,
             })),
           },
         }),
@@ -393,6 +419,7 @@ export class ContractsService {
     const nextVersion = (contract.versions[0]?.versionNumber ?? 0) + 1;
 
     await this.prisma.client.$transaction(async (tx) => {
+      await this.assertPartyContactsInBusiness(businessId, data.parties, tx);
       await tx.contract.update({
         where: { id: contractId },
         data: {
@@ -460,7 +487,7 @@ export class ContractsService {
             phone: p.phone,
             address: p.address,
             notes: p.notes,
-            contactId: p.contactId,
+            contactId: p.contactId || null,
           })),
         });
       }
@@ -507,6 +534,8 @@ export class ContractsService {
       await this.applyExtractionResult(payload.businessId, existing.id, payload.result);
       return;
     }
+
+    await this.assertPartyContactsInBusiness(payload.businessId, payload.result.contractData.parties);
 
     const contract = await this.prisma.client.contract.create({
       data: {

@@ -99,7 +99,13 @@ beforeEach(() => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const { pathname } = new URL(url, "http://localhost");
       if (pathname.endsWith(`/crm/businesses/${BIZ}/custom-field-definitions`)) return json(200, DEFINITIONS);
-      if (pathname.endsWith(`/contacts/${CONTACT_ID}/events`)) return json(200, served);
+      if (pathname.endsWith(`/contacts/${CONTACT_ID}/events`)) {
+        // As the server answers since FU-TIMELINE-EVENTS-PAGING (D-284): a paged read (the Timeline page's, since
+        // FU-TIMELINE-LOAD-OLDER) gets { events, nextCursor, hasMore }; the default read the plain array.
+        const q = new URL(url, "http://localhost").searchParams;
+        const paged = q.has("paged") || q.has("limit") || q.has("cursor");
+        return json(200, paged ? { events: served, nextCursor: null, hasMore: false } : served);
+      }
       return json(404, { message: "Not stubbed" });
     }),
   );

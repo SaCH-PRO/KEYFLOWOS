@@ -226,8 +226,16 @@ describe('CommandCenterKeyGenomeBridgeService', () => {
           module: 'operations',
           readinessScore: 80,
           missingFacts: [
-            { impact: 'BLOCKING', section: 'OPERATIONAL_MODEL', field: 'ops.sla' },
-            { impact: 'BLOCKING', section: 'BUSINESS_MODEL', field: 'model.revenue_model' },
+            { impact: 'BLOCKING', section: 'OPERATIONS_DELIVERY', domain: 'operations', field: 'ops.sla' },
+          ],
+        } as any,
+        // Mixed module requiring/missing a BUSINESS_MODEL money fact is withheld whole under P106 (D-234).
+        {
+          module: 'crm',
+          readinessScore: 40,
+          missingFacts: [
+            { impact: 'BLOCKING', section: 'OPERATIONS_DELIVERY', domain: 'operations', field: 'ops.intake' },
+            { impact: 'BLOCKING', section: 'BUSINESS_MODEL', domain: 'business_model', field: 'model.revenue_model' },
           ],
         } as any,
       ],
@@ -237,6 +245,7 @@ describe('CommandCenterKeyGenomeBridgeService', () => {
     expect(brief.domainHealth).toEqual({ operations_delivery: 65, marketing_growth: 80 });
     expect(brief.domainReadiness).toEqual({ operations_delivery: 65, marketing_growth: 80 });
     expect(brief.healthScore).toBe(73);
+    expect(brief.readinessScore).toBe(80);
     expect(brief.overallRiskLevel).toBe('UNKNOWN');
     expect(brief.confidenceScore).toBe(0);
     expect(brief.topOpportunities).toEqual([]);

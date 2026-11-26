@@ -9,7 +9,11 @@ export interface ToolParamSchema {
     type: string;
     description: string;
     enum?: string[];
-    items?: { type: string };
+    items?: {
+      type: string;
+      properties?: Record<string, { type: string; description?: string }>;
+      required?: string[];
+    };
   }>;
   required: string[];
   [key: string]: unknown;
@@ -1777,7 +1781,16 @@ export const FLOW_TOOLS: FlowTool[] = [
         items: {
           type: 'array',
           description: 'Invoice line items',
-          items: { type: 'object' },
+          items: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', description: 'Line item description' },
+              quantity: { type: 'number', description: 'Line quantity (up to 2 decimal places; whole units required for stock-tracked products)' },
+              unitPrice: { type: 'number', description: 'Unit price' },
+              productId: { type: 'string', description: 'Optional catalog product ID' },
+            },
+            required: ['description', 'quantity', 'unitPrice'],
+          },
         },
         currency: { type: 'string', description: 'Currency code (default TTD)' },
         dueDate: { type: 'string', description: 'Due date in ISO format' },
@@ -1860,7 +1873,16 @@ export const FLOW_TOOLS: FlowTool[] = [
         items: {
           type: 'array',
           description: 'Quote line items',
-          items: { type: 'object' },
+          items: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', description: 'Line item description' },
+              quantity: { type: 'number', description: 'Line quantity (up to 2 decimal places; whole units required for stock-tracked products)' },
+              unitPrice: { type: 'number', description: 'Unit price' },
+              productId: { type: 'string', description: 'Optional catalog product ID' },
+            },
+            required: ['description', 'quantity', 'unitPrice'],
+          },
         },
         currency: { type: 'string', description: 'Currency code (default TTD)' },
         expiryDate: { type: 'string', description: 'Expiry date in ISO format' },

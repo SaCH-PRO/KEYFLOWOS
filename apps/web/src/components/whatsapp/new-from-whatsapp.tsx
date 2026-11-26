@@ -61,11 +61,11 @@ export function mayCaptureFromWhatsApp(levels: ModuleLevels): boolean {
 }
 
 /**
- * How New quote and New booking leave the sheet: a full page load, not router.push. RequireAuth
- * (components/require-auth.tsx) verifies again on every pathname change and shows its spinner in place of the whole
- * app shell, so a client navigation mounts the destination page twice: the first instance reads and strips the
- * one-shot ?contactId, and the second, mounted after the shell comes back, opens no form. A direct load mounts the
- * page once, after the check. An object so the unit tests can watch it.
+ * How New quote and New booking leave the sheet: a full page load. It was chosen because RequireAuth used to remount
+ * the app shell on every pathname change, so a client navigation mounted the destination page twice and the first
+ * instance stripped the one-shot ?contactId. Since FU-REQUIRE-AUTH-REMOUNT the shell stays mounted and router.push
+ * doors with that id work (a contact's Send quote uses one, FU-CONTACT-SEND-QUOTE-DOOR); the sheet keeps the full load,
+ * which also works. An object so the unit tests can watch it.
  */
 export const newFromWhatsAppNavigation = {
   assign(href: string): void {
