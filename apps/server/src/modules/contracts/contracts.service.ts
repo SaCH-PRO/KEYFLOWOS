@@ -107,7 +107,30 @@ export class ContractsService {
     return contract;
   }
 
+  private async assertPartyContactsInBusiness(
+    businessId: string,
+    parties?: Array<{ contactId?: string | null }>,
+  ): Promise<void> {
+    if (!parties?.length) return;
+    const contactIds = [
+      ...new Set(
+        parties
+          .map((p) => p.contactId)
+          .filter((id): id is string => id !== undefined && id !== null),
+      ),
+    ];
+    for (const contactId of contactIds) {
+      const contact = await this.prisma.client.contact.findFirst({
+        where: { id: contactId, businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!contact) throw new NotFoundException('Contact not found');
+    }
+  }
+
   async createContract(businessId: string, dto: CreateContractDto, userId?: string) {
+    await this.assertPartyContactsInBusiness(businessId, dto.parties);
+
     const contract = await this.prisma.client.$transaction(async (tx) => {
       const created = await tx.contract.create({
         data: {
@@ -172,6 +195,7 @@ export class ContractsService {
       include: { parties: true, tags: { select: { tagId: true } } },
     });
     if (!existing) throw new NotFoundException('Contract not found');
+    await this.assertPartyContactsInBusiness(businessId, dto.parties);
 
     const updated = await this.prisma.client.$transaction(async (tx) => {
       // Replace parties if supplied
@@ -389,6 +413,7 @@ export class ContractsService {
       include: { versions: { orderBy: { versionNumber: 'desc' }, take: 1 } },
     });
     if (!contract) throw new NotFoundException('Contract not found');
+    await this.assertPartyContactsInBusiness(businessId, data.parties);
 
     const nextVersion = (contract.versions[0]?.versionNumber ?? 0) + 1;
 

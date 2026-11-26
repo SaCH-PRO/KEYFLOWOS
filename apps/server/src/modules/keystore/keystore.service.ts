@@ -103,6 +103,18 @@ export class KeystoreService {
   // Orders (User)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  private async assertContactInBusiness(
+    businessId: string,
+    contactId: string | null | undefined,
+  ): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    const contact = await db.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   async createOrder(
     businessId: string,
     userId: string,
@@ -118,6 +130,8 @@ export class KeystoreService {
         `Pricing tier "${dto.pricingTier}" not found for this listing`,
       );
     }
+
+    await this.assertContactInBusiness(businessId, dto.contactId);
 
     // Calculate estimated price with addons
     let estimatedPrice = selectedTier.price;
