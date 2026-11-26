@@ -3745,3 +3745,33 @@ describe("CSC-73 adversarial shapes (each a credential write)", () => {
     });
   }
 });
+
+describe("CSC-74 (pins) round-13 rules a fail-closed '*' would otherwise hide", () => {
+  it("undefined as a whole key is the key undefined (N2)", () => {
+    expect(keysOf(scan("src/fixture-r13l.ts", 'localStorage.setItem(undefined, "1");'))).toEqual(["localStorage:undefined"]);
+  });
+  it("a real duplicate property: the last one wins (N8)", () => {
+    expect(keysOf(scan("src/fixture-r13m.ts", 'const K = { a: "kf_prefs", a: "kf_x_token" };\nlocalStorage.setItem(K.a, "1");'))).toEqual(["localStorage:kf_x_token"]);
+  });
+  it("a wrapper's cookie template naming valueOf does not throw (N12, literalValue bindings)", () => {
+    const fixture = 'function w(name: string, value: string) { document.cookie = `${name}=${valueOf}`; }\nw("kf_a", "1");';
+    expect(() => scan("src/fixture-r13n.ts", fixture)).not.toThrow();
+  });
+  it("the innermost function that holds the write, not a nested one declared before it (N14)", () => {
+    const fixture = 'function b(k: string) {\n  function c(k: string) { return k; }\n  c("kf_x_token");\n  localStorage.setItem(k, "1");\n}\nb("kf_view");';
+    const ws = scan("src/fixture-r13o.ts", fixture);
+    expect(keysOf(ws)).toEqual(["localStorage:kf_view"]);
+    expect(ws.filter(isCredential)).toEqual([]);
+  });
+  it("a parameter with no callers takes * even beside a plain fallback (N17)", () => {
+    expect(credIn("src/fixture-r13p.ts", 'function s(k: string) { localStorage.setItem(k || "kf_view", "1"); }', "localStorage").length).toBe(1);
+  });
+  for (const [name, fixture] of [
+    ["a rest parameter returned", 'function mk(...k: string[]) { return k; }\nlocalStorage.setItem(mk("kf_view") as unknown as string, "1");'],
+    ["a parameter reassigned before it is returned", 'function mk(k: string) { k = "kf_x_token"; return k; }\nlocalStorage.setItem(mk("kf_view"), "1");'],
+  ]) {
+    it(`${name}: not bound to the call's argument (N19)`, () => {
+      expect(credIn("src/fixture-r13q.ts", fixture, "localStorage").length).toBe(1);
+    });
+  }
+});
