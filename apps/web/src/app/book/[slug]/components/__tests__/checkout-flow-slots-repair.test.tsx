@@ -71,7 +71,9 @@ function renderToSchedule(onSubmit: ReturnType<typeof vi.fn>) {
 
 const slotCalls = () => apiGet.mock.calls.map(([p]) => String(p)).filter((p) => p.startsWith(SLOTS_ROUTE));
 
-beforeEach(() => apiGet.mockReset());
+beforeEach(() => {
+  apiGet.mockReset();
+});
 afterEach(() => {
   cleanup();
   try { window.localStorage.clear(); } catch { /* best-effort */ }
