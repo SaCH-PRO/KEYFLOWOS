@@ -403,35 +403,45 @@ describe('P120 / V1-85 FU-MARKETPLACE-PAID-PAYMENT-ROW (D-249 / D-75 / D-14)', (
       include: { items: true },
     });
 
-    const origTx = prismaService.client.$transaction.bind(prismaService.client);
-    const txSpy = vi.spyOn(prismaService.client, '$transaction').mockImplementation((async (fn: any, opts?: any) => {
-      if (typeof fn !== 'function') return origTx(fn, opts);
-      return origTx(async (tx: any) => {
-        const proxiedTx = new Proxy(tx, {
-          get(target, prop) {
-            if (prop === 'payment') {
-              return new Proxy(target.payment, {
-                get(pTarget, pProp) {
-                  if (pProp === 'create') {
-                    return () => Promise.reject(new Error('simulated payment insert failure'));
+    const realPrisma = integration.prisma;
+    const origTx = realPrisma.client.$transaction.bind(realPrisma.client);
+    const wrappedClient = new Proxy(realPrisma.client, {
+      get(cTarget, cProp) {
+        if (cProp === '$transaction') {
+          return async (fn: any, opts?: any) => {
+            if (typeof fn !== 'function') return origTx(fn, opts);
+            return origTx(async (tx: any) => {
+              const proxiedTx = new Proxy(tx, {
+                get(target, prop) {
+                  if (prop === 'payment') {
+                    return new Proxy(target.payment, {
+                      get(pTarget, pProp) {
+                        if (pProp === 'create') {
+                          return () => Promise.reject(new Error('simulated payment insert failure'));
+                        }
+                        const val = Reflect.get(pTarget, pProp);
+                        return typeof val === 'function' ? val.bind(pTarget) : val;
+                      },
+                    });
                   }
-                  const val = Reflect.get(pTarget, pProp);
-                  return typeof val === 'function' ? val.bind(pTarget) : val;
+                  const val = Reflect.get(target, prop);
+                  return typeof val === 'function' ? val.bind(target) : val;
                 },
               });
-            }
-            const val = Reflect.get(target, prop);
-            return typeof val === 'function' ? val.bind(target) : val;
-          },
-        });
-        return fn(proxiedTx);
-      }, opts);
-    }) as any);
+              return fn(proxiedTx);
+            }, opts);
+          };
+        }
+        const val = Reflect.get(cTarget, cProp, cTarget);
+        return typeof val === 'function' ? val.bind(cTarget) : val;
+      },
+    });
+    integration.prisma = { client: wrappedClient };
 
     try {
       await integration.handleOrderPaid({ order: atomicOrder, businessId: ID.bizA });
     } finally {
-      txSpy.mockRestore();
+      integration.prisma = realPrisma;
     }
 
     const atomicInvoices = await db.invoice.findMany({
