@@ -77,7 +77,6 @@ vi.mock("@/hooks/use-module-events", () => ({ useModuleEmit: () => emit }));
 vi.mock("sonner", () => ({ toast }));
 
 import { useStoreData } from "../use-store-data";
-import { DEFAULT_HOURS } from "../../components/hours-editor";
 
 const product = (biz: string, n = 1) => ({ id: `p_${biz}_${n}`, name: `Item ${n} of ${biz}`, price: 5, currency: "TTD", category: "PRODUCT", isActive: true });
 const graphOf = (biz: string, live: string[] = []) => ({
@@ -93,8 +92,6 @@ let productsOf: Record<string, unknown[]>;
 let graphReadOf: Record<string, () => Promise<Res<unknown>>>;
 let bizReadOf: Record<string, () => Promise<Res<unknown>>>;
 let servicesReadOf: Record<string, () => Promise<Res<unknown>>>;
-
-const writesTo = (fn: ReturnType<typeof vi.fn>, biz: string) => fn.mock.calls.filter((c) => JSON.stringify(c).includes(biz));
 
 beforeEach(() => {
   ws.businessId = A;
@@ -155,25 +152,6 @@ async function loadA(): Promise<Hook> {
   return hook;
 }
 
-function selectB(how: "event" | "storage") {
-  act(() => {
-    ws.businessId = B;
-    if (how === "event") window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: B } }));
-    else window.dispatchEvent(new StorageEvent("storage", { key: "kf_business_id", newValue: B }));
-  });
-}
-
-async function bLanded(hook: Hook) {
-  await waitFor(() => expect(hook.result.current.businessData?.name).toBe("Shop B"));
-  await waitFor(() => expect(hook.result.current.loading).toBe(false));
-  await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-}
-
-
-const graphWithDrift = (biz: string, pid: string) => ({
-  mappings: [{ productId: pid, productName: pid, serviceName: pid, serviceId: `svc_${pid}`, isLive: true, priceDrift: true, durationDrift: false, commercePrice: 9, commerceDuration: null }],
-  liveCount: 1, draftCount: 0, driftCount: 1, totalProducts: 1,
-});
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 
 const graphReadsFor = (biz: string) => client.fetchStoreGraph.mock.calls.filter((c) => c[0] === biz).length;

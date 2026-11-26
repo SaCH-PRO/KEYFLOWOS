@@ -46,7 +46,6 @@ import { useProducts } from "../use-products";
 import type { Product } from "@/lib/client";
 
 const productOfA = { id: "p_A_1", name: "Pepper sauce", price: 45, currency: "TTD", category: "PRODUCT", isActive: false } as unknown as Product;
-const formOf = { name: "Pepper sauce", description: "", price: "50", category: "PRODUCT" as const, duration: "", imageUrl: "", sku: "", isActive: true };
 
 let setProducts: ReturnType<typeof vi.fn>;
 

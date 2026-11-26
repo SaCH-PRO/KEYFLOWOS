@@ -3,9 +3,9 @@
  * another tab's localStorage.clear() sends: the page then shows the business now stored. No test held that branch.
  * The harness is products-page-review-r4.test.tsx's.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor, within, act } from "@testing-library/react";
+import { render, screen, waitFor, within, act } from "@testing-library/react";
 
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPatch: vi.fn(), apiDelete: vi.fn() }));
 const nav = vi.hoisted(() => ({ search: "" }));
