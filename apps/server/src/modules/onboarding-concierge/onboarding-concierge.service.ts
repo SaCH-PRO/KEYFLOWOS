@@ -1280,16 +1280,17 @@ EXTRACTED: archetype=service_provider`;
       });
       if (claim.count === 0) return null;
 
-      const seeded = await this.demoSeeder.seedDemoData(businessId, tx);
+      // D-157 (DEMO-PREVIEW): onboarding completion writes zero demo rows into
+      // the live workspace. Explicit POST .../seed-demo remains available.
       await this.awardSetupMilestone(businessId, 'onboardingComplete', tx);
       const disclaimerAcceptedAt = await this.ensureLegalDisclaimerAccepted(businessId, tx);
-      await this.recordCompletionActivity(tx, businessId, actorId, seeded, disclaimerAcceptedAt);
+      await this.recordCompletionActivity(tx, businessId, actorId, null, disclaimerAcceptedAt);
 
-      return { demoData: seeded };
+      return { demoData: null };
     });
 
     if (!completion) return { complete: true, alreadyComplete: true };
-    return { complete: true, demoData: completion.demoData, genomeRecommendation };
+    return { complete: true, demoData: null, genomeRecommendation };
   }
 
   /**

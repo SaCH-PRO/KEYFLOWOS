@@ -20,7 +20,7 @@
     "a fresh owner completes onboarding with the minimal profile and no AI (D-03) POST /complete succeeds (201 {complete: true}) with the three-pillar score below the minimum",
     "a fresh owner completes onboarding with the minimal profile and no AI (D-03) the three-pillar score is reported as a recommendation, not a gate",
     "a fresh owner completes onboarding with the minimal profile and no AI (D-03) onboardingComplete is true and the onboarding state reports complete",
-    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) LEDGER: completion wrote exactly one demo contact and one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) LEDGER: completion wrote zero demo contacts, zero invoices, and no FinancialTransaction or LedgerEntry (D-157)",
     "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: completion and the legal disclaimer acceptance are recorded against the owner in team_activity_logs",
     "a fresh owner completes onboarding with the minimal profile and no AI (D-03) a second /complete answers alreadyComplete and writes nothing more",
     "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: on a completed business, a STAFF member is still refused (authority is checked before the replay)",
@@ -40,7 +40,7 @@
     "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) an ADMIN granted settings:write sending {onboardingComplete: true} with a profile field gets 403; the Business row is unchanged and the genome gate input stays unset",
     "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) the owner's PATCH of a profile field still applies (200); an onboardingComplete: true beside it is dropped and the genome gate input stays unset",
     "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) on the business the owner completed, no one's {onboardingComplete: false} un-completes it (403 for STAFF and the settings:write ADMIN, dropped for the owner), so /complete does not run again",
-    "R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes once three simultaneous /complete calls: all answer complete, exactly one is not alreadyComplete, and one onboarding_completed row, one disclaimer acceptance and one demo seed are written",
+    "R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes once three simultaneous /complete calls: all answer complete, exactly one is not alreadyComplete, and one onboarding_completed row, one disclaimer acceptance and zero demo rows are written (D-157)",
     "characterization — the non-AI genome editor path (PATCH /blueprint) after PATCH /blueprint with founder, business and market fields, /complete succeeds and no AI was used"
   ]
 }
