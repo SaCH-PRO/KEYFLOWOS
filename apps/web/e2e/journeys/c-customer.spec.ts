@@ -59,6 +59,24 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  * down (1440x900). C7 (CSV import, tags, trash and Undo) passes.
  */
 
+/**
+ * C6's whole-word detector (FU-CONTACT-PAGES-RAW-STATUS): the stored one-word and snake codes the customer's pages
+ * read (packages/db InvoiceStatus, QuoteStatus, BookingStatus; the contact statuses; task priorities). Matched case
+ * sensitively as whole words, so "Lead" or "High" in a sentence is not a finding and "LEAD" is.
+ */
+const STORED_CODES = [
+  "DRAFT", "SENT", "VIEWED", "PAID", "PARTIALLY_PAID", "PARTIAL", "OVERDUE", "VOID", "FAILED", "PENDING",
+  "FULLY_CREDITED", "PARTIALLY_CREDITED", "ACCEPTED", "REJECTED", "EXPIRED", "INVOICED", "CONVERTED",
+  "CONFIRMED", "UNCONFIRMED", "CANCELLED", "COMPLETED", "NO_SHOW",
+  "LEAD", "PROSPECT", "CLIENT", "LOST",
+  "HIGH", "NORMAL", "MEDIUM", "LOW", "URGENT",
+];
+const STORED_WORD = new RegExp(`\\b(${STORED_CODES.join("|")})\\b`, "g");
+/** The same codes in lower case, as the whole text of one element (a badge). */
+const LOWER_CODES = new Set(STORED_CODES.map((c) => c.toLowerCase()));
+/** A lower-case event code: "invoice.paid", "payment.received", "recurring_invoice.generated". */
+const LOWER_EVENT_CODE = /\b(invoice|payment|quote|booking|note|contact|task|recurring_invoice)\.[a-z_]+\b/g;
+
 const auth = (t: Tenant) => ({ Authorization: `Bearer ${t.token}` });
 
 async function api<T = Record<string, unknown>>(
@@ -387,6 +405,27 @@ test.describe("journey C: one customer record", () => {
     const last = `Plain${stamp()}`;
     const contact = await seedContact(request, owner, "Jade", last);
     await api(request, owner, "POST", `/crm/businesses/${owner.businessId}/contacts/${contact.id}/notes`, { body: "Prefers mornings" });
+    // FU-CONTACT-PAGES-RAW-STATUS (CDC-4): a note alone reaches none of the stored statuses the other tabs print.
+    // A part-paid invoice, a quote, a no-show booking and a high-priority task do (the contact itself is a LEAD).
+    const invoice = await seedSentInvoice(request, owner, contact.id, "Plain words line");
+    await api(request, owner, "POST", `/commerce/businesses/${owner.businessId}/invoices/${invoice.id}/payments`, { amount: 50, method: "Cash", idempotencyKey: `${last}-part` });
+    await api(request, owner, "POST", `/commerce/businesses/${owner.businessId}/quotes`, { contactId: contact.id, currency: owner.currency, items: [{ description: "Plain words quote", quantity: 1, unitPrice: 90 }] });
+    await api(request, owner, "POST", `/crm/businesses/${owner.businessId}/contacts/${contact.id}/tasks`, { title: "Plain words task", priority: "HIGH" });
+    const staff = await api<{ id: string }>(request, owner, "POST", `/bookings/businesses/${owner.businessId}/staff`, { name: `Stylist ${stamp()}` });
+    const service = await api<{ id: string }>(request, owner, "POST", `/bookings/businesses/${owner.businessId}/services`, { name: `Trim for Jade ${stamp()}`, duration: 60, price: 250, currency: owner.currency });
+    const start = new Date(Date.now() + 2 * 86_400_000);
+    start.setUTCHours(14, 0, 0, 0);
+    const booking = await api<{ id: string }>(request, owner, "POST", `/bookings/businesses/${owner.businessId}`, {
+      contactId: contact.id,
+      serviceId: service.id,
+      staffId: staff.id,
+      startTime: start.toISOString(),
+      endTime: new Date(start.getTime() + 3_600_000).toISOString(),
+    });
+    await api(request, owner, "POST", `/bookings/businesses/${owner.businessId}/bookings/${booking.id}/status`, { status: "NO_SHOW", cancelledBy: "BUSINESS" });
+    const stored = await api<{ data?: Array<{ id: string; status: string }> }>(request, owner, "GET", `/commerce/businesses/${owner.businessId}/invoices?contactId=${contact.id}`);
+    expect((stored.data ?? []).find((i) => i.id === invoice.id)?.status, "the seeded invoice is part-paid").toMatch(/^PARTIAL(LY_PAID)?$/);
+
     await page.goto(`/app/crm/contacts/${contact.id}/overview`);
     await expect(page.getByRole("heading", { level: 1, name: `Jade ${last}` })).toBeVisible();
     const hrefs = await page
@@ -399,6 +438,15 @@ test.describe("journey C: one customer record", () => {
       const text = await page.locator("body").innerText();
       for (const m of text.match(/\b[A-Z][a-z]+\.[A-Z][a-z]+\b/g) ?? []) findings.push(`${href}: event code "${m}"`);
       for (const m of text.match(/\b[A-Z]+_[A-Z_]+\b/g) ?? []) findings.push(`${href}: stored value "${m}"`);
+      // A one-word stored code (LEAD, SENT, HIGH) has no underscore for the detector above to see.
+      for (const m of text.match(STORED_WORD) ?? []) findings.push(`${href}: stored value "${m}"`);
+      for (const m of text.match(LOWER_EVENT_CODE) ?? []) findings.push(`${href}: event code "${m}"`);
+      // A lower-case code printed as a badge of its own ("high", "pending").
+      const leaves = await page.locator("body *").evaluateAll((els) =>
+        // HTML elements only: an icon's SVG parts have no innerText.
+        els.filter((e): e is HTMLElement => e instanceof HTMLElement && e.children.length === 0 && e.offsetParent !== null).map((e) => e.innerText.trim()),
+      );
+      for (const leaf of leaves) if (LOWER_CODES.has(leaf)) findings.push(`${href}: stored value "${leaf}"`);
       if (text.includes(contact.id)) findings.push(`${href}: the contact's id is on screen`);
     }
     expect([...new Set(findings)], "raw labels on the customer's pages").toEqual([]);
