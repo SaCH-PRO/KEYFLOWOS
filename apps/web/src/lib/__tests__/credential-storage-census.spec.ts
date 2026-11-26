@@ -1327,3 +1327,115 @@ describe("CSC-18 a match inside a comment is not a write", () => {
     expect(compare(ws, []).unregistered).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------- repair round 3 */
+
+/**
+ * Repair round 3 (security review REJECT, CSC-A1 MAJOR; minors CSC-A2..A5). Each case plants a sample the round-2
+ * scanner (2f1399c) gets wrong.
+ *
+ *   CSC-19 (CSC-A1) a "/*" or "//" that is not a comment (in a string, a template, a regex literal or JSX text) does
+ *          not hide the writes after it; a real comment still does (sw.js:265).
+ *   CSC-20 (CSC-A2) Cache Storage receivers bound by .then(function (cache) …), self.caches.open,
+ *          (await caches.open(N)).put(…) and a later assignment `cache = await caches.open(N)`.
+ *   CSC-21 (CSC-A3) IndexedDB: a cursor named `cur`, .objectStore(name()).put(…), and a parameter typed IDBObjectStore.
+ *   CSC-22 (CSC-A4) a yoda https-only Secure ternary is recorded as secure-on-https, not as garbage attributes.
+ *   CSC-23 (CSC-A5) a private, signing or access key in the value is a credential write.
+ */
+describe("CSC-19 only a real comment hides a write", () => {
+  const cases: Array<[string, string[]]> = [
+    ["accept=\"image/*\" in JSX", [`export const F = () => <input type="file" accept="image/*" />;`, `export const save = (t: string) => localStorage.setItem("kf_a1_token", t);`]],
+    ["a \"/api/*\" string", [`const ROUTES = ["/api/*"];`, `export const save = (t: string) => localStorage.setItem("kf_a1_token", t);`]],
+    ["a regex literal with /*", [`export const trim = (u: string) => u.replace(/\\/*$/, "");`, `export const save = (t: string) => localStorage.setItem("kf_a1_token", t);`]],
+    ["a closed doc comment, then \"text/*\"", [`/* doc */`, `const H = { Accept: "text/*" };`, `export const save = (t: string) => localStorage.setItem("kf_a1_token", t);`]],
+    ["a regex with // before the write on its line", [`export const save = (u: string, t: string) => /^https?:\\/\\//.test(u) && localStorage.setItem("kf_a1_token", t);`]],
+    ["a template line with http://", [`const msg = \`see`, `http://example.test \${1}\`; localStorage.setItem("kf_a1_token", t);`]],
+    ["JSX text with https://", [`export const P = ({ t }: { t: string }) => (`, `  <p>Visit https://example.test <button onClick={() => localStorage.setItem("kf_a1_token", t)} /></p>`, `);`]],
+  ];
+  for (const [name, lines] of cases) {
+    it(`a write after ${name} is found`, () => {
+      const keys = keysOf(scan("src/fixture-a1.tsx", lines.join("\n")));
+      expect(keys).toContain("localStorage:kf_a1_token");
+    });
+  }
+
+  it("a write inside a real block or line comment is still not counted", () => {
+    const fixture = [
+      `/* localStorage.setItem("kf_c1_token", t); */`,
+      `// localStorage.setItem("kf_c2_token", t);`,
+      `const x = 1; // localStorage.setItem("kf_c3_token", t);`,
+      `export const P = () => <div>{/* localStorage.setItem("kf_c4_token", t) */}</div>;`,
+      `localStorage.setItem("kf_c5_token", t);`,
+    ].join("\n");
+    expect(keysOf(scan("src/fixture-c.tsx", fixture))).toEqual(["localStorage:kf_c5_token"]);
+  });
+
+  it("the census still excludes sw.js:265 (a true comment)", () => {
+    expect(census().some((w) => w.file === "public/sw.js" && w.line === 265)).toBe(false);
+  });
+});
+
+describe("CSC-20 more Cache Storage receivers", () => {
+  const fixture = [
+    `async function f(request, token) {`,
+    `  caches.open("kf-fn-cache").then(function (cache) {`,
+    `    cache.put(request, new Response(token));`,
+    `  });`,
+    `  const sc = await self.caches.open("kf-self-cache");`,
+    `  sc.put(request, new Response(token));`,
+    `  (await caches.open("kf-inline-cache")).put(request, new Response(token));`,
+    `  let later;`,
+    `  later = await caches.open("kf-later-cache");`,
+    `  later.put(request, new Response(token));`,
+    `}`,
+  ].join("\n");
+  const { unregistered } = compare(scan("public/fixture-a2.js", fixture), []);
+
+  for (const name of ["kf-fn-cache", "kf-self-cache", "kf-inline-cache", "kf-later-cache"]) {
+    it(`${name}: a token put is a credential write`, () => {
+      expect(unregistered.some((u) => u.startsWith(`cacheStorage ${name} @`))).toBe(true);
+    });
+  }
+});
+
+describe("CSC-21 more IndexedDB writes", () => {
+  const fixture = [
+    `export function f(tx: IDBTransaction, cur: IDBCursorWithValue, s: IDBObjectStore, token: string) {`,
+    `  cur.update({ token });`,
+    `  tx.objectStore(storeName()).put({ token });`,
+    `  s.put({ token });`,
+    `}`,
+  ].join("\n");
+  const ws = scan("src/fixture-a3.ts", fixture).filter((w) => w.store === "indexedDB" && isCredential(w));
+
+  it("finds the three credential writes", () => {
+    expect(ws.map((w) => w.line).sort()).toEqual([2, 3, 4]);
+  });
+});
+
+describe("CSC-22 a yoda Secure ternary", () => {
+  it("is recorded as secure-on-https", () => {
+    const fixture = `export const w = (t: string) => { document.cookie = \`kf_yoda_token=\${t}; Path=/\${"https:" === location.protocol ? "; Secure" : ""}\`; };`;
+    expect(scan("src/fixture-a4.ts", fixture).find((w) => w.key === "kf_yoda_token")?.attrs).toEqual(["path=/", "secure-on-https"]);
+  });
+});
+
+describe("CSC-23 a private, signing or access key in the value", () => {
+  const fixture = [
+    `export function save(privateKey: string, signing_key: string, accessKey: string) {`,
+    `  localStorage.setItem("kf_k", privateKey);`,
+    `  localStorage.setItem("kf_k2", signing_key);`,
+    `  localStorage.setItem("kf_k3", accessKey);`,
+    `  localStorage.setItem("kf_k4", sortKey);`,
+    `}`,
+  ].join("\n");
+  const { unregistered } = compare(scan("src/fixture-a5.ts", fixture), []);
+
+  it("flags each", () => {
+    for (const k of ["kf_k", "kf_k2", "kf_k3"]) expect(unregistered.some((u) => u.startsWith(`localStorage ${k} @`)), k).toBe(true);
+  });
+
+  it("does not flag a plain key name", () => {
+    expect(unregistered.some((u) => u.startsWith("localStorage kf_k4 @"))).toBe(false);
+  });
+});
