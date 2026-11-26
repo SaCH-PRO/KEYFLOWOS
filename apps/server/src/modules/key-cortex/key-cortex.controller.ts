@@ -155,6 +155,10 @@ import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orch
 import { isFinancialProposal, proposalViewForReader, redactedProposalView } from '../business-genome/key-genome/genome-finance-scope';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import {
+  KeyCortexOperationalSelfModelService,
+  type OperationalSelfModel,
+} from './key-cortex-operational-self-model.service';
 
 /**
  * R0-07a / R0-34b (COST-LEDGER-001 section 7 item 7): the structured 503 an
@@ -1721,6 +1725,9 @@ export class KeyCortexController {
     // hence forwardRef. Optional only so the specs that build this controller for
     // other routes need not provide it: the route refuses (503) when it is absent.
     @Optional() @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomy?: AutonomyOrchestratorService,
+    // V1-63 (TOF-KEY-SELF-MODEL, D-129/D-141): appended last so specs with a
+    // positional design:paramtypes array stay valid; read only on owner-guarded GET context.
+    @Optional() @Inject(KeyCortexOperationalSelfModelService) private readonly operationalSelfModel?: KeyCortexOperationalSelfModelService,
   ) {}
 
   /* ================================================================== */
@@ -2688,9 +2695,11 @@ export class KeyCortexController {
   @UseGuards(CortexBusinessOwnerGuard)
   async getContext(
     @GuardedBusinessId() businessId: string,
+    @Req() req?: { user?: { id?: string } },
   ): Promise<{
     context: Record<string, unknown>;
     formatted: string;
+    selfModel?: OperationalSelfModel;
   }> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2699,8 +2708,15 @@ export class KeyCortexController {
     try {
       const context = await this.contextV2.getFullContext(businessId);
       const formatted = this.contextV2.formatContextForPrompt(context);
+      const selfModel = this.operationalSelfModel
+        ? await this.operationalSelfModel.build(businessId, req?.user?.id)
+        : undefined;
 
-      return { context: context as any, formatted };
+      return {
+        context: context as any,
+        formatted,
+        ...(selfModel ? { selfModel } : {}),
+      };
     } catch (err: any) {
       this.logger.error(`Context error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to assemble business context');
