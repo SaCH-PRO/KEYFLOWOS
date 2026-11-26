@@ -1500,6 +1500,11 @@
       "prefix": "v72t_",
       "owner": "apps/server/test/token-encryption-key-census.integration.test.ts",
       "packet": "V1-72 (RR-DB-CRYPTO-KEY-CENSUS)"
+    },
+    {
+      "prefix": "v72b_",
+      "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
     }
   ],
   "pendingRenames": [],
