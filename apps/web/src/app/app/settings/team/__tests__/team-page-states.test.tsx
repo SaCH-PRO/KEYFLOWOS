@@ -163,6 +163,8 @@ describe("SWP-TEAM-WEB: a refused or failed team read (BUG-063, journey J6)", ()
     api.apiGet.mockResolvedValue({ data: null, error: "Internal server error", status: 500 });
     await renderAs(OWNER_ID);
     await waitFor(() => expect(screen.getByText(/couldn't load your team/i)).toBeTruthy());
+    // COR-TW-1: a failed load is not a refusal.
+    expect(screen.queryByText(/no access/i), "a 500 shown as No access").toBeNull();
     expect(screen.queryByText(/^\d+ (owner|admin|staff)$/), "the failed read shown as counts").toBeNull();
     expect(screen.queryByText(/no team members yet/i), "the failed read shown as an empty team").toBeNull();
     expect(screen.queryByRole("button", { name: /^Invite$/ })).toBeNull();
@@ -309,5 +311,116 @@ describe("SWP-TEAM-WEB: members from the old 11-item form (legacyaccess, D-179)"
     const row = await rowOf("usr_tps_chosen");
     expect(within(row).queryByText(/Analytics and Operations: No access/i)).toBeNull();
     expect(within(row).queryByRole("button", { name: /grant analytics and operations/i })).toBeNull();
+  });
+});
+
+/**
+ * Repair round 1 (the orchestrator's reviews of 0705bb0d):
+ *   TPR-01  SEC-TW-M1: a viewer whose own row holds team read (not write) is not offered Invite or the presets (the
+ *           server refuses the invite 403); team write and the owner are; a viewer the page cannot find in the list
+ *           keeps the form (the server is the authority there, as R0-ID-UX-T07 relies on)
+ *   TPR-02  SEC-TW-M2 / COR-TW-3: the legacy row is exactly the old 11-item form's shape: all eleven of its modules
+ *           named and both analytics and operations absent. Not an empty array or object, not a map missing only one
+ *           of the two, and never the OWNER's row
+ *   TPR-03  COR-TW-2: an invite with edited scopes is followed by an untouched one that sends the role defaults
+ *   TPR-04  COR-TW-4: a reload that fails after a good first load keeps the team on screen and says so, with Try again
+ */
+describe("SWP-TEAM-WEB repair 1", () => {
+  const legacyStaffScopes = () =>
+    Object.fromEntries(LEGACY_FORM_MODULES.map((m) => [m, ROLE_DEFAULT_SCOPES.STAFF[m as keyof typeof ROLE_DEFAULT_SCOPES.STAFF]]));
+  const rowOf = async (userId: string) => {
+    const row = rowAround(await screen.findByText(`${userId}@example.com`));
+    expect(row, "the member row").not.toBeNull();
+    return row!;
+  };
+
+  it("TPR-01 SEC-TW-M1: team read without write is not offered Invite; team write and the owner are", async () => {
+    const viewer = member("usr_tpr_reader", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF, team: "read" }, 0);
+    serveTeam([owner(), viewer]);
+    await renderAs("usr_tpr_reader");
+    await screen.findByText("usr_tpr_reader@example.com");
+    expect(screen.queryByRole("button", { name: /^Invite$/ }), "Invite for team read").toBeNull();
+    expect(screen.queryByLabelText("Team member email")).toBeNull();
+    cleanup();
+
+    serveTeam([owner(), member("usr_tpr_writer", "ADMIN", { ...ROLE_DEFAULT_SCOPES.ADMIN }, 3)]);
+    await renderAs("usr_tpr_writer");
+    expect(await screen.findByRole("button", { name: /^Invite$/ }), "Invite for team write").toBeTruthy();
+    cleanup();
+
+    serveTeam([owner()]);
+    await renderAs(OWNER_ID);
+    expect(await screen.findByRole("button", { name: /^Invite$/ }), "Invite for the owner").toBeTruthy();
+    cleanup();
+
+    serveTeam([owner()]);
+    await renderAs("usr_tpr_not_listed");
+    expect(await screen.findByRole("button", { name: /^Invite$/ }), "Invite for a viewer the page cannot find").toBeTruthy();
+  });
+
+  it("TPR-02 SEC-TW-M2 / COR-TW-3: only the old form's exact shape is a legacy row, never the owner's", async () => {
+    const { analytics: _a, ...withoutAnalytics } = { ...ROLE_DEFAULT_SCOPES.STAFF };
+    const { operations: _o, ...withoutOperations } = { ...ROLE_DEFAULT_SCOPES.STAFF };
+    void _a;
+    void _o;
+    const cases: Array<[string, string, unknown, boolean]> = [
+      ["the old 11-item form", "STAFF", legacyStaffScopes(), true],
+      ["an empty array", "STAFF", [], false],
+      ["an empty map", "STAFF", {}, false],
+      ["analytics missing, operations named", "STAFF", withoutAnalytics, false],
+      ["operations missing, analytics named", "STAFF", withoutOperations, false],
+      ["eight of the old form's modules", "STAFF", Object.fromEntries(Object.entries(legacyStaffScopes()).slice(0, 8)), false],
+    ];
+    const wrong: string[] = [];
+    for (const [name, role, scopes, legacy] of cases) {
+      const id = `usr_tpr_${name.replace(/[^a-z0-9]+/gi, "_")}`;
+      serveTeam([owner(), member(id, role, scopes as Record<string, string>, 0)]);
+      await renderAs(OWNER_ID);
+      const row = await rowOf(id);
+      const shown = !!within(row).queryByText(/Analytics and Operations: No access/i);
+      if (shown !== legacy) wrong.push(`${name}: ${shown ? "shown" : "not shown"}`);
+      cleanup();
+    }
+    expect(wrong, "rows marked legacy the wrong way").toEqual([]);
+
+    // The OWNER's own row, even with the old form's map, has nothing to grant (the owner holds every module).
+    serveTeam([member(OWNER_ID, "OWNER", legacyStaffScopes(), 4), member("usr_tpr_other", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0)]);
+    await renderAs(OWNER_ID);
+    await rowOf("usr_tpr_other");
+    expect(screen.queryByText(/Analytics and Operations: No access/i), "the owner's row marked legacy").toBeNull();
+  });
+
+  it("TPR-03 COR-TW-2: after an invite with edited scopes, an untouched invite sends the Staff defaults", async () => {
+    serveTeam([owner()]);
+    await renderAs(OWNER_ID);
+    await openInviteForm();
+    fireEvent.click(screen.getByRole("button", { name: "Set permissions & approval tier" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set Analytics to none" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set CRM / Clients to write" }));
+    const edited = await sendInvite("ade@example.com");
+    expect(edited.scopes).toEqual({ ...ROLE_DEFAULT_SCOPES.STAFF, analytics: "none", crm: "write" });
+    const next = await sendInvite("bea@example.com");
+    expect(next.role).toBe("STAFF");
+    expect(next.scopes, "the untouched invite after an edited one").toEqual(ROLE_DEFAULT_SCOPES.STAFF);
+  });
+
+  it("TPR-04 COR-TW-4: a failed reload keeps the team on screen, says so, and Try again reloads it", async () => {
+    serveTeam([owner(), member("usr_tpr_kept", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0)]);
+    await renderAs(OWNER_ID);
+    await screen.findByText("usr_tpr_kept@example.com");
+    const good = api.apiGet.getMockImplementation();
+    api.apiGet.mockResolvedValue({ data: null, error: "Bad gateway", status: 502 });
+    await openInviteForm();
+    await sendInvite("cara@example.com");
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent ?? "").toMatch(/couldn't load your team/i);
+    expect(screen.getByText("usr_tpr_kept@example.com"), "the team kept on screen").toBeTruthy();
+    expect(screen.getByLabelText("Team member email"), "the invite form kept on screen").toBeTruthy();
+
+    serveTeam([owner(), member("usr_tpr_kept", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0), member("usr_tpr_cara", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0)]);
+    void good;
+    fireEvent.click(within(notice).getByRole("button", { name: /try again/i }));
+    await screen.findByText("usr_tpr_cara@example.com");
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 });
