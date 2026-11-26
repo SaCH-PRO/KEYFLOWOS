@@ -1633,3 +1633,45 @@ describe("CSC-27 only the Headers tuple shape is a Set-Cookie write", () => {
     ]);
   });
 });
+
+/* ------------------------------------------------------- repair round 4 */
+
+/**
+ * Repair round 4 (security CSC-B1..B3, correctness CSC3-COR-1): JSX text is text, not code. The hand-written comment
+ * pass (b5a036f) does not parse JSX, so JSX text can open a comment that hides real writes.
+ *
+ *   CSC-28 JSX text holding " /*" with a later JSX comment in the file (CSC-B1), a lone backtick in JSX text (CSC-B2)
+ *          and JSX text holding " // " before code on the same line (CSC-B3) each hide nothing.
+ */
+describe("CSC-28 JSX text never opens a comment", () => {
+  const cases: Array<[string, string[]]> = [
+    [
+      'JSX text " /*" and a later JSX comment',
+      [
+        `export const F = ({ t }: { t: string }) => (`,
+        `  <div>`,
+        `    <p>Upload (paths like /* allowed)</p>`,
+        `    <button onClick={() => localStorage.setItem("kf_jx_token", t)} />`,
+        `    {/* a real comment */}`,
+        `  </div>`,
+        `);`,
+      ],
+    ],
+    [
+      "a lone backtick in JSX text, then a template holding ' // '",
+      [
+        `export const F = () => <p>Press \` to open the console</p>;`,
+        "const s = `a // b`; localStorage.setItem(\"kf_jx_token\", t);",
+      ],
+    ],
+    [
+      "JSX text ' // ' before code on the same line",
+      [`export const F = ({ t }: { t: string }) => <p>a // b <button onClick={() => localStorage.setItem("kf_jx_token", t)} /></p>;`],
+    ],
+  ];
+  for (const [name, lines] of cases) {
+    it(`a write after ${name} is found`, () => {
+      expect(keysOf(scan("src/fixture-jsx.tsx", lines.join("\n")))).toContain("localStorage:kf_jx_token");
+    });
+  }
+});
