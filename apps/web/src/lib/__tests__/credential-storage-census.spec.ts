@@ -42,20 +42,24 @@
  * string, a template, a regex literal or JSX text hides nothing.
  * A write that only clears (an empty value with Max-Age=0 / maxAge: 0) stores nothing and is not counted.
  *
- * Arguments are read across line breaks and comments, so a Prettier-shaped call (key on the next line) resolves.
- * The key is resolved from the source: string and template literals, numbers, `a + b`, a `const` in the same file
- * (inside templates too), a const imported one file away, and a same-file function returning a template. When the
- * key is a parameter of a wrapper function in the same file (presence-sdk.ts writeCookie), the wrapper's call sites
- * are resolved instead. A piece that cannot be resolved is `*`; a wholly unresolved key stays as its source text.
+ * Keys and names. Every key or name position (storage keys, cookieStore / response-cookie / document.cookie names,
+ * cache names, wrapper calls, string code) goes through one resolver, resolveKeySet (rounds 12-13), on the host
+ * file's AST: it either proves a finite set of runtime key strings or gives "*" for what it cannot prove, and a key
+ * holding "*" is a credential write (fail closed). See resolveKeySet for the rules: scope-correct identifiers (only an
+ * initialised const resolves; let / var / destructured / for / catch are "*"), parameters through their callers,
+ * defaults and "undefined" (plus "*" when the function can be called from elsewhere or reassigns them), ternaries,
+ * ||, ??, &&, +, templates, null / undefined as JS prints them, const-object members (last property wins) and enums,
+ * same-file function returns, capped at 64 candidates. An empty set is never "no write".
  *
- * A write is a CREDENTIAL write when the resolved key or the key's source text matches CREDENTIAL_PATTERN
- * (token, refresh, secret, session, auth, plus admin, verifier, password, jwt, bearer, credential, api key and sid),
- * when the VALUE's source text names a credential (VALUE_PATTERN: token, refresh, secret, session, auth, password,
- * bearer, jwt, credential, api key, verifier; through JSON.stringify(x) and a const one hop away), when an IndexedDB
- * or Cache Storage write keeps
- * request headers, and always for window.name. Every credential write must have exactly one REGISTRY row (store,
- * key, file) saying why it is there, and every row must still match a write. A new unregistered write fails CSC-02;
- * a stale row fails CSC-03. Every cookie row pins the attributes the source writes (CSC-12).
+ * A write is a CREDENTIAL write when a resolved key holds "*", when it or the key's source text matches
+ * CREDENTIAL_PATTERN (token, refresh, secret, session, auth, plus admin, verifier, password, jwt, bearer, credential,
+ * api key and sid), when the VALUE's source text names a credential (VALUE_PATTERN: token, refresh, secret, session,
+ * auth, password, bearer, jwt, credential, api / private / signing / access key, verifier; through JSON.stringify(x)
+ * and a const one hop away), when an IndexedDB or Cache Storage write keeps request headers, and always for
+ * window.name. Every credential write must have a REGISTRY row (store, key, file) saying why it is there, and every
+ * row must still match a write: a new unregistered write fails CSC-02, a stale row CSC-03. A row whose key holds "*"
+ * is also pinned to the key's and the value's source text of the write it was read for (CSC-71), so another write of
+ * that key shape in the file is unregistered. Every cookie row pins the attributes the source writes (CSC-12).
  *
  *   CSC-01 the scanner finds the writes it must (self-test on in-memory sources, including a new kf_new_token write).
  *   CSC-02 every credential write in the web app is registered.
@@ -67,34 +71,26 @@
  *          follow-up.
  *   CSC-06..12 repair round 1, CSC-13..17 repair round 2, below.
  *
- * Known gaps, recorded as follow-ups (security review CSC-SEC-5 and correctness review, repair round 2), not closed
- * here: a storage wrapper defined in another file (only same-file wrappers expand); a bracket write on an aliased
- * receiver (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `self.name` /
- * `globalThis.name`; a cookie string built up in a variable (`let c = …; c += …; document.cookie = c`); Dexie / idb
- * library databases (contacts-db.ts `new Dexie(name)`); the registry pins keys and cookie attributes, not values;
- * and, from the round-6 security review (CSC6-SEC-5): computed method names (`ls[m](k, v)`), `.call` / `.apply` /
- * `.bind` / `Reflect.apply` on a write, a destructured `setItem` (`const { setItem } = localStorage`), a comma call
- * (`(0, ls.setItem)(k, v)`), `document["cookie"] = …`, an aliased `document`, `Object.defineProperty` on a store,
- * arguments spread from a variable, tagged templates, a Headers tuple held in its own variable, `cache.add` /
- * `cache.addAll`, keys built at runtime, and `with` blocks; from the round-7 reviews (CSC7-SEC-4/5): code built by
- * concatenating strings, `new Function(args, body)` with its parameters as keys, srcDoc HTML, data: URLs, minified
- * dynamic code, comments inside string code, string code nested deeper than 3, a `d = document` alias, nested const
- * objects, a destructured jar and `globalThis.Cache` types; from round 8 (CSC8-SEC-3, FU-CENSUS-HARDENING): a
- * cookie set through ternaries reads as a clear (`document.cookie = \`kf_session=${on ? token : ""};
- * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0). Since round 12 every
- * KEY or NAME position (storage keys, cookieStore / response-cookie / document.cookie names, cache names, wrapper
- * calls, string code) goes through one structural resolver, resolveKeySet: ternaries, ||, ??, &&, +, templates,
- * parentheses, as / satisfies / ! / <T>x, consts at any depth, imported consts, wrapper and same-file callers'
- * arguments, const objects and enums, same-file function returns, capped at 64 candidates; any part it cannot
- * resolve is "*", and a key holding "*" is a credential write (fail closed). What still takes a ternary's first
- * resolvable branch: a cookie string's value and attributes (parseCookie, so the clear above), and a template
- * substitution in string code whose candidates are all plain (the first is spliced in; one naming a credential is
- * spliced in instead, and a "*" one fails closed). Values are classed on their full source text (VALUE_PATTERN), so
- * every branch of a value is seen; in the text scanner only (a file with parse errors), a
- * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
- * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
- * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
- * the AST too.
+ * Known gaps, recorded as follow-ups (FU-CENSUS-HARDENING), not closed here:
+ *   - receivers and channels: a storage wrapper defined in another file (only same-file wrappers and callers are
+ *     followed; an exported function's parameters do take "*"); a bracket write on an aliased receiver
+ *     (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `Object.defineProperty` on a store;
+ *     `self.name` / `globalThis.name` writes; computed method names (`ls[m](k, v)`); `.call` / `.apply` / `.bind` /
+ *     `Reflect.apply` on a write; a destructured `setItem`; a comma call (`(0, ls.setItem)(k, v)`); an aliased
+ *     `document` (`d = document`); a destructured jar; a Headers tuple held in its own variable; `cache.add` /
+ *     `cache.addAll`; `globalThis.Cache` types; `with` blocks; Dexie / idb library databases (contacts-db.ts
+ *     `new Dexie(name)`);
+ *   - cookie strings: a cookie built up in a variable (`let c = …; c += …; document.cookie = c`); a cookie string's
+ *     VALUE and ATTRIBUTES still take a ternary's first resolvable branch (parseCookie), so `document.cookie =
+ *     \`kf_session=${on ? token : ""}; Max-Age=${on ? age : 0}\`` reads as a clear (its NAME goes through the
+ *     resolver);
+ *   - string code: code built by concatenating strings, `new Function(args, body)` with its parameters as keys,
+ *     srcDoc HTML, data: URLs, minified dynamic code, comments inside string code, string code nested deeper than 3;
+ *   - values are classed by pattern on their source text (VALUE_PATTERN), not resolved: a credential reached only
+ *     through an opaque name in a value is not seen.
+ * Known false positives (fail closed): a string that only quotes a write counts as that write (CSC-47); in the text
+ * scanner only (a file with parse errors), a type literal `{ 'set-cookie': string }` reads as a response-cookie
+ * write named "*", which is now classed as a credential write (CSC-30 pins that the tree has no such file).
  *
  * Counting (CSC_DUMP=1 prints one line per write found, sorted by file, line, store and key): a write reached through a
  * wrapper is one line per call site,
@@ -142,6 +138,12 @@ interface RegistryRow {
   attrs?: string[];
   /** A credential store that is a known defect, reported as a follow-up and not fixed by this packet. */
   followUp?: string;
+  /**
+   * Rows whose key holds "*" (round 13): the key's and the value's source text of the write the row was read for, so
+   * another write of the same key shape in that file is unregistered (CSC-71).
+   */
+  keyExpr?: string;
+  valueExpr?: string;
 }
 
 const CREDENTIAL_PATTERN = /token|refresh|secret|session|auth|admin|verifier|password|passwd|jwt|bearer|credential|api[_-]?key|(?:^|[^a-z])sid(?:[^a-z]|$)/i;
@@ -182,26 +184,28 @@ const REGISTRY: RegistryRow[] = [
     key: "kf_pending_checkout_*",
     file: "src/app/book/[slug]/page.tsx",
     why: "Pending public checkout (bookings, order) kept for the return from payment; withoutTokenLinks drops the booking token links, so no credential is stored.",
+    keyExpr: "`kf_pending_checkout_${slug}`",
+    valueExpr: "JSON.stringify({\n            bookingResults: withoutTokenLinks(bookingRefs),\n            bookingReuseKey: reuseKey,\n            orderPayload,\n            orderNumber: storeOrder?.order?.orderNumber ?? null,\n            orderId: storeOrder?.order?.id ?? null,\n            orderTotal: storeOrder?.order?.total ?? cartTotal,\n            paymentMethod: paymentMethodUI,\n            shippingZoneId,\n            items: [...cart],\n            customerEmail: orderPayload?.customer?.email ?? null,\n            confirmedDetails: serviceDetails,\n          })",
   },
 
   // Keys with a runtime part (repair round 12): the key resolver cannot resolve the suffix (a business id, a slug,
   // a route), so the write fails closed and must be written down. Each was read: it holds UI state, not a credential.
-  { store: "localStorage", key: "kf_dunning_rules_*", file: "src/app/app/commerce/components/dunning-rules.tsx", why: "Dunning rule settings per business (JSON of the rules the owner set); the suffix is the business id." },
-  { store: "localStorage", key: "kf:morning-briefing:dismissed:*:*", file: "src/app/app/control-tower/components/morning-briefing.tsx", why: `Morning briefing dismissed flag ("1") per business and day.` },
-  { store: "localStorage", key: "kf-tower-pinned-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Pinned control-tower item ids per business." },
-  { store: "localStorage", key: "kf-tower-dismissed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Dismissed control-tower item ids and dates per business." },
-  { store: "localStorage", key: "kf-tower-snoozed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Snoozed control-tower item ids and wake times per business." },
-  { store: "localStorage", key: "kf_finance_banner_dismissed_*", file: "src/app/app/finance/components/finance-banner.tsx", why: `Finance banner dismissed flag ("1"); the suffix names the banner.` },
-  { store: "localStorage", key: "kf_default_destinations_*", file: "src/app/app/marketing/components/unified/channel-selector.tsx", why: "Default marketing destination ids per business." },
-  { store: "sessionStorage", key: "kf-genome-milestone-*-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `Business-genome milestone shown flag ("1") per business and threshold.` },
-  { store: "sessionStorage", key: "kf-genome-milestone-anon-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `The same flag with no business yet ("anon", the ?? branch), per threshold.` },
-  { store: "localStorage", key: "dismissed-prompts-*", file: "src/app/app/profile/components/progressive-prompts.tsx", why: "Dismissed profile prompt ids per business." },
-  { store: "localStorage", key: "kf-section-*", file: "src/app/app/reports/components/shared-components.tsx", why: `Report section open/closed state ("1"/"0") per section.` },
-  { store: "localStorage", key: "kf_wishlist_*", file: "src/app/book/[slug]/components/use-wishlist.ts", why: "Public booking-page wishlist items per business slug." },
-  { store: "localStorage", key: "kf_cart_*", file: "src/app/book/[slug]/components/utils.ts", why: "Public booking-page cart per business slug." },
-  { store: "localStorage", key: "kf_promo_*", file: "src/app/book/[slug]/components/utils.ts", why: "Applied promo code details per business slug." },
-  { store: "localStorage", key: "kf_contacts_last_sync:*", file: "src/lib/contacts-db.ts", why: "Last contacts sync time (an ISO date) per cache owner." },
-  { store: "sessionStorage", key: "kf-scroll-*", file: "src/lib/use-return-navigation.ts", why: "Scroll position per route, to restore it on return." },
+  { store: "localStorage", key: "kf_dunning_rules_*", file: "src/app/app/commerce/components/dunning-rules.tsx", why: "Dunning rule settings per business (JSON of the rules the owner set); the suffix is the business id.", keyExpr: "`kf_dunning_rules_${businessId}`", valueExpr: "JSON.stringify(rules)" },
+  { store: "localStorage", key: "kf:morning-briefing:dismissed:*:*", file: "src/app/app/control-tower/components/morning-briefing.tsx", why: `Morning briefing dismissed flag ("1") per business and day.`, keyExpr: "getDismissKey(businessId)", valueExpr: "\"1\"" },
+  { store: "localStorage", key: "kf-tower-pinned-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Pinned control-tower item ids per business.", keyExpr: "getPinKey(businessId)", valueExpr: "JSON.stringify([...ids])" },
+  { store: "localStorage", key: "kf-tower-dismissed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Dismissed control-tower item ids and dates per business.", keyExpr: "getDismissKey(businessId)", valueExpr: "JSON.stringify(Object.fromEntries(ids))" },
+  { store: "localStorage", key: "kf-tower-snoozed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Snoozed control-tower item ids and wake times per business.", keyExpr: "getSnoozedKey(businessId)", valueExpr: "JSON.stringify(Object.fromEntries(ids))" },
+  { store: "localStorage", key: "kf_finance_banner_dismissed_*", file: "src/app/app/finance/components/finance-banner.tsx", why: `Finance banner dismissed flag ("1"); the suffix names the banner.`, keyExpr: "storageKey", valueExpr: "\"1\"" },
+  { store: "localStorage", key: "kf_default_destinations_*", file: "src/app/app/marketing/components/unified/channel-selector.tsx", why: "Default marketing destination ids per business.", keyExpr: "PREF_KEY", valueExpr: "JSON.stringify(selectedDestinations.map((d) => d.id))" },
+  { store: "sessionStorage", key: "kf-genome-milestone-*-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `Business-genome milestone shown flag ("1") per business and threshold.`, keyExpr: "key", valueExpr: "\"1\"" },
+  { store: "sessionStorage", key: "kf-genome-milestone-anon-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `The same flag with no business yet ("anon", the ?? branch), per threshold.`, keyExpr: "key", valueExpr: "\"1\"" },
+  { store: "localStorage", key: "dismissed-prompts-*", file: "src/app/app/profile/components/progressive-prompts.tsx", why: "Dismissed profile prompt ids per business.", keyExpr: "`dismissed-prompts-${businessId}`", valueExpr: "JSON.stringify([...next])" },
+  { store: "localStorage", key: "kf-section-*", file: "src/app/app/reports/components/shared-components.tsx", why: `Report section open/closed state ("1"/"0") per section.`, keyExpr: "storageKey", valueExpr: "next ? \"1\" : \"0\"" },
+  { store: "localStorage", key: "kf_wishlist_*", file: "src/app/book/[slug]/components/use-wishlist.ts", why: "Public booking-page wishlist items per business slug.", keyExpr: "getStorageKey(slug)", valueExpr: "JSON.stringify(items)" },
+  { store: "localStorage", key: "kf_cart_*", file: "src/app/book/[slug]/components/utils.ts", why: "Public booking-page cart per business slug.", keyExpr: "`kf_cart_${slug}`", valueExpr: "JSON.stringify(cart)" },
+  { store: "localStorage", key: "kf_promo_*", file: "src/app/book/[slug]/components/utils.ts", why: "Applied promo code details per business slug.", keyExpr: "`kf_promo_${slug}`", valueExpr: "JSON.stringify(promo)" },
+  { store: "localStorage", key: "kf_contacts_last_sync:*", file: "src/lib/contacts-db.ts", why: "Last contacts sync time (an ISO date) per cache owner.", keyExpr: "key", valueExpr: "new Date().toISOString()" },
+  { store: "sessionStorage", key: "kf-scroll-*", file: "src/lib/use-return-navigation.ts", why: "Scroll position per route, to restore it on return.", keyExpr: "SCROLL_STORAGE_PREFIX + route", valueExpr: "String(scrollY)" },
 
   // The service worker's offline write queue, public/sw.js. enqueue() stores each queued request's headers, so the
   // user's Authorization bearer is written to IndexedDB in clear (security review follow-up, not fixed here).
@@ -225,6 +229,8 @@ interface Ctx {
   src: string;
   read?: (rel: string) => string | null;
   bindings?: Record<string, string>;
+  /** Each binding's call-site offset, so its argument text is resolved in the caller's scope. */
+  bindAt?: Record<string, number>;
   /** The write's offset in src: a const declared nearest before it wins (constText). */
   at?: number;
 }
@@ -561,7 +567,7 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
     }
   }
   if (IDENT.test(t)) {
-    if (ctx.bindings && t in ctx.bindings) return literalValue({ ...ctx, bindings: undefined }, ctx.bindings[t], depth + 1);
+    if (ctx.bindings && Object.hasOwn(ctx.bindings, t)) return literalValue({ ...ctx, bindings: undefined }, ctx.bindings[t], depth + 1);
     const own = constText(ctx.src, t, ctx.at);
     if (own !== null) return literalValue(ctx, own, depth + 1);
     const imported = importedText(ctx, t);
@@ -583,7 +589,7 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
 /** The raw text a value expression stands for, one hop: an identifier's own const text is added (CSC-08). */
 function valueText(ctx: Ctx, text: string): string {
   const t = text.trim();
-  const hop = (id: string) => ctx.bindings?.[id] ?? constText(ctx.src, id, ctx.at);
+  const hop = (id: string) => (ctx.bindings && Object.hasOwn(ctx.bindings, id) ? ctx.bindings[id] : constText(ctx.src, id, ctx.at));
   if (IDENT.test(t)) {
     const own = hop(t);
     if (own !== null && own !== undefined) return `${t} ${own}`;
@@ -595,14 +601,41 @@ function valueText(ctx: Ctx, text: string): string {
   return [t, ...extra].join(" ");
 }
 
-/** The enclosing function's name when `param` is one of its parameters (`function f(param, …)` or `const f = (param`). */
-function wrapperOf(src: string, at: number, param: string): { fn: string; params: string[] } | null {
+/** The parameter names in a parameter list's text (`a: string, b = 1, c?`). */
+const paramNames = (list: string) =>
+  list
+    .split(",")
+    .map((p) => p.trim().split(/[\s:=?]/)[0])
+    .filter((p) => p !== "");
+
+/**
+ * The function that holds offset `at` and has `param` as a parameter (the innermost such, on the AST; round 13: not
+ * an earlier function that happens to share the parameter name), its name and parameters, and whether it can be
+ * called from elsewhere. A file that does not parse falls back to the nearest earlier regex match.
+ */
+function wrapperOf(src: string, at: number, param: string): { fn: string; params: string[]; elsewhere: boolean } | null {
+  const parsed = parseCacheBySrc(src);
+  if (parsed && parsed.ok) {
+    const path = pathAt(parsed.sf, at);
+    for (let i = path.length - 1; i >= 0; i--) {
+      const node = path[i];
+      if (!ts.isFunctionLike(node)) continue;
+      const params = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ""));
+      if (!params.includes(param)) {
+        if (node.parameters.some((p) => bindsName(p.name, param))) return null;
+        continue;
+      }
+      const name = functionName(node);
+      return name ? { fn: name, params, elsewhere: calledFromElsewhere(parsed.sf, node) || reassignedIn(node, param) } : null;
+    }
+    return null;
+  }
   const before = src.slice(0, at);
   const re = /(?:function\s+([\w$]+)\s*\(|(?:const|let)\s+([\w$]+)\s*=\s*(?:async\s*)?\()([^)]*)\)/g;
-  let found: { fn: string; params: string[] } | null = null;
+  let found: { fn: string; params: string[]; elsewhere: boolean } | null = null;
   for (const m of before.matchAll(re)) {
-    const params = m[3].split(",").map((p) => p.trim().split(/[\s:=?]/)[0]);
-    if (params.includes(param)) found = { fn: m[1] ?? m[2], params };
+    const params = paramNames(m[3]);
+    if (params.includes(param)) found = { fn: m[1] ?? m[2], params, elsewhere: true };
   }
   return found;
 }
@@ -650,8 +683,13 @@ function parseFile(file: string, src: string): { sf: ts.SourceFile; ok: boolean 
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
   const parsed = { sf, ok: (sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length === 0 };
   parseCache.set(cacheKey, parsed);
+  parseBySrc.set(src, parsed);
   return parsed;
 }
+
+/** The last parse of a source text, for helpers that only hold the text (wrapperOf), or undefined. */
+const parseBySrc = new Map<string, { sf: ts.SourceFile; ok: boolean }>();
+const parseCacheBySrc = (src: string) => parseBySrc.get(src);
 
 const commentCache = new Map<string, Array<[number, number]>>();
 function commentRanges(file: string, src: string): Array<[number, number]> {
@@ -759,7 +797,15 @@ function contexts(ctx: Ctx, at: number, id: string | undefined): Ctx[] {
   if (!w) return [ctx];
   const sites = callSites(ctx.src, w.fn);
   if (sites.length === 0) return [ctx];
-  return sites.map((s) => ({ ...ctx, bindings: Object.fromEntries(w.params.map((p, i) => [p, s.args[i] ?? ""])) }));
+  const bound = sites.map((s) => ({
+    ...ctx,
+    // A missing argument is left unbound: the resolver then takes the parameter's default (or "undefined").
+    bindings: Object.fromEntries(w.params.flatMap((p, i) => (s.args[i] !== undefined ? [[p, s.args[i]]] : []))),
+    bindAt: Object.fromEntries(w.params.map((p) => [p, s.at])),
+  }));
+  // A wrapper that can be called from elsewhere also gets the unbound context: its parameter then resolves to "*"
+  // too (CSC-70).
+  return w.elsewhere ? [...bound, ctx] : bound;
 }
 
 /** A cookie string rendered from its source: name, value and the attributes (lower-case, in order). */
@@ -798,24 +844,177 @@ const isClear = (value: string, attrs: string[]) =>
 
 const KEY_CAP = 64;
 
+/* ------------------------------------------------------------ key resolver (rounds 12-13) */
+
+type Decl =
+  | { kind: "const"; init: ts.Expression }
+  | { kind: "param"; fn: ts.SignatureDeclaration; index: number; param: ts.ParameterDeclaration }
+  | { kind: "function"; fn: ts.FunctionLikeDeclaration }
+  | { kind: "enum"; decl: ts.EnumDeclaration }
+  | { kind: "import" }
+  | { kind: "unknown" }
+  | { kind: "none" };
+
+/** The nodes from the file down to the deepest one that holds offset `at`. */
+function pathAt(sf: ts.SourceFile, at: number): ts.Node[] {
+  const path: ts.Node[] = [sf];
+  let node: ts.Node = sf;
+  for (;;) {
+    let next: ts.Node | undefined;
+    ts.forEachChild(node, (c) => {
+      if (next === undefined && c.getStart(sf) <= at && at < c.end) next = c;
+    });
+    if (!next) return path;
+    path.push(next);
+    node = next;
+  }
+}
+
+const bindsName = (b: ts.BindingName, name: string): boolean =>
+  ts.isIdentifier(b) ? b.text === name : b.elements.some((e) => !ts.isOmittedExpression(e) && bindsName(e.name, name));
+
+/** The declaration of `name` visible at `at`: the innermost scope wins (a parameter before an outer const). */
+function lookupDecl(sf: ts.SourceFile, name: string, at: number): Decl {
+  const path = pathAt(sf, at);
+  const inStatements = (statements: readonly ts.Statement[]): Decl | null => {
+    for (const st of statements) {
+      if (ts.isVariableStatement(st)) {
+        const isConst = (st.declarationList.flags & ts.NodeFlags.Const) !== 0;
+        for (const d of st.declarationList.declarations) {
+          if (!bindsName(d.name, name)) continue;
+          return isConst && ts.isIdentifier(d.name) && d.initializer ? { kind: "const", init: d.initializer } : { kind: "unknown" };
+        }
+      } else if (ts.isFunctionDeclaration(st) && st.name?.text === name) return { kind: "function", fn: st };
+      else if (ts.isEnumDeclaration(st) && st.name.text === name) return { kind: "enum", decl: st };
+      else if (ts.isClassDeclaration(st) && st.name?.text === name) return { kind: "unknown" };
+      else if (ts.isImportDeclaration(st) && st.importClause) {
+        const ic = st.importClause;
+        if (ic.name?.text === name) return { kind: "import" };
+        const nb = ic.namedBindings;
+        if (nb && ts.isNamespaceImport(nb) && nb.name.text === name) return { kind: "import" };
+        if (nb && ts.isNamedImports(nb) && nb.elements.some((e) => e.name.text === name)) return { kind: "import" };
+      }
+    }
+    return null;
+  };
+  for (let i = path.length - 1; i >= 0; i--) {
+    const node = path[i];
+    if (ts.isFunctionLike(node)) {
+      const idx = node.parameters.findIndex((p) => bindsName(p.name, name));
+      if (idx !== -1) {
+        const p = node.parameters[idx];
+        return ts.isIdentifier(p.name) ? { kind: "param", fn: node, index: idx, param: p } : { kind: "unknown" };
+      }
+      if ((ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) && node.name?.text === name) return { kind: "function", fn: node };
+    }
+    if (ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseClause(node) || ts.isDefaultClause(node)) {
+      const d = inStatements(node.statements);
+      if (d) return d;
+    }
+    if ((ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node)) && node.initializer && ts.isVariableDeclarationList(node.initializer)) {
+      if (node.initializer.declarations.some((d) => bindsName(d.name, name))) return { kind: "unknown" };
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration && bindsName(node.variableDeclaration.name, name)) return { kind: "unknown" };
+  }
+  return { kind: "none" };
+}
+
+/** A function-like's name as callers write it: its own name, or the const / let it is assigned to. */
+function functionName(fn: ts.SignatureDeclaration): string | null {
+  if ((ts.isFunctionDeclaration(fn) || ts.isFunctionExpression(fn)) && fn.name) return fn.name.text;
+  const p = fn.parent;
+  if (p && ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) return p.name.text;
+  return null;
+}
+
 /**
- * The key resolver (repair round 12): one structural resolver for every key or name position the census reads
- * (storage setItem and bracket or property assignment, cookieStore.set and response cookies().set names,
- * document.cookie names, caches.open, wrapper calls, string code). The key TEXT is parsed as a TypeScript expression,
- * so parentheses, `as`, `satisfies`, `!` and `<T>x` are structure, not text. It returns a finite set of candidate
- * strings in which "*" stands for any part it cannot resolve:
- *   - a string or no-substitution template: itself; a number: itself; null / undefined / void: no key (skipped);
- *   - an identifier: a wrapper binding, a const (any number of hops, cycle-guarded), a const imported one file away,
- *     or a parameter of the enclosing function whose same-file callers give its arguments; otherwise "*";
- *   - `a ? b : c`: b and c; `a || b`, `a ?? b`, `a && b`: a and b;
- *   - `a + b` and a template with substitutions: the product of the parts' sets;
- *   - `K.a`, `K["a"]` on a same-file const object or enum (literalValue); String(x): x;
- *   - a call of a same-file function: each of its returns, its parameters bound to the call's arguments;
- *   - anything else (an unknown call or member, an operator): "*".
- * A union or product over KEY_CAP candidates is "*". The caller classes a write whose key holds "*" as a credential
- * write (isCredential), so an unresolvable key, or part of one, fails closed.
+ * Can a function be called from somewhere this file does not show (CSC-70)? Exported (directly, by default, or by
+ * name), anonymous, or used as a value (passed, stored, returned) rather than only called.
  */
-function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<string> = new Set()): string[] {
+function calledFromElsewhere(sf: ts.SourceFile, fn: ts.SignatureDeclaration): boolean {
+  const name = functionName(fn);
+  if (!name) return true;
+  const holder = ts.isVariableDeclaration(fn.parent) ? fn.parent.parent?.parent : fn;
+  const mods = holder && ts.canHaveModifiers(holder) ? (ts.getModifiers(holder) ?? []) : [];
+  if (mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword || m.kind === ts.SyntaxKind.DefaultKeyword)) return true;
+  let asValue = false;
+  const visit = (n: ts.Node) => {
+    if (asValue) return;
+    if (ts.isIdentifier(n) && n.text === name) {
+      const p = n.parent;
+      const isOwnName = (ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p) || ts.isVariableDeclaration(p)) && p.name === n;
+      const isCallee = ts.isCallExpression(p) && p.expression === n;
+      if (!isOwnName && !isCallee) asValue = true;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return asValue;
+}
+
+/** Is `name` assigned (=, op=, ++, --) anywhere inside `fn`? */
+function reassignedIn(fn: ts.Node, name: string): boolean {
+  let found = false;
+  const visit = (n: ts.Node) => {
+    if (found) return;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(n.left) && n.left.text === name) found = true;
+    if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && ts.isIdentifier(n.operand) && n.operand.text === name) {
+      if (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) found = true;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(fn);
+  return found;
+}
+
+/** The expressions a function can return: an expression body, each return (bare → undefined), and undefined when the body can end without one. */
+function returnExprs(fn: ts.FunctionLikeDeclaration): Array<ts.Expression | "undefined"> {
+  if (!fn.body) return ["undefined"];
+  if (!ts.isBlock(fn.body)) return [fn.body];
+  const out: Array<ts.Expression | "undefined"> = [];
+  const visit = (n: ts.Node) => {
+    if (ts.isFunctionLike(n)) return;
+    if (ts.isReturnStatement(n)) out.push(n.expression ?? "undefined");
+    ts.forEachChild(n, visit);
+  };
+  fn.body.statements.forEach(visit);
+  const last = fn.body.statements[fn.body.statements.length - 1];
+  if (!last || !ts.isReturnStatement(last)) out.push("undefined");
+  return out;
+}
+
+/** A binding of a parameter: the expression it takes (in its own file and scope), or a fixed string. */
+type Bind =
+  | { expr: ts.Expression; sf: ts.SourceFile; ctx: Ctx; env: Env }
+  | { literal: string }
+  | { star: true }
+  | { text: string; at: number | undefined };
+type Env = ReadonlyMap<string, Bind>;
+
+/**
+ * The key resolver: one structural resolver for every key or name position the census reads (storage setItem and
+ * bracket or property assignment, cookieStore.set and response cookies().set names, document.cookie names,
+ * caches.open, wrapper calls, string code). The key TEXT is parsed as a TypeScript expression and every identifier,
+ * member and call in it is resolved on the HOST file's AST, scope by scope. It PROVES a finite set of runtime key
+ * strings, or gives "*" for what it cannot prove (round 13); an empty set is never "no write":
+ *   - a string or no-substitution template: itself; a number: itself; null / undefined / void: the strings JS gives,
+ *     "null" and "undefined", as a whole key and inside "+" and templates;
+ *   - an identifier: its innermost declaration at that point. An initialised const: its initialiser, in its own
+ *     scope. let / var / destructured / for / catch / class: "*". A parameter bound by a call being resolved: the
+ *     argument, its default, or "undefined". An unbound parameter: its same-file callers' arguments (default or
+ *     "undefined" when one is missing), plus "*" when the function can be called from elsewhere (exported, anonymous,
+ *     used as a value) or reassigns it, or has no callers. A const imported one file away: resolved there. Else "*";
+ *   - `a ? b : c`: b and c; `a || b`, `a ?? b`, `a && b`: a and b; `+` and templates: the product of the parts;
+ *   - `K.a`, `K["a"]` on a same-file const object (the LAST property of that name; a spread after it, a getter or a
+ *     method, or no such property: "*") or enum member; String(x): x;
+ *   - a call of a same-file function: each of its returns (undefined when its body can end without one), its
+ *     parameters bound to the call's arguments or defaults;
+ *   - parentheses, as, satisfies, !, <T>x, await: the inner expression; anything else: "*".
+ * A union or product over KEY_CAP candidates is "*". A write whose key holds "*" is a credential write
+ * (isCredential), so whatever is not proven fails closed. A file that does not parse resolves only `const NAME =`
+ * initialisers by text (constText) and gives "*" for the rest.
+ */
+function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<ts.Node> = new Set()): string[] {
   const t = text.trim();
   if (t === "" || depth > 12) return ["*"];
   const ksf = ts.createSourceFile("key.ts", `(${t}\n);`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -829,6 +1028,15 @@ function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<stri
   ) {
     return ["*"];
   }
+  // The wrapper bindings of this context (contexts(): one call site's arguments), as an Env.
+  const env = new Map<string, Bind>();
+  for (const [k, v] of Object.entries(ctx.bindings ?? {})) env.set(k, { text: v, at: ctx.bindAt?.[k] });
+  const out = resolveNode(ctx, ksf, st.expression.expression, ctx.at ?? 0, env, depth, seen);
+  return out.length === 0 ? ["*"] : out;
+}
+
+function resolveNode(ctx: Ctx, nsf: ts.SourceFile, node: ts.Expression, at: number, env: Env, depth: number, seen: ReadonlySet<ts.Node>): string[] {
+  const host = parseFile(ctx.file, ctx.src);
   const union = (...sets: string[][]) => {
     const out = [...new Set(sets.flat())];
     return out.length > KEY_CAP ? ["*"] : out;
@@ -836,7 +1044,7 @@ function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<stri
   const product = (sets: string[][]) => {
     let acc = [""];
     for (const set of sets) {
-      if (set.length === 0) return [];
+      if (set.length === 0) return ["*"];
       const next: string[] = [];
       for (const a of acc) for (const b of set) next.push(a + b);
       acc = [...new Set(next)];
@@ -844,19 +1052,69 @@ function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<stri
     }
     return acc;
   };
-  const sub = (txt: string, c: Ctx = ctx, more: ReadonlySet<string> = seen) => resolveKeySet(c, txt, depth + 1, more);
+  /** Resolve a host-file expression at its own position. */
+  const hostExpr = (e: ts.Expression, withEnv: Env = new Map(), more: ReadonlySet<ts.Node> = seen) =>
+    resolveNode(ctx, host.sf, e, e.getStart(host.sf), withEnv, depth + 1, more);
+  const fromBind = (b: Bind, more: ReadonlySet<ts.Node>): string[] => {
+    if ("star" in b) return ["*"];
+    if ("literal" in b) return [b.literal];
+    // A wrapper binding from contexts() is argument TEXT at its call site: resolved there, as a key of its own.
+    if ("text" in b) return resolveKeySet({ ...ctx, bindings: undefined, bindAt: undefined, at: b.at }, b.text, depth + 1);
+    return resolveNode(b.ctx, b.sf, b.expr, b.expr.getStart(b.sf), b.env, depth + 1, more);
+  };
+  /** The object literal or enum an expression names, in the host file, or null. */
+  const containerOf = (e: ts.Expression): ts.ObjectLiteralExpression | ts.EnumDeclaration | null => {
+    let u = e;
+    while (ts.isParenthesizedExpression(u) || ts.isAsExpression(u) || ts.isSatisfiesExpression(u) || ts.isNonNullExpression(u)) u = u.expression;
+    if (ts.isIdentifier(u)) {
+      if (!host.ok) return null;
+      const d = lookupDecl(host.sf, u.text, nsf === host.sf ? u.getStart(nsf) : at);
+      if (d.kind === "enum") return d.decl;
+      if (d.kind !== "const") return null;
+      let init = d.init;
+      while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isSatisfiesExpression(init)) init = init.expression;
+      return ts.isObjectLiteralExpression(init) ? init : null;
+    }
+    if (ts.isPropertyAccessExpression(u) || (ts.isElementAccessExpression(u) && ts.isStringLiteralLike(u.argumentExpression))) {
+      const parent = containerOf(u.expression);
+      if (!parent || !ts.isObjectLiteralExpression(parent)) return null;
+      const prop = ts.isPropertyAccessExpression(u) ? u.name.text : (u.argumentExpression as ts.StringLiteralLike).text;
+      const member = memberOf(parent, prop);
+      if (!member || !ts.isPropertyAssignment(member)) return null;
+      let init = member.initializer;
+      while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init)) init = init.expression;
+      return ts.isObjectLiteralExpression(init) ? init : null;
+    }
+    return null;
+  };
+  /** The LAST member of an object literal named `prop`, or null when a spread follows it or it is missing. */
+  const memberOf = (obj: ts.ObjectLiteralExpression, prop: string): ts.ObjectLiteralElementLike | null => {
+    let found: ts.ObjectLiteralElementLike | null = null;
+    for (const p of obj.properties) {
+      if (ts.isSpreadAssignment(p)) {
+        found = null;
+        continue;
+      }
+      const n = p.name;
+      const pn = n && (ts.isIdentifier(n) || ts.isStringLiteralLike(n) || ts.isNumericLiteral(n)) ? n.text : undefined;
+      if (pn === prop) found = p;
+    }
+    return found;
+  };
   const go = (n: ts.Expression): string[] => {
     if (
       ts.isParenthesizedExpression(n) ||
       ts.isAsExpression(n) ||
       ts.isSatisfiesExpression(n) ||
       ts.isNonNullExpression(n) ||
-      ts.isTypeAssertionExpression(n)
+      ts.isTypeAssertionExpression(n) ||
+      ts.isAwaitExpression(n)
     ) {
       return go(n.expression);
     }
     if (ts.isStringLiteralLike(n) || ts.isNumericLiteral(n)) return [n.text];
-    if (n.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(n) && n.text === "undefined") || ts.isVoidExpression(n)) return [];
+    if (n.kind === ts.SyntaxKind.NullKeyword) return ["null"];
+    if (ts.isVoidExpression(n)) return ["undefined"];
     if (ts.isConditionalExpression(n)) return union(go(n.whenTrue), go(n.whenFalse));
     if (ts.isBinaryExpression(n)) {
       const op = n.operatorToken.kind;
@@ -871,57 +1129,109 @@ function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<stri
     }
     if (ts.isIdentifier(n)) {
       const name = n.text;
-      if (ctx.bindings && name in ctx.bindings) return sub(ctx.bindings[name], { ...ctx, bindings: undefined });
-      if (seen.has(name)) return ["*"];
-      const more = new Set([...seen, name]);
-      const own = constText(ctx.src, name, ctx.at);
-      if (own !== null) return sub(own, ctx, more);
-      const imported = importedText(ctx, name);
-      if (imported) return sub(imported.text, imported.ctx, more);
-      if (ctx.at !== undefined) {
-        const w = wrapperOf(ctx.src, ctx.at, name);
-        if (w) {
-          const idx = w.params.indexOf(name);
-          const sites = callSites(ctx.src, w.fn).filter((site) => site.args[idx] !== undefined);
-          if (sites.length > 0) return union(...sites.map((site) => sub(site.args[idx], { ...ctx, at: site.at, bindings: undefined }, more)));
+      if (name === "undefined") return ["undefined"];
+      if (env.has(name)) return fromBind(env.get(name)!, seen);
+      const pos = nsf === host.sf ? n.getStart(nsf) : at;
+      if (!host.ok) {
+        // A file that does not parse: only a `const NAME =` initialiser, by text.
+        const m = ctx.src.match(new RegExp(`\\bconst\\s+${name.replace(/\$/g, "\\$")}\\s*(?::[^=;\\n]+)?=(?!=)`));
+        if (!m) return ["*"];
+        const own = constText(ctx.src, name, pos);
+        return own === null ? ["*"] : resolveKeySet({ ...ctx, bindings: undefined, at: pos }, own, depth + 1);
+      }
+      const d = lookupDecl(host.sf, name, pos);
+      if (d.kind === "const") {
+        if (seen.has(d.init)) return ["*"];
+        return hostExpr(d.init, new Map(), new Set([...seen, d.init]));
+      }
+      if (d.kind === "param") {
+        if (seen.has(d.fn)) return ["*"];
+        const more = new Set<ts.Node>([...seen, d.fn]);
+        const fnName = functionName(d.fn);
+        const sets: string[][] = [];
+        if (calledFromElsewhere(host.sf, d.fn) || reassignedIn(d.fn, name) || d.param.dotDotDotToken) sets.push(["*"]);
+        const calls: ts.CallExpression[] = [];
+        if (fnName) {
+          const visit = (k: ts.Node) => {
+            if (ts.isCallExpression(k) && ts.isIdentifier(k.expression) && k.expression.text === fnName) calls.push(k);
+            ts.forEachChild(k, visit);
+          };
+          visit(host.sf);
         }
+        if (calls.length === 0) sets.push(["*"]);
+        for (const call of calls) {
+          const arg = call.arguments[d.index];
+          if (arg && ts.isSpreadElement(arg)) sets.push(["*"]);
+          else if (arg) sets.push(hostExpr(arg, new Map(), more));
+          else if (d.param.initializer) sets.push(hostExpr(d.param.initializer, new Map(), more));
+          else sets.push(["undefined"]);
+        }
+        return union(...sets);
+      }
+      if (d.kind === "import") {
+        const imported = importedText(ctx, name);
+        return imported ? resolveKeySet({ ...imported.ctx, read: ctx.read }, imported.text, depth + 1) : ["*"];
       }
       return ["*"];
     }
     if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
-      const v = literalValue(ctx, n.getText(ksf));
-      return v === null ? ["*"] : [v];
+      const prop = ts.isPropertyAccessExpression(n) ? n.name.text : ts.isStringLiteralLike(n.argumentExpression) ? n.argumentExpression.text : null;
+      if (prop === null) return ["*"];
+      const c = containerOf(n.expression);
+      if (!c) return ["*"];
+      if (ts.isEnumDeclaration(c)) {
+        const m = c.members.find((x) => (ts.isIdentifier(x.name) || ts.isStringLiteral(x.name)) && x.name.text === prop);
+        return m?.initializer ? hostExpr(m.initializer) : ["*"];
+      }
+      const member = memberOf(c, prop);
+      if (!member) return ["*"];
+      if (ts.isPropertyAssignment(member)) return hostExpr(member.initializer);
+      if (ts.isShorthandPropertyAssignment(member)) return hostExpr(member.name);
+      return ["*"];
     }
-    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
-      const fn = n.expression.text;
-      if (fn === "String" && n.arguments.length === 1) return go(n.arguments[0]);
-      const returns = functionReturnTexts(ctx.src, fn);
-      const params = functionParams(ctx.src, fn);
-      if (returns.length === 0 || params === null || seen.has(`${fn}()`)) return ["*"];
-      const bindings = Object.fromEntries(params.map((p, i) => [p, n.arguments[i] ? n.arguments[i].getText(ksf) : "undefined"]));
-      const more = new Set([...seen, `${fn}()`]);
-      return union(...returns.filter((r) => !/^(?:null|undefined)$/.test(r.trim())).map((r) => sub(r, { ...ctx, bindings }, more)));
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && !n.questionDotToken) {
+      const fnName = n.expression.text;
+      const pos = nsf === host.sf ? n.getStart(nsf) : at;
+      const d = host.ok ? lookupDecl(host.sf, fnName, pos) : ({ kind: "none" } as Decl);
+      if (d.kind === "none" && fnName === "String" && n.arguments.length === 1) return go(n.arguments[0]);
+      let fn: ts.FunctionLikeDeclaration | null = null;
+      if (d.kind === "function") fn = d.fn;
+      if (d.kind === "const") {
+        let init = d.init;
+        while (ts.isParenthesizedExpression(init)) init = init.expression;
+        if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) fn = init;
+      }
+      if (!fn || seen.has(fn)) return ["*"];
+      const more = new Set<ts.Node>([...seen, fn]);
+      const calleeEnv = new Map<string, Bind>();
+      fn.parameters.forEach((p, i) => {
+        const arg = n.arguments[i];
+        const names: string[] = [];
+        const collect = (b: ts.BindingName) => {
+          if (ts.isIdentifier(b)) names.push(b.text);
+          else for (const e of b.elements) if (!ts.isOmittedExpression(e)) collect(e.name);
+        };
+        collect(p.name);
+        if (!ts.isIdentifier(p.name) || p.dotDotDotToken || (arg && ts.isSpreadElement(arg)) || reassignedIn(fn!, names[0])) {
+          for (const nm of names) calleeEnv.set(nm, { star: true });
+          return;
+        }
+        if (arg) calleeEnv.set(p.name.text, { expr: arg, sf: nsf, ctx, env });
+        else if (p.initializer) calleeEnv.set(p.name.text, { expr: p.initializer, sf: host.sf, ctx, env: new Map(calleeEnv) });
+        else calleeEnv.set(p.name.text, { literal: "undefined" });
+      });
+      return union(
+        ...returnExprs(fn).map((r) => (r === "undefined" ? ["undefined"] : resolveNode(ctx, host.sf, r, r.getStart(host.sf), calleeEnv, depth + 1, more))),
+      );
     }
     return ["*"];
   };
-  return go(st.expression.expression);
-}
-
-/** A same-file function's parameter names (`function fn(a, b)` or `const fn = (a, b) =>`), or null. */
-function functionParams(src: string, fn: string): string[] | null {
-  const name = fn.replace(/\$/g, "\\$");
-  const m =
-    src.match(new RegExp(`\\bfunction\\s+${name}\\s*(?:<[^>]*>)?\\s*\\(([^)]*)\\)`)) ??
-    src.match(new RegExp(`\\b(?:const|let)\\s+${name}\\s*=\\s*(?:async\\s*)?\\(([^)]*)\\)\\s*(?::\\s*[^=]+)?=>`));
-  if (!m) return null;
-  return m[1]
-    .split(",")
-    .map((p) => p.trim().split(/[\s:=?]/)[0])
-    .filter((p) => p !== "");
+  if (depth > 12) return ["*"];
+  return go(node);
 }
 
 /** A resolved key set as the keys a write is recorded under: "*" alone is UNRESOLVED; other "*" parts stay. */
-const keysFrom = (set: string[]) => [...new Set(set.map((k) => (k === "*" ? UNRESOLVED : k)))];
+const keysFrom = (set: string[]) => [...new Set((set.length === 0 ? ["*"] : set).map((k) => (k === "*" ? UNRESOLVED : k)))];
 
 /** Each write's offset in the source it was found in (kept out of the Write objects, so they keep their shape). */
 const writeOffsets = new WeakMap<Write, number>();
@@ -1522,6 +1832,8 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     // credential is spliced in (so the inner write is a credential write under its real name), else the first.
     const cands = resolveKeySet(c, json ? json[1] : t);
     if (cands.length === 0 || cands.some((x) => x.includes("*"))) return UNRESOLVED;
+    // Several candidates: the code would be scanned with only one of them spliced in, so fail closed (CSC-69).
+    if (cands.length > 1 && !cands.some((x) => CREDENTIAL_PATTERN.test(x))) return UNRESOLVED;
     const pick = cands.find((x) => CREDENTIAL_PATTERN.test(x)) ?? cands[0];
     return json ? JSON.stringify(pick) : pick;
   }
@@ -1619,13 +1931,23 @@ const dumpLines = (writes: Write[]): string[] =>
     .sort((a, b) => cmp(a.file, b.file) || a.line - b.line || cmp(a.store, b.store) || cmp(a.key, b.key))
     .map((w) => `CSC ${isCredential(w) ? "CRED" : "----"} ${w.store} ${w.key} @ ${w.file}:${w.line}`);
 
+/** Does a registry row cover a write: the same id and, for a pinned row, the same key and value source text? */
+const covers = (r: RegistryRow, w: Write) =>
+  id(r) === id(w) && (r.keyExpr === undefined || (r.keyExpr === w.expr && r.valueExpr === w.value));
+
 /** The census against a registry: credential writes with no row, and rows with no write. */
 function compare(writes: Write[], registry: RegistryRow[]) {
-  const found = new Map<string, Write>();
-  for (const w of writes.filter(isCredential)) if (!found.has(id(w))) found.set(id(w), w);
-  const rows = new Set(registry.map(id));
-  const unregistered = [...found.values()].filter((w) => !rows.has(id(w))).map((w) => `${id(w)}:${w.line} (key source: ${w.expr})`);
-  const stale = registry.filter((r) => !found.has(id(r))).map(id);
+  const cred = writes.filter(isCredential);
+  const seenIds = new Set<string>();
+  const unregistered: string[] = [];
+  for (const w of cred) {
+    if (registry.some((r) => covers(r, w))) continue;
+    const key = `${id(w)}|${w.expr}|${w.value}`;
+    if (seenIds.has(key)) continue;
+    seenIds.add(key);
+    unregistered.push(`${id(w)}:${w.line} (key source: ${w.expr})`);
+  }
+  const stale = registry.filter((r) => !cred.some((w) => covers(r, w))).map(id);
   return { unregistered, stale };
 }
 
@@ -2053,7 +2375,8 @@ describe("CSC-15 each resolution step decides a result", () => {
       `  localStorage.setItem(keyFor(owner), t);`,
       `}`,
     ].join("\n");
-    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_other", "localStorage:kf_owner_secret:*"]);
+    // Round 13: keyFor's `: null` branch is the key "null" (JS stores setItem(null) under "null").
+    expect(keysOf(scan("src/fixture-ternary.ts", fixture))).toEqual(["localStorage:kf_tern_token", "localStorage:kf_other", "localStorage:kf_owner_secret:*", "localStorage:null"]);
   });
 
   it("an inline https-only Secure, and one through a const, are recorded as secure-on-https", () => {
@@ -3130,9 +3453,10 @@ describe("CSC-59 a ternary key resolves to all its branches", () => {
     expect(credentialWrites("src/fixture-q5.ts", fixture).length).toBe(1);
   });
 
-  it("pins: a ternary of two plain keys gives both, and a null branch is skipped", () => {
+  // Round 13 (an empty set is never no write): a null branch is the key "null", as JS stores it.
+  it("pins: a ternary of two plain keys gives both, and a null branch is the key null", () => {
     const fixture = ['const A = "kf_view_a";', 'const B = "kf_view_b";', "localStorage.setItem(on ? B : A, v);", 'localStorage.setItem(id ? `kf-section-${"x"}` : null, v);'].join("\n");
-    expect(keysOf(scan("src/fixture-tp.ts", fixture))).toEqual(["localStorage:kf_view_b", "localStorage:kf_view_a", "localStorage:kf-section-x"]);
+    expect(keysOf(scan("src/fixture-tp.ts", fixture))).toEqual(["localStorage:kf_view_b", "localStorage:kf_view_a", "localStorage:kf-section-x", "localStorage:null"]);
     expect(credentialWrites("src/fixture-tp.ts", fixture)).toEqual([]);
   });
 });
@@ -3359,6 +3683,13 @@ describe("CSC-71 wildcard registry rows are pinned to their write", () => {
   it("a different write of the same key shape in that file is unregistered", () => {
     const planted: Write = { store: "localStorage", key: "kf_cart_*", expr: "`kf_cart_${session.token}`", value: "accessToken", file: "src/app/book/[slug]/components/utils.ts", line: 99 };
     expect(compare([...census(), planted], REGISTRY).unregistered.some((u) => u.includes("kf_cart_*") && u.includes(":99"))).toBe(true);
+  });
+});
+
+describe("CSC-66b a function that can end without a return", () => {
+  it("gives undefined as well as its returns", () => {
+    const fixture = 'function key(on: boolean) { if (on) return "kf_p"; }\nlocalStorage.setItem(key(x), "1");';
+    expect(keysOf(scan("src/fixture-r13k.ts", fixture))).toEqual(["localStorage:kf_p", "localStorage:undefined"]);
   });
 });
 
