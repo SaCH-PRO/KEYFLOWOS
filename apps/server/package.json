@@ -27,7 +27,8 @@
     "backfill:phone-keys": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-phone-keys.ts",
     "encrypt:bank-tokens": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/encrypt-bank-connection-tokens.ts",
     "cleanup:storefront-reservations": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/release-storefront-decremented-reservations.ts",
-    "cleanup:planted-stock-rows": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/cleanup-planted-stock-rows.ts"
+    "cleanup:planted-stock-rows": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/cleanup-planted-stock-rows.ts",
+    "backfill:memory-class": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/memory-class-backfill.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

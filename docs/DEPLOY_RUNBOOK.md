@@ -422,3 +422,91 @@ such objects.
 `apps/server/src/schema-migration-coverage.spec.ts` guards the two defects that
 caused this, with no database required: a model with no `CREATE TABLE`, and a
 migration touching a table before an earlier migration creates it.
+
+---
+
+## Operator Backfills
+
+### Memory classification backfill (`MEM-CLASS-BACKFILL`, D-254 / D-257)
+
+Rows written before `MEM-CLASS-COLUMNS` (`P125`) have `data_class IS NULL` across
+`ai_memories`, `temporal_flow_memories`, and `ai_memory_embeddings`. The backfill
+command (`apps/server/scripts/memory-class-backfill.ts`) classifies legacy rows
+using the exact canonical P125 provenance classifiers (`memory-classification.ts`),
+leaving `UNCLASSIFIED` where provenance is insufficient, and never overwrites or
+downgrades rows that already have a non-null `data_class`.
+
+> [!IMPORTANT]
+> **Dry-run first; `--apply` requires explicit owner authority (D-254).**
+> Never run `--apply` against production without explicit owner sign-off and a
+> verified backup.
+
+#### 1. Dry-run report (default — writes nothing to Postgres)
+
+From `apps/server` (or inside the API container with `DATABASE_URL` set):
+
+```bash
+# Dry-run across all businesses and all 3 memory tables (writes NOTHING)
+pnpm backfill:memory-class
+
+# Optional: scope dry-run to a single business or table
+pnpm backfill:memory-class --business-id=<business_id>
+pnpm backfill:memory-class --table=ai_memories
+```
+
+The command prints a structured JSON report containing **only counts per table,
+per `data_class` (`GENERAL`, `REVENUE`, `PERSONAL`, `SECRET_BEARING`,
+`UNCLASSIFIED`), per `businessId`, and resumable cursors (`nextCursor`)** — zero
+memory content, summaries, titles, or PII are ever printed.
+
+#### 2. Apply in bounded batches (explicit owner authority only, D-254)
+
+```bash
+# Apply in batches of 200 (default), idempotently (WHERE data_class IS NULL)
+pnpm backfill:memory-class --apply --batch-size=200
+
+# Optional: scope apply to a single business
+pnpm backfill:memory-class --apply --business-id=<business_id> --batch-size=200
+
+# Optional: cap batches per invocation for progressive rollout
+pnpm backfill:memory-class --apply --batch-size=200 --max-batches=25
+```
+
+#### 3. Resuming an interrupted apply
+
+Every run prints `nextCursor` (per-table last processed `id`) and `completed`
+(`true` when all targeted tables are drained). If a run is interrupted or capped
+via `--max-batches`, resume from the reported cursor:
+
+```bash
+# Multi-table resume using nextCursor JSON from the previous run
+pnpm backfill:memory-class --apply --batch-size=200 \
+  --cursor='{"ai_memories":"<last_id>"}'
+
+# Single-table resume using --after-id
+pnpm backfill:memory-class --apply --table=ai_memory_embeddings \
+  --after-id=<last_id> --batch-size=200
+```
+
+Applying is idempotent (`WHERE id = ... AND business_id = ... AND data_class IS NULL`),
+so a second `--apply` run updates `0` rows.
+
+#### 4. Post-apply verification counts
+
+Re-run the dry-run command and verify `totals.scanned === 0` (and confirm with
+read-only SQL counts):
+
+```bash
+pnpm backfill:memory-class
+# Expect: "mode": "dry-run", "completed": true, "totals": { "scanned": 0, "updated": 0, ... }
+```
+
+```sql
+SELECT 'ai_memories' AS tbl, data_class, count(*) FROM ai_memories GROUP BY 1, 2
+UNION ALL
+SELECT 'temporal_flow_memories', data_class, count(*) FROM temporal_flow_memories GROUP BY 1, 2
+UNION ALL
+SELECT 'ai_memory_embeddings', data_class, count(*) FROM ai_memory_embeddings GROUP BY 1, 2
+ORDER BY 1, 2;
+```
+
