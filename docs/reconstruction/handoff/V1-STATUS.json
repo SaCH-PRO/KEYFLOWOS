@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "ae4a5bebc6141e3daa77c256b72a470e2c4cad7e",
-  "main_commit_date": "2026-11-26T20:19:08+00:00",
+  "main_sha": "b25d3655db1d505464919ec12361645b62fa0529",
+  "main_commit_date": "2026-11-26T23:04:36+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 218,
-    "points": 327.5,
-    "pct_by_points": 57.4
+    "packets": 225,
+    "points": 338.5,
+    "pct_by_points": 59.3
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 178,
-    "points": 243,
-    "pct_by_points": 42.6
+    "packets": 171,
+    "points": 232,
+    "pct_by_points": 40.7
    }
   },
   "by_step": {
@@ -66,21 +66,21 @@
     "total": 7
    },
    "3": {
-    "done": 88,
+    "done": 91,
     "in-progress": 0,
-    "todo": 61,
+    "todo": 58,
     "total": 149
    },
    "4": {
-    "done": 29,
+    "done": 32,
     "in-progress": 0,
-    "todo": 24,
+    "todo": 21,
     "total": 53
    },
    "5": {
-    "done": 56,
+    "done": 57,
     "in-progress": 0,
-    "todo": 36,
+    "todo": 35,
     "total": 92
    },
    "6": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 129,
+    "done": 136,
     "in-progress": 0,
-    "todo": 126,
+    "todo": 119,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 86,
+   "prior-status-file": 82,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 83,
-   "compacted-commit": 86,
-   "no-evidence": 111,
+   "code-commit-subject": 89,
+   "compacted-commit": 87,
+   "no-evidence": 108,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -169,8 +169,11 @@
    "SWP-CENSUS-V1-B",
    "NAV-B-LEGACY-SERVER",
    "W1F-ORDER-TRANSITIONS",
+   "W1F-SETTLE-NO-STOCK",
+   "W1F-STORE-STRIPE-R0",
    "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
+   "FU-CONTACT-AUDIT-RESIDUAL",
    "FU-MERGE-CONTACTS-UNIQUE",
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
@@ -183,6 +186,7 @@
    "FU-DOC-FETCH-BODY-CAP",
    "MEM-CENSUS",
    "MEM-EXPIRED-NOT-SERVED",
+   "MEM-CLASS-COLUMNS",
    "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
@@ -191,7 +195,9 @@
    "RR-STRUCTURED-PARSE-INVALID-STATE",
    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
    "RR-TOOL-EFFECT-CLASS",
+   "RR-TOOL-WRITES-SEQUENTIAL",
    "RR-DISPATCH-NO-BLIND-RETRY",
+   "RR-DISPATCH-ATOMIC-CLAIM",
    "RR-WEBHOOK-INGRESS-CENSUS",
    "RR-ACTION-INTENT-ONE-CLASSIFIER",
    "RR-EVAL-HARNESS-NO-VACUOUS",
@@ -215,8 +221,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 104,
-  "todo_with_dependencies_met_launch": 74
+  "todo_with_dependencies_met": 101,
+  "todo_with_dependencies_met_launch": 69
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -232,9 +238,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 23,
+   "weight": 22,
    "chain": [
-    "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
     "W11-WEB-INVENTORY-REFUSALS",
     "SWP-CALENDAR-TRUTH",
@@ -271,14 +276,14 @@
    "unblocks": 44
   },
   {
-   "id": "SWP-FIN-WEB-CRASHES",
+   "id": "SWP-UI-COPY",
    "step": 5,
-   "priority": "P1",
+   "priority": "P3",
    "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 19
+   "unblocks": 18
   },
   {
    "id": "W11-TRANSIENT-CONFLICT",
@@ -421,16 +426,6 @@
    "unblocks": 3
   },
   {
-   "id": "MEM-CLASS-COLUMNS",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
    "id": "SWP-STORE-FRAME",
    "step": 4,
    "priority": "P1",
@@ -461,10 +456,10 @@
    "unblocks": 2
   },
   {
-   "id": "RR-TOOL-WRITES-SEQUENTIAL",
-   "step": 3,
+   "id": "MEM-CLASS-READ",
+   "step": 4,
    "priority": "P1",
-   "size": "S",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -531,16 +526,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACT-AUDIT-RESIDUAL",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
    "step": 3,
    "priority": "P1",
@@ -601,41 +586,21 @@
    "unblocks": 0
   },
   {
+   "id": "MEM-CLASS-BACKFILL",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "MEM-EVAL-SUITE",
    "step": 4,
    "priority": "P1",
    "size": "M",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-DISPATCH-ATOMIC-CLAIM",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-SETTLE-NO-STOCK",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-STORE-STRIPE-R0",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -895,6 +860,16 @@
    "step": 3,
    "priority": "P2",
    "size": "M",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-RUN-BUDGET",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
@@ -1313,14 +1288,14 @@
    "unblocks": 44
   },
   {
-   "id": "SWP-FIN-WEB-CRASHES",
+   "id": "SWP-UI-COPY",
    "step": 5,
-   "priority": "P1",
+   "priority": "P3",
    "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 19
+   "unblocks": 18
   },
   {
    "id": "W11-TRANSIENT-CONFLICT",
@@ -1463,16 +1438,6 @@
    "unblocks": 3
   },
   {
-   "id": "MEM-CLASS-COLUMNS",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
    "id": "FU-VITEST-DECORATOR-METADATA",
    "step": 3,
    "priority": "P1",
@@ -1493,10 +1458,10 @@
    "unblocks": 2
   },
   {
-   "id": "RR-TOOL-WRITES-SEQUENTIAL",
-   "step": 3,
+   "id": "MEM-CLASS-READ",
+   "step": 4,
    "priority": "P1",
-   "size": "S",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1558,16 +1523,6 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONTACT-AUDIT-RESIDUAL",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1638,36 +1593,6 @@
    "priority": "P1",
    "size": "M",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-DISPATCH-ATOMIC-CLAIM",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-SETTLE-NO-STOCK",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-STORE-STRIPE-R0",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -4125,15 +4050,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "3581d281"
+   ],
    "depends_on": [
     "SWP-TEAM-WEB"
    ],
    "title": "Reports: switching Books tabs never crashes",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-UI-COPY",
@@ -4151,7 +4078,7 @@
     "SWP-KEY-SHELL-SMOKE"
    ],
    "title": "Plain words instead of developer text in Calendar, Events and Settings",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-WEB-INVENTORY-REFUSALS",
@@ -5348,16 +5275,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "10a14b67"
+   ],
    "depends_on": [
     "W11-CHECKOUT-PAIR-SCOPE",
     "SWP-STORE-OVERSELL"
    ],
    "title": "A provider settlement whose stock has run out records the money and alerts the business; stock reads are business-scoped everywhere",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W1F-STORE-STRIPE-R0",
@@ -5366,15 +5295,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "34eb3c40"
+   ],
    "depends_on": [
     "W11-STORE-OWN-PAYMENT-KEYS"
    ],
    "title": "The platform's Stripe signature never settles a store order; store refunds map to their order",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W1F-STORE-PAYPAL",
@@ -5572,15 +5503,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "45343458"
+   ],
    "depends_on": [
     "TOF-CONTACT-AUDIT-CREATE"
    ],
    "title": "Every remaining contact write records its audit row durably (D-25), notes and tasks included (D-207)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-MERGE-CONTACTS-UNIQUE",
@@ -6271,15 +6204,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e8d44688",
+    "fa20c217"
+   ],
    "depends_on": [
     "MEM-CENSUS"
    ],
    "title": "Memory rows and embedding copies record data class and module scope at write, from provenance",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-CLASS-BACKFILL",
@@ -6296,7 +6232,7 @@
     "MEM-CLASS-COLUMNS"
    ],
    "title": "Classify legacy memory rows: dry-run report by default, apply on owner authority",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-CLASS-READ",
@@ -6317,7 +6253,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "One reader projection decides every memory read by data class; derived items inherit their sources' class",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-TEMPORAL-EMBED-DEDUP",
@@ -7009,7 +6945,7 @@
     "RR-TOOL-WRITES-SEQUENTIAL"
    ],
    "title": "A typed per-turn run budget for KEY: a cap on tool calls executed per model response, and pinned worst-case model attempts per turn",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-TOOL-EFFECT-CLASS",
@@ -7054,15 +6990,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b0d721e7"
+   ],
    "depends_on": [
     "RR-TOOL-EFFECT-CLASS"
    ],
    "title": "Flow chat runs the writes of one model turn one at a time in model order; only reads run in parallel",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-DISPATCH-NO-BLIND-RETRY",
@@ -7091,15 +7029,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "db146c7a",
+    "a68cfa6e"
+   ],
    "depends_on": [
     "RR-DISPATCH-NO-BLIND-RETRY"
    ],
    "title": "Plan queue takes an atomic durable claim on the idempotency key before running a step (no find-then-execute)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-MCP-TENANT-BOUND",

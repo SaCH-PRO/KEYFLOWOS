@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-26 ~20:25 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M34 merged. Main is `615ee22c`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-26 ~23:25 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M36 merged. Main is `b25d3655`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,7 +17,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-26 ~20:25 UTC)
+## 0. Current state: the next session starts here (2026-11-26 ~23:25 UTC)
 
 Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issue #80 and the
 pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this session is needed.
@@ -26,7 +26,7 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 which the owner paused (#80 7179133696). Cloud workers report there and post every PACKET REPORT on #80, so a new
 orchestrator reads #80.
 
-**State:** main `615ee22c` (M34 #268 merged 20:16 UTC; M32 #267 17:28; M30 #266 ~15:05; M28 #265 11:56; M26 #263 10:23). V1-STATUS: 218 of 396 done (57.4% of points; launch 129 of 255), counting tests-only packets since the status fix below.
+**State:** main `b25d3655` (M36 #270 merged 23:17 UTC; M34 #268 20:16; M32 #267 17:28; M30 #266 ~15:05; M28 #265 11:56; M26 #263 10:23; Antigravity's M43 #264 and M45 #269 in between). V1-STATUS: 225 of 396 done (59.3% of points; launch 136 of 255).
 Production still runs `f5d58ef7` (16 Nov); the owner redeploys (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set
 (D-290).
 
@@ -55,12 +55,15 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 - **M34** (#268, merged 20:16 UTC): P212 EXPENSES-HUB-1 web half (applied as its own diff from `132ad399`, since P208
   reached main compacted) + RR-SESSION-STORAGE-CENSUS + P215 CUSTOMER-PAGE-HONESTY + docs. Proof at `5ba4f480`: server
   16,393, R0 39/39, web 3,531; G10, G11, H5, H6 red→green.
-- **Status script fix (this branch, `scripts/agent-memory/lib.mjs`, RED then fix):** a tests-only packet now counts done
-  on its compacted `test(...): RED for pkt/V1-<ID> (compacted)` commit (compact.sh gives such a packet one commit).
-  RR-SESSION-STORAGE-CENSUS and FU-E2E-MOCKED-SESSION-TOKEN were stuck at todo before. Reaches main with the next docs
-  squash.
-- **Next wave (M36):** P220 SWP-FIN-WEB-CRASHES (repair round 1) and P221 EXPENSES-HUB-3 (finishing on top of M34)
-  + docs.
+- **M36** (#270, merged 23:17 UTC): P220 SWP-FIN-WEB-CRASHES + docs, including the status-script rule: a tests-only
+  packet counts done only on a subject that is exactly `test(<scope>): RED for pkt/V1-<ID> (compacted)` (tightened from
+  the wave security confirmation; RR-SESSION-STORAGE-CENSUS and FU-E2E-MOCKED-SESSION-TOKEN count). Proof at
+  `e508baab`: server 16,393, R0 39/39, web 3,539; H8 red→green (base red twice, head green three times). Journey H was
+  re-run 3x head / 2x base: H1/H3/H9/H10 and phone H4 fail everywhere; desktop H2/H4/H5/H7a flip at head and base under
+  load. Four wave confirmations (two at the wave head, two at the status-script delta) CONFIRMED; the first correctness
+  confirmation caught six PR-body inaccuracies, all corrected before enqueue.
+- **Next Claude wave (M38):** P221 EXPENSES-HUB-3 and P224 SWP-BOOKING-SLOTS when each is confirmed and its blockers
+  clear (0.2), + docs.
 - **Container restarts:** this container restarted three times on 2026-11-26 (~11:54, ~13:48, ~14:45 UTC). After each:
   `service postgresql start; service redis-server start`, then recover finished reviewers' reports from
   `subagents/agent-<id>.jsonl` (last SubagentHandback input). A proof running across a restart does not count. The container restarted about eight times on 2026-11-26.
@@ -76,13 +79,17 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 | **P208 EXPENSES-HUB-2** | merged | M32 | — |
 | **P212 EXPENSES-HUB-1 web** | merged | M34 | — |
 | **P215 CUSTOMER-PAGE-HONESTY** | merged | M34 | — |
-| **P220 SWP-FIN-WEB-CRASHES** | `pkt/V1-SWP-FIN-WEB-CRASHES` @ `5157201c` | Complete (#80 7199953059), H8 red→green; acceptance ACCEPT WITH MINORS x2; repair round 1 (business-switch, cancelled-guard and loading pins; loading reset on a null business) | Confirmations, RETURN, wave M36 |
-| **P221 EXPENSES-HUB-3** | `pkt/V1-EXPENSES-HUB-3` @ `7bbb26e` | J6, H10, H4 phone red→green live; receipt sweep added. Now merging main (M34) and making the [id] BUG-072 fix. The cross-session receipt leg is blocked on server row P222 (no route serves receiptUrl): **owner question 65** | Report, two reviews, wave M36 |
+| **P220 SWP-FIN-WEB-CRASHES** | merged | M36 | — |
+| **P221 EXPENSES-HUB-3** | `pkt/V1-EXPENSES-HUB-3` @ `37abcc5` | Repair round 5 in progress (round 4: security CONFIRMED with one older MAJOR, stuck loading after two business switches in one React batch; correctness NOT CONFIRMED, a relative `NEXT_PUBLIC_API_BASE_URL` such as `/__api` makes an own receipt read "unavailable"). Cross-session receipt leg blocked on server row P222: **owner question 65** | Round 5, two confirmations, then hold for Q65/P222 |
+| **P224 SWP-BOOKING-SLOTS** | `pkt/V1-SWP-BOOKING-SLOTS` @ `d4e0af9` | Repair round 3 done (held slot after a failed payment, BRH-01/02; calendar link encoding and clamp). Round 3 security: NOT CONFIRMED, the held slot's service match is untested (mutation survives); correctness confirmation running. Held for server row P227 (Antigravity RETURN 7204856722, not yet on main) | Round 4, then the next wave once P227 is on main |
+| **WEDGE-HIDE-STORE** | worker session (below) | Part 1 in progress (CONTRADICTION handled with option A) | Part 2 after P224 is on main |
 
 **Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
 - `session_017o9EBfvTibjEvGQK5qTBwq`: census (done).
-- `session_017o9EBfxE8RbWYwvChG8wPk`: SWP-FIN-WEB-CRASHES.
 - `session_017o9EBhDj4SCaLaHVacciEC`: EXPENSES-HUB-3.
+- `session_017o9EBgz5HFUDMDrWzuesH1`: SWP-BOOKING-SLOTS.
+- `session_017o9EBgPURGAKurygwgEU8p`: WEDGE-HIDE-STORE.
+- Done and idle: `session_017o9EBfxE8RbWYwvChG8wPk` (SWP-FIN-WEB-CRASHES).
 - Done and idle: `session_017o9EBebUgMerdbBpmQScSt` (EXPENSES-HUB-1 web), `session_017o9EBdokLqHytggQ888Jux` (CUSTOMER-PAGE-HONESTY).
 - Done and idle: `session_017o9EBgPURGAKurygwgEU8p` (TODAY-4BLOCK), `session_017o9EBg5uEv5gUvm5sYpiG7` (EXPENSES-HUB-2).
 
@@ -90,7 +97,7 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 
 Active on #80 and on the board (rows below 200). Server rows Claude raised for them under D-297: P202
 RR-ADMIN-API-SIGNIN-KIND (D-291), P203 FU-TODAY-AGGREGATE-TZ-SEED, P204 FU-STORE-ADD-IDEMPOTENT, P205
-FU-TODAY-ORDERS-PREMISE, P206 FU-TODAY-APPROVALS-STAFF, P207 FU-TODAY-OVERVIEW-PARITY (absorbs FU-TODAY-PULSE-OVERVIEW), P213 FU-RECURRING-EXPENSE-SERVER, P214 FU-TODAY-QUOTE-HREF. Under D-298, Journey I2/I3/I4 are the done condition of P206/P205/P207.
+FU-TODAY-ORDERS-PREMISE, P206 FU-TODAY-APPROVALS-STAFF, P207 FU-TODAY-OVERVIEW-PARITY (absorbs FU-TODAY-PULSE-OVERVIEW), P213 FU-RECURRING-EXPENSE-SERVER (returned 7204446156), P214 FU-TODAY-QUOTE-HREF, P222 FU-RECEIPT-READ-ROUTE (blocks EXPENSES-HUB-3's cross-session leg), P223 FU-REPORTS-DATE-RANGE-STABLE, P226 FU-PUBLIC-BOOKING-GRID, P227 FU-SLOTS-HOURS-READER (returned 7204856722; blocks P224). Asked on #80 7204091370. P202 returned. Under D-298, Journey I2/I3/I4 are the done condition of P206/P205/P207.
 
 ### 0.4 Queue and follow-ups (Claude lane)
 
@@ -222,8 +229,7 @@ Every ruling to D-285 is on main (M16, PR #248). D-273 (Antigravity's FU-VITEST-
 referred to on the board but is not yet a row.
 - **D-286 to D-290** reached main with M22's docs squash (merged 2026-11-26). Each is
   on #80 (OWNER RULINGS 7178159751; D-290 7178888690). Summary in section 4's last paragraph.
-- **D-291 to D-297** (owner answers to questions 57 to 62, 2026-11-26) are on this branch (`007fcffa`) and reach main
-  with the next Claude wave's docs squash. D-291 `/api/admin/*` requires the admin sign-in (server packet P202);
+- **D-291 to D-298** (owner answers to questions 57 to 63, 2026-11-26) are on main (docs squashes of M30 onwards). D-291 `/api/admin/*` requires the admin sign-in (server packet P202);
   D-292 favorites strip and duplicate banner stay above the search; D-293 CLIENT reads "Client"; D-294 a tab reads
   KEY_DISABLED once, until reload; D-295 Release 0 AMEND of WOS-C01's final assertion only (TODAY-4BLOCK); D-296 the
   role presets stay read-only; D-297 board numbering and server rows for Antigravity; D-298 (owner question 63) Journey I2/I3/I4 leave TODAY-4BLOCK for P206/P205/P207.
@@ -234,14 +240,14 @@ referred to on the board but is not yet a row.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `615ee22c`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `b25d3655`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
-| **Owner** | - | - | Section 4 questions 40 to 50, 54 and 64 to 66; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
-| `wave/v1-docs-p19` | main `615ee22c` merged in | This file and V1-STATUS | Squashed into each Claude wave |
+| **Owner** | - | - | Section 4 questions 40 to 50, 54 and 64 to 68; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| `wave/v1-docs-p19` | main `b25d3655` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -375,6 +381,8 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 
 65. **EXPENSES-HUB-3's "another session sees the receipt" (board P222).** Nothing on the server serves the stored receiptUrl, and object storage is S3-only. Move that leg to server row P222 (recommended), hold EXPENSES-HUB-3 until P222 lands, or hide receipt upload until then? (Default meanwhile: the leg is a pending test naming P222; EXPENSES-HUB-3 is not put in a wave until you rule.)
 64. **Session-storage census approach** (asked; the orchestrator took the stricter default: the resolver proves only a small grammar and everything else fails closed). Overrule if you prefer patching shape by shape or accepting documented gaps.
+67. **Plan dependency for SALES-ORDERS-TAB and QUICK-SALE-WEB** (asked in this session; recorded here because the question tool was interrupted). Confirm the dependency order the plan should carry for these two web packets. (Default: as in the plan.)
+68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
 66. **Trust wording on customer pages** (from CUSTOMER-PAGE-HONESTY): keep or drop "Trusted Platform", the owner-picked "Verified Business"/"Instant Booking" rails, "Instant Confirmation", "Secure Booking", "Secured by KeyFlowOS"; and published case studies have no public page now that /site redirects.
 
 **Ruled 2026-11-26 (D-298, #80 7189605548):** 63 = D-298.
