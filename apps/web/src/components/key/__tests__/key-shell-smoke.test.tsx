@@ -31,6 +31,12 @@
  *                        store open or fills its input: the guards hold below the drawer, not only by hiding it
  *   KSS-W15  RED-BEFORE  under keyDisabled the drawer does not render even when KEY's chat store is opened directly
  *                        (as the Genome chip and the chat history do through openGenomeConversation, not an event)
+ *   KSS-W17  guard       COR-CJ-2 (carried from FU-KEY-CTRLJ-OWNERS's review): in the app shell, with the Genome gate
+ *                        deferred, Ctrl+J and Cmd+J pressed while the gate is still checking and again once the shell
+ *                        has drawn leave KEY's drawer and the shell's chat store shut under keyDisabled, not even for
+ *                        a moment. On main the shell's useKeyboardShortcuts and KeyAgent both answer Ctrl+J and
+ *                        cancel each other out, which masks a missing guard; with KeyAgent as Ctrl+J's one owner
+ *                        (FU-KEY-CTRLJ-OWNERS) this case fails when KeyAgent's Ctrl+J guard is removed
  *
  * Each case uses its own session token: useKeyEnabled keeps one answer per session token, so a case never reads the
  * answer an earlier case was given.
@@ -61,13 +67,15 @@ vi.mock("next/link", () => ({
 }));
 
 // The Genome gate answers a moment after the first render, as its real read does (as key-ctrlj-owner.test.tsx).
+// KSS-W17 holds it longer so keys can be pressed while it is still checking.
+const genomeGate = vi.hoisted(() => ({ answerAfterMs: 20 }));
 vi.mock("@/hooks/use-genome-gate", async () => {
   const React = await import("react");
   return {
     useGenomeGate: () => {
       const [checking, setChecking] = React.useState(true);
       React.useEffect(() => {
-        const t = setTimeout(() => setChecking(false), 20);
+        const t = setTimeout(() => setChecking(false), genomeGate.answerAfterMs);
         return () => clearTimeout(t);
       }, []);
       return { checking, gateActive: false, threePillarMet: true, genomeIntegrity: 100, genesisCompleted: true };
@@ -159,6 +167,7 @@ beforeEach(() => {
   server.aiSettingsCalls = 0;
   server.onboardingNeedsGenome = false;
   server.releaseMe = null;
+  genomeGate.answerAfterMs = 20;
   keyOn();
   vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => answer(input, init));
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -323,6 +332,55 @@ describe("SWP-KEY-SHELL-SMOKE: no KEY door in the shell under keyDisabled", { ti
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     await waitFor(() => expect(palette(), "the command palette").not.toBeNull(), { timeout: 2000 });
     expect(drawer()).toBeNull();
+  });
+});
+
+describe("SWP-KEY-SHELL-SMOKE: Ctrl+J in the app shell under keyDisabled (COR-CJ-2)", { timeout: 15_000 }, () => {
+  it("KSS-W17 guard: with the Genome gate deferred, Ctrl+J and Cmd+J never open KEY's drawer in the app shell", async () => {
+    keyOff();
+    genomeGate.answerAfterMs = 600;
+    // Any moment the drawer is in the page counts, not only where it is after the keypress has settled.
+    const seen: string[] = [];
+    let phase = "first render";
+    const look = () => {
+      if (drawer()) seen.push(`${phase}: drawer`);
+      const store = screen.queryByTestId("chat-store")?.textContent;
+      if (store && store !== "open=false input=") seen.push(`${phase}: chat store ${store}`);
+    };
+    const observer = new MutationObserver(look);
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      render(
+        <Providers>
+          <AppLayout>
+            {/* The page sits inside the shell's KeyChatProvider, so the probe reads the shell's own chat store. */}
+            <OpenStoreButton />
+          </AppLayout>
+        </Providers>,
+      );
+      await screen.findByText(/checking your business genome/i, {}, { timeout: 4000 });
+      expect(document.querySelector("header"), "the shell waits on the Genome gate").toBeNull();
+      phase = "Ctrl+J while the Genome gate checks";
+      fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+      phase = "Cmd+J while the Genome gate checks";
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      phase = "the gate answers";
+      await waitFor(() => expect(document.querySelector("header"), "the app header renders").not.toBeNull(), { timeout: 4000 });
+      await settle(150);
+      for (const [name, mods] of [["Ctrl+J", { ctrlKey: true }], ["Cmd+J", { metaKey: true }]] as const) {
+        for (const press of [1, 2]) {
+          phase = `${name} in the shell (press ${press})`;
+          fireEvent.keyDown(window, { key: "j", ...mods });
+          await settle(150);
+          look();
+        }
+      }
+    } finally {
+      observer.disconnect();
+    }
+    expect(screen.getByTestId("chat-store").textContent, "the shell's chat store is read").toBe("open=false input=");
+    expect([...new Set(seen)], "moments KEY's drawer or chat store opened in the app shell under keyDisabled").toEqual([]);
+    expect(askKey(), "the header's Ask KEY button under keyDisabled").toBeNull();
   });
 });
 
