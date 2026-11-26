@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import type { KeyInboxInsight, KeyInboxMessage } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { fenceUntrusted, withUntrustedContentRule } from '../ai/untrusted-content';
 import type { GenerateKeyInboxIntelligenceDto } from './dto/generate-intelligence.dto';
 import { KeyInboxTemporalEmitterService } from './key-inbox-temporal-emitter.service';
 import type {
@@ -400,9 +401,11 @@ export class KeyInboxIntelligenceService {
     trends: Record<string, MetricTrend>,
     evidence: EvidenceBundle,
   ): Promise<KeyInboxIntelligenceReportContent> {
-    const systemPrompt = `You are KEYInbox Intelligence, the omnichannel business communication analyst for KEYFlowOS.
+    const systemPrompt = withUntrustedContentRule(`You are KEYInbox Intelligence, the omnichannel business communication analyst for KEYFlowOS.
 You analyze business conversations across email, WhatsApp, forms, Meta, website chat, and other active channels.
-Use only the provided metrics, trends, and evidence. Do not invent numbers. Return only valid JSON.`;
+Use only the provided metrics, trends, and evidence. Do not invent numbers. Return only valid JSON.`);
+
+    const fencedEvidence = fenceUntrusted('inbound_message', JSON.stringify(evidence, null, 2));
 
     const userPrompt = `Generate an intelligence report for business ${businessId}.
 Scope: ${scope}
@@ -415,7 +418,7 @@ Trends (current vs previous period):
 ${JSON.stringify(trends, null, 2)}
 
 Evidence samples:
-${JSON.stringify(evidence, null, 2)}
+${fencedEvidence}
 
 Return ONLY valid JSON matching this exact schema:
 {

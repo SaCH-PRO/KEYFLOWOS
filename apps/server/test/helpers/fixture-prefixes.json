@@ -598,6 +598,11 @@
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
     },
     {
+      "prefix": "v72d_",
+      "owner": "apps/server/test/social-webhook-tenant.integration.test.ts",
+      "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
+    },
+    {
       "prefix": "v80m_",
       "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
       "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
@@ -736,6 +741,11 @@
       "prefix": "v86e_",
       "owner": "apps/server/test/contact-status-readers-import.integration.test.ts",
       "packet": "V1-86 (V1-38b-STATUS-READERS)"
+    },
+    {
+      "prefix": "v86u_",
+      "owner": "apps/server/test/untrusted-inbound-fence.integration.test.ts",
+      "packet": "V1-86 (FU-UNTRUSTED-INBOUND-FENCE)"
     },
     {
       "prefix": "v87a_",
@@ -1480,6 +1490,51 @@
       "prefix": "v64l_",
       "owner": "apps/server/test/census-key-b.integration.test.ts",
       "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v71h_",
+      "owner": "apps/server/test/merge-contacts-unique.integration.test.ts",
+      "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE, P112)"
+    },
+    {
+      "prefix": "v81o_",
+      "owner": "apps/server/test/key-overdue-sent-only.integration.test.ts",
+      "packet": "V1-81 (FU-KEY-OVERDUE-SENT-ONLY, P113)"
+    },
+    {
+      "prefix": "v83c_",
+      "owner": "apps/server/test/contactid-writer-validation.integration.test.ts",
+      "packet": "V1-83 (FU-CONTACTID-WRITER-VALIDATION, P114)"
+    },
+    {
+      "prefix": "v72t_",
+      "owner": "apps/server/test/token-encryption-key-census.integration.test.ts",
+      "packet": "V1-72 (RR-DB-CRYPTO-KEY-CENSUS)"
+    },
+    {
+      "prefix": "v72b_",
+      "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
+    },
+    {
+      "prefix": "v67b_",
+      "owner": "apps/server/test/legacy-modules.integration.test.ts",
+      "packet": "V1-67 (NAV-B-LEGACY-SERVER)"
+    },
+    {
+      "prefix": "v84k_",
+      "owner": "apps/server/test/cortex-insight-cash-truth.integration.test.ts",
+      "packet": "V1-84 (FU-CORTEX-INSIGHT-CASH-TRUTH, P119)"
+    },
+    {
+      "prefix": "v85m_",
+      "owner": "apps/server/test/marketplace-paid-payment-row.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120)"
+    },
+    {
+      "prefix": "v85n_",
+      "owner": "apps/server/test/marketplace-paid-payment-row-r1.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120 R1)"
     }
   ],
   "pendingRenames": [],
@@ -1491,6 +1546,10 @@
     {
       "file": "apps/server/test/backfill-scripts-cli.integration.test.ts",
       "reason": "Runs the operator scripts' dry runs (no arguments) as child processes against DATABASE_URL; dry runs write no rows, so there is nothing to seed or clean up."
+    },
+    {
+      "file": "apps/server/test/contract-fetch-body-cap.integration.test.ts",
+      "reason": "Tests ContractClauseService decompressed body cap against a real local HTTP server with an in-memory Prisma double; touches no database rows."
     },
     {
       "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",

@@ -3,8 +3,8 @@ import { Pool } from "pg";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { softDelete } from "./middleware/soft-delete";
 import { tokenEncryptionExtension } from "./middleware/token-encryption";
-export { tokenEncryptionKeySource, decryptNestedRecord, ENCRYPTED_FIELDS } from "./middleware/token-encryption";
-export type { TokenEncryptionKeyVar, EncryptedModel } from "./middleware/token-encryption";
+export { tokenEncryptionKeySource, decryptNestedRecord, ENCRYPTED_FIELDS, classifyStoredToken } from "./middleware/token-encryption";
+export type { TokenEncryptionKeyVar, EncryptedModel, TokenEncryptionKeyLabel } from "./middleware/token-encryption";
 
 // Tenant isolation support via AsyncLocalStorage (injected at runtime by apps/server)
 let _tenantContextProvider: { getCurrentBusinessId: () => string | undefined } | undefined;

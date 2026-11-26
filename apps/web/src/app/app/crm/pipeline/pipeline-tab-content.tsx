@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, List, Heart, ChevronDown, Zap, Bot, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -21,7 +21,7 @@ import type { NextAction } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
 import { useOpenComposer } from "@/hooks/use-open-composer";
 import { BulkActionBar } from "./bulk-action-bar";
-import { PipelineToolbar } from "./pipeline-toolbar";
+import { CONTACTS_INSIGHTS_PANEL_ID, PipelineToolbar } from "./pipeline-toolbar";
 import type { ViewMode } from "./pipeline-toolbar";
 import { PipelineContactList } from "./pipeline-contact-list";
 import { PipelineDetailPanel } from "./pipeline-detail-panel";
@@ -44,6 +44,11 @@ interface PipelineTabContentProps {
   onToggleAutopilotPause?: () => void;
   onApproveAutopilot?: (id: string) => Promise<void>;
   onDenyAutopilot?: (id: string) => Promise<void>;
+  /**
+   * CONTACTS-LIST-FIRST (D-289): the screen's own cards (the contacts page's Relationship Pulse and Action Center),
+   * drawn in the collapsible "Insights and filters" panel with the Priority Queue and the smart chips.
+   */
+  insights?: ReactNode;
 }
 
 const PIPELINE_VIEW_KEY = "kf_pipeline_view";
@@ -134,7 +139,7 @@ function ContactsLoadErrorNotice({ message, onRetry }: { message: string; onRetr
   );
 }
 
-function PipelineTabContentInner({ state, nextActions, autopilotActions, autopilotPaused, onCompleteNextAction, onViewEngageContact, onDoAction, onToggleAutopilotPause, onApproveAutopilot, onDenyAutopilot }: PipelineTabContentProps) {
+function PipelineTabContentInner({ state, nextActions, autopilotActions, autopilotPaused, onCompleteNextAction, onViewEngageContact, onDoAction, onToggleAutopilotPause, onApproveAutopilot, onDenyAutopilot, insights }: PipelineTabContentProps) {
   const {
     businessId,
     displayContacts, loading, loadError, hasMore, activeListTab,
@@ -166,6 +171,10 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [showImport, setShowImport] = useState(false);
   const [showEngageSection, setShowEngageSection] = useState(false);
+  // CONTACTS-LIST-FIRST (D-289): the list comes first, so the panel of insights and filters starts closed at every
+  // width and is not remembered (a desktop user who opened it once must still land on the list).
+  const [showInsights, setShowInsights] = useState(false);
+  const handleToggleInsights = useCallback(() => setShowInsights((open) => !open), []);
   const [pipelineLists, setPipelineLists] = useState<{ id: string; name: string }[]>([]);
   // Review CR-1: the business whose table read was refused (the table reports
   // it through ContactsTableDenialContext). Cleared by Try Again and by a view
@@ -321,63 +330,6 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         <DuplicateDetector businessId={businessId} onMergeComplete={handleMergeComplete} />
       )}
 
-      {((nextActions && nextActions.length > 0) || (autopilotActions && autopilotActions.length > 0)) && (
-        <div className="rounded-xl border border-[hsl(var(--kf-accent1))]/20 bg-[hsl(var(--kf-accent1))]/[0.02] overflow-hidden" data-walkthrough="crm-ai">
-          <button
-            onClick={() => setShowEngageSection(!showEngageSection)}
-            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
-          >
-            <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-[hsl(var(--kf-accent1))]/10 flex-shrink-0">
-              <Zap className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
-            </div>
-            <span className="text-sm font-semibold">Priority Queue</span>
-            {nextActions && nextActions.length > 0 && (
-              <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]">
-                {nextActions.length}
-              </span>
-            )}
-            {autopilotActions && autopilotActions.length > 0 && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))] border border-[hsl(var(--kf-accent2))]/20">
-                <Bot className="w-3 h-3" />
-                {autopilotActions.length} autopilot
-              </span>
-            )}
-            <ChevronDown className={`w-4 h-4 ml-auto text-muted-foreground transition-transform ${showEngageSection ? "rotate-180" : ""}`} />
-          </button>
-          <AnimatePresence>
-            {showEngageSection && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="px-4 pb-4 space-y-3">
-                  {nextActions && nextActions.length > 0 && onCompleteNextAction && onViewEngageContact && onDoAction && (
-                    <NextActionQueue
-                      actions={nextActions}
-                      onComplete={onCompleteNextAction}
-                      onViewContact={onViewEngageContact}
-                      onDoAction={onDoAction}
-                    />
-                  )}
-                  {autopilotActions && autopilotActions.length > 0 && onApproveAutopilot && onDenyAutopilot && (
-                    <AutopilotActions
-                      actions={autopilotActions}
-                      isPaused={autopilotPaused ?? false}
-                      onApprove={onApproveAutopilot}
-                      onDeny={onDenyAutopilot}
-                      onTogglePause={onToggleAutopilotPause ?? (() => {})}
-                    />
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-
       {favoriteContacts.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 px-1">
@@ -515,6 +467,9 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         businessId={businessId ?? undefined}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
+        insightsOpen={showInsights}
+        onToggleInsights={handleToggleInsights}
+        insightsActiveCount={(smartFilter ? 1 : 0) + (activeSegment ? 1 : 0) + (activeListTab !== "all" ? 1 : 0)}
         savedViewState={{
           search: searchInput,
           status: statusFilter,
@@ -548,30 +503,95 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         }}
       />
 
-      {/* Smart Filter Chips */}
-      <div className="flex flex-wrap gap-1.5 px-1 pb-1">
-        {[
-          { key: "unpaid", label: "Unpaid Invoices", icon: "💰" },
-          { key: "bookings", label: "Upcoming Bookings", icon: "📅" },
-          { key: "deals", label: "Open Deals", icon: "🤝" },
-          { key: "stale", label: "Stale 14+ days", icon: "⏰" },
-          { key: "atrisk", label: "At Risk", icon: "⚠️" },
-          { key: "highvalue", label: "High Value", icon: "💎" },
-        ].map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setSmartFilter(smartFilter === f.key ? null : f.key)}
-            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition-all ${
-              smartFilter === f.key
-                ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
-                : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
-            }`}
-          >
-            <span>{f.icon}</span>
-            {f.label}
-          </button>
-        ))}
-      </div>
+      {/* CONTACTS-LIST-FIRST (D-289): the cards that stood above the list, collapsed behind the toolbar's toggle. */}
+      {showInsights && (
+        <section id={CONTACTS_INSIGHTS_PANEL_ID} aria-label="Insights and filters" className="space-y-5">
+          {insights}
+        {((nextActions && nextActions.length > 0) || (autopilotActions && autopilotActions.length > 0)) && (
+          <div className="rounded-xl border border-[hsl(var(--kf-accent1))]/20 bg-[hsl(var(--kf-accent1))]/[0.02] overflow-hidden" data-walkthrough="crm-ai">
+            <button
+              onClick={() => setShowEngageSection(!showEngageSection)}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
+            >
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-[hsl(var(--kf-accent1))]/10 flex-shrink-0">
+                <Zap className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+              </div>
+              <span className="text-sm font-semibold">Priority Queue</span>
+              {nextActions && nextActions.length > 0 && (
+                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]">
+                  {nextActions.length}
+                </span>
+              )}
+              {autopilotActions && autopilotActions.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))] border border-[hsl(var(--kf-accent2))]/20">
+                  <Bot className="w-3 h-3" />
+                  {autopilotActions.length} autopilot
+                </span>
+              )}
+              <ChevronDown className={`w-4 h-4 ml-auto text-muted-foreground transition-transform ${showEngageSection ? "rotate-180" : ""}`} />
+            </button>
+            <AnimatePresence>
+              {showEngageSection && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="px-4 pb-4 space-y-3">
+                    {nextActions && nextActions.length > 0 && onCompleteNextAction && onViewEngageContact && onDoAction && (
+                      <NextActionQueue
+                        actions={nextActions}
+                        onComplete={onCompleteNextAction}
+                        onViewContact={onViewEngageContact}
+                        onDoAction={onDoAction}
+                      />
+                    )}
+                    {autopilotActions && autopilotActions.length > 0 && onApproveAutopilot && onDenyAutopilot && (
+                      <AutopilotActions
+                        actions={autopilotActions}
+                        isPaused={autopilotPaused ?? false}
+                        onApprove={onApproveAutopilot}
+                        onDeny={onDenyAutopilot}
+                        onTogglePause={onToggleAutopilotPause ?? (() => {})}
+                      />
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Smart Filter Chips */}
+        <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+          {[
+            { key: "unpaid", label: "Unpaid Invoices", icon: "💰" },
+            { key: "bookings", label: "Upcoming Bookings", icon: "📅" },
+            { key: "deals", label: "Open Deals", icon: "🤝" },
+            { key: "stale", label: "Stale 14+ days", icon: "⏰" },
+            { key: "atrisk", label: "At Risk", icon: "⚠️" },
+            { key: "highvalue", label: "High Value", icon: "💎" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setSmartFilter(smartFilter === f.key ? null : f.key)}
+              aria-pressed={smartFilter === f.key}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition-all ${
+                smartFilter === f.key
+                  ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+                  : "border-border/30 text-muted-foreground hover:text-foreground hover:border-border/60"
+              }`}
+            >
+              <span>{f.icon}</span>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        </section>
+      )}
 
       {loadErrorView ? (
         <ContactsLoadErrorNotice message={loadErrorView} onRetry={handleRetry} />

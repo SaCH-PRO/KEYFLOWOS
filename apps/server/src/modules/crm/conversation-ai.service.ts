@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { fenceUntrusted, withUntrustedContentRule } from '../ai/untrusted-content';
 import type { MessageReceivedPayload } from '../../core/event-bus/events.types';
 import {
   EXCLUDE_WHATSAPP_INBOUND_CONTACT_EVENTS,
@@ -250,9 +251,10 @@ export class ConversationAiService {
     const transcript = thread
       .map((e) => `[${e.direction === 'in' ? 'CONTACT' : e.direction === 'internal' ? 'NOTE' : 'BUSINESS'} · ${e.channel}] ${sanitize(e.body, 600)}`)
       .join('\n');
+    const fencedTranscript = fenceUntrusted('inbound_message', transcript);
 
-    const system = `You analyze CRM conversations between a small business and a contact.
-Return STRICT JSON. Be concise and factual. No invented details.`;
+    const system = withUntrustedContentRule(`You analyze CRM conversations between a small business and a contact.
+Return STRICT JSON. Be concise and factual. No invented details.`);
     const user = `Summarize the following conversation thread (oldest first).
 Return JSON of shape:
 {
@@ -264,7 +266,7 @@ Return JSON of shape:
 }
 
 THREAD:
-${transcript}`;
+${fencedTranscript}`;
 
     let result: ThreadSummaryResult | null;
     let modelUsed: string | undefined;
@@ -315,6 +317,8 @@ ${transcript}`;
   }): Promise<MessageAnalysisResult | null> {
     const body = sanitize(args.body, 1000);
     if (!body) return null;
+    const fencedBody = fenceUntrusted('inbound_message', body);
+    if (!fencedBody) return null;
     const hash = createHash('sha256').update(args.messageRef).update('\u0001').update(body).digest('hex').slice(0, 32);
 
     const cached = await this.readInsight(args.businessId, args.contactId, 'message_analysis', args.messageRef);
@@ -322,10 +326,11 @@ ${transcript}`;
       return cached.payload as unknown as MessageAnalysisResult;
     }
 
-    const system = `Classify a single CRM message from a contact to a business.
-Return STRICT JSON. Use plain snake_case intent labels (e.g. pricing_question, booking_request, complaint, scheduling, smalltalk, support_request, payment_issue, cancellation).`;
-    const user = `Channel: ${args.channel}
-Message: ${body}
+    const system = withUntrustedContentRule(`Classify a single CRM message from a contact to a business.
+Return STRICT JSON. Use plain snake_case intent labels (e.g. pricing_question, booking_request, complaint, scheduling, smalltalk, support_request, payment_issue, cancellation).`);
+    const user = `Channel: ${sanitize(args.channel, 40)}
+Message:
+${fencedBody}
 
 Return JSON:
 {
@@ -399,15 +404,16 @@ Return JSON:
       .slice(-12)
       .map((e) => `[${e.direction === 'in' ? 'CONTACT' : e.direction === 'internal' ? 'NOTE' : 'BUSINESS'} · ${e.channel}] ${sanitize(e.body, 500)}`)
       .join('\n');
+    const fencedTranscript = fenceUntrusted('inbound_message', transcript);
 
     const channelHint = opts?.preferredChannel
       ? `Default to channel "${sanitize(opts.preferredChannel, 30)}".`
       : `Default to the channel most recently used by the contact.`;
     const toneHint = opts?.tone ? `Tone: ${sanitize(opts.tone, 40)}.` : 'Tone: warm, professional, concise.';
 
-    const system = `You draft reply options that the business owner can review before sending.
+    const system = withUntrustedContentRule(`You draft reply options that the business owner can review before sending.
 Never auto-send. Each draft must be safe to send as-is, in plain text, no placeholders like [name].
-Return STRICT JSON.`;
+Return STRICT JSON.`);
     const user = `Business: ${business?.name ?? 'Business'}${business?.industry ? ` (${business.industry})` : ''}
 Currency: ${business?.currency ?? 'TTD'}
 
@@ -421,7 +427,7 @@ Return JSON:
 }
 
 THREAD (oldest first):
-${transcript}`;
+${fencedTranscript}`;
 
     try {
       const r = await this.aiUsage.callAi({

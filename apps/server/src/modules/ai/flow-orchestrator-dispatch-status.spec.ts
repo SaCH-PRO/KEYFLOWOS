@@ -198,7 +198,7 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     expect(conditionalWrites).toBe(2);
   });
 
-  it('DS-02 W11-DISPATCH-REFUSAL-FINAL (after W11-PROVIDER-OUTAGE-503; W10-DISPATCH-STATUS review CR-W10DS-1, D-73): a provider that did not answer is a 503 provider_unavailable (GmailService.searchMessages\' \'Gmail search failed (503)\', reached by reconcile_sweep_statements); it reaches the dispatcher as itself, is retried, and five such sweeps open that business\'s circuit for the tool; another business still sweeps', async () => {
+  it('DS-02 W11-DISPATCH-REFUSAL-FINAL (after W11-PROVIDER-OUTAGE-503; W10-DISPATCH-STATUS review CR-W10DS-1, D-73; updated RR-DISPATCH-NO-BLIND-RETRY, D-263): a provider that did not answer is a 503 provider_unavailable (GmailService.searchMessages\' \'Gmail search failed (503)\', reached by reconcile_sweep_statements); it reaches the dispatcher as itself, is retried on READ tools, stops at 1 attempt with OUTCOME_UNKNOWN on WRITE tools, and five such sweeps open that business\'s circuit for the tool; another business still sweeps', async () => {
     const outage = () => providerUnavailable('gmail', 503, GMAIL_OUTAGE);
     expect(outage()).toBeInstanceOf(ServiceUnavailableException);
     expect(outage().getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'gmail', message: GMAIL_OUTAGE });
@@ -210,27 +210,28 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     expect((err as HttpException).getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
     expect((err as Error).message).toBe(GMAIL_OUTAGE);
 
-    // A passing outage: the retry sweeps.
-    const once = makeFlow((call) => (call === 1 ? outage() : null), { imported: 0, filesConsidered: 0 });
-    const first = makeDispatcher(once.flow).dispatcher;
-    expect(await first.dispatch({ businessId: BIZ_A, ...SWEEP, retryCount: 2 })).toMatchObject({ success: true });
-    expect(once.calls()).toBe(2);
+    // A passing outage on a READ tool: the retry answers.
+    const onceRead = makeFlow((call) => (call === 1 ? outage() : null), { revenue: 0 });
+    const firstRead = makeDispatcher(onceRead.flow).dispatcher;
+    expect(await firstRead.dispatch({ businessId: BIZ_A, toolName: 'fetch_business_summary', args: {}, retryCount: 2 })).toMatchObject({ success: true });
+    expect(onceRead.calls()).toBe(2);
 
-    // A lasting outage in BIZ_A: each sweep tries three times and counts once; the fifth opens BIZ_A's circuit.
+    // A lasting outage on WRITE tool reconcile_sweep_statements (RR-DISPATCH-NO-BLIND-RETRY): each sweep
+    // stops after 1 attempt with OUTCOME_UNKNOWN and counts once; the fifth opens BIZ_A's circuit.
     const down = makeFlow((_call, businessId) => (businessId === BIZ_A ? outage() : null), { imported: 0, filesConsidered: 0 });
     const { dispatcher, threshold } = makeDispatcher(down.flow);
     for (let i = 0; i < threshold; i++) {
-      expect(await dispatcher.dispatch({ businessId: BIZ_A, ...SWEEP, retryCount: 2 })).toMatchObject({ success: false, error: GMAIL_OUTAGE });
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, ...SWEEP, retryCount: 2 })).toMatchObject({ success: false, error: `OUTCOME_UNKNOWN: ${GMAIL_OUTAGE}` });
     }
-    expect(down.calls()).toBe(threshold * 3);
+    expect(down.calls()).toBe(threshold);
     expect(dispatcher.getCircuitStatus(SWEEP.toolName, BIZ_A)).toMatchObject({ open: true, failures: threshold });
     expect(await dispatcher.dispatch({ businessId: BIZ_A, ...SWEEP, retryCount: 2 })).toMatchObject({ success: false, error: `Circuit breaker open for tool "${SWEEP.toolName}"` });
-    expect(down.calls()).toBe(threshold * 3);
+    expect(down.calls()).toBe(threshold);
     expect(await dispatcher.dispatch({ businessId: BIZ_B, ...SWEEP, retryCount: 2 })).toMatchObject({ success: true });
     expect(dispatcher.getCircuitStatus(SWEEP.toolName, BIZ_B)).toEqual(CLOSED);
   });
 
-  it('DS-03 regression control (W10-DISPATCH-STATUS, SEC-W9DC-1, D-73): a refusal whose status says asking again gets the same answer (404, 403, 401, 410) reaches the dispatcher as the tool\'s own HttpException, answered once and counted toward no circuit; a 5xx or 429 HttpException reaches it as itself and stays a failure, retried and counted', async () => {
+  it('DS-03 regression control (W10-DISPATCH-STATUS, SEC-W9DC-1, D-73; updated RR-DISPATCH-NO-BLIND-RETRY, D-263): a refusal whose status says asking again gets the same answer (404, 403, 401, 410) reaches the dispatcher as the tool\'s own HttpException, answered once and counted toward no circuit; a 5xx or 429 HttpException reaches it as itself and stays a counted failure (retried on READ, 1 attempt OUTCOME_UNKNOWN on WRITE)', async () => {
     const args = { contactId: 'w10ds_contact', callerId: 'w10ds_owner' };
     const refusals = [
       new NotFoundException('Contact not found'),
@@ -255,11 +256,19 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
       const thrown = makeFlow(() => failure);
       expect(await thrownByExecuteToolDirectly(thrown.flow, 'call_create_task', args), String(status)).toBe(failure);
 
-      const failing = makeFlow(() => failure);
-      const { dispatcher } = makeDispatcher(failing.flow);
-      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: 'call_create_task', args, retryCount: 2 }), String(status)).toMatchObject({ success: false, error: failure.message });
-      expect(failing.calls(), String(status)).toBe(3);
-      expect(dispatcher.getCircuitStatus('call_create_task', BIZ_A), String(status)).toMatchObject({ open: false, failures: 1 });
+      // WRITE tool (call_create_task): stops after 1 attempt with OUTCOME_UNKNOWN, still counted on circuit.
+      const failingWrite = makeFlow(() => failure);
+      const writeDispatcher = makeDispatcher(failingWrite.flow).dispatcher;
+      expect(await writeDispatcher.dispatch({ businessId: BIZ_A, toolName: 'call_create_task', args, retryCount: 2 }), String(status)).toMatchObject({ success: false, error: `OUTCOME_UNKNOWN: ${failure.message}` });
+      expect(failingWrite.calls(), String(status)).toBe(1);
+      expect(writeDispatcher.getCircuitStatus('call_create_task', BIZ_A), String(status)).toMatchObject({ open: false, failures: 1 });
+
+      // READ tool (fetch_business_summary): still retried 3x and counted on circuit.
+      const failingRead = makeFlow(() => failure);
+      const readDispatcher = makeDispatcher(failingRead.flow).dispatcher;
+      expect(await readDispatcher.dispatch({ businessId: BIZ_A, toolName: 'fetch_business_summary', args: {}, retryCount: 2 }), String(status)).toMatchObject({ success: false, error: failure.message });
+      expect(failingRead.calls(), String(status)).toBe(3);
+      expect(readDispatcher.getCircuitStatus('fetch_business_summary', BIZ_A), String(status)).toMatchObject({ open: false, failures: 1 });
     }
   });
 
@@ -348,7 +357,7 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     expect(ok.calls()).toBe(2);
   });
 
-  it('DS-07 regression control (W11-DISPATCH-REFUSAL-FINAL; W9 isToolRefusal): a 408 Request Timeout asks the caller to try again, so it reaches the dispatcher as itself and stays a failure, retried and counted; so does an error that is no HttpException', async () => {
+  it('DS-07 regression control (W11-DISPATCH-REFUSAL-FINAL; W9 isToolRefusal; updated RR-DISPATCH-NO-BLIND-RETRY, D-263): a 408 Request Timeout reaches the dispatcher as itself and stays a counted failure (retried 3x on READ, 1 attempt OUTCOME_UNKNOWN on WRITE); so does an error that is no HttpException', async () => {
     const args = { contactId: 'w10ds_contact', callerId: 'w10ds_owner' };
     for (const failure of [new HttpException('Request Timeout', HttpStatus.REQUEST_TIMEOUT), new Error('connect ECONNRESET')]) {
       const thrown = makeFlow(() => failure);
@@ -359,11 +368,19 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
         expect((err as Error).message).toBe(failure.message);
       }
 
-      const failing = makeFlow(() => failure);
-      const { dispatcher } = makeDispatcher(failing.flow);
-      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: 'call_create_task', args, retryCount: 2 }), failure.message).toMatchObject({ success: false, error: failure.message });
-      expect(failing.calls(), failure.message).toBe(3);
-      expect(dispatcher.getCircuitStatus('call_create_task', BIZ_A), failure.message).toMatchObject({ open: false, failures: 1 });
+      // WRITE tool (call_create_task): stops after 1 attempt with OUTCOME_UNKNOWN, still counted on circuit.
+      const failingWrite = makeFlow(() => failure);
+      const writeDispatcher = makeDispatcher(failingWrite.flow).dispatcher;
+      expect(await writeDispatcher.dispatch({ businessId: BIZ_A, toolName: 'call_create_task', args, retryCount: 2 }), failure.message).toMatchObject({ success: false, error: `OUTCOME_UNKNOWN: ${failure.message}` });
+      expect(failingWrite.calls(), failure.message).toBe(1);
+      expect(writeDispatcher.getCircuitStatus('call_create_task', BIZ_A), failure.message).toMatchObject({ open: false, failures: 1 });
+
+      // READ tool (fetch_business_summary): still retried 3x and counted on circuit.
+      const failingRead = makeFlow(() => failure);
+      const readDispatcher = makeDispatcher(failingRead.flow).dispatcher;
+      expect(await readDispatcher.dispatch({ businessId: BIZ_A, toolName: 'fetch_business_summary', args: {}, retryCount: 2 }), failure.message).toMatchObject({ success: false, error: failure.message });
+      expect(failingRead.calls(), failure.message).toBe(3);
+      expect(readDispatcher.getCircuitStatus('fetch_business_summary', BIZ_A), failure.message).toMatchObject({ open: false, failures: 1 });
     }
   });
 

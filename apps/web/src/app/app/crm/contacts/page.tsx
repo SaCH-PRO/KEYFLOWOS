@@ -210,103 +210,7 @@ export default function ContactsPage() {
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
 
-      {/* 1. Relationship Pulse */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-            Relationship Pulse
-          </h2>
-        </div>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          {[
-            { label: "Follow-ups due", count: state.segmentCounts["needs-followup"] ?? 0, icon: AlertTriangle, color: "text-[hsl(var(--kf-accent1))]", bg: "bg-[hsl(var(--kf-accent1))]/10", onClick: () => state.setActiveSegment("needs-followup") },
-            { label: "At risk", count: state.segmentCounts["at-risk"] ?? 0, icon: Flame, color: "text-red-400", bg: "bg-red-500/10", onClick: () => state.setActiveSegment("at-risk") },
-            { label: "High value idle", count: state.segmentCounts["high-value"] ?? 0, icon: Zap, color: "text-emerald-400", bg: "bg-emerald-500/10", onClick: () => state.setActiveSegment("high-value") },
-            { label: "Active clients", count: state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length, icon: Users, color: "text-blue-400", bg: "bg-blue-500/10", onClick: () => state.setStatusFilter("CLIENT") },
-            { label: "New this week", count: state.segmentCounts["new-this-week"] ?? 0, icon: CalendarPlus, color: "text-[hsl(var(--kf-accent2))]", bg: "bg-[hsl(var(--kf-accent2))]/10", onClick: () => state.setActiveSegment("new-this-week") },
-            { label: "Total contacts", count: contacts.length, icon: TrendingUp, color: "text-muted-foreground", bg: "bg-white/[0.04]", onClick: () => state.setActiveSegment(null) },
-          ].map((metric) => (
-            <button
-              key={metric.label}
-              onClick={metric.onClick}
-              className="flex flex-col items-start gap-1.5 p-3 rounded-xl border border-border/30 bg-card/20 hover:bg-card/40 hover:border-border/50 transition-all text-left"
-            >
-              <div className={`p-1.5 rounded-lg ${metric.bg}`}>
-                <metric.icon className={`w-3.5 h-3.5 ${metric.color}`} />
-              </div>
-              <div>
-                <p className={`text-lg font-semibold leading-tight ${metric.color}`}>{metric.count}</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-0.5">{metric.label}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 2. Action Center */}
-      {(leverageInsights.length > 0 || nextActions.length > 0 || autopilotActions.length > 0) && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-              Action Center
-            </h2>
-          </div>
-          
-          <div className="grid gap-2">
-            {/* Leverage insights */}
-            {leverageInsights.map((item, i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  if (item.href === "#followup") state.setActiveSegment("needs-followup");
-                  else if (item.href === "#atrisk") state.setActiveSegment("at-risk");
-                  else if (item.href === "#highvalue") state.setActiveSegment("high-value");
-                }}
-                className="flex items-start gap-3 p-3.5 rounded-xl border border-border/40 bg-card/30 hover:bg-card/50 transition-all text-left"
-              >
-                <div className="p-2 rounded-lg bg-[hsl(var(--kf-accent1))]/10 shrink-0">
-                  <item.icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{item.label}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{item.detail}</p>
-                </div>
-                <span className="text-xs font-medium text-[hsl(var(--kf-accent1))] flex items-center gap-1 shrink-0">
-                  {item.cta} <ArrowRight className="w-3 h-3" />
-                </span>
-              </button>
-            ))}
-
-            {/* Next actions */}
-            {nextActions.length > 0 && (
-              <div className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
-                <NextActionQueue
-                  actions={nextActions}
-                  onComplete={handleCompleteNextAction}
-                  onViewContact={handleViewEngageContact}
-                  onDoAction={handleDoAction}
-                />
-              </div>
-            )}
-
-            {/* Autopilot */}
-            {autopilotActions.length > 0 && (
-              <div className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
-                <AutopilotActions
-                  actions={autopilotActions}
-                  isPaused={autopilotPaused}
-                  onTogglePause={handleToggleAutopilotPause}
-                  onApprove={handleApproveAutopilot}
-                  onDeny={handleDenyAutopilot}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 3. Contact Workspace */}
+      {/* Contact workspace: the toolbar, then the list (the Pulse and the Action Center are in its insights panel) */}
       <div className="space-y-2">
         <PipelineTabContent
           state={state}
@@ -319,6 +223,107 @@ export default function ContactsPage() {
           onToggleAutopilotPause={handleToggleAutopilotPause}
           onApproveAutopilot={handleApproveAutopilot}
           onDenyAutopilot={handleDenyAutopilot}
+          // CONTACTS-LIST-FIRST (D-289): the Pulse and the Action Center sit in the toolbar's collapsible
+          // "Insights and filters" panel, so the header, the search and then the list come first.
+          insights={
+            <>
+              {/* 1. Relationship Pulse */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                    Relationship Pulse
+                  </h2>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {[
+                    { label: "Follow-ups due", count: state.segmentCounts["needs-followup"] ?? 0, icon: AlertTriangle, color: "text-[hsl(var(--kf-accent1))]", bg: "bg-[hsl(var(--kf-accent1))]/10", onClick: () => state.setActiveSegment("needs-followup") },
+                    { label: "At risk", count: state.segmentCounts["at-risk"] ?? 0, icon: Flame, color: "text-red-400", bg: "bg-red-500/10", onClick: () => state.setActiveSegment("at-risk") },
+                    { label: "High value idle", count: state.segmentCounts["high-value"] ?? 0, icon: Zap, color: "text-emerald-400", bg: "bg-emerald-500/10", onClick: () => state.setActiveSegment("high-value") },
+                    { label: "Active clients", count: state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length, icon: Users, color: "text-blue-400", bg: "bg-blue-500/10", onClick: () => state.setStatusFilter("CLIENT") },
+                    { label: "New this week", count: state.segmentCounts["new-this-week"] ?? 0, icon: CalendarPlus, color: "text-[hsl(var(--kf-accent2))]", bg: "bg-[hsl(var(--kf-accent2))]/10", onClick: () => state.setActiveSegment("new-this-week") },
+                    { label: "Total contacts", count: contacts.length, icon: TrendingUp, color: "text-muted-foreground", bg: "bg-white/[0.04]", onClick: () => state.setActiveSegment(null) },
+                  ].map((metric) => (
+                    <button
+                      key={metric.label}
+                      onClick={metric.onClick}
+                      className="flex flex-col items-start gap-1.5 p-3 rounded-xl border border-border/30 bg-card/20 hover:bg-card/40 hover:border-border/50 transition-all text-left"
+                    >
+                      <div className={`p-1.5 rounded-lg ${metric.bg}`}>
+                        <metric.icon className={`w-3.5 h-3.5 ${metric.color}`} />
+                      </div>
+                      <div>
+                        <p className={`text-lg font-semibold leading-tight ${metric.color}`}>{metric.count}</p>
+                        <p className="text-[10px] text-muted-foreground/60 mt-0.5">{metric.label}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Action Center */}
+              {(leverageInsights.length > 0 || nextActions.length > 0 || autopilotActions.length > 0) && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                    <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                      Action Center
+                    </h2>
+                  </div>
+
+                  <div className="grid gap-2">
+                    {/* Leverage insights */}
+                    {leverageInsights.map((item, i) => (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          if (item.href === "#followup") state.setActiveSegment("needs-followup");
+                          else if (item.href === "#atrisk") state.setActiveSegment("at-risk");
+                          else if (item.href === "#highvalue") state.setActiveSegment("high-value");
+                        }}
+                        className="flex items-start gap-3 p-3.5 rounded-xl border border-border/40 bg-card/30 hover:bg-card/50 transition-all text-left"
+                      >
+                        <div className="p-2 rounded-lg bg-[hsl(var(--kf-accent1))]/10 shrink-0">
+                          <item.icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{item.label}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{item.detail}</p>
+                        </div>
+                        <span className="text-xs font-medium text-[hsl(var(--kf-accent1))] flex items-center gap-1 shrink-0">
+                          {item.cta} <ArrowRight className="w-3 h-3" />
+                        </span>
+                      </button>
+                    ))}
+
+                    {/* Next actions */}
+                    {nextActions.length > 0 && (
+                      <div className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
+                        <NextActionQueue
+                          actions={nextActions}
+                          onComplete={handleCompleteNextAction}
+                          onViewContact={handleViewEngageContact}
+                          onDoAction={handleDoAction}
+                        />
+                      </div>
+                    )}
+
+                    {/* Autopilot */}
+                    {autopilotActions.length > 0 && (
+                      <div className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
+                        <AutopilotActions
+                          actions={autopilotActions}
+                          isPaused={autopilotPaused}
+                          onTogglePause={handleToggleAutopilotPause}
+                          onApprove={handleApproveAutopilot}
+                          onDeny={handleDenyAutopilot}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          }
         />
       </div>
 

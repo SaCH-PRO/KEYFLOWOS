@@ -89,6 +89,39 @@ export const DOCUMENT_URL_TOO_MANY_REDIRECTS = 'The document URL redirected too 
 export const DOCUMENT_FETCH_TIMEOUT_MS = 30_000;
 
 /**
+ * FU-DOC-FETCH-BODY-CAP (P111 / D-246): maximum decompressed bytes read from a fetched contract
+ * document (opts.url or contract.sourceAssetId). No asset-module upload limit exists; 25 MB bounds
+ * memory against oversized streams and gzip/deflate/brotli bombs.
+ */
+export const MAX_DOCUMENT_FETCH_BYTES = 25 * 1024 * 1024;
+
+/**
+ * FU-DOC-FETCH-BODY-CAP: final 400 message when a fetched document exceeds MAX_DOCUMENT_FETCH_BYTES.
+ * Names the limit, never the host, and carries no outage cause (not retried by the plan queue).
+ */
+export const DOCUMENT_BODY_TOO_LARGE = `The document exceeds the ${MAX_DOCUMENT_FETCH_BYTES / (1024 * 1024)} MB limit`;
+
+function documentBodyTooLarge(maxBytes: number): BadRequestException {
+  const limitLabel =
+    maxBytes % (1024 * 1024) === 0
+      ? `${maxBytes / (1024 * 1024)} MB`
+      : `${maxBytes} bytes`;
+  return new BadRequestException(`The document exceeds the ${limitLabel} limit`);
+}
+
+function declaredContentLengthExceeds(res: Response, maxBytes: number): boolean {
+  const raw = res.headers.get('content-length');
+  if (!raw) return false;
+  for (const part of raw.split(',')) {
+    const trimmed = part.trim();
+    if (!/^\d+$/.test(trimmed)) continue;
+    const len = Number(trimmed);
+    if (!Number.isNaN(len) && len > maxBytes) return true;
+  }
+  return false;
+}
+
+/**
  * FU-CONTRACT-FETCH-OUTBOUND-GUARD acceptance review (correctness M1): give up a response body that will not
  * be read, so the connection is released now rather than when the host ends it (the per-hop dispatcher's
  * close() waits for a body in flight).
@@ -102,12 +135,85 @@ async function discardBody(res: Response): Promise<void> {
 }
 
 /**
+ * FU-DOC-FETCH-BODY-CAP (P111 / D-246): read a fetched document body with a hard cap on decompressed
+ * bytes. Rejects an oversized Content-Length up front before touching the stream, then streams
+ * `res.body` (already decompressed by fetch for gzip/deflate/brotli) with a running byte counter and
+ * cancels/aborts the moment cumulative bytes exceed `maxBytes` so the socket closes immediately.
+ */
+async function readDocumentBody(
+  res: Response,
+  maxBytes: number,
+  signal: AbortSignal,
+  abort: () => void,
+): Promise<Buffer> {
+  if (declaredContentLengthExceeds(res, maxBytes)) {
+    const cancelPromise = discardBody(res);
+    abort();
+    await cancelPromise;
+    throw documentBodyTooLarge(maxBytes);
+  }
+  if (signal.aborted) {
+    await discardBody(res);
+    throw signal.reason;
+  }
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    if (typeof res.arrayBuffer !== 'function') return Buffer.alloc(0);
+    const ab: ArrayBuffer | ArrayBufferView = await underSignal(res.arrayBuffer(), signal);
+    if (ab.byteLength > maxBytes) {
+      abort();
+      throw documentBodyTooLarge(maxBytes);
+    }
+    return ArrayBuffer.isView(ab)
+      ? Buffer.from(ab.buffer, ab.byteOffset, ab.byteLength)
+      : Buffer.from(ab);
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  let finished = false;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  aborted.catch(() => undefined);
+
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), aborted]);
+      if (done) {
+        finished = true;
+        break;
+      }
+      if (!value || value.byteLength === 0) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw documentBodyTooLarge(maxBytes);
+      }
+      chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+    }
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+    if (!finished) {
+      const cancelPromise = reader.cancel().catch(() => undefined);
+      abort();
+      await cancelPromise;
+    }
+    reader.releaseLock();
+  }
+  return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, total);
+}
+
+/**
  * FU-CONTRACT-FETCH-OUTBOUND-GUARD review round 1 (correctness 1, security 1): the resolver could not answer
  * now (EAI_AGAIN, a timeout, a server failure; OutboundAddressRefusedError.transient). That says nothing
  * about the name, so it is no refusal: it stays the plain failure a fetch whose lookup failed was before
  * the guard (no HttpException), which the plan queue retries and counts. It names no host and no code.
  */
 export class DocumentHostUnresolvedError extends Error {
+  /** RR-DISPATCH-NO-BLIND-RETRY (D-263): DNS lookup failed before any fetch or contract write. */
+  readonly effectNotApplied = true;
   constructor() {
     super('The document host could not be resolved right now');
     this.name = 'DocumentHostUnresolvedError';
@@ -159,6 +265,12 @@ async function checkDocumentUrl(raw: string): Promise<{ url: URL; target: Checke
   }
 }
 
+interface FetchedDocument {
+  response: Response;
+  signal: AbortSignal;
+  abort: () => void;
+}
+
 /**
  * FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): fetch a contract's document from a URL a member gave (the call's
  * url or the contract's asset). Each request goes through a dispatcher pinned to the addresses its host was
@@ -167,8 +279,12 @@ async function checkDocumentUrl(raw: string): Promise<{ url: URL; target: Checke
  * MAX_DOCUMENT_REDIRECTS of them. A host that answered (any status but a redirect) is handed back as it
  * answered, so the caller's outage marking (W11-DISPATCH-REFUSAL-FINAL, D-134) is unchanged.
  */
-async function fetchDocument(raw: string, timeoutMs: number): Promise<Response> {
-  const signal = AbortSignal.timeout(timeoutMs);
+async function fetchDocument(raw: string, timeoutMs: number): Promise<FetchedDocument> {
+  const controller = new AbortController();
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
   let { url, target } = await underSignal(checkDocumentUrl(raw), signal);
   for (let hops = 0; ; hops++) {
     const dispatcher = new PinnedDispatcher(target);
@@ -180,7 +296,7 @@ async function fetchDocument(raw: string, timeoutMs: number): Promise<Response> 
       dispatcher.close().catch(() => undefined);
     }
     const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
-    if (!location) return response;
+    if (!location) return { response, signal, abort };
     await discardBody(response);
     if (hops >= MAX_DOCUMENT_REDIRECTS) throw new BadRequestException(DOCUMENT_URL_TOO_MANY_REDIRECTS);
     let next: string;
@@ -209,6 +325,12 @@ export class ContractClauseService {
    * DNS and every redirect hop included. DOCUMENT_FETCH_TIMEOUT_MS (30 s); only a test shortens it.
    */
   documentFetchTimeoutMs = DOCUMENT_FETCH_TIMEOUT_MS;
+
+  /**
+   * FU-DOC-FETCH-BODY-CAP: maximum decompressed bytes read from a remote document fetch
+   * (opts.url or contract.sourceAssetId). MAX_DOCUMENT_FETCH_BYTES (25 MB) in production.
+   */
+  documentFetchMaxBytes = MAX_DOCUMENT_FETCH_BYTES;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -294,16 +416,17 @@ export class ContractClauseService {
     }
     if (opts.url) {
       // FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): a URL the server may not fetch is DOCUMENT_URL_REFUSED.
-      const res = await fetchDocument(opts.url, this.documentFetchTimeoutMs);
+      const { response: res, signal, abort } = await fetchDocument(opts.url, this.documentFetchTimeoutMs);
       if (!res.ok) {
         await discardBody(res);
+        abort();
         throw new BadRequestException(
           `Could not fetch document URL (${res.status})`,
           isDocumentHostOutage(res.status) ? { cause: new DocumentHostUnavailableError(res.status), description: 'Bad Request' } : undefined,
         );
       }
       return {
-        buffer: Buffer.from(await res.arrayBuffer()),
+        buffer: await readDocumentBody(res, this.documentFetchMaxBytes, signal, abort),
         mimeType: res.headers.get('content-type') ?? 'application/pdf',
         filename: opts.filename ?? 'contract.pdf',
         source: 'url',
@@ -314,16 +437,17 @@ export class ContractClauseService {
       const asset = await this.prisma.client.asset.findFirst({ where: { id: contract.sourceAssetId, businessId } });
       if (asset?.url && asset.url.startsWith('http')) {
         // FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): the asset's URL passes the same guard.
-        const res = await fetchDocument(asset.url, this.documentFetchTimeoutMs);
+        const { response: res, signal, abort } = await fetchDocument(asset.url, this.documentFetchTimeoutMs);
         if (res.ok) {
           return {
-            buffer: Buffer.from(await res.arrayBuffer()),
+            buffer: await readDocumentBody(res, this.documentFetchMaxBytes, signal, abort),
             mimeType: asset.mimeType ?? 'application/pdf',
             filename: asset.name ?? 'asset',
             source: 'asset',
           };
         }
         await discardBody(res);
+        abort();
         // W11-DISPATCH-REFUSAL-FINAL review COR-1 (D-134): the asset's host did not answer (5xx, 408,
         // 429). What extractClauses answers is unchanged (its 400 'No source document available');
         // the host's status rides on it as its cause, so KEY's plan queue can tell an outage from a

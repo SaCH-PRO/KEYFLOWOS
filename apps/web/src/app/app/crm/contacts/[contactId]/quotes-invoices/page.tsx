@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { Card, Button } from "@keyflow/ui";
+import { statusLabel } from "@/lib/status-labels";
 import { FileText, Receipt } from "lucide-react";
 
 interface Invoice {
@@ -119,7 +120,7 @@ export default function ContactQuotesInvoicesPage() {
                       <div className="flex items-center gap-2">
                         <Receipt className="h-4 w-4 text-muted-foreground" />
                         <span className="font-medium">{inv.invoiceNumber || inv.id.slice(0, 8)}</span>
-                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>{inv.status}</span>
+                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>{statusLabel(inv.status, "invoice")}</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                         {inv.issueDate && <span>Issued {fmtDate(inv.issueDate)}</span>}
@@ -163,7 +164,7 @@ export default function ContactQuotesInvoicesPage() {
                       <div className="flex items-center gap-2">
                         <FileText className="h-4 w-4 text-muted-foreground" />
                         <span className="font-medium">{q.quoteNumber || q.id.slice(0, 8)}</span>
-                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(q.status)}`}>{q.status}</span>
+                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(q.status)}`}>{statusLabel(q.status)}</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                         {q.issueDate && <span>Issued {fmtDate(q.issueDate)}</span>}
