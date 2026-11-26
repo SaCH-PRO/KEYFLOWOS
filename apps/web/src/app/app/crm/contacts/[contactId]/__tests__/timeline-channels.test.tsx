@@ -57,6 +57,12 @@
  *   TCH-17b pin      N-2: at the cap boundary, the WhatsApp event (source whatsapp_inbound, with its noteId) and a
  *                    later edit of that note are on the page but its note.created is not: the edit is WhatsApp
  *
+ * FU-TIMELINE-LOAD-OLDER (D-284): the events read pages (FU-TIMELINE-EVENTS-PAGING). The fetch stub answers it as the
+ * server does (events-read-stub.ts: the default call the newest 20 as an array; a paged call { events, nextCursor,
+ * hasMore }), and TCH-14 now has a 21st, older record behind its first page: a first page of 20 with nothing behind it
+ * is the whole history. The line it pins no longer says "Only the latest 20 ... were loaded" (older ones can now be
+ * loaded: timeline-load-older.test.tsx, TLO-01..). TCH-14's counts, header and empty texts are unchanged.
+ *
  * The page renders for real on the real client; only fetch and the Next router hooks are stubbed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -73,6 +79,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import ContactTimelinePage from "../timeline/page";
+import { serveEventsRead, type StubEvent } from "./events-read-stub";
 
 const BIZ = "biz_tch";
 const C = params.contactId;
@@ -126,7 +133,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(url, "http://localhost");
-    if (pathname.endsWith(`/crm/businesses/${BIZ}/contacts/${C}/events`)) return json(200, served);
+    if (pathname.endsWith(`/crm/businesses/${BIZ}/contacts/${C}/events`)) return serveEventsRead(url, served as StubEvent[]);
     return json(404, { message: "Not stubbed" });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -355,17 +362,23 @@ describe("D-277: the Timeline has a channel filter", () => {
     expect(countOf("WhatsApp")).toBe(1);
   });
 
-  it("TCH-14 RED: a full read (20 events) says it shows the latest 20, and its counts and empty texts say so too", async () => {
-    // Ten pasted messages, as captureInboundWhatsApp writes them: twenty events, ten items. An older call is not read.
-    served = Array.from({ length: 10 }, (_, i) => [
-      { ...PASTED[0], id: `ev_wa_note_${i}`, createdAt: at(2 * i), data: { noteId: `n_wa_${i}` } },
-      { ...PASTED[1], id: `ev_wa_${i}`, createdAt: at(2 * i + 1), data: { ...PASTED[1].data, body: `Message ${i}`, noteId: `n_wa_${i}` } },
-    ]).flat();
-    expect(served).toHaveLength(20);
+  it("TCH-14 RED: a first page with older records behind it says it shows the latest 20, and its counts and empty texts say so too", async () => {
+    // Ten pasted messages, as captureInboundWhatsApp writes them: twenty events, ten items. An older call is on the
+    // next page (FU-TIMELINE-LOAD-OLDER: the read pages, and the call is listed only once older records are loaded).
+    served = [
+      { ...CALL, createdAt: at(-5) },
+      ...Array.from({ length: 10 }, (_, i) => [
+        { ...PASTED[0], id: `ev_wa_note_${i}`, createdAt: at(2 * i), data: { noteId: `n_wa_${i}` } },
+        { ...PASTED[1], id: `ev_wa_${i}`, createdAt: at(2 * i + 1), data: { ...PASTED[1].data, body: `Message ${i}`, noteId: `n_wa_${i}` } },
+      ]).flat(),
+    ];
+    expect(served).toHaveLength(21);
     await renderTimeline();
-    // N-1 (review round 2): the line speaks of the records the read loaded, the header of the items those make (a
-    // pasted message is two records, one item), and each says which, so they never read as two different counts.
-    expect(screen.getByText("Only the latest 20 timeline records were loaded; older ones are not listed or counted.")).toBeInTheDocument();
+    // N-1 (review round 2): the line speaks of the records loaded, the header of the items those make (a pasted
+    // message is two records, one item), and each says which, so they never read as two different counts.
+    // D-284: the line no longer says "Only the latest 20 ... were loaded": the older ones can be loaded.
+    expect(screen.getByText("The latest 20 timeline records are loaded; older ones are not listed or counted until you load them.")).toBeInTheDocument();
+    expect(screen.queryByText(/^Only the latest 20 timeline records were loaded/)).not.toBeInTheDocument();
     expect(screen.getByText(/^10 items from the latest 20 records$/)).toBeInTheDocument();
     expect(screen.queryByText(/^(Latest )?10 events$/)).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/latest 20 events/i);
@@ -440,7 +453,7 @@ describe("D-277: the Timeline has a channel filter", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const { pathname } = new URL(url, "http://localhost");
       if (!pathname.endsWith(`/contacts/${C}/events`)) return json(404, { message: "Not stubbed" });
-      return failing ? json(503, { message: "Service unavailable" }) : json(200, [NOTE, ...PASTED]);
+      return failing ? json(503, { message: "Service unavailable" }) : serveEventsRead(url, [NOTE, ...PASTED]);
     });
     vi.stubGlobal("fetch", reads);
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -497,7 +510,7 @@ describe("D-277: the Timeline has a channel filter", () => {
       const { pathname } = new URL(url, "http://localhost");
       if (!pathname.endsWith(`/contacts/${C}/events`)) return json(404, { message: "Not stubbed" });
       if (failing) return new Response("<html><body>Bad gateway</body></html>", { status: 502, statusText: "", headers: { "content-type": "text/html" } });
-      return json(200, [NOTE, ...PASTED]);
+      return serveEventsRead(url, [NOTE, ...PASTED]);
     });
     vi.stubGlobal("fetch", reads);
     vi.spyOn(console, "warn").mockImplementation(() => {});

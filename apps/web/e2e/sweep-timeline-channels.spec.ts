@@ -16,10 +16,13 @@ import { test, expect, API_URL, memberOf, settle, signedInContext, type Tenant }
  *   4. the filter fits the width: no sideways page scroll;
  *   5. member scope (D-100): a member with crm read and no revenue read is served no payment event, and the
  *      filter shows and counts none (All is one fewer than the owner's; every channel count is the owner's).
- *   6. review round 1 COR-TCH-1: the events read serves at most 20. A second customer has a call, then 11 pasted
- *      messages (22 newer events): the page says only the latest 20 timeline records were loaded, the header counts
+ *   6. review round 1 COR-TCH-1: the events read serves at most 20 at a time. A second customer has a call, then 11
+ *      pasted messages (22 newer events): the page says the latest 20 timeline records are loaded, the header counts
  *      the items those make ("11 items from the latest 20 records" or fewer), the counts read "(n+)", and Calls says
- *      "No calls in the latest 20 records.", never "No calls yet." (the call is real, only older).
+ *      "No calls in the latest 20 records.", never "No calls yet." (the call is real, only older). Since
+ *      FU-TIMELINE-LOAD-OLDER (D-284) the line reads "The latest 20 timeline records are loaded; older ones are not
+ *      listed or counted until you load them." in place of "Only the latest 20 ... were loaded" (the older ones can
+ *      be loaded: e2e/sweep-timeline-load-older.spec.ts).
  *
  * Run at 375, 768, 1024 and 1440. Live only (E2E_LIVE=1, a production build, a real API and database: the journey
  * harness's own fixtures, README in e2e/journeys); without E2E_LIVE every case is skipped. Run it in the "chromium"
@@ -217,7 +220,7 @@ for (const width of [375, 768, 1024, 1440]) {
         expect(served.map((e) => e.type), "the call is older than the 20 served").not.toContain("communication.call");
         await openTimeline(page, busyId);
         await expect
-          .soft(page.getByText("Only the latest 20 timeline records were loaded; older ones are not listed or counted."), "the page says the read is the latest 20")
+          .soft(page.getByText("The latest 20 timeline records are loaded; older ones are not listed or counted until you load them."), "the page says the latest 20 are loaded")
           .toHaveCount(1);
         await expect.soft(page.getByText(/^\d+ items from the latest 20 records$/), "the header counts items of those 20 records").toHaveCount(1);
         await expect.soft(filterButton(page, "Calls"), "Calls counts within the latest 20").toContainText("(0+)");
