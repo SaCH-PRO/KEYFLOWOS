@@ -162,6 +162,10 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       <AnimatePresence>
         {showBuilder && (
           <RecurringBuilder
+            // Each schedule and the create form get their own builder state: without a key, a builder brought
+            // back (New during an Edit sheet, or its exit animation) kept the other's fields, and Update could
+            // PATCH create-form fields onto a schedule.
+            key={editing?.id ?? "new"}
             businessId={businessId}
             saving={saving}
             categories={categories}
