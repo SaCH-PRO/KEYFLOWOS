@@ -75,7 +75,7 @@ const json = (status: number, body: unknown) =>
 
 function answer(url: string): Response {
   const { pathname: p } = new URL(url, "http://api.test.local");
-  if (p === "/identity/me") return json(200, { id: "usr_kcj", email: "owner@kcj.test", businesses: [{ id: BIZ, role: "OWNER" }] });
+  if (p === "/identity/me") return json(200, { id: "usr_kcj", email: "owner@kcj.test", keyDisabled: false, businesses: [{ id: BIZ, role: "OWNER" }] });
   if (/\/(sessions|notifications|needs-attention|items|list)(\/|$)/.test(p) || p.endsWith("/flow/sessions")) return json(200, []);
   return json(200, {});
 }
