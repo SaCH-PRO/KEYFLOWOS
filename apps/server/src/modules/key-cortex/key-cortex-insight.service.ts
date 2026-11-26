@@ -98,13 +98,6 @@ const CLIENT_STATUSES = [CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STA
  */
 const AUTOMATED_TASK_CATEGORIES = ['workflow', 'automation', 'delegation_loop'];
 
-/** A contact's open deals (tenant-scoped; currency-checked against home currency per D-13/D-251). */
-const openDealSelect = (businessId: string) =>
-  ({
-    where: { businessId, status: DealStatus.OPEN, deletedAt: null },
-    select: { value: true, currency: true },
-  }) as const;
-
 const openDealValue = (
   deals: Array<{ value: number | null; currency?: string | null }>,
   homeCurrency: string,
@@ -342,7 +335,10 @@ export class KeyCortexInsightService {
           leadScore: true,
           lastInteractionAt: true,
           pipelineStage: true,
-          deals: openDealSelect(businessId),
+          deals: {
+            where: { businessId, status: DealStatus.OPEN, deletedAt: null },
+            select: { value: true, currency: true },
+          },
         },
       });
 
@@ -815,7 +811,10 @@ export class KeyCortexInsightService {
             pipelineStage: true,
             createdAt: true,
             lastInteractionAt: true,
-            deals: openDealSelect(businessId),
+            deals: {
+              where: { businessId, status: DealStatus.OPEN, deletedAt: null },
+              select: { value: true, currency: true },
+            },
           },
         }),
       ]);
