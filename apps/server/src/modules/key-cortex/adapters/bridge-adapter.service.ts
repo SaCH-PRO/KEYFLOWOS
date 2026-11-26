@@ -98,6 +98,7 @@ export class KeyCortexBridgeAdapterService {
           businessId,
           ...dna,
           scores: dnaScoresForReader(dna.scores, false),
+          confidence: dnaScoresForReader(dna.confidence, false),
           stage: null,
           executiveReadiness: null,
           withheldForRevenue: ['stage', 'executiveReadiness', 'financial', 'sales', 'business'],

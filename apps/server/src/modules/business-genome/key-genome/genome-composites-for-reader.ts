@@ -13,11 +13,15 @@
  */
 import type { PrismaService } from '../../../core/prisma/prisma.service';
 import type { DnaSectionKey, DnaSectionScore, GenomeIntegrityResult } from '../../blueprint/blueprint.types';
+import type { TemporalFlowService } from '../../temporal-flow/temporal-flow.service';
+import type { TemporalFlowAnalysis } from '../../temporal-flow/temporal-flow.types';
 import {
   dnaScoresForReader,
   genomeReaderReadsRevenue,
   isFinanceSignal,
   isMoneyLabel,
+  proposalTextStatesMoney,
+  structuredValueStatesMoney,
   type GenomeReader,
 } from './genome-finance-scope';
 import { DNA_TO_KEY_GENOME_SECTION } from './key-genome.service';
@@ -59,6 +63,34 @@ export async function readsRevenueFor(
   return genomeReaderReadsRevenue(prisma, businessId, reader).catch(() => false);
 }
 
+/**
+ * R1-SEC-03: Run TemporalFlowService.analyze with reader-scoped event & memory filters whenever a reader context is
+ * present (including `null` fail-closed). Leaves internal callers (`reader === undefined`) unchanged. If a mock
+ * TemporalFlowService lacks `readerFilter`/`memorySight` and `!readsRevenue`, fails closed to an empty analysis.
+ */
+export async function analyzeTemporalForReader(
+  temporal: Pick<TemporalFlowService, 'analyze'> &
+    Partial<Pick<TemporalFlowService, 'readerFilter' | 'memorySight'>>,
+  businessId: string,
+  reader: GenomeReader | null | undefined,
+  readsRevenue: boolean,
+): Promise<TemporalFlowAnalysis> {
+  if (reader === undefined) {
+    return temporal.analyze(businessId);
+  }
+  if (typeof temporal.readerFilter !== 'function' || typeof temporal.memorySight !== 'function') {
+    if (!readsRevenue) {
+      return { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] };
+    }
+    return temporal.analyze(businessId);
+  }
+  const [filter, sight] = await Promise.all([
+    temporal.readerFilter(businessId, reader ?? undefined),
+    temporal.memorySight(businessId, reader ?? undefined),
+  ]);
+  return temporal.analyze(businessId, filter, sight, reader);
+}
+
 export type ProjectedGenome<T> = Omit<T, (typeof GENOME_COMPOSITES)[number]> & {
   genomeIntegrity: number | null;
   executiveReadinessScore: number | null;
@@ -66,13 +98,76 @@ export type ProjectedGenome<T> = Omit<T, (typeof GENOME_COMPOSITES)[number]> & {
   withheldForRevenue?: string[];
 };
 
-/** The DNA sections a reader without revenue read is served. */
+/**
+ * Money fields embedded inside an otherwise-served DNA section (R1-SEC-04): removing them from `fieldsTotal` and
+ * `fieldsCaptured` prevents presence/absence inference via counts or section integrity.
+ */
+const HIDDEN_DNA_SECTION_FIELDS: Partial<Record<DnaSectionKey, ReadonlySet<string>>> = {
+  risk: new Set(['financialRisks']),
+};
+
+function sanitizeDnaSection<S extends Pick<DnaSectionScore, 'key'>>(section: S): S {
+  const rec = section as unknown as Partial<DnaSectionScore> & Record<string, unknown>;
+  const hiddenSet = HIDDEN_DNA_SECTION_FIELDS[section.key as DnaSectionKey];
+  const rawMissing = Array.isArray(rec.missingFields) ? (rec.missingFields as string[]) : null;
+  const cleanMissing = rawMissing
+    ? rawMissing.filter((f) => typeof f === 'string' && !hiddenSet?.has(f) && !isMoneyLabel(f) && !proposalTextStatesMoney(f))
+    : null;
+
+  const out: Record<string, unknown> = { ...rec };
+  if (cleanMissing !== null) out.missingFields = cleanMissing;
+
+  if (hiddenSet && hiddenSet.size > 0) {
+    const label = typeof rec.label === 'string' && rec.label ? rec.label : `${section.key} DNA`;
+    if (typeof rec.fieldsTotal === 'number' && typeof rec.fieldsCaptured === 'number' && rawMissing !== null) {
+      const hiddenMissing = rawMissing.filter((f) => hiddenSet.has(f)).length;
+      const hiddenCaptured = Math.max(0, hiddenSet.size - hiddenMissing);
+      const nextTotal = Math.max(0, rec.fieldsTotal - hiddenSet.size);
+      const nextCaptured = Math.max(0, Math.min(nextTotal, rec.fieldsCaptured - hiddenCaptured));
+      const nextIntegrity = nextTotal > 0 ? Math.round((nextCaptured / nextTotal) * 100) : 0;
+      out.fieldsTotal = nextTotal;
+      out.fieldsCaptured = nextCaptured;
+      if (typeof rec.integrity === 'number') out.integrity = nextIntegrity;
+      if (typeof rec.confidence === 'number') out.confidence = nextIntegrity;
+      if (typeof rec.summary === 'string') {
+        if (nextIntegrity === 100) out.summary = `${label} is complete.`;
+        else if (nextIntegrity === 0) out.summary = `${label} has not been started.`;
+        else {
+          const firstMissing = (cleanMissing ?? []).slice(0, 3).join(', ');
+          out.summary = firstMissing
+            ? `${label} is partially complete. Missing: ${firstMissing}${(cleanMissing?.length ?? 0) > 3 ? '...' : ''}`
+            : `${label} is partially complete.`;
+        }
+      }
+      if (typeof rec.recommendation === 'string') {
+        out.recommendation =
+          cleanMissing && cleanMissing.length > 0
+            ? `Add ${cleanMissing[0].replace(/([A-Z])/g, ' $1').toLowerCase()} to strengthen ${label}.`
+            : 'No further fields required.';
+      }
+    }
+  }
+
+  if (typeof out.summary === 'string' && (isMoneyLabel(out.summary) || proposalTextStatesMoney(out.summary))) {
+    out.summary = '';
+  }
+  if (
+    typeof out.recommendation === 'string' &&
+    (isMoneyLabel(out.recommendation) || proposalTextStatesMoney(out.recommendation))
+  ) {
+    out.recommendation = '';
+  }
+
+  return out as S;
+}
+
+/** The DNA sections a reader without revenue read is served, scrubbed of embedded money fields/prose. */
 export function dnaSectionsForReader<S extends Pick<DnaSectionScore, 'key'>>(
   sections: S[] | null | undefined,
   readsRevenue: boolean,
 ): S[] {
   const list = sections ?? [];
-  return readsRevenue ? list : list.filter((s) => isServedDnaKey(s.key));
+  return readsRevenue ? list : list.filter((s) => isServedDnaKey(s.key)).map(sanitizeDnaSection);
 }
 
 /** The withheld field names: the composites and the money DNA keys. */
@@ -103,7 +198,29 @@ export function genomeIntegrityForReader<T extends Partial<GenomeIntegrityResult
     out.readinessBreakdown = dnaScoresForReader(result.readinessBreakdown as Record<string, unknown>, false);
   }
   if ('dnaSections' in result) {
-    out.dnaSections = dnaSectionsForReader(result.dnaSections, false);
+    const projectedSections = dnaSectionsForReader(result.dnaSections, false);
+    out.dnaSections = projectedSections;
+    // Keep scores/confidence/breakdown in sync for sections whose hidden money fields were adjusted (e.g. risk).
+    for (const sec of projectedSections) {
+      if (!HIDDEN_DNA_SECTION_FIELDS[sec.key as DnaSectionKey]) continue;
+      if (out.genomeDnaScores && typeof out.genomeDnaScores === 'object' && sec.key in out.genomeDnaScores) {
+        (out.genomeDnaScores as Record<string, unknown>)[sec.key] = sec.integrity;
+      }
+      if (
+        out.genomeDnaConfidence &&
+        typeof out.genomeDnaConfidence === 'object' &&
+        sec.key in out.genomeDnaConfidence
+      ) {
+        (out.genomeDnaConfidence as Record<string, unknown>)[sec.key] = sec.confidence;
+      }
+      if (
+        out.readinessBreakdown &&
+        typeof out.readinessBreakdown === 'object' &&
+        sec.key in out.readinessBreakdown
+      ) {
+        (out.readinessBreakdown as Record<string, unknown>)[sec.key] = sec.integrity;
+      }
+    }
   }
   out.withheldForRevenue = withheldNames();
   return out as ProjectedGenome<T>;
@@ -115,18 +232,80 @@ export function genomeIntegrityForReader<T extends Partial<GenomeIntegrityResult
 export const MONEY_BLUEPRINT_COLUMNS = ['financials', 'projectionProfile', 'salesSystem'] as const;
 
 /**
- * Money fields inside otherwise-served blueprint columns (D-100, D-234; rounds 1-2).
+ * Money fields inside otherwise-served blueprint columns (D-100, D-234; rounds 1-2 + R1-SEC-04).
  */
 const MONEY_BLUEPRINT_FIELDS: Readonly<Record<string, readonly string[]>> = {
   intelligence: ['recentMomentumScore', 'expenseRatio', 'quoteConversionRate', 'topProductCategories'],
   workflowModel: ['retainerCycle', 'quoteDrivenSales', 'ecommerceFulfillment'],
-  taxProfile: ['estimatedAnnualRevenue'],
-  riskProfile: ['financialRisks'],
+  taxProfile: ['estimatedAnnualRevenue', 'vatThresholdWatch'],
+  riskProfile: ['financialRisks', 'riskScore'],
   operatingModel: ['revenueModel'],
   constraints: ['budgetRange'],
 };
 
 const MONEY_WHOLE_COLUMNS: readonly string[] = [...MONEY_BLUEPRINT_COLUMNS, 'offerArchitecture'];
+
+const BLUEPRINT_NON_SANITIZED_TOP_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'businessId',
+  'schemaVersion',
+  'genomeIntegrity',
+  'executiveReadinessScore',
+  'genomeStage',
+  'genomeDnaScores',
+  'genomeDnaConfidence',
+  'readinessBreakdown',
+  'dnaSections',
+  'confidenceScores',
+  'completeness',
+  'readinessScore',
+  'withheldForRevenue',
+  'genesisCompleted',
+  'constitutionVersion',
+  'constitutionGeneratedAt',
+  'lastGenomeSyncAt',
+  'lastAnalyzedAt',
+  'updatedAt',
+  'createdAt',
+  ...MONEY_WHOLE_COLUMNS,
+]);
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return Boolean(v && typeof v === 'object' && !Array.isArray(v));
+}
+
+/** Recursively scrub money-stating strings/items from kept blueprint columns without dropping benign keys like taxIdStatus. */
+function sanitizeKeptBlueprintValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) return undefined;
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') {
+    return proposalTextStatesMoney(value) ? undefined : value;
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    for (const item of value) {
+      if (typeof item === 'string') {
+        if (!proposalTextStatesMoney(item)) out.push(item);
+      } else if (isPlainObject(item)) {
+        if (structuredValueStatesMoney(item)) continue;
+        const cleaned = sanitizeKeptBlueprintValue(item, depth + 1);
+        if (isPlainObject(cleaned) && Object.keys(cleaned).length > 0) out.push(cleaned);
+      } else if (item !== undefined) {
+        out.push(item);
+      }
+    }
+    return out;
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const cleaned = sanitizeKeptBlueprintValue(v, depth + 1);
+      if (cleaned !== undefined) out[k] = cleaned;
+    }
+    return out;
+  }
+  return value;
+}
 
 /**
  * Setup steps as a reader may see them: omit steps tied to money columns.
@@ -141,7 +320,7 @@ export function setupStepsForReader<S extends { id?: string; section?: string }>
 
 /**
  * A blueprint (GET or write response) as a reader may see it: composites, money DNA, money columns/fields,
- * completeness and readinessScore withheld.
+ * completeness and readinessScore withheld, and money-stating prose scrubbed from kept columns.
  */
 export function blueprintForReader<T extends Record<string, unknown>>(blueprint: T, readsRevenue: boolean): T {
   if (readsRevenue || !blueprint || typeof blueprint !== 'object') return blueprint;
@@ -154,13 +333,38 @@ export function blueprintForReader<T extends Record<string, unknown>>(blueprint:
   }
   for (const [column, fields] of Object.entries(MONEY_BLUEPRINT_FIELDS)) {
     const value = blueprint[column];
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const kept: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    if (!isPlainObject(value)) continue;
+    const kept: Record<string, unknown> = { ...value };
     for (const field of fields) delete kept[field];
     out[column] = kept;
   }
+  for (const [key, value] of Object.entries(out)) {
+    if (BLUEPRINT_NON_SANITIZED_TOP_KEYS.has(key)) continue;
+    if (isPlainObject(value) || Array.isArray(value)) {
+      const sanitized = sanitizeKeptBlueprintValue(value);
+      out[key] = sanitized ?? (Array.isArray(value) ? [] : {});
+    } else if (typeof value === 'string' && proposalTextStatesMoney(value)) {
+      out[key] = null;
+    }
+  }
+  if (!('dnaSections' in blueprint) && isPlainObject(out.riskProfile)) {
+    const nonMoneyRiskFields = ['legalRisks', 'marketRisks', 'operationalRisks', 'founderRisks', 'mitigationPlan'];
+    const captured = nonMoneyRiskFields.filter((f) => {
+      const v = (out.riskProfile as Record<string, unknown>)[f];
+      if (Array.isArray(v)) return v.length > 0;
+      if (typeof v === 'string') return v.trim().length > 0;
+      return v !== null && v !== undefined;
+    }).length;
+    const riskScore = Math.round((captured / nonMoneyRiskFields.length) * 100);
+    if (isPlainObject(out.genomeDnaScores) && 'risk' in out.genomeDnaScores) {
+      (out.genomeDnaScores as Record<string, unknown>).risk = riskScore;
+    }
+    if (isPlainObject(out.genomeDnaConfidence) && 'risk' in out.genomeDnaConfidence) {
+      (out.genomeDnaConfidence as Record<string, unknown>).risk = riskScore;
+    }
+  }
   const confidence = blueprint.confidenceScores;
-  if (confidence && typeof confidence === 'object' && !Array.isArray(confidence)) {
+  if (isPlainObject(confidence)) {
     const kept: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(confidence)) {
       if (!MONEY_WHOLE_COLUMNS.includes(key)) kept[key] = value;

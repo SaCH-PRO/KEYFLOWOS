@@ -2,7 +2,11 @@ import { BadRequestException, Inject, Injectable, Optional } from '@nestjs/commo
 import type { BusinessAsset } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
-import { isServedDnaKey, readsRevenueFor } from '../business-genome/key-genome/genome-composites-for-reader';
+import {
+  analyzeTemporalForReader,
+  isServedDnaKey,
+  readsRevenueFor,
+} from '../business-genome/key-genome/genome-composites-for-reader';
 import { BusinessIntelligenceService } from './business-intelligence.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
@@ -70,13 +74,13 @@ export class KeyExecutiveModeService {
     const keyMode = mode as KeyExecutiveMode;
     const config = KEY_EXECUTIVE_MODE_CONFIG[keyMode];
 
-    const [executiveBrief, blueprint, temporalAnalysis, proposals, assets, readsRevenue] = await Promise.all([
+    const readsRevenue = await readsRevenueFor(this.prisma, businessId, reader);
+    const [executiveBrief, blueprint, temporalAnalysis, proposals, assets] = await Promise.all([
       this.intelligence.generateExecutiveBrief(businessId, reader),
       this.blueprint.getBlueprint(businessId),
-      this.temporal.analyze(businessId),
+      analyzeTemporalForReader(this.temporal, businessId, reader, readsRevenue),
       this.genomeEvolution.list(businessId, { status: 'PENDING' }),
       this.businessAssets.list(businessId),
-      readsRevenueFor(this.prisma, businessId, reader),
     ]);
 
     const findings: KeyModeFinding[] = [

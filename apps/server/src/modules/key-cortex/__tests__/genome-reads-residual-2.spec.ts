@@ -78,7 +78,7 @@ const SAMPLE_FACTS = [
   },
   {
     id: 'f_ops_clean',
-    section: 'OPERATIONS',
+    section: 'OPERATIONS_DELIVERY',
     domain: 'operations',
     field: 'openingTime',
     value: { raw: 'Opens 9am Monday to Saturday' },
@@ -217,14 +217,21 @@ describe('P82 [GR2-02] KeyGenomeAdapterService organ tools (get_blueprint, calcu
     const bpRes = await runTool('key_genome.get_blueprint', ctx, {});
     const bpJson = JSON.stringify(bpRes.data);
     expect(bpRes.data.identity.industry).toBe('Wellness');
-    expect(bpRes.data.financials).toBeUndefined();
-    expect(bpRes.data.taxProfile).toBeUndefined();
-    expect(bpRes.data.projectionProfile).toBeUndefined();
-    expect(bpRes.data.offerArchitecture).toBeUndefined();
-    expect(bpRes.data.salesSystem).toBeUndefined();
-    expect(bpRes.data.riskProfile).toBeUndefined();
-    expect(bpRes.data.completeness).toBeUndefined();
-    expect(bpRes.data.genomeStage).toBeUndefined();
+    // P106 (Ruling B4): withheld whole columns return {}, withheld money sub-fields are deleted, composites are null + withheldForRevenue.
+    expect(bpRes.data.financials).toEqual({});
+    expect(bpRes.data.taxProfile.estimatedAnnualRevenue).toBeUndefined();
+    expect(bpRes.data.projectionProfile).toEqual({});
+    expect(bpRes.data.offerArchitecture).toEqual({});
+    expect(bpRes.data.salesSystem).toEqual({});
+    expect(bpRes.data.riskProfile.riskScore).toBeUndefined();
+    expect(bpRes.data.completeness).toBeNull();
+    expect(bpRes.data.readinessScore).toBeNull();
+    expect(bpRes.data.genomeStage).toBeNull();
+    expect(bpRes.data.genomeIntegrity).toBeNull();
+    expect(bpRes.data.executiveReadinessScore).toBeNull();
+    expect(bpRes.data.withheldForRevenue).toEqual(
+      expect.arrayContaining(['genomeIntegrity', 'executiveReadinessScore', 'genomeStage', 'completeness', 'readinessScore']),
+    );
     expect(bpRes.data.operatingModel.revenueModel).toBeUndefined();
     expect(bpRes.data.constraints.budgetRange).toBeUndefined();
     expect(bpRes.data.genomeDnaScores.financial).toBeUndefined();
@@ -232,14 +239,19 @@ describe('P82 [GR2-02] KeyGenomeAdapterService organ tools (get_blueprint, calcu
     expect(bpJson).not.toContain('125000');
     expect(bpJson).not.toContain('1500000');
     expect(bpJson).not.toContain('REVENUE_ENGINE');
+    expect(bpJson).not.toContain('riskScore');
 
     const intRes = await runTool('key_genome.calculate_integrity', ctx, {});
     expect(intRes.data.genomeDnaScores.financial).toBeUndefined();
     expect(intRes.data.genomeDnaScores.sales).toBeUndefined();
     expect(intRes.data.dnaSections.map((s: any) => s.key)).toEqual(['founder', 'operations']);
-    expect(intRes.data.genomeStage).toBeUndefined();
-    // Recomputed from visible sections ONLY: (80+70)/2 = 75, NOT 45!
-    expect(intRes.data.genomeIntegrity).toBe(75);
+    // P106 (Ruling B4): composites withheld as null (not recomputed), named in withheldForRevenue.
+    expect(intRes.data.genomeStage).toBeNull();
+    expect(intRes.data.genomeIntegrity).toBeNull();
+    expect(intRes.data.executiveReadinessScore).toBeNull();
+    expect(intRes.data.withheldForRevenue).toEqual(
+      expect.arrayContaining(['genomeIntegrity', 'executiveReadinessScore', 'genomeStage']),
+    );
     expect(intRes.data.readinessBreakdown.finance).toBeUndefined();
     expect(intRes.data.readinessBreakdown.sales).toBeUndefined();
 
