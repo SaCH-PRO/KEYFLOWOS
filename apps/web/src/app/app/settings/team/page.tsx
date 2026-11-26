@@ -776,6 +776,8 @@ export default function TeamSettingsPage() {
   // COR-TW-4: once the team has loaded, a reload that fails keeps it on screen and says so here, with Try again.
   const [reloadError, setReloadError] = useState<string | null>(null);
   const loadedOnce = useRef(false);
+  // Bumped by a refusal, so an activity answer that was out when it came changes nothing.
+  const readEpoch = useRef(0);
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -805,9 +807,15 @@ export default function TeamSettingsPage() {
     setReloadError(null);
     setTeamRead(state);
     if (state.kind !== "ok") {
-      // A refusal, or a first load that failed: nothing of the team stays on screen.
+      // A refusal, or a first load that failed: nothing of the team stays on screen or in what was open.
+      readEpoch.current += 1;
       setDashboard(null);
       setActivityItems([]);
+      setEditingMember(null);
+      setConfirmRemove(null);
+      setShowInvite(false);
+      setShowAdvancedInvite(false);
+      setInviter(null);
       loadedOnce.current = false;
     }
     if (state.kind === "ok" && res.data) {
@@ -826,9 +834,11 @@ export default function TeamSettingsPage() {
     if (!businessId) return;
     const params = new URLSearchParams({ limit: "50" });
     if (mod) params.set("module", mod);
+    const epoch = readEpoch.current;
     const res = await apiGet<{ items: ActivityItem[]; total: number }>(
       `/identity/businesses/${businessId}/team/activity?${params.toString()}`
     );
+    if (epoch !== readEpoch.current) return;
     if (res.data) setActivityItems(res.data.items);
   }, []);
 
