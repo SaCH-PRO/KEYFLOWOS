@@ -17,6 +17,7 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { isSystemActor } from '../../core/auth/system-actor';
+import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import {
   WIPAY_CURRENCY,
@@ -314,6 +315,215 @@ export async function memberMayRecordPayments(
   actorId: string | null | undefined,
 ): Promise<boolean> {
   return (await paymentRecorderRefusal(prisma, businessId, actorId)) === null;
+}
+
+/**
+ * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): the Prisma
+ * projection for a reader whose revenue level is below read. Every money
+ * column, payment/discount column, billing address, and item price column is
+ * excluded at the query boundary so Postgres never returns them; metadata is
+ * then allowlist-sanitized via `redactOrderMetadataForFulfilment`.
+ */
+const FULFILMENT_ORDER_SELECT = {
+  id: true,
+  businessId: true,
+  orderNumber: true,
+  status: true,
+  type: true,
+  customerName: true,
+  customerEmail: true,
+  customerPhone: true,
+  customerCountry: true,
+  shippingAddress: true,
+  notes: true,
+  metadata: true,
+  createdAt: true,
+  updatedAt: true,
+  items: {
+    select: {
+      id: true,
+      orderId: true,
+      productId: true,
+      name: true,
+      sku: true,
+      quantity: true,
+    },
+  },
+} satisfies Prisma.MarketplaceOrderSelect;
+
+const PAYMENT_TIMELINE_STATUSES: ReadonlySet<string> = new Set([
+  'paid',
+  'refunded',
+  'partially_refunded',
+  'payment_failed',
+  'payment_pending',
+  'payment_recorded',
+]);
+
+/**
+ * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): fail-closed
+ * allowlist for `MarketplaceOrder.metadata` when served to a reader below
+ * `revenue: read`. Keeps only fulfilment/storefront keys (`source`,
+ * `storefrontSlug`, `referralCode`, `visitorId`, `deliveryNotes`,
+ * `deliveryInstructions`, `stockNotDecrementedProductIds`, non-fee `shipping`
+ * fields, and non-payment `statusTimeline` entries). Strips `taxRate`,
+ * `promoCode`, `refundedTotal`, `shippingExpense`, `links` (carries
+ * `invoiceId`), `publicToken`, `shipping.fee`, payment/refund timeline steps,
+ * and any unrecognized keys.
+ */
+export function redactOrderMetadataForFulfilment(metadata: unknown): Record<string, unknown> | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const src = metadata as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  for (const key of [
+    'source',
+    'storefrontSlug',
+    'referralCode',
+    'visitorId',
+    'deliveryNotes',
+    'deliveryInstructions',
+  ] as const) {
+    const val = src[key];
+    if (typeof val === 'string' || val === null) out[key] = val;
+  }
+
+  if (Array.isArray(src.stockNotDecrementedProductIds)) {
+    out.stockNotDecrementedProductIds = src.stockNotDecrementedProductIds.filter(
+      (id): id is string => typeof id === 'string',
+    );
+  }
+
+  if (src.shipping && typeof src.shipping === 'object' && !Array.isArray(src.shipping)) {
+    const ship = src.shipping as Record<string, unknown>;
+    const cleanShip: Record<string, unknown> = {};
+    for (const key of ['zoneId', 'zoneName', 'estimatedDays', 'carrier'] as const) {
+      if (ship[key] !== undefined) cleanShip[key] = ship[key];
+    }
+    out.shipping = cleanShip;
+  }
+
+  if (Array.isArray(src.statusTimeline)) {
+    out.statusTimeline = src.statusTimeline
+      .filter((entry): entry is Record<string, unknown> => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+        const st = typeof entry.status === 'string' ? entry.status.trim().toLowerCase() : '';
+        return !PAYMENT_TIMELINE_STATUSES.has(st);
+      })
+      .map((entry) => {
+        const clean: Record<string, unknown> = {};
+        if (typeof entry.status === 'string') clean.status = entry.status;
+        if (typeof entry.timestamp === 'string') clean.timestamp = entry.timestamp;
+        if (typeof entry.note === 'string') clean.note = entry.note;
+        return clean;
+      });
+  }
+
+  return out;
+}
+
+/**
+ * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): allowlist-builds
+ * the fulfilment-only view of an already-loaded `MarketplaceOrder` row (used
+ * for mutation responses like `PATCH .../orders/:orderId/status` when the
+ * caller is below `revenue: read`).
+ */
+export function redactOrderForFulfilment(order: {
+  id: string;
+  businessId: string;
+  orderNumber: string;
+  status: string;
+  type: string;
+  customerName: string;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  customerCountry: string | null;
+  shippingAddress: unknown;
+  notes: string | null;
+  metadata: unknown;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  items?: Array<{
+    id: string;
+    orderId: string;
+    productId: string;
+    name: string;
+    sku: string | null;
+    quantity: number;
+  }>;
+  shipments?: Array<{
+    id: string;
+    businessId: string;
+    orderId: string | null;
+    trackingNumber: string | null;
+    carrier: string | null;
+    status: string;
+    originCountry: string | null;
+    destinationCountry: string | null;
+    destinationAddress: unknown;
+    weight: number | null;
+    weightUnit: string | null;
+    dimensions: unknown;
+    estimatedDelivery: Date | string | null;
+    shippedAt: Date | string | null;
+    deliveredAt: Date | string | null;
+    milestones: unknown;
+    createdAt: Date | string;
+    updatedAt: Date | string;
+  }>;
+}) {
+  return {
+    id: order.id,
+    businessId: order.businessId,
+    orderNumber: order.orderNumber,
+    status: order.status,
+    type: order.type,
+    customerName: order.customerName,
+    customerEmail: order.customerEmail,
+    customerPhone: order.customerPhone,
+    customerCountry: order.customerCountry,
+    shippingAddress: order.shippingAddress,
+    notes: order.notes,
+    metadata: redactOrderMetadataForFulfilment(order.metadata),
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    ...(Array.isArray(order.items)
+      ? {
+          items: order.items.map((item) => ({
+            id: item.id,
+            orderId: item.orderId,
+            productId: item.productId,
+            name: item.name,
+            sku: item.sku,
+            quantity: item.quantity,
+          })),
+        }
+      : {}),
+    ...(Array.isArray(order.shipments)
+      ? {
+          shipments: order.shipments.map((s) => ({
+            id: s.id,
+            businessId: s.businessId,
+            orderId: s.orderId,
+            trackingNumber: s.trackingNumber,
+            carrier: s.carrier,
+            status: s.status,
+            originCountry: s.originCountry,
+            destinationCountry: s.destinationCountry,
+            destinationAddress: s.destinationAddress,
+            weight: s.weight,
+            weightUnit: s.weightUnit,
+            dimensions: s.dimensions,
+            estimatedDelivery: s.estimatedDelivery,
+            shippedAt: s.shippedAt,
+            deliveredAt: s.deliveredAt,
+            milestones: s.milestones,
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+          })),
+        }
+      : {}),
+  };
 }
 
 @Injectable()
@@ -1026,6 +1236,22 @@ export class StoreOrderService {
     }
   }
 
+  /**
+   * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): order detail as
+   * the member asking may see it. Below `revenue: read`, money columns,
+   * payment/discount fields, item prices, and non-fulfilment metadata keys are
+   * omitted.
+   */
+  async getOrderForReader(orderId: string, businessId: string, readsRevenue: boolean) {
+    if (readsRevenue) return this.getOrder(orderId, businessId);
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: FULFILMENT_ORDER_SELECT,
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    return { ...order, metadata: redactOrderMetadataForFulfilment(order.metadata) };
+  }
+
   async getOrder(orderId: string, businessId?: string) {
     const where: any = { id: orderId };
     if (businessId) where.businessId = businessId;
@@ -1086,6 +1312,25 @@ export class StoreOrderService {
    * cancelled: SHIPPED, DELIVERED, COMPLETED, CANCELLED, REFUNDED). Every
    * other status is written as before.
    */
+  /**
+   * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): executes
+   * `updateOrderStatus` (preserving full internal events and D-126 shipping
+   * expense booking) and strips money, payment, item-price, and financial
+   * metadata fields from the HTTP response when the actor is below
+   * `revenue: read`.
+   */
+  async updateOrderStatusForReader(
+    orderId: string,
+    status: string,
+    businessId: string,
+    body?: Record<string, unknown> | null,
+    actor?: ModuleLevelActor,
+  ) {
+    const order = await this.updateOrderStatus(orderId, status, businessId, body, actor?.id ?? null);
+    const readsRevenue = rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
+    return readsRevenue ? order : redactOrderForFulfilment(order);
+  }
+
   async updateOrderStatus(
     orderId: string,
     status: string,
@@ -2182,20 +2427,15 @@ export class StoreOrderService {
     }
   }
 
-  async listOrders(
+  private buildOrderListWhere(
     businessId: string,
     filters?: {
       status?: string;
       dateFrom?: string;
       dateTo?: string;
       search?: string;
-      page?: number;
-      pageSize?: number;
     },
   ) {
-    const page = Math.max(filters?.page ?? 1, 1);
-    const pageSize = Math.min(Math.max(filters?.pageSize ?? 20, 1), 100);
-
     const where: any = { businessId };
 
     if (filters?.status) {
@@ -2213,6 +2453,66 @@ export class StoreOrderService {
         { orderNumber: { contains: filters.search, mode: 'insensitive' } },
       ];
     }
+    return where;
+  }
+
+  /**
+   * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): order list as
+   * the member asking may see it. Below `revenue: read`, every money column,
+   * payment/discount field, item price, and non-fulfilment metadata key is
+   * omitted; list count and pagination metadata are preserved.
+   */
+  async listOrdersForReader(
+    businessId: string,
+    readsRevenue: boolean,
+    filters?: {
+      status?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      search?: string;
+      page?: number;
+      pageSize?: number;
+    },
+  ) {
+    if (readsRevenue) return this.listOrders(businessId, filters);
+
+    const page = Math.max(filters?.page ?? 1, 1);
+    const pageSize = Math.min(Math.max(filters?.pageSize ?? 20, 1), 100);
+    const where = this.buildOrderListWhere(businessId, filters);
+
+    const [rows, total] = await Promise.all([
+      this.prisma.client.marketplaceOrder.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        select: FULFILMENT_ORDER_SELECT,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.marketplaceOrder.count({ where }),
+    ]);
+
+    const data = rows.map((row) => ({
+      ...row,
+      metadata: redactOrderMetadataForFulfilment(row.metadata),
+    }));
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+  }
+
+  async listOrders(
+    businessId: string,
+    filters?: {
+      status?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      search?: string;
+      page?: number;
+      pageSize?: number;
+    },
+  ) {
+    const page = Math.max(filters?.page ?? 1, 1);
+    const pageSize = Math.min(Math.max(filters?.pageSize ?? 20, 1), 100);
+    const where = this.buildOrderListWhere(businessId, filters);
 
     const [data, total] = await Promise.all([
       this.prisma.client.marketplaceOrder.findMany({
