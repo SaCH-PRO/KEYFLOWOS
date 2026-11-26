@@ -144,6 +144,7 @@ describe("R2-1: a Drive copy that fails after the save is a notice, not a failed
     fireEvent.click(buttons[buttons.length - 1]);
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onClose, "the sheet closes once").toHaveBeenCalledTimes(1);
     expect(client.createExpense).toHaveBeenCalledTimes(1);
     const errors = vi.mocked(toast.error).mock.calls.map((c) => String(c[0]));
     expect(errors.some((m) => /failed to save expense/i.test(m)), `errors: ${JSON.stringify(errors)}`).toBe(false);
