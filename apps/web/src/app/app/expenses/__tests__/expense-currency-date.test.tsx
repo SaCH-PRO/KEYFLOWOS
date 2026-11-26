@@ -19,6 +19,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/re
 import type { Expense, ExpenseBudget, ExpenseSummary } from "@/lib/client";
 
 const BUSINESS = "biz_hub2_usd";
+const ZONE_FOR_DISPLAY = "America/Port_of_Spain";
 const cachedBusiness = vi.hoisted(() => ({ value: { id: "biz_hub2_usd", name: "Hub2 USD Co", currency: "USD" } as Record<string, unknown> | null }));
 
 vi.mock("sonner", () => ({
@@ -48,7 +49,7 @@ vi.mock("@/lib/client", () => ({
 
 import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
-import { formatCurrency } from "../components/expense-utils";
+import { formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpensesSnapshotTab } from "../components/expenses-snapshot-tab";
 import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
@@ -142,5 +143,34 @@ describe("BUG-028: the new expense's date is today in Trinidad", () => {
     vi.setSystemTime(new Date("2026-11-25T14:00:00.000Z"));
     const { container } = mountForm(form);
     expect((container.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-11-25");
+  });
+});
+
+describe("BUG-028: an expense's date shows as the day it was dated, in Port of Spain", () => {
+  // The expense date is a calendar day, stored as midnight UTC: read in Port of Spain's local time it is 20:00 the day before.
+  let tz: string | undefined;
+  beforeEach(() => {
+    tz = process.env.TZ;
+    process.env.TZ = ZONE_FOR_DISPLAY;
+  });
+  afterEach(() => {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  });
+
+  it("formatDate of 2026-11-25 (stored midnight UTC) reads Nov 25, 2026, not Nov 24", () => {
+    expect(new Date("2026-11-25T00:00:00.000Z").getDate(), "the test runs in Port of Spain's local time").toBe(24);
+    expect(formatDate("2026-11-25T00:00:00.000Z")).toBe("Nov 25, 2026");
+    expect(formatDate("2026-11-25")).toBe("Nov 25, 2026");
+  });
+
+  it("the recurring panel shows a schedule's next date as its calendar day", async () => {
+    const client = await import("@/lib/client");
+    vi.mocked(client.fetchRecurringExpenses).mockResolvedValueOnce({
+      data: [{ id: "r1", name: "Rent", description: "Rent", amount: 4500, currency: "USD", frequency: "MONTHLY", nextRunDate: "2026-12-25T00:00:00.000Z", isActive: true, runCount: 0, failureCount: 0, createsBill: false, businessId: BUSINESS, createdAt: "", updatedAt: "" }],
+      error: null,
+    } as never);
+    render(<RecurringExpensesPanel businessId={BUSINESS} categories={[]} />);
+    await waitFor(() => expect(screen.getByText(/Next: Dec 25/)).toBeTruthy());
   });
 });
