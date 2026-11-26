@@ -103,7 +103,13 @@ export function BillPayDialog({
       }
       if (e.key !== "Tab") return;
       const focusable = Array.from(form.querySelectorAll<HTMLElement>(FOCUSABLE));
-      if (focusable.length === 0) return;
+      if (focusable.length === 0) {
+        // Nothing to move to (every control is disabled while a pay is in flight): focus stays on the dialog itself
+        // (tabIndex -1), never on the page behind it (review round 4).
+        e.preventDefault();
+        form.focus();
+        return;
+      }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const active = document.activeElement;
