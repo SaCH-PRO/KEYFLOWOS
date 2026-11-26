@@ -207,6 +207,8 @@ export function useExpensesData() {
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
+    // `refresh` is a trigger, not a value read here: a new loadData is what makes the read effect run again (R6 C-4).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearAll, businessId, switchEpoch, refresh, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
