@@ -217,25 +217,7 @@ export function CheckoutFlow({
   heldSlots = [],
 }: Props) {
   const [checkoutStep, setCheckoutStep] = useState(0);
-  // A row whose service a kept booking holds starts with that booking's slot, so the same customer reuses it.
-  const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>(() => {
-    const filled: Record<string, ServiceBookingData> = {};
-    for (const si of cart.filter((c) => c.requiresBooking)) {
-      const serviceId = si.sourceServiceId || si.id;
-      const held = heldSlots.find((h) => h.serviceId === serviceId);
-      if (!held) continue;
-      filled[`${si.id}_${si.itemType}`] = {
-        serviceId,
-        serviceName: si.name,
-        staffId: held.staffId,
-        date: held.date,
-        time: held.time,
-        startIso: held.startIso,
-        ...(held.location ? { location: held.location } : {}),
-      };
-    }
-    return filled;
-  });
+  const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>({});
 
   const savedDetails = loadCheckoutDetails();
   const [firstName, setFirstName] = useState(savedDetails.firstName);
@@ -281,9 +263,15 @@ export function CheckoutFlow({
     business.timezone,
     serviceItemsInCart.map(slotRequestOf).filter((r): r is SlotRequest => r !== null),
   );
+  // SEC-W9WCN-1: a kept booking's slot is this checkout's only while it is the same customer's, as bookingReuseKey
+  // writes the customer; another customer at the same browser is neither handed it nor offered it.
+  const customerNow = [firstName.trim(), lastName.trim(), emailInput.trim().toLowerCase(), phoneInput.trim()];
+  const ownHeldSlots = heldSlots.filter(
+    (h) => h.customer.length === customerNow.length && h.customer.every((c, i) => c === customerNow[i]),
+  );
   /** The slot a kept booking holds for this request, if any. */
   const heldFor = (r: SlotRequest): HeldSlot | undefined =>
-    heldSlots.find((h) => h.serviceId === r.serviceId && h.date === r.date && h.staffId === r.staffId);
+    ownHeldSlots.find((h) => h.serviceId === r.serviceId && h.date === r.date && h.staffId === r.staffId);
   /** A row's offered times: its current answer, with a slot its kept booking holds (the server counts it as taken). */
   const offeredFor = (r: SlotRequest): SlotTime[] | null | undefined => {
     const answer = slotAnswers.answerFor(r);
@@ -408,6 +396,30 @@ export function CheckoutFlow({
         email: emailInput.trim(),
         phone: phoneInput.trim(),
       });
+      // A row not yet scheduled, whose service this customer's kept booking holds, starts with that booking's
+      // slot, so the customer reuses it instead of booking again.
+      if (ownHeldSlots.length > 0) {
+        setServiceBookings((prev) => {
+          const next = { ...prev };
+          for (const si of serviceItemsInCart) {
+            const key = `${si.id}_${si.itemType}`;
+            if (next[key]?.date) continue;
+            const serviceId = si.sourceServiceId || si.id;
+            const held = ownHeldSlots.find((h) => h.serviceId === serviceId);
+            if (!held) continue;
+            next[key] = {
+              serviceId,
+              serviceName: si.name,
+              staffId: held.staffId,
+              date: held.date,
+              time: held.time,
+              startIso: held.startIso,
+              ...(held.location ? { location: held.location } : {}),
+            };
+          }
+          return next;
+        });
+      }
     }
     setCheckoutStep((s) => s + 1);
   };

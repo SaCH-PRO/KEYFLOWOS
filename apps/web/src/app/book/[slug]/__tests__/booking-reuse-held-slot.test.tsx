@@ -20,7 +20,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const { SLUG, BUSINESS, SERVICE, PRODUCT, nothing, passthrough } = vi.hoisted(() => ({
   SLUG: "brh-shop",

@@ -98,14 +98,14 @@ function bookingReuseKey(
 function heldSlotsOf(reuseKey: string | null, bookingsKept: number): HeldSlot[] {
   if (!reuseKey || bookingsKept === 0) return [];
   try {
-    const services = (JSON.parse(reuseKey) as { services?: unknown }).services;
-    if (!Array.isArray(services)) return [];
+    const { customer, services } = JSON.parse(reuseKey) as { customer?: unknown; services?: unknown };
+    if (!Array.isArray(services) || !Array.isArray(customer) || !customer.every((c) => typeof c === "string")) return [];
     return services.flatMap((line): HeldSlot[] => {
       if (!Array.isArray(line) || line.length < 7) return [];
       const [serviceId, , date, time, staffId, location, startIso] = line as unknown[];
       const text = [serviceId, date, time, staffId, location, startIso];
       if (!text.every((v) => typeof v === "string") || !startIso || Number.isNaN(new Date(startIso as string).getTime())) return [];
-      return [{ serviceId, date, time, staffId, location, startIso } as HeldSlot];
+      return [{ customer, serviceId, date, time, staffId, location, startIso } as HeldSlot];
     });
   } catch {
     return [];

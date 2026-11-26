@@ -81,6 +81,8 @@ export type CartItem = CatalogItem & { quantity: number };
  * failed or abandoned payment. The public slots route counts it as taken, so the checkout offers its time itself.
  */
 export type HeldSlot = {
+  /** Whose booking it is, as bookingReuseKey writes the customer: first, last, email (lower-cased), phone. */
+  customer: string[];
   serviceId: string;
   date: string;
   time: string;
