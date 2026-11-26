@@ -23,8 +23,14 @@
  *   - Cache Storage: the names opened (`[self.]caches.open`) and what is `put` into a cache bound from it (`const`,
  *     `let` or a later assignment, `.then((c) => …)`, `.then(function (c) …)`, or `(await caches.open(n)).put(…)`);
  *   - `window.name` (=, and the logical assignments ||= ??= &&=, as for document.cookie and storage).
- * Code inside a string or template literal that looks like a store write (an inline script's __html, eval,
- * new Function, a string setTimeout) is parsed as JS by the same scanner and reported at host-file lines (CSC-37).
+ * Code inside a string or template literal that names any store the scanners know (CODE_HINT: setItem,
+ * localStorage, sessionStorage, indexedDB, objectStore, caches, cookieStore, document.cookie / document[, .cookies,
+ * cookies(, set-cookie, window/self/globalThis .name) is parsed as JS by the same scanner (the text scanner if it does
+ * not parse) and reported at host-file lines mapped through the raw text (CSC-37, CSC-43, CSC-48); so is the JSX
+ * text of a <script> / <Script> element (CSC-45). A template substitution is resolved in the host file (a const, a
+ * JSON.stringify of one); one that cannot be resolved stands for a secret, so the write fails closed (CSC-44). This
+ * path errs toward counting: a string that only quotes a write (help text, an error message) counts as that write, a
+ * deliberate, known false positive (CSC-47).
  * Response cookie jars include aliases (`const jar = res.cookies`, `res["cookies"]`, an aliased next/headers
  * `cookies` import); a Set-Cookie header name may be a const or a concatenation (CSC-38). In public/, a two-argument
  * put of request headers or the authorization header on any receiver is a Cache write, as is a put on a parameter
@@ -69,7 +75,10 @@
  * `.bind` / `Reflect.apply` on a write, a destructured `setItem` (`const { setItem } = localStorage`), a comma call
  * (`(0, ls.setItem)(k, v)`), `document["cookie"] = …`, an aliased `document`, `Object.defineProperty` on a store,
  * arguments spread from a variable, tagged templates, a Headers tuple held in its own variable, `cache.add` /
- * `cache.addAll`, keys built at runtime, and `with` blocks; in the text scanner only (a file with parse errors), a
+ * `cache.addAll`, keys built at runtime, and `with` blocks; from the round-7 reviews (CSC7-SEC-4/5): code built by
+ * concatenating strings, `new Function(args, body)` with its parameters as keys, srcDoc HTML, data: URLs, minified
+ * dynamic code, comments inside string code, string code nested deeper than 3, a `d = document` alias, nested const
+ * objects, a destructured jar and `globalThis.Cache` types; in the text scanner only (a file with parse errors), a
  * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
  * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
@@ -504,7 +513,9 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
   if (member) {
     const [, obj, dotProp, , bracketProp] = member;
     const prop = dotProp ?? bracketProp;
-    const propRe = (sep: string) => new RegExp(`(?:^|[{,\\s])(?:${prop.replace(/\$/g, "\\$")}|"${prop}"|'${prop}')\\s*${sep}\\s*`);
+    // Every regex character of the name escaped (COR7-5): K["a(b"] must not throw, K["a.b"] must not match aXb.
+    const p = prop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const propRe = (sep: string) => new RegExp(`(?:^|[{,\\s])(?:${p}|"${p}"|'${p}')\\s*${sep}\\s*`);
     const objText = constText(ctx.src, obj, ctx.at);
     if (objText !== null && objText.trim().startsWith("{")) {
       const m = objText.match(propRe(":"));
@@ -871,7 +882,7 @@ function scanSourceText(file: string, src: string, base: Ctx): Write[] {
   }
 
   // document.cookie = "key=value; …"
-  for (const m of src.matchAll(/document\.cookie\s*\+?=(?!=)/g)) {
+  for (const m of src.matchAll(/document\s*(?:\.\s*cookie|\[\s*(["'])cookie\1\s*\])\s*\+?=(?!=)/g)) {
     cookieString("cookie", readExpr(src, m.index! + m[0].length, ";", true).text, m.index!);
   }
 
@@ -1005,7 +1016,39 @@ export function scanSource(
  * new Function, a string setTimeout, or any other. Prose that only names a store ("localStorage is full") does not
  * match.
  */
-const CODE_HINT = /\bsetItem\s*\(|\bdocument\s*\.\s*cookie\b|\bindexedDB\s*\.|\bcaches\s*\.\s*open\b|\bcookieStore\s*\.|\bwindow\s*\.\s*name\s*=|\.cookies\b|set-cookie/i;
+const CODE_HINT =
+  /\bsetItem\b|\b(?:localStorage|sessionStorage|indexedDB|objectStore|caches|cookieStore)\b|\bdocument\s*(?:\.\s*cookie\b|\[)|\.cookies\b|\bcookies\s*\(|set-cookie|\b(?:window|self|globalThis)\s*\.\s*name\b/i;
+
+/** The unresolved-substitution placeholder: it names a secret, so a write built from it fails closed (CSC-44). */
+const UNRESOLVED = "__kf_unresolved_secret__";
+
+/**
+ * The raw-text line on which cooked line `line` of a string starts (COR7-4): a "\\n" escape is a cooked line break
+ * with no raw one, and a backslash line continuation is a raw break with no cooked one.
+ */
+function rawLineOf(raw: string, line: number): number {
+  if (line <= 1) return 1;
+  let cooked = 1;
+  let rawLine = 1;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === "\\") {
+      const nx = raw[i + 1];
+      if (nx === "n") cooked++;
+      else if (nx === "\n") rawLine++;
+      else if (nx === "\r") {
+        rawLine++;
+        if (raw[i + 2] === "\n") i++;
+      }
+      i++;
+    } else if (c === "\n") {
+      cooked++;
+      rawLine++;
+    }
+    if (cooked === line) return rawLine;
+  }
+  return rawLine;
+}
 
 /** The receiver as written, past parentheses, `!`, `await`, `as` and `satisfies` (and `<T>x` casts). */
 function unwrap(e: ts.Expression): ts.Expression {
@@ -1225,7 +1268,10 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
       if (!assigns && op !== ts.SyntaxKind.PlusEqualsToken) return;
       const left = n.left;
       const pos = at(n);
-      if (ts.isPropertyAccessExpression(left) && left.name.text === "cookie" && lastName(left.expression) === "document") {
+      const isDocCookie =
+        (ts.isPropertyAccessExpression(left) && left.name.text === "cookie") ||
+        (ts.isElementAccessExpression(left) && ts.isStringLiteralLike(left.argumentExpression) && left.argumentExpression.text === "cookie");
+      if (isDocCookie && lastName((left as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression) === "document") {
         cookieString("cookie", text(n.right), pos);
         return;
       }
@@ -1253,23 +1299,52 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
       return;
     }
     // Code inside a string or template (CSC6-SEC-1): parsed as JS by this same scanner (the text scanner if it does
-    // not parse), its writes reported at host-file lines. A substitution becomes a placeholder that keeps its line
-    // breaks, so the lines still line up.
-    if (depth < 3 && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n))) {
-      const code = ts.isTemplateExpression(n)
-        ? n.head.text +
-          n.templateSpans
-            // Every line break between "${" and "}", the whitespace around the expression included.
-            .map((sp) => `__kf_sub__${"\n".repeat((src.slice(sp.expression.pos, sp.literal.getStart(sf)).match(/\n/g) ?? []).length)}${sp.literal.text}`)
-            .join("")
-        : n.text;
-      if (!CODE_HINT.test(code)) return;
-      const firstLine = lineOf(src, at(n));
-      for (const w of scanSource(`${file}.inline.js`, code, { read: base.read, depth: depth + 1 })) {
-        writes.push({ ...w, file, line: firstLine + w.line - 1 });
+    // not parse), its writes reported at host-file lines. A substitution is resolved in the host file (a const, a
+    // JSON.stringify of one); one that cannot be resolved becomes UNRESOLVED, so its write fails closed (CSC-44). Lines
+    // map through the raw text (COR7-4), a substitution keeping every line break between "${" and "}".
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+      scanInline(n.text, src.slice(at(n) + 1, n.end - 1), lineOf(src, at(n)), true);
+      return;
+    }
+    if (ts.isTemplateExpression(n)) {
+      let code = n.head.text;
+      let raw = src.slice(at(n) + 1, n.head.end - 2);
+      for (const sp of n.templateSpans) {
+        const breaks = "\n".repeat((src.slice(sp.expression.pos, sp.literal.getStart(sf)).match(/\n/g) ?? []).length);
+        code += resolveSubstitution(sp.expression) + breaks + sp.literal.text;
+        const litStart = sp.literal.getStart(sf) + 1;
+        raw += "x" + breaks + src.slice(litStart, sp.literal.end - (ts.isTemplateTail(sp.literal) ? 1 : 2));
       }
+      scanInline(code, raw, lineOf(src, at(n)), true);
+      return;
+    }
+    // JSX text children of <script> / <Script> are code (CSC7-SEC-3); no hint needed.
+    if (ts.isJsxElement(n) && /^script$/i.test(n.openingElement.tagName.getText(sf))) {
+      for (const child of n.children) if (ts.isJsxText(child)) scanInline(child.text, child.text, lineOf(src, child.pos), false);
     }
   });
+
+  /** A template substitution's text, resolved in the host file; UNRESOLVED when it cannot be. */
+  function resolveSubstitution(e: ts.Expression): string {
+    const t = text(e);
+    const c = { ...base, at: e.getStart(sf) };
+    const json = t.match(/^JSON\s*\.\s*stringify\s*\(([\s\S]*)\)$/);
+    if (json) {
+      const v = literalValue(c, json[1]);
+      return v === null ? UNRESOLVED : JSON.stringify(v);
+    }
+    return literalValue(c, t) ?? UNRESOLVED;
+  }
+
+  /** Scan `code` (cooked text; `raw` for line mapping) as JS, reporting at host lines from `firstLine`. */
+  function scanInline(code: string, raw: string, firstLine: number, hinted: boolean) {
+    if (depth >= 3 || (hinted && !CODE_HINT.test(code))) return;
+    const g = globalThis as unknown as { __kfInlineScans?: number };
+    g.__kfInlineScans = (g.__kfInlineScans ?? 0) + 1;
+    for (const w of scanSource(`${file}.inline.js`, code, { read: base.read, depth: depth + 1 })) {
+      writes.push({ ...w, file, line: firstLine + rawLineOf(raw, w.line) - 1 });
+    }
+  }
 
   // IndexedDB, as before: a file that opens one database lends it its writes' values (kf-sync-queue, CSC-10).
   idbWrites.sort((x, y) => x.at - y.at);
@@ -1335,10 +1410,13 @@ function census(): Write[] {
 
 const id = (r: { store: string; key: string; file: string }) => `${r.store} ${r.key} @ ${r.file}`;
 
+const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+
 /** The CSC_DUMP lines, sorted by file, line, store and key, so two runs compare line for line (COR6-4). */
 const dumpLines = (writes: Write[]): string[] =>
   [...writes]
-    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.store.localeCompare(b.store) || a.key.localeCompare(b.key))
+    // A plain code-unit comparison, not localeCompare, so the order is the same on every machine (COR7-7).
+    .sort((a, b) => cmp(a.file, b.file) || a.line - b.line || cmp(a.store, b.store) || cmp(a.key, b.key))
     .map((w) => `CSC ${isCredential(w) ? "CRED" : "----"} ${w.store} ${w.key} @ ${w.file}:${w.line}`);
 
 /** The census against a registry: credential writes with no row, and rows with no write. */
@@ -2588,6 +2666,11 @@ describe("CSC-45 JSX text children of a script tag are code", () => {
 });
 
 describe("CSC-46 document[\"cookie\"]", () => {
+  it("and in a file with parse errors (the text scanner) too", () => {
+    const fixture = `const f = <T>(x: T) => x;\ndocument["cookie"] = "kf_dc2_session=" + t;`;
+    expect(keysOf(scan("src/fixture-dc2.tsx", fixture))).toContain("cookie:kf_dc2_session");
+  });
+
   it("document[\"cookie\"] = … is a cookie write", () => {
     expect(keysOf(scan("src/fixture-dc.ts", `document["cookie"] = "kf_dc_session=" + t;`))).toContain("cookie:kf_dc_session");
   });
