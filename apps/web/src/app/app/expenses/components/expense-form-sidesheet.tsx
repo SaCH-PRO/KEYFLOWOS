@@ -101,7 +101,9 @@ function isObjectLikePath(path: string): boolean {
     try {
       next = decodeURIComponent(p);
     } catch {
-      return true;
+      // R6 C-1: a path that will not decode at all, or whose decoded form still holds an escape, may hide anything:
+      // refused. A decoded form left with only a literal "%" (a receipt named "100%") is judged as it is.
+      return round === 0 || /%[0-9A-Fa-f]{2}/.test(p);
     }
     if (next === p) return false;
     p = next;
@@ -142,6 +144,14 @@ export function receiptKind(url: string | null | undefined, businessId: string |
   } catch {
     apiHost = null;
   }
+  // R6 S-1: the page's own host is an API host too: next.config rewrites /__api/* on it to the API whatever the base.
+  let pageHost: string | null = null;
+  try {
+    pageHost = typeof window !== "undefined" ? hostKey(window.location.hostname) : null;
+  } catch {
+    pageHost = null;
+  }
+  if (pageHost && hostKey(parsed.hostname) === pageHost && pageHost !== apiHost) return "unavailable";
   if (apiHost && hostKey(parsed.hostname) === apiHost) {
     return !apiIsRelative && raw.startsWith(`${api}/`) && isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
   }

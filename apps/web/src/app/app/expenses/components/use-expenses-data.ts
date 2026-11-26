@@ -52,6 +52,9 @@ export function useExpensesData() {
   // A loadData from an older epoch is a stale closure (a delete started before the switch): it is refused.
   const switchRef = useRef(0);
   const [switchEpoch, setSwitchEpoch] = useState(0);
+  // R6 C-4: bumped when a call from before the latest switch asks for a reload of the business the page shows again
+  // (a delete that returns after A -> B -> A): the current view is read afresh, never with that call's old filters.
+  const [refresh, setRefresh] = useState(0);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -147,7 +150,8 @@ export function useExpensesData() {
         }
       } catch {}
     })();
-  }, [businessId]);
+    // R6 S-3: and again on every adopted switch (a batched A -> B -> A clears the lists and leaves businessId as it was).
+  }, [businessId, switchEpoch]);
 
   const loadData = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
@@ -156,7 +160,11 @@ export function useExpensesData() {
     // the page would stay loading.
     // R5: and a load from before the latest switch (its closure holds that time's filters) is refused the same way,
     // leaving loading as it is for the current read.
-    if (businessRef.current !== businessId || switchEpoch !== switchRef.current) return;
+    if (businessRef.current !== businessId) return;
+    if (switchEpoch !== switchRef.current) {
+      setRefresh((n) => n + 1);
+      return;
+    }
     const generation = ++generationRef.current;
     const current = () => generation === generationRef.current && businessRef.current === businessId;
     setLoading(true);
@@ -199,7 +207,7 @@ export function useExpensesData() {
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-  }, [clearAll, businessId, switchEpoch, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  }, [clearAll, businessId, switchEpoch, refresh, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
