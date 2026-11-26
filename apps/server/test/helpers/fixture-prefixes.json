@@ -813,6 +813,11 @@
       "packet": "V1-89 (W3-D17b-REVIEW-SOLICIT-DEDUPE)"
     },
     {
+      "prefix": "v91b_",
+      "owner": "apps/server/test/recurring-expense-server.integration.test.ts",
+      "packet": "V1-91 (FU-RECURRING-EXPENSE-SERVER)"
+    },
+    {
       "prefix": "v92d_",
       "owner": "apps/server/test/identity-rekey-creator.integration.test.ts",
       "packet": "V1-92 (W6-IDENTITY-REKEY-CREATOR)"
@@ -1575,6 +1580,21 @@
       "prefix": "v70e_",
       "owner": "apps/server/test/settle-no-stock.integration.test.ts",
       "packet": "V1-70 (W1F-SETTLE-NO-STOCK)"
+    },
+    {
+      "prefix": "v88p_",
+      "owner": "apps/server/test/proposal-money-tag.integration.test.ts",
+      "packet": "V1-88 (FU-PROPOSAL-MONEY-TAG)"
+    },
+    {
+      "prefix": "v91c_",
+      "owner": "apps/server/test/key-invoice-email-pay-link.integration.test.ts",
+      "packet": "V1-91 (FU-KEY-INVOICE-EMAIL-PAY-LINK)"
+    },
+    {
+      "prefix": "v91d_",
+      "owner": "apps/server/test/slots-hours-reader.integration.test.ts",
+      "packet": "V1-91 (FU-SLOTS-HOURS-READER, P227)"
     }
   ],
   "pendingRenames": [],

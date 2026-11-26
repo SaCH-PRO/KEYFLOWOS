@@ -28,6 +28,7 @@ import { FinancialCopilotService } from '../commerce/financial-copilot.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { schedulersDisabled } from '../../core/config/env';
+import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 
 @Injectable()
 export class FlowListener implements OnModuleInit, OnModuleDestroy {
@@ -57,11 +58,34 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
    * and never mints one for an invoice whose links were all revoked or
    * expired (an anonymous WiPay failure callback reaches the payment-failed
    * email). Callers build it only once the contact has an email.
+   *
+   * FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): on RetryableConflictException (the
+   * pending pay link was withdrawn under the caller):
+   * - cron callers (`retryOnceOnConflict: false`, handleInvoiceDueSoonReminders)
+   *   let RetryableConflictException propagate so that single invoice is
+   *   deferred to the next hourly sweep without sending a button-less email;
+   * - one-shot @OnEvent listeners (`retryOnceOnConflict: true`, overdue and
+   *   payment_failed) have no external retry queue, so they perform one
+   *   immediate retry (the withdrawn pending row is already gone) and only
+   *   degrade with a warning if the retry also fails.
    */
-  private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
+  private async customerInvoiceUrl(
+    invoiceId: string,
+    businessId: string,
+    opts?: { retryOnceOnConflict?: boolean },
+  ): Promise<string | undefined> {
     try {
       return (await this.commerce.automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
     } catch (e) {
+      if (e instanceof RetryableConflictException) {
+        if (!opts?.retryOnceOnConflict) throw e;
+        try {
+          return (await this.commerce.automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
+        } catch (retryErr) {
+          this.logger.warn(`No pay link for invoice ${invoiceId} after retry: ${(retryErr as Error).message}`);
+          return undefined;
+        }
+      }
       this.logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`);
       return undefined;
     }
@@ -206,7 +230,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       total: inv.total,
       currency: inv.currency,
       dueDate: inv.dueDate,
-      invoiceUrl: await this.customerInvoiceUrl(inv.id, payload.businessId),
+      invoiceUrl: await this.customerInvoiceUrl(inv.id, payload.businessId, { retryOnceOnConflict: true }),
       daysOverdue,
     });
   }
@@ -645,7 +669,16 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
         // V1-46b review (CR-V46B-01): no email, no reminder, so no pay link is touched.
         if (!inv.contact?.email) continue;
 
-        const invoiceUrl = await this.customerInvoiceUrl(inv.id, inv.businessId);
+        let invoiceUrl: string | undefined;
+        try {
+          invoiceUrl = await this.customerInvoiceUrl(inv.id, inv.businessId);
+        } catch (e) {
+          if (e instanceof RetryableConflictException) {
+            this.logger.warn(`Deferring due-soon reminder for invoice ${inv.id}: ${e.message}`);
+            continue;
+          }
+          throw e;
+        }
 
         await this.sendCustomerNotification(inv.businessId, 'invoice_due_soon', inv.contact, {
           invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
@@ -728,7 +761,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       .catch(() => null);
     if (!inv?.contact?.email) return;
     // V1-46b (CR-01): the retry link is the token link; /invoices/<id>/pay is served by no web route.
-    const retryUrl = await this.customerInvoiceUrl(inv.id, payload.businessId);
+    const retryUrl = await this.customerInvoiceUrl(inv.id, payload.businessId, { retryOnceOnConflict: true });
     await this.sendCustomerNotification(
       payload.businessId,
       'payment_failed',

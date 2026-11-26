@@ -1,6 +1,7 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NON_MONEY_APPROVAL_REQUEST_TYPES } from '../key-autonomy/proposal-money-tag';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 
 export interface CreateApprovalRequestInput {
@@ -381,6 +382,10 @@ export class ApprovalRequestService {
     if (!this.proposalOrchestrator) return;
 
     try {
+      const normalizedRequestType = typeof input.requestType === 'string' ? input.requestType.trim().toLowerCase() : '';
+      const requestCarriesMoney =
+        !NON_MONEY_APPROVAL_REQUEST_TYPES.has(normalizedRequestType) ||
+        (input.threshold !== undefined && input.threshold !== null);
       const proposal = await this.proposalOrchestrator.propose({
         businessId: input.businessId,
         userId: input.requesterId,
@@ -392,6 +397,7 @@ export class ApprovalRequestService {
         summary: input.description,
         parameters: input.payload,
         affectedEntities: { requestType: input.requestType, steps: input.steps },
+        carriesMoney: requestCarriesMoney,
       });
 
       await this.prisma.client.approvalRequest.update({

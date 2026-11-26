@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -68,6 +68,7 @@ export class BillsController {
     @Param('businessId') businessId: string,
     @Param('billId') billId: string,
     @Body() body: { paymentMethod?: unknown; paidAt?: unknown; paymentAccountId?: unknown },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     let paymentAccountId: string | undefined;
     if (body?.paymentAccountId !== undefined && body?.paymentAccountId !== null) {
@@ -99,6 +100,8 @@ export class BillsController {
       paymentMethod,
       paidAt,
       paymentAccountId,
+      actorUserId: req?.user?.id,
+      actorRole: req?.user?.role,
     });
   }
 

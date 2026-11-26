@@ -381,6 +381,8 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
           title: `Plan step: ${step.action}`,
           summary: step.description ?? undefined,
           actionType: 'EXECUTE_TOOL',
+          toolName,
+          module: (step as { module?: string }).module ?? undefined,
           payload: {
             toolName,
             inputPayload: step.inputPayload,
