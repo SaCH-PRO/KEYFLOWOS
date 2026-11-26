@@ -19,7 +19,9 @@ import {
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { Dialog } from "@keyflow/ui";
+import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { retryKeySwitch, useKeyEnabled, useKeySwitchFailed } from "@/hooks/use-key-enabled";
 import {
   fetchAiSettings,
   updateAiSettings,
@@ -78,7 +80,44 @@ function getUtilizationBg(pct: number) {
   return "bg-emerald-500";
 }
 
+/**
+ * Settings > KEY. SWP-KEY-SHELL-SMOKE: it renders, and reads, KEY's settings only once /identity/me has said KEY is
+ * on. Under the server's KEY_DISABLED it renders none of them and sends the member back to the Settings index (the
+ * index does not offer KEY then either); while that read is in flight it draws the loading skeleton. When the read
+ * fails it says so and offers Try again, with KEY still off and none of its settings read (repair round 1, COR-4).
+ */
 export default function AiSettingsPage() {
+  const { enabled, known } = useKeyEnabled();
+  const failed = useKeySwitchFailed();
+  const router = useRouter();
+  const keyOff = known && !enabled;
+
+  useEffect(() => {
+    if (keyOff) router.replace("/app/settings");
+  }, [keyOff, router]);
+
+  if (enabled) return <AiSettingsContent />;
+  if (keyOff) return null;
+  if (failed) {
+    return (
+      <div className="max-w-5xl space-y-3">
+        <p role="alert" className="text-sm text-muted-foreground">
+          We couldn&apos;t check whether KEY is on for your business.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => retryKeySwitch()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-5xl space-y-6">
+      <Skeleton />
+    </div>
+  );
+}
+
+function AiSettingsContent() {
   const [activeTab, setActiveTab] = useState<TabKey>("capacity");
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<TeamCapacityMember[]>([]);

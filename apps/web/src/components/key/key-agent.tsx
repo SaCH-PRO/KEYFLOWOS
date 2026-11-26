@@ -8,7 +8,8 @@ import { CommandPalette } from "@/components/command-palette";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { transcribeKeyflowSpeech } from "@/lib/client";
 import { useKeyChat, KeyChatPanel, useKeyChatActions, type CopilotModule } from "@/components/key/chat";
-import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
+import { useKeyEnabled } from "@/hooks/use-key-enabled";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 import { useTts } from "@/components/tts";
 import { pickRecorderMimeType, createSilenceMonitor } from "@/components/key/chat/voice-utils";
 import { VoiceConversation } from "@/components/key/chat/voice-conversation";
@@ -47,6 +48,10 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
   const { sendMessage } = useKeyChatActions();
   const { state: ttsState } = useTts();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // SWP-KEY-SHELL-SMOKE: under the server's KEY_DISABLED (or until /identity/me has said otherwise) no door opens KEY:
+  // not an open event, not Cmd/Ctrl+J, not push-to-talk, and the drawer is not rendered. The command palette stays.
+  const { enabled: keyEnabled } = useKeyEnabled();
+  const keyEnabledRef = useLatestRef(keyEnabled);
 
   // Push-to-talk state
   const [pttActive, setPttActive] = useState(false);
@@ -83,6 +88,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
         setPaletteOpen(true);
         return;
       }
+      if (!keyEnabledRef.current) return;
       if (detail.mode === "onboarding") {
         openGenomeOnboardingConversation();
         return;
@@ -94,7 +100,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     };
     window.addEventListener(KEY_OPEN_EVENT, handler);
     return () => window.removeEventListener(KEY_OPEN_EVENT, handler);
-  }, [currentModule, openGenomeOnboardingConversation, setCurrentModule, setInput, setOpen, setPageContext]);
+  }, [currentModule, keyEnabledRef, openGenomeOnboardingConversation, setCurrentModule, setInput, setOpen, setPageContext]);
 
   // Keyboard shortcuts. KeyAgent is the one owner of Cmd/Ctrl+K (the palette) and Cmd/Ctrl+J (KEY's drawer): the
   // shell's useKeyboardShortcuts lists both for the shortcuts help but leaves the keypress here (ownedBy "KeyAgent";
@@ -109,7 +115,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
         setPaletteOpen((open) => !open);
       } else if (isMod && k === "j") {
         e.preventDefault();
-        setOpen((prev) => !prev);
+        if (keyEnabledRef.current) setOpen((prev) => !prev);
       } else if (e.key === "Escape") {
         close();
         setPaletteOpen(false);
@@ -118,11 +124,12 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [close, setOpen]);
+  }, [close, keyEnabledRef, setOpen]);
 
   // Legacy event names from existing code paths still open KEY
   useEffect(() => {
     const legacyOpenCopilot = (e: Event) => {
+      if (!keyEnabledRef.current) return;
       const detail = (e as CustomEvent).detail;
       setOpen(true);
       if (detail?.prompt) setInput(detail.prompt);
@@ -131,40 +138,11 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     };
     window.addEventListener("kf:open-copilot", legacyOpenCopilot);
     return () => window.removeEventListener("kf:open-copilot", legacyOpenCopilot);
-  }, [setCurrentModule, setInput, setOpen, setPageContext]);
+  }, [keyEnabledRef, setCurrentModule, setInput, setOpen, setPageContext]);
 
-  // Single post-sign-in genome nudge: once per session, if the Business
-  // Genome still needs work, open the native chat panel with the built-in
-  // onboarding conversation. Never redirects; fails open on fetch errors.
-  // HOME ONLY — auto-opening the panel over working pages (Key Connect,
-  // finance, CRM) covers the UI the user came for.
-  useEffect(() => {
-    if (!businessId) return;
-    const alreadyPrompted = sessionStorage.getItem("kf:genome-auto-prompt");
-    if (alreadyPrompted === "1") return;
-    if (typeof window !== "undefined" && window.location.pathname !== "/app/command-center") return;
-
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      fetchOnboardingState(businessId)
-        .then(({ data }) => {
-          if (cancelled || !data) return;
-          const needsGenome = !data.onboardingComplete || !data.threePillarMet;
-          if (needsGenome) {
-            sessionStorage.setItem("kf:genome-auto-prompt", "1");
-            openGenomeOnboardingConversation();
-          }
-        })
-        .catch(() => {
-          // ignore — a failed status check must never block or redirect the app
-        });
-    }, 2000);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [businessId, openGenomeOnboardingConversation]);
+  // The drawer never opens by itself (SWP-KEY-SHELL-SMOKE kept scope; journey K: "KEY opens only from the header
+  // button or Cmd/Ctrl+J, never by itself"). The once-per-session Genome nudge that opened it on Today 2 s after load
+  // for a new owner is gone; the Genome's own cards on Today still open the Genome conversation when pressed.
 
   // Push-to-talk handlers — voice turns end on silence and send immediately.
   const stopPttRecording = useCallback(() => {
@@ -277,6 +255,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (e.key !== " ") return;
+      if (!keyEnabledRef.current) return;
       if (isInputElement(e.target)) return;
       if (pttActiveRef.current) {
         e.preventDefault();
@@ -320,7 +299,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
       window.removeEventListener("keyup", handleKeyUp);
       if (pttTimerRef.current) clearTimeout(pttTimerRef.current);
     };
-  }, [pttRecording, startPttRecording, stopPttRecording]);
+  }, [keyEnabledRef, pttRecording, startPttRecording, stopPttRecording]);
 
   useEffect(() => {
     return () => {
@@ -330,7 +309,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
 
   return (
     <>
-      <KeyChatPanel />
+      {keyEnabled && <KeyChatPanel />}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {/* Push-to-talk overlay */}
