@@ -992,3 +992,70 @@ describe("TODAY-4BLOCK repair round 4 (confirmation reviews at 3b4bb17b): an act
     }
   }, CASE_MS);
 });
+
+describe("TODAY-4BLOCK repair round 5: the request counters pinned for one business", () => {
+  // lib/api.ts coalesces identical GETs in flight by URL and Authorization. A token refresh while a read is out lets a
+  // second read for the SAME business run on its own; when the older one lands last, only the request counter keeps
+  // the newer answer on screen.
+  const OLD = { ...RESTOCK_X, id: "ci_t4b_old", title: "Old queue answer" };
+  const NEW = { ...RESTOCK_X, id: "ci_t4b_new", title: "New queue answer" };
+
+  it("[T4B-36] (round 5) the queue: two reads for one business under different tokens, the older landing last, leave the newer list", async () => {
+    window.localStorage.setItem("kf_token", "t4b-token-a");
+    const api = serveTwo(
+      { [BIZ]: { today: ok(busyToday()), due: dueList([]), items: [listedItems([RESTOCK_X]), listedItems([OLD]), listedItems([NEW])] } },
+      [[BIZ, "items", 1]],
+    );
+    try {
+      await mountPage();
+      await screen.findByText(RESTOCK_X.title, {}, { timeout: 10_000 });
+      fireEvent.click(screen.getAllByRole("button", { name: /^refresh$/i })[0]);
+      await waitFor(() => expect(api.calls(BIZ, "items")).toBe(2));
+      window.localStorage.setItem("kf_token", "t4b-token-b");
+      fireEvent.click(screen.getAllByRole("button", { name: /^refresh$/i })[0]);
+      await waitFor(() => expect(api.calls(BIZ, "items")).toBe(3));
+      await screen.findByText(NEW.title, {}, { timeout: 10_000 });
+      api.release(BIZ, "items");
+      await waitFor(() => expect(api.answeredCount(BIZ, "items")).toBe(3));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.getByText(NEW.title)).toBeTruthy();
+      expect(screen.queryByText(OLD.title)).toBeNull();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-37] (round 5) the due panel: two re-reads for one business under different tokens, the older landing last, leave the newer list", async () => {
+    const ONE = { ...OBLIGATION_X, id: "ci_t4b_ob1", title: "Rebook Maria" };
+    const TWO = { ...OBLIGATION_X, id: "ci_t4b_ob2", title: "File the return" };
+    const OLD_DUE = { ...OBLIGATION_X, id: "ci_t4b_ob_old", title: "Old due answer" };
+    const NEW_DUE = { ...OBLIGATION_X, id: "ci_t4b_ob_new", title: "New due answer" };
+    window.localStorage.setItem("kf_token", "t4b-token-a");
+    const api = serveTwo(
+      { [BIZ]: { today: ok(busyToday()), items: listedItems([]), action: ok({}), due: [dueList([ONE, TWO]), dueList([OLD_DUE]), dueList([NEW_DUE])] } },
+      [[BIZ, "due", 1]],
+    );
+    const doneOf = (title: string) => {
+      let node: HTMLElement | null = screen.getByText(title);
+      while (node && !within(node).queryByRole("button", { name: "Done" })) node = node.parentElement;
+      return within(node!).getByRole("button", { name: "Done" });
+    };
+    try {
+      await mountPage();
+      await screen.findByText(ONE.title, {}, { timeout: 10_000 });
+      fireEvent.click(doneOf(ONE.title));
+      await waitFor(() => expect(api.calls(BIZ, "due")).toBe(2), { timeout: 10_000 });
+      window.localStorage.setItem("kf_token", "t4b-token-b");
+      fireEvent.click(doneOf(TWO.title));
+      await waitFor(() => expect(api.calls(BIZ, "due")).toBe(3), { timeout: 10_000 });
+      await screen.findByText(NEW_DUE.title, {}, { timeout: 10_000 });
+      api.release(BIZ, "due");
+      await waitFor(() => expect(api.answeredCount(BIZ, "due")).toBe(3));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.getByText(NEW_DUE.title)).toBeTruthy();
+      expect(screen.queryByText(OLD_DUE.title)).toBeNull();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+});
