@@ -257,8 +257,9 @@ export function canTransitionOrder(from: string, to: string): boolean {
  * of neither (e.g. 'on_hold'). PATCH /marketplace/.../status writes any status as sent, so a stored status is not
  * always spelled as canTransitionOrder's tables are.
  */
-function namedOrderStatus(status: string): string | undefined {
-  const trimmed = status.trim();
+export function namedOrderStatus(status?: string | null): string | undefined {
+  const trimmed = (status ?? '').trim();
+  if (!trimmed) return undefined;
   for (const spelling of [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()]) {
     const named = Object.prototype.hasOwnProperty.call(LEGACY_STATUS_MAP, spelling) ? LEGACY_STATUS_MAP[spelling] : spelling;
     if (Object.prototype.hasOwnProperty.call(VALID_ORDER_TRANSITIONS, named)) return named;
@@ -267,14 +268,13 @@ function namedOrderStatus(status: string): string | undefined {
 }
 
 /**
- * W11-ORDER-CANCEL-RELEASE review OCR-COR-1 (owner ruling D-136): whether a status edit (PATCH /marketplace/.../status
- * 'cancelled', PATCH /site/.../status CANCELLED) may cancel an order stored with this status. A status of either
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-1 (owner ruling D-136) & W1F-ORDER-TRANSITIONS (D-198):
+ * whether a cancel (PATCH /marketplace/.../status 'cancelled', PATCH /site/.../status CANCELLED, or
+ * MarketplaceService.fulfillOrder 'cancel') may cancel an order stored with this status. A status of either
  * vocabulary, in any case and with any surrounding spaces, may be cancelled as canTransitionOrder says: 'processing',
  * 'pending' and 'confirmed' are open, a shipped, delivered, completed, cancelled or refunded one is not (D-136). A label
  * of neither vocabulary (e.g. 'on_hold', written by the marketplace route as sent) names no step past which a cancel is
- * refused, so it may be cancelled, as it was before the packet. canTransitionOrder alone (case-sensitive) refused every
- * such open order with 400 'Cannot cancel order in processing status', and the fulfil 'cancel' refuses them too, so no
- * route could cancel it. The fulfil 'cancel' keeps canTransitionOrder (FulfillmentRoutingService.cancelOrderFulfilment).
+ * refused, so it may be cancelled.
  */
 export function statusEditMayCancel(status: string): boolean {
   const named = namedOrderStatus(status);
@@ -282,14 +282,72 @@ export function statusEditMayCancel(status: string): boolean {
 }
 
 /**
- * W11-ORDER-CANCEL-RELEASE review OCR-COR-2 (D-136): the 409 a status-edit cancel answers when the order's status
+ * W1F-ORDER-TRANSITIONS (owner ruling D-198 `orderstatus`, SEC-W11OCR-2):
+ * whether a status-edit PATCH (PATCH /marketplace/.../status or PATCH /site/.../status) may move an order from
+ * `from` to `to`. Both statuses are read case-insensitively and trimmed across the marketplace and storefront
+ * vocabularies:
+ *   - SHIPPED: may stay shipped (idempotent) or move forward to delivered / completed; moving backwards (including
+ *     to pending, confirmed, processing, picking_packing, routed, paid, cancelled, or an unknown label like on_hold
+ *     or CANCELED) is refused (fix a mistake with a return or refund).
+ *   - DELIVERED: may stay delivered (idempotent) or move forward to completed; moving backwards (including to
+ *     shipped) is refused.
+ *   - COMPLETED: may stay completed (idempotent); moving backwards is refused.
+ *   - CANCELLED / REFUNDED: terminal — cannot be reopened or overwritten by a status edit.
+ *   - Open statuses (including 'on_hold'): may move to any open, shipped, delivered, or completed status (cancels
+ *     are handled separately through releaseOrderFulfilmentForCancel).
+ */
+export function statusEditMayTransition(from: string, to: string): boolean {
+  const fromNamed = namedOrderStatus(from);
+  const toNamed = namedOrderStatus(to);
+  if (fromNamed === 'shipped') {
+    return toNamed === 'shipped' || toNamed === 'delivered' || toNamed === 'completed';
+  }
+  if (fromNamed === 'delivered') {
+    return toNamed === 'delivered' || toNamed === 'completed';
+  }
+  if (fromNamed === 'completed') {
+    return toNamed === 'completed';
+  }
+  if (fromNamed === 'cancelled' || fromNamed === 'refunded') {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * W1F-ORDER-TRANSITIONS (D-198): asserts statusEditMayTransition(from, to), throwing 400 BadRequestException
+ * when moving a shipped, delivered, or completed order backwards or reopening a cancelled/refunded order.
+ */
+export function assertStatusEditTransition(from: string, to: string): void {
+  if (statusEditMayTransition(from, to)) return;
+  const fromNamed = namedOrderStatus(from);
+  if (fromNamed === 'cancelled' || fromNamed === 'refunded') {
+    throw new BadRequestException(
+      `Cannot move order from ${from} to ${to.trim()}: a ${fromNamed} order cannot be reopened or modified`,
+    );
+  }
+  throw new BadRequestException(
+    `Cannot move order from ${from} to ${to.trim()}: a ${fromNamed ?? from} order cannot move backwards (use a return or refund instead)`,
+  );
+}
+
+/**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-2 (D-136): the 409 a cancel answers when the order's status
  * changed between releaseOrderFulfilmentForCancel's read (under the routing claim) and the cancel's write (a
- * compare-and-set on that status). A ship takes no claim (PATCH 'shipped', PATCH /site SHIPPED, the fulfil 'ship'), so it
- * can commit while the cancel waits for the stock rows; the cancel wrote 'cancelled' over the shipped order by id.
+ * compare-and-set on that status).
  */
 export const ORDER_STATUS_CHANGED_DURING_CANCEL =
   "This order's status changed while it was being cancelled (it was shipped or edited meanwhile): nothing was written. " +
   'Reload the order and cancel it again if it can still be cancelled';
+
+/**
+ * W1F-ORDER-TRANSITIONS (D-198 `orderstatus`, reverse race): the 409 a status edit or fulfil 'ship' answers when the
+ * order's status changed between its read and its compare-and-set write (e.g. a concurrent cancel or delivery committed
+ * meanwhile): nothing was written.
+ */
+export const ORDER_STATUS_CHANGED_DURING_EDIT =
+  "This order's status changed while it was being updated (it was cancelled, shipped, or edited meanwhile): nothing was written. " +
+  'Reload the order and try again';
 
 /**
  * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): the release of an order's fulfilment for a cancel, on the
@@ -311,11 +369,13 @@ export const ORDER_STATUS_CHANGED_DURING_CANCEL =
  * meets the order cancelled and creates nothing. It releases reservations only: it restocks nothing a paid storefront
  * checkout decremented, and records no refund.
  *
- * Review repairs: `mayCancel` is the check on the status read. The fulfil 'cancel' keeps canTransitionOrder (the
- * default); the status edits pass statusEditMayCancel, which reads the status in any case with any surrounding spaces
- * (OCR-COR-1). It returns the status it read, on which the status edits' order write is a compare-and-set
- * (OCR-COR-2): a ship takes no claim, so one that commits while this waits for its stock rows is not written over
- * (ORDER_STATUS_CHANGED_DURING_CANCEL, 409, the transaction rolled back).
+ * W11-ORDER-CANCEL-RELEASE review repairs & W1F-ORDER-TRANSITIONS (D-198): `mayCancel` is the check on the status
+ * read; both the status-edit cancels and FulfillmentRoutingService.cancelOrderFulfilment pass `statusEditMayCancel`,
+ * which reads the status case-insensitively with any surrounding spaces and admits open labels such as 'on_hold'
+ * (OCR-COR-1). It returns the status it read, on which every cancel's order write is a compare-and-set (OCR-COR-2):
+ * a status-edit ship (which takes no routing claim) committing while this waits for stock rows is never overwritten
+ * (ORDER_STATUS_CHANGED_DURING_CANCEL, 409, the transaction rolled back), while fulfil 'ship' serializes on
+ * claimOrderRouting and likewise compare-and-sets on its readStatus.
  */
 export async function releaseOrderFulfilmentForCancel(
   tx: RoutingTx,
@@ -1205,8 +1265,10 @@ export class FulfillmentRoutingService {
    *   8. move remaining PICKING_PACKING, PO_RAISED, and PREORDER_ACCEPTED
    *      routes (e.g. MANUAL, DROPSHIP, PREORDER) to SHIPPED.
    *
-   * Returns the deduplicated ids of stock rows decremented so the caller runs
-   * checkAndAlertReorderThreshold after the transaction commits.
+   * Returns the deduplicated ids of stock rows decremented (so the caller runs
+   * checkAndAlertReorderThreshold after the transaction commits) and the order
+   * status read under the claim (W1F-ORDER-TRANSITIONS, D-198: so the caller
+   * compare-and-sets the order's status write on that readStatus).
    */
   async shipOrderFulfilment(
     tx: RoutingTx,
@@ -1214,7 +1276,7 @@ export class FulfillmentRoutingService {
     orderId: string,
     data?: { carrier?: unknown; trackingNumber?: unknown; estimatedDelivery?: unknown },
     actorId: string | null = null,
-  ): Promise<string[]> {
+  ): Promise<{ decrementedStockIds: string[]; readStatus: string }> {
     const carrier =
       data?.carrier === undefined || data?.carrier === null
         ? undefined
@@ -1378,7 +1440,7 @@ export class FulfillmentRoutingService {
       data: { status: 'SHIPPED' },
     });
 
-    return [...decrementedStockIds];
+    return { decrementedStockIds: [...decrementedStockIds], readStatus: order.status };
   }
 
   /**
@@ -1399,11 +1461,13 @@ export class FulfillmentRoutingService {
    * reserved and cancels every route not COMPLETED or CANCELLED. A router that comes after
    * it meets the order cancelled and creates nothing.
    *
-   * W11-ORDER-CANCEL-RELEASE: the work is releaseOrderFulfilmentForCancel (above), which the status edits that cancel
-   * an order run too; this method delegates to it unchanged.
+   * W11-ORDER-CANCEL-RELEASE & W1F-ORDER-TRANSITIONS (D-198): delegates to
+   * releaseOrderFulfilmentForCancel with statusEditMayCancel (case-insensitive
+   * open-status read including 'on_hold') and returns the status read under the
+   * claim so the caller compare-and-sets its status write.
    */
-  async cancelOrderFulfilment(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
-    await releaseOrderFulfilmentForCancel(tx, businessId, orderId);
+  async cancelOrderFulfilment(tx: RoutingTx, businessId: string, orderId: string): Promise<string> {
+    return releaseOrderFulfilmentForCancel(tx, businessId, orderId, statusEditMayCancel);
   }
 
   async checkAndAlertReorderThreshold(businessId: string, stockId: string): Promise<void> {

@@ -6,7 +6,7 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { TemporalFlowService } from '../../temporal-flow/temporal-flow.service';
+import { TemporalFlowService, type TemporalFlowReader } from '../../temporal-flow/temporal-flow.service';
 import { KeyOrganAdapter } from './key-organ-adapter.interface';
 import {
   KeyCortexToolContext,
@@ -33,17 +33,47 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
     // Tools are registered by the central adapter registrar in key-cortex.module
   }
 
-  async getState(businessId: string): Promise<import('./key-organ-adapter.interface').KeyOrganState> {
+  /**
+   * FU-TIMELINE-CALLERS-SCOPE (D-100, D-179, D-227, D-234, R1-SEC-07): the acting member for a KEY tool call.
+   * `ctx.auditUserId` decides no permission (KeyCortexToolContext); missing, blank, or non-string `ctx.userId`
+   * fails closed (`null`, withholding every module-owned and unclassified event).
+   */
+  private readerOf(ctx: KeyCortexToolContext): TemporalFlowReader {
+    const id = typeof ctx.userId === 'string' ? ctx.userId.trim() : '';
+    return id ? { id } : null;
+  }
+
+  /**
+   * System interoception (`KeyCortexInteroceptionService.senseBody`) calls `getState(businessId)` with
+   * no reader and discards `metadata` (keeping only `healthy`, `status`, `gaps`). When `reader === undefined`,
+   * omit `metadata` entirely (R1-SEC-05). Any member-facing caller passing `reader` (including `null`
+   * fail-closed) receives counts scoped to that reader.
+   */
+  async getState(
+    businessId: string,
+    reader?: TemporalFlowReader,
+  ): Promise<import('./key-organ-adapter.interface').KeyOrganState> {
     try {
-      const analysis = await this.temporalFlow.analyze(businessId);
+      if (reader !== undefined) {
+        const [readerFilter, memorySight] = await Promise.all([
+          this.temporalFlow.readerFilter(businessId, reader),
+          this.temporalFlow.memorySight(businessId, reader),
+        ]);
+        const analysis = await this.temporalFlow.analyze(businessId, readerFilter, memorySight, reader);
+        return {
+          healthy: true,
+          status: 'Timeline active',
+          metadata: {
+            urgentItems: analysis.urgentItems?.length ?? 0,
+            opportunities: analysis.opportunities?.length ?? 0,
+            risks: analysis.risks?.length ?? 0,
+          },
+        };
+      }
+      await this.temporalFlow.analyze(businessId);
       return {
         healthy: true,
         status: 'Timeline active',
-        metadata: {
-          urgentItems: analysis.urgentItems?.length ?? 0,
-          opportunities: analysis.opportunities?.length ?? 0,
-          risks: analysis.risks?.length ?? 0,
-        },
       };
     } catch (err: unknown) {
       this.logger.error(`getState failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -68,14 +98,21 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
           limit: { type: 'number' },
         },
         async (ctx, input) => {
-          const events = await this.temporalFlow.list(ctx.businessId, {
-            source: input.source as string,
-            type: input.type as string,
-            status: input.status as string,
-            from: input.from as string,
-            to: input.to as string,
-            limit: input.limit as number,
-          });
+          const reader = this.readerOf(ctx);
+          const readerFilter = await this.temporalFlow.readerFilter(ctx.businessId, reader);
+          const events = await this.temporalFlow.list(
+            ctx.businessId,
+            {
+              source: input.source as string,
+              type: input.type as string,
+              status: input.status as string,
+              from: input.from as string,
+              to: input.to as string,
+              limit: input.limit as number,
+            },
+            reader,
+            readerFilter,
+          );
           return { success: true, data: { events, count: events.length } };
         },
       ),
@@ -97,7 +134,8 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
           entityId: { type: 'string' },
         },
         async (ctx, input) => {
-          const event = await this.temporalFlow.emit({
+          const reader = this.readerOf(ctx);
+          const payload = {
             businessId: ctx.businessId,
             source: 'key_cortex',
             type: (input.type as string) ?? 'note',
@@ -110,7 +148,12 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
             reminderAt: input.reminderAt ? new Date(input.reminderAt as string) : undefined,
             entityType: input.entityType as string,
             entityId: input.entityId as string,
-          });
+          };
+          if (!(await this.temporalFlow.canWriteEvent(ctx.businessId, payload, reader))) {
+            return { success: false, error: 'Unauthorized' };
+          }
+          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, reader);
+          const event = await this.temporalFlow.emit(payload, writerFilter, reader);
           return { success: true, data: { eventId: event.id, title: event.title } };
         },
       ),
@@ -124,14 +167,20 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
           description: { type: 'string' },
         },
         async (ctx, input) => {
-          const event = await this.temporalFlow.emit({
+          const reader = this.readerOf(ctx);
+          const payload = {
             businessId: ctx.businessId,
             source: 'key_cortex',
             type: 'reminder',
             title: input.title as string,
             summary: (input.description as string) ?? '',
             reminderAt: new Date(input.reminderAt as string),
-          });
+          };
+          if (!(await this.temporalFlow.canWriteEvent(ctx.businessId, payload, reader))) {
+            return { success: false, error: 'Unauthorized' };
+          }
+          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, reader);
+          const event = await this.temporalFlow.emit(payload, writerFilter, reader);
           return { success: true, data: { eventId: event.id, reminderAt: event.reminderAt } };
         },
       ),
@@ -143,7 +192,16 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
         ['eventId'],
         {},
         async (ctx, input) => {
-          const result = await this.temporalFlow.markResolved(ctx.businessId, input.eventId as string);
+          const eventId = typeof input.eventId === 'string' ? input.eventId : '';
+          if (!eventId) {
+            return { success: false, error: 'Event not found' };
+          }
+          const reader = this.readerOf(ctx);
+          const writerFilter = await this.temporalFlow.readerFilter(ctx.businessId, reader);
+          const result = await this.temporalFlow.markResolved(ctx.businessId, eventId, writerFilter, reader);
+          if (result.count === 0) {
+            return { success: false, error: 'Event not found' };
+          }
           return { success: true, data: { updated: result.count } };
         },
       ),
@@ -155,7 +213,12 @@ export class TemporalFlowAdapterService extends KeyOrganAdapter implements OnMod
         [],
         {},
         async (ctx) => {
-          const analysis = await this.temporalFlow.analyze(ctx.businessId);
+          const reader = this.readerOf(ctx);
+          const [readerFilter, memorySight] = await Promise.all([
+            this.temporalFlow.readerFilter(ctx.businessId, reader),
+            this.temporalFlow.memorySight(ctx.businessId, reader),
+          ]);
+          const analysis = await this.temporalFlow.analyze(ctx.businessId, readerFilter, memorySight, reader);
           return { success: true, data: analysis };
         },
       ),
