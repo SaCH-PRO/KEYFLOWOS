@@ -57,9 +57,10 @@ export class GenomeEvolutionController {
   @UseGuards(GenomeGateGuard)
   async generateFromTemporalFlow(
     @Param('businessId') businessId: string,
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
-    return this.service.generateFromTemporalFlow(businessId, this.userId(req));
+    const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : null;
+    return this.service.generateFromTemporalFlow(businessId, this.userId(req), reader);
   }
 
   @RequireModuleScope('settings', 'write')

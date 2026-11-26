@@ -15,8 +15,9 @@ import {
   PlugZap,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
-import { fetchWithAuthRetry } from "@/lib/api";
+import { fetchWithAuthRetry, getAuthHeaders } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useKeyEnabled } from "@/hooks/use-key-enabled";
 
 const API_BASE = getApiBase();
 
@@ -150,15 +151,21 @@ export function KeyAwarenessPanel({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState<AwarenessKind | "all">("all");
+  // SWP-KEY-SHELL-SMOKE: these are KEY's background findings; under the server's KEY_DISABLED (and until /identity/me
+  // has said KEY is on) the panel neither reads nor renders.
+  const { enabled: keyEnabled } = useKeyEnabled();
 
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId || !keyEnabled) return;
     setLoading(true);
     setError(null);
     try {
+      // The session's bearer token goes with the read (SWP-KEY-SHELL-SMOKE kept scope): without it the API's AuthGuard
+      // refused this read 401 on every Command Center load. fetchWithAuthRetry only adds a token on its retry, after a
+      // refresh, which a session without a refresh token never gets.
       const res = await fetchWithAuthRetry(
         `${API_BASE}/api/v1/cortex/awareness?businessId=${encodeURIComponent(businessId)}`,
-        { headers: { Accept: "application/json" } },
+        { headers: { Accept: "application/json", ...getAuthHeaders() } },
       );
       if (!res.ok) throw new Error(`Could not load (HTTP ${res.status})`);
       const data = (await res.json()) as AwarenessResponse;
@@ -171,7 +178,7 @@ export function KeyAwarenessPanel({
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, keyEnabled]);
 
   useEffect(() => {
     void load();
@@ -186,6 +193,8 @@ export function KeyAwarenessPanel({
     () => (Object.keys(KIND_META) as AwarenessKind[]).filter((k) => (counts[k] ?? 0) > 0),
     [counts],
   );
+
+  if (!keyEnabled) return null;
 
   return (
     <div className={cn("rounded-2xl border border-border/50 bg-card/40", className)}>
