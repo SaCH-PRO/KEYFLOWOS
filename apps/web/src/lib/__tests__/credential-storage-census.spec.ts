@@ -28,7 +28,8 @@
  * cookies(, set-cookie, window/self/globalThis .name) is parsed as JS by the same scanner (the text scanner if it does
  * not parse) and reported at host-file lines mapped through the raw text (CSC-37, CSC-43, CSC-48); so is the JSX
  * text of a <script> / <Script> element (CSC-45). A template substitution is resolved in the host file (a const, a
- * JSON.stringify of one); one that cannot be resolved stands for a secret, so the write fails closed (CSC-44). This
+ * JSON.stringify of one); one that cannot be resolved in full, or whose own source names a credential, stands for a
+ * secret, so the write fails closed (CSC-44, CSC-52, CSC-54). This
  * path errs toward counting: a string that only quotes a write (help text, an error message) counts as that write, a
  * deliberate, known false positive (CSC-47).
  * Response cookie jars include aliases (`const jar = res.cookies`, `res["cookies"]`, an aliased next/headers
@@ -78,7 +79,9 @@
  * `cache.addAll`, keys built at runtime, and `with` blocks; from the round-7 reviews (CSC7-SEC-4/5): code built by
  * concatenating strings, `new Function(args, body)` with its parameters as keys, srcDoc HTML, data: URLs, minified
  * dynamic code, comments inside string code, string code nested deeper than 3, a `d = document` alias, nested const
- * objects, a destructured jar and `globalThis.Cache` types; in the text scanner only (a file with parse errors), a
+ * objects, a destructured jar and `globalThis.Cache` types; from round 8 (CSC8-SEC-3, FU-CENSUS-HARDENING): a
+ * cookie set through ternaries reads as a clear (`document.cookie = \`kf_session=${on ? token : ""};
+ * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0); in the text scanner only (a file with parse errors), a
  * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
  * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
@@ -766,6 +769,9 @@ const isClear = (value: string, attrs: string[]) =>
   value === "" && attrs.some((a) => a === "max-age=0" || /^expires=thu, 01 jan 1970/.test(a));
 
 /** `scanSource(file, src, { files })`: `files` (path relative to apps/web → source) serves imported consts. */
+/** Each write's offset in the source it was found in (kept out of the Write objects, so they keep their shape). */
+const writeOffsets = new WeakMap<Write, number>();
+
 /** The write handlers both scanners share: they resolve keys and values from argument TEXT and push the writes. */
 function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write, "file" | "line">, at: number) => void) {
   /** A keyed store write: key expression, value expression. */
@@ -840,7 +846,10 @@ function scanSourceText(file: string, src: string, base: Ctx): Write[] {
   // A match inside a comment is prose, not a write ("cache.put() below", sw.js). A file with parse errors has no
   // comment ranges, so in the text scanner every match counts.
   const push = (w: Omit<Write, "file" | "line">, at: number) => {
-    if (!inComment(file, src, at)) writes.push({ ...w, file, line: lineOf(src, at) });
+    if (inComment(file, src, at)) return;
+    const full: Write = { ...w, file, line: lineOf(src, at) };
+    writeOffsets.set(full, at);
+    writes.push(full);
   };
   const { keyed, cookieString, setCookieValue, cookieArgs, cachePut: cachePutText } = handlersFor(file, src, base, push);
 
@@ -1023,31 +1032,36 @@ const CODE_HINT =
 const UNRESOLVED = "__kf_unresolved_secret__";
 
 /**
- * The raw-text line on which cooked line `line` of a string starts (COR7-4): a "\\n" escape is a cooked line break
- * with no raw one, and a backslash line continuation is a raw break with no cooked one.
+ * The raw offset of cooked offset `cooked` in a string's raw text (COR7-4, COR8-3): an escape is one cooked character
+ * for its raw sequence (\\n, \\", \\xHH, \\uHHHH, \\u{…}), a backslash line continuation (LF or CRLF) is none, and a raw
+ * CRLF (a template's) is one.
  */
-function rawLineOf(raw: string, line: number): number {
-  if (line <= 1) return 1;
-  let cooked = 1;
-  let rawLine = 1;
-  for (let i = 0; i < raw.length; i++) {
-    const c = raw[i];
-    if (c === "\\") {
+function rawOffsetOf(raw: string, cooked: number): number {
+  let i = 0;
+  let c = 0;
+  while (i < raw.length && c < cooked) {
+    const ch = raw[i];
+    if (ch === "\\") {
       const nx = raw[i + 1];
-      if (nx === "n") cooked++;
-      else if (nx === "\n") rawLine++;
-      else if (nx === "\r") {
-        rawLine++;
-        if (raw[i + 2] === "\n") i++;
+      if (nx === "\n") i += 2;
+      else if (nx === "\r") i += raw[i + 2] === "\n" ? 3 : 2;
+      else {
+        if (nx === "x") i += 4;
+        else if (nx === "u") i = raw[i + 2] === "{" ? raw.indexOf("}", i) + 1 : i + 6;
+        else i += 2;
+        c++;
       }
+    } else if (ch === "\r" && raw[i + 1] === "\n") {
+      i += 2;
+      c++;
+    } else {
       i++;
-    } else if (c === "\n") {
-      cooked++;
-      rawLine++;
+      c++;
     }
-    if (cooked === line) return rawLine;
   }
-  return rawLine;
+  // A continuation right at the target is zero cooked characters: the cooked character there starts after it.
+  while (raw[i] === "\\" && (raw[i + 1] === "\n" || raw[i + 1] === "\r")) i += raw[i + 1] === "\r" && raw[i + 2] === "\n" ? 3 : 2;
+  return i;
 }
 
 /** The receiver as written, past parentheses, `!`, `await`, `as` and `satisfies` (and `<T>x` casts). */
@@ -1087,7 +1101,11 @@ function propertyName(n: ts.PropertyName): ts.Node | string | undefined {
  */
 function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, depth = 0): Write[] {
   const writes: Write[] = [];
-  const push = (w: Omit<Write, "file" | "line">, at: number) => writes.push({ ...w, file, line: lineOf(src, at) });
+  const push = (w: Omit<Write, "file" | "line">, at: number) => {
+    const full: Write = { ...w, file, line: lineOf(src, at) };
+    writeOffsets.set(full, at);
+    writes.push(full);
+  };
   const { keyed, cookieString, cookieArgs, cachePut } = handlersFor(file, src, base, push);
 
   const ranges = [...commentRanges(file, src)].sort((x, y) => x[0] - y[0]);
@@ -1303,7 +1321,7 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     // JSON.stringify of one); one that cannot be resolved becomes UNRESOLVED, so its write fails closed (CSC-44). Lines
     // map through the raw text (COR7-4), a substitution keeping every line break between "${" and "}".
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-      scanInline(n.text, src.slice(at(n) + 1, n.end - 1), lineOf(src, at(n)), true);
+      scanInline(n.text, src.slice(at(n) + 1, n.end - 1), at(n) + 1, true, true);
       return;
     }
     if (ts.isTemplateExpression(n)) {
@@ -1311,38 +1329,52 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
       let raw = src.slice(at(n) + 1, n.head.end - 2);
       for (const sp of n.templateSpans) {
         const breaks = "\n".repeat((src.slice(sp.expression.pos, sp.literal.getStart(sf)).match(/\n/g) ?? []).length);
-        code += resolveSubstitution(sp.expression) + breaks + sp.literal.text;
+        const resolved = resolveSubstitution(sp.expression);
+        code += resolved + breaks + sp.literal.text;
+        // The raw side stands in for the substitution with as many characters and line breaks, and no escapes.
         const litStart = sp.literal.getStart(sf) + 1;
-        raw += "x" + breaks + src.slice(litStart, sp.literal.end - (ts.isTemplateTail(sp.literal) ? 1 : 2));
+        raw += resolved.replace(/[^\n]/g, "x") + breaks + src.slice(litStart, sp.literal.end - (ts.isTemplateTail(sp.literal) ? 1 : 2));
       }
-      scanInline(code, raw, lineOf(src, at(n)), true);
+      scanInline(code, raw, at(n) + 1, false, true);
       return;
     }
     // JSX text children of <script> / <Script> are code (CSC7-SEC-3); no hint needed.
     if (ts.isJsxElement(n) && /^script$/i.test(n.openingElement.tagName.getText(sf))) {
-      for (const child of n.children) if (ts.isJsxText(child)) scanInline(child.text, child.text, lineOf(src, child.pos), false);
+      for (const child of n.children) if (ts.isJsxText(child)) scanInline(child.text, child.text, child.end - child.text.length, true, false);
     }
   });
 
-  /** A template substitution's text, resolved in the host file; UNRESOLVED when it cannot be. */
+  /**
+   * A template substitution's text, resolved in the host file; UNRESOLVED (a credential) when it cannot be resolved
+   * in full, or when its own source names a credential (CSC8-SEC-1/2): a ternary's first resolvable branch, a "*"
+   * piece or a resolved const would otherwise lose the credential (`${token ? token : ""}`, `${AUTH_KEY}`).
+   */
   function resolveSubstitution(e: ts.Expression): string {
     const t = text(e);
+    if (CREDENTIAL_PATTERN.test(t) || VALUE_PATTERN.test(t)) return UNRESOLVED;
     const c = { ...base, at: e.getStart(sf) };
     const json = t.match(/^JSON\s*\.\s*stringify\s*\(([\s\S]*)\)$/);
-    if (json) {
-      const v = literalValue(c, json[1]);
-      return v === null ? UNRESOLVED : JSON.stringify(v);
-    }
-    return literalValue(c, t) ?? UNRESOLVED;
+    const v = literalValue(c, json ? json[1] : t);
+    if (v === null || v.includes("*")) return UNRESOLVED;
+    return json ? JSON.stringify(v) : v;
   }
 
-  /** Scan `code` (cooked text; `raw` for line mapping) as JS, reporting at host lines from `firstLine`. */
-  function scanInline(code: string, raw: string, firstLine: number, hinted: boolean) {
+  /**
+   * Scan `code` (cooked text) as JS. `raw` is the same text as written in the host, starting at host offset
+   * `rawStart`; `contiguous` when raw is one slice of the host (a string, JSX text), not a template rebuilt around its
+   * substitutions. Each inner write's cooked offset maps to a raw offset through the escapes (rawOffsetOf), and its
+   * host line is the raw start's line plus the raw line breaks before it (COR7-4, COR8-3).
+   */
+  function scanInline(code: string, raw: string, rawStart: number, contiguous: boolean, hinted: boolean) {
     if (depth >= 3 || (hinted && !CODE_HINT.test(code))) return;
     const g = globalThis as unknown as { __kfInlineScans?: number };
     g.__kfInlineScans = (g.__kfInlineScans ?? 0) + 1;
+    const firstLine = lineOf(src, rawStart);
     for (const w of scanSource(`${file}.inline.js`, code, { read: base.read, depth: depth + 1 })) {
-      writes.push({ ...w, file, line: firstLine + rawLineOf(raw, w.line) - 1 });
+      const rawIdx = rawOffsetOf(raw, writeOffsets.get(w) ?? 0);
+      const mapped: Write = { ...w, file, line: firstLine + (raw.slice(0, rawIdx).match(/\n/g) ?? []).length };
+      writeOffsets.set(mapped, contiguous ? rawStart + rawIdx : rawStart);
+      writes.push(mapped);
     }
   }
 
@@ -2727,7 +2759,8 @@ describe("CSC-51 the dump sorts by plain comparison (COR7-7)", () => {
  *   CSC-52 a substitution whose own text names a credential, or that resolves only partly, fails closed (CSC8-SEC-1/2).
  *   CSC-53 each CODE_HINT branch, one store name per row, and the /i flag (COR8-1).
  *   CSC-54 an unresolvable JSON.stringify(...) substitution fails closed (COR8-2).
- *   CSC-55 rawLineOf: a backslash continuation, an escaped backslash, CRLF; nesting depth 3 is scanned, 4 is not
+ *   CSC-55 line mapping (rawOffsetOf): a backslash continuation, an escaped backslash, CRLF; nesting depth 3 is
+ *          scanned, 4 is not
  *          (COR8-3).
  *   CSC-56 the JSX <script> text path needs no hint (COR8-4).
  */
@@ -2784,10 +2817,15 @@ describe("CSC-54 an unresolvable JSON.stringify substitution fails closed", () =
   });
 });
 
-describe("CSC-55 rawLineOf and the nesting limit", () => {
+describe("CSC-55 line mapping and the nesting limit", () => {
   it("a backslash line continuation moves the write to the next host line", () => {
     const fixture = 'eval("var a = 1; \\\nlocalStorage.setItem(\'kf_lc_token\', t)");';
     expect(scan("src/fixture-lc.ts", fixture).find((w) => w.key === "kf_lc_token")?.line).toBe(2);
+  });
+
+  it("two continuations before the write move it two host lines", () => {
+    const fixture = 'eval("a; \\\nb; \\\nlocalStorage.setItem(\'kf_lc2_token\', t)");';
+    expect(scan("src/fixture-lc2.ts", fixture).find((w) => w.key === "kf_lc2_token")?.line).toBe(3);
   });
 
   it("an escaped backslash before n is not a line break", () => {
@@ -2798,6 +2836,11 @@ describe("CSC-55 rawLineOf and the nesting limit", () => {
   it("a CRLF line continuation counts as one host line", () => {
     const fixture = 'eval("var a = 1; \\\r\nlocalStorage.setItem(\'kf_crlf_token\', t)");';
     expect(scan("src/fixture-crlf.ts", fixture).find((w) => w.key === "kf_crlf_token")?.line).toBe(2);
+  });
+
+  it("a template written with CRLF line ends maps each line once", () => {
+    const fixture = "const s = `line1\r\nline2\r\nlocalStorage.setItem('kf_tc_token', t)`;";
+    expect(scan("src/fixture-tcrlf.ts", fixture).find((w) => w.key === "kf_tc_token")?.line).toBe(3);
   });
 
   const wrap = (code: string) => `eval(${JSON.stringify(code)})`;
