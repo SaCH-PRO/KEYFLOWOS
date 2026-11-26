@@ -1004,7 +1004,8 @@ export class IdentityController {
     return this.identity.updateAdvancedSettings(businessId, body, user);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/ai-generate-field')
   async generateField(
     @Param('businessId') businessId: string,
@@ -1077,7 +1078,8 @@ export class IdentityController {
     return { context: ctx };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/generate-profile')
   async generateProfile(
     @Param('businessId') businessId: string,
@@ -1181,7 +1183,8 @@ export class IdentityController {
     return { subProfile: subProfile, data };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Patch('businesses/:businessId/guidance/:subProfile')
   async upsertGuidanceSubProfile(
     @Param('businessId') businessId: string,

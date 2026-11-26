@@ -528,8 +528,11 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
 
     const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
     expect(res.status, JSON.stringify(res.body)).toBe(403);
-    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
-    expect(res.body.message).toBe(OWNER_ONLY_MESSAGE);
+    // P90 (SWP-CENSUS-V1-B, owner ruling A1 on #80): OnboardingConciergeController.markComplete now enforces
+    // @RequireModuleScope('settings', 'write') in ModuleScopeGuard before reaching the owner-only check
+    // (R0-SEC-03 cases below verify ONBOARDING_COMPLETE_FORBIDDEN for settings:write/admin non-owners).
+    expect(res.body.code).toBe('FORBIDDEN');
+    expect(String(res.body.message ?? '')).toMatch(/settings requires write access/);
     expect(JSON.stringify(res.body)).not.toContain('demoData');
     const f = await footprint(S.bizA!);
     expectNothingWritten(f);
@@ -614,7 +617,8 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
   it('ST-R032-1: on a completed business, a STAFF member is still refused (authority is checked before the replay)', async () => {
     const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
     expect(res.status, JSON.stringify(res.body)).toBe(403);
-    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(res.body.code).toBe('FORBIDDEN');
+    expect(String(res.body.message ?? '')).toMatch(/settings requires write access/);
     expect(await activity(S.bizA!)).toHaveLength(2);
   });
 

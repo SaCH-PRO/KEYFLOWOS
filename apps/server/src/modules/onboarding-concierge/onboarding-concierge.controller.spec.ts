@@ -8,6 +8,7 @@ import { OnboardingStateService } from './onboarding-state.service';
 import { DemoDataSeederService } from './demo-data-seeder.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
 
 describe('OnboardingConciergeController', () => {
   let controller: OnboardingConciergeController;
@@ -65,6 +66,8 @@ describe('OnboardingConciergeController', () => {
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleScopeGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

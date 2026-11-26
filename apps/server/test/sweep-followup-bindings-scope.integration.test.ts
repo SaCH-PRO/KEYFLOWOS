@@ -510,17 +510,21 @@ describe('byokkeys (recommended option): only the owner enters, changes or clear
   });
 });
 
-describe('whatsappsmoke (recommended option): the WhatsApp test only reports its result, never switches WhatsApp back on, and is open to members', () => {
+describe('whatsappsmoke (amended P90 D-181 owner ruling A1): the WhatsApp test requires settings:admin and only reports its result, never switching WhatsApp back on', () => {
   const connectors = `/connectors/businesses/${ID.bizA}`;
 
-  it('[SFB-WASMOKE-01] RED-BEFORE: after a settings admin\'s explicit disconnect, a STAFF member on role defaults runs the WhatsApp test: 201 with the check reported, and WhatsApp stays disconnected (the row, its verification record and health)', async () => {
+  it('[SFB-WASMOKE-01] RED-BEFORE (amended P90 D-181): after a settings admin\'s explicit disconnect, STAFF (settings:none) is refused 403 settings:admin while a settings:admin member runs the WhatsApp test: 201 with the check reported, and WhatsApp stays disconnected (the row, its verification record and health)', async () => {
     const disconnect = await send('post', `${connectors}/disconnect/whatsapp`, ID.owner);
     expect(disconnect.status, said(disconnect)).toBe(201);
     const before = await whatsappRow();
     expect(before.status).toBe('disconnected');
     expect(before.record?.state).toBe('disconnected');
 
-    const smoke = await send('post', `${connectors}/smoke/whatsapp`, ID.staffDefault);
+    const denied = await send('post', `${connectors}/smoke/whatsapp`, ID.staffDefault);
+    expect(denied.status, said(denied)).toBe(403);
+    expect(said(denied)).toMatch(/settings requires admin access/);
+
+    const smoke = await send('post', `${connectors}/smoke/whatsapp`, ID.settingsAdmin);
     expect(smoke.status, said(smoke)).toBe(201);
     // the provider check is reported (the passing profile answered above), and that it switched nothing on
     expect(said(smoke)).toMatch(/stays disconnected|not switched|switch(es)? nothing/i);
@@ -531,9 +535,13 @@ describe('whatsappsmoke (recommended option): the WhatsApp test only reports its
     expect(health.body?.status).toBe('disconnected');
   });
 
-  it('[SFB-WASMOKE-02] with no explicit disconnect, a member\'s passing test is reported as passed and records nothing (no connected verification, no connected row)', async () => {
+  it('[SFB-WASMOKE-02] (amended P90 D-181) with no explicit disconnect, STAFF (settings:none) is refused 403 settings:admin while a settings:admin member\'s passing test is reported as passed and records nothing (no connected verification, no connected row)', async () => {
     await db.connectorStatus.deleteMany({ where: { businessId: ID.bizA, connectorType: 'whatsapp' } });
-    const smoke = await send('post', `${connectors}/smoke/whatsapp`, ID.staffDefault);
+    const denied = await send('post', `${connectors}/smoke/whatsapp`, ID.staffDefault);
+    expect(denied.status, said(denied)).toBe(403);
+    expect(said(denied)).toMatch(/settings requires admin access/);
+
+    const smoke = await send('post', `${connectors}/smoke/whatsapp`, ID.settingsAdmin);
     expect(smoke.status, said(smoke)).toBe(201);
     expect(smoke.body?.success, said(smoke)).toBe(true);
     expect(await whatsappRow()).toEqual({ status: null, record: null });
