@@ -675,6 +675,7 @@ beforeAll(async () => {
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const controllerModule: any = await import('../src/modules/key-cortex/key-cortex.controller');
   const { KeyCortexController } = controllerModule;
   const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
@@ -777,6 +778,7 @@ beforeAll(async () => {
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      ModuleScopeGuard,
       { provide: KeyCortexConnectorService, useValue: connector },
       {
         provide: KeyCortexExecutorService,
@@ -2244,23 +2246,26 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
 });
 
 describe('V1-31c SB: client code is not executed (the cortex sandbox is not bounded)', () => {
-  it('SB-01 POST sandbox/execute is 410 for the OWNER and a scope-less member, 403 across tenants, and the sandbox is never reached', async () => {
+  it('SB-01 POST sandbox/execute is 410 for the OWNER, 403 ai:write for a scope-less member, 403 across tenants, and the sandbox is never reached', async () => {
     const before = sandboxCalls.length;
-    for (const actor of [ID.cxOwner, ID.cxStaffRO]) {
-      const res = await cortex('sandbox/execute', actor, { businessId: ID.cxBiz, code: 'return 1', language: 'javascript' });
-      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(410);
-    }
+    const ownerRes = await cortex('sandbox/execute', ID.cxOwner, { businessId: ID.cxBiz, code: 'return 1', language: 'javascript' });
+    expect(ownerRes.status, `cxOwner ${JSON.stringify(ownerRes.body)}`).toBe(410);
+    // SWP-CENSUS-KEY-B (P109, Ruling B2): sandbox/execute requires ai:write before reaching the 410 handler.
+    const roRes = await cortex('sandbox/execute', ID.cxStaffRO, { businessId: ID.cxBiz, code: 'return 1', language: 'javascript' });
+    expect(roRes.status, `cxStaffRO ${JSON.stringify(roRes.body)}`).toBe(403);
+    expect(JSON.stringify(roRes.body)).toMatch(/ai requires write/i);
     const cross = await cortex('sandbox/execute', ID.other, { businessId: ID.cxBiz, code: 'return 1', language: 'javascript' });
     expect(cross.status).toBe(403);
     expect(sandboxCalls.slice(before)).toEqual([]);
   });
 
-  it('SB-02 POST sandbox/apply is 410 likewise: a template\'s client parameters are never substituted or run', async () => {
+  it('SB-02 POST sandbox/apply is 410 for OWNER and 403 ai:write for scope-less member: a template\'s client parameters are never substituted or run', async () => {
     const before = sandboxCalls.length;
-    for (const actor of [ID.cxOwner, ID.cxStaffRO]) {
-      const res = await cortex('sandbox/apply', actor, { businessId: ID.cxBiz, templateId: 'weekly-report', parameters: { reportData: '{}' } });
-      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(410);
-    }
+    const ownerRes = await cortex('sandbox/apply', ID.cxOwner, { businessId: ID.cxBiz, templateId: 'weekly-report', parameters: { reportData: '{}' } });
+    expect(ownerRes.status, `cxOwner ${JSON.stringify(ownerRes.body)}`).toBe(410);
+    const roRes = await cortex('sandbox/apply', ID.cxStaffRO, { businessId: ID.cxBiz, templateId: 'weekly-report', parameters: { reportData: '{}' } });
+    expect(roRes.status, `cxStaffRO ${JSON.stringify(roRes.body)}`).toBe(403);
+    expect(JSON.stringify(roRes.body)).toMatch(/ai requires write/i);
     const cross = await cortex('sandbox/apply', ID.other, { businessId: ID.cxBiz, templateId: 'weekly-report', parameters: {} });
     expect(cross.status).toBe(403);
     expect(sandboxCalls.slice(before)).toEqual([]);
@@ -2286,17 +2291,18 @@ describe('V1-31c SB: client code is not executed (the cortex sandbox is not boun
     expect(ran).toContain('.replace(/v31c_code/g');
   });
 
-  it('SB-05 (review SEC-V131c-3) POST sandbox/auto is 410 likewise, whether or not it asks to execute, and the sandbox is never reached', async () => {
+  it('SB-05 (review SEC-V131c-3) POST sandbox/auto is 410 for OWNER and 403 ai:write for scope-less member, whether or not it asks to execute, and the sandbox is never reached', async () => {
     const before = sandboxCalls.length;
-    for (const actor of [ID.cxOwner, ID.cxStaffRO]) {
-      for (const body of [
-        { businessId: ID.cxBiz, description: 'return typeof process' },
-        { businessId: ID.cxBiz, description: 'return typeof process', execute: true },
-        { businessId: ID.cxBiz, description: 'return typeof process', execute: false },
-      ]) {
-        const res = await cortex('sandbox/auto', actor, body);
-        expect(res.status, `${actor} ${JSON.stringify(body)} ${JSON.stringify(res.body)}`).toBe(410);
-      }
+    for (const body of [
+      { businessId: ID.cxBiz, description: 'return typeof process' },
+      { businessId: ID.cxBiz, description: 'return typeof process', execute: true },
+      { businessId: ID.cxBiz, description: 'return typeof process', execute: false },
+    ]) {
+      const ownerRes = await cortex('sandbox/auto', ID.cxOwner, body);
+      expect(ownerRes.status, `cxOwner ${JSON.stringify(body)} ${JSON.stringify(ownerRes.body)}`).toBe(410);
+      const roRes = await cortex('sandbox/auto', ID.cxStaffRO, body);
+      expect(roRes.status, `cxStaffRO ${JSON.stringify(body)} ${JSON.stringify(roRes.body)}`).toBe(403);
+      expect(JSON.stringify(roRes.body)).toMatch(/ai requires write/i);
     }
     const cross = await cortex('sandbox/auto', ID.other, { businessId: ID.cxBiz, description: 'return 1' });
     expect(cross.status).toBe(403);

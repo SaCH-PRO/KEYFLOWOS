@@ -1873,7 +1873,8 @@ export class KeyCortexController {
    */
   @Post('chat')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(CortexMemberAuthorityGuard)
+  @UseGuards(ModuleScopeGuard, CortexMemberAuthorityGuard)
+  @RequireModuleScope('ai', 'write')
   async chat(
     @Body() query: ChatQueryDto,
     @CurrentUser() user?: AuthenticatedUser,
@@ -2163,6 +2164,8 @@ export class KeyCortexController {
    */
   @Post('feedback')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async recordFeedback(
     @Body() dto: FeedbackDto,
     @CurrentUser() user?: AuthenticatedUser,
@@ -2198,6 +2201,8 @@ export class KeyCortexController {
    */
   @Post('voice/speak')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async speak(
     @Body() dto: VoiceSpeakDto,
     @GuardedBusinessId() businessId: string,
@@ -2246,6 +2251,8 @@ export class KeyCortexController {
   @Post('voice/listen')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor('audio'))
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async listen(
     @UploadedFile() audioFile: Express.Multer.File,
     @GuardedBusinessId() resolvedBusinessId: string,
@@ -2335,6 +2342,8 @@ export class KeyCortexController {
    */
   @Post('personalities/switch')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async switchPersonality(
     @Body() dto: SwitchPersonalityDto,
     @GuardedBusinessId() businessId?: string,
@@ -2411,7 +2420,8 @@ export class KeyCortexController {
    */
   @Post('actions/approve')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(CortexMemberAuthorityGuard)
+  @UseGuards(ModuleScopeGuard, CortexMemberAuthorityGuard)
+  @RequireModuleScope('ai', 'write')
   async approveAction(
     @Body() dto: ApproveActionDto,
     @Req() req: { user?: { id?: string } },
@@ -2900,6 +2910,8 @@ export class KeyCortexController {
    */
   @Post('monitors')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async createMonitor(
     @Body() dto: CreateMonitorDto,
   ): Promise<Record<string, unknown>> {
@@ -2958,6 +2970,8 @@ export class KeyCortexController {
    */
   @Patch('monitors/:id')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async updateMonitor(
     @Param('id') monitorId: string,
     @Body() dto: UpdateMonitorDto,
@@ -2986,6 +3000,8 @@ export class KeyCortexController {
    */
   @Post('monitors/:id/toggle')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async toggleMonitor(
     @Param('id') monitorId: string,
     @Body() dto: ToggleMonitorDto,
@@ -3159,6 +3175,8 @@ export class KeyCortexController {
    */
   @Post('rollback')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async rollback(
     @Body() dto: RollbackDto,
     @CurrentUser() user?: AuthenticatedUser,
@@ -3341,6 +3359,8 @@ export class KeyCortexController {
    */
   @Post('sandbox/generate')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async sandboxGenerate(
     @Body() dto: SandboxGenerateDto,
   ): Promise<{
@@ -3381,6 +3401,8 @@ export class KeyCortexController {
    */
   @Post('sandbox/execute')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async sandboxExecute(
     @Body() _dto: SandboxExecuteDto,
   ): Promise<{
@@ -3404,6 +3426,8 @@ export class KeyCortexController {
    */
   @Post('sandbox/auto')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async sandboxAuto(
     @Body() _dto: SandboxAutoDto,
   ): Promise<{
@@ -3453,6 +3477,8 @@ export class KeyCortexController {
    */
   @Post('sandbox/apply')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async sandboxApply(
     @Body() _dto: SandboxApplyDto,
   ): Promise<{
@@ -3468,6 +3494,8 @@ export class KeyCortexController {
    */
   @Post('sandbox/explain')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async sandboxExplain(
     @Body() dto: SandboxExplainDto,
   ): Promise<{
@@ -3504,6 +3532,8 @@ export class KeyCortexController {
    */
   @Post('flows/generate')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async flowGenerate(
     @Body() dto: FlowGenerateDto,
   ): Promise<{
@@ -3536,6 +3566,8 @@ export class KeyCortexController {
    */
   @Post('flows')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async flowCreate(
     @Body() dto: FlowCreateDto,
   ): Promise<Record<string, unknown>> {
@@ -3670,6 +3702,8 @@ export class KeyCortexController {
    */
   @Put('flows/:id')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async flowUpdate(
     @Param('id') flowId: string,
     @Body() dto: FlowUpdateDto,
@@ -3694,6 +3728,8 @@ export class KeyCortexController {
    */
   @Delete('flows/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async flowDelete(
     @Param('id') flowId: string,
     @GuardedBusinessId() businessId?: string,
@@ -3896,6 +3932,8 @@ export class KeyCortexController {
    */
   @Post('flows/:id/toggle')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async flowToggle(
     @Param('id') flowId: string,
     @Body() dto: { active: boolean },
@@ -3920,6 +3958,8 @@ export class KeyCortexController {
    */
   @Post('flows/apply-template')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async flowApplyTemplate(
     @Body() dto: FlowApplyTemplateDto,
   ): Promise<Record<string, unknown>> {
@@ -3958,6 +3998,8 @@ export class KeyCortexController {
    */
   @Post('phone/call')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async phoneCall(
     @Body() dto: PhoneCallDto,
   ): Promise<{
@@ -4018,6 +4060,8 @@ export class KeyCortexController {
    */
   @Post('phone/script')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async phoneScript(
     @Body() dto: PhoneScriptDto,
   ): Promise<{
@@ -4049,6 +4093,8 @@ export class KeyCortexController {
    */
   @Post('phone/analyze')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async phoneAnalyze(
     @Body() dto: PhoneAnalyzeDto,
   ): Promise<{
@@ -4116,6 +4162,8 @@ export class KeyCortexController {
   @Post('documents')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(FileInterceptor('file'))
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async documentUpload(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: { metadata?: Record<string, unknown> },
@@ -4201,6 +4249,8 @@ export class KeyCortexController {
    */
   @Delete('documents/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async documentDelete(
     @Param('id') documentId: string,
     @GuardedBusinessId() businessId?: string,
@@ -4223,6 +4273,8 @@ export class KeyCortexController {
    */
   @Post('documents/ask')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async documentAsk(
     @Body() dto: DocumentAskDto,
   ): Promise<{
@@ -4258,6 +4310,8 @@ export class KeyCortexController {
    */
   @Post('documents/extract')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async documentExtract(
     @Body() dto: DocumentExtractDto,
   ): Promise<{
@@ -4292,6 +4346,8 @@ export class KeyCortexController {
    */
   @Post('documents/compare')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async documentCompare(
     @Body() dto: DocumentCompareDto,
   ): Promise<{
@@ -4393,6 +4449,8 @@ export class KeyCortexController {
    */
   @Post('evolution/tune')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async evolutionTune(
     @Body() dto: EvolutionTuneDto,
   ): Promise<{
@@ -4501,6 +4559,8 @@ export class KeyCortexController {
    */
   @Post('conscious/chat')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async consciousChat(
     @Body() dto: ConsciousChatDto,
     @CurrentUser() user?: AuthenticatedUser,

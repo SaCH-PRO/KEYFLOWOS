@@ -1162,10 +1162,11 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     await db.business.create({ data: { id: S.biz, name: 'V97O Biz S', ownerId: S.owner } });
     for (const m of [
       { userId: S.owner, businessId: S.biz, role: 'OWNER' },
-      { userId: S.staffNoRevenue, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'none' } },
-      { userId: S.staffRevenueRead, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+      // SWP-CENSUS-KEY-B (P109, Ruling B2): POST chat requires ai:write; keep revenue none/read so KC-SEC-3 redaction remains proven.
+      { userId: S.staffNoRevenue, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'none', ai: 'write' } },
+      { userId: S.staffRevenueRead, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'read', ai: 'write' } },
       { userId: S.staffDefault, businessId: S.biz, role: 'STAFF' },
-      { userId: S.adminNoScopes, businessId: S.biz, role: 'ADMIN', permissionScopes: [] },
+      { userId: S.adminNoScopes, businessId: S.biz, role: 'ADMIN', permissionScopes: { ai: 'write' } },
     ]) {
       await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}`, ...m } });
     }
