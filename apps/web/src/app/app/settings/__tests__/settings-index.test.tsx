@@ -41,6 +41,8 @@ function serve(modules: Record<string, string> | null) {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(url, "http://localhost");
+    // SWP-KEY-SHELL-SMOKE: the index offers KEY once /identity/me says KEY is on (useKeyEnabled), as it does in the app.
+    if (pathname === "/identity/me") return jsonResponse(200, { id: "usr_nav_a2", keyDisabled: false });
     if (pathname.endsWith(`/identity/businesses/${BIZ}/my-access`)) {
       return modules ? jsonResponse(200, { role: "STAFF", modules }) : jsonResponse(503, { message: "Service Unavailable" });
     }
@@ -78,7 +80,7 @@ describe("NAV-A2: /app/settings is the v1 Settings index", () => {
   it("RED-BEFORE: it lists the v1 Settings in order, each opening its page", async () => {
     serve(null);
     await renderSettings();
-    expect(entries()).toEqual([
+    await waitFor(() => expect(entries()).toEqual([
       { name: "Business profile", href: "/app/profile" },
       { name: "Getting paid", href: "/app/settings/business" },
       { name: "Team", href: "/app/settings/team" },
@@ -87,7 +89,7 @@ describe("NAV-A2: /app/settings is the v1 Settings index", () => {
       { name: "Plan & billing", href: "/app/settings/billing" },
       { name: "KEY", href: "/app/settings/ai" },
       { name: "My account", href: "/app/settings/profile" },
-    ]);
+    ]));
   });
 
   it("RED-BEFORE: Getting paid leads with cash, bank transfer and WiPay, and names PayPal and Stripe as your own keys", async () => {
