@@ -21,8 +21,8 @@ async function loadServiceLink(businessId: string): Promise<ServiceLinkData> {
   const meta = (res.data?.metaData as Record<string, unknown> | undefined) ?? {};
   const storeEnabled = (meta.storeEnabled as boolean | undefined) ?? !!res.data?.storeEnabled;
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const identifier = slug || businessId;
-  const publicUrl = identifier ? `${origin}/book/${identifier}` : null;
+  // CUSTOMER-PAGE-HONESTY: the service link is /book/<saved slug>, never /book/<business id>; no slug, no link.
+  const publicUrl = slug ? `${origin}/book/${encodeURIComponent(slug)}` : null;
   return { slug, storeEnabled, publicUrl };
 }
 

@@ -102,7 +102,7 @@ const WEEKDAYS_9_TO_5: BusinessHours = {
 };
 
 function renderHero(b: Business) {
-  return render(<BusinessHero business={b} primaryColor="#f97316" secondaryColor="#0ea5e9" accentColor="#22c55e" config={{}} />);
+  return render(<BusinessHero business={b} primaryColor="#f97316" secondaryColor="#0ea5e9" accentColor="#22c55e" config={null} />);
 }
 
 const pageText = () => (document.body.textContent ?? "").replace(/\s+/g, " ");

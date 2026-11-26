@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { MapPin, Phone, Mail, CheckCircle, Shield, Award, ExternalLink, Facebook, Instagram, Twitter, MessageCircle, CalendarCheck, ShoppingBag, ArrowRight, Sparkles } from "lucide-react";
+import { MapPin, Phone, Mail, CheckCircle, ExternalLink, Facebook, Instagram, Twitter, MessageCircle, CalendarCheck, ShoppingBag, ArrowRight, Sparkles } from "lucide-react";
 import type { Business, BusinessHours } from "./types";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 import type { StorefrontConfig, StorefrontHeroProofChip } from "@/lib/client";
@@ -21,18 +21,49 @@ type Props = {
 
 type ProofChip = StorefrontHeroProofChip;
 
-function getOpenStatus(hours?: BusinessHours | null): { isOpen: boolean; label: string } {
-  if (!hours) return { isOpen: true, label: "Open Now" };
-  const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+function hasHoursSet(hours?: BusinessHours | null): hours is BusinessHours {
+  if (!hours || typeof hours !== "object") return false;
+  return DAY_KEYS.some((d) => {
+    const e = hours[d];
+    return !!e && (e.closed || (typeof e.open === "string" && typeof e.close === "string"));
+  });
+}
+
+/** The weekday and minutes past midnight now on the business's own clock (the visitor's when its zone is unknown). */
+function nowIn(timeZone?: string | null): { dayKey: string; mins: number } {
   const now = new Date();
-  const dayKey = days[now.getDay()];
+  if (timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+      const dayKey = get("weekday").toLowerCase();
+      const hour = Number(get("hour")) % 24;
+      const minute = Number(get("minute"));
+      if (DAY_KEYS.includes(dayKey) && Number.isFinite(hour) && Number.isFinite(minute)) return { dayKey, mins: hour * 60 + minute };
+    } catch {
+      // An unknown zone: fall back to the visitor's clock.
+    }
+  }
+  return { dayKey: DAY_KEYS[now.getDay()], mins: now.getHours() * 60 + now.getMinutes() };
+}
+
+/**
+ * CUSTOMER-PAGE-HONESTY: whether the business is open, only when it has set its opening hours (null otherwise: the
+ * page then says nothing about being open), read on the business's own clock.
+ */
+function getOpenStatus(hours?: BusinessHours | null, timeZone?: string | null): { isOpen: boolean; label: string } | null {
+  if (!hasHoursSet(hours)) return null;
+  const { dayKey, mins: nowMins } = nowIn(timeZone);
   const entry = hours[dayKey];
   if (!entry || entry.closed) return { isOpen: false, label: "Closed Today" };
-  const nowMins = now.getHours() * 60 + now.getMinutes();
+  if (typeof entry.open !== "string" || typeof entry.close !== "string") return null;
   const [openH, openM] = entry.open.split(":").map(Number);
   const [closeH, closeM] = entry.close.split(":").map(Number);
   const openMins = openH * 60 + openM;
   const closeMins = closeH * 60 + closeM;
+  if (![openMins, closeMins].every(Number.isFinite)) return null;
   if (nowMins >= openMins && nowMins < closeMins) return { isOpen: true, label: `Open · Closes ${entry.close}` };
   if (nowMins < openMins) return { isOpen: false, label: `Opens at ${entry.open}` };
   return { isOpen: false, label: "Closed Now" };
@@ -67,7 +98,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
   const subheadline = hero.subheadline || business.tagline || "Book your appointment online";
   const coverUrl = hero.coverImageUrl;
   const coverVideoUrl = hero.coverVideoUrl;
-  const openStatus = getOpenStatus(business.businessHours);
+  const openStatus = getOpenStatus(business.businessHours, business.timezone);
   const promotionalRibbon = hero.promotionalRibbon;
   const ribbonColor = hero.promotionalRibbonColor || "#f59e0b";
   const proofChips: ProofChip[] = hero.proofChips ?? [];
@@ -99,8 +130,6 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
   const builtInProofChips: Array<{ icon?: string; label: string; iconComponent?: React.ElementType; iconColor?: string; value?: number }> = [
     ...(catalogCount && catalogCount > 0 ? [{ iconComponent: ShoppingBag, label: `${catalogCount} ${catalogCount === 1 ? "Item" : "Items"}`, iconColor: primaryColor, value: catalogCount }] : []),
     ...(completedOrdersCount && completedOrdersCount > 0 ? [{ iconComponent: CalendarCheck, label: `${completedOrdersCount}+ orders`, iconColor: secondaryColor, value: completedOrdersCount }] : []),
-    { iconComponent: Shield, label: "Verified Business", iconColor: "#22c55e" },
-    { iconComponent: Award, label: "Instant Booking", iconColor: primaryColor },
   ];
 
   const displayProofChips = proofChips.length > 0 ? proofChips : null;
@@ -196,12 +225,14 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   className={`relative h-16 w-16 sm:h-24 sm:w-24 object-cover border-2 shadow-2xl ${theme === "elegant" || theme === "luxury_editorial" ? "rounded-full" : "rounded-2xl"}`}
                   style={{ borderColor: `${primaryColor}25` }}
                  width={64} height={64} unoptimized />
-                <div
-                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center shadow-lg"
-                  style={{ borderColor: ts.pageBg, backgroundColor: openStatus.isOpen ? "#22c55e" : "#ef4444" }}
-                >
-                  <CheckCircle className="w-3.5 h-3.5 text-white" />
-                </div>
+                {openStatus && (
+                  <div
+                    className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center shadow-lg"
+                    style={{ borderColor: ts.pageBg, backgroundColor: openStatus.isOpen ? "#22c55e" : "#ef4444" }}
+                  >
+                    <CheckCircle className="w-3.5 h-3.5 text-white" />
+                  </div>
+                )}
               </div>
             ) : (
               <div className="relative">
@@ -228,7 +259,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               transition: "opacity 0.7s 0.25s, transform 0.7s 0.25s cubic-bezier(0.16,1,0.3,1)",
             }}
           >
-            {showHours && (
+            {showHours && openStatus && (
               <div
                 className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-medium backdrop-blur-sm ${textAlign}`}
                 style={{
