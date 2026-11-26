@@ -578,6 +578,11 @@
       "packet": "V1-61 (W11-STORE-OWN-PAYMENT-KEYS)"
     },
     {
+      "prefix": "v63b_",
+      "owner": "apps/server/test/knowledge-upload-scope.integration.test.ts",
+      "packet": "V1-63 (TOF-KNOWLEDGE-UPLOAD)"
+    },
+    {
       "prefix": "v70b_",
       "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
       "packet": "V1-70 (W1F-MEMORY-COPIES)"
@@ -1465,6 +1470,26 @@
       "prefix": "v63a_",
       "owner": "apps/server/test/key-cortex-self-model.integration.test.ts",
       "packet": "V1-63 (TOF-KEY-SELF-MODEL)"
+    },
+    {
+      "prefix": "v64f_",
+      "owner": "apps/server/test/decimal-quantity.integration.test.ts",
+      "packet": "V1-64 (DECIMALS-SERVER)"
+    },
+    {
+      "prefix": "v64l_",
+      "owner": "apps/server/test/census-key-b.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v71h_",
+      "owner": "apps/server/test/merge-contacts-unique.integration.test.ts",
+      "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE, P112)"
+    },
+    {
+      "prefix": "v81o_",
+      "owner": "apps/server/test/key-overdue-sent-only.integration.test.ts",
+      "packet": "V1-81 (FU-KEY-OVERDUE-SENT-ONLY, P113)"
     }
   ],
   "pendingRenames": [],
@@ -1476,6 +1501,10 @@
     {
       "file": "apps/server/test/backfill-scripts-cli.integration.test.ts",
       "reason": "Runs the operator scripts' dry runs (no arguments) as child processes against DATABASE_URL; dry runs write no rows, so there is nothing to seed or clean up."
+    },
+    {
+      "file": "apps/server/test/contract-fetch-body-cap.integration.test.ts",
+      "reason": "Tests ContractClauseService decompressed body cap against a real local HTTP server with an in-memory Prisma double; touches no database rows."
     },
     {
       "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",

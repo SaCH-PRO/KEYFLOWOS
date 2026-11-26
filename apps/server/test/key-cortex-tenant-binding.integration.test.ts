@@ -377,6 +377,7 @@ beforeAll(async () => {
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { KeyCortexController } = await import('../src/modules/key-cortex/key-cortex.controller');
   const { KeyCortexGoalsController } = await import('../src/modules/key-cortex/key-cortex-goals.controller');
@@ -481,6 +482,7 @@ beforeAll(async () => {
         PrismaService,
         AuthGuard,
         BusinessGuard,
+        ModuleScopeGuard,
         {
           provide: KeyAutonomySafetyService,
           useFactory: (prisma: any) => new KeyAutonomySafetyService(prisma),
@@ -1195,7 +1197,8 @@ for (const pipeline of PIPELINES) {
 
     beforeAll(async () => {
       await db.user.create({ data: { id: staff, email: `${P}kcsb_staff_${pipeline}@test.local`, role: 'USER' } });
-      await db.membership.create({ data: { id: `${P}m_kcsb_staff_${pipeline}`, userId: staff, businessId: ID.bizA, role: 'STAFF' } });
+      // SWP-CENSUS-KEY-B (P109, Ruling B2 #80 7179130521): KEY cortex write routes require ai:write; grant it so cross-member 404 is still proven.
+      await db.membership.create({ data: { id: `${P}m_kcsb_staff_${pipeline}`, userId: staff, businessId: ID.bizA, role: 'STAFF', permissionScopes: { ai: 'write' } } });
     });
 
     afterAll(async () => {

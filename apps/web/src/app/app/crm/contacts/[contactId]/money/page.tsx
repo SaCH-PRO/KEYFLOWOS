@@ -5,7 +5,8 @@ import { useParams } from "next/navigation";
 import { fetchContactRevenueSummary } from "@/lib/client";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { Card, Badge } from "@keyflow/ui";
+import { Card } from "@keyflow/ui";
+import { eventLabel, statusLabel } from "@/lib/status-labels";
 import { DollarSign, TrendingUp, AlertCircle, Receipt, FileText, Clock } from "lucide-react";
 
 interface RevenueAction {
@@ -171,8 +172,9 @@ export default function ContactMoneyPage() {
             {summary.recentRevenueActions.map((a, i) => (
               <div key={i} className="flex items-center justify-between rounded-lg border p-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <Badge tone="default">{a.type}</Badge>
-                  <span>{a.label}</span>
+                  {/* The label says what happened; the event code is not shown. With no label of its own (the
+                      server falls back to the code), the code read in plain words. */}
+                  <span>{a.label && a.label !== a.type ? a.label : eventLabel(a.type)}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   {a.amount !== null && <span className="font-medium">{fmtCurrency(a.amount, a.currency || currency)}</span>}
@@ -194,7 +196,7 @@ export default function ContactMoneyPage() {
                   <div className="flex items-center gap-3">
                     <Receipt className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">{inv.invoiceNumber || inv.id.slice(0, 8)}</span>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>{inv.status}</span>
+                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>{statusLabel(inv.status, "invoice")}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     {inv.issueDate && <span className="text-xs text-muted-foreground">{fmtDate(inv.issueDate)}</span>}
@@ -217,7 +219,7 @@ export default function ContactMoneyPage() {
                   <div className="flex items-center gap-3">
                     <FileText className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">{q.quoteNumber || q.id.slice(0, 8)}</span>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(q.status)}`}>{q.status}</span>
+                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor(q.status)}`}>{statusLabel(q.status)}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     {q.issueDate && <span className="text-xs text-muted-foreground">{fmtDate(q.issueDate)}</span>}

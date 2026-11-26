@@ -209,9 +209,10 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
   ai: {
     read: [],
     // SWP-CENSUS-GENOME (P84): KeyflowCommandController.createNote requires ai write
-    write: ['keyflow_create_note'],
+    // SWP-CENSUS-KEY-B (P109, Ruling B2): KeyCortexGoalsController write routes require ai write
+    write: ['goals_create', 'goals_create_plan', 'goals_delete', 'keyflow_create_note'],
     admin: [],
-    deny: ['goals_create', 'execute_custom_logic', 'commerce_create_invoice'],
+    deny: ['execute_custom_logic', 'commerce_create_invoice'],
   },
   team: {
     read: ['structure_get_org_tree', 'structure_list_job_roles', 'structure_list_assignments', 'structure_get_stats'],

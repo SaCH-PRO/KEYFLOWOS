@@ -260,8 +260,10 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.biz2, name: 'V73K Other', slug: `${P}biz2`, ownerId: ID.outsider, currency: 'TTD' } });
   for (const [user, biz, role, permissionScopes] of [
     [ID.owner, ID.biz, 'OWNER', undefined],
-    [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write' }],
-    [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write' }],
+    // SWP-CENSUS-KEY-B (P109, Ruling B2): bridge-action now requires ai:write before requireBridgeRevenue;
+    // keep revenue: 'none'/'read' so KAG-04 still proves requireBridgeRevenue 403.
+    [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write', ai: 'write' }],
+    [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write', ai: 'write' }],
     // Round 2 (security MINOR-2): an explicit map without a revenue key reads revenue 'none'.
     [ID.staffMissing, ID.biz, 'STAFF', { crm: 'read', operations: 'write' }],
     [ID.superAdmin, ID.biz, 'STAFF', { crm: 'read' }],
