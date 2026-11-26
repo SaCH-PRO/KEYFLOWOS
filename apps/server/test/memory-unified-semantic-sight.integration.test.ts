@@ -180,7 +180,16 @@ async function seedRevenue(perKind: number, patterns = 0) {
     }
     await temporalMemory.summarizeContact(ID.biz, contactId);
 
-    await knowledge.ingestText({ businessId: ID.biz, title: `${REV} statement ${i}`, sourceType: 'document', content: `${REV} Balance owed TTD ${AMOUNT}` });
+    const ksTitle = `${REV} statement ${i}`;
+    const ksContent = `${REV} Balance owed TTD ${AMOUNT}`;
+    const sourceId = await knowledge.ingestText({ businessId: ID.biz, title: ksTitle, sourceType: 'document', content: ksContent });
+    await semantic.store({
+      businessId: ID.biz,
+      content: `[${ksTitle} chunk 1/1]\n${ksContent}`,
+      sourceType: 'document',
+      sourceId: `${sourceId}:0`,
+      metadata: { knowledgeSourceId: sourceId, title: ksTitle, sourceType: 'document', chunkIndex: 0 },
+    });
   }
   for (let i = 0; i < patterns; i++) {
     await memory.upsert(ID.biz, {
@@ -240,7 +249,7 @@ beforeAll(async () => {
   memory = new AiMemoryService(prisma, {} as any, { getBlueprint: async () => null } as any, semantic);
   temporalMemory = new TemporalFlowMemoryService(prisma, semantic);
   temporal = new TemporalFlowService(prisma, temporalMemory, semantic);
-  knowledge = new KnowledgeIngestionService(prisma, semantic);
+  knowledge = new KnowledgeIngestionService(prisma);
   unified = new UnifiedMemoryRetrievalService(prisma, semantic);
 
   buildMemoryContextFor = async (userId) => {

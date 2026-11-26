@@ -1,8 +1,13 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { KnowledgeIngestionService } from './knowledge-ingestion.service';
+import { KnowledgeIngestionService, MAX_PG_INT32 } from './knowledge-ingestion.service';
 import {
   KnowledgeIngestionController,
+  MAX_OFFSET,
   MAX_SYNC_TEXT_BYTES,
   MAX_URL_LENGTH,
 } from './knowledge-ingestion.controller';
@@ -12,6 +17,7 @@ function fixture() {
     create: vi.fn().mockResolvedValue({ id: 'ks-1' }),
     findFirst: vi.fn().mockResolvedValue(null),
     update: vi.fn().mockResolvedValue({ id: 'ks-1', status: 'approved' }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     findMany: vi.fn().mockResolvedValue([]),
   };
   const prisma = { client: { knowledgeSource } };
@@ -63,7 +69,7 @@ describe('KnowledgeIngestionService reachability foundation', () => {
     });
   });
 
-  it('approves a tenant-owned source and transitions status to approved', async () => {
+  it('approves a tenant-owned quarantined source atomically with tenant+state updateMany', async () => {
     const { service, knowledgeSource } = fixture();
     knowledgeSource.findFirst.mockResolvedValueOnce({ id: 'ks-1', status: 'quarantined' });
 
@@ -74,10 +80,11 @@ describe('KnowledgeIngestionService reachability foundation', () => {
       where: { id: 'ks-1', businessId: 'biz-1' },
       select: { id: true, status: true },
     });
-    expect(knowledgeSource.update).toHaveBeenCalledWith({
-      where: { id: 'ks-1' },
+    expect(knowledgeSource.updateMany).toHaveBeenCalledWith({
+      where: { id: 'ks-1', businessId: 'biz-1', status: 'quarantined' },
       data: { status: 'approved' },
     });
+    expect(knowledgeSource.update).not.toHaveBeenCalled();
   });
 
   it('returns cleanly when approving an already-approved source without redundant update', async () => {
@@ -88,6 +95,39 @@ describe('KnowledgeIngestionService reachability foundation', () => {
 
     expect(res).toEqual({ sourceId: 'ks-1', status: 'approved' });
     expect(knowledgeSource.update).not.toHaveBeenCalled();
+    expect(knowledgeSource.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('handles concurrent approval cleanly and rejects concurrent non-approved transition with ConflictException', async () => {
+    const { service, knowledgeSource } = fixture();
+    knowledgeSource.findFirst
+      .mockResolvedValueOnce({ id: 'ks-1', status: 'quarantined' })
+      .mockResolvedValueOnce({ id: 'ks-1', status: 'approved' });
+    knowledgeSource.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    const ok = await service.approveSource('biz-1', 'ks-1');
+    expect(ok).toEqual({ sourceId: 'ks-1', status: 'approved' });
+
+    knowledgeSource.findFirst
+      .mockResolvedValueOnce({ id: 'ks-2', status: 'quarantined' })
+      .mockResolvedValueOnce({ id: 'ks-2', status: 'rejected' });
+    knowledgeSource.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(service.approveSource('biz-1', 'ks-2')).rejects.toThrow(ConflictException);
+  });
+
+  it('refuses pending, failed, and rejected sources with ConflictException and zero writes', async () => {
+    for (const disallowed of ['pending', 'failed', 'rejected']) {
+      const { service, knowledgeSource } = fixture();
+      knowledgeSource.findFirst.mockResolvedValueOnce({ id: 'ks-1', status: disallowed });
+
+      await expect(
+        service.approveSource('biz-1', 'ks-1'),
+        `approveSource should reject status=${disallowed}`,
+      ).rejects.toThrow(ConflictException);
+      expect(knowledgeSource.update).not.toHaveBeenCalled();
+      expect(knowledgeSource.updateMany).not.toHaveBeenCalled();
+    }
   });
 
   it('throws NotFoundException on missing or foreign sourceId without mutating', async () => {
@@ -102,6 +142,7 @@ describe('KnowledgeIngestionService reachability foundation', () => {
       select: { id: true, status: true },
     });
     expect(knowledgeSource.update).not.toHaveBeenCalled();
+    expect(knowledgeSource.updateMany).not.toHaveBeenCalled();
   });
 
   it('lists bounded metadata only and never materializes source content', async () => {
@@ -124,7 +165,7 @@ describe('KnowledgeIngestionService reachability foundation', () => {
     });
   });
 
-  it('caps service-side pagination defensively', async () => {
+  it('caps service-side pagination defensively including Int32 offset ceiling', async () => {
     const { service, knowledgeSource } = fixture();
 
     await service.listSources('biz-1', undefined, { limit: 500, offset: -3 });
@@ -135,11 +176,19 @@ describe('KnowledgeIngestionService reachability foundation', () => {
         skip: 0,
       }),
     );
+
+    await service.listSources('biz-1', undefined, { limit: 10, offset: MAX_PG_INT32 + 500 });
+    expect(knowledgeSource.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        take: 10,
+        skip: MAX_PG_INT32,
+      }),
+    );
   });
 });
 
 describe('KnowledgeIngestionController input validation', () => {
-  it('accepts http and https URLs and rejects javascript:, file:, data:, and oversized URLs', async () => {
+  it('accepts http and https URLs and rejects unsafe protocols, control chars, whitespace, and oversized URLs', async () => {
     const { controller, knowledgeSource } = fixture();
 
     const okHttps = await controller.registerUrl('biz-1', {
@@ -164,10 +213,18 @@ describe('KnowledgeIngestionController input validation', () => {
       'data:text/plain,hi',
       'ftp://example.com/file',
       `https://example.com/${'a'.repeat(MAX_URL_LENGTH)}`,
+      'https://example.com/path\r\nX-Injected: 1',
+      'https://example.com/path\nline2',
+      'https://example.com/path\rline2',
+      'https://example.com/path\tcol2',
+      'https://example.com/path with spaces',
+      ' https://example.com/leading-space',
+      'https://example.com/nul\u0000byte',
+      'https://example.com/del\u007fchar',
     ]) {
       await expect(
         controller.registerUrl('biz-1', { url: badUrl }),
-        `registerUrl should reject ${badUrl.slice(0, 32)}`,
+        `registerUrl should reject ${JSON.stringify(badUrl.slice(0, 48))}`,
       ).rejects.toThrow(BadRequestException);
 
       await expect(
@@ -176,7 +233,7 @@ describe('KnowledgeIngestionController input validation', () => {
           content: 'safe body',
           sourceUrl: badUrl,
         }),
-        `ingestText sourceUrl should reject ${badUrl.slice(0, 32)}`,
+        `ingestText sourceUrl should reject ${JSON.stringify(badUrl.slice(0, 48))}`,
       ).rejects.toThrow(BadRequestException);
     }
   });
@@ -212,23 +269,30 @@ describe('KnowledgeIngestionController input validation', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('rejects invalid pagination and status query params on list()', () => {
+  it('rejects invalid pagination, repeated-param arrays, Int32 offset overflow, and invalid status on list()', () => {
     const { controller } = fixture();
 
-    for (const [status, limit, offset] of [
+    const cases: Array<[string | string[] | undefined, string | string[] | undefined, string | string[] | undefined]> = [
       [undefined, '0', undefined],
       [undefined, '-1', undefined],
       [undefined, '101', undefined],
       [undefined, 'abc', undefined],
       [undefined, '1.5', undefined],
+      [undefined, ['10', '20'], undefined],
       [undefined, undefined, '-1'],
       [undefined, undefined, 'abc'],
       [undefined, undefined, ''],
+      [undefined, undefined, ['0', '10']],
+      [undefined, undefined, String(MAX_OFFSET + 1)],
+      [undefined, undefined, '99999999999999999999'],
       ['unknown_status', undefined, undefined],
-    ] as const) {
+      [['approved', 'pending'], undefined, undefined],
+    ];
+
+    for (const [status, limit, offset] of cases) {
       expect(
         () => controller.list('biz-1', status, limit, offset),
-        `list(${String(status)}, ${String(limit)}, ${String(offset)}) should throw`,
+        `list(${JSON.stringify(status)}, ${JSON.stringify(limit)}, ${JSON.stringify(offset)}) should throw`,
       ).toThrow(BadRequestException);
     }
   });
