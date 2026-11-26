@@ -313,12 +313,13 @@ describe('W11-SHIPPING-EXPENSE-ONCE (D-126, F-24): the shipping fee is booked on
     });
   });
 
-  it('SE-02 (D-126) the owner PATCHing shipped 3 times, then picking_packing and shipped again, books exactly one PAID Expense of the stored shippingFee and one posting', async () => {
+  it('SE-02 (D-126; amended W1F-ORDER-TRANSITIONS D-198) the owner PATCHing shipped 3 times, attempting picking_packing (refused 400 under D-198), and PATCHing shipped again, books exactly one PAID Expense of the stored shippingFee and one posting', async () => {
     const o = await order();
     const postingsBefore = await expensePostings();
 
     for (let i = 0; i < 3; i += 1) await patchStatus(o.id, 'shipped', ID.owner);
-    await patchStatus(o.id, 'picking_packing', ID.owner);
+    // W1F-ORDER-TRANSITIONS (D-198): moving a shipped order backwards is now refused 400.
+    await expect(patchStatus(o.id, 'picking_packing', ID.owner)).rejects.toMatchObject({ status: 400 });
     await patchStatus(o.id, 'shipped', ID.owner);
     await settle();
 
@@ -452,7 +453,7 @@ describe('W11-SHIPPING-EXPENSE-ONCE (D-126, F-24): the shipping fee is booked on
     // Review CR-W11SE-1: the claim stayed { claim, at } for good, and every later ship booked nothing.
     expect(await claimOf(o.id), 'the claim is released').toBeUndefined();
 
-    await patchStatus(o.id, 'picking_packing', ID.owner);
+    // W1F-ORDER-TRANSITIONS (D-198): retry shipped directly (moving shipped -> picking_packing backwards is now refused 400).
     await patchStatus(o.id, 'shipped', ID.owner);
     await settle();
     const booked = await shippingExpenses(o.id);
