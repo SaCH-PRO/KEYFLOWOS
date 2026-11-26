@@ -4,19 +4,29 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { PostingService, buildExternalRef, type PostingInput } from './posting.service';
+import { isStockTracked, ownStockRows } from '../../core/inventory/inventory-mode';
+import { assertValidLineQuantity, STOCK_TRACKED_WHOLE_UNITS_MESSAGE } from '../commerce/dto/document-line-item.dto';
+
+export interface CreditNoteLineItemInput {
+  description: string;
+  quantity?: number;
+  unitPrice?: number;
+  amount: number;
+  productId?: string;
+}
 
 export interface CreateCreditNoteInput {
   invoiceId: string;
   creditNoteNumber: string;
   amount: number;
   reason?: string;
-  items?: Array<{ description: string; quantity?: number; unitPrice?: number; amount: number }>;
+  items?: CreditNoteLineItemInput[];
 }
 
 export interface UpdateCreditNoteInput {
   amount?: number;
   reason?: string;
-  items?: Array<{ description: string; quantity?: number; unitPrice?: number; amount: number }>;
+  items?: CreditNoteLineItemInput[];
 }
 
 const D = Prisma.Decimal;
@@ -88,7 +98,56 @@ export class CreditNoteService {
     return { ...cn, invoice };
   }
 
+  /**
+   * P108 (V1-64 / DECIMALS-SERVER, D-166): validate credit-note item quantities
+   * (<= 2 decimals) and enforce in-tenant productId + whole units on
+   * stock-tracked products via the canonical `isStockTracked` + `ownStockRows`.
+   */
+  private async assertCreditNoteItems(businessId: string, items: CreditNoteLineItemInput[] | undefined): Promise<void> {
+    if (items === undefined || items === null) return;
+    if (!Array.isArray(items)) {
+      throw new BadRequestException('items must be an array');
+    }
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item?.quantity !== undefined) {
+        assertValidLineQuantity(item.quantity, `items.${i}.quantity`);
+      }
+    }
+    const productIds = [
+      ...new Set(
+        items
+          .map((item) => item?.productId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ];
+    if (productIds.length === 0) return;
+    const products = await this.prisma.client.product.findMany({
+      where: { id: { in: productIds }, businessId },
+      select: {
+        id: true,
+        inventoryMode: true,
+        _count: { select: { inventoryStocks: { where: ownStockRows(businessId) } } },
+      },
+    });
+    if (products.length !== productIds.length) {
+      throw new NotFoundException('Product not found');
+    }
+    const trackedIds = new Set(
+      products
+        .filter((p) => isStockTracked(p.inventoryMode, p._count.inventoryStocks > 0))
+        .map((p) => p.id),
+    );
+    for (const item of items) {
+      if (item?.productId && trackedIds.has(item.productId) && item.quantity !== undefined && !Number.isInteger(item.quantity)) {
+        throw new BadRequestException(STOCK_TRACKED_WHOLE_UNITS_MESSAGE);
+      }
+    }
+  }
+
   async create(businessId: string, input: CreateCreditNoteInput) {
+    await this.assertCreditNoteItems(businessId, input.items);
+
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId },
       select: { id: true, status: true, total: true },
@@ -132,6 +191,9 @@ export class CreditNoteService {
   async update(businessId: string, id: string, input: UpdateCreditNoteInput) {
     const cn = await this.get(businessId, id);
     if (cn.status !== 'DRAFT') throw new BadRequestException('Can only update draft credit notes');
+    if (input.items !== undefined) {
+      await this.assertCreditNoteItems(businessId, input.items);
+    }
 
     // V1-44: compare-and-set on DRAFT, so a PATCH racing an apply cannot change
     // the amount of a note whose posting is already written.

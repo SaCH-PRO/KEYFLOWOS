@@ -96,6 +96,7 @@ const ID = {
   productA: `${P}productA`,
   // bizB: same-tenant controls for the reference-binding cases (ST-D3-1/2)
   productB: `${P}productB`,
+  productTrackedB: `${P}productTrackedB`,
   invBindB: `${P}invBindB`,
   // bizB: the one invoice that receives a legal payment (ST-D3-3 positive control)
   invPayB: `${P}invPayB`,
@@ -354,6 +355,7 @@ beforeAll(async () => {
   await coaSeeder.ensureDefaults(ID.bizC);
   await db.product.create({ data: { id: ID.productA, businessId: ID.bizA, name: 'CIE Product A', price: 5 } });
   await db.product.create({ data: { id: ID.productB, businessId: ID.bizB, name: 'CIE Product B', price: 7 } });
+  await db.product.create({ data: { id: ID.productTrackedB, businessId: ID.bizB, name: 'CIE Tracked Product B', price: 40, inventoryMode: 'tracked' } });
 
   const inv = async (id: string, biz: string, contactId: string, status: string, total: number, number: string) =>
     db.invoice.create({
@@ -847,8 +849,6 @@ describe('R0-27: POST /commerce/businesses/:businessId/invoices create contract 
   const invalid: Array<[string, () => Record<string, unknown>, RegExp]> = [
     ['empty items', () => ({ contactId: ID.contactB, items: [] }), /^items must contain at least 1 elements$/],
     ['quantity 0', () => ({ contactId: ID.contactB, items: [line({ quantity: 0 })] }), /^items\.0\.quantity must be a positive number$/],
-    // InvoiceItem.quantity is an Int column: before R0-27, 1.5 x 40 was stored as quantity 1 under a line and invoice total of 60.
-    ['fractional quantity 1.5', () => ({ contactId: ID.contactB, items: [line({ quantity: 1.5, unitPrice: 40 })] }), /^items\.0\.quantity must be an integer number$/],
     ['NaN price (serialised as null)', () => ({ contactId: ID.contactB, items: [line({ unitPrice: Number.NaN })] }), /^items\.0\.unitPrice must be a number/],
     ['missing contactId', () => ({ items: [line()] }), /^contactId should not be empty$/],
   ];
@@ -870,6 +870,35 @@ describe('R0-27: POST /commerce/businesses/:businessId/invoices create contract 
       }
     });
   }
+
+  // P108 (V1-64 / DECIMALS-SERVER, D-166, Ruling B3 #80 7179130521):
+  // InvoiceItem.quantity is now Float; 1.5 on a non-stock line persists 1.5
+  // with total 60, while 1.5 on a stock-tracked product line is refused 400
+  // before any Invoice or FinancialTransaction is written.
+  it('CC-400 fractional quantity 1.5: non-stock line -> 201 (stored 1.5, total 60); stock-tracked product line -> 400 with nothing written (no Invoice, no FinancialTransaction)', async () => {
+    const ok = await create(ID.ownerB, ID.bizB, { contactId: ID.contactB, items: [line({ quantity: 1.5, unitPrice: 40 })] });
+    expect(ok.status).toBe(201);
+    expect(ok.body.total).toBe(60);
+    expect(ok.body.items[0].quantity).toBe(1.5);
+    const storedItems: Array<{ quantity: number; total: number }> = await db.$queryRawUnsafe(
+      `SELECT quantity, total FROM invoice_items WHERE invoice_id = '${ok.body.id}'`,
+    );
+    expect(storedItems).toEqual([{ quantity: 1.5, total: 60 }]);
+
+    recordedEvents.length = 0;
+    postingCalls.length = 0;
+    const before = await writes(ID.bizB);
+    const refused = await create(ID.ownerB, ID.bizB, {
+      contactId: ID.contactB,
+      items: [line({ quantity: 1.5, unitPrice: 40, productId: ID.productTrackedB })],
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.code).toBe('BAD_REQUEST');
+    expect(refused.body.message).toBe('Stock-tracked products must be billed in whole units');
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect(recordedEvents).toEqual([]);
+    expect(postingCalls).toEqual([]);
+  });
 
   it('CC-TOTALS: subtotal, taxAmount, discountAmount and total are computed on the server; the client total, subtotal, taxAmount and items[].total are dropped', async () => {
     const res = await create(ID.ownerB, ID.bizB, {
