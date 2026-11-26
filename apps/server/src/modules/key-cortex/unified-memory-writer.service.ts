@@ -1,6 +1,11 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AiMemoryService, MemoryEntry, MemorySource } from '../ai/ai-memory.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import {
+  classifyAiMemoryWrite,
+  isMemoryRowDataClass,
+  unionModuleScopes,
+} from '../ai/memory-classification';
 import { CortexMemory, MemoryType } from './cortex-genome-contracts';
 import { MemoryWriteOptions, MemoryDocumentExtractionOptions } from './unified-memory-writer.types';
 
@@ -52,13 +57,26 @@ export class UnifiedMemoryWriterService {
     value: string,
     opts?: MemoryWriteOptions,
   ): Promise<CortexMemory> {
+    const normalizedSource = normalizeSource(opts?.source);
+    const classified = classifyAiMemoryWrite({
+      category: type,
+      key,
+      value,
+      source: normalizedSource,
+      userId: opts?.userId ?? null,
+      explicitDataClass: opts?.dataClass ?? null,
+      explicitModuleScope: opts?.moduleScope ?? null,
+    });
+
     const entry = await this.aiMemory.upsert(businessId, {
       category: type as any,
       key,
       value,
       confidence: opts?.confidence ?? 0.8,
-      source: normalizeSource(opts?.source),
+      source: normalizedSource,
       expiresAt: opts?.expiresAt ?? null,
+      dataClass: classified.dataClass,
+      moduleScope: classified.moduleScope,
     });
 
     if (opts?.indexSemantic && this.semanticMemory) {
@@ -69,6 +87,10 @@ export class UnifiedMemoryWriterService {
           sourceType: 'memory',
           sourceId: entry.id,
           metadata: { type, key, source: opts?.source ?? 'inferred' },
+          dataClass: isMemoryRowDataClass(entry.dataClass)
+            ? entry.dataClass
+            : classified.dataClass,
+          moduleScope: unionModuleScopes(entry.moduleScope, classified.moduleScope),
         });
       } catch (err: any) {
         this.logger.warn(
@@ -131,6 +153,8 @@ export class UnifiedMemoryWriterService {
       confidence: 1.0,
       source: opts?.source ?? 'role_engine',
       ...opts,
+      dataClass: opts?.dataClass ?? 'REVENUE',
+      moduleScope: unionModuleScopes(['revenue'], opts?.moduleScope),
     });
   }
 

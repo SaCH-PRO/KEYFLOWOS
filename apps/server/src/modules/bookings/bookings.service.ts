@@ -52,6 +52,11 @@ import {
   wipayMerchantComplete,
   wipayTakesCurrency,
 } from '../../core/connectors/implementations/wipay-merchant';
+import {
+  DEFAULT_BUSINESS_CLOSE_MIN,
+  DEFAULT_BUSINESS_OPEN_MIN,
+  readBusinessDayHours,
+} from './business-hours.util';
 
 /** V1-64: the provider names a refused public booking's message uses. */
 const PUBLIC_BOOKING_PROVIDER_NAMES: Record<string, string> = { WIPAY: 'WiPay', PAYPAL: 'PayPal', STRIPE: 'Stripe' };
@@ -1198,8 +1203,6 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const dayOfMonth = params.date.getDate();
     const date = `${year}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
     const weekday = new Date(Date.UTC(year, month - 1, dayOfMonth)).getUTCDay();
-    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayKey = dayKeys[weekday];
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { businessHours: true, timezone: true },
@@ -1234,15 +1237,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (windows.length === 0) {
-      const hours = business?.businessHours as BusinessHoursMap | null;
-      const dayHours = hours?.[dayKey];
-      if (!dayHours || dayHours.closed || !dayHours.open || !dayHours.close) {
+      const dayHours = readBusinessDayHours(business?.businessHours, weekday);
+      if (dayHours?.closed) {
         return { date, slots: [] };
       }
-      const [oh, om] = dayHours.open.split(':').map(Number);
-      const [ch, cm] = dayHours.close.split(':').map(Number);
       // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
-      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm, bufferMins: Math.max(0, service.bufferMins ?? 0) }];
+      const bufferMins = Math.max(0, service.bufferMins ?? 0);
+      windows = [
+        dayHours
+          ? { openMin: dayHours.openMin, closeMin: dayHours.closeMin, bufferMins }
+          : { openMin: DEFAULT_BUSINESS_OPEN_MIN, closeMin: DEFAULT_BUSINESS_CLOSE_MIN, bufferMins },
+      ];
     }
 
     const earliest = service.leadTimeMins && service.leadTimeMins > 0
@@ -1535,23 +1540,15 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const hours = params.hours;
-    if (!hours) return;
-    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayHours = hours[dayKeys[startClock.weekday]];
-    if (dayHours?.closed) {
+    const dayHours = readBusinessDayHours(params.hours, startClock.weekday);
+    if (!dayHours) return;
+    if (dayHours.closed) {
       throw new BadRequestException('This business is closed on the selected day.');
     }
-    if (dayHours && dayHours.open && dayHours.close) {
-      const [oh, om] = dayHours.open.split(':').map(Number);
-      const [ch, cm] = dayHours.close.split(':').map(Number);
-      const openMins = oh * 60 + om;
-      const closeMins = ch * 60 + cm;
-      // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
-      const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
-      if (startMinsOfDay < openMins || endMins > closeMins) {
-        throw new BadRequestException('The selected time is outside business hours.');
-      }
+    // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
+    const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
+    if (startMinsOfDay < dayHours.openMin || endMins > dayHours.closeMin) {
+      throw new BadRequestException('The selected time is outside business hours.');
     }
   }
 
@@ -1643,29 +1640,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!hasStaffSchedule) {
-      const hours = business?.businessHours as BusinessHoursMap | null;
-      if (hours) {
-        const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-        const dayKey = dayKeys[startClock.weekday];
-        const dayHours = hours[dayKey];
-        if (dayHours?.closed) {
-          throw new BadRequestException('The business is closed on this day.');
-        }
-        if (dayHours && dayHours.open && dayHours.close) {
-          const [oh, om] = dayHours.open.split(':').map(Number);
-          const [ch, cm] = dayHours.close.split(':').map(Number);
-          const openMin = oh * 60 + om;
-          const closeMin = ch * 60 + cm;
-          // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
-          // both create paths (assertWithinSchedule) and the picker read it; a
-          // staff member's own hours above are read without it, as there. A
-          // negative buffer counts as none (SEC-W10BB-1).
-          const bookingEndMin = endMinsOfDay + Math.max(0, service?.bufferMins ?? 0);
-          if (startMinsOfDay < openMin || bookingEndMin > closeMin) {
-            throw new BadRequestException(
-              `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
-            );
-          }
+      const dayHours = readBusinessDayHours(business?.businessHours, startClock.weekday);
+      if (dayHours?.closed) {
+        throw new BadRequestException('The business is closed on this day.');
+      }
+      if (dayHours) {
+        // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
+        // both create paths (assertWithinSchedule) and the picker read it; a
+        // staff member's own hours above are read without it, as there. A
+        // negative buffer counts as none (SEC-W10BB-1).
+        const bookingEndMin = endMinsOfDay + Math.max(0, service?.bufferMins ?? 0);
+        if (startMinsOfDay < dayHours.openMin || bookingEndMin > dayHours.closeMin) {
+          throw new BadRequestException(
+            `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
+          );
         }
       }
     }
@@ -2281,6 +2269,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * up, through CommerceService.publicInvoiceUrl (the one place such a URL is
    * built). Best effort: the booking is written, so a link that cannot be
    * issued leaves the answer without one rather than failing it.
+   *
+   * FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): intentionally unchanged — this
+   * caller invokes publicInvoiceUrl (not automatedInvoiceUrl) for brand-new
+   * invoices just created inside createPublicBooking after the booking, slot
+   * claim, booking.created event, storefront event, and revenue attribution
+   * are already committed, and sends no email. Propagating a 409 here would
+   * fail a committed public HTTP booking response.
    */
   private async customerInvoiceUrl(businessId: string, invoiceId: string): Promise<string | undefined> {
     try {

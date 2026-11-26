@@ -37,6 +37,11 @@ import { KeyActionGenomePolicyService } from './key-action-genome-policy.service
 import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
 import { ActionNotClearedError, KeyActionBoundaryService } from './action-boundary/key-action-boundary.service';
 import { resolvePrincipalAuthority, type PrincipalAuthority } from './action-boundary/control-clearance';
+import {
+  computeProposalCarriesMoney,
+  structuredPayloadCarriesMoney,
+  structuralTextCarriesMoney,
+} from './proposal-money-tag';
 import type {
   CreateKeyActionProposalInput,
   KeyActionProposalData,
@@ -547,6 +552,36 @@ export class KeyActionProposalService {
     const boundaryColumns = this.boundary.sealProposal(businessId, input, userId ?? null);
     const requiresApproval = boundaryColumns ? true : this.policy.requiresApproval(input.actionType);
 
+    // FU-PROPOSAL-MONEY-TAG (V1-88, D-238, D-227): compute the authoritative structural
+    // money tag before persisting. If the proposal references a genome recommendation,
+    // verify its provenance in this business (fail closed when missing or financial).
+    let recFinancial = false;
+    if (input.carriesMoney !== true) {
+      const recId = this.extractRecommendationId(input.payload, input.inputPayload);
+      if (recId) {
+        try {
+          const rec = await this.prisma.client.genomeRecommendation?.findFirst({
+            where: { id: recId, businessId },
+            select: {
+              domain: true,
+              title: true,
+              diagnosis: true,
+              insight: true,
+              recommendation: true,
+              expectedGain: true,
+            },
+          });
+          recFinancial = !rec || isFinanceRecommendation(rec as GenomeRowFields);
+        } catch {
+          recFinancial = true;
+        }
+      }
+    }
+    const carriesMoney = computeProposalCarriesMoney({
+      ...input,
+      carriesMoney: input.carriesMoney === true || recFinancial ? true : undefined,
+    });
+
     const row = await this.prisma.client.keyActionProposal.create({
       data: {
         businessId,
@@ -577,6 +612,7 @@ export class KeyActionProposalService {
         riskLevel,
         status: 'PENDING',
         requiresApproval,
+        carriesMoney,
         ...(boundaryColumns ?? {}),
       },
     });
@@ -798,6 +834,7 @@ export class KeyActionProposalService {
     // any other proposal the write is conditional on the status just read
     // (V1-32, SEC-V32-1): a proposal approved again and claimed in between is
     // not overwritten.
+    const reasonCarriesMoney = typeof reason === 'string' && structuralTextCarriesMoney(reason);
     const row = this.boundary.governs(existing)
       ? await this.boundary.voidAction(businessId, proposalId, 'REJECTED', rejectedBy ?? null, reason)
       : await this.writeIfStatus(businessId, proposalId, existing.status, {
@@ -805,6 +842,7 @@ export class KeyActionProposalService {
           rejectedBy: rejectedBy ?? null,
           rejectedAt: new Date(),
           rejectionReason: reason ?? null,
+          ...(reasonCarriesMoney ? { carriesMoney: true } : {}),
         });
     if (!row) throw new ConflictException('This proposal is no longer pending approval');
 
@@ -1050,7 +1088,12 @@ export class KeyActionProposalService {
     proposalId: string,
     data: Prisma.KeyActionProposalUpdateManyMutationInput & { status: 'EXECUTED' | 'FAILED' },
   ) {
-    const written = await this.writeIfStatus(businessId, proposalId, 'EXECUTING', data);
+    const resultCarriesMoney =
+      data.executionResult !== undefined &&
+      data.executionResult !== null &&
+      structuredPayloadCarriesMoney(data.executionResult);
+    const writeData = resultCarriesMoney ? { ...data, carriesMoney: true } : data;
+    const written = await this.writeIfStatus(businessId, proposalId, 'EXECUTING', writeData);
     if (written) return { row: written, recorded: true };
     const current = await this.prisma.client.keyActionProposal.findFirst({ where: { id: proposalId, businessId } });
     if (!current) throw new NotFoundException('Action proposal not found');
@@ -1317,8 +1360,19 @@ export class KeyActionProposalService {
       proposedBy: row.proposedBy ?? null,
       executedFor: row.executedFor ?? null,
       outcomeEvidence: (row.outcomeEvidence ?? null) as Record<string, unknown> | null,
+      carriesMoney: typeof row.carriesMoney === 'boolean' ? row.carriesMoney : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
+  }
+
+  private extractRecommendationId(payload: unknown, inputPayload: unknown): string | null {
+    for (const source of [payload, inputPayload]) {
+      if (source && typeof source === 'object' && !Array.isArray(source)) {
+        const id = (source as Record<string, unknown>).recommendationId;
+        if (typeof id === 'string' && id.trim()) return id.trim();
+      }
+    }
+    return null;
   }
 }

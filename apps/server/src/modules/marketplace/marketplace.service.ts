@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
+import { ownStockRows } from '../../core/inventory/inventory-mode';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
 import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace, StockRowHeldConflict } from '../../core/inventory/stock-ownership';
 import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
@@ -473,7 +474,12 @@ export class MarketplaceService {
   async getWarehouses(businessId: string) {
     return this.prisma.client.warehouse.findMany({
       where: { businessId, isActive: true },
-      include: { inventoryStocks: { include: { product: true } } },
+      include: {
+        inventoryStocks: {
+          where: ownStockRows(businessId),
+          include: { product: true },
+        },
+      },
       orderBy: { name: 'asc' },
     });
   }

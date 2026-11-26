@@ -1702,7 +1702,7 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(connectorEvents).toHaveLength(0);
   });
 
-  it('MP-06d: a storefront order id (not an invoice): a Payment Link session of another business pointed at the order through client_reference_id, or a session not naming the order, its business, its currency or exactly its total, is refused (400): the order is never settled, no dedupe claim, one refusal row; the storefront checkout session of the order settles it once through the door', async () => {
+  it("MP-06d (D-196 storestripe): a storefront order id (not an invoice): a platform-signed session on the legacy route is ALWAYS refused (400) — whether malformed (Payment Link, foreign business, wrong currency or amount) or matching the order (the platform signature never settles a store order, no dedupe claim, one refusal row); only a session signed with the store's own Stripe webhook secret settles it once through the door", async () => {
     const order = ID.orderLegacyStripe;
     const totalMinor = LEGACY_ORDER_TOTAL * 100;
     /** A session naming the storefront order (as createStorePayment makes it, unless `object` overrides it). */
@@ -1722,28 +1722,56 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
       ['ord_link_total', 'order', { metadata: { businessId: ID.bizB } }],
       ['ord_link_own_biz', 'order', { metadata: { businessId: ID.biz } }],
       ['ord_otherbiz', 'business', { metadata: { orderId: order, businessId: ID.bizB } }],
-      ['ord_short', 'amount', { amount_total: totalMinor - 100 }],
-      ['ord_over', 'amount', { amount_total: totalMinor + 100 }],
-      ['ord_noamount', 'amount', { amount_total: null }],
-      ['ord_usd', 'currency', { currency: 'usd' }],
+      ['ord_short', 'business', { amount_total: totalMinor - 100 }],
+      ['ord_over', 'business', { amount_total: totalMinor + 100 }],
+      ['ord_noamount', 'business', { amount_total: null }],
+      ['ord_usd', 'business', { currency: 'usd' }],
+      // D-196 (storestripe): even a matching session naming the order, its business, currency and exact total
+      // is refused when signed with the platform's STRIPE_WEBHOOK_SECRET on the legacy route.
+      ['ord_ok', 'business', {}],
     ];
     for (const [tag, reason, object] of refusals) {
       await expectRefused(await legacy(orderEvent(tag, object)), tag, reason);
     }
-    expect(storeOrderCalls, 'the order is never settled by a refused event').toEqual([]);
-
-    // The storefront checkout's own session: settled once through the door, redelivery a no-op.
-    const raw = orderEvent('ord_ok', {});
-    const res = await legacy(raw);
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed', ...HINT });
-    expect(storeOrderCalls).toEqual([[order, 'PAID', `${P}cs_ord_ok`, 'stripe']]);
-    expect(await refusalsOf('ord_ok')).toHaveLength(0);
-    const again = await legacy(raw);
-    expect(again.status, JSON.stringify(again.body)).toBe(201);
-    expect(storeOrderCalls).toHaveLength(1);
-    // An order payment is no invoice payment: no invoice connector event.
+    // Retry of the platform-signed matching session keeps no second refusal row.
+    await expectRefused(await legacy(orderEvent('ord_ok', {})), 'ord_ok', 'business');
+    expect(storeOrderCalls, 'the order is never settled by a platform-signed event').toEqual([]);
     expect(connectorEvents).toHaveLength(0);
+
+    // Control (D-196 / D-138): when the store holds its own complete Stripe set, a session signed with that
+    // store's own webhook secret settles the order once through the door (redelivery a no-op), while the
+    // platform-signed legacy delivery is still refused.
+    const storeSecret = `whsec_${P}store_own_d196`;
+    await db.business.update({
+      where: { id: ID.biz },
+      data: {
+        metaData: {
+          stripePublishableKey: `pk_test_${P}store_own`,
+          stripeSecretKey: `sk_test_${P}store_own`,
+          stripeWebhookSecret: storeSecret,
+        },
+      },
+    });
+    try {
+      await expectRefused(await legacy(orderEvent('ord_ok_own_cfg', {})), 'ord_ok_own_cfg', 'business');
+      const storeRaw = orderEvent('ord_store_ok', {});
+      await expect(stripeDoor.handleStripeWebhook(storeRaw, sign(storeRaw, storeSecret))).resolves.toMatchObject({
+        ok: true,
+        received: true,
+        processed: 'checkout.session.completed',
+      });
+      expect(storeOrderCalls).toEqual([[order, 'PAID', `${P}cs_ord_store_ok`, 'stripe', `${P}pi_ord_store_ok`]]);
+      expect(await refusalsOf('ord_store_ok')).toHaveLength(0);
+      await expect(stripeDoor.handleStripeWebhook(storeRaw, sign(storeRaw, storeSecret))).resolves.toMatchObject({
+        ok: true,
+        received: true,
+      });
+      expect(storeOrderCalls).toHaveLength(1);
+      // An order payment is no invoice payment: no invoice connector event.
+      expect(connectorEvents).toHaveLength(0);
+    } finally {
+      await db.$executeRawUnsafe(`UPDATE businesses SET meta_data = NULL WHERE id = $1`, ID.biz);
+    }
   });
 
   it('MP-06e: a session paid after the invoice total was edited (createStripeCheckout fixed the amount) is recorded for the amount it carries: 100 of an invoice edited to 120 -> PARTIALLY_PAID, 100 of one edited to 80 -> PAID; once, whichever endpoint gets it first; no refusal', async () => {
@@ -1807,7 +1835,7 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(kept[0], `${tag}: refusal row`).toMatchObject({ businessId, eventType: `${JSON.parse(raw).type}:${reason}` });
   }
 
-  it("MP-06g (review SEC-R020B-2): the Stripe ledger door itself (POST /payments/stripe/webhook) refuses (400) a platform-signed payment event of an invoice whose metadata.businessId is another business's, whose currency is another or none, whose amount is missing or not positive, or a Payment Link session naming no business, and one of a storefront order not naming the order, its business, its currency or exactly its total: nothing recorded, no posting, no dedupe claim, the order never settled; each refusal is kept as one webhook_events row (a retry adds none)", async () => {
+  it("MP-06g (review SEC-R020B-2; D-196 storestripe): the Stripe ledger door itself (POST /payments/stripe/webhook) refuses (400) a platform-signed payment event of an invoice whose metadata.businessId is another business's, whose currency is another or none, whose amount is missing or not positive, or a Payment Link session naming no business, refuses any platform-signed event of a storefront order (even when matching), and refuses a store-signed event of a storefront order not naming the order, its business, its currency or exactly its total: nothing recorded, no posting, no dedupe claim, the order never settled; each refusal is kept as one webhook_events row (a retry adds none); a matching store-signed session settles the order once", async () => {
     const inv = ID.invDoorBound;
     const markPaidSpy = vi.spyOn(commerce, 'markInvoicePaid');
     const refusals: Array<[string, string, Record<string, unknown>]> = [
@@ -1841,7 +1869,9 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(timelineFor(inv)).toHaveLength(0);
     expect(markPaidSpy).not.toHaveBeenCalled();
 
-    // A storefront order of A: the door settles it for its whole total, so it is bound to the order's own session.
+    // A storefront order of A (D-196 storestripe): the platform's signature NEVER settles a store order, even when
+    // orderId, businessId, currency and exact total all match; and a store-signed event is still bound to the order's
+    // id, business, currency and exact total.
     const order = ID.orderLegacyStripe;
     const totalMinor = LEGACY_ORDER_TOTAL * 100;
     const orderEvent = (tag: string, object: Record<string, unknown>) =>
@@ -1852,23 +1882,59 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
         currency: 'ttd',
         ...object,
       });
-    const orderRefusals: Array<[string, string, Record<string, unknown>]> = [
-      ['door_ord_link', 'order', { metadata: { businessId: ID.bizB }, amount_total: 1, currency: 'usd' }],
-      ['door_ord_link_own_biz', 'order', { metadata: { businessId: ID.biz } }],
-      ['door_ord_otherbiz', 'business', { metadata: { orderId: order, businessId: ID.bizB } }],
-      ['door_ord_short', 'amount', { amount_total: totalMinor - 100 }],
-      ['door_ord_noamount', 'amount', { amount_total: null }],
-      ['door_ord_usd', 'currency', { currency: 'usd' }],
-    ];
-    for (const [tag, reason, object] of orderRefusals) {
-      await expectDoorRefused(orderEvent(tag, object), tag, reason);
+    // Platform-signed matching session (store has no Stripe keys): refused 400 ('business').
+    await expectDoorRefused(orderEvent('door_ord_platform', {}), 'door_ord_platform', 'business');
+    expect(storeOrderCalls, 'platform signature never settles the store order').toEqual([]);
+
+    const storeSecret = `whsec_${P}store_own_g`;
+    await db.business.update({
+      where: { id: ID.biz },
+      data: {
+        metaData: {
+          stripePublishableKey: `pk_test_${P}store_own_g`,
+          stripeSecretKey: `sk_test_${P}store_own_g`,
+          stripeWebhookSecret: storeSecret,
+        },
+      },
+    });
+    try {
+      // Platform-signed matching session when the store holds its own Stripe keys: still refused 400 ('business').
+      await expectDoorRefused(orderEvent('door_ord_platform_own', {}), 'door_ord_platform_own', 'business');
+
+      const doorStore = (raw: string) => stripeDoor.handleStripeWebhook(raw, sign(raw, storeSecret));
+      const expectStoreDoorRefused = async (raw: string, tag: string, reason: string) => {
+        const outcome: any = await doorStore(raw).then(
+          (ack: unknown) => ({ accepted: ack }),
+          (e: unknown) => e,
+        );
+        expect(outcome?.accepted, `${tag}: the door refused it`).toBeUndefined();
+        expect(outcome?.getStatus?.(), `${tag}: ${outcome?.message}`).toBe(400);
+        expect(await claimsOf(tag), `${tag}: no dedupe claim`).toBe(0);
+        const kept = await doorRefusalsOf(tag);
+        expect(kept, `${tag}: one refusal row`).toHaveLength(1);
+        expect(kept[0], `${tag}: refusal row`).toMatchObject({ businessId: ID.biz, eventType: `${JSON.parse(raw).type}:${reason}` });
+      };
+
+      const orderRefusals: Array<[string, string, Record<string, unknown>]> = [
+        ['door_ord_link', 'order', { metadata: { businessId: ID.bizB }, amount_total: 1, currency: 'usd' }],
+        ['door_ord_link_own_biz', 'order', { metadata: { businessId: ID.biz } }],
+        ['door_ord_otherbiz', 'business', { metadata: { orderId: order, businessId: ID.bizB } }],
+        ['door_ord_short', 'amount', { amount_total: totalMinor - 100 }],
+        ['door_ord_noamount', 'amount', { amount_total: null }],
+        ['door_ord_usd', 'currency', { currency: 'usd' }],
+      ];
+      for (const [tag, reason, object] of orderRefusals) {
+        await expectStoreDoorRefused(orderEvent(tag, object), tag, reason);
+      }
+      expect(storeOrderCalls, 'the order is never settled by a refused event').toEqual([]);
+      // Control: the order's own store-signed session settles it once through the door.
+      const ok = orderEvent('door_ord_ok', {});
+      await expect(doorStore(ok)).resolves.toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed' });
+      expect(storeOrderCalls).toEqual([[order, 'PAID', `${P}cs_door_ord_ok`, 'stripe', `${P}pi_door_ord_ok`]]);
+      expect(await doorRefusalsOf('door_ord_ok')).toHaveLength(0);
+    } finally {
+      await db.$executeRawUnsafe(`UPDATE businesses SET meta_data = NULL WHERE id = $1`, ID.biz);
     }
-    expect(storeOrderCalls, 'the order is never settled by a refused event').toEqual([]);
-    // Control: the order's own session settles it once through the door.
-    const ok = orderEvent('door_ord_ok', {});
-    await expect(door(ok)).resolves.toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed' });
-    expect(storeOrderCalls).toEqual([[order, 'PAID', `${P}cs_door_ord_ok`, 'stripe']]);
-    expect(await doorRefusalsOf('door_ord_ok')).toHaveLength(0);
   });
 
   it('MP-06h: a matching session through the Stripe ledger door is recorded once (one SUCCESSFUL stripe payment posted once, PAID; a redelivery on either endpoint writes nothing; no refusal row); the legacy route hands its verified event to the same door binding, its only binding (R0-20d): a payment event the legacy route refuses is refused by that binding and kept once under the legacy label stripe-legacy-refused, never the door label', async () => {

@@ -391,6 +391,7 @@ describe('CRM e2e', () => {
         priority: 'HIGH',
         remindAt: '2024-01-01T00:00:00.000Z',
       }),
+      expect.objectContaining({ actor: { type: 'USER', id: 'user_1' } }),
     );
   });
 
