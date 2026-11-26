@@ -545,71 +545,8 @@ export function OrderConfirmation({
         </div>
       )}
 
-      {isOrder && !customerEmail && (
-        <div
-          className="rounded-2xl border border-gray-200 overflow-hidden text-left"
-          style={{
-            background: "linear-gradient(135deg, rgba(0,0,0,0.025) 0%, rgba(0,0,0,0.008) 100%)",
-            animation: "fadeUp 500ms ease-out 750ms both",
-          }}
-        >
-          <div className="p-4 space-y-3">
-            <div className="flex items-center gap-2.5">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: `${secondaryColor}12` }}
-              >
-                <Bell className="w-4 h-4" style={{ color: secondaryColor }} />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-gray-600">Get Order Updates</p>
-                <p className="text-[10px] text-gray-400">Receive status notifications via email</p>
-              </div>
-            </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const form = e.target as HTMLFormElement;
-                const emailInput = form.elements.namedItem("notifyEmail") as HTMLInputElement;
-                if (emailInput?.value && orderId) {
-                  const btn = form.querySelector("button[type=submit]") as HTMLButtonElement;
-                  if (btn) {
-                    btn.textContent = "Saving...";
-                    btn.disabled = true;
-                  }
-                  try {
-                    await fetch(`${apiBase}/site/storefront/public/order/${orderId}/notify`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ email: emailInput.value }),
-                    });
-                  } catch {}
-                  if (btn) {
-                    btn.textContent = "Subscribed!";
-                    btn.style.opacity = "0.6";
-                  }
-                }
-              }}
-              className="flex gap-2"
-            >
-              <input
-                name="notifyEmail"
-                type="email"
-                required
-                placeholder="your@email.com"
-                className="flex-1 rounded-xl px-3 py-2.5 text-sm min-h-[44px] bg-gray-50 border border-gray-200 text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-200 transition-all"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2.5 rounded-xl text-sm font-medium text-white transition-all hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
-                style={{ backgroundColor: secondaryColor }}
-              >
-                Notify Me
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* CUSTOMER-PAGE-HONESTY: no "Get Order Updates / Notify Me" sign-up here. It posted to a route the server does
+         not have and said "Subscribed!" whatever it answered; the server alerts the owner of an order (OWNER-ALERTS-SERVER). */}
 
       <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300 pt-2">
         <Shield className="w-3 h-3" />

@@ -378,10 +378,13 @@ export function useStoreData() {
   }
   const refuseListing = () => refuse(canChangeListing, "store listing", listingRefused);
 
+  // CUSTOMER-PAGE-HONESTY (journey F1): the link the owner shares is /book/<saved slug>. Never the business id (a
+  // business is created with no slug) and never the slug input's unsaved text; with no saved slug there is no link
+  // ("": every caller then disables or hides its share actions).
   function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
-    const identifier = storeSlug || businessId;
-    return identifier ? `${domain}/book/${identifier}` : "";
+    const savedSlug = businessData?.slug?.trim();
+    return savedSlug ? `${domain}/book/${encodeURIComponent(savedSlug)}` : "";
   }
 
   async function handleSaveSlug() {

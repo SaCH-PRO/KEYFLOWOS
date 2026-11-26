@@ -26,6 +26,7 @@ import type {
 } from "./components/types";
 import { loadCart, saveCart, loadPromoCode, savePromoCode } from "./components/utils";
 import { BusinessHero } from "./components/business-hero";
+import { todaysHoursLabel } from "./components/store-hours";
 import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
@@ -1118,14 +1119,7 @@ function PublicBookingPageInner() {
               completedOrdersCount={completedOrdersCount}
               configuredRails={storefrontConfig?.merchandising?.trustRails}
               showPaymentBadge={showPaymentBadge}
-              businessHoursToday={(() => {
-                if (!business?.businessHours) return null;
-                const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-                const today = days[new Date().getDay()];
-                const h = business.businessHours[today];
-                if (!h || h.closed) return "Closed";
-                return `${h.open} – ${h.close}`;
-              })()}
+              businessHoursToday={todaysHoursLabel(business?.businessHours, business?.timezone)}
             />
             <div className="flex items-center gap-2 flex-shrink-0">
               <ShareStoreButton

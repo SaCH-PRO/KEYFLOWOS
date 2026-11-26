@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ShieldCheck, Clock, CreditCard, Star, Award, Zap, Truck, Headphones, Layers, BadgeCheck } from "lucide-react";
+import { ShieldCheck, Clock, CreditCard, Star, Zap, Truck, Headphones, Layers, BadgeCheck } from "lucide-react";
 import type { TrustRailItem } from "@/lib/client";
 
 type Props = {
@@ -69,9 +69,8 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
         ? [{ icon: Star, label: `${formatOrderCount(completedOrdersCount)} Orders Completed`, key: "orders" }]
         : [{ icon: Clock, label: "Instant Confirmation", key: "instant" }]),
       ...(showPaymentBadge ? [{ icon: CreditCard, label: "Secure Payments", key: "payments" }] : []),
-      ...(businessHoursToday
-        ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }]
-        : [{ icon: Award, label: "Guaranteed by KeyFlowOS", key: "guarantee" }]),
+      // CUSTOMER-PAGE-HONESTY: no 'Guaranteed by KeyFlowOS' fallback; KeyFlowOS guarantees nothing.
+      ...(businessHoursToday ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }] : []),
     ];
     visibleItems = trustItems;
   }
@@ -175,8 +174,8 @@ export function SecurityFooter({ primaryColor, businessName }: FooterBadgeProps)
       <div className="h-px w-full" style={{ background: `linear-gradient(to right, transparent, ${primaryColor}12, transparent)` }} />
       <div className="flex items-center justify-center gap-8 flex-wrap">
         {[
+          // CUSTOMER-PAGE-HONESTY: no 'Instant Booking' (a booking may wait for the owner's confirmation).
           { icon: ShieldCheck, label: "SSL Encrypted" },
-          { icon: Zap, label: "Instant Booking" },
           { icon: Star, label: "Trusted Platform" },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-1.5 text-[10px] text-gray-400 hover:text-gray-500 transition-colors">

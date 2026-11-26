@@ -388,10 +388,6 @@ export default function ProductDetailPage() {
 
             <div className="flex flex-wrap gap-3 py-1">
               <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                <Star className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-                Quality Guaranteed
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Secure Checkout
               </div>
@@ -515,9 +511,6 @@ export default function ProductDetailPage() {
           <div className="flex items-center justify-center gap-6 flex-wrap">
             <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
               <Shield className="w-3 h-3" /> SSL Encrypted
-            </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
-              <Zap className="w-3 h-3" /> Instant Booking
             </div>
             <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
               <Star className="w-3 h-3" /> Trusted Platform
