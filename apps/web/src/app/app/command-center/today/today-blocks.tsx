@@ -376,19 +376,24 @@ function PulseFigures({ pulse }: { pulse: TodayPulse }) {
   );
 }
 
-/** D-157: a sample invoice shown as a picture of what customers receive. It creates nothing and links nowhere. */
-function SamplePreview() {
+/**
+ * D-157: a sample invoice shown as a picture of what customers receive. It creates nothing and links nowhere. A member
+ * without revenue read sees it without amounts (journey I6: no money on their Today, a sample's included).
+ */
+function SamplePreview({ showAmounts }: { showAmounts: boolean }) {
   return (
     <figure aria-label="Sample invoice preview" className="rounded-xl border border-dashed border-border/70 bg-background/60 p-3 text-xs space-y-1.5">
       <figcaption className="font-medium text-foreground">Sample invoice (preview)</figcaption>
       <div className="flex justify-between text-muted-foreground">
         <span>Hair treatment × 1</span>
-        <span>TTD 250.00</span>
+        {showAmounts && <span>TTD 250.00</span>}
       </div>
-      <div className="flex justify-between font-medium text-foreground border-t border-border/50 pt-1.5">
-        <span>Total</span>
-        <span>TTD 250.00</span>
-      </div>
+      {showAmounts && (
+        <div className="flex justify-between font-medium text-foreground border-t border-border/50 pt-1.5">
+          <span>Total</span>
+          <span>TTD 250.00</span>
+        </div>
+      )}
       <p className="text-muted-foreground">
         This is what your customers get when you send an invoice. It is only a sample: nothing is added to your books.
       </p>
@@ -420,7 +425,7 @@ function GetSetUp({ data }: { data: TodayAggregate }) {
           </li>
         ))}
       </ul>
-      <SamplePreview />
+      <SamplePreview showAmounts={data.pulseStatus === "OK"} />
       <InstallAppStep />
     </div>
   );
