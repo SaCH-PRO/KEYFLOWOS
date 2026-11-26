@@ -36,11 +36,17 @@ import AdminLayout from "@/app/admin/layout";
 const ADMIN_KEYS = ["kf_admin_token", "kf_admin_user_cache", "kf_auth_mode"] as const;
 const adminKeysLeft = () => ADMIN_KEYS.filter((k) => window.localStorage.getItem(k) !== null || document.cookie.includes(`${k}=`));
 
+// RR-ADMIN-SHELL-SERVER-GATE (D-290): the admin layout and the edge gate open the shell only on an unexpired
+// admin-shaped kf_admin_token (header.payload.sig, payload.type "admin", exp in ms, as buildAdminToken issues it), so
+// the seeded admin session carries one. Every assertion below is unchanged.
+const b64url = (o: unknown) => btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const ADMIN_BEARER = `${b64url({ alg: "HS256", typ: "JWT" })}.${b64url({ sub: "v1rr_admin", type: "admin", role: "SUPER_ADMIN", exp: Date.now() + 3_600_000 })}.v1rr_admin_sig`;
+
 function seedAdminSession() {
-  window.localStorage.setItem("kf_admin_token", "v1rr_admin_bearer");
+  window.localStorage.setItem("kf_admin_token", ADMIN_BEARER);
   window.localStorage.setItem("kf_admin_user_cache", JSON.stringify({ id: "v1rr_admin", email: "v1rr_admin@test.local", role: "SUPER_ADMIN" }));
   window.localStorage.setItem("kf_auth_mode", "admin");
-  document.cookie = "kf_admin_token=v1rr_admin_bearer; path=/; max-age=86400";
+  document.cookie = `kf_admin_token=${ADMIN_BEARER}; path=/; max-age=86400`;
   document.cookie = "kf_admin_user_cache=x; path=/; max-age=86400";
   document.cookie = "kf_auth_mode=admin; path=/; max-age=86400";
 }
@@ -111,7 +117,7 @@ describe("RR-ADMIN-LOGOUT: a user sign-in clears the admin session; the admin ar
     await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/admin/login"));
     const logouts = calls.filter((c) => c.path === "/api/admin/auth/logout");
     expect(logouts).toHaveLength(1);
-    expect(logouts[0]).toMatchObject({ method: "POST", authorization: "Bearer v1rr_admin_bearer" });
+    expect(logouts[0]).toMatchObject({ method: "POST", authorization: `Bearer ${ADMIN_BEARER}` });
     expect(adminKeysLeft()).toEqual([]);
   });
 
