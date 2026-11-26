@@ -27,6 +27,7 @@ import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService, AiMode, BudgetCaps, AiProvider } from './model-gateway.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { isAdminSignIn, type AdminRequestLike } from '../../core/auth/admin.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
@@ -1629,8 +1630,8 @@ export class AiController {
     @Req() req: AuthenticatedRequest,
     @Body() body: Record<string, unknown>,
   ) {
-    if (req.user?.role !== 'SUPER_ADMIN') {
-      throw new BadRequestException('Only super admins can update routing configuration');
+    if (req.user?.role !== 'SUPER_ADMIN' || !isAdminSignIn(req as unknown as AdminRequestLike)) {
+      throw new ForbiddenException('Only super admins signed in via admin login can update routing configuration');
     }
     return this.gateway.updateRoutingConfig(body as Record<string, Record<string, { primary: { provider: string; model: string }; fallbacks: Array<{ provider: string; model: string }> }>>);
   }

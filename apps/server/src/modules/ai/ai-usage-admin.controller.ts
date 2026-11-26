@@ -1,11 +1,12 @@
 import { Controller, Get, Param, Query, Req, UseGuards, Inject, ForbiddenException, HttpException, HttpStatus, Header } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { AdminGuard, isAdminSignIn, type AdminRequestLike } from '../../core/auth/admin.guard';
 import { AiUsageService } from './ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { Request } from 'express';
 
 @Controller('api/admin/ai-usage')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, AdminGuard)
 export class AiUsageAdminController {
   constructor(
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
@@ -13,8 +14,8 @@ export class AiUsageAdminController {
   ) {}
 
   private assertSuperAdmin(req: Request) {
-    const user = (req as { user?: { role?: string } }).user;
-    if (!user || user.role !== 'SUPER_ADMIN') {
+    const r = req as unknown as AdminRequestLike;
+    if (!r.user || r.user.role !== 'SUPER_ADMIN' || !isAdminSignIn(r)) {
       throw new ForbiddenException('Super admin access required');
     }
   }
