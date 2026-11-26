@@ -37,7 +37,7 @@ export interface ModelLifecycleEntry {
 }
 
 function unverified(provider: AiProvider, modelId: string): ModelLifecycleEntry {
-  return {
+  return Object.freeze({
     provider,
     modelId,
     status: 'unverified',
@@ -45,10 +45,10 @@ function unverified(provider: AiProvider, modelId: string): ModelLifecycleEntry 
     source: null,
     checkedAt: null,
     checkedBy: null,
-  };
+  });
 }
 
-export const MODEL_LIFECYCLE_CATALOG: readonly ModelLifecycleEntry[] = [
+export const MODEL_LIFECYCLE_CATALOG: readonly ModelLifecycleEntry[] = Object.freeze([
   // OpenAI — chat, embeddings, audio
   unverified('openai', 'gpt-4o'),
   unverified('openai', 'gpt-4o-mini'),
@@ -78,18 +78,30 @@ export const MODEL_LIFECYCLE_CATALOG: readonly ModelLifecycleEntry[] = [
   // Infrastructure / self-hosted routes
   unverified('native', 'native-llm'),
   unverified('opensource', 'llama-3.1-70b'),
-];
+]);
 
 /**
  * Look up the lifecycle catalog entry for a (provider, modelId) pair.
+ * Normalizes whitespace and ASCII case so padded or mixed-case overrides
+ * cannot bypass a retired entry.
  */
 export function getModelLifecycleEntry(
   provider: string,
   modelId: string,
   catalog: readonly ModelLifecycleEntry[] = MODEL_LIFECYCLE_CATALOG,
 ): ModelLifecycleEntry | undefined {
+  if (typeof provider !== 'string' || typeof modelId !== 'string') {
+    return undefined;
+  }
+  const normalizedProvider = provider.trim().toLowerCase();
+  const normalizedModelId = modelId.trim().toLowerCase();
+  if (!normalizedProvider || !normalizedModelId) {
+    return undefined;
+  }
   return catalog.find(
-    (entry) => entry.provider === provider && entry.modelId === modelId,
+    (entry) =>
+      entry.provider.trim().toLowerCase() === normalizedProvider &&
+      entry.modelId.trim().toLowerCase() === normalizedModelId,
   );
 }
 

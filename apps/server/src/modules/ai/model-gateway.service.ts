@@ -1287,6 +1287,15 @@ export class ModelGatewayService {
     model: string,
     preferences: AiPreferences,
   ): AsyncGenerator<StreamChunk> {
+    if (isModelRetired(provider, model, this.getLifecycleCatalog())) {
+      throw new ServiceUnavailableException({
+        code: 'provider_unavailable' as AiUnavailableCode,
+        service: 'ai',
+        message: `No AI providers available: model ${provider}/${model} is retired`,
+        error: 'Service Unavailable',
+      });
+    }
+
     const normalizedMessages = this.normalizeMessages(request.messages, provider);
 
     switch (provider) {
@@ -2113,9 +2122,11 @@ export class ModelGatewayService {
   ): ModelStrategy {
     // An explicit per-request override still wins over everything. It is used by
     // callers that know exactly what they need and is not a user preference.
-    if (request.providerOverride && request.modelOverride) {
+    const modelOverride =
+      typeof request.modelOverride === 'string' ? request.modelOverride.trim() : '';
+    if (request.providerOverride && modelOverride) {
       return {
-        primary: { provider: request.providerOverride, model: request.modelOverride },
+        primary: { provider: request.providerOverride, model: modelOverride },
         fallbacks: this.routingTable[mode][request.taskCategory]?.fallbacks ?? [],
       };
     }
@@ -2283,6 +2294,15 @@ export class ModelGatewayService {
     model: string,
     preferences: AiPreferences,
   ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
+    if (isModelRetired(provider, model, this.getLifecycleCatalog())) {
+      throw new ServiceUnavailableException({
+        code: 'provider_unavailable' as AiUnavailableCode,
+        service: 'ai',
+        message: `No AI providers available: model ${provider}/${model} is retired`,
+        error: 'Service Unavailable',
+      });
+    }
+
     const normalizedMessages = this.normalizeMessages(request.messages, provider);
 
     switch (provider) {
