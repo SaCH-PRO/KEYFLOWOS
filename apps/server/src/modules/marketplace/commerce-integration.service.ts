@@ -40,6 +40,25 @@ export const SHIPPING_EXPENSE_CLAIM_STALE_MS = 10 * 60_000;
 /** The value of metadata.shippingExpense while a call books it; expenseId is added when it is recorded. */
 type ShippingExpenseClaim = { claim: string; at: string };
 
+/**
+ * V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120; D-249/D-75): deterministic
+ * Payment.providerPaymentId for a marketplace order paid revenue record,
+ * scoped to businessId and orderId so retries/replays never duplicate rows.
+ */
+export function marketplaceOrderProviderPaymentId(businessId: string, orderId: string): string {
+  return `marketplace_order_paid:${businessId}:${orderId}`;
+}
+
+/**
+ * Derive a normalized lowercase Payment.method from a marketplace order's
+ * paymentMethod, falling back cleanly to 'manual' when absent or blank.
+ */
+function deriveMarketplacePaymentMethod(raw: unknown): string {
+  if (typeof raw !== 'string') return 'manual';
+  const normalized = raw.trim().toLowerCase().replace(/[\s/-]+/g, '_');
+  return normalized || 'manual';
+}
+
 @Injectable()
 export class CommerceIntegrationService {
   private readonly logger = new Logger(CommerceIntegrationService.name);
@@ -211,7 +230,18 @@ export class CommerceIntegrationService {
 
       const stored = await this.prisma.client.marketplaceOrder.findFirst({
         where: { id: order.id, businessId: payload.businessId },
-        select: { type: true, paymentStatus: true, orderNumber: true },
+        select: {
+          type: true,
+          paymentStatus: true,
+          orderNumber: true,
+          paymentMethod: true,
+          paymentRef: true,
+          currency: true,
+          total: true,
+          subtotal: true,
+          taxAmount: true,
+          discountAmount: true,
+        },
       });
       if (!stored) {
         this.logger.warn(`[CommerceIntegration] store_order.paid names order ${order.id}, not found in business ${payload.businessId}; ignored`);
@@ -247,7 +277,7 @@ export class CommerceIntegrationService {
         }
       }
 
-      await this.createRevenueRecord(payload.businessId, order, stored.type, payload.invoiceId ?? null);
+      await this.createRevenueRecord(payload.businessId, order, stored, payload.invoiceId ?? null);
 
       let contactId: string | null = null;
       if (order.customerEmail || order.customerPhone) {
@@ -294,23 +324,43 @@ export class CommerceIntegrationService {
   }
 
   /**
-   * The invoice behind a paid order (F206). Before V1-18 this deduplicated on
-   * `notes contains order:<id>` alone. completeCheckout's invoice is
-   * INV-<orderNumber> with the notes "Storefront order <orderNumber>", so it
-   * was never found, and every checkout got a second, raw PAID invoice
-   * INV-ORD-<orderNumber> with no payment and no posting.
+   * The invoice behind a paid order (F206; V1-85 / FU-MARKETPLACE-PAID-PAYMENT-ROW, D-249/D-75).
+   * Before V1-18 this deduplicated on `notes contains order:<id>` alone.
+   * completeCheckout's invoice is INV-<orderNumber> with the notes "Storefront
+   * order <orderNumber>", so it was never found, and every checkout got a
+   * second, raw PAID invoice INV-ORD-<orderNumber> with no payment and no
+   * posting.
    *
    *   1. The event names its invoice (completeCheckout): resolve it in this
    *      business and write nothing, whether or not it is found.
-   *   2. A storefront order is invoiced only by completeCheckout, in one
-   *      transaction with its payment and posting: a paid event without an
-   *      invoiceId (the legacy shape, a replay) writes nothing. (handleOrderPaid
-   *      has already ignored a storefront order without that invoice.)
+   *   2. A storefront or quick-sale order is invoiced only by completeCheckout,
+   *      in one transaction with its payment and posting: a paid event without
+   *      an invoiceId (the legacy shape, a replay) writes nothing.
    *   3. Any other order with an invoice already (INV-<orderNumber>,
    *      INV-ORD-<orderNumber> or the notes marker): nothing.
-   *   4. Otherwise (a marketplace order marked paid) the legacy record below.
+   *   4. Otherwise (a marketplace order stored PAID outside completeCheckout):
+   *      in ONE `$transaction` (serialized per business+order via advisory lock),
+   *      create the PAID invoice and — when `total > 0` — exactly one own-tenant
+   *      `SUCCESSFUL` `Payment` row matching the invoice's currency and amount,
+   *      with method derived from the order and a deterministic
+   *      `providerPaymentId` so retries/replays are idempotent.
    */
-  private async createRevenueRecord(businessId: string, order: any, orderType: string, invoiceId: string | null) {
+  private async createRevenueRecord(
+    businessId: string,
+    order: any,
+    stored: {
+      type: string;
+      orderNumber: string | null;
+      paymentMethod: string | null;
+      paymentRef: string | null;
+      currency: string;
+      total: number;
+      subtotal: number;
+      taxAmount: number;
+      discountAmount: number;
+    },
+    invoiceId: string | null,
+  ) {
     try {
       if (invoiceId) {
         const settled = await this.prisma.client.invoice.findFirst({
@@ -324,9 +374,10 @@ export class CommerceIntegrationService {
         }
         return;
       }
-      if (orderType === STOREFRONT_ORDER_TYPE || orderType === 'QUICK_SALE') return;
+      if (stored.type === STOREFRONT_ORDER_TYPE || stored.type === 'QUICK_SALE') return;
 
-      const numbers: string[] = order.orderNumber ? [`INV-${order.orderNumber}`, `INV-ORD-${order.orderNumber}`] : [];
+      const orderNumber = stored.orderNumber ?? order.orderNumber ?? null;
+      const numbers: string[] = orderNumber ? [`INV-${orderNumber}`, `INV-ORD-${orderNumber}`] : [];
       const existing = await this.prisma.client.invoice.findFirst({
         where: {
           businessId,
@@ -343,32 +394,89 @@ export class CommerceIntegrationService {
         total: item.total ?? (item.quantity ?? 1) * (item.unitPrice ?? 0),
       }));
 
-      const subtotal = items.reduce((s: number, i: any) => s + i.total, 0);
+      const computedSubtotal = items.reduce((s: number, i: any) => s + i.total, 0);
+      const subtotal = items.length > 0 ? computedSubtotal : Number(stored.subtotal ?? 0);
+      const taxAmount = Number(stored.taxAmount ?? order.taxAmount ?? 0);
+      const discountAmount = Number(stored.discountAmount ?? order.discountAmount ?? 0);
+      const invoiceTotal = Number(stored.total ?? order.total ?? subtotal);
+      const currency = String(stored.currency ?? order.currency ?? 'TTD').trim() || 'TTD';
+      const method = deriveMarketplacePaymentMethod(stored.paymentMethod ?? order.paymentMethod);
+      const paymentRef =
+        (typeof stored.paymentRef === 'string' && stored.paymentRef.trim() ? stored.paymentRef.trim() : null) ??
+        (typeof order.paymentRef === 'string' && order.paymentRef.trim() ? order.paymentRef.trim() : null);
+      const providerPaymentId = marketplaceOrderProviderPaymentId(businessId, order.id);
 
       const contactId = await this.resolveContactId(businessId, order);
       if (!contactId) throw new Error(`Cannot create invoice: no contact resolved for order ${order.id}`);
 
-      await this.prisma.client.invoice.create({
-        data: {
-          businessId,
-          contactId,
-          invoiceNumber: `INV-ORD-${order.orderNumber ?? order.id.slice(-8).toUpperCase()}`,
-          status: 'PAID',
-          issueDate: new Date(),
-          paidAt: new Date(),
-          subtotal,
-          taxAmount: order.taxAmount ?? 0,
-          discountAmount: order.discountAmount ?? 0,
-          total: order.total ?? subtotal,
-          currency: order.currency ?? 'TTD',
-          notes: `Auto-generated from store order ${order.orderNumber ?? order.id}. order:${order.id}`,
-          items: {
-            create: items,
+      const created = await this.prisma.client.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`marketplace-order-revenue:${businessId}:${order.id}`}))`;
+
+        const existingInTx = await tx.invoice.findFirst({
+          where: {
+            businessId,
+            OR: [...numbers.map((invoiceNumber) => ({ invoiceNumber })), { notes: { contains: `order:${order.id}` } }],
           },
-        },
+          select: { id: true },
+        });
+        if (existingInTx) return false;
+
+        const now = new Date();
+        const invoice = await tx.invoice.create({
+          data: {
+            businessId,
+            contactId,
+            invoiceNumber: `INV-ORD-${orderNumber ?? order.id.slice(-8).toUpperCase()}`,
+            status: 'PAID',
+            issueDate: now,
+            paidAt: now,
+            subtotal,
+            taxAmount,
+            discountAmount,
+            total: invoiceTotal,
+            currency,
+            notes: `Auto-generated from store order ${orderNumber ?? order.id}. order:${order.id}`,
+            items: {
+              create: items,
+            },
+          },
+        });
+
+        if (Number.isFinite(invoiceTotal) && invoiceTotal > 0) {
+          const existingPayment = await tx.payment.findFirst({
+            where: {
+              OR: [
+                { providerPaymentId },
+                { businessId, invoiceId: invoice.id, status: 'SUCCESSFUL' },
+              ],
+            },
+            select: { id: true },
+          });
+          if (!existingPayment) {
+            await tx.payment.create({
+              data: {
+                businessId,
+                invoiceId: invoice.id,
+                amount: invoiceTotal,
+                currency,
+                status: 'SUCCESSFUL',
+                provider: 'marketplace',
+                method,
+                providerPaymentId,
+                reference: paymentRef,
+                notes: `Auto-generated from marketplace order ${orderNumber ?? order.id}. order:${order.id}`,
+                createdAt: now,
+              },
+            });
+          }
+        }
+
+        return true;
       });
 
-      this.logger.log(`[CommerceIntegration] Revenue record created for order ${order.orderNumber ?? order.id}`);
+      if (created) {
+        this.logger.log(`[CommerceIntegration] Revenue record created for order ${orderNumber ?? order.id}`);
+      }
     } catch (e) {
       this.logger.error(`[CommerceIntegration] Failed to create revenue record: ${(e as Error).message}`);
     }
