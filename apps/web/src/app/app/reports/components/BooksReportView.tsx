@@ -35,16 +35,28 @@ const REPORT_KEY: Record<BooksReportKind, "pnl" | "cashflow" | "balance-sheet" |
 
 export function BooksReportView({ businessId, kind, startDate, endDate, asOf }: Props) {
   const [basis, setBasis] = useState<LedgerReportBasis>("accrual");
-  const [data, setData] = useState<unknown>(null);
+  /*
+   * SWP-FIN-WEB-CRASHES (BUG-039): the answer is kept with the business and tab it was loaded for. Each tab's
+   * report has its own shape; when the tab changed, the next render drew the new tab's block from the old tab's
+   * report (Cash flow read `accrualAdjustments` of a P&L) before the new fetch had even started, threw a TypeError
+   * and took the page to its error boundary. A report is drawn only under the tab it belongs to; until that tab's
+   * own answer arrives the view says it is loading. Dates and basis are not in the key: the page passes "now" as
+   * the end of the period on every render, and a report of the same shape is safe to show while it refreshes.
+   */
+  const reportKey = `${businessId ?? ""}|${kind}`;
+  const [answer, setAnswer] = useState<{ key: string; data: unknown; error: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const settled = answer?.key === reportKey ? answer : null;
+  const data = settled?.data ?? null;
+  const error = settled?.error ?? null;
+  const showLoading = loading || (!!businessId && !settled);
 
   useEffect(() => {
     if (!businessId) return;
     let cancelled = false;
+    const key = `${businessId}|${kind}`;
     async function load() {
       setLoading(true);
-      setError(null);
       try {
         if (!businessId) return;
         let res;
@@ -63,10 +75,11 @@ export function BooksReportView({ businessId, kind, startDate, endDate, asOf }: 
             res = await fetchLedgerTaxSummary(businessId, startDate, endDate); break;
         }
         if (cancelled) return;
-        if (res && "data" in res && res.data) setData(res.data);
-        else if (res && "error" in res) setError((res as { error?: string }).error || "Failed to load report");
+        if (res && "data" in res && res.data) setAnswer({ key, data: res.data, error: null });
+        else if (res && "error" in res) setAnswer({ key, data: null, error: (res as { error?: string }).error || "Failed to load report" });
+        else setAnswer({ key, data: null, error: null });
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled) setAnswer({ key, data: null, error: (e as Error).message });
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -114,18 +127,18 @@ export function BooksReportView({ businessId, kind, startDate, endDate, asOf }: 
         </div>
       </div>
 
-      {loading && (
+      {showLoading && (
         <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading ledger data…
         </div>
       )}
-      {error && (
+      {!showLoading && error && (
         <div className="rounded-xl border p-4 text-sm" style={{ borderColor: "hsl(var(--kf-error) / 0.3)", background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))" }}>
           {error}
         </div>
       )}
 
-      {!loading && !error && data ? (
+      {!showLoading && !error && data ? (
         <div className="rounded-xl border p-4" style={{ borderColor: "hsl(var(--border))" }}>
           {kind === "books-pnl" && <PnlBlock r={data as LedgerPnlReport} />}
           {kind === "books-cashflow" && <CashflowBlock r={data as LedgerCashflowReport} />}
