@@ -433,7 +433,7 @@ function BusinessCard({ business }: { business: DirectoryBusiness }) {
 
         <div className="flex items-center gap-2">
           <Link
-            href={`/site/${business.slug}`}
+            href={`/book/${encodeURIComponent(business.slug)}`}
             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[hsl(24_95%_53%)] to-[hsl(24_95%_45%)] hover:brightness-110 transition-all shadow-lg shadow-orange-500/10"
           >
             Visit

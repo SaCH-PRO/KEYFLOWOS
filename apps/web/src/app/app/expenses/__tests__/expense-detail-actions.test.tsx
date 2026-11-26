@@ -13,12 +13,18 @@
  * pinned in apps/server/test/expense-edit-posted.integration.test.ts (EE-06,
  * EE-07).
  *
+ * EXPENSES-HUB-1 (owner ruling billpay D-168, "the app always asks"): Approve no
+ * longer pays at once; it opens Pay, which asks the account and the method, and
+ * Pay calls payBill with them. The two Approve cases below press Pay in that
+ * dialog; what they assert is unchanged (bill-pay-dialog.test.tsx pins the
+ * dialog itself).
+ *
  * Mounted on the real ExpenseDetailPage; the client reads, the finance API
  * helpers, the workspace, next/navigation and sonner are stubbed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import type { Expense } from "@/lib/client";
 
 const BUSINESS = "biz_b7_detail";
@@ -53,6 +59,7 @@ vi.mock("@/lib/client", () => ({
   extractReceipt: vi.fn(),
   fetchExpenseCategories: vi.fn(async () => ({ data: [], error: null })),
   fetchExpenseBudgets: vi.fn(async () => ({ data: [], error: null })),
+  fetchFinanceAccounts: vi.fn(async () => ({ data: { items: [] }, error: null })),
   PAYMENT_METHODS: [],
 }));
 vi.mock("@/lib/api/finance", () => ({
@@ -81,6 +88,16 @@ function expense(status: string): Expense {
   };
 }
 
+/** EXPENSES-HUB-1 (D-168): Approve opens Pay; Pay pays. */
+async function approveAndPay() {
+  fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+  const dialog = await screen.findByRole("dialog", { name: /pay bill/i });
+  expect(payBill).not.toHaveBeenCalled();
+  const pay = within(dialog).getByRole("button", { name: /^Pay/ });
+  await waitFor(() => expect((pay as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(pay);
+}
+
 async function mount(status: string) {
   getExpense.mockResolvedValue({ data: expense(status), error: null });
   render(<ExpenseDetailPage />);
@@ -103,10 +120,10 @@ afterEach(() => {
 describe("D-67: Approve pays a BILL and Reject voids it, through the bills doors", () => {
   it("Approve on a BILL calls payBill(businessId, id) and never updateExpense; the page shows the paid row", async () => {
     await mount("BILL");
-    fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+    await approveAndPay();
 
     await waitFor(() => expect(payBill).toHaveBeenCalledTimes(1));
-    expect(payBill).toHaveBeenCalledWith(BUSINESS, EXPENSE_ID);
+    expect(payBill).toHaveBeenCalledWith(BUSINESS, EXPENSE_ID, { paymentMethod: "cash" });
     expect(updateExpense).not.toHaveBeenCalled();
     expect(voidBill).not.toHaveBeenCalled();
     await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
@@ -131,7 +148,7 @@ describe("D-67: Approve pays a BILL and Reject voids it, through the bills doors
   it("an {error} from payBill shows toast.error with it and no success toast; the BILL stays actionable", async () => {
     payBill.mockResolvedValue({ data: null, error: "Cannot mark a voided expense as paid", status: 400 });
     await mount("BILL");
-    fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+    await approveAndPay();
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot mark a voided expense as paid"));
     expect(toast.success).not.toHaveBeenCalled();
