@@ -111,7 +111,7 @@ const slotRequestKey = (r: SlotRequest) => JSON.stringify([r.serviceId, r.date, 
  * (fetchAvailableSlotTimes), kept by the (service, date, staff) asked. A row shows only the answer for its current
  * request: undefined while it is pending, null when it failed; an answer for an older request never reaches it.
  */
-function useSlotAnswers(businessId: string, timeZone: string | null | undefined, requests: SlotRequest[]) {
+export function useSlotAnswers(businessId: string, timeZone: string | null | undefined, requests: SlotRequest[]) {
   const [answers, setAnswers] = useState<Record<string, SlotTime[] | null>>({});
   // Bumped to ask again: by retry (a failed row's Try again) and forget (a refused Place Order).
   const [generation, setGeneration] = useState(0);
@@ -266,6 +266,7 @@ export function CheckoutFlow({
     if (!bd?.date || !bd.time || !bd.startIso || !request) return false;
     return (slotAnswers.answerFor(request) ?? []).some((s) => s.startIso === bd.startIso);
   };
+  const allRowsScheduled = serviceItemsInCart.every(isRowScheduled);
   const hasPhysicalProducts = cart.some((c) => c.itemType === "product");
   const hasServicesOnly = serviceItemsInCart.length > 0 && !hasPhysicalProducts;
 
@@ -315,7 +316,8 @@ export function CheckoutFlow({
       return true;
     }
     if (stepKey === "payment") {
-      return termsAccepted;
+      // A refused order forgets the rows' times (COR-2): it is placed again only once each row has a fresh one.
+      return termsAccepted && allRowsScheduled;
     }
     return true;
   })();
@@ -1202,6 +1204,12 @@ export function CheckoutFlow({
                 <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                   {error}
+                </div>
+              )}
+              {!allRowsScheduled && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
+                  <Clock className="w-4 h-4 flex-shrink-0" />
+                  A time you chose is no longer available. Go back to pick another.
                 </div>
               )}
             </div>

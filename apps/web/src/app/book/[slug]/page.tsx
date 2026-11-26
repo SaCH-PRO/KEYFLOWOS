@@ -124,6 +124,9 @@ function PublicBookingPageInner() {
     serviceNames: string[];
     dates: string[];
     times: string[];
+    /** SWP-BOOKING-SLOTS: each booking's instant as the slots route offered it, and the service's length in minutes. */
+    starts?: (string | null)[];
+    durations?: (number | null)[];
     locations: (string | null)[];
     businessName: string;
   } | null>(null);
@@ -752,10 +755,13 @@ function PublicBookingPageInner() {
 
     // SWP-BOOKING-SLOTS (SEC-M2): every service row books the instant the public slots route offered. A row without
     // one is refused before anything is booked, never read as a wall time on the visitor's clock.
-    for (const si of serviceItemsInCart) {
-      const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
-      if (bd && !bd.startIso) throw new Error(`Please pick a time for ${si.name} again.`);
-    }
+    const withoutInstant = serviceItemsInCart
+      .filter((si) => {
+        const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+        return bd && !bd.startIso;
+      })
+      .map((si) => si.name);
+    if (withoutInstant.length > 0) throw new Error(`Please pick a time again for ${withoutInstant.join(", ")}.`);
 
     // SEC-W9WCN-1: the bookings an unfinished checkout made are reused only
     // by the same customer booking the same services; any other checkout
@@ -822,12 +828,16 @@ function PublicBookingPageInner() {
     const svcDates: string[] = [];
     const svcTimes: string[] = [];
     const svcLocations: (string | null)[] = [];
+    const svcStarts: (string | null)[] = [];
+    const svcDurations: (number | null)[] = [];
     for (const si of serviceItemsInCart) {
       const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
       if (bd) {
         svcNames.push(si.name);
         svcDates.push(bd.date);
         svcTimes.push(bd.time);
+        svcStarts.push(bd.startIso ?? null);
+        svcDurations.push(typeof si.duration === "number" && si.duration > 0 ? si.duration : null);
         svcLocations.push(bd.location?.trim() ? bd.location.trim() : null);
       }
     }
@@ -835,6 +845,8 @@ function PublicBookingPageInner() {
       serviceNames: svcNames,
       dates: svcDates,
       times: svcTimes,
+      starts: svcStarts,
+      durations: svcDurations,
       locations: svcLocations,
       businessName: business?.name || "",
     } : null;
@@ -958,12 +970,14 @@ function PublicBookingPageInner() {
   if (success) {
     const hasStoreOrder = confirmedOrderNumber !== null;
     const isOrder = hasStoreOrder || (bookingResults.length > 0 && bookingResults.every((br) => br.bookingId.startsWith("ORD-")));
-    const firstDate = confirmedDetails?.dates[0];
-    const firstTime = confirmedDetails?.times[0];
-    const calendarUrl = firstDate && firstTime && confirmedDetails
+    // SWP-BOOKING-SLOTS: the calendar event is the booked instant (the slots route's), never the date and time read
+    // on the visitor's clock; it lasts the service's length (an hour when unknown). No instant, no link.
+    const firstStart = confirmedDetails?.starts?.[0] ? new Date(confirmedDetails.starts[0]) : null;
+    const calendarUrl = firstStart && !Number.isNaN(firstStart.getTime()) && confirmedDetails
       ? (() => {
-          const start = new Date(`${firstDate}T${firstTime}`);
-          const end = new Date(start.getTime() + 60 * 60 * 1000);
+          const start = firstStart;
+          const minutes = confirmedDetails.durations?.[0] ?? 60;
+          const end = new Date(start.getTime() + minutes * 60 * 1000);
           const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
           const title = encodeURIComponent(`${confirmedDetails.serviceNames[0] || "Appointment"} - ${confirmedDetails.businessName}`);
           const firstBookingLocation = confirmedDetails.locations?.[0] || null;
