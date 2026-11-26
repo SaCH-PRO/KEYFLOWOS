@@ -69,11 +69,14 @@
  * `.bind` / `Reflect.apply` on a write, a destructured `setItem` (`const { setItem } = localStorage`), a comma call
  * (`(0, ls.setItem)(k, v)`), `document["cookie"] = …`, an aliased `document`, `Object.defineProperty` on a store,
  * arguments spread from a variable, tagged templates, a Headers tuple held in its own variable, `cache.add` /
- * `cache.addAll`, keys built at runtime, and `with` blocks; and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
+ * `cache.addAll`, keys built at runtime, and `with` blocks; in the text scanner only (a file with parse errors), a
+ * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
+ * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
  * the AST too.
  *
- * Counting (CSC_DUMP=1 prints one line per write found): a write reached through a wrapper is one line per call site,
+ * Counting (CSC_DUMP=1 prints one line per write found, sorted by file, line, store and key): a write reached through a
+ * wrapper is one line per call site,
  * so the same id can print twice (cookie kf_sid @ presence-sdk.ts:93, once per writeCookie call). The registry has one
  * row per credential id.
  */
@@ -841,7 +844,18 @@ function scanSourceText(file: string, src: string, base: Ctx): Write[] {
 
   // localStorage / sessionStorage / any storage-like receiver: .setItem(key, value)
   for (const m of src.matchAll(/([\w$.?\]\)]*?)\??\.setItem\s*\(/g)) {
-    const receiver = m[1];
+    let receiver = m[1];
+    // A parenthesized receiver, `(localStorage satisfies Storage).setItem`: read the whole group back to its "(", so
+    // the store is classed as the AST scanner classes it (COR6-5).
+    if (receiver.endsWith(")")) {
+      let depth = 0;
+      let j = m.index! + receiver.length - 1;
+      for (; j >= 0; j--) {
+        if (src[j] === ")") depth++;
+        else if (src[j] === "(" && --depth === 0) break;
+      }
+      if (j >= 0) receiver = src.slice(j, m.index! + receiver.length);
+    }
     const store: Store = /sessionStorage/.test(receiver) ? "sessionStorage" : /localStorage/.test(receiver) ? "localStorage" : "storage";
     const key = readExpr(src, m.index! + m[0].length);
     const value = src[key.end] === "," ? readExpr(src, key.end + 1).text : "";
@@ -1103,10 +1117,21 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
   visitAll((n) => {
     if ((ts.isVariableDeclaration(n) || ts.isParameter(n)) && ts.isIdentifier(n.name)) {
       const name = n.name.text;
-      const type = n.type && ts.isTypeReferenceNode(n.type) ? n.type.typeName.getText(sf) : "";
-      if (type === "IDBObjectStore") storeVars.add(name);
-      if (type === "IDBCursor" || type === "IDBCursorWithValue") cursorVars.add(name);
-      if (type === "Cache") cacheVars.set(name, '"*"'); // a parameter typed Cache (CSC6-SEC-3)
+      // The type's names, through unions and parentheses (`IDBCursorWithValue | null`, COR6-5).
+      const typeNames = (t: ts.TypeNode | undefined): string[] =>
+        !t
+          ? []
+          : ts.isTypeReferenceNode(t)
+            ? [t.typeName.getText(sf)]
+            : ts.isUnionTypeNode(t)
+              ? t.types.flatMap(typeNames)
+              : ts.isParenthesizedTypeNode(t)
+                ? typeNames(t.type)
+                : [];
+      const types = typeNames(n.type);
+      if (types.includes("IDBObjectStore")) storeVars.add(name);
+      if (types.includes("IDBCursor") || types.includes("IDBCursorWithValue")) cursorVars.add(name);
+      if (types.includes("Cache")) cacheVars.set(name, '"*"'); // a parameter typed Cache (CSC6-SEC-3)
       if (ts.isVariableDeclaration(n) && n.initializer) {
         const init = unwrap(n.initializer);
         if (isCookiesCall(init) || isCookiesProp(init)) jars.add(name);
@@ -1310,8 +1335,11 @@ function census(): Write[] {
 
 const id = (r: { store: string; key: string; file: string }) => `${r.store} ${r.key} @ ${r.file}`;
 
-/** The CSC_DUMP lines (repair round 7b fills this in: sorted by file, line, store and key). */
-const dumpLines = (writes: Write[]): string[] => writes.map((w) => `CSC ${isCredential(w) ? "CRED" : "----"} ${w.store} ${w.key} @ ${w.file}:${w.line}`);
+/** The CSC_DUMP lines, sorted by file, line, store and key, so two runs compare line for line (COR6-4). */
+const dumpLines = (writes: Write[]): string[] =>
+  [...writes]
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.store.localeCompare(b.store) || a.key.localeCompare(b.key))
+    .map((w) => `CSC ${isCredential(w) ? "CRED" : "----"} ${w.store} ${w.key} @ ${w.file}:${w.line}`);
 
 /** The census against a registry: credential writes with no row, and rows with no write. */
 function compare(writes: Write[], registry: RegistryRow[]) {
@@ -1379,7 +1407,7 @@ describe("CSC-01 the scanner finds the writes it must", () => {
 
 describe("CSC-02/03 the census matches the registry", () => {
   const writes = census();
-  if (process.env.CSC_DUMP) for (const w of writes) console.log(`CSC ${isCredential(w) ? "CRED" : "----"} ${w.store} ${w.key} @ ${w.file}:${w.line}`);
+  if (process.env.CSC_DUMP) for (const line of dumpLines(writes)) console.log(line);
 
   it("the scan reads the web app (sanity: it finds the session token writes)", () => {
     expect(writes.length).toBeGreaterThan(50);
