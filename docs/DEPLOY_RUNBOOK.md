@@ -443,7 +443,7 @@ downgrades rows that already have a non-null `data_class`.
 
 #### 1. Dry-run report (default — writes nothing to Postgres)
 
-From `apps/server` (or inside the API container with `DATABASE_URL` set):
+From a repo checkout in `apps/server` (with `DATABASE_URL` set):
 
 ```bash
 # Dry-run across all businesses and all 3 memory tables (writes NOTHING)
@@ -453,6 +453,18 @@ pnpm backfill:memory-class
 pnpm backfill:memory-class --business-id=<business_id>
 pnpm backfill:memory-class --table=ai_memories
 ```
+
+On the production host, the `api` container image (`Dockerfile` target `server`) ships `apps/server/dist` and `packages/db/dist` without `apps/server/scripts/` or `apps/server/src/`. Mount both directories read-only from the repo checkout into `/app/apps/server` (mirroring `docs/development/owner-membership-backfill.md`):
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml run --rm -T \
+  -v "$PWD/apps/server/scripts:/app/apps/server/scripts:ro" \
+  -v "$PWD/apps/server/src:/app/apps/server/src:ro" \
+  -w /app/apps/server \
+  api pnpm backfill:memory-class
+```
+
+(Pass `--apply`, `--batch-size=200`, `--business-id=<id>`, `--cursor=...`, etc. after `pnpm backfill:memory-class`.)
 
 The command prints a structured JSON report containing **only counts per table,
 per `data_class` (`GENERAL`, `REVENUE`, `PERSONAL`, `SECRET_BEARING`,
