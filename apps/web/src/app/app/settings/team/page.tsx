@@ -848,7 +848,7 @@ export default function TeamSettingsPage() {
       // BUG-115 (journey J3): the next invite starts at the default role and its defaults, not the last one's.
       setInviteRole(DEFAULT_INVITE_CHOICE);
       startInviteAt(DEFAULT_INVITE_CHOICE, inviter);
-      setShowInvite(false);
+      // The form stays open for the next invite (journey J2 sends three in a row); a closing form lost what was typed.
       setShowAdvancedInvite(false);
       loadDashboard();
     }
