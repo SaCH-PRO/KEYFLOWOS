@@ -27,6 +27,8 @@
  *                        it is not refused 401 on every load (it sent no Authorization header at all)
  *   KSS-W14  RED-BEFORE  under keyDisabled the awareness panel ("From KEY's background scans") renders nothing and
  *                        reads nothing
+ *   KSS-W16  RED-BEFORE  under keyDisabled no door (kf:open-key, kf:open-copilot, Ctrl/Cmd+J) even sets KEY's chat
+ *                        store open or fills its input: the guards hold below the drawer, not only by hiding it
  *   KSS-W15  RED-BEFORE  under keyDisabled the drawer does not render even when KEY's chat store is opened directly
  *                        (as the Genome chip and the chat history do through openGenomeConversation, not an event)
  *
@@ -200,11 +202,14 @@ async function renderShell(page: ReactNode = <p>Today</p>) {
 
 /** Opens KEY's chat store directly, as openGenomeConversation does (no kf:open-key event). */
 function OpenStoreButton() {
-  const { setOpen } = useKeyChat();
+  const { setOpen, open, input } = useKeyChat();
   return (
-    <button type="button" onClick={() => setOpen(true)}>
-      open the chat store
-    </button>
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        open the chat store
+      </button>
+      <output data-testid="chat-store">{`open=${String(open)} input=${String(input ?? "")}`}</output>
+    </>
   );
 }
 
@@ -361,6 +366,27 @@ describe("SWP-KEY-SHELL-SMOKE: KeyAgent's own keys under keyDisabled", { timeout
     fireEvent.click(screen.getByRole("button", { name: "open the chat store" }));
     await settle(200);
     expect(drawer(), "KEY's drawer under keyDisabled").toBeNull();
+  });
+
+  it("KSS-W16 RED-BEFORE: under keyDisabled no door sets KEY's chat store open or fills its input", async () => {
+    keyOff();
+    await renderAgent();
+    const store = () => screen.getByTestId("chat-store").textContent;
+    expect(store()).toBe("open=false input=");
+    const doors: Array<[string, () => void]> = [
+      ["kf:open-key chat", () => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat", prompt: "p1" } }))],
+      ["kf:open-key onboarding", () => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "onboarding" } }))],
+      ["kf:open-copilot", () => window.dispatchEvent(new CustomEvent("kf:open-copilot", { detail: { prompt: "p2" } }))],
+      ["Ctrl+J", () => fireEvent.keyDown(window, { key: "j", ctrlKey: true })],
+      ["Cmd+J", () => fireEvent.keyDown(window, { key: "j", metaKey: true })],
+    ];
+    const moved: string[] = [];
+    for (const [name, press] of doors) {
+      act(() => press());
+      await settle(100);
+      if (store() !== "open=false input=") moved.push(`${name}: ${store()}`);
+    }
+    expect(moved, "doors that moved KEY's chat store under keyDisabled").toEqual([]);
   });
 
   it("KSS-W10 RED-BEFORE: for a new owner whose Genome needs work, the drawer does not open by itself on Today", async () => {
