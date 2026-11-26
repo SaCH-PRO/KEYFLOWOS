@@ -58,7 +58,7 @@ vi.mock("sonner", () => ({
 }));
 
 import TeamSettingsPage from "../page";
-import { setCachedUser } from "@/lib/workspace";
+import { clearStoredBusinessId, setCachedUser } from "@/lib/workspace";
 
 const BUSINESS = "biz_tps";
 const OWNER_ID = "usr_tps_owner";
@@ -422,5 +422,77 @@ describe("SWP-TEAM-WEB repair 1", () => {
     fireEvent.click(within(notice).getByRole("button", { name: /try again/i }));
     await screen.findByText("usr_tpr_cara@example.com");
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+/**
+ * Repair round 2 (the orchestrator's reviews of 0081360f):
+ *   TPR-05  SEC-TW-R1 / COR-TW-R2-1: a reload refused 403 (a module-scope refusal, or BusinessGuard's "No access to
+ *           this business" for a removed member) drops the team from the screen and shows the refusal; only a 5xx, a
+ *           network failure or an empty error keeps the last good list (TPR-04)
+ *   TPR-06  COR-TW-R2-2: a viewer row with no scope map (null) is read at its role's defaults, as the server's
+ *           memberModuleLevel reads it: an ADMIN sees Invite, a STAFF does not
+ *   TPR-07  COR-TW-R2-3: a reload that lowers the viewer's own team level to read while the form is open takes the
+ *           form and Invite away
+ *   TPR-08  SEC-TW-R2: with no cached user at all, Invite is not offered (a cached user absent from the list keeps it,
+ *           R0-ID-UX-T07)
+ */
+describe("SWP-TEAM-WEB repair 2", { timeout: 15_000 }, () => {
+  const kept = () => member("usr_tpr_kept2", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0);
+
+  async function reloadAnswering(answer: { data: null; error: string; status: number }) {
+    serveTeam([owner(), kept()]);
+    await renderAs(OWNER_ID);
+    await screen.findByText("usr_tpr_kept2@example.com");
+    api.apiGet.mockResolvedValue(answer);
+    await openInviteForm();
+    await sendInvite("dee@example.com");
+  }
+
+  it("TPR-05a: a module-scope 403 on reload shows No access and the old rows are gone", async () => {
+    await reloadAnswering({ data: null, error: "Insufficient permissions: team requires read access (you have none)", status: 403 });
+    await waitFor(() => expect(screen.getByText(/no access - ask the owner/i)).toBeTruthy());
+    expect(screen.queryByText("usr_tpr_kept2@example.com"), "the old team left on screen").toBeNull();
+    expect(screen.queryByLabelText("Team member email")).toBeNull();
+  });
+
+  it("TPR-05b: BusinessGuard's 'No access to this business' 403 on reload drops the team and says so", async () => {
+    await reloadAnswering({ data: null, error: "No access to this business", status: 403 });
+    await waitFor(() => expect(screen.queryByText("usr_tpr_kept2@example.com"), "the old team left on screen").toBeNull());
+    expect(document.body.textContent ?? "").toMatch(/no access to this business/i);
+    expect(screen.queryByLabelText("Team member email")).toBeNull();
+    expect(screen.queryByText(/as it was last loaded/i), "the refusal shown as a soft notice").toBeNull();
+  });
+
+  it("TPR-06: a viewer row with a null map is read at its role's defaults (ADMIN invites, STAFF does not)", async () => {
+    serveTeam([owner(), member("usr_tpr_null_admin", "ADMIN", null as unknown as Record<string, string>, 3)]);
+    await renderAs("usr_tpr_null_admin");
+    expect(await screen.findByRole("button", { name: /^Invite$/ }), "Invite for an ADMIN with no stored map").toBeTruthy();
+    cleanup();
+
+    serveTeam([owner(), member("usr_tpr_null_staff", "STAFF", null as unknown as Record<string, string>, 0)]);
+    await renderAs("usr_tpr_null_staff");
+    await screen.findByText("usr_tpr_null_staff@example.com");
+    expect(screen.queryByRole("button", { name: /^Invite$/ }), "Invite for a STAFF with no stored map").toBeNull();
+  });
+
+  it("TPR-07: a reload that lowers the viewer to team read takes the open form and Invite away", async () => {
+    const writer = (team: string) => member("usr_tpr_writer2", "ADMIN", { ...ROLE_DEFAULT_SCOPES.ADMIN, team }, 3);
+    serveTeam([owner(), writer("write")]);
+    await renderAs("usr_tpr_writer2");
+    await openInviteForm();
+    serveTeam([owner(), writer("read")]);
+    await sendInvite("eve@example.com");
+    await waitFor(() => expect(screen.queryByLabelText("Team member email"), "the form after the viewer was lowered").toBeNull());
+    expect(screen.queryByRole("button", { name: /^Invite$/ })).toBeNull();
+  });
+
+  it("TPR-08: with no cached user, Invite is not offered", async () => {
+    clearStoredBusinessId();
+    window.localStorage.setItem("kf_business_id", BUSINESS);
+    serveTeam([owner(), kept()]);
+    render(<TeamSettingsPage />);
+    await screen.findByText("usr_tpr_kept2@example.com");
+    expect(screen.queryByRole("button", { name: /^Invite$/ }), "Invite with no signed-in user known").toBeNull();
   });
 });
