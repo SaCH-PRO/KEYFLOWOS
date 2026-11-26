@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
@@ -178,10 +178,16 @@ const inviteChoice = (value: string): InviteChoice =>
  * this page. Nothing is granted by itself. A map that names them, even at none, is the owner's own choice.
  */
 const LEGACY_MISSING = ["analytics", "operations"] as const;
+/** The old form's eleven modules: it always sent all of them. */
+const LEGACY_FORM_MODULES = ["crm", "revenue", "bookings", "projects", "content", "expenses", "automations", "storefront", "settings", "ai", "team"];
 
+/**
+ * Exactly the old form's shape (repair round 1, SEC-TW-M2 / COR-TW-3): a plain map naming all eleven of its modules and
+ * neither analytics nor operations. An empty or partial map, an array, or a map missing only one of the two is not it.
+ */
 function isLegacyFormMap(scopes: unknown): boolean {
-  if (!scopes || typeof scopes !== "object") return false;
-  return LEGACY_MISSING.every((key) => !Object.hasOwn(scopes, key));
+  if (!scopes || typeof scopes !== "object" || Array.isArray(scopes)) return false;
+  return LEGACY_FORM_MODULES.every((key) => Object.hasOwn(scopes, key)) && LEGACY_MISSING.every((key) => !Object.hasOwn(scopes, key));
 }
 
 /**
@@ -750,6 +756,9 @@ export default function TeamSettingsPage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   // FAILURE-KIT: what the team read answered. A refusal is "no access", a failed load says so; neither is an empty team.
   const [teamRead, setTeamRead] = useState<ReadState>({ kind: "ok" });
+  // COR-TW-4: once the team has loaded, a reload that fails keeps it on screen and says so here, with Try again.
+  const [reloadError, setReloadError] = useState<string | null>(null);
+  const loadedOnce = useRef(false);
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -770,8 +779,15 @@ export default function TeamSettingsPage() {
     if (!businessId) { setLoading(false); return; }
     const res = await apiGet<DashboardData>(`/identity/businesses/${businessId}/team/dashboard`);
     const state = readState(res, { what: "your team" });
+    if (state.kind === "failed" && loadedOnce.current) {
+      setReloadError(state.message);
+      setLoading(false);
+      return;
+    }
+    setReloadError(null);
     setTeamRead(state);
     if (state.kind === "ok" && res.data) {
+      loadedOnce.current = true;
       setDashboard(res.data);
       setActivityItems(res.data.recentActivity);
       // Kept by value, so a reload with the same envelope does not reset the inviter's edits.
@@ -946,7 +962,15 @@ export default function TeamSettingsPage() {
   const staffCount = joined.filter((m) => m.role === "STAFF").length;
   const invitedCount = members.length - joined.length;
   const me = getCachedUser();
-  const viewerIsOwner = !!me?.id && members.some((m) => m.userId === me.id && m.role === "OWNER");
+  const myRow = me?.id ? members.find((m) => m.userId === me.id) : undefined;
+  const viewerIsOwner = myRow?.role === "OWNER";
+  // SEC-TW-M1: the server refuses an invite below team write (403), so the form is not offered there. A viewer the
+  // page cannot find in the list keeps it: the server is the authority, and its refusal is shown as it is.
+  const canInvite =
+    me?.role === "SUPER_ADMIN" ||
+    !myRow ||
+    myRow.role === "OWNER" ||
+    levelRank(ownLevel(myRow.permissionScopes ?? {}, "team")) >= LEVEL_RANK.write;
 
   return (
     <motion.div
@@ -977,15 +1001,26 @@ export default function TeamSettingsPage() {
             <Network className="h-3.5 w-3.5 mr-1.5" />
             Structure
           </Button>
-          <Button size="sm" onClick={() => setShowInvite(!showInvite)}>
-            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-            Invite
-          </Button>
+          {canInvite && (
+            <Button size="sm" onClick={() => setShowInvite(!showInvite)}>
+              <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+              Invite
+            </Button>
+          )}
         </div>
       </div>
 
+      {reloadError && (
+        <div role="alert" className="kf-card px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs border border-amber-500/30">
+          <span>{reloadError} The team below is as it was last loaded.</span>
+          <Button size="sm" variant="subtle" onClick={() => loadDashboard()}>
+            Try again
+          </Button>
+        </div>
+      )}
+
       <AnimatePresence>
-        {showInvite && (
+        {canInvite && showInvite && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
