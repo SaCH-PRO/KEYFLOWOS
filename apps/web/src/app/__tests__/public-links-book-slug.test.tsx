@@ -23,8 +23,8 @@ const ITEM = {
   publishedAt: "2026-11-01T00:00:00Z",
 };
 
-function serveDirectory() {
-  const body = { items: [ITEM], total: 1, page: 1, pageSize: 24, pageCount: 1, filters: { industries: [], cities: [] } };
+function serveDirectory(item = ITEM) {
+  const body = { items: [item], total: 1, page: 1, pageSize: 24, pageCount: 1, filters: { industries: [], cities: [] } };
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } })));
 }
 
@@ -46,5 +46,23 @@ describe("public links name /book/<slug>, not /site/<slug>", () => {
     render(<DirectoryPage />);
     const visit = await screen.findByRole("link", { name: /visit/i });
     expect(visit.getAttribute("href")).toBe("/book/pepper-co");
+  });
+});
+
+describe("repair round 2: the slug is one encoded path segment in both links", () => {
+  const ODD = { ...ITEM, slug: "a b/c?d#e" };
+  const ENCODED = "/book/a%20b%2Fc%3Fd%23e";
+
+  it("the sitemap encodes it", async () => {
+    serveDirectory(ODD);
+    const urls = (await sitemap()).map((e) => e.url);
+    expect(urls.some((u) => u.endsWith(ENCODED)), JSON.stringify(urls)).toBe(true);
+  });
+
+  it("the directory's Visit link encodes it", async () => {
+    serveDirectory(ODD);
+    render(<DirectoryPage />);
+    const visit = await screen.findByRole("link", { name: /visit/i });
+    expect(visit.getAttribute("href")).toBe(ENCODED);
   });
 });

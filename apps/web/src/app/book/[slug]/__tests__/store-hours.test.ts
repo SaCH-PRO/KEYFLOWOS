@@ -85,11 +85,24 @@ describe("SEC-M2: only a real closed flag or valid HH:MM times count as set", ()
     }
   });
 
-  it("a truthy non-boolean closed beside valid times is an open day, not a closed one", () => {
+  it("repair round 2: a closed flag that is neither a boolean nor absent ('true', 1, 'false') says nothing, beside valid times too", () => {
+    // Round 1 read closed: "false" beside valid times as an open day; round 2 (orchestrator, 2026-11-26): a closed
+    // flag that is not exactly true, false, undefined or null is unknown, so that day is neither open nor closed.
     at("2026-11-23T15:00:00Z");
-    const hours = { mon: { open: "09:00", close: "17:00", closed: "false" } } as unknown as BusinessHours;
-    expect(getOpenStatus(hours, POS)).toEqual({ isOpen: true, label: "Open · Closes 17:00" });
-    expect(todaysHoursLabel(hours, POS)).toBe("09:00 – 17:00");
+    for (const closed of ["true", 1, "false"]) {
+      const hours = { mon: { open: "09:00", close: "17:00", closed }, tue: { open: "09:00", close: "17:00", closed: false } } as unknown as BusinessHours;
+      expect(getOpenStatus(hours, POS), `closed ${JSON.stringify(closed)}`).toBeNull();
+      expect(todaysHoursLabel(hours, POS), `closed ${JSON.stringify(closed)}`).toBeNull();
+    }
+  });
+
+  it("closed false, null or absent beside valid times is an open day", () => {
+    at("2026-11-23T15:00:00Z");
+    for (const day of [{ open: "09:00", close: "17:00", closed: false }, { open: "09:00", close: "17:00", closed: null }, { open: "09:00", close: "17:00" }]) {
+      const hours = { mon: day } as unknown as BusinessHours;
+      expect(getOpenStatus(hours, POS), JSON.stringify(day)).toEqual({ isOpen: true, label: "Open · Closes 17:00" });
+      expect(todaysHoursLabel(hours, POS), JSON.stringify(day)).toBe("09:00 – 17:00");
+    }
   });
 
   it("closed === true is closed", () => {
@@ -156,5 +169,31 @@ describe("MIN-3: hours past midnight (18:00-02:00)", () => {
     expect(getOpenStatus(day, POS)).toEqual({ isOpen: true, label: "Open · Closes 17:00" });
     at("2026-11-26T22:00:00Z");
     expect(getOpenStatus(day, POS)).toEqual({ isOpen: false, label: "Closed Now" });
+  });
+});
+
+describe("repair round 2: HH:MM:SS and a 24:00 close", () => {
+  it("times with seconds read as their HH:MM", () => {
+    at("2026-11-26T16:00:00Z"); // Thursday 12:00 in Port of Spain
+    const hours = every("09:00:00", "17:00:00");
+    expect(getOpenStatus(hours, POS)).toEqual({ isOpen: true, label: "Open · Closes 17:00" });
+    expect(todaysHoursLabel(hours, POS)).toBe("09:00 – 17:00");
+  });
+
+  it("a 24:00 close is the end of the day, open until midnight", () => {
+    const hours = every("18:00", "24:00");
+    at("2026-11-27T03:30:00Z"); // Thursday 23:30 in Port of Spain
+    expect(getOpenStatus(hours, POS)).toEqual({ isOpen: true, label: "Open · Closes 24:00" });
+    expect(todaysHoursLabel(hours, POS)).toBe("18:00 – 24:00");
+    at("2026-11-27T04:30:00Z"); // Friday 00:30: Thursday's span ended at midnight
+    expect(getOpenStatus(hours, POS)).toEqual({ isOpen: false, label: "Opens at 18:00" });
+  });
+
+  it("24:00 is not an opening time, and seconds out of range are invalid", () => {
+    at("2026-11-26T16:00:00Z");
+    for (const [open, close] of [["24:00", "17:00"], ["09:00:60", "17:00"]]) {
+      expect(getOpenStatus(every(open, close), POS), `${open}-${close}`).toBeNull();
+      expect(todaysHoursLabel(every(open, close), POS), `${open}-${close}`).toBeNull();
+    }
   });
 });
