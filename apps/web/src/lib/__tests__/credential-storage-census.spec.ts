@@ -22,7 +22,13 @@
  *     receiver) and `update` on a cursor (a name holding "cursor", `cur`, or a parameter typed IDBCursor[WithValue]);
  *   - Cache Storage: the names opened (`[self.]caches.open`) and what is `put` into a cache bound from it (`const`,
  *     `let` or a later assignment, `.then((c) => …)`, `.then(function (c) …)`, or `(await caches.open(n)).put(…)`);
- *   - `window.name`.
+ *   - `window.name` (=, and the logical assignments ||= ??= &&=, as for document.cookie and storage).
+ * Code inside a string or template literal that looks like a store write (an inline script's __html, eval,
+ * new Function, a string setTimeout) is parsed as JS by the same scanner and reported at host-file lines (CSC-37).
+ * Response cookie jars include aliases (`const jar = res.cookies`, `res["cookies"]`, an aliased next/headers
+ * `cookies` import); a Set-Cookie header name may be a const or a concatenation (CSC-38). In public/, a two-argument
+ * put of request headers or the authorization header on any receiver is a Cache write, as is a put on a parameter
+ * typed Cache anywhere (CSC-39). Keys resolve one hop through a same-file const object or enum (CSC-40).
  * A cookie may be built with `+`, a template or `[…].join("")`. A match inside a real comment is not a write; the
  * comments are the ones the TypeScript parser finds (commentRanges: the file parsed as TSX/TS/JSX/JS by its extension,
  * leading and trailing comment ranges at every node and token, none read where JSX text starts), so "/*" or "//" in a
@@ -59,7 +65,11 @@
  * receiver (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `self.name` /
  * `globalThis.name`; a cookie string built up in a variable (`let c = …; c += …; document.cookie = c`); Dexie / idb
  * library databases (contacts-db.ts `new Dexie(name)`); the registry pins keys and cookie attributes, not values;
- * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
+ * and, from the round-6 security review (CSC6-SEC-5): computed method names (`ls[m](k, v)`), `.call` / `.apply` /
+ * `.bind` / `Reflect.apply` on a write, a destructured `setItem` (`const { setItem } = localStorage`), a comma call
+ * (`(0, ls.setItem)(k, v)`), `document["cookie"] = …`, an aliased `document`, `Object.defineProperty` on a store,
+ * arguments spread from a variable, tagged templates, a Headers tuple held in its own variable, `cache.add` /
+ * `cache.addAll`, keys built at runtime, and `with` blocks; and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
  * the AST too.
  *
@@ -485,6 +495,25 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
       if (v !== null) return v;
     }
     return null;
+  }
+  // One-hop property access on a same-file const object or enum: K.a, K["a"], E.A (CSC6-SEC-4).
+  const member = t.match(/^([A-Za-z_$][\w$]*)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*(["'])([^"']*)\3\s*\])$/);
+  if (member) {
+    const [, obj, dotProp, , bracketProp] = member;
+    const prop = dotProp ?? bracketProp;
+    const propRe = (sep: string) => new RegExp(`(?:^|[{,\\s])(?:${prop.replace(/\$/g, "\\$")}|"${prop}"|'${prop}')\\s*${sep}\\s*`);
+    const objText = constText(ctx.src, obj, ctx.at);
+    if (objText !== null && objText.trim().startsWith("{")) {
+      const m = objText.match(propRe(":"));
+      if (m && m.index !== undefined) return literalValue(ctx, readExpr(objText, m.index + m[0].length, ",}").text, depth + 1);
+    }
+    const en = ctx.src.match(new RegExp(`\\benum\\s+${obj.replace(/\$/g, "\\$")}\\s*\\{`));
+    if (en && en.index !== undefined) {
+      const open = en.index + en[0].length - 1;
+      const body = ctx.src.slice(open, blockEnd(ctx.src, open));
+      const m = body.match(propRe("="));
+      if (m && m.index !== undefined) return literalValue(ctx, readExpr(body, m.index + m[0].length, ",}").text, depth + 1);
+    }
   }
   if (IDENT.test(t)) {
     if (ctx.bindings && t in ctx.bindings) return literalValue({ ...ctx, bindings: undefined }, ctx.bindings[t], depth + 1);
@@ -946,12 +975,23 @@ function scanSourceText(file: string, src: string, base: Ctx): Write[] {
  * A file the TypeScript parser reads cleanly is scanned on its AST (scanSourceAst); a file with parse diagnostics falls
  * back to the text scanner (scanSourceText), where every match counts (CSC-30, CSC-35).
  */
-export function scanSource(file: string, src: string, opts: { files?: Record<string, string>; read?: (rel: string) => string | null } = {}): Write[] {
+export function scanSource(
+  file: string,
+  src: string,
+  opts: { files?: Record<string, string>; read?: (rel: string) => string | null; depth?: number } = {},
+): Write[] {
   const read = opts.read ?? (opts.files ? (rel: string) => opts.files![rel] ?? null : undefined);
   const base: Ctx = { file, src, read };
   const parsed = parseFile(file, src);
-  return parsed.ok ? scanSourceAst(file, src, parsed.sf, base) : scanSourceText(file, src, base);
+  return parsed.ok ? scanSourceAst(file, src, parsed.sf, base, opts.depth ?? 0) : scanSourceText(file, src, base);
 }
+
+/**
+ * A string or template whose text looks like code that writes a store (CSC6-SEC-1): an inline script's __html, eval,
+ * new Function, a string setTimeout, or any other. Prose that only names a store ("localStorage is full") does not
+ * match.
+ */
+const CODE_HINT = /\bsetItem\s*\(|\bdocument\s*\.\s*cookie\b|\bindexedDB\s*\.|\bcaches\s*\.\s*open\b|\bcookieStore\s*\.|\bwindow\s*\.\s*name\s*=|\.cookies\b|set-cookie/i;
 
 /** The receiver as written, past parentheses, `!`, `await`, `as` and `satisfies` (and `<T>x` casts). */
 function unwrap(e: ts.Expression): ts.Expression {
@@ -988,7 +1028,7 @@ function propertyName(n: ts.PropertyName): ts.Node | string | undefined {
  * (comments removed) then goes through the same resolution as before (handlersFor: literalValue, valueText,
  * parseCookie), so keys, values, attributes and the census output are unchanged.
  */
-function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx): Write[] {
+function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, depth = 0): Write[] {
   const writes: Write[] = [];
   const push = (w: Omit<Write, "file" | "line">, at: number) => writes.push({ ...w, file, line: lineOf(src, at) });
   const { keyed, cookieString, cookieArgs, cachePut } = handlersFor(file, src, base, push);
@@ -1011,6 +1051,9 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx):
     return out.trim();
   };
   const at = (n: ts.Node) => n.getStart(sf);
+  /** A header name that is "Set-Cookie": any quote kind, a const, or a concatenation (CSC6-SEC-2). */
+  const isSetCookieExpr = (n: ts.Node | undefined) =>
+    !!n && (isSetCookieName(n) || (literalValue({ ...base, at: n.getStart(sf) }, text(n)) ?? "").toLowerCase() === "set-cookie");
   const setCookieNode = (v: ts.Node | undefined, pos: number) => {
     if (!v) return;
     if (ts.isArrayLiteralExpression(v)) for (const el of v.elements) cookieString("response-cookie", text(el), pos);
@@ -1037,7 +1080,21 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx):
   };
 
   // Pass 1: the bindings later writes depend on.
-  const jars = new Set<string>(); // const jar = await cookies()
+  const jars = new Set<string>(); // const jar = await cookies(), or const jar = res.cookies (CSC6-SEC-2)
+  // `cookies` from next/headers, under its own name or an alias (import { cookies as c }).
+  const cookieFns = new Set<string>(["cookies"]);
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !st.importClause?.namedBindings || !ts.isNamedImports(st.importClause.namedBindings)) continue;
+    for (const el of st.importClause.namedBindings.elements) if ((el.propertyName ?? el.name).text === "cookies") cookieFns.add(el.name.text);
+  }
+  const isCookiesCall = (e: ts.Expression) => {
+    const u = unwrap(e);
+    return ts.isCallExpression(u) && ts.isIdentifier(u.expression) && cookieFns.has(u.expression.text) && u.arguments.length === 0;
+  };
+  const isCookiesProp = (e: ts.Expression) => {
+    const u = unwrap(e);
+    return (ts.isPropertyAccessExpression(u) || ts.isElementAccessExpression(u)) && lastName(u) === "cookies";
+  };
   const storeVars = new Set<string>(); // bound from .objectStore(…) or typed IDBObjectStore
   const cursorVars = new Set<string>(); // typed IDBCursor / IDBCursorWithValue
   const cacheVars = new Map<string, string>(); // bound from caches.open(name): name text
@@ -1049,9 +1106,10 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx):
       const type = n.type && ts.isTypeReferenceNode(n.type) ? n.type.typeName.getText(sf) : "";
       if (type === "IDBObjectStore") storeVars.add(name);
       if (type === "IDBCursor" || type === "IDBCursorWithValue") cursorVars.add(name);
+      if (type === "Cache") cacheVars.set(name, '"*"'); // a parameter typed Cache (CSC6-SEC-3)
       if (ts.isVariableDeclaration(n) && n.initializer) {
         const init = unwrap(n.initializer);
-        if (ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === "cookies" && init.arguments.length === 0) jars.add(name);
+        if (isCookiesCall(init) || isCookiesProp(init)) jars.add(name);
         let hasObjectStore = false;
         const find = (k: ts.Node) => {
           if (ts.isCallExpression(k) && methodOf(k)?.name === "objectStore") hasObjectStore = true;
@@ -1101,19 +1159,19 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx):
         keyed(store, a[0] ?? "", a[1] ?? "", pos);
       }
       if (m.name === "set" && lastName(m.recv) === "cookieStore") cookieArgs("cookie", pos, a);
-      if (
-        m.name === "set" &&
-        ((ts.isPropertyAccessExpression(u) && u.name.text === "cookies") ||
-          (ts.isCallExpression(u) && ts.isIdentifier(u.expression) && u.expression.text === "cookies" && u.arguments.length === 0) ||
-          (ts.isIdentifier(u) && jars.has(u.text)))
-      ) {
+      if (m.name === "set" && (isCookiesProp(u) || isCookiesCall(u) || (ts.isIdentifier(u) && jars.has(u.text)))) {
         cookieArgs("response-cookie", pos, a);
       }
-      if ((m.name === "set" || m.name === "append" || m.name === "setHeader") && isSetCookieName(n.arguments[0])) setCookieNode(n.arguments[1], pos);
+      if ((m.name === "set" || m.name === "append" || m.name === "setHeader") && isSetCookieExpr(n.arguments[0])) setCookieNode(n.arguments[1], pos);
       if (m.name === "open" && lastName(m.recv) === "caches") keyed("cacheStorage", a[0] ?? "", "", pos);
       if (m.name === "put") {
         if (ts.isIdentifier(u) && cacheVars.has(u.text)) cachePut(pos, a[0] ?? "", a[1] ?? "", cacheVars.get(u.text)!);
         else if (isCall(u, "caches", "open")) cachePut(pos, a[0] ?? "", a[1] ?? "", text((unwrap(u) as ts.CallExpression).arguments[0]));
+        // In public/ (the service worker), a two-argument put of request headers or the authorization header on any
+        // other receiver, a parameter included, is a Cache write too (CSC6-SEC-3).
+        else if (file.startsWith("public/") && n.arguments.length === 2 && /headers|authorization/i.test(`${a[0]} ${a[1]}`)) {
+          cachePut(pos, a[0] ?? "", a[1] ?? "", '"*"');
+        }
       }
       if (idbFile && (m.name === "put" || m.name === "add")) {
         const name = lastName(u);
@@ -1133,14 +1191,20 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx):
     }
     if (ts.isBinaryExpression(n)) {
       const op = n.operatorToken.kind;
-      if (op !== ts.SyntaxKind.EqualsToken && op !== ts.SyntaxKind.PlusEqualsToken) return;
+      // = and the logical assignments ||= ??= &&= write the target; += appends (document.cookie).
+      const assigns =
+        op === ts.SyntaxKind.EqualsToken ||
+        op === ts.SyntaxKind.BarBarEqualsToken ||
+        op === ts.SyntaxKind.QuestionQuestionEqualsToken ||
+        op === ts.SyntaxKind.AmpersandAmpersandEqualsToken;
+      if (!assigns && op !== ts.SyntaxKind.PlusEqualsToken) return;
       const left = n.left;
       const pos = at(n);
       if (ts.isPropertyAccessExpression(left) && left.name.text === "cookie" && lastName(left.expression) === "document") {
         cookieString("cookie", text(n.right), pos);
         return;
       }
-      if (op !== ts.SyntaxKind.EqualsToken) return;
+      if (!assigns) return;
       if (ts.isPropertyAccessExpression(left) && left.name.text === "name" && lastName(left.expression) === "window") {
         push({ store: "window.name", key: "window.name", expr: "window.name", value: text(n.right) }, pos);
         return;
@@ -1154,13 +1218,31 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx):
     }
     if (ts.isPropertyAssignment(n)) {
       const name = propertyName(n.name);
-      const isSc = typeof name === "string" ? name.toLowerCase() === "set-cookie" : isSetCookieName(name);
+      const isSc = typeof name === "string" ? name.toLowerCase() === "set-cookie" : isSetCookieExpr(name);
       if (isSc) setCookieNode(n.initializer, at(n));
       return;
     }
     // The Headers tuple: a two-element ["Set-Cookie", value] that is an entry of an outer array (CSC2-COR-D).
-    if (ts.isArrayLiteralExpression(n) && n.elements.length === 2 && isSetCookieName(n.elements[0]) && ts.isArrayLiteralExpression(n.parent)) {
+    if (ts.isArrayLiteralExpression(n) && n.elements.length === 2 && isSetCookieExpr(n.elements[0]) && ts.isArrayLiteralExpression(n.parent)) {
       setCookieNode(n.elements[1], at(n));
+      return;
+    }
+    // Code inside a string or template (CSC6-SEC-1): parsed as JS by this same scanner (the text scanner if it does
+    // not parse), its writes reported at host-file lines. A substitution becomes a placeholder that keeps its line
+    // breaks, so the lines still line up.
+    if (depth < 3 && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n))) {
+      const code = ts.isTemplateExpression(n)
+        ? n.head.text +
+          n.templateSpans
+            // Every line break between "${" and "}", the whitespace around the expression included.
+            .map((sp) => `__kf_sub__${"\n".repeat((src.slice(sp.expression.pos, sp.literal.getStart(sf)).match(/\n/g) ?? []).length)}${sp.literal.text}`)
+            .join("")
+        : n.text;
+      if (!CODE_HINT.test(code)) return;
+      const firstLine = lineOf(src, at(n));
+      for (const w of scanSource(`${file}.inline.js`, code, { read: base.read, depth: depth + 1 })) {
+        writes.push({ ...w, file, line: firstLine + w.line - 1 });
+      }
     }
   });
 
@@ -2270,6 +2352,11 @@ describe("CSC-37 code inside a string or template is scanned", () => {
       expect(keysOf(scan("src/fixture-str-code.ts", fixture))).toContain(key);
     });
   }
+
+  it("a multi-line substitution keeps the inner lines aligned with the host file", () => {
+    const fixture = ["const s = `${", "  a +", "  b", "}", "localStorage.setItem('kf_ml_token', t);`;"].join("\n");
+    expect(scan("src/fixture-ml.ts", fixture).find((w) => w.key === "kf_ml_token")?.line).toBe(5);
+  });
 
   it("prose that only names a store is not a write", () => {
     const fixture = `const msg = "localStorage is full; clear the token cache"; const h = "Set-Cookie";`;
