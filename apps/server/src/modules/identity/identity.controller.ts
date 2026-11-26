@@ -880,23 +880,6 @@ export class IdentityController {
   }
 
   /**
-   * NAV-B-LEGACY-SERVER (V1-67, owner rulings D-152 'hide', D-156 'payroll',
-   * D-153 'whatsapp', D-158 'devhooks'): per-business live read of which hidden
-   * v1 modules this business already has live records in. Any live member
-   * (AuthGuard + BusinessGuard); answers sorted module key strings only —
-   * zero counts, zero names, zero amounts, zero writes (SWP-READ-SCOPE-CENSUS
-   * expected-applied exempt-own).
-   */
-  @UseGuards(AuthGuard, BusinessGuard)
-  @Get('businesses/:businessId/legacy-modules')
-  async getLegacyModules(@Param('businessId') businessId: string): Promise<V1HiddenModuleKey[]> {
-    if (!this.legacyModules) {
-      throw new ServiceUnavailableException('Legacy modules service unavailable');
-    }
-    return this.legacyModules.getLegacyModules(businessId);
-  }
-
-  /**
    * Public storefront lookup by slug.
    * Returns public-safe business fields (name, logo, contact info, social links, etc.).
    * Used when a visitor navigates to a business's public URL by its human-readable slug.
@@ -1171,6 +1154,26 @@ export class IdentityController {
   @Get('businesses/community-profile/:businessId')
   async getCommunityProfile(@Param('businessId') businessId: string) {
     return this.identity.getBusinessCommunityProfile(businessId);
+  }
+
+  /**
+   * NAV-B-LEGACY-SERVER (V1-67, owner rulings D-152 'hide', D-156 'payroll',
+   * D-153 'whatsapp', D-158 'devhooks'): per-business live read of which hidden
+   * v1 modules this business already has live records in. Any live member
+   * (AuthGuard + BusinessGuard); answers sorted module key strings only —
+   * zero counts, zero names, zero amounts, zero writes (SWP-READ-SCOPE-CENSUS
+   * expected-applied exempt-own). Placed after literal-prefix routes
+   * (`businesses/slug/:slug`, `businesses/slug-check/:slug`,
+   * `businesses/public/:businessId`, `businesses/community-profile/:businessId`)
+   * so those never get intercepted at Express runtime.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/legacy-modules')
+  async getLegacyModules(@Param('businessId') businessId: string): Promise<V1HiddenModuleKey[]> {
+    if (!this.legacyModules) {
+      throw new ServiceUnavailableException('Legacy modules service unavailable');
+    }
+    return this.legacyModules.getLegacyModules(businessId);
   }
 
   @Get('profile-completeness-fields')
