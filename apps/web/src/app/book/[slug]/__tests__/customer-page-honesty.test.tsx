@@ -158,6 +158,27 @@ describe("store hero: no unearned badges", () => {
   });
 });
 
+describe("store hero: the hours as the store saves them (short day keys)", () => {
+  // Your page's hours editor and the server's booking availability key Business.businessHours by sun..sat; the
+  // profile editor writes sunday..saturday. Both are read: a business open now is not called closed.
+  const SHORT_9_TO_5: BusinessHours = Object.fromEntries(
+    ["sun", "mon", "tue", "wed", "thu", "fri", "sat"].map((d) => [d, { open: "09:00", close: "17:00", closed: false }]),
+  );
+
+  it("a business open 09:00-17:00 every day is open at 11:00 in Port of Spain, not 'Closed Today'", () => {
+    at("2026-11-26T15:00:00Z");
+    renderHero(business(SHORT_9_TO_5));
+    expect(pageText()).not.toMatch(/closed today/i);
+    expect(pageText()).toMatch(/open · closes 17:00/i);
+  });
+
+  it("and closed at 18:00 there", () => {
+    at("2026-11-26T22:00:00Z");
+    renderHero(business(SHORT_9_TO_5));
+    expect(pageText()).toMatch(/closed now/i);
+  });
+});
+
 describe("trust bar: no unearned badges", () => {
   it("never falls back to 'Guaranteed by KeyFlowOS', with or without today's hours", () => {
     for (const businessHoursToday of [null, undefined, "09:00 – 17:00"]) {
