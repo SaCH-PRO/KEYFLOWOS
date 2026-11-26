@@ -30,6 +30,10 @@ import {
   listRecommendationsForReader,
   listSignalsForReader,
 } from './genome-finance-scope';
+import {
+  growthChannelForReader,
+  marketingSnapshotForReader,
+} from './genome-composites-for-reader';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
@@ -1120,13 +1124,18 @@ export class KeyGenomeController {
     @Query('channelType') channelType?: string,
     @Query('minConfidence') minConfidence?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.growthChannels.findMany(businessId, {
-      status,
-      channelType,
-      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
-      limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    const [rows, readsRevenue] = await Promise.all([
+      this.growthChannels.findMany(businessId, {
+        status,
+        channelType,
+        minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+        limit: limit !== undefined ? Number(limit) : undefined,
+      }),
+      this.readsRevenue(businessId, req),
+    ]);
+    return rows.map((c) => growthChannelForReader(c as unknown as Record<string, unknown>, readsRevenue));
   }
 
   @RequireModuleScope('settings', 'write')
@@ -1134,8 +1143,13 @@ export class KeyGenomeController {
   async createGrowthChannel(
     @Param('businessId') businessId: string,
     @Body() body: CreateGenomeGrowthChannelInput,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.growthChannels.create(businessId, body);
+    const [created, readsRevenue] = await Promise.all([
+      this.growthChannels.create(businessId, body),
+      this.readsRevenue(businessId, req),
+    ]);
+    return growthChannelForReader(created as unknown as Record<string, unknown>, readsRevenue);
   }
 
   @RequireModuleScope('settings', 'write')
@@ -1144,8 +1158,13 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Param('channelId') channelId: string,
     @Body() body: UpdateGenomeGrowthChannelInput,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.growthChannels.update(businessId, channelId, body);
+    const [updated, readsRevenue] = await Promise.all([
+      this.growthChannels.update(businessId, channelId, body),
+      this.readsRevenue(businessId, req),
+    ]);
+    return growthChannelForReader(updated as unknown as Record<string, unknown>, readsRevenue);
   }
 
   @RequireModuleScope('settings', 'write')
@@ -1196,8 +1215,12 @@ export class KeyGenomeController {
   }
 
   @Get('marketing-growth/snapshot')
-  async getMarketingGrowthSnapshot(@Param('businessId') businessId: string) {
-    return this.marketingGenome.getLatestMarketingGrowthSnapshot(businessId);
+  async getMarketingGrowthSnapshot(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const [snapshot, readsRevenue] = await Promise.all([
+      this.marketingGenome.getLatestMarketingGrowthSnapshot(businessId),
+      this.readsRevenue(businessId, req),
+    ]);
+    return marketingSnapshotForReader(snapshot as unknown as Record<string, unknown> | null, readsRevenue);
   }
 
   @RequireModuleScope('settings', 'write')
@@ -1205,8 +1228,13 @@ export class KeyGenomeController {
   async computeMarketingGrowthSnapshot(
     @Param('businessId') businessId: string,
     @Query('period') period?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.marketingGenome.computeMarketingGrowthSnapshot(businessId, period);
+    const [snapshot, readsRevenue] = await Promise.all([
+      this.marketingGenome.computeMarketingGrowthSnapshot(businessId, period),
+      this.readsRevenue(businessId, req),
+    ]);
+    return marketingSnapshotForReader(snapshot as unknown as Record<string, unknown>, readsRevenue);
   }
 
   @Get('marketing-growth/snapshots')
@@ -1215,24 +1243,39 @@ export class KeyGenomeController {
     @Query('period') period?: string,
     @Query('riskLevel') riskLevel?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.marketingGenome.listMarketingGrowthSnapshots(businessId, {
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    // Ignore riskLevel filter when !readsRevenue to block oracle probing of overallRisk.
+    const rows = await this.marketingGenome.listMarketingGrowthSnapshots(businessId, {
       period,
-      riskLevel,
+      riskLevel: readsRevenue ? riskLevel : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
     });
+    return rows.map((s) => marketingSnapshotForReader(s as unknown as Record<string, unknown>, readsRevenue));
   }
 
   @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/signals/generate')
-  async generateMarketingGrowthSignals(@Param('businessId') businessId: string) {
-    return this.marketingGenome.generateMarketingGrowthSignals(businessId);
+  async generateMarketingGrowthSignals(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const [rows, readsRevenue] = await Promise.all([
+      this.marketingGenome.generateMarketingGrowthSignals(businessId),
+      this.readsRevenue(businessId, req),
+    ]);
+    return readsRevenue ? rows : rows.filter((s) => !isFinanceSignal(s));
   }
 
   @RequireModuleScope('settings', 'write')
   @Post('marketing-growth/recommendations/generate')
-  async generateMarketingGrowthRecommendations(@Param('businessId') businessId: string) {
-    return this.marketingGenome.generateMarketingGrowthRecommendations(businessId);
+  async generateMarketingGrowthRecommendations(
+    @Param('businessId') businessId: string,
+    @Req() req?: GenomeRequest,
+  ) {
+    const [rows, readsRevenue] = await Promise.all([
+      this.marketingGenome.generateMarketingGrowthRecommendations(businessId),
+      this.readsRevenue(businessId, req),
+    ]);
+    return readsRevenue ? rows : rows.filter((r) => !isFinanceRecommendation(r));
   }
 
   // ---------------------------------------------------------------------------

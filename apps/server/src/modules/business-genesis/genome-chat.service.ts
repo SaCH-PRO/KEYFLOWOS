@@ -6,6 +6,12 @@ import type { DnaSectionKey, GenomeIntegrityResult } from '../blueprint/blueprin
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 import { DNA_TO_KEY_GENOME_SECTION } from '../business-genome/key-genome/key-genome.service';
+import { isServedDnaKey } from '../business-genome/key-genome/genome-composites-for-reader';
+import {
+  isMoneyLabel,
+  proposalTextStatesMoney,
+  structuredValueStatesMoney,
+} from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeChatMessage {
   id: string;
@@ -54,25 +60,95 @@ export class GenomeChatService {
 
   async getMessages(
     businessId: string,
-    options: { limit?: number; cursor?: string } = {},
+    options: { limit?: number; cursor?: string; readsRevenue?: boolean } = {},
   ): Promise<GenomeChatMessage[]> {
     const limit = Math.min(options.limit ?? 50, 100);
+    const readsRevenue = options.readsRevenue !== false;
     const rows = await this.prisma.client.genomeChatMessage.findMany({
       where: { businessId },
-      take: limit,
+      ...(readsRevenue ? { take: limit } : {}),
       cursor: options.cursor ? { id: options.cursor } : undefined,
       orderBy: { createdAt: 'desc' },
     });
 
-    return rows
-      .map((row) => ({
-        id: row.id,
-        role: row.role as 'user' | 'assistant' | 'system',
-        content: row.content,
-        metadata: (row.metadata as Record<string, unknown>) || undefined,
-        createdAt: row.createdAt,
-      }))
-      .reverse();
+    const mapped: GenomeChatMessage[] = rows.map((row) => ({
+      id: row.id,
+      role: row.role as 'user' | 'assistant' | 'system',
+      content: row.content,
+      metadata: (row.metadata as Record<string, unknown>) || undefined,
+      createdAt: row.createdAt,
+    }));
+
+    if (readsRevenue) {
+      return mapped.reverse();
+    }
+
+    const projected: GenomeChatMessage[] = [];
+    for (const msg of mapped) {
+      const cleaned = this.projectMessageForNonRevenueReader(msg);
+      if (cleaned) projected.push(cleaned);
+      if (projected.length >= limit) break;
+    }
+    return projected.reverse();
+  }
+
+  private projectMessageForNonRevenueReader(msg: GenomeChatMessage): GenomeChatMessage | null {
+    const meta = msg.metadata;
+    if (meta && typeof meta === 'object') {
+      const appliedSection = meta.appliedSection;
+      if (typeof appliedSection === 'string' && !isServedDnaKey(appliedSection)) {
+        return null;
+      }
+      const proposed = meta.proposedUpdates;
+      if (proposed && typeof proposed === 'object' && !Array.isArray(proposed)) {
+        const proposedSection = (proposed as { section?: unknown }).section;
+        if (typeof proposedSection === 'string' && !isServedDnaKey(proposedSection)) {
+          return null;
+        }
+      }
+    }
+
+    // Legacy system messages for money DNA without metadata or mentioning money DNA explicitly.
+    if (msg.role === 'system') {
+      const sectionMatch = /^Updated\s+([a-z_]+)\s+DNA\b/i.exec(msg.content);
+      if (sectionMatch && !isServedDnaKey(sectionMatch[1])) {
+        return null;
+      }
+    }
+
+    const content = msg.content.replace(/\s*Genome Integrity[^.]*\.?/gi, '').trim();
+
+    let nextMeta = meta;
+    if (meta && typeof meta === 'object') {
+      const copy: Record<string, unknown> = { ...meta };
+      if (copy.appliedData && typeof copy.appliedData === 'object' && !Array.isArray(copy.appliedData)) {
+        const cleanedData: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(copy.appliedData as Record<string, unknown>)) {
+          if (isMoneyLabel(k) || proposalTextStatesMoney(k) || structuredValueStatesMoney(v)) continue;
+          cleanedData[k] = v;
+        }
+        copy.appliedData = cleanedData;
+      }
+      if (
+        copy.proposedUpdates &&
+        typeof copy.proposedUpdates === 'object' &&
+        !Array.isArray(copy.proposedUpdates)
+      ) {
+        const pu = { ...(copy.proposedUpdates as Record<string, unknown>) };
+        if (pu.data && typeof pu.data === 'object' && !Array.isArray(pu.data)) {
+          const cleanedData: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(pu.data as Record<string, unknown>)) {
+            if (isMoneyLabel(k) || proposalTextStatesMoney(k) || structuredValueStatesMoney(v)) continue;
+            cleanedData[k] = v;
+          }
+          pu.data = cleanedData;
+        }
+        copy.proposedUpdates = pu;
+      }
+      nextMeta = copy;
+    }
+
+    return { ...msg, content, metadata: nextMeta };
   }
 
   async sendMessage(
@@ -131,11 +207,15 @@ export class GenomeChatService {
     const genome = await this.blueprint.calculateGenomeIntegrity(businessId);
 
     const populatedFields = Object.keys(data).join(', ');
+    // SR-15 & SR-17: never persist genome integrity % or money DNA values in the shared chat history.
+    const metadata: Record<string, unknown> = isServedDnaKey(section)
+      ? { appliedSection: section, appliedData: data }
+      : { appliedSection: section };
     await this.persistMessage(
       businessId,
       'system',
-      `Updated ${section} DNA: ${populatedFields}. Genome Integrity is now ${genome.genomeIntegrity}%.`,
-      { appliedSection: section, appliedData: data },
+      `Updated ${section} DNA: ${populatedFields}.`,
+      metadata,
     );
 
     await this.writeEvidenceBackedFacts(businessId, userId, section, data, opts);

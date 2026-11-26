@@ -13,6 +13,7 @@ import {
 } from '../business-genome/key-genome/key-genome.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import { KeyGenomeBackfillService } from '../business-genome/key-genome/key-genome-backfill.service';
+import { dnaSectionsForReader } from '../business-genome/key-genome/genome-composites-for-reader';
 import {
   BlueprintBrand,
   BlueprintComplianceProfile,
@@ -381,8 +382,13 @@ export class BlueprintService {
   /**
    * Return rule-based DNA recommendations for the next highest-value action.
    */
-  async getRecommendations(businessId: string): Promise<GenomeRecommendation[]> {
-    const { dnaSections, threePillarMinimumMet } = await this.calculateGenomeIntegrity(businessId);
+  async getRecommendations(
+    businessId: string,
+    options: { readsRevenue?: boolean } = {},
+  ): Promise<GenomeRecommendation[]> {
+    const readsRevenue = options.readsRevenue !== false;
+    const { dnaSections: rawSections, threePillarMinimumMet } = await this.calculateGenomeIntegrity(businessId);
+    const dnaSections = dnaSectionsForReader(rawSections, readsRevenue);
 
     const recommendations: GenomeRecommendation[] = [];
 
