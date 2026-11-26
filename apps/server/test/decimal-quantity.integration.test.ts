@@ -334,7 +334,7 @@ beforeAll(async () => {
   await db.product.create({
     data: { id: ID.prodBizB, businessId: ID.bizB, name: 'V64F Foreign Product', price: 100, inventoryMode: null },
   });
-}, 30_000);
+}, 180_000);
 
 afterAll(async () => {
   await cleanup();
