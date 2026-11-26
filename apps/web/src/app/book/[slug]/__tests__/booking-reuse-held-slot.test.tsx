@@ -15,6 +15,8 @@
  *
  *   BRH-01  after a failed payment, the same customer checks out again with the time already booked (selected,
  *           though the fresh answer omits it); the service is booked once, at that instant, and the order placed
+ *   BRH-02  another customer at the same browser is not handed the kept booking's slot: their row starts empty,
+ *           the kept time is not offered to them, and it does not schedule their row
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -142,12 +144,14 @@ const orderPosts = () => net.posts.filter((p) => p.path === ORDER_PATH);
 const button = (name: string | RegExp) => screen.getByRole("button", { name });
 
 /** The checkout's information and delivery steps, up to its Schedule part (the details are remembered after once). */
-async function toSchedule() {
+async function toSchedule(who?: { firstName: string; email: string }) {
   fireEvent.click(await screen.findByRole("button", { name: "Checkout" }, { timeout: 3000 }));
   const first = await screen.findByPlaceholderText("John");
-  if (!(first as HTMLInputElement).value) fireEvent.change(first, { target: { value: "Rhea" } });
+  if (who) fireEvent.change(first, { target: { value: who.firstName } });
+  else if (!(first as HTMLInputElement).value) fireEvent.change(first, { target: { value: "Rhea" } });
   const email = screen.getByPlaceholderText("john@example.com") as HTMLInputElement;
-  if (!email.value) fireEvent.change(email, { target: { value: "brh_customer@example.test" } });
+  if (who) fireEvent.change(email, { target: { value: who.email } });
+  else if (!email.value) fireEvent.change(email, { target: { value: "brh_customer@example.test" } });
   fireEvent.click(button(/Continue/i));
   fireEvent.change(screen.getByPlaceholderText("123 Main Street"), { target: { value: "1 Frederick St" } });
   fireEvent.change(screen.getByPlaceholderText("Port of Spain"), { target: { value: "Port of Spain" } });
@@ -199,5 +203,25 @@ describe("SWP-BOOKING-SLOTS: a kept booking's time stays the customer's after a 
     await screen.findByRole("heading", { name: "Order Placed!" }, { timeout: 3000 });
     expect(orderPosts()).toHaveLength(2);
     expect(bookingPosts(), "the service is booked once, not again at another time").toHaveLength(1);
+  });
+
+  it("BRH-02 another customer at the same browser is not handed the kept booking's slot", async () => {
+    render(<PublicBookingPage />);
+    await toSchedule();
+    fireEvent.change(document.querySelector('input[type="date"]') as HTMLInputElement, { target: { value: "2026-12-15" } });
+    fireEvent.click(await screen.findByRole("button", { name: "11:00" }));
+    await placeOrder();
+    await screen.findByRole("heading", { name: "Payment Failed" }, { timeout: 3000 });
+
+    fireEvent.click(button("Back to Shop"));
+    net.slots = WITHOUT_OWN;
+    await toSchedule({ firstName: "Otto", email: "brh_other@example.test" });
+
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    expect(dateInput.value, "the other customer's row starts empty").toBe("");
+    fireEvent.change(dateInput, { target: { value: "2026-12-15" } });
+    expect(await screen.findByRole("button", { name: "12:00" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "11:00" }), "the kept booking's time is not offered to them").toBeNull();
+    expect(button(/Continue/i)).toBeDisabled();
   });
 });
