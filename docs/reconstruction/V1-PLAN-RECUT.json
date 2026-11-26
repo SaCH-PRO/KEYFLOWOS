@@ -14491,6 +14491,11 @@
    "change": "Conditional AMEND: if the components WOS-C01 mounts move, re-pointing the test's import (never its assertions) uses the authority S1-RULINGS-RECORD requests in advance."
   },
   {
+   "packet": "TODAY-4BLOCK",
+   "r0_case": "command-actions-ops-scope.test.tsx '[WOS-C01] RED-BEFORE: a member without operations ...' (final assertion)",
+   "change": "AMEND (owner ruling D-295, #80 7188960928): WOS-C01's final assertion only. expect(screen.getByText(\"No urgent actions today.\")), the removed cockpit snapshot's briefing headline, becomes: the level-2 headings Needs you and Today render for a member without operations (D-96). In that case GET .../today answers 503, so Pulse and Get set up do not render. The case title that release0-index.json cites as closedBy (OPS-T02) is unchanged; WOS-C02..C07 and every other WOS-C01 assertion are unchanged. Commit e9e05754 on pkt/V1-TODAY-4BLOCK."
+  },
+  {
    "packet": "KEY-PASTE-BOX",
    "r0_case": "apps/web/e2e/release0-live.spec.ts",
    "change": "KEEP: apps/web/e2e/release0-live.spec.ts (closedBy evidence) drives /app/commerce/invoices/new: the 'New Invoice' heading, the 'Select a client...' option, the /add item/i button, the 'Item description' placeholder, the two number inputs per line (quantity, price), the /save draft/i button and a 250.00 total for 2 x 100 + 1 x 50; all stay as they are."
