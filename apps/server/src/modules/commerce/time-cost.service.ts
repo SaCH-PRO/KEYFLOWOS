@@ -81,6 +81,21 @@ export class TimeCostService {
     }
   }
 
+  private async assertContactInBusiness(
+    businessId: string,
+    contactId: unknown,
+  ): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || contactId.trim().length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
+    const contact = await this.db.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   async create(input: CreateTimeCostInput) {
     if (!ALLOWED_REFS.includes(input.refType)) {
       throw new BadRequestException(`Unsupported refType: ${input.refType}`);
@@ -89,6 +104,7 @@ export class TimeCostService {
       throw new BadRequestException('minutes must be a positive number');
     }
     await this.assertRef(input.businessId, input.refType, input.refId);
+    await this.assertContactInBusiness(input.businessId, input.contactId);
 
     // Inherit contactId from the referenced row when caller didn't supply one
     // — most time entries are billable against a contact and we want the
@@ -124,6 +140,7 @@ export class TimeCostService {
     if (!Number.isFinite(minutes) || minutes <= 0) {
       throw new BadRequestException('minutes must be a positive number');
     }
+    await this.assertContactInBusiness(businessId, patch.contactId);
     const costRate = patch.costRate === undefined ? existing.costRate : patch.costRate;
     return this.db.timeCostEntry.update({
       where: { id },
@@ -286,20 +303,40 @@ export class TimeCostService {
     try {
       switch (refType) {
         case 'INVOICE': {
-          const r = await this.db.invoice.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          const r = await this.db.invoice.findFirst({
+            where: { id: refId, businessId },
+            select: { contactId: true, contact: { select: { businessId: true, deletedAt: true } } },
+          });
+          return r?.contactId && r.contact?.businessId === businessId && r.contact?.deletedAt === null
+            ? r.contactId
+            : null;
         }
         case 'QUOTE': {
-          const r = await this.db.quote.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          const r = await this.db.quote.findFirst({
+            where: { id: refId, businessId },
+            select: { contactId: true, contact: { select: { businessId: true, deletedAt: true } } },
+          });
+          return r?.contactId && r.contact?.businessId === businessId && r.contact?.deletedAt === null
+            ? r.contactId
+            : null;
         }
         case 'BOOKING': {
-          const r = await this.db.booking.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          const r = await this.db.booking.findFirst({
+            where: { id: refId, businessId },
+            select: { contactId: true, contact: { select: { businessId: true, deletedAt: true } } },
+          });
+          return r?.contactId && r.contact?.businessId === businessId && r.contact?.deletedAt === null
+            ? r.contactId
+            : null;
         }
         case 'PROJECT': {
           const r = await this.db.project.findFirst({ where: { id: refId, businessId }, select: { contactId: true } });
-          return r?.contactId ?? null;
+          if (!r?.contactId) return null;
+          const c = await this.db.contact.findFirst({
+            where: { id: r.contactId, businessId, deletedAt: null },
+            select: { id: true },
+          });
+          return c?.id ?? null;
         }
         case 'ORDER': {
           // MarketplaceOrder is keyed by customer email rather than a CRM

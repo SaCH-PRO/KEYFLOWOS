@@ -110,9 +110,16 @@ function build(stored: ReturnType<typeof order>) {
 
   const client = {
     marketplaceOrder: {
-      findFirst: vi.fn(async () => stored),
-      findUnique: vi.fn(async () => stored),
-      update: vi.fn(async ({ data }: any) => { writes.push(`order.update:${Object.keys(data).sort().join(',')}`); return { ...stored, ...data }; }),
+      findFirst: vi.fn(async () => current),
+      findUnique: vi.fn(async () => current),
+      update: vi.fn(async ({ data }: any) => { writes.push(`order.update:${Object.keys(data).sort().join(',')}`); current = { ...current, ...data }; return current; }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        writes.push(`order.updateMany:${Object.keys(data).sort().join(',')}`);
+        if (where.id !== current.id || where.businessId !== current.businessId || where.status !== current.status) return { count: 0 };
+        current = { ...current, ...data };
+        return { count: 1 };
+      }),
+      findFirstOrThrow: vi.fn(async () => current),
     },
     warehouse: { findFirst: vi.fn(async () => null) },
     product: {
@@ -169,8 +176,8 @@ describe('V1-18 StoreOrderService: CONFIRMED is not paid', () => {
     expect(h.emitted.some((e) => e.name === 'store_order.paid')).toBe(false);
     expect(h.emitted[0].payload.businessId).toBe(BIZ);
     expect(h.emitted[0].payload.order.id).toBe('ord_v18_1');
-    // Only the fulfilment status moves; nothing claims the money arrived.
-    expect(h.writes).toEqual(['order.update:status']);
+    // Only the fulfilment status moves (compare-and-set on the status read, W1F-ORDER-TRANSITIONS D-198); nothing claims the money arrived.
+    expect(h.writes).toEqual(['order.updateMany:status']);
     expect(out.paymentStatus).toBe('UNPAID');
     expect(h.tx.invoice.create).not.toHaveBeenCalled();
     expect(h.tx.payment.create).not.toHaveBeenCalled();
@@ -280,5 +287,66 @@ describe('W11-ORDER-CANCEL-RELEASE StoreOrderService: CANCELLED releases the ord
       });
       expect(h.emitted.map((e) => e.name), status).toEqual(['store_order.cancelled']);
     }
+  });
+
+  it('SO-09 (W1F-ORDER-TRANSITIONS; D-198) moving SHIPPED or DELIVERED backwards is refused 400 with nothing written and no event', async () => {
+    const shipped = build(order({ status: 'SHIPPED', paymentStatus: 'PAID' }));
+    await expect(shipped.svc.updateOrderStatus('ord_v18_1', 'PROCESSING', BIZ)).rejects.toMatchObject({ status: 400 });
+    expect(shipped.writes).toEqual([]);
+    expect(shipped.emitted).toEqual([]);
+
+    const delivered = build(order({ status: 'DELIVERED', paymentStatus: 'PAID' }));
+    await expect(delivered.svc.updateOrderStatus('ord_v18_1', 'SHIPPED', BIZ)).rejects.toMatchObject({ status: 400 });
+    expect(delivered.writes).toEqual([]);
+    expect(delivered.emitted).toEqual([]);
+  });
+
+  it('SO-10 (W1F-ORDER-TRANSITIONS; D-198) SHIPPED compare-and-set refuses 409 when a concurrent cancel commits between read and write', async () => {
+    const h = build(order({ status: 'CONFIRMED', paymentStatus: 'PAID' }));
+    h.client.marketplaceOrder.findFirst.mockImplementationOnce(async () => {
+      const snap = { ...order({ status: 'CONFIRMED', paymentStatus: 'PAID' }) };
+      h.moveStored({ status: 'CANCELLED' });
+      return snap;
+    });
+    await expect(h.svc.updateOrderStatus('ord_v18_1', 'SHIPPED', BIZ)).rejects.toMatchObject({ status: 409 });
+    expect(h.emitted).toEqual([]);
+  });
+
+  it("SO-11 (W1F-ORDER-TRANSITIONS review R1-SEC-01) isClosedStorefrontOrder and completeCheckout FULFILMENT_PAST_CONFIRMED trim padded statuses: ' cancelled ' is closed and refused, and ' shipped ' is not rewound to CONFIRMED", async () => {
+    const { isClosedStorefrontOrder } = await import('./store-order.service');
+    expect(isClosedStorefrontOrder({ status: ' cancelled ', paymentStatus: 'UNPAID' })).toBe(true);
+    expect(isClosedStorefrontOrder({ status: ' refunded ', paymentStatus: 'PAID' })).toBe(true);
+    expect(isClosedStorefrontOrder({ status: 'PENDING', paymentStatus: ' refunded ' })).toBe(true);
+
+    // Padded ' shipped ' order settled via completeCheckout keeps trimmed 'shipped' (never rewound to CONFIRMED).
+    const hShipped = build(order({ status: ' shipped ', paymentStatus: 'UNPAID' }));
+    hShipped.tx.$queryRaw.mockResolvedValueOnce([{ id: 'ord_v18_1', status: ' shipped ', payment_status: 'UNPAID' }]);
+    const settled = await hShipped.svc.completeCheckout({
+      orderId: 'ord_v18_1',
+      paymentRef: 'ref_r1_shipped',
+      provider: 'stripe',
+      method: 'card',
+    });
+    expect(settled?.status).toBe('shipped');
+    expect(hShipped.tx.marketplaceOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'shipped', paymentStatus: 'PAID' }),
+      }),
+    );
+
+    // Padded ' cancelled ' order with refuseClosedOrder: true is refused 409 with nothing written.
+    const hCancelled = build(order({ status: ' cancelled ', paymentStatus: 'UNPAID' }));
+    hCancelled.tx.$queryRaw.mockResolvedValueOnce([{ id: 'ord_v18_1', status: ' cancelled ', payment_status: 'UNPAID' }]);
+    await expect(
+      hCancelled.svc.completeCheckout({
+        orderId: 'ord_v18_1',
+        paymentRef: 'ref_r1_cancelled',
+        provider: 'manual',
+        method: 'cash',
+        refuseClosedOrder: true,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(hCancelled.tx.invoice.create).not.toHaveBeenCalled();
+    expect(hCancelled.tx.marketplaceOrder.update).not.toHaveBeenCalled();
   });
 });

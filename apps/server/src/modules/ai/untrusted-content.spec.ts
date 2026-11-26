@@ -137,7 +137,12 @@ describe('RR-UNTRUSTED-CONTENT-FENCE fenceUntrusted: empty and oversize input', 
     expect(fenceUntrusted('attachment', text as never)).toBe('');
   });
 
-  it.each([['attachment' as const], ['mcp_tool' as const]])('%s: oversize input is capped at its limit with a note inside the block', (source) => {
+  it.each([
+    ['attachment' as const],
+    ['mcp_tool' as const],
+    ['inbound_message' as const],
+    ['storefront_signal' as const],
+  ])('%s: oversize input is capped at its limit with a note inside the block', (source) => {
     const cap = UNTRUSTED_MAX_CHARS[source];
     expect(cap).toBeGreaterThan(0);
     const fenced = fenceUntrusted(source, 'x'.repeat(cap * 3));

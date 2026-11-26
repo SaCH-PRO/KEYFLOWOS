@@ -10,6 +10,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../../ai/model-gateway.service';
+import { capUntrusted, fenceUntrusted, withUntrustedContentRule, withoutInvisible } from '../../ai/untrusted-content';
 import { KeyCortexEventBusService } from '../key-cortex-event-bus.service';
 
 export interface SentimentDetectionResult {
@@ -94,12 +95,8 @@ export class SentimentWatcherService {
           channel: message.channel,
           threadId: message.threadId ?? null,
           contactId: message.contactId ?? null,
-          senderName: message.senderName ?? null,
-          senderEmail: message.senderEmail ?? null,
-          snippet: text.slice(0, 300),
           score: detection.score,
           keywords: detection.keywords,
-          llmReason: detection.llmReason,
           receivedAt: message.receivedAt ?? message.createdAt,
         },
         metadata: {
@@ -290,9 +287,15 @@ export class SentimentWatcherService {
   private async classifyWithLlm(
     text: string,
   ): Promise<{ negative: boolean; confidence: number; reason: string }> {
-    const prompt = `Classify whether the following customer message expresses negative sentiment. Reply with exactly one line in this format: NEGATIVE:<score>:<reason> or NEUTRAL:<score>:<reason> where score is 0.0-1.0.
-
-Message: "${text.replace(/"/g, '\\"').slice(0, 500)}"`;
+    const fenced = fenceUntrusted('inbound_message', capUntrusted(withoutInvisible(text), 500));
+    if (!fenced) {
+      return { negative: false, confidence: 0, reason: '' };
+    }
+    const instructions = withUntrustedContentRule(
+      'Classify whether the following customer message expresses negative sentiment. ' +
+        'Reply with exactly one line in this format: NEGATIVE:<score>:<reason> or NEUTRAL:<score>:<reason> where score is 0.0-1.0.',
+    );
+    const prompt = `${instructions}\n\nMessage:\n${fenced}`;
 
     const result = await (this.modelGateway as any).complete(prompt, {
       model: 'gpt-4o-mini',

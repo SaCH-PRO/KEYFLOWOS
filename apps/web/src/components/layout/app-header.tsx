@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 import { NewEntityMenu } from "./new-entity-menu";
 import { openKey } from "@/components/key/key-agent";
+import { useKeyEnabled } from "@/hooks/use-key-enabled";
 import { getCachedUser } from "@/lib/workspace";
 import { getNotificationIcon, getNotificationLink, relativeTime } from "@/lib/notifications";
 import type { AppNotification } from "@/lib/notifications";
@@ -119,8 +120,11 @@ export function AppHeader({
   const pathname = usePathname();
   // KEY's door (journey K: "KEY opens only from the header button, on phones
   // too, or Cmd/Ctrl+J"). app/app/layout.tsx mounts KeyAgent, which answers
-  // it, everywhere but onboarding, so the door is not shown there.
-  const showKeyDoor = !pathname?.startsWith("/app/onboarding");
+  // it, everywhere but onboarding, so the door is not shown there. Nor under
+  // the server's KEY_DISABLED, nor until /identity/me has said KEY is on
+  // (SWP-KEY-SHELL-SMOKE: a KEY-disabled business never sees the door flash).
+  const { enabled: keyEnabled } = useKeyEnabled();
+  const showKeyDoor = keyEnabled && !pathname?.startsWith("/app/onboarding");
 
 
   return (

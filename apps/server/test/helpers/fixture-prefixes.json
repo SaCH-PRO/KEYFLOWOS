@@ -593,9 +593,19 @@
       "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
     },
     {
+      "prefix": "v70d_",
+      "owner": "apps/server/test/order-transitions.integration.test.ts",
+      "packet": "V1-70 (W1F-ORDER-TRANSITIONS)"
+    },
+    {
       "prefix": "v70h_",
       "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
+    },
+    {
+      "prefix": "v72d_",
+      "owner": "apps/server/test/social-webhook-tenant.integration.test.ts",
+      "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
     },
     {
       "prefix": "v80m_",
@@ -736,6 +746,11 @@
       "prefix": "v86e_",
       "owner": "apps/server/test/contact-status-readers-import.integration.test.ts",
       "packet": "V1-86 (V1-38b-STATUS-READERS)"
+    },
+    {
+      "prefix": "v86u_",
+      "owner": "apps/server/test/untrusted-inbound-fence.integration.test.ts",
+      "packet": "V1-86 (FU-UNTRUSTED-INBOUND-FENCE)"
     },
     {
       "prefix": "v87a_",
@@ -1490,6 +1505,51 @@
       "prefix": "v81o_",
       "owner": "apps/server/test/key-overdue-sent-only.integration.test.ts",
       "packet": "V1-81 (FU-KEY-OVERDUE-SENT-ONLY, P113)"
+    },
+    {
+      "prefix": "v83c_",
+      "owner": "apps/server/test/contactid-writer-validation.integration.test.ts",
+      "packet": "V1-83 (FU-CONTACTID-WRITER-VALIDATION, P114)"
+    },
+    {
+      "prefix": "v72t_",
+      "owner": "apps/server/test/token-encryption-key-census.integration.test.ts",
+      "packet": "V1-72 (RR-DB-CRYPTO-KEY-CENSUS)"
+    },
+    {
+      "prefix": "v72b_",
+      "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
+    },
+    {
+      "prefix": "v67b_",
+      "owner": "apps/server/test/legacy-modules.integration.test.ts",
+      "packet": "V1-67 (NAV-B-LEGACY-SERVER)"
+    },
+    {
+      "prefix": "v84k_",
+      "owner": "apps/server/test/cortex-insight-cash-truth.integration.test.ts",
+      "packet": "V1-84 (FU-CORTEX-INSIGHT-CASH-TRUTH, P119)"
+    },
+    {
+      "prefix": "v85m_",
+      "owner": "apps/server/test/marketplace-paid-payment-row.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120)"
+    },
+    {
+      "prefix": "v85n_",
+      "owner": "apps/server/test/marketplace-paid-payment-row-r1.integration.test.ts",
+      "packet": "V1-85 (FU-MARKETPLACE-PAID-PAYMENT-ROW, P120 R1)"
+    },
+    {
+      "prefix": "v86t_",
+      "owner": "apps/server/test/timeline-callers-scope.integration.test.ts",
+      "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE)"
+    },
+    {
+      "prefix": "v86r_",
+      "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
+      "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
     }
   ],
   "pendingRenames": [],

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
@@ -18,6 +18,12 @@ import {
   type ProviderFailureClass,
 } from './provider-failure-class';
 import { keyDisabled } from '../../core/config/env';
+import {
+  MODEL_LIFECYCLE_CATALOG,
+  MODEL_LIFECYCLE_CATALOG_TOKEN,
+  isModelRetired,
+  type ModelLifecycleEntry,
+} from './model-lifecycle-catalog';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'google' | 'native' | 'opensource';
 
@@ -686,6 +692,7 @@ export class ModelGatewayService {
   private readonly byokEncryptionAvailable: boolean;
   private routingTable: Record<AiMode, Record<TaskCategory, ModelStrategy>>;
   private routingTableLoaded = false;
+  private readonly lifecycleCatalog: readonly ModelLifecycleEntry[];
 
   private static readonly PREFERENCES_TTL_MS = 120_000;
   private static readonly MAX_RETRIES = 2;
@@ -701,7 +708,9 @@ export class ModelGatewayService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly llmCost: LLMCostService,
     private readonly langfuse: LangfuseService,
+    @Optional() @Inject(MODEL_LIFECYCLE_CATALOG_TOKEN) lifecycleCatalog?: readonly ModelLifecycleEntry[],
   ) {
+    this.lifecycleCatalog = lifecycleCatalog ?? MODEL_LIFECYCLE_CATALOG;
     // A MISSING KEY MUST NOT TAKE THE WHOLE SERVER DOWN.
     //
     // The OpenAI SDK throws from its own constructor when apiKey is undefined.
@@ -847,6 +856,13 @@ export class ModelGatewayService {
     const preferences = await this.getPreferences(request.businessId);
     const mode = preferences.aiMode;
     const strategy = this.resolveStrategy(request, mode, preferences);
+    const rawCandidates = [strategy.primary, ...strategy.fallbacks];
+    const { candidates, primaryDroppedAsRetired, allRetired } =
+      this.filterRetiredCandidates(rawCandidates, request);
+
+    if (allRetired) {
+      throw this.noProviderAvailable(rawCandidates, preferences, { allRetired: true });
+    }
 
     const budgetCaps = preferences.budgetCaps;
     let spendByProvider: Record<string, number> | undefined;
@@ -858,7 +874,6 @@ export class ModelGatewayService {
       totalSpend = spendData.total;
     }
 
-    const candidates = [strategy.primary, ...strategy.fallbacks];
     const budgetFilteredCandidates = this.filterCandidatesByBudget(
       candidates, budgetCaps, spendByProvider, totalSpend,
     );
@@ -890,7 +905,7 @@ export class ModelGatewayService {
         continue;
       }
 
-      if (i > 0 || (budgetDegraded && candidate !== candidates[0])) {
+      if (i > 0 || primaryDroppedAsRetired || (budgetDegraded && candidate !== candidates[0])) {
         fallbackUsed = true;
         fallbackProvider = candidate.provider;
         this.logger.warn(
@@ -971,7 +986,7 @@ export class ModelGatewayService {
         lastError ? `another candidate failed with a provider error (${classifyProviderFailure(lastError)})` : undefined,
       );
     }
-    throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
+    throw lastError || this.noProviderAvailable(rawCandidates, preferences);
   }
 
   /**
@@ -981,13 +996,17 @@ export class ModelGatewayService {
   private noProviderAvailable(
     candidates: Array<{ provider: AiProvider }>,
     preferences: AiPreferences,
+    options: { allRetired?: boolean } = {},
   ): ServiceUnavailableException {
-    const code: AiUnavailableCode = candidates.some((c) => this.isProviderConfigured(c.provider, preferences))
-      ? 'provider_unavailable'
-      : 'provider_not_configured';
-    const message = code === 'provider_not_configured'
-      ? 'No AI providers available: no AI provider is configured for this deployment or business'
-      : 'No AI providers available: every configured AI provider is temporarily unavailable';
+    const code: AiUnavailableCode =
+      options.allRetired || candidates.some((c) => this.isProviderConfigured(c.provider, preferences))
+        ? 'provider_unavailable'
+        : 'provider_not_configured';
+    const message = options.allRetired
+      ? 'No AI providers available: every candidate model is retired'
+      : code === 'provider_not_configured'
+        ? 'No AI providers available: no AI provider is configured for this deployment or business'
+        : 'No AI providers available: every configured AI provider is temporarily unavailable';
     return new ServiceUnavailableException({ code, service: 'ai', message, error: 'Service Unavailable' });
   }
 
@@ -1108,7 +1127,22 @@ export class ModelGatewayService {
     const preferences = await this.getPreferences(request.businessId);
     const mode = preferences.aiMode;
     const strategy = this.resolveStrategy(request, mode, preferences);
-    const candidates = [strategy.primary, ...strategy.fallbacks];
+    const rawCandidates = [strategy.primary, ...strategy.fallbacks];
+    const { candidates, primaryDroppedAsRetired, allRetired } =
+      this.filterRetiredCandidates(rawCandidates, request);
+
+    if (allRetired) {
+      const refusal = this.noProviderAvailable(rawCandidates, preferences, { allRetired: true });
+      const body = refusal.getResponse() as { code: AiUnavailableCode };
+      yield {
+        type: 'error',
+        error: refusal.message,
+        code: body.code,
+        fallbackUsed: false,
+        fallbackProvider: undefined,
+      };
+      return;
+    }
 
     const budgetCaps = preferences.budgetCaps;
     let spendByProvider: Record<string, number> | undefined;
@@ -1145,7 +1179,7 @@ export class ModelGatewayService {
         continue;
       }
 
-      if (i > 0 || (budgetFilteredCandidates.length === 0 && candidate !== candidates[0])) {
+      if (i > 0 || primaryDroppedAsRetired || (budgetFilteredCandidates.length === 0 && candidate !== candidates[0])) {
         fallbackUsed = true;
         fallbackProvider = candidate.provider;
         this.logger.warn(
@@ -1236,7 +1270,7 @@ export class ModelGatewayService {
       return;
     }
     // Nothing was dispatched: the same refusal complete() throws, as a chunk.
-    const refusal = this.noProviderAvailable(effectiveCandidates, preferences);
+    const refusal = this.noProviderAvailable(rawCandidates, preferences);
     const body = refusal.getResponse() as { code: AiUnavailableCode };
     yield {
       type: 'error',
@@ -1253,6 +1287,15 @@ export class ModelGatewayService {
     model: string,
     preferences: AiPreferences,
   ): AsyncGenerator<StreamChunk> {
+    if (isModelRetired(provider, model, this.getLifecycleCatalog())) {
+      throw new ServiceUnavailableException({
+        code: 'provider_unavailable' as AiUnavailableCode,
+        service: 'ai',
+        message: `No AI providers available: model ${provider}/${model} is retired`,
+        error: 'Service Unavailable',
+      });
+    }
+
     const normalizedMessages = this.normalizeMessages(request.messages, provider);
 
     switch (provider) {
@@ -2021,6 +2064,57 @@ export class ModelGatewayService {
     };
   }
 
+  private getLifecycleCatalog(): readonly ModelLifecycleEntry[] {
+    return this.lifecycleCatalog ?? MODEL_LIFECYCLE_CATALOG;
+  }
+
+  private isCandidateRetired(candidate: { provider: AiProvider; model: string }): boolean {
+    return isModelRetired(candidate.provider, candidate.model, this.getLifecycleCatalog());
+  }
+
+  /**
+   * RR-MODEL-LIFECYCLE-GUARD (P124): drop every candidate marked 'retired' in
+   * the lifecycle catalog before dispatch, regardless of its origin (default
+   * routing table, DB-loaded routing table, preferredProvider /
+   * PROVIDER_DEFAULT_MODEL, or per-request providerOverride + modelOverride).
+   * Logs a structured warning for each skipped candidate with no secrets/keys.
+   */
+  private filterRetiredCandidates(
+    rawCandidates: Array<{ provider: AiProvider; model: string }>,
+    request: GatewayRequest,
+  ): {
+    candidates: Array<{ provider: AiProvider; model: string }>;
+    primaryDroppedAsRetired: boolean;
+    allRetired: boolean;
+  } {
+    const kept: Array<{ provider: AiProvider; model: string }> = [];
+    let primaryDroppedAsRetired = false;
+
+    for (let i = 0; i < rawCandidates.length; i++) {
+      const candidate = rawCandidates[i];
+      if (this.isCandidateRetired(candidate)) {
+        if (i === 0) primaryDroppedAsRetired = true;
+        this.logger.warn(
+          `Skipping retired model candidate: ${JSON.stringify({
+            provider: candidate.provider,
+            modelId: candidate.model,
+            reason: 'retired',
+            taskCategory: request.taskCategory,
+            businessId: request.businessId,
+          })}`,
+        );
+        continue;
+      }
+      kept.push(candidate);
+    }
+
+    return {
+      candidates: kept,
+      primaryDroppedAsRetired,
+      allRetired: rawCandidates.length > 0 && kept.length === 0,
+    };
+  }
+
   private resolveStrategy(
     request: GatewayRequest,
     mode: AiMode,
@@ -2028,9 +2122,11 @@ export class ModelGatewayService {
   ): ModelStrategy {
     // An explicit per-request override still wins over everything. It is used by
     // callers that know exactly what they need and is not a user preference.
-    if (request.providerOverride && request.modelOverride) {
+    const modelOverride =
+      typeof request.modelOverride === 'string' ? request.modelOverride.trim() : '';
+    if (request.providerOverride && modelOverride) {
       return {
-        primary: { provider: request.providerOverride, model: request.modelOverride },
+        primary: { provider: request.providerOverride, model: modelOverride },
         fallbacks: this.routingTable[mode][request.taskCategory]?.fallbacks ?? [],
       };
     }
@@ -2054,11 +2150,12 @@ export class ModelGatewayService {
     if (!preferred || preferred === strategy.primary.provider) return strategy;
     if (!this.isProviderAvailable(preferred, preferences)) return strategy;
 
-    // Prefer a model this provider is already trusted with for this task; fall
-    // back to its general-purpose model. Picking a model the provider does not
-    // serve would turn a preference into a hard failure.
+    // Prefer a non-retired model this provider is already trusted with for this
+    // task; fall back to its general-purpose model. If that default is itself
+    // retired, filterRetiredCandidates drops and logs it at dispatch and counts
+    // the next non-retired candidate as a fallback.
     const fromChain = [strategy.primary, ...strategy.fallbacks].find(
-      (c) => c.provider === preferred,
+      (c) => c.provider === preferred && !this.isCandidateRetired(c),
     );
     const model = fromChain?.model ?? PROVIDER_DEFAULT_MODEL[preferred];
     if (!model) return strategy;
@@ -2197,6 +2294,15 @@ export class ModelGatewayService {
     model: string,
     preferences: AiPreferences,
   ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
+    if (isModelRetired(provider, model, this.getLifecycleCatalog())) {
+      throw new ServiceUnavailableException({
+        code: 'provider_unavailable' as AiUnavailableCode,
+        service: 'ai',
+        message: `No AI providers available: model ${provider}/${model} is retired`,
+        error: 'Service Unavailable',
+      });
+    }
+
     const normalizedMessages = this.normalizeMessages(request.messages, provider);
 
     switch (provider) {
@@ -3144,7 +3250,13 @@ export class ModelGatewayService {
     const preferences = await this.getPreferences(request.businessId);
     const mode = preferences.aiMode;
     const strategy = this.resolveStrategy(request, mode, preferences);
-    const candidates = [strategy.primary, ...strategy.fallbacks];
+    const rawCandidates = [strategy.primary, ...strategy.fallbacks];
+    const { candidates, primaryDroppedAsRetired, allRetired } =
+      this.filterRetiredCandidates(rawCandidates, request);
+
+    if (allRetired) {
+      throw this.noProviderAvailable(rawCandidates, preferences, { allRetired: true });
+    }
 
     const budgetCaps = preferences.budgetCaps;
     let spendByProvider: Record<string, number> | undefined;
@@ -3170,16 +3282,16 @@ export class ModelGatewayService {
         return {
           provider: candidate.provider,
           model: candidate.model,
-          fallbackUsed: i > 0,
+          fallbackUsed: i > 0 || primaryDroppedAsRetired,
         };
       }
     }
 
-    // Fallback of last resort: return the first candidate even if unavailable
+    // Fallback of last resort: return the first non-retired candidate even if unavailable
     return {
       provider: effectiveCandidates[0].provider,
       model: effectiveCandidates[0].model,
-      fallbackUsed: false,
+      fallbackUsed: primaryDroppedAsRetired,
     };
   }
 

@@ -59,6 +59,10 @@ const SHORTCUTS: ShortcutConfig[] = [
     key: "j",
     modifier: "meta",
     global: true,
+    // KeyAgent owns Cmd/Ctrl+J too (it opens and closes KEY's drawer), for the reason given for Cmd/Ctrl+K above: this
+    // hook's kf:open-key opened the drawer and KeyAgent's toggle shut it again in the same keypress
+    // (FU-KEY-CTRLJ-OWNERS).
+    ownedBy: "KeyAgent",
     handler: () => window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat" } })),
     description: "Talk to KEY",
     category: "Navigation",

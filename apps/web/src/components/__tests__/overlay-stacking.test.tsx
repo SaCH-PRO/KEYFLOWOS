@@ -170,7 +170,7 @@ const json = (status: number, body: unknown) =>
  */
 function answer(url: string): Response {
   const p = new URL(url, "http://api.test.local").pathname;
-  if (p === "/identity/me") return json(200, { id: "usr_swp_layers", email: "owner@swp-layers.test", businesses: [{ id: BIZ, role: "OWNER" }] });
+  if (p === "/identity/me") return json(200, { id: "usr_swp_layers", email: "owner@swp-layers.test", keyDisabled: false, businesses: [{ id: BIZ, role: "OWNER" }] });
   if (p.endsWith("/genome/integrity")) return json(200, { genomeIntegrity: 40, sections: [] });
   if (/\/(sessions|notifications|needs-attention|items|list)(\/|$)/.test(p) || p.endsWith("/flow/sessions")) return json(200, []);
   return json(200, {});

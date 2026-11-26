@@ -32,11 +32,17 @@ describe('GenomeEvolutionController', () => {
     expect(result.id).toBe('prop_2');
   });
 
-  it('POST /evolution-proposals/generate-from-temporal-flow generates candidates', async () => {
+  it('POST /evolution-proposals/generate-from-temporal-flow generates candidates with reader scope', async () => {
     const { controller, service } = makeController();
-    const result = await controller.generateFromTemporalFlow('biz_1', { user: { id: 'user_1' } } as any);
-    expect(service.generateFromTemporalFlow).toHaveBeenCalledWith('biz_1', 'user_1');
+    const result = await controller.generateFromTemporalFlow('biz_1', { user: { id: 'user_1', role: 'USER' } } as any);
+    expect(service.generateFromTemporalFlow).toHaveBeenCalledWith('biz_1', 'user_1', { id: 'user_1', role: 'USER' });
     expect(result).toHaveLength(1);
+  });
+
+  it('POST /evolution-proposals/generate-from-temporal-flow passes null reader when req.user is absent', async () => {
+    const { controller, service } = makeController();
+    await controller.generateFromTemporalFlow('biz_1', {} as any);
+    expect(service.generateFromTemporalFlow).toHaveBeenCalledWith('biz_1', undefined, null);
   });
 
   it('POST /evolution-proposals/:id/approve approves', async () => {

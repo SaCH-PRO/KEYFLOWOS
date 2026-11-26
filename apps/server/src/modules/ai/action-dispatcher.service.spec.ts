@@ -42,10 +42,11 @@ type Answer = (ctx: { businessId: string; toolName: string }) => unknown;
 /** A dispatcher whose orchestrator answers with `answer` (a value is the result; a thrown error fails the attempt). */
 function makeDispatcher(answer: Answer) {
   const executeToolDirectly = vi.fn(async (businessId: string, toolName: string) => answer({ businessId, toolName }));
+  const logToolExecution = vi.fn(async () => undefined);
   const dispatcher = new ActionDispatcherService(
-    {} as never,
+    { client: { aiExecutionLog: { findFirst: async () => null } } } as never,
     { emit: () => true } as never,
-    { logToolExecution: async () => undefined } as never,
+    { logToolExecution } as never,
     { evaluate: async () => ({ allowed: true, tier: 1, reason: 'w9dc: allowed' }) } as never,
     { executeToolDirectly } as never,
     { registerAction: async () => undefined } as never,
@@ -54,7 +55,7 @@ function makeDispatcher(answer: Answer) {
   internals.logger = { log: () => undefined, warn: () => undefined, error: () => undefined };
   // Retries happen at once here; how many there are is what these cases count.
   internals.RETRY_DELAYS = [0, 0];
-  return { dispatcher, executeToolDirectly, threshold: internals.CIRCUIT_THRESHOLD, timeoutMs: internals.CIRCUIT_TIMEOUT_MS };
+  return { dispatcher, executeToolDirectly, logToolExecution, threshold: internals.CIRCUIT_THRESHOLD, timeoutMs: internals.CIRCUIT_TIMEOUT_MS };
 }
 
 const ctx = (businessId: string, toolName = TOOL, extra: Partial<DispatchContext> = {}): DispatchContext => ({
@@ -115,13 +116,13 @@ describe('ActionDispatcherService circuit breaker (W9-DISPATCH-CIRCUIT; review S
     expect(ran).toMatchObject({ success: true, result: { id: 'w9dc_ok' } });
   });
 
-  it('DC-02 W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): circuits are per business and tool: five genuine failures open the circuit for that business and tool only; another business runs the tool, and the same business runs another tool', async () => {
+  it('DC-02 W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73; updated RR-DISPATCH-NO-BLIND-RETRY, D-263): circuits are per business and tool: five genuine failures open the circuit for that business and tool only; another business runs the tool, and the same business runs another tool', async () => {
     const { dispatcher, executeToolDirectly, threshold } = makeDispatcher(
       failFor({ businessId: BIZ_A }, () => new Error('connect ECONNREFUSED 127.0.0.1:5432')),
     );
 
     for (let i = 0; i < threshold; i++) {
-      expect(await dispatcher.dispatch(ctx(BIZ_A, TOOL, { retryCount: 0 }))).toMatchObject({ success: false, error: 'connect ECONNREFUSED 127.0.0.1:5432' });
+      expect(await dispatcher.dispatch(ctx(BIZ_A, TOOL, { retryCount: 0 }))).toMatchObject({ success: false, error: 'OUTCOME_UNKNOWN: connect ECONNREFUSED 127.0.0.1:5432' });
     }
     expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ open: true, failures: threshold });
 
@@ -142,51 +143,82 @@ describe('ActionDispatcherService circuit breaker (W9-DISPATCH-CIRCUIT; review S
     expect(dispatcher.getCircuitStatus(TOOL)).toMatchObject({ open: true, failures: threshold });
   });
 
-  it('DC-03 regression control (W9-DISPATCH-CIRCUIT): a genuine failure keeps the breaker: an Error, a 5xx and a timeout are each retried and counted, the fifth opens the circuit, nothing runs while it is open, and it closes after CIRCUIT_TIMEOUT_MS', async () => {
+  it('DC-03 regression control (W9-DISPATCH-CIRCUIT; updated RR-DISPATCH-NO-BLIND-RETRY, D-263): a genuine failure keeps the breaker: an Error, a 5xx and a timeout are retried 3x on a READ tool (and 1x OUTCOME_UNKNOWN on a WRITE tool), the fifth opens the circuit, nothing runs while it is open, and it closes after CIRCUIT_TIMEOUT_MS', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-10T09:00:00Z'));
+    const READ_TOOL = 'fetch_business_summary';
     const failures = [
-      () => new Error('Tool call_create_task failed'),
+      () => new Error('Tool failed'),
       () => new InternalServerErrorException('database unavailable'),
       () => new ServiceUnavailableException('provider unavailable'),
       () => Object.assign(new Error('operation timed out'), { code: 'ETIMEDOUT' }),
       () => new HttpException('Gateway Timeout', HttpStatus.GATEWAY_TIMEOUT),
     ];
-    let n = 0;
-    let fail = true;
-    const { dispatcher, executeToolDirectly, threshold, timeoutMs } = makeDispatcher(() => {
-      if (fail) throw failures[Math.floor(n++ / 3) % failures.length]();
+
+    // READ tool: retried 3x per dispatch, fifth opens circuit, closes after CIRCUIT_TIMEOUT_MS.
+    let nRead = 0;
+    let failRead = true;
+    const readRun = makeDispatcher(() => {
+      if (failRead) throw failures[Math.floor(nRead++ / 3) % failures.length]();
+      return { id: 'w9dc_read_ok' };
+    });
+    for (let i = 0; i < readRun.threshold; i++) {
+      expect(await readRun.dispatcher.dispatch(ctx(BIZ_A, READ_TOOL)), `read dispatch ${i + 1}`).toMatchObject({ success: false });
+      expect(readRun.executeToolDirectly).toHaveBeenCalledTimes(3 * (i + 1));
+      expect(readRun.dispatcher.getCircuitStatus(READ_TOOL, BIZ_A)).toMatchObject({ failures: i + 1, open: i + 1 >= readRun.threshold });
+    }
+    failRead = false;
+    expect(await readRun.dispatcher.dispatch(ctx(BIZ_A, READ_TOOL))).toMatchObject({ success: false, error: `Circuit breaker open for tool "${READ_TOOL}"` });
+    expect(readRun.executeToolDirectly).toHaveBeenCalledTimes(3 * readRun.threshold);
+    vi.setSystemTime(Date.now() + readRun.timeoutMs + 1);
+    expect(await readRun.dispatcher.dispatch(ctx(BIZ_A, READ_TOOL))).toMatchObject({ success: true, result: { id: 'w9dc_read_ok' } });
+    expect(readRun.dispatcher.getCircuitStatus(READ_TOOL, BIZ_A)).toMatchObject({ open: false, failures: 0 });
+
+    // WRITE tool: 1 attempt per dispatch (OUTCOME_UNKNOWN), fifth still opens circuit, closes after CIRCUIT_TIMEOUT_MS.
+    let nWrite = 0;
+    let failWrite = true;
+    const writeRun = makeDispatcher(() => {
+      if (failWrite) throw failures[nWrite++ % failures.length]();
       return { id: 'w9dc_ok' };
     });
-
-    for (let i = 0; i < threshold; i++) {
-      expect(await dispatcher.dispatch(ctx(BIZ_A)), `dispatch ${i + 1}`).toMatchObject({ success: false });
-      // Retried: three attempts (retryCount 2) for each genuine failure.
-      expect(executeToolDirectly).toHaveBeenCalledTimes(3 * (i + 1));
-      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ failures: i + 1, open: i + 1 >= threshold });
+    for (let i = 0; i < writeRun.threshold; i++) {
+      const r = await writeRun.dispatcher.dispatch(ctx(BIZ_A));
+      expect(r.success, `write dispatch ${i + 1}`).toBe(false);
+      expect(r.error?.startsWith('OUTCOME_UNKNOWN: '), `write dispatch ${i + 1}`).toBe(true);
+      expect(writeRun.executeToolDirectly).toHaveBeenCalledTimes(i + 1);
+      expect(writeRun.dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ failures: i + 1, open: i + 1 >= writeRun.threshold });
     }
-
-    fail = false;
-    expect(await dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: false, error: `Circuit breaker open for tool "${TOOL}"` });
-    expect(executeToolDirectly).toHaveBeenCalledTimes(3 * threshold);
-
-    vi.setSystemTime(Date.now() + timeoutMs + 1);
-    expect(await dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: true, result: { id: 'w9dc_ok' } });
-    expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ open: false, failures: 0 });
+    failWrite = false;
+    expect(await writeRun.dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: false, error: `Circuit breaker open for tool "${TOOL}"` });
+    expect(writeRun.executeToolDirectly).toHaveBeenCalledTimes(writeRun.threshold);
+    vi.setSystemTime(Date.now() + writeRun.timeoutMs + 1);
+    expect(await writeRun.dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: true, result: { id: 'w9dc_ok' } });
+    expect(writeRun.dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ open: false, failures: 0 });
   });
 
-  it('DC-04 regression control (W9-DISPATCH-CIRCUIT): a 408 or 429 asks the caller to try again later, so it is retried and counted as a failure, not taken as a refusal', async () => {
-    const { dispatcher, executeToolDirectly } = makeDispatcher(() => {
-      throw executeToolDirectly.mock.calls.length <= 3
+  it('DC-04 regression control (W9-DISPATCH-CIRCUIT; updated RR-DISPATCH-NO-BLIND-RETRY, D-263): a 408 or 429 is counted as a failure (not taken as a refusal): retried 3x on a READ tool, 1x OUTCOME_UNKNOWN on a WRITE tool', async () => {
+    const READ_TOOL = 'fetch_business_summary';
+    const readRun = makeDispatcher(() => {
+      throw readRun.executeToolDirectly.mock.calls.length <= 3
         ? new HttpException('Too Many Requests', HttpStatus.TOO_MANY_REQUESTS)
         : new HttpException('Request Timeout', HttpStatus.REQUEST_TIMEOUT);
     });
+    expect(await readRun.dispatcher.dispatch(ctx(BIZ_A, READ_TOOL))).toMatchObject({ success: false, error: 'Too Many Requests' });
+    expect(readRun.executeToolDirectly).toHaveBeenCalledTimes(3);
+    expect(await readRun.dispatcher.dispatch(ctx(BIZ_A, READ_TOOL))).toMatchObject({ success: false, error: 'Request Timeout' });
+    expect(readRun.executeToolDirectly).toHaveBeenCalledTimes(6);
+    expect(readRun.dispatcher.getCircuitStatus(READ_TOOL, BIZ_A)).toMatchObject({ open: false, failures: 2 });
 
-    expect(await dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: false, error: 'Too Many Requests' });
-    expect(executeToolDirectly).toHaveBeenCalledTimes(3);
-    expect(await dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: false, error: 'Request Timeout' });
-    expect(executeToolDirectly).toHaveBeenCalledTimes(6);
-    expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ open: false, failures: 2 });
+    const writeRun = makeDispatcher(() => {
+      throw writeRun.executeToolDirectly.mock.calls.length <= 1
+        ? new HttpException('Too Many Requests', HttpStatus.TOO_MANY_REQUESTS)
+        : new HttpException('Request Timeout', HttpStatus.REQUEST_TIMEOUT);
+    });
+    expect(await writeRun.dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: false, error: 'OUTCOME_UNKNOWN: Too Many Requests' });
+    expect(writeRun.executeToolDirectly).toHaveBeenCalledTimes(1);
+    expect(await writeRun.dispatcher.dispatch(ctx(BIZ_A))).toMatchObject({ success: false, error: 'OUTCOME_UNKNOWN: Request Timeout' });
+    expect(writeRun.executeToolDirectly).toHaveBeenCalledTimes(2);
+    expect(writeRun.dispatcher.getCircuitStatus(TOOL, BIZ_A)).toMatchObject({ open: false, failures: 2 });
   });
 
   it('DC-05 regression control: the action boundary\'s answer (retryable false) is neither retried nor counted, and a waiting action is reported as waiting (KF-EXEC-ACTION-001)', async () => {
@@ -218,5 +250,36 @@ describe('ActionDispatcherService circuit breaker (W9-DISPATCH-CIRCUIT; review S
     dispatcher.resetCircuit(TOOL);
     expect(dispatcher.getCircuitStatus(TOOL, BIZ_B)).toEqual(CLOSED);
     expect(dispatcher.getCircuitStatus(TOOL)).toEqual(CLOSED);
+  });
+
+  it('DC-07 RR-DISPATCH-NO-BLIND-RETRY (R1-SEC-01): throwing null, undefined, or Error("") on a WRITE tool stops after 1 attempt, returns "OUTCOME_UNKNOWN: unknown error", logs once with idempotencyKey, and increments the circuit breaker', async () => {
+    const cases: Array<{ label: string; thrown: unknown }> = [
+      { label: 'null', thrown: null },
+      { label: 'undefined', thrown: undefined },
+      { label: 'empty-Error', thrown: new Error('') },
+    ];
+
+    for (const { label, thrown } of cases) {
+      const { dispatcher, executeToolDirectly, logToolExecution } = makeDispatcher(() => {
+        throw thrown;
+      });
+      const idempotencyKey = `w9dc_r1sec01_${label}`;
+      const res = await dispatcher.dispatch(ctx(BIZ_A, TOOL, { idempotencyKey, retryCount: 2 }));
+
+      expect(executeToolDirectly, label).toHaveBeenCalledTimes(1);
+      expect(res.success, label).toBe(false);
+      expect(res.error, label).toBe('OUTCOME_UNKNOWN: unknown error');
+      expect(logToolExecution, label).toHaveBeenCalledTimes(1);
+      expect(logToolExecution, label).toHaveBeenCalledWith(
+        BIZ_A,
+        TOOL,
+        { contactId: 'w9dc_contact' },
+        'OUTCOME_UNKNOWN: unknown error',
+        false,
+        expect.any(Number),
+        expect.objectContaining({ idempotencyKey }),
+      );
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toMatchObject({ open: false, failures: 1 });
+    }
   });
 });

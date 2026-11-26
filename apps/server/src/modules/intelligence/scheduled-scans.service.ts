@@ -105,6 +105,7 @@ export class ScheduledScansService implements OnModuleInit {
               where: { businessId, status: 'SENT', deletedAt: null, dueDate: { lt: now } },
               select: {
                 id: true, contactId: true, total: true, currency: true, dueDate: true,
+                contact: { select: { businessId: true, deletedAt: true } },
                 // V1-41c: this tenant's own rows (M31), read by the balance contract below.
                 payments: { where: { businessId }, select: { amount: true, status: true } },
               },
@@ -117,6 +118,12 @@ export class ScheduledScansService implements OnModuleInit {
               // extracted rows as money received, and dropped overdue invoices.
               const remaining = balanceOfStoredRows(Number(inv.total ?? 0), inv.payments, inv.currency).remaining;
               if (remaining <= 0) continue;
+              const liveContactId =
+                inv.contactId &&
+                inv.contact?.businessId === businessId &&
+                inv.contact?.deletedAt === null
+                  ? inv.contactId
+                  : undefined;
               await this.signals.upsertSignal(
                 businessId,
                 { module: 'commerce', type: 'OVERDUE_INVOICE', entityType: 'invoice', entityId: inv.id },
@@ -128,7 +135,7 @@ export class ScheduledScansService implements OnModuleInit {
                   description: `Invoice ${inv.id.slice(0, 8)} is overdue by ${Math.ceil((now.getTime() - new Date(inv.dueDate!).getTime()) / 86400000)} days`,
                   entityType: 'invoice',
                   entityId: inv.id,
-                  contactId: inv.contactId ?? undefined,
+                  contactId: liveContactId,
                   value: remaining,
                 },
               );
@@ -137,7 +144,7 @@ export class ScheduledScansService implements OnModuleInit {
                 sourceModule: 'commerce',
                 sourceType: 'invoice',
                 sourceId: inv.id,
-                contactId: inv.contactId ?? undefined,
+                contactId: liveContactId,
                 title: `Collect overdue invoice (${remaining.toFixed(2)})`,
                 description: `Invoice is overdue. Remaining balance: ${remaining.toFixed(2)}`,
                 category: 'MONEY',
