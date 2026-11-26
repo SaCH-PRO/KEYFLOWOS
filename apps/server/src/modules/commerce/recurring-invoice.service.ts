@@ -194,6 +194,18 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // R1-SEC-02: bound the computed subtotal/total against the numeric(18,4)
+    // ledger limit (MAX_DOCUMENT_AMOUNT), matching CommerceService.assertInvoiceAmounts.
+    const computed = computeDocumentAmounts({
+      lines: normalized.map((it) => lineAmount(it.quantity, it.unitPrice)),
+      taxRate: 0,
+    });
+    for (const amount of [computed.subtotal, computed.total]) {
+      if (!Number.isFinite(amount) || amount > MAX_DOCUMENT_AMOUNT) {
+        throw new BadRequestException(`Invoice amount cannot exceed ${MAX_DOCUMENT_AMOUNT}`);
+      }
+    }
+
     return normalized;
   }
 
