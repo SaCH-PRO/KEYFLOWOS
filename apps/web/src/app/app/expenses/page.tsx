@@ -196,6 +196,8 @@ export default function ExpensesInboxPage() {
   const [activeTab, setActiveTab] = useState<ExpenseStatusTab>("inbox");
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddDrawer, setShowAddDrawer] = useState(false);
+  // EXPENSES-HUB-2 (BUG-059): the sheet opens as an expense (Add expense) or a bill to pay later (Record bill).
+  const [sheetKind, setSheetKind] = useState<"expense" | "bill">("expense");
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [prefill, setPrefill] = useState<ExpensePrefill | null>(null);
   const [_detailExpense, _setDetailExpense] = useState<Expense | null>(null);
@@ -353,8 +355,9 @@ export default function ExpensesInboxPage() {
       });
   };
 
-  const openAdd = () => { setEditingExpense(null); setPrefill(null); setShowAddDrawer(true); };
-  const _openEdit = (exp: Expense) => { setEditingExpense(exp); setShowAddDrawer(true); };
+  const openAdd = () => { setEditingExpense(null); setPrefill(null); setSheetKind("expense"); setShowAddDrawer(true); };
+  const openBill = () => { setEditingExpense(null); setPrefill(null); setSheetKind("bill"); setShowAddDrawer(true); };
+  const _openEdit = (exp: Expense) => { setEditingExpense(exp); setSheetKind("expense"); setShowAddDrawer(true); };
 
   const totalPages = Math.max(1, Math.ceil(d.totalExpenses / d.pageSize));
 
@@ -378,8 +381,18 @@ export default function ExpensesInboxPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={openBill}
+              aria-label="Record bill"
+              title="Record a bill to pay later"
+              className="inline-flex items-center gap-2 px-3 py-2 min-h-[44px] sm:min-h-0 rounded-lg border border-border bg-card text-sm font-medium text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              <span className="hidden sm:inline">Record bill</span>
+            </button>
+            <button
               onClick={openAdd}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95"
+              aria-label="Add expense"
+              className="inline-flex items-center gap-2 px-4 py-2 min-h-[44px] sm:min-h-0 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95"
               style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
             >
               <Plus className="w-4 h-4" />
@@ -427,7 +440,7 @@ export default function ExpensesInboxPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
           <StatCard
             label="Spent this month"
-            value={formatCurrency(stats.spentThisMonth)}
+            value={formatCurrency(stats.spentThisMonth, undefined, d.businessId)}
             sub={`${d.summary ? Math.round((stats.spentThisMonth / (d.summary.total * 1.5 || 1)) * 100) : 0}% of monthly budget`}
             icon={TrendingUp}
             iconColor="text-blue-600"
@@ -435,7 +448,7 @@ export default function ExpensesInboxPage() {
           />
           <StatCard
             label="Pending approval"
-            value={formatCurrency(stats.pendingApproval)}
+            value={formatCurrency(stats.pendingApproval, undefined, d.businessId)}
             sub={`${tabCounts.pending_approval} expense${tabCounts.pending_approval !== 1 ? "s" : ""} waiting`}
             icon={Clock}
             iconColor="text-amber-600"
@@ -541,7 +554,7 @@ export default function ExpensesInboxPage() {
                               <input type="checkbox" className="rounded border-border" />
                             </td>
                             <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                              {formatDate(exp.date)}
+                              {formatDate(exp.date, d.businessId)}
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2.5">
@@ -562,7 +575,7 @@ export default function ExpensesInboxPage() {
                               <StatusBadge status={status} />
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <span className="text-sm font-semibold text-foreground">{formatCurrency(exp.amount)}</span>
+                              <span className="text-sm font-semibold text-foreground">{formatCurrency(exp.amount, exp.currency, d.businessId)}</span>
                             </td>
                             <td className="px-4 py-3 hidden xl:table-cell">
                               <span className={cn("text-xs font-medium", budgetColor)}>{budgetImpact}</span>
@@ -679,6 +692,7 @@ export default function ExpensesInboxPage() {
           contacts={d.contacts}
           services={d.services}
           prefill={prefill}
+          initialKind={sheetKind}
           onClose={() => {
             setShowAddDrawer(false);
             setPrefill(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Upload, Image as ImageIcon, Repeat, DollarSign, FileText, Store, Tag, Calendar, CreditCard, FolderKanban, Users, Briefcase, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,7 +11,9 @@ import {
   createExpense,
   updateExpense,
   extractReceipt,
+  createRecurringExpense,
 } from "@/lib/client";
+import { businessCurrency, recurringScheduleBody, todayInBusinessZone } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { API_BASE } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -29,6 +31,8 @@ interface ExpenseFormModalProps {
 
 export function ExpenseFormModal({ businessId, categories, editingExpense, projects = [], contacts = [], services = [], onClose, onSaved }: ExpenseFormModalProps) {
   const { uploadFile, isUploading: uploading } = useUpload();
+  // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
+  const [currency] = useState(() => businessCurrency(businessId));
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
       return {
@@ -40,14 +44,15 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       };
     }
     return {
-      description: "", amount: "", date: new Date().toISOString().split("T")[0],
+      // BUG-028: today in Trinidad (the business's zone), not the UTC date.
+      description: "", amount: "", date: todayInBusinessZone(new Date(), businessId),
       vendor: "", categoryId: "", notes: "", receiptUrl: "", paymentMethod: "",
       tags: "" as string, isRecurring: false, recurringFrequency: "MONTHLY",
       projectId: "", contactId: "", serviceId: "",
     };
   });
 
-  const handleSubmit = async () => {
+  const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
@@ -71,10 +76,45 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         toast.error(res.error);
         return;
       }
-      toast.success("Expense saved");
+      // EXPENSES-HUB-2 (BUG-061): a recurring expense (new, or an edit that makes it recurring) creates its
+      // schedule through the existing route, next due one period after this expense's date.
+      if (formData.isRecurring && !(editingExpense && editingExpense.isRecurring)) {
+        let refused: string | null = null;
+        try {
+          const scheduled = await createRecurringExpense(businessId, recurringScheduleBody({
+            description: formData.description.trim(), amount: parseFloat(formData.amount), date: formData.date,
+            frequency: formData.recurringFrequency, vendor: formData.vendor.trim() || null,
+            paymentMethod: formData.paymentMethod || null, categoryId: formData.categoryId || null,
+            notes: formData.notes.trim() || null, projectId: formData.projectId || null,
+            contactId: formData.contactId || null, serviceId: formData.serviceId || null,
+          }, businessId));
+          refused = scheduled?.error ? scheduled.error : null;
+        } catch (err) {
+          refused = err instanceof Error ? err.message : "the request failed";
+        }
+        if (refused) toast.error(`Expense saved, but its recurring schedule was not created: ${refused}`);
+        else toast.success("Expense saved");
+      } else {
+        toast.success("Expense saved");
+      }
       onSaved();
       onClose();
     } catch (_err) { toast.error("Failed to save expense"); }
+  };
+
+  // COR-F3: one save at a time: a double click (or a second tap while the first is in flight) sends nothing.
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const handleSubmit = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await submit();
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   const [extracting, setExtracting] = useState(false);
@@ -168,7 +208,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><DollarSign className="w-3 h-3" /> Amount (TTD) *</label>
+              <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><DollarSign className="w-3 h-3" /> Amount ({currency}) *</label>
               <input type="number" step="0.01" min="0" value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
             </div>
             <div>
@@ -291,7 +331,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
           <div className="flex justify-end gap-2 pt-2 border-t border-border/30">
             <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted/30">Cancel</button>
-            <button onClick={handleSubmit} disabled={!formData.description.trim() || !formData.amount} className="kf-btn-primary px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-40">{editingExpense ? "Update" : "Add Expense"}</button>
+            <button onClick={handleSubmit} disabled={submitting || !formData.description.trim() || !formData.amount} aria-busy={submitting || undefined} className="kf-btn-primary px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-40">{editingExpense ? "Update" : "Add Expense"}</button>
           </div>
         </div>
       </motion.div>

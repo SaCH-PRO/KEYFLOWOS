@@ -66,9 +66,7 @@ describe('D-151: the home hub is Today and the sales hub is Sales', () => {
  * rebuilds Today and its header. Until then the header disagreement is ledgered here, and the ledger cleans itself:
  * it fails once the header agrees. Shrink-only.
  */
-const PAGE_TITLE_OUTSIDE_WRITE_SET: Record<string, string> = {
-  'app/app/command-center/page.tsx': 'TODAY-4BLOCK rebuilds Today and its header (D-151); outside NAV-A1',
-};
+const PAGE_TITLE_OUTSIDE_WRITE_SET: Record<string, string> = {};
 
 describe('/app/command-center: nav, breadcrumb and page title agree', () => {
   it('the Today hub reads the constant', () => {
