@@ -21,6 +21,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup, fireEvent } from "@testing-library/react";
 import { GenomeProvider } from "@/contexts/genome-context";
+import { resetKeySwitchForTests } from "@/hooks/use-key-enabled";
+import { selectBusiness } from "@/lib/workspace";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -245,6 +247,9 @@ beforeEach(() => {
   window.localStorage.setItem("activeBusinessId", BIZ);
   window.localStorage.setItem("kf_business_cache", JSON.stringify({ id: BIZ, name: "Gina's Salon" }));
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  // Repair round 2: Today reads KEY_DISABLED through main's useKeyEnabled, which keeps the answer per tab; each case
+  // starts as a new tab would.
+  resetKeySwitchForTests();
 });
 
 afterEach(() => {
@@ -443,10 +448,10 @@ describe("TODAY-4BLOCK repair round 1 (acceptance reviews at e9e05754)", () => {
     const api = serve({ today: [ok(busyToday())], me: { status: 500, body: { statusCode: 500, message: "Internal server error" } }, items: ok({ items: [KEY_ITEM], total: 1 }) });
     await renderToday();
     await screen.findByText(KEY_ITEM.title, {}, { timeout: 10_000 });
-    // Only once GET /identity/me has been answered (with its 500): before that, KEY is off anyway. In jsdom that answer
-    // reaches the page after a few hundred ms (observed at e9e05754: hidden at 300 ms, every KEY surface shown by 3 s).
-    await waitFor(() => expect(api.sent.some((r) => r.path.endsWith("/identity/me"))).toBe(true));
-    await new Promise((r) => setTimeout(r, 3000));
+    // Repair round 2 (COR): every check runs only once the KEY read has settled: its final answer, after the client's
+    // retries, has reached the page (data-key-read="settled"). So each check alone catches a page that fails open.
+    await waitFor(() => expect(document.querySelector("[data-key-read]")?.getAttribute("data-key-read")).toBe("settled"), { timeout: 15_000 });
+    expect(api.sent.some((r) => r.path.endsWith("/identity/me"))).toBe(true);
     expect(screen.queryByText("Chase the overdue wholesale invoice")).toBeNull();
     expect(screen.queryByTestId("approved-actions-panel")).toBeNull();
     expect(screen.queryByText("KEY can handle")).toBeNull();
@@ -507,5 +512,89 @@ describe("TODAY-4BLOCK repair round 1 (acceptance reviews at e9e05754)", () => {
     const sample = await screen.findByRole("figure", { name: /sample invoice preview/i });
     expect(sample.textContent).toMatch(/USD 250\.00/);
     expect(sample.textContent).not.toMatch(/TTD/);
+  }, CASE_MS);
+});
+
+describe("TODAY-4BLOCK repair round 2 (confirmation reviews at 14934c7c)", () => {
+  it("[T4B-19] RED-BEFORE (SEC-T4B-2 narrowed): a refresh that fails with a 5xx keeps the last good figures for the same business under the alert, with Retry", async () => {
+    serve({ today: [ok(busyToday()), { status: 503, body: { statusCode: 503, message: "Service Unavailable" } }] });
+    await renderToday();
+    await screen.findByRole("heading", { level: 2, name: /^pulse$/i });
+    fireEvent.click(screen.getAllByRole("button", { name: /^refresh$/i })[0]);
+    const alert = await screen.findByTestId("today-unavailable", {}, { timeout: 15_000 });
+    expect(within(alert).getByRole("button", { name: /retry/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: /^pulse$/i })).toBeTruthy();
+    expect((block(/^pulse$/i).textContent ?? "").replace(/\s+/g, " ")).toMatch(/Cash[^0-9]*400\.00/);
+    expect(within(block(/^today$/i)).getAllByText(/INV-0042/).length).toBeGreaterThan(0);
+  }, CASE_MS);
+
+  it("[T4B-20] RED-BEFORE (SEC): after a switch to another business, a failed reply for the first business neither clears the second's Today nor raises its alert", async () => {
+    const BIZ2 = "biz_t4b_other";
+    const other = busyToday();
+    other.businessId = BIZ2;
+    other.today.invoices = [{ ...other.today.invoices[0], id: "inv_77", invoiceNumber: "INV-0077" }];
+    let failFirst: (() => void) | null = null;
+    let firstReads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(url, "http://localhost");
+      if (pathname.endsWith(`/business-command-center/businesses/${BIZ}/today`)) {
+        firstReads += 1;
+        // The first business's read answers only when the test lets it, and then with a 403 (not retried).
+        await new Promise<void>((resolve) => { failFirst = resolve; });
+        return jsonResponse(403, { statusCode: 403, message: "Forbidden resource" });
+      }
+      if (pathname.endsWith(`/business-command-center/businesses/${BIZ2}/today`)) return jsonResponse(200, other);
+      if (pathname.endsWith("/identity/me")) return jsonResponse(200, { id: "u_owner", email: "owner@t4b.test.local", keyDisabled: false });
+      return jsonResponse(500, { message: "Internal server error" });
+    }));
+    const { default: Page } = await import("@/app/app/command-center/page");
+    render(
+      <GenomeProvider>
+        <Page />
+      </GenomeProvider>,
+    );
+    await waitFor(() => expect(firstReads).toBe(1), { timeout: 10_000 });
+    try {
+      selectBusiness(BIZ2);
+      expect(await screen.findByText("INV-0077", {}, { timeout: 10_000 })).toBeTruthy();
+      failFirst!();
+      await new Promise((r) => setTimeout(r, 200));
+      expect(screen.getAllByText("INV-0077").length).toBeGreaterThan(0);
+      expect(screen.queryByTestId("today-unavailable")).toBeNull();
+    } finally {
+      // Never leave the first business's read pending: lib/api.ts coalesces identical GETs, so a later case's read of
+      // the same URL would wait on it.
+      (failFirst as (() => void) | null)?.();
+    }
+  }, CASE_MS);
+
+  it("[T4B-21] RED-BEFORE: when the KEY read failed, Retry reads it again, so a KEY-on business gets its KEY UI back without a reload", async () => {
+    let meFails = true;
+    const api = serve({
+      today: [{ status: 500, body: { statusCode: 500, message: "Internal server error" } }, ok(busyToday())],
+      me: { status: 500, body: { statusCode: 500, message: "Internal server error" } },
+    });
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (!meFails && new URL(url, "http://localhost").pathname.endsWith("/identity/me")) {
+        return jsonResponse(200, { id: "u_owner", email: "owner@t4b.test.local", keyDisabled: false });
+      }
+      return real(input, init);
+    }));
+    const { default: Page } = await import("@/app/app/command-center/page");
+    render(
+      <GenomeProvider>
+        <Page />
+      </GenomeProvider>,
+    );
+    const alert = await screen.findByTestId("today-unavailable", {}, { timeout: 15_000 });
+    await waitFor(() => expect(document.querySelector("[data-key-read]")?.getAttribute("data-key-read")).toBe("settled"), { timeout: 15_000 });
+    meFails = false;
+    fireEvent.click(within(alert).getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText("Chase the overdue wholesale invoice", {}, { timeout: 10_000 })).toBeTruthy();
+    expect(await screen.findByTestId("approved-actions-panel")).toBeTruthy();
+    expect(api.sent.filter((r) => r.path.endsWith("/identity/me")).length).toBeGreaterThan(0);
   }, CASE_MS);
 });
