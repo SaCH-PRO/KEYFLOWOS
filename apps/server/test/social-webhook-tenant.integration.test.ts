@@ -446,4 +446,101 @@ describe('POST /social/webhook/:businessId tenant binding (RR-WEBHOOK-INGRESS-CE
     expect(await countInboxMessages(ID.bizA)).toBe(2);
     expect(await countInboxMessages(ID.bizB)).toBe(0);
   });
+
+  it('accepts batched delivery for business A containing inbound DM plus outbound is_echo for page A', async () => {
+    const batchedBody = {
+      object: 'page',
+      entry: [
+        {
+          id: ID.pageA,
+          time: 1700000000100,
+          messaging: [
+            {
+              sender: { id: `${P}customer_psid_1` },
+              recipient: { id: ID.pageA },
+              timestamp: 1700000000100,
+              message: { mid: `${P}mid_batch_inbound`, text: 'Customer DM in batch' },
+            },
+            {
+              sender: { id: ID.pageA },
+              recipient: { id: `${P}customer_psid_1` },
+              timestamp: 1700000000101,
+              message: {
+                is_echo: true,
+                mid: `${P}mid_batch_echo`,
+                text: 'Outbound echo from business A page',
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = await postWebhook(ID.bizA, batchedBody);
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(await countInboxMessages(ID.bizA)).toBe(1);
+    expect(await countInboxMessages(ID.bizB)).toBe(0);
+  });
+
+  it('refuses with 403 and ingests nothing when business A outbound is_echo is POSTed to /social/webhook/B', async () => {
+    const echoCrossBody = {
+      object: 'page',
+      entry: [
+        {
+          id: ID.pageA,
+          time: 1700000000200,
+          messaging: [
+            {
+              sender: { id: ID.pageA },
+              recipient: { id: `${P}customer_psid_2` },
+              timestamp: 1700000000200,
+              message: {
+                is_echo: true,
+                mid: `${P}mid_cross_echo`,
+                text: 'Cross-tenant echo from business A',
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = await postWebhook(ID.bizB, echoCrossBody);
+
+    expect(res.status).toBe(403);
+    expect(await countInboxMessages(ID.bizA)).toBe(0);
+    expect(await countInboxMessages(ID.bizB)).toBe(0);
+  });
+
+  it('refuses with 403 and ingests nothing on smuggled is_echo (entry.id=B, sender.id=A) POSTed to /social/webhook/B', async () => {
+    const smuggledEchoBody = {
+      object: 'page',
+      entry: [
+        {
+          id: ID.pageB,
+          time: 1700000000300,
+          messaging: [
+            {
+              sender: { id: ID.pageA },
+              recipient: { id: `${P}customer_psid_3` },
+              timestamp: 1700000000300,
+              message: {
+                is_echo: true,
+                mid: `${P}mid_smuggled_echo`,
+                text: 'Smuggled echo claiming entry.id=B with sender.id=A',
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = await postWebhook(ID.bizB, smuggledEchoBody);
+
+    expect(res.status).toBe(403);
+    expect(await countInboxMessages(ID.bizA)).toBe(0);
+    expect(await countInboxMessages(ID.bizB)).toBe(0);
+  });
 });
