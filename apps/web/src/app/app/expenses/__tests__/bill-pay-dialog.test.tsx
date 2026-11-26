@@ -41,6 +41,9 @@
  *   BPD-21  RED  found in round 3: Escape in Pay stays in Pay. The app's Escape shortcut (use-keyboard-shortcuts,
  *                a window keydown listener) goes to the list from a detail page, so without this Escape would also
  *                leave the expense, even while a pay is in flight
+ *   Repair round 4 (reviews at 145b140):
+ *   BPD-22  RED  while a pay is in flight every control is disabled; Tab and Shift+Tab are still kept in the dialog
+ *                (prevented, focus on the dialog), not let out to the page behind the aria-modal dialog
  *
  * Mounted on the real ExpenseDetailPage and the real api clients (lib/api.ts, lib/client.ts, lib/api/finance.ts),
  * so the request body is read off the wire; only `fetch`, the toast, next/navigation and the stored business are
@@ -602,5 +605,30 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     } finally {
       window.removeEventListener("keydown", onWindowKey);
     }
+  });
+
+  it("BPD-22 while a pay is in flight (every control disabled), Tab and Shift+Tab keep focus in the dialog", async () => {
+    let release: (r: Response) => void = () => {};
+    renderDialog({ pay: () => new Promise<Response>((r) => { release = r; }) });
+    render(
+      <>
+        <button type="button">Behind the dialog</button>
+        <BillPayDialog businessId={BUSINESS} bill={BILL as unknown as Expense} onClose={vi.fn()} onPaid={vi.fn()} />
+      </>,
+    );
+    await screen.findByRole("combobox", { name: /pay from/i });
+    fireEvent.click(screen.getByRole("button", { name: /^Pay/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(true));
+    const dialog = payDialog();
+    expect(dialog.querySelectorAll("select:not([disabled]), button:not([disabled])")).toHaveLength(0);
+
+    for (const shiftKey of [false, true]) {
+      const from = document.activeElement ?? document.body;
+      // fireEvent returns false when the handler called preventDefault (the browser would not move focus).
+      const notPrevented = fireEvent.keyDown(from, { key: "Tab", shiftKey });
+      expect(notPrevented, `Tab${shiftKey ? " with Shift" : ""} is kept in the dialog`).toBe(false);
+      expect(dialog.contains(document.activeElement), "focus is inside the dialog").toBe(true);
+    }
+    release(jsonResponse(201, PAID, "Created"));
   });
 });
