@@ -1,85 +1,35 @@
-const DB_NAME = "keyflow-product-images";
-const STORE_NAME = "images";
-const DB_VERSION = 1;
+/**
+ * CATALOG-1 (BUG-005): this module is no longer where product photos are kept.
+ *
+ * It used to keep each product's photo in this browser's IndexedDB ("keyflow-product-images"), keyed by product
+ * id, and the products screens showed that copy over the product's stored image. No other device, and not the
+ * public store, ever saw such a photo. A product's photo is now only the link stored with it on the server
+ * (Product.imageUrl); the product form offers that link and refuses a browser-only photo.
+ *
+ * What is left is getAllProductImages, which answers an empty set without opening IndexedDB, so the Sales shell's
+ * load (which still asks for it) shows the server's images only. A photo an owner saved here before stays in
+ * their browser's storage untouched; nothing reads or writes it.
+ */
 
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export async function saveProductImage(
-  productId: string,
-  dataUrl: string
-): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(dataUrl, productId);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function getProductImage(
-  productId: string
-): Promise<string | null> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const req = tx.objectStore(STORE_NAME).get(productId);
-    req.onsuccess = () => resolve((req.result as string) ?? null);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export async function deleteProductImage(productId: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).delete(productId);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (file.size > 5 * 1024 * 1024) {
-      reject(new Error("Image must be under 5 MB"));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
+/** @deprecated CATALOG-1: photos are not kept in this browser; always an empty set (IndexedDB is not opened). */
 export async function getAllProductImages(): Promise<Record<string, string>> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.openCursor();
-    const result: Record<string, string> = {};
-    req.onsuccess = () => {
-      const cursor = req.result;
-      if (cursor) {
-        result[cursor.key as string] = cursor.value as string;
-        cursor.continue();
-      } else {
-        resolve(result);
-      }
-    };
-    req.onerror = () => reject(req.error);
-  });
+  return {};
+}
+
+/** The IndexedDB database the old photo store wrote ("keyflow-product-images"). */
+export const LEGACY_PHOTO_DB = "keyflow-product-images";
+
+/**
+ * CATALOG-1 (SEC-CAT-4): whether this browser holds the old photo store, so Sales > Products can say once that
+ * those photos are no longer shown. It asks the browser for its database names (indexedDB.databases()) and never
+ * opens the database (opening would create it) or reads a photo. A browser without databases() answers false.
+ */
+export async function hadBrowserOnlyPhotos(): Promise<boolean> {
+  try {
+    if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return false;
+    const dbs = await indexedDB.databases();
+    return dbs.some((d) => d.name === LEGACY_PHOTO_DB);
+  } catch {
+    return false;
+  }
 }
