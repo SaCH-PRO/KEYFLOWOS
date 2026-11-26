@@ -703,13 +703,13 @@ export class FulfillmentRoutingService {
           );
           break;
         case 'MANUAL':
-          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing);
+          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing, alreadyAlertedProductIds);
           break;
         case 'SERVICE':
           route = await this.routeService(tx, businessId, orderId, item, listing);
           break;
         default:
-          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing);
+          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing, alreadyAlertedProductIds);
       }
 
       routes.push(route);
@@ -784,6 +784,26 @@ export class FulfillmentRoutingService {
           sourceType: 'WAREHOUSE',
           notes: `${inventoryMode === 'virtual' ? 'Virtual/digital' : 'Untracked'} product — no inventory reservation required`,
           metadata: { inventoryMode, noReservationRequired: true },
+        },
+      });
+      return route as unknown as FulfillmentRouteShape;
+    }
+
+    // V1-70 (W1F-SETTLE-NO-STOCK; D-199, R1-COR-01): never partially reserve stock for a tracked
+    // product whose stock was left untouched (and COGS skipped) at checkout settlement (e.g.
+    // multi-line duplicate-product shortfall, inactive warehouse, or post-commit restock window).
+    if (alreadyAlertedProductIds.has(item.productId)) {
+      const route = await tx.fulfillmentRoute.create({
+        data: {
+          businessId,
+          orderId,
+          orderItemId: item.id,
+          listingId: listing?.id,
+          strategy: 'LOCAL_STOCK',
+          status: 'FAILED',
+          sourceType: 'WAREHOUSE',
+          notes: `Stock not decremented at checkout; awaiting restock or refund (required: ${item.quantity})`,
+          metadata: { inventoryMode: 'tracked', stockNotDecrementedAtCheckout: true },
         },
       });
       return route as unknown as FulfillmentRouteShape;
@@ -866,6 +886,26 @@ export class FulfillmentRoutingService {
     }
   }
 
+  private async hasCheckoutStockShortfallNotice(
+    businessId: string,
+    orderId: string,
+    productId: string,
+  ): Promise<boolean> {
+    if (!this.prisma.client.notification) return false;
+    const existingNotices = await this.prisma.client.notification.findMany({
+      where: {
+        businessId,
+        type: 'store_order.stock_not_decremented',
+        data: { path: ['orderId'], equals: orderId },
+      },
+      select: { data: true },
+    });
+    return existingNotices.some((n) => {
+      const products = (n.data as { products?: Array<{ productId?: string }> } | null)?.products;
+      return Array.isArray(products) && products.some((p) => p?.productId === productId);
+    });
+  }
+
   private async notifyInsufficientStock(
     businessId: string,
     orderId: string,
@@ -875,23 +915,8 @@ export class FulfillmentRoutingService {
     // V1-70 (W1F-SETTLE-NO-STOCK; D-199): defense-in-depth — never send a
     // second seller_low_stock email when the paid door already alerted the
     // business for this order and product line.
-    if (this.prisma.client.notification) {
-      const existingNotices = await this.prisma.client.notification.findMany({
-        where: {
-          businessId,
-          type: 'store_order.stock_not_decremented',
-          data: { path: ['orderId'], equals: orderId },
-        },
-        select: { data: true },
-      });
-      if (
-        existingNotices.some((n) => {
-          const products = (n.data as { products?: Array<{ productId?: string }> } | null)?.products;
-          return Array.isArray(products) && products.some((p) => p?.productId === item.productId);
-        })
-      ) {
-        return;
-      }
+    if (await this.hasCheckoutStockShortfallNotice(businessId, orderId, item.productId)) {
+      return;
     }
 
     const business = await this.prisma.client.business.findFirst({
@@ -1109,7 +1134,7 @@ export class FulfillmentRoutingService {
 
     const available = stock ? stock.quantity - stock.reserved : 0;
 
-    if (available >= item.quantity) {
+    if (!alreadyAlertedProductIds.has(item.productId) && available >= item.quantity) {
       this.logger.log(
         `Hybrid: local stock satisfied for product ${item.productId} (${available}/${item.quantity})`,
       );
@@ -1150,6 +1175,7 @@ export class FulfillmentRoutingService {
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
+    alreadyAlertedProductIds: ReadonlySet<string> = new Set(),
   ): Promise<FulfillmentRouteShape> {
     const route = await tx.fulfillmentRoute.create({
       data: {
@@ -1164,11 +1190,13 @@ export class FulfillmentRoutingService {
       },
     });
 
-    afterCommit.push(async () => {
-      this.notifyManualFulfillmentRequired(businessId, orderId, item).catch((err) =>
-        this.logger.error(`Failed to send manual-fulfillment notification: ${(err as Error).message}`),
-      );
-    });
+    if (!alreadyAlertedProductIds.has(item.productId)) {
+      afterCommit.push(async () => {
+        await this.notifyManualFulfillmentRequired(businessId, orderId, item).catch((err) =>
+          this.logger.error(`Failed to send manual-fulfillment notification: ${(err as Error).message}`),
+        );
+      });
+    }
 
     return route as unknown as FulfillmentRouteShape;
   }
@@ -1178,6 +1206,12 @@ export class FulfillmentRoutingService {
     orderId: string,
     item: OrderItemShape,
   ): Promise<void> {
+    // V1-70 (W1F-SETTLE-NO-STOCK; D-199, R1-COR-02): never send a duplicate
+    // seller_low_stock email when checkout already alerted the business for this line.
+    if (await this.hasCheckoutStockShortfallNotice(businessId, orderId, item.productId)) {
+      return;
+    }
+
     const business = await this.prisma.client.business.findFirst({
       where: { id: businessId },
       select: { email: true, name: true },
