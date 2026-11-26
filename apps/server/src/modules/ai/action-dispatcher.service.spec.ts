@@ -42,10 +42,11 @@ type Answer = (ctx: { businessId: string; toolName: string }) => unknown;
 /** A dispatcher whose orchestrator answers with `answer` (a value is the result; a thrown error fails the attempt). */
 function makeDispatcher(answer: Answer) {
   const executeToolDirectly = vi.fn(async (businessId: string, toolName: string) => answer({ businessId, toolName }));
+  const logToolExecution = vi.fn(async () => undefined);
   const dispatcher = new ActionDispatcherService(
-    {} as never,
+    { client: { aiExecutionLog: { findFirst: async () => null } } } as never,
     { emit: () => true } as never,
-    { logToolExecution: async () => undefined } as never,
+    { logToolExecution } as never,
     { evaluate: async () => ({ allowed: true, tier: 1, reason: 'w9dc: allowed' }) } as never,
     { executeToolDirectly } as never,
     { registerAction: async () => undefined } as never,
@@ -54,7 +55,7 @@ function makeDispatcher(answer: Answer) {
   internals.logger = { log: () => undefined, warn: () => undefined, error: () => undefined };
   // Retries happen at once here; how many there are is what these cases count.
   internals.RETRY_DELAYS = [0, 0];
-  return { dispatcher, executeToolDirectly, threshold: internals.CIRCUIT_THRESHOLD, timeoutMs: internals.CIRCUIT_TIMEOUT_MS };
+  return { dispatcher, executeToolDirectly, logToolExecution, threshold: internals.CIRCUIT_THRESHOLD, timeoutMs: internals.CIRCUIT_TIMEOUT_MS };
 }
 
 const ctx = (businessId: string, toolName = TOOL, extra: Partial<DispatchContext> = {}): DispatchContext => ({
@@ -249,5 +250,36 @@ describe('ActionDispatcherService circuit breaker (W9-DISPATCH-CIRCUIT; review S
     dispatcher.resetCircuit(TOOL);
     expect(dispatcher.getCircuitStatus(TOOL, BIZ_B)).toEqual(CLOSED);
     expect(dispatcher.getCircuitStatus(TOOL)).toEqual(CLOSED);
+  });
+
+  it('DC-07 RR-DISPATCH-NO-BLIND-RETRY (R1-SEC-01): throwing null, undefined, or Error("") on a WRITE tool stops after 1 attempt, returns "OUTCOME_UNKNOWN: unknown error", logs once with idempotencyKey, and increments the circuit breaker', async () => {
+    const cases: Array<{ label: string; thrown: unknown }> = [
+      { label: 'null', thrown: null },
+      { label: 'undefined', thrown: undefined },
+      { label: 'empty-Error', thrown: new Error('') },
+    ];
+
+    for (const { label, thrown } of cases) {
+      const { dispatcher, executeToolDirectly, logToolExecution } = makeDispatcher(() => {
+        throw thrown;
+      });
+      const idempotencyKey = `w9dc_r1sec01_${label}`;
+      const res = await dispatcher.dispatch(ctx(BIZ_A, TOOL, { idempotencyKey, retryCount: 2 }));
+
+      expect(executeToolDirectly, label).toHaveBeenCalledTimes(1);
+      expect(res.success, label).toBe(false);
+      expect(res.error, label).toBe('OUTCOME_UNKNOWN: unknown error');
+      expect(logToolExecution, label).toHaveBeenCalledTimes(1);
+      expect(logToolExecution, label).toHaveBeenCalledWith(
+        BIZ_A,
+        TOOL,
+        { contactId: 'w9dc_contact' },
+        'OUTCOME_UNKNOWN: unknown error',
+        false,
+        expect.any(Number),
+        expect.objectContaining({ idempotencyKey }),
+      );
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toMatchObject({ open: false, failures: 1 });
+    }
   });
 });

@@ -305,6 +305,7 @@ function hasEffectNotApplied(err: unknown): boolean {
   for (let depth = 0; depth <= 5 && cur !== null && cur !== undefined; depth += 1) {
     if (typeof cur !== 'object' || seen.has(cur)) break;
     seen.add(cur);
+    if (cur instanceof RetryableConflictException) return true;
     if ((cur as { effectNotApplied?: unknown }).effectNotApplied === true) return true;
     cur = (cur as { cause?: unknown }).cause;
   }
@@ -4043,7 +4044,15 @@ ${triage.standingContext}`;
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      const logged = this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+      const errMsg =
+        error instanceof Error
+          ? error.message
+          : typeof (error as { message?: unknown } | null | undefined)?.message === 'string'
+            ? (error as { message: string }).message
+            : error !== null && error !== undefined
+              ? String(error)
+              : 'unknown error';
+      const logged = this.executionLog.logToolExecution(businessId, toolName, args, errMsg, false, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
@@ -4062,7 +4071,7 @@ ${triage.standingContext}`;
         family: errorEnvelope.family,
         riskTier: errorEnvelope.riskTier,
         success: false,
-        error: (error as Error).message,
+        error: errMsg,
         ...(error instanceof ActionNotClearedError
           ? { notCleared: { actionId: error.actionId, disposition: error.disposition, code: error.code } }
           : {}),
