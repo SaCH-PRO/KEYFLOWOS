@@ -13,6 +13,9 @@
  *   BPD-05  RED  a refused pay keeps Pay open with the server's words, and no success
  *   BPD-06  RED  when the accounts cannot be read, Pay says why and sends the method only (the server's default)
  *   BPD-07  RED  a second press while the pay is in flight sends nothing more
+ *   BPD-08  RED  while the accounts load, Pay asks nothing yet: account and method are asked together (live
+ *                journey H5 at 4fafe8d chose "Bank Account" in the method select, shown alone while the accounts
+ *                loaded, and the bill was paid from Cash)
  *
  * Mounted on the real ExpenseDetailPage and the real api clients (lib/api.ts, lib/client.ts, lib/api/finance.ts),
  * so the request body is read off the wire; only `fetch`, the toast, next/navigation and the stored business are
@@ -234,5 +237,22 @@ describe("EXPENSES-HUB-1: paying a bill asks which account and method (D-168, BU
     release(jsonResponse(201, PAID, "Created"));
     await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
     expect(pays).toHaveLength(1);
+  });
+
+  it("BPD-08 while the accounts load, Pay asks nothing yet: account and method are asked together", async () => {
+    let release: (r: Response) => void = () => {};
+    const pays = stubServer({ accounts: () => new Promise<Response>((r) => { release = r; }) as unknown as Response });
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: /^Approve/ }));
+    const dialog = await screen.findByRole("dialog", { name: /pay bill/i });
+
+    expect(within(dialog).getByText(/loading accounts/i)).toBeTruthy();
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+    expect((within(dialog).getByRole("button", { name: /^Pay/ }) as HTMLButtonElement).disabled).toBe(true);
+
+    release(jsonResponse(200, { items: ACCOUNTS }));
+    await waitFor(() => expect(within(payDialog()).getByRole("combobox", { name: /pay from/i })).toBeTruthy());
+    expect(within(payDialog()).getByRole("combobox", { name: /payment method/i })).toBeTruthy();
+    expect(pays).toEqual([]);
   });
 });

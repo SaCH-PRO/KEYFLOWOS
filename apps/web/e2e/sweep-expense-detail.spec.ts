@@ -186,11 +186,12 @@ for (const vp of VIEWPORTS) {
           owner.businessId,
           bill.id,
         );
-        const [linked] = pgRows<{ chart_of_account_id: string }>(
-          `select chart_of_account_id from financial_accounts where id = '${chosen}' and business_id = '${owner.businessId}'`,
+        const [linked] = pgRows<{ chart_of_account_id: string; type: string; system_key: string | null }>(
+          `select fa.chart_of_account_id, fa.type, c.system_key from financial_accounts fa join chart_of_accounts c on c.id = fa.chart_of_account_id where fa.id = '${chosen}' and fa.business_id = '${owner.businessId}'`,
           chosen,
           owner.businessId,
         );
+        expect(linked, "the account chosen is the bank account, linked to the bank's chart row").toMatchObject({ type: "BANK", system_key: "BANK" });
         testInfo.annotations.push({ type: "bill payment credits", description: JSON.stringify({ credits, linked }) });
         expect(credits, "the payment posts once and credits the chosen account's chart row, not Cash").toEqual([
           { account_id: linked.chart_of_account_id, credit: 320, txns: 1 },
