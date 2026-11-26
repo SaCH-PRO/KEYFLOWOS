@@ -10,7 +10,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../../ai/model-gateway.service';
-import { fenceUntrusted, withUntrustedContentRule } from '../../ai/untrusted-content';
+import { capUntrusted, fenceUntrusted, withUntrustedContentRule, withoutInvisible } from '../../ai/untrusted-content';
 import { KeyCortexEventBusService } from '../key-cortex-event-bus.service';
 
 export interface SentimentDetectionResult {
@@ -95,12 +95,8 @@ export class SentimentWatcherService {
           channel: message.channel,
           threadId: message.threadId ?? null,
           contactId: message.contactId ?? null,
-          senderName: message.senderName ?? null,
-          senderEmail: message.senderEmail ?? null,
-          snippet: text.slice(0, 300),
           score: detection.score,
           keywords: detection.keywords,
-          llmReason: detection.llmReason,
           receivedAt: message.receivedAt ?? message.createdAt,
         },
         metadata: {
@@ -291,7 +287,7 @@ export class SentimentWatcherService {
   private async classifyWithLlm(
     text: string,
   ): Promise<{ negative: boolean; confidence: number; reason: string }> {
-    const fenced = fenceUntrusted('inbound_message', text.slice(0, 500));
+    const fenced = fenceUntrusted('inbound_message', capUntrusted(withoutInvisible(text), 500));
     if (!fenced) {
       return { negative: false, confidence: 0, reason: '' };
     }

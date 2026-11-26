@@ -109,12 +109,13 @@ export class CrmAiService {
     const start = Date.now();
     const sanitizedPrompt = this.sanitizeAiInput(prompt, 2000);
     const context = await this.buildCrmContext(businessId, contactIds, scope);
+    const fencedContext = fenceUntrusted('inbound_message', context);
 
-    const systemPrompt = `You are an expert CRM analyst and business advisor for a Caribbean service business (Trinidad & Tobago, TTD currency).
+    const systemPrompt = withUntrustedContentRule(`You are an expert CRM analyst and business advisor for a Caribbean service business (Trinidad & Tobago, TTD currency).
 You analyze customer relationship data and provide actionable business intelligence.
 
 CURRENT CRM DATA:
-${context}
+${fencedContext}
 
 INSTRUCTIONS:
 - Analyze the data based on the user's request
@@ -149,7 +150,7 @@ Respond in valid JSON with this exact structure:
       "priority": "HIGH|NORMAL|LOW"
     }
   ]
-}`;
+}`);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -435,13 +436,24 @@ ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} $
     const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
     const outstandingBalance = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).reduce((s, i) => s + Number(i.total ?? 0), 0);
 
+    const fencedProfile = fenceUntrusted(
+      'inbound_message',
+      [
+        `Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}`,
+        `Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}`,
+        `Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}`,
+        `Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}`,
+        `Source: ${contact.source ?? 'manual'} | Tags: ${(contact.tags ?? []).join(', ') || 'none'}`,
+        `Preferred Channel: ${contact.preferredChannel ?? 'N/A'} | WhatsApp: ${contact.whatsappNumber ?? 'N/A'}`,
+      ].join('\n'),
+    );
+    const openTasksRaw = tasks
+      .filter(t => t.status === 'OPEN')
+      .map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'})`)
+      .join('\n');
+
     const contextBlock = `CONTACT PROFILE:
-Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}
-Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}
-Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}
-Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}
-Source: ${contact.source ?? 'manual'} | Tags: ${(contact.tags ?? []).join(', ') || 'none'}
-Preferred Channel: ${contact.preferredChannel ?? 'N/A'} | WhatsApp: ${contact.whatsappNumber ?? 'N/A'}
+${fencedProfile}
 Created: ${daysSinceCreated} days ago | Last Interaction: ${daysSinceLastInteraction != null ? `${daysSinceLastInteraction} days ago` : 'never'}
 
 FINANCIAL:
@@ -456,7 +468,7 @@ RECENT EVENTS (${events.length}):
 ${events.slice(0, 15).map(e => `- ${e.type} at ${e.createdAt.toISOString().split('T')[0]}`).join('\n') || 'No events'}
 
 OPEN TASKS:
-${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'})`).join('\n') || 'None'}`;
+${fenceUntrusted('inbound_message', openTasksRaw) || 'None'}`;
 
     const systemPrompt = withUntrustedContentRule(buildContactSummaryPrompt(contextBlock));
 
@@ -466,7 +478,7 @@ ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ??
         feature: 'contact_summary',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Generate a comprehensive briefing for ${name}.` },
+          { role: 'user', content: `Generate a comprehensive briefing for contact ${contactId}.` },
         ],
         maxTokens: 600,
         temperature: 0.3,
@@ -539,10 +551,17 @@ ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ??
     const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
     const recentEvents30d = events.filter(e => (now.getTime() - new Date(e.createdAt).getTime()) < 30 * 86400000).length;
 
-    const contextBlock = `CONTACT: ${name}
-Status: ${contact.status} | Current Lead Score: ${contact.leadScore ?? 'N/A'} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'}
-Company: ${contact.companyName ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'} | Source: ${contact.source ?? 'manual'}
-Tags: ${(contact.tags ?? []).join(', ') || 'none'}
+    const fencedProfile = fenceUntrusted(
+      'inbound_message',
+      [
+        `CONTACT: ${name}`,
+        `Status: ${contact.status} | Current Lead Score: ${contact.leadScore ?? 'N/A'} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'}`,
+        `Company: ${contact.companyName ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'} | Source: ${contact.source ?? 'manual'}`,
+        `Tags: ${(contact.tags ?? []).join(', ') || 'none'}`,
+      ].join('\n'),
+    );
+
+    const contextBlock = `${fencedProfile}
 Last Interaction: ${daysSinceLastInteraction != null ? `${daysSinceLastInteraction} days ago` : 'never'}
 Contact Age: ${Math.floor((now.getTime() - new Date(contact.createdAt).getTime()) / 86400000)} days
 
@@ -569,7 +588,7 @@ ${fenceUntrusted('inbound_message', notes.slice(0, 8).map(n => `- ${n.body.subst
         feature: 'ai_lead_score',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Score this lead: ${name}` },
+          { role: 'user', content: `Score contact ${contactId} and return the structured lead score.` },
         ],
         maxTokens: 600,
         temperature: 0.3,
@@ -620,6 +639,10 @@ ${fenceUntrusted('inbound_message', notes.slice(0, 8).map(n => `- ${n.body.subst
     });
 
     const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed';
+    const fencedContactMeta = fenceUntrusted(
+      'inbound_message',
+      `CONTACT: ${name} | Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}\nTags: ${(contact.tags ?? []).join(', ') || 'none'}`,
+    );
     const fencedPreviousNotes =
       fenceUntrusted('inbound_message', recentNotes.slice(0, 3).map(n => `- ${n.body.substring(0, 200)}`).join('\n')) ||
       'No previous notes';
@@ -628,8 +651,7 @@ ${fenceUntrusted('inbound_message', notes.slice(0, 8).map(n => `- ${n.body.subst
     const systemPrompt = withUntrustedContentRule(`You are a CRM note intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
 Analyze this note about a contact and extract actionable intelligence.
 
-CONTACT: ${name} | Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}
-Tags: ${(contact.tags ?? []).join(', ') || 'none'}
+${fencedContactMeta}
 
 PREVIOUS NOTES (for context):
 ${fencedPreviousNotes}
@@ -738,7 +760,8 @@ Respond in valid JSON:
       return `- ${name} (ID:${c.id}) | Status: ${c.status} | Revenue: TTD ${totalRevenue.toFixed(0)} | Last active: ${daysSinceLastInteraction}d ago | Recent events: ${recentEvents} | Overdue invoices: ${overdueInvoices} | Overdue tasks: ${overdueTasks} | Score: ${c.leadScore ?? 'N/A'} | Latest note: "${cNotes[0]?.body?.substring(0, 100) ?? 'none'}"`;
     }).join('\n');
 
-    const systemPrompt = buildChurnDetectionPrompt(contactProfiles);
+    const fencedContactProfiles = fenceUntrusted('inbound_message', contactProfiles);
+    const systemPrompt = withUntrustedContentRule(buildChurnDetectionPrompt(fencedContactProfiles));
 
     try {
       const result = await this.aiUsage.callAi({
@@ -795,13 +818,21 @@ Respond in valid JSON:
     const knownCities = [...new Set(contactFields.map(c => c.city).filter(Boolean))];
     const knownIndustries = [...new Set(contactFields.map(c => c.industry).filter(Boolean))];
 
-    const systemPrompt = buildNlSearchPrompt({
-      knownStatuses,
-      knownTags,
-      knownSources,
-      knownCities,
-      knownIndustries,
-    });
+    const fenceList = (items: (string | null)[]) => {
+      const joined = items.filter((v): v is string => Boolean(v && v.trim())).join(', ');
+      const fenced = fenceUntrusted('inbound_message', joined);
+      return fenced ? [fenced] : [];
+    };
+
+    const systemPrompt = withUntrustedContentRule(
+      buildNlSearchPrompt({
+        knownStatuses,
+        knownTags: fenceList(knownTags.slice(0, 20)),
+        knownSources: fenceList(knownSources),
+        knownCities: fenceList(knownCities),
+        knownIndustries: fenceList(knownIndustries),
+      }),
+    );
 
     try {
       const result = await this.aiUsage.callAi({
@@ -944,13 +975,20 @@ Respond in valid JSON:
     const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
     const eventTypes = [...new Set(events.map(e => e.type))];
 
+    const fencedProfile = fenceUntrusted(
+      'inbound_message',
+      [
+        `Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}`,
+        `Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}`,
+        `Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}`,
+        `Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}`,
+        `Source: ${contact.source ?? 'manual'} | Current Tags: ${(contact.tags ?? []).join(', ') || 'none'}`,
+        `Preferred Channel: ${contact.preferredChannel ?? 'N/A'}`,
+      ].join('\n'),
+    );
+
     const contextBlock = `CONTACT:
-Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}
-Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}
-Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}
-Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}
-Source: ${contact.source ?? 'manual'} | Current Tags: ${(contact.tags ?? []).join(', ') || 'none'}
-Preferred Channel: ${contact.preferredChannel ?? 'N/A'}
+${fencedProfile}
 Created: ${daysSinceCreated} days ago | Last Interaction: ${daysSinceLastInteraction != null ? `${daysSinceLastInteraction} days ago` : 'never'}
 
 FINANCIAL:
@@ -966,7 +1004,7 @@ NOTES (${notes.length}):
 ${fenceUntrusted('inbound_message', notes.slice(0, 8).map(n => `- [${n.source ?? 'general'}] ${n.body.substring(0, 200)}`).join('\n')) || 'No notes'}
 
 EXISTING TAGS IN BUSINESS (popular ones):
-${popularTags.join(', ') || 'none yet'}`;
+${fenceUntrusted('inbound_message', popularTags.join(', ')) || 'none yet'}`;
 
     const systemPrompt = withUntrustedContentRule(`You are a CRM tagging intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
 Analyze this contact's data, notes, events, and interaction patterns to suggest relevant tags.
@@ -998,7 +1036,7 @@ Respond in valid JSON:
         feature: 'ai_tags',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Suggest tags for ${name}.` },
+          { role: 'user', content: `Suggest tags for contact ${contactId}.` },
         ],
         maxTokens: 600,
         temperature: 0.3,
@@ -1092,13 +1130,23 @@ Respond in valid JSON:
     const openTasks = tasks.filter(t => t.status === 'OPEN');
     const overdueTasks = openTasks.filter(t => t.dueDate && new Date(t.dueDate) < now);
 
+    const fencedProfile = fenceUntrusted(
+      'inbound_message',
+      [
+        `Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}`,
+        `Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}`,
+        `Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}`,
+        `Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}`,
+        `Source: ${contact.source ?? 'manual'} | Tags: ${(contact.tags ?? []).join(', ') || 'none'}`,
+        `Preferred Channel: ${contact.preferredChannel ?? 'N/A'} | WhatsApp: ${contact.whatsappNumber ?? 'N/A'}`,
+      ].join('\n'),
+    );
+    const openTasksRaw = openTasks
+      .map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'}${t.dueDate && new Date(t.dueDate) < now ? ' OVERDUE' : ''})`)
+      .join('\n');
+
     const contextBlock = `CONTACT PROFILE:
-Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}
-Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}
-Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}
-Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}
-Source: ${contact.source ?? 'manual'} | Tags: ${(contact.tags ?? []).join(', ') || 'none'}
-Preferred Channel: ${contact.preferredChannel ?? 'N/A'} | WhatsApp: ${contact.whatsappNumber ?? 'N/A'}
+${fencedProfile}
 Created: ${daysSinceCreated} days ago | Last Interaction: ${daysSinceLastInteraction != null ? `${daysSinceLastInteraction} days ago` : 'never'}
 
 FINANCIAL:
@@ -1109,7 +1157,7 @@ Open quotes: ${openQuotes.map(q => `${q.quoteNumber ?? 'N/A'} - TTD ${Number(q.t
 Bookings: ${bookings.length} total (${bookings.filter(b => b.status === 'COMPLETED').length} completed)
 
 OPEN TASKS:
-${openTasks.map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'}${t.dueDate && new Date(t.dueDate) < now ? ' OVERDUE' : ''})`).join('\n') || 'None'}
+${fenceUntrusted('inbound_message', openTasksRaw) || 'None'}
 
 NOTES (recent ${notes.length}):
 ${fenceUntrusted('inbound_message', notes.slice(0, 15).map(n => `- [${n.createdAt.toISOString().split('T')[0]}] [${n.source ?? 'general'}] ${n.body.substring(0, 300)}`).join('\n')) || 'No notes'}
@@ -1154,7 +1202,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         feature: 'ai_prep_brief',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Prepare me for a conversation with ${name}.` },
+          { role: 'user', content: `Prepare me for a conversation with contact ${contactId}.` },
         ],
         maxTokens: 1200,
         temperature: 0.3,
@@ -1221,6 +1269,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || 'Unnamed';
       return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
     }).join('\n');
+    const fencedContactSummary = fenceUntrusted('inbound_message', contactSummary) || 'No contacts';
 
     // W9-CRM-RESIDUALS (D-37): for a member whose view is scoped, the counts are
     // over the contacts the member may open; the OWNER's are listSequences' and
@@ -1237,7 +1286,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${visible ? visible.members.get(l.id) ?? 0 : l.memberCount ?? 0} members`).join('\n')
       : undefined;
 
-    const systemPrompt = buildCommandInterpreterPrompt(contactSummary, sequenceSummary, listSummary);
+    const systemPrompt = withUntrustedContentRule(
+      buildCommandInterpreterPrompt(fencedContactSummary, sequenceSummary, listSummary),
+    );
 
     const result = await this.aiUsage.callAi({
       businessId,
@@ -1771,11 +1822,17 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     ]);
 
     const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'there';
-    const firstName = contact.firstName ?? name;
 
-    const contextBlock = `Contact: ${name}
-Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}
-Channel: ${contact.preferredChannel ?? 'email'}
+    const fencedContact = fenceUntrusted(
+      'inbound_message',
+      [
+        `Contact: ${name}`,
+        `Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}`,
+        `Channel: ${contact.preferredChannel ?? 'email'}`,
+      ].join('\n'),
+    );
+
+    const contextBlock = `${fencedContact}
 Recent Notes: ${fenceUntrusted('inbound_message', notes.map(n => n.body.substring(0, 100)).join('; ')) || 'None'}
 Recent Events: ${events.map(e => e.type).join(', ') || 'None'}
 Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status === 'PENDING' ? 'PENDING — not yet sent; do not send a payment reminder' : i.status})`).join(', ') : 'None'}`;
@@ -1813,7 +1870,7 @@ Respond in valid JSON:
         feature: 'follow_up_draft',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Generate follow-up messages for ${firstName}.` },
+          { role: 'user', content: `Generate follow-up messages for contact ${contactId}.` },
         ],
         maxTokens: 800,
         temperature: 0.5,
