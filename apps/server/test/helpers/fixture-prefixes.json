@@ -1550,6 +1550,11 @@
       "prefix": "v86r_",
       "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
       "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
+    },
+    {
+      "prefix": "v88p_",
+      "owner": "apps/server/test/proposal-money-tag.integration.test.ts",
+      "packet": "V1-88 (FU-PROPOSAL-MONEY-TAG)"
     }
   ],
   "pendingRenames": [],
