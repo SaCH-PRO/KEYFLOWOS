@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
-import { test, expect, API_URL, isLocal, settle, type Tenant } from "./journeys/journey-helpers";
+import { test, expect, API_URL, coveredButtonFindings, isLocal, settle, type Tenant } from "./journeys/journey-helpers";
 
 /**
  * EXPENSES-HUB-1, the browser half (journey H5, H6; BUG-025, BUG-031, BUG-058; owner rulings billpay D-168,
@@ -52,10 +52,13 @@ async function api<T = Record<string, unknown>>(request: APIRequestContext, owne
   return (text ? JSON.parse(text) : null) as T;
 }
 
-/** Clicks a button after scrolling it into view; fails if something covers it. */
+/**
+ * Clicks a button as journey H does: scrolled to the centre of the screen, and only if nothing covers it there (at
+ * 375 the fixed mobile navigation sits over the bottom of the screen, where scrollIntoViewIfNeeded leaves a button).
+ */
 async function press(button: Locator, what: string): Promise<void> {
   await expect(button, what).toBeVisible();
-  await button.scrollIntoViewIfNeeded();
+  expect(await coveredButtonFindings([{ what, locator: button }]), `${what} can be pressed`).toEqual([]);
   await button.click({ timeout: 10_000 });
 }
 
