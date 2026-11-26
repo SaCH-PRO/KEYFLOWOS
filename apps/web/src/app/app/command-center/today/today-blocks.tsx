@@ -261,7 +261,8 @@ function TodayList({ data }: { data: TodayAggregate }) {
             {acceptedQuotes.map((q) => (
               <li key={q.id} className={rowClass}>
                 <span className="min-w-0">
-                  <Link href={`/app/commerce?tab=quotes&quoteId=${encodeURIComponent(q.id)}`} className="font-medium hover:underline focus-ring rounded">
+                  {/* COR-3: the deep link commerce/page.tsx reads (recordType + recordId opens the quote's record drawer). */}
+                  <Link href={`/app/commerce?recordType=quote&recordId=${encodeURIComponent(q.id)}`} className="font-medium hover:underline focus-ring rounded">
                     {q.quoteNumber}
                   </Link>
                   <span className="ml-2 text-muted-foreground">{formatCurrency(q.total, q.currency)}</span>
@@ -380,18 +381,19 @@ function PulseFigures({ pulse }: { pulse: TodayPulse }) {
  * D-157: a sample invoice shown as a picture of what customers receive. It creates nothing and links nowhere. A member
  * without revenue read sees it without amounts (journey I6: no money on their Today, a sample's included).
  */
-function SamplePreview({ showAmounts }: { showAmounts: boolean }) {
+function SamplePreview({ showAmounts, currency }: { showAmounts: boolean; currency: string }) {
+  const amount = formatCurrency(250, currency);
   return (
     <figure aria-label="Sample invoice preview" className="rounded-xl border border-dashed border-border/70 bg-background/60 p-3 text-xs space-y-1.5">
       <figcaption className="font-medium text-foreground">Sample invoice (preview)</figcaption>
       <div className="flex justify-between text-muted-foreground">
         <span>Hair treatment × 1</span>
-        {showAmounts && <span>TTD 250.00</span>}
+        {showAmounts && <span>{amount}</span>}
       </div>
       {showAmounts && (
         <div className="flex justify-between font-medium text-foreground border-t border-border/50 pt-1.5">
           <span>Total</span>
-          <span>TTD 250.00</span>
+          <span>{amount}</span>
         </div>
       )}
       <p className="text-muted-foreground">
@@ -401,7 +403,7 @@ function SamplePreview({ showAmounts }: { showAmounts: boolean }) {
   );
 }
 
-function GetSetUp({ data }: { data: TodayAggregate }) {
+function GetSetUp({ data, businessCurrency }: { data: TodayAggregate; businessCurrency: string | null }) {
   const { steps, complete } = data.getSetUp;
   return (
     <div className="space-y-3">
@@ -425,7 +427,8 @@ function GetSetUp({ data }: { data: TodayAggregate }) {
           </li>
         ))}
       </ul>
-      <SamplePreview showAmounts={data.pulseStatus === "OK"} />
+      {/* COR-7: in the business's own currency (Pulse's, else the business record's), never a hard-coded one. */}
+      <SamplePreview showAmounts={data.pulseStatus === "OK"} currency={data.pulse?.currency || businessCurrency || "TTD"} />
       <InstallAppStep />
     </div>
   );
@@ -438,6 +441,8 @@ export interface TodayBlocksProps {
   error: string | null;
   /** True only once GET /identity/me said KEY is switched off; the KEY kinds of Needs you are then not shown. */
   keyDisabled: boolean;
+  /** The business's currency from its cached record (the sample preview's, when Pulse is not there to say). */
+  businessCurrency?: string | null;
   onRefresh: () => void | Promise<void>;
   /** Mounted at the end of Needs you (the approved actions panel, the command queue). */
   needsYouExtra?: ReactNode;
@@ -445,7 +450,7 @@ export interface TodayBlocksProps {
   todayExtra?: ReactNode;
 }
 
-export function TodayBlocks({ businessId, data, loading, error, keyDisabled, onRefresh, needsYouExtra, todayExtra }: TodayBlocksProps) {
+export function TodayBlocks({ businessId, data, loading, error, keyDisabled, businessCurrency = null, onRefresh, needsYouExtra, todayExtra }: TodayBlocksProps) {
   const waiting = loading && !data;
   const pending = (
     <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -475,14 +480,21 @@ export function TodayBlocks({ businessId, data, loading, error, keyDisabled, onR
           </Block>
         </div>
         <div className="space-y-4 min-w-0">
-          {data && data.pulseStatus === "OK" && data.pulse && (
+          {data && data.pulseStatus === "OK" && (
             <Block title="Pulse" testId="today-block-pulse">
-              <PulseFigures pulse={data.pulse} />
+              {data.pulse ? (
+                <PulseFigures pulse={data.pulse} />
+              ) : (
+                // COR-6: a member who may see Pulse, and an answer without it, fails visibly (never an empty block or zeros).
+                <p role="alert" data-testid="today-pulse-unavailable" className="text-sm text-amber-700">
+                  Pulse could not be loaded: the server sent no figures. Refresh to try again.
+                </p>
+              )}
             </Block>
           )}
           {data && (
             <Block title="Get set up" testId="today-block-get-set-up">
-              <GetSetUp data={data} />
+              <GetSetUp data={data} businessCurrency={businessCurrency} />
             </Block>
           )}
         </div>

@@ -49,6 +49,7 @@ import {
 import { DueObligationsPanel } from "./components/due-obligations-panel";
 import { ApprovedActionsPanel } from "../control-tower/components/approved-actions-queue";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
+import { CommandKeyDisabledContext } from "@/components/command/command-card-v2";
 import { commandActionsDisabledReason, operationsLevelFromAnswer, type OperationsLevel } from "@/lib/module-access";
 import { CommandSection } from "./components/command-section";
 import { TodayBlocks } from "./today/today-blocks";
@@ -120,6 +121,7 @@ function CommandQuickLauncher({ keyDisabled }: { keyDisabled: boolean }) {
 export default function CommandCenterPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [businessName, setBusinessName] = useState<string | null>(null);
+  const [businessCurrency, setBusinessCurrency] = useState<string | null>(null);
   const [today, setToday] = useState<{ businessId: string; data: TodayAggregate } | null>(null);
   const [todayLoading, setTodayLoading] = useState(true);
   const [todayError, setTodayError] = useState<string | null>(null);
@@ -151,6 +153,7 @@ export default function CommandCenterPage() {
       setBusinessId(resolved);
       const cached = getCachedBusiness();
       setBusinessName(cached && cached.id === resolved ? cached.name : null);
+      setBusinessCurrency(cached && cached.id === resolved ? (cached.currency ?? null) : null);
       if (!resolved) setTodayLoading(false);
     };
     void resolveBusinessId();
@@ -174,6 +177,9 @@ export default function CommandCenterPage() {
       setToday({ businessId, data });
       setTodayError(null);
     } else {
+      // SEC-T4B-2: any failed read (a refusal, a 5xx, no answer) clears what an earlier read showed, so no figure,
+      // Pulse or customer row stays on screen under the alert for a member the server no longer answers.
+      setToday(null);
       setTodayError(error || "the server did not answer");
     }
     setTodayLoading(false);
@@ -259,6 +265,8 @@ export default function CommandCenterPage() {
   };
 
   // KEY UI waits for GET /identity/me: nothing KEY shows before it answers, and none once it says KEY is off.
+  // SEC-T4B-1 (fail closed when the read fails) is held: it conflicts with approved-actions-mount.test.tsx (D-72, pass
+  // unchanged), whose harness answers /identity/me 503. Reported to the orchestrator.
   const keyOff = !keyRead || keyDisabled === true;
   const current = today && today.businessId === businessId ? today.data : null;
 
@@ -285,6 +293,7 @@ export default function CommandCenterPage() {
               loading={todayLoading}
               error={todayError}
               keyDisabled={keyOff}
+              businessCurrency={businessCurrency}
               onRefresh={loadToday}
               needsYouExtra={
                 <>
@@ -292,6 +301,8 @@ export default function CommandCenterPage() {
                       each with its D-70 Run action. /app/control-tower redirects here. Not under KEY_DISABLED. */}
                   {!keyOff && <ApprovedActionsPanel key={`approved-actions:${businessId}`} businessId={businessId} />}
                   <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
+                    {/* COR-1: under KEY_DISABLED no card shows "KEY can handle" or Execute, and no execute handler is given. */}
+                    <CommandKeyDisabledContext.Provider value={keyOff}>
                     <CommandQueueV2
                       items={commandItems}
                       total={queueTotal}
@@ -299,13 +310,14 @@ export default function CommandCenterPage() {
                       onRefresh={loadQueue}
                       onComplete={handleComplete}
                       onApprove={handleApprove}
-                      onExecute={handleExecute}
+                      onExecute={keyOff ? undefined : handleExecute}
                       onAssign={handleAssign}
                       onDismiss={handleDismiss}
                       onSnooze={handleSnooze}
                       onReopen={handleReopen}
                       operationsLevel={operationsLevel}
                     />
+                    </CommandKeyDisabledContext.Provider>
                   </CommandSection>
                 </>
               }
