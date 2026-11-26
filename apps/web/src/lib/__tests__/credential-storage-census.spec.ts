@@ -81,10 +81,16 @@
  * dynamic code, comments inside string code, string code nested deeper than 3, a `d = document` alias, nested const
  * objects, a destructured jar and `globalThis.Cache` types; from round 8 (CSC8-SEC-3, FU-CENSUS-HARDENING): a
  * cookie set through ternaries reads as a clear (`document.cookie = \`kf_session=${on ? token : ""};
- * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0): a ternary KEY is
- * every branch since round 11 (keyCandidates: one write per branch, or one UNRESOLVED credential write when a branch
- * cannot be resolved), but a ternary in a value, a cookie string or a function's return still resolves to its first
- * resolvable branch; in the text scanner only (a file with parse errors), a
+ * Max-Age=${on ? age : 0}\`` resolves each ternary to its first resolvable branch, "" and 0). Since round 12 every
+ * KEY or NAME position (storage keys, cookieStore / response-cookie / document.cookie names, cache names, wrapper
+ * calls, string code) goes through one structural resolver, resolveKeySet: ternaries, ||, ??, &&, +, templates,
+ * parentheses, as / satisfies / ! / <T>x, consts at any depth, imported consts, wrapper and same-file callers'
+ * arguments, const objects and enums, same-file function returns, capped at 64 candidates; any part it cannot
+ * resolve is "*", and a key holding "*" is a credential write (fail closed). What still takes a ternary's first
+ * resolvable branch: a cookie string's value and attributes (parseCookie, so the clear above), and a template
+ * substitution in string code whose candidates are all plain (the first is spliced in; one naming a credential is
+ * spliced in instead, and a "*" one fails closed). Values are classed on their full source text (VALUE_PATTERN), so
+ * every branch of a value is seen; in the text scanner only (a file with parse errors), a
  * type literal `{ 'set-cookie': string }` reads as a response-cookie write named "*" (harmless: never a credential);
  * and the argument nodes' text (comments removed) is still resolved by the text resolver (literalValue, valueText,
  * parseCookie: consts one hop, templates, ternaries), not by a type checker; FU-CENSUS-HARDENING would resolve keys on
@@ -177,6 +183,25 @@ const REGISTRY: RegistryRow[] = [
     file: "src/app/book/[slug]/page.tsx",
     why: "Pending public checkout (bookings, order) kept for the return from payment; withoutTokenLinks drops the booking token links, so no credential is stored.",
   },
+
+  // Keys with a runtime part (repair round 12): the key resolver cannot resolve the suffix (a business id, a slug,
+  // a route), so the write fails closed and must be written down. Each was read: it holds UI state, not a credential.
+  { store: "localStorage", key: "kf_dunning_rules_*", file: "src/app/app/commerce/components/dunning-rules.tsx", why: "Dunning rule settings per business (JSON of the rules the owner set); the suffix is the business id." },
+  { store: "localStorage", key: "kf:morning-briefing:dismissed:*:*", file: "src/app/app/control-tower/components/morning-briefing.tsx", why: `Morning briefing dismissed flag ("1") per business and day.` },
+  { store: "localStorage", key: "kf-tower-pinned-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Pinned control-tower item ids per business." },
+  { store: "localStorage", key: "kf-tower-dismissed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Dismissed control-tower item ids and dates per business." },
+  { store: "localStorage", key: "kf-tower-snoozed-*", file: "src/app/app/control-tower/components/priority-queue.tsx", why: "Snoozed control-tower item ids and wake times per business." },
+  { store: "localStorage", key: "kf_finance_banner_dismissed_*", file: "src/app/app/finance/components/finance-banner.tsx", why: `Finance banner dismissed flag ("1"); the suffix names the banner.` },
+  { store: "localStorage", key: "kf_default_destinations_*", file: "src/app/app/marketing/components/unified/channel-selector.tsx", why: "Default marketing destination ids per business." },
+  { store: "sessionStorage", key: "kf-genome-milestone-*-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `Business-genome milestone shown flag ("1") per business and threshold.` },
+  { store: "sessionStorage", key: "kf-genome-milestone-anon-*", file: "src/app/app/profile/components/business-genome/genome-milestone.tsx", why: `The same flag with no business yet ("anon", the ?? branch), per threshold.` },
+  { store: "localStorage", key: "dismissed-prompts-*", file: "src/app/app/profile/components/progressive-prompts.tsx", why: "Dismissed profile prompt ids per business." },
+  { store: "localStorage", key: "kf-section-*", file: "src/app/app/reports/components/shared-components.tsx", why: `Report section open/closed state ("1"/"0") per section.` },
+  { store: "localStorage", key: "kf_wishlist_*", file: "src/app/book/[slug]/components/use-wishlist.ts", why: "Public booking-page wishlist items per business slug." },
+  { store: "localStorage", key: "kf_cart_*", file: "src/app/book/[slug]/components/utils.ts", why: "Public booking-page cart per business slug." },
+  { store: "localStorage", key: "kf_promo_*", file: "src/app/book/[slug]/components/utils.ts", why: "Applied promo code details per business slug." },
+  { store: "localStorage", key: "kf_contacts_last_sync:*", file: "src/lib/contacts-db.ts", why: "Last contacts sync time (an ISO date) per cache owner." },
+  { store: "sessionStorage", key: "kf-scroll-*", file: "src/lib/use-return-navigation.ts", why: "Scroll position per route, to restore it on return." },
 
   // The service worker's offline write queue, public/sw.js. enqueue() stores each queued request's headers, so the
   // user's Authorization bearer is written to IndexedDB in clear (security review follow-up, not fixed here).
@@ -771,31 +796,132 @@ function optionAttrs(ctx: Ctx, opts: string): string[] {
 const isClear = (value: string, attrs: string[]) =>
   value === "" && attrs.some((a) => a === "max-age=0" || /^expires=thu, 01 jan 1970/.test(a));
 
-/** `scanSource(file, src, { files })`: `files` (path relative to apps/web → source) serves imported consts. */
+const KEY_CAP = 64;
+
 /**
- * A key expression's possible values when it is a ternary (SEC-R10-1): every branch, through parentheses, nested
- * ternaries and a const one hop away (`const K = on ? B : A`), each resolved by literalValue, null for a branch that
- * cannot be resolved. A null / undefined branch is no key and is skipped. Not a ternary: null.
+ * The key resolver (repair round 12): one structural resolver for every key or name position the census reads
+ * (storage setItem and bracket or property assignment, cookieStore.set and response cookies().set names,
+ * document.cookie names, caches.open, wrapper calls, string code). The key TEXT is parsed as a TypeScript expression,
+ * so parentheses, `as`, `satisfies`, `!` and `<T>x` are structure, not text. It returns a finite set of candidate
+ * strings in which "*" stands for any part it cannot resolve:
+ *   - a string or no-substitution template: itself; a number: itself; null / undefined / void: no key (skipped);
+ *   - an identifier: a wrapper binding, a const (any number of hops, cycle-guarded), a const imported one file away,
+ *     or a parameter of the enclosing function whose same-file callers give its arguments; otherwise "*";
+ *   - `a ? b : c`: b and c; `a || b`, `a ?? b`, `a && b`: a and b;
+ *   - `a + b` and a template with substitutions: the product of the parts' sets;
+ *   - `K.a`, `K["a"]` on a same-file const object or enum (literalValue); String(x): x;
+ *   - a call of a same-file function: each of its returns, its parameters bound to the call's arguments;
+ *   - anything else (an unknown call or member, an operator): "*".
+ * A union or product over KEY_CAP candidates is "*". The caller classes a write whose key holds "*" as a credential
+ * write (isCredential), so an unresolvable key, or part of one, fails closed.
  */
-function keyCandidates(ctx: Ctx, text: string, depth = 0): Array<string | null> | null {
-  let t = text.trim();
-  while (t.startsWith("(") && t.endsWith(")") && splitTop(t.slice(1, -1), ",").length === 1 && ternaryBranches(t) === null) t = t.slice(1, -1).trim();
-  if (depth > MAX_DEPTH) return null;
-  const branches = ternaryBranches(t);
-  if (!branches) {
-    if (!IDENT.test(t)) return null;
-    const own = ctx.bindings?.[t] ?? constText(ctx.src, t, ctx.at);
-    return own === null || own === undefined ? null : keyCandidates(ctx, own, depth + 1);
+function resolveKeySet(ctx: Ctx, text: string, depth = 0, seen: ReadonlySet<string> = new Set()): string[] {
+  const t = text.trim();
+  if (t === "" || depth > 12) return ["*"];
+  const ksf = ts.createSourceFile("key.ts", `(${t}\n);`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const st = ksf.statements[0];
+  if (
+    ksf.statements.length !== 1 ||
+    !st ||
+    !ts.isExpressionStatement(st) ||
+    !ts.isParenthesizedExpression(st.expression) ||
+    (ksf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length > 0
+  ) {
+    return ["*"];
   }
-  const out: Array<string | null> = [];
-  for (const b of branches) {
-    if (/^(?:null|undefined)$/.test(b.trim())) continue;
-    const nested = keyCandidates(ctx, b, depth + 1);
-    if (nested) out.push(...nested);
-    else out.push(literalValue(ctx, b, depth + 1));
-  }
-  return out;
+  const union = (...sets: string[][]) => {
+    const out = [...new Set(sets.flat())];
+    return out.length > KEY_CAP ? ["*"] : out;
+  };
+  const product = (sets: string[][]) => {
+    let acc = [""];
+    for (const set of sets) {
+      if (set.length === 0) return [];
+      const next: string[] = [];
+      for (const a of acc) for (const b of set) next.push(a + b);
+      acc = [...new Set(next)];
+      if (acc.length > KEY_CAP) return ["*"];
+    }
+    return acc;
+  };
+  const sub = (txt: string, c: Ctx = ctx, more: ReadonlySet<string> = seen) => resolveKeySet(c, txt, depth + 1, more);
+  const go = (n: ts.Expression): string[] => {
+    if (
+      ts.isParenthesizedExpression(n) ||
+      ts.isAsExpression(n) ||
+      ts.isSatisfiesExpression(n) ||
+      ts.isNonNullExpression(n) ||
+      ts.isTypeAssertionExpression(n)
+    ) {
+      return go(n.expression);
+    }
+    if (ts.isStringLiteralLike(n) || ts.isNumericLiteral(n)) return [n.text];
+    if (n.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(n) && n.text === "undefined") || ts.isVoidExpression(n)) return [];
+    if (ts.isConditionalExpression(n)) return union(go(n.whenTrue), go(n.whenFalse));
+    if (ts.isBinaryExpression(n)) {
+      const op = n.operatorToken.kind;
+      if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.AmpersandAmpersandToken) {
+        return union(go(n.left), go(n.right));
+      }
+      if (op === ts.SyntaxKind.PlusToken) return product([go(n.left), go(n.right)]);
+      return ["*"];
+    }
+    if (ts.isTemplateExpression(n)) {
+      return product([[n.head.text], ...n.templateSpans.flatMap((sp) => [go(sp.expression), [sp.literal.text]])]);
+    }
+    if (ts.isIdentifier(n)) {
+      const name = n.text;
+      if (ctx.bindings && name in ctx.bindings) return sub(ctx.bindings[name], { ...ctx, bindings: undefined });
+      if (seen.has(name)) return ["*"];
+      const more = new Set([...seen, name]);
+      const own = constText(ctx.src, name, ctx.at);
+      if (own !== null) return sub(own, ctx, more);
+      const imported = importedText(ctx, name);
+      if (imported) return sub(imported.text, imported.ctx, more);
+      if (ctx.at !== undefined) {
+        const w = wrapperOf(ctx.src, ctx.at, name);
+        if (w) {
+          const idx = w.params.indexOf(name);
+          const sites = callSites(ctx.src, w.fn).filter((site) => site.args[idx] !== undefined);
+          if (sites.length > 0) return union(...sites.map((site) => sub(site.args[idx], { ...ctx, at: site.at, bindings: undefined }, more)));
+        }
+      }
+      return ["*"];
+    }
+    if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
+      const v = literalValue(ctx, n.getText(ksf));
+      return v === null ? ["*"] : [v];
+    }
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
+      const fn = n.expression.text;
+      if (fn === "String" && n.arguments.length === 1) return go(n.arguments[0]);
+      const returns = functionReturnTexts(ctx.src, fn);
+      const params = functionParams(ctx.src, fn);
+      if (returns.length === 0 || params === null || seen.has(`${fn}()`)) return ["*"];
+      const bindings = Object.fromEntries(params.map((p, i) => [p, n.arguments[i] ? n.arguments[i].getText(ksf) : "undefined"]));
+      const more = new Set([...seen, `${fn}()`]);
+      return union(...returns.filter((r) => !/^(?:null|undefined)$/.test(r.trim())).map((r) => sub(r, { ...ctx, bindings }, more)));
+    }
+    return ["*"];
+  };
+  return go(st.expression.expression);
 }
+
+/** A same-file function's parameter names (`function fn(a, b)` or `const fn = (a, b) =>`), or null. */
+function functionParams(src: string, fn: string): string[] | null {
+  const name = fn.replace(/\$/g, "\\$");
+  const m =
+    src.match(new RegExp(`\\bfunction\\s+${name}\\s*(?:<[^>]*>)?\\s*\\(([^)]*)\\)`)) ??
+    src.match(new RegExp(`\\b(?:const|let)\\s+${name}\\s*=\\s*(?:async\\s*)?\\(([^)]*)\\)\\s*(?::\\s*[^=]+)?=>`));
+  if (!m) return null;
+  return m[1]
+    .split(",")
+    .map((p) => p.trim().split(/[\s:=?]/)[0])
+    .filter((p) => p !== "");
+}
+
+/** A resolved key set as the keys a write is recorded under: "*" alone is UNRESOLVED; other "*" parts stay. */
+const keysFrom = (set: string[]) => [...new Set(set.map((k) => (k === "*" ? UNRESOLVED : k)))];
 
 /** Each write's offset in the source it was found in (kept out of the Write objects, so they keep their shape). */
 const writeOffsets = new WeakMap<Write, number>();
@@ -806,17 +932,11 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
   const keyed = (store: Store, keyExpr: string, valueExpr: string, at: number) => {
     const id = IDENT.test(keyExpr.trim()) ? keyExpr.trim() : undefined;
     for (const c of contexts({ ...base, at }, at, id)) {
-      // A ternary key is every branch: one write each, or, when a branch cannot be resolved, one write under the
-      // UNRESOLVED (credential) key, failing closed (SEC-R10-1).
-      const cands = keyCandidates(c, keyExpr);
-      if (cands) {
-        const keys = cands.includes(null) ? [UNRESOLVED] : [...new Set(cands as string[])];
-        for (const key of keys) push({ store, key, expr: keyExpr, value: valueText(c, valueExpr) }, at);
-        continue;
+      // Every candidate the key resolver gives is a write (round 12); a "*" part fails closed (isCredential).
+      for (const key of keysFrom(resolveKeySet(c, keyExpr))) {
+        const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${key})` : keyExpr;
+        push({ store, key, expr, value: valueText(c, valueExpr) }, at);
       }
-      const key = literalValue(c, keyExpr) ?? keyExpr;
-      const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${key})` : keyExpr;
-      push({ store, key, expr, value: valueText(c, valueExpr) }, at);
     }
   };
 
@@ -827,12 +947,16 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
     const raw = joined ? splitTop(joined[1], ",").filter((x) => x !== "").join(joined[3] ? ` + ${JSON.stringify(joined[3])} + ` : " + ") : rawIn;
     const id = raw.match(/^`\$\{\s*([\w$]+)\s*\}=/)?.[1];
     for (const c of contexts({ ...base, at }, at, id)) {
-      const { name, value, attrs } = parseCookie(c, raw);
+      const { name: firstName, value, attrs } = parseCookie(c, raw);
       if (isClear(value, attrs)) continue;
       const keySource = raw.split("=")[0];
       const valueSource = raw.slice(raw.indexOf("=") + 1).split(";")[0];
-      const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${name})` : keySource;
-      push({ store, key: name, expr, value: valueText(c, valueSource), attrs }, at);
+      // The cookie's name through the key resolver (round 12): each candidate string's part before its first "=".
+      const names = keysFrom(resolveKeySet(c, raw).map((k) => (k.includes("=") ? k.slice(0, k.indexOf("=")).trim() : "*")));
+      for (const name of names.length > 0 ? names : [firstName]) {
+        const expr = c.bindings && id ? `${wrapperOf(src, at, id)!.fn}(${name})` : keySource;
+        push({ store, key: name, expr, value: valueText(c, valueSource), attrs }, at);
+      }
     }
   };
 
@@ -855,13 +979,15 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
       const value = prop("value");
       const attrs = optionAttrs(base, obj);
       if (/^(["'`])\1$/.test(value) && attrs.includes("max-age=0")) return;
-      push({ store, key: literalValue(base, prop("name")) ?? prop("name"), expr: prop("name"), value: valueText(base, value), attrs }, at);
+      for (const key of keysFrom(resolveKeySet({ ...base, at }, prop("name")))) {
+        push({ store, key, expr: prop("name"), value: valueText(base, value), attrs }, at);
+      }
       return;
     }
     const second = args[1] ?? "";
     const attrs = optionAttrs(base, args[2] ?? "");
     if (/^(["'`])\1$/.test(second) && attrs.includes("max-age=0")) return;
-    push({ store, key: literalValue(base, first) ?? first, expr: first, value: valueText(base, second), attrs }, at);
+    for (const key of keysFrom(resolveKeySet({ ...base, at }, first))) push({ store, key, expr: first, value: valueText(base, second), attrs }, at);
   };
 
   /** A Cache Storage put into the cache opened as `nameExpr`. */
@@ -1384,20 +1510,20 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
   /**
    * A template substitution's text, resolved in the host file; UNRESOLVED (a credential) when it cannot be resolved
    * in full ("*" piece), or when its own source names a credential (CSC8-SEC-1/2: `${token ? token : ""}`,
-   * `${AUTH_KEY}`). A ternary is every branch (keyCandidates): one that cannot be resolved, or names a credential,
-   * fails closed; of plain branches the first is spliced in.
+   * `${AUTH_KEY}`). Otherwise the substitution goes through resolveKeySet: a candidate with a "*" part fails closed;
+   * one naming a credential is spliced in; of plain candidates the first is spliced in.
    */
   function resolveSubstitution(e: ts.Expression): string {
     const t = text(e);
     if (CREDENTIAL_PATTERN.test(t) || VALUE_PATTERN.test(t)) return UNRESOLVED;
     const c = { ...base, at: e.getStart(sf) };
     const json = t.match(/^JSON\s*\.\s*stringify\s*\(([\s\S]*)\)$/);
-    // A ternary is every branch: one that cannot be resolved, or that names a credential, fails closed (SEC-R10-1).
-    const cands = keyCandidates(c, json ? json[1] : t);
-    if (cands && cands.some((x) => x === null || x.includes("*") || CREDENTIAL_PATTERN.test(x))) return UNRESOLVED;
-    const v = literalValue(c, json ? json[1] : t);
-    if (v === null || v.includes("*")) return UNRESOLVED;
-    return json ? JSON.stringify(v) : v;
+    // Through the key resolver (round 12): a candidate with a "*" part fails closed; otherwise a candidate naming a
+    // credential is spliced in (so the inner write is a credential write under its real name), else the first.
+    const cands = resolveKeySet(c, json ? json[1] : t);
+    if (cands.length === 0 || cands.some((x) => x.includes("*"))) return UNRESOLVED;
+    const pick = cands.find((x) => CREDENTIAL_PATTERN.test(x)) ?? cands[0];
+    return json ? JSON.stringify(pick) : pick;
   }
 
   /**
@@ -1437,6 +1563,7 @@ const HEADERS_PATTERN = /\bheaders\b/;
 
 const isCredential = (w: Pick<Write, "store" | "key" | "expr" | "value">) =>
   w.store === "window.name" ||
+  w.key.includes("*") || // a key the resolver could not resolve in full fails closed (round 12)
   CREDENTIAL_PATTERN.test(w.key) ||
   CREDENTIAL_PATTERN.test(w.expr) ||
   VALUE_PATTERN.test(w.value) ||
@@ -3096,6 +3223,23 @@ describe("CSC-64 parentheses are structural", () => {
 });
 
 describe("CSC-65 pins", () => {
+  it("document.cookie's name goes through the resolver: `${on ? B : A}=1` is a credential write", () => {
+    expect(credWrites("src/fixture-r12p.ts", [...AB, "document.cookie = `${on ? B : A}=1; Path=/`;"].join("\n"), "cookie").length).toBeGreaterThan(0);
+  });
+  it("`as` and `!` are unwrapped: a plain key under them stays a plain write", () => {
+    const fixture = ['const K = "kf_plain_nn";', 'localStorage.setItem("kf_plain_as" as string, v);', "localStorage.setItem(K!, v);"].join("\n");
+    const ws = scan("src/fixture-r12r.ts", fixture);
+    expect(keysOf(ws)).toEqual(["localStorage:kf_plain_as", "localStorage:kf_plain_nn"]);
+    expect(ws.filter(isCredential)).toEqual([]);
+  });
+  it("a union over 64 candidates is unresolved (a credential write)", () => {
+    const chain = Array.from({ length: 65 }, (_, i) => `x === ${i} ? "kf_p${i}"`).join(" : ") + ' : "kf_q"';
+    expect(credWrites("src/fixture-r12s.ts", `localStorage.setItem(${chain}, v);`, "localStorage").length).toBe(1);
+  });
+  it("a const cycle resolves to unresolved, not a hang", () => {
+    const fixture = ["const P = Q;", "const Q = P;", "localStorage.setItem(P, v);"].join("\n");
+    expect(credWrites("src/fixture-r12q.ts", fixture, "localStorage").length).toBe(1);
+  });
   it('on ? "kf_a" : "kf_b" gives two plain writes', () => {
     const ws = scan("src/fixture-r12n.ts", 'localStorage.setItem(on ? "kf_a" : "kf_b", v);');
     expect(keysOf(ws)).toEqual(["localStorage:kf_a", "localStorage:kf_b"]);
