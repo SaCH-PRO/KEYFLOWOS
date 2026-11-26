@@ -434,8 +434,10 @@ describe("SWP-TEAM-WEB repair 1", () => {
  *           memberModuleLevel reads it: an ADMIN sees Invite, a STAFF does not
  *   TPR-07  COR-TW-R2-3: a reload that lowers the viewer's own team level to read while the form is open takes the
  *           form and Invite away
- *   TPR-08  SEC-TW-R2: with no cached user at all, Invite is not offered (a cached user absent from the list keeps it,
- *           R0-ID-UX-T07)
+ *   TPR-08  SEC-TW-R2, control (judged acceptable as designed): with no cached user the form stays, and the server's
+ *           refusal is what stops a member below team write. Hiding it was tried and breaks R0-ID-UX-T02 and
+ *           SFB-WEB-01/02 (invite-default-scopes / staff-bookings-default, outside this packet's write set), which
+ *           render the page with no cached user; so it is left, as the review allowed
  */
 describe("SWP-TEAM-WEB repair 2", { timeout: 15_000 }, () => {
   const kept = () => member("usr_tpr_kept2", "STAFF", { ...ROLE_DEFAULT_SCOPES.STAFF }, 0);
@@ -487,12 +489,16 @@ describe("SWP-TEAM-WEB repair 2", { timeout: 15_000 }, () => {
     expect(screen.queryByRole("button", { name: /^Invite$/ })).toBeNull();
   });
 
-  it("TPR-08: with no cached user, Invite is not offered", async () => {
+  it("TPR-08 control: with no cached user the form stays and the server's refusal is shown", async () => {
     clearStoredBusinessId();
     window.localStorage.setItem("kf_business_id", BUSINESS);
     serveTeam([owner(), kept()]);
     render(<TeamSettingsPage />);
     await screen.findByText("usr_tpr_kept2@example.com");
-    expect(screen.queryByRole("button", { name: /^Invite$/ }), "Invite with no signed-in user known").toBeNull();
+    api.apiPostSimple.mockResolvedValue({ data: null, error: "Insufficient permissions: team requires write access (you have read)", status: 403 });
+    await openInviteForm();
+    await sendInvite("fay@example.com");
+    const { toast } = await import("sonner");
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Insufficient permissions: team requires write access (you have read)"));
   });
 });
