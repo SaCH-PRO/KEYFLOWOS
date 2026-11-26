@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-26 ~05:55 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M22 merged. Main is `0c1f4624`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-26 ~07:45 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M24 merged. Main is `c5a5a99e`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,7 +17,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-26 ~05:55 UTC)
+## 0. Current state: the next session starts here (2026-11-26 ~07:45 UTC)
 
 Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issue #80 and the
 pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this session is needed.
@@ -26,41 +26,45 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 which the owner paused (#80 7179133696). Cloud workers report there and post every PACKET REPORT on #80, so a new
 orchestrator reads #80.
 
-**State:** main `0c1f4624` (M22 #254 merged at 05:03 UTC, then Antigravity's M31 #256). V1-STATUS: 194 of 396 done
-(50.9% of points; launch 106 of 255). Production still runs `f5d58ef7` (16 Nov); the owner redeploys (D-266).
+**State:** main `c5a5a99e` (M24 #259 merged 07:41 UTC; Antigravity's M33 #257 and M35 #258 before it). V1-STATUS:
+200 of 396 done (52.7% of points; launch 112 of 255). Production still runs `f5d58ef7` (16 Nov); the owner redeploys
+(D-266).
 
-### 0.1 M22: merged
+### 0.1 Waves this session
 
-PR #254 merged at 05:03 UTC through the queue (head `3d2a63b1`). It was dequeued once at 02:13 UTC by an existing
-test's time-of-day failure (today-aggregate TD-01/02, below), then re-queued after 04:00 UTC with main `a1d3db2f`
-merged in. The only conflict was `fixture-prefixes.json`, resolved as the exact union.
-- **Wave-head proof** (`e8f9e765`): server 892 files / 15,949 passed; R0 EXIT GATE MET 39/39; web 2,534; mocked e2e
-  25/25; live release0-live and the five M22 sweeps green. Journey C's **C4 and C8 fail identically at base main**:
-  C8 is P98's, and C4 fails "from Today" on main.
-- **Two wave confirmations:** both CONFIRMED (PR comment 7180191349).
+- **M22** (#254, merged 05:03 UTC): P67, FU-CONTACT-SEND-QUOTE-DOOR, FU-NOTIFICATIONS-PAGE-REFUSED, P95. It was
+  dequeued once by today-aggregate TD-01/02, which fail 02:00-04:00 UTC on any code (0.3).
+- **M24** (#259, merged 07:41 UTC, head `2d0c712c`): P28 FU-CONTACT-PAGES-RAW-STATUS and P98 CONTACTS-LIST-FIRST.
+  - Proof at `dfd034a0`: server 16,118 passed; R0 EXIT GATE MET; web 2,563; mocked e2e 25/25; live release0 2/2.
+  - **Journey C:** C8 went from red on main to green (P98). C4 fails identically at base: it fails "from Today",
+    which neither packet touches.
+  - Two wave confirmations CONFIRMED. Main `c1cf1b41` was merged in at `2d0c712c` because the divergence check
+    counted M33's files; `apps/web` stayed byte-identical.
+- **M26** (assembled, proof running): `wave/v1-wave-m26` @ `ed2f80ba` on main `c1cf1b41`, carrying P34
+  FU-KEY-CTRLJ-OWNERS and P99 SWP-KEY-SHELL-SMOKE web.
+  - `key-agent.tsx` is the exact union of both packets; main has not touched it.
+  - The proof (`/home/user/proof-m26` in this container) runs live release0 and Journeys A and K under both the
+    ai-disabled and key-disabled variants, at head and base.
+  - Expect K1 red under key-disabled until FU-KEY-DISABLED-NAV-TODAY lands; compare with the base run.
+  - **Next:** merge main into the branch (M24's docs squash is identical, so it should merge cleanly), PR, two wave
+    confirmations, enqueue.
+- **M28 (next):** P86 CATALOG-1 web, its own wave.
 
 ### 0.2 Claude packets in flight (heads as of this file)
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **P86 CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ `0e964cc4` | Rounds 5 to 8 done this session. Round 8 (tests only) adds the r8 spec for the stale-load early return. Store and commerce: 75 files / 540 tests. Two confirmations of `f7ca6c5e..0e964cc4` are running. | If both confirm: RETURN, then its own wave. Follow-up for the server lane: **FU-STORE-ADD-IDEMPOTENT** (an item in flight during A to B to A can be created twice; no unique key on `sourceProductId`) |
-| **RR-ADMIN-SHELL-SERVER-GATE** | `pkt/V1-RR-ADMIN-SHELL-SERVER-GATE` @ `d089921` | Rounds 2 to 4 done. Web gate: edge cookie, `canOpenOwnerConsole` from the admin session only, malformed `/app` paths keep `/app` rules, `SameSite=Lax` and Secure on https. Two confirmations of round 4 (tests only) are running. **Security MAJOR-1 is open:** `AdminGuard` checks the role only, so `/api/admin/*` accepts a Supabase-session SUPER_ADMIN (#80 7180630143). | **Owner question 57.** Then RETURN, with MAJOR-1 recorded per the ruling |
-| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `2f1399c` | Round 2 done (census 35/35; 95 writes, 18 credential, 19 rows). Two reviews of `8bc5833..2f1399c` are running. **Wave action:** merged with the admin gate, CSC-12's three admin cookie rows take `samesite=lax` and `secure-on-https`. | Reviews, then RETURN. Follow-ups: **FU-CENSUS-HARDENING**, **FU-SW-QUEUE-NO-AUTH** (`public/sw.js` queues the Authorization header and request bodies; its definition of done adjusts HEADERS_PATTERN) |
-| **P98 CONTACTS-LIST-FIRST** | `pkt/V1-CONTACTS-LIST-FIRST` @ `080e2769` | Security ACCEPT, correctness ACCEPT WITH MINORS. The repair (CLF-08/09/10, tests only) is CONFIRMED by both lenses. C8 is red at base and green at head on phone and desktop. | **RETURN** (to be posted), then a wave. Owner question 58 |
-| **P99 SWP-KEY-SHELL-SMOKE web** | `pkt/V1-SWP-KEY-SHELL-SMOKE` @ `86eebc29` | Security ACCEPT WITH MINORS. **Correctness REJECT, COR-1 MAJOR:** `use-key-enabled` keys its answer on `kf_token` and reads only on mount, so KEY turns itself off after a token refresh. Repair round 1 was sent to `session_017o9EBgXDkoqPmCSmXnZwXh`: COR-1, fail closed on a non-boolean `keyDisabled`, the Settings > KEY retry, and the comments. | Repair, two reviews, RETURN. Pair with P34. Follow-up **FU-KEY-DISABLED-NAV-TODAY** (the sidebar KEY link and Today's KEY cards under `keyDisabled`) |
-| **P34 FU-KEY-CTRLJ-OWNERS** | `pkt/V1-FU-KEY-CTRLJ-OWNERS` @ `6f48b89c` | RETURNED (7179034851) | Wave with P99 |
-| **P28 FU-CONTACT-PAGES-RAW-STATUS** | `pkt/V1-FU-CONTACT-PAGES-RAW-STATUS` @ `f026efc5` | RETURNED (7179351910) | Next Claude wave |
+| **P86 CATALOG-1 web** | `pkt/V1-CATALOG-1-WEB` @ `0e964cc4` | **RETURNed** (#80 7183976090). Rounds 5 to 8 this session; round 8 CONFIRMED by both lenses. | Wave M28. Server follow-up **FU-STORE-ADD-IDEMPOTENT** |
+| **P99 SWP-KEY-SHELL-SMOKE web** | `pkt/V1-SWP-KEY-SHELL-SMOKE` @ `223ef25` | **RETURNed** (#80 7184497503). The COR-1 token-refresh MAJOR is fixed; repairs 1 and 2 accepted and confirmed. | Wave M26. Owner question 60; follow-up **FU-KEY-DISABLED-NAV-TODAY** |
+| **P34 FU-KEY-CTRLJ-OWNERS** | `pkt/V1-FU-KEY-CTRLJ-OWNERS` @ `6f48b89c` | RETURNed (7179034851) | Wave M26 with P99 |
+| **RR-ADMIN-SHELL-SERVER-GATE** | `pkt/V1-RR-ADMIN-SHELL-SERVER-GATE` @ `d089921` | Rounds 2 to 4 done, round 4 CONFIRMED by both lenses. **Held for owner question 57:** security MAJOR-1, `/api/admin/*` `AdminGuard` checks the role only (#80 7180630143). | RETURN as the owner rules |
+| **RR-SESSION-STORAGE-CENSUS** | `pkt/V1-RR-SESSION-STORAGE-CENSUS` @ `314056a` | Rounds 2 to 5 done. Each round's security review found another text shape that defeats regex matching (round 5: a comment between a call's tokens, #80 7185472329). **Round 6 is the root fix:** detect writes on the TypeScript AST; the text scanner stays only as the fallback for files that fail to parse. Building in `session_017o9EBfvTibjEvGQK5qTBwq`. | Two reviews of round 6, then RETURN. Wave action: CSC-12's three admin cookie rows take `samesite=lax` and `secure-on-https` once the gate is on main. Follow-ups **FU-CENSUS-HARDENING**, **FU-SW-QUEUE-NO-AUTH** |
+
+P28 and P98 merged in M24.
 
 **Cloud workers** (on the `keyflowos` environment, Opus):
-- `session_017o9EBfvTibjEvGQK5qTBwq`: the admin gate and the census. Idle until the next round.
-- `session_017o9EBgXDkoqPmCSmXnZwXh`: P99, repair round 1.
-- `session_017o9EBfFFYNpxwZxCup4gv4`: P98. Idle.
-
-A worker that is gone leaves its branch pushed: read its last PACKET REPORT on #80 and continue with
-PACKET-WORKER-BRIEF.md.
-
-**Next Claude wave (M24; Antigravity uses odd numbers):** P28, P98, P34 + P99 (once P99 returns), the admin gate and the
-census (once returned, with the CSC-12 wave action). CATALOG-1 web goes in its own wave.
+- `session_017o9EBfvTibjEvGQK5qTBwq`: census round 6.
+- `session_017o9EBgXDkoqPmCSmXnZwXh` (P99) and `session_017o9EBfFFYNpxwZxCup4gv4` (P98): idle.
 
 ### 0.3 Antigravity (server lane)
 
@@ -207,14 +211,14 @@ referred to on the board but is not yet a row.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `0c1f4624`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
+Main is at `c5a5a99e`. Production runs `f5d58ef7` (16 Nov), far behind main; the owner redeploys (D-266).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; FU-TODAY-AGGREGATE-TZ-SEED proposed |
-| **Owner** | - | - | Section 4 questions 40 to 50, 54, 57 to 59; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
-| `wave/v1-docs-p19` | main `0c1f4624` merged in | This file and V1-STATUS | Squashed into each Claude wave |
+| **Owner** | - | - | Section 4 questions 40 to 50, 54, 57 to 60; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| `wave/v1-docs-p19` | main `c5a5a99e` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -348,6 +352,7 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 57. **Does D-290 cover the admin API?** The web gate now keeps a Supabase-session SUPER_ADMIN out of /admin. But the server's `AdminGuard` checks only `role === 'SUPER_ADMIN'`, and the auth middleware builds the same user from a Supabase token and from an admin token, so `/api/admin/*` still answers that session with admin data (RR-ADMIN security MAJOR-1, #80 7180630143; confirmed by reading). (Recommended: yes, as a separate server packet. The middleware records the sign-in kind, `AdminGuard` requires the admin sign-in, and the other guards that check only the role are reviewed too. The web packet ships as built. Default meanwhile: the web packet returns with MAJOR-1 recorded, and no server change.)
 58. **Favorites strip and duplicate banner (P98, D-289).** They still sit above the search on the Customers page, so a user with favorites sees them before the list. Move them into the Insights and filters panel, move them below the list, or leave them? (Default: leave as at base; D-289 did not list them, and C8 passes for a fresh business.)
 59. **Contact status CLIENT reads "Client" (P28).** The Customers hub says "Customers", and `status-labels.ts` says a customer is a "Customer". Should CLIENT read "Customer"? (Default: "Client", as shipped.)
+60. **Should a tab read the KEY switch again (P99)?** Once a tab knows whether KEY_DISABLED is on, it keeps that answer until the page reloads, even across token refreshes and sign-ins. A tab already open when the operator flips KEY_DISABLED keeps showing KEY's doors, while the server refuses every dispatch. Options: read again on a new sign-in, on a timer, on window focus, or when the server refuses with KEY_DISABLED. (Default: keep as built; a reload picks up the change.)
 
 **Ruled 2026-11-25/26 (D-286 to D-290, #80 7178159751 and 7178888690):** 52 (P90 gates all 46, Option A) = D-286; 51 and 55 (refunds stay as built; FU-REFUND-GATEWAY-REFUSE withdrawn) = D-287; 56 (only an OWNER changes owner alerts) = D-288; 53 (CONTACTS-LIST-FIRST, list first on phones, cards collapsed on desktop) = D-289; the Owner Console only via the separate admin sign-in = D-290 (owner step: set ADMIN_EMAIL and ADMIN_PASSWORD_HASH in production before the redeploy).
 

@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "2c0f86e89a195b22c5a2fa1a59c3e618a3f08735",
-  "main_commit_date": "2026-11-26T05:51:49+00:00",
+  "main_sha": "766e00c69fd5a6de7ff05734e086cab52aca6b55",
+  "main_commit_date": "2026-11-26T07:42:37+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 194,
-    "points": 290.5,
-    "pct_by_points": 50.9
+    "packets": 200,
+    "points": 300.5,
+    "pct_by_points": 52.7
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 202,
-    "points": 280,
-    "pct_by_points": 49.1
+    "packets": 196,
+    "points": 270,
+    "pct_by_points": 47.3
    }
   },
   "by_step": {
@@ -66,21 +66,21 @@
     "total": 7
    },
    "3": {
-    "done": 83,
+    "done": 84,
     "in-progress": 0,
-    "todo": 66,
+    "todo": 65,
     "total": 149
    },
    "4": {
-    "done": 26,
+    "done": 27,
     "in-progress": 0,
-    "todo": 27,
+    "todo": 26,
     "total": 53
    },
    "5": {
-    "done": 45,
+    "done": 49,
     "in-progress": 0,
-    "todo": 47,
+    "todo": 43,
     "total": 92
    },
    "6": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 106,
+    "done": 112,
     "in-progress": 0,
-    "todo": 149,
+    "todo": 143,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 94,
+   "prior-status-file": 92,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 71,
-   "compacted-commit": 76,
-   "no-evidence": 127
+   "code-commit-subject": 75,
+   "compacted-commit": 78,
+   "no-evidence": 123
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -146,6 +146,7 @@
    "W11-GENOME-RECS-DOMAIN",
    "W11-PROPOSAL-RESULT-READER-SCOPE",
    "W11-GENOME-RUNWAY",
+   "SWP-CENSUS-KEY-B",
    "SWP-CENSUS-GENOME",
    "W11-RUNWAY-BURN-CURRENCY",
    "TOF-PAYROLL-DISCARD",
@@ -169,6 +170,7 @@
    "SWP-CENSUS-V1-B",
    "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
+   "FU-MERGE-CONTACTS-UNIQUE",
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
    "FU-KEY-MEMORY-MONEY-SIGHT",
@@ -176,8 +178,10 @@
    "FU-PROPOSAL-REVENUE-SIGHT",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
+   "FU-DOC-FETCH-BODY-CAP",
    "MEM-CENSUS",
    "MEM-EXPIRED-NOT-SERVED",
+   "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
    "RR-UNKNOWN-COST-NOT-ZERO",
@@ -202,8 +206,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 121,
-  "todo_with_dependencies_met_launch": 91
+  "todo_with_dependencies_met": 115,
+  "todo_with_dependencies_met_launch": 85
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -328,16 +332,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
-  },
-  {
-   "id": "SWP-CENSUS-KEY-B",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 9
   },
   {
    "id": "PLAN-TABLE",
@@ -560,31 +554,11 @@
    "unblocks": 0
   },
   {
-   "id": "CONTACTS-LIST-FIRST",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CONTACT-AUDIT-RESIDUAL",
    "step": 3,
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONTACT-PAGES-RAW-STATUS",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -604,16 +578,6 @@
    "step": 3,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-DOC-FETCH-BODY-CAP",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -650,30 +614,10 @@
    "unblocks": 0
   },
   {
-   "id": "FU-KEY-OVERDUE-SENT-ONLY",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
    "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-MERGE-CONTACTS-UNIQUE",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1542,16 +1486,6 @@
    "unblocks": 10
   },
   {
-   "id": "SWP-CENSUS-KEY-B",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 9
-  },
-  {
    "id": "PLAN-TABLE",
    "step": 6,
    "priority": "P1",
@@ -1752,31 +1686,11 @@
    "unblocks": 0
   },
   {
-   "id": "CONTACTS-LIST-FIRST",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CONTACT-AUDIT-RESIDUAL",
    "step": 3,
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CONTACT-PAGES-RAW-STATUS",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1796,16 +1710,6 @@
    "step": 3,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-DOC-FETCH-BODY-CAP",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1842,30 +1746,10 @@
    "unblocks": 0
   },
   {
-   "id": "FU-KEY-OVERDUE-SENT-ONLY",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
    "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-MERGE-CONTACTS-UNIQUE",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -4026,13 +3910,15 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "18427dd3"
+   ],
    "depends_on": [],
    "title": "REST scope census, KEY batch B: cortex, goals, audit, action proposals, genome bridge (46 open rows, 5 controllers)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-GENOME",
@@ -5903,15 +5789,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "1039dbd7",
+    "43c6b240"
+   ],
    "depends_on": [
     "TOF-CONTACT-AUDIT-AWAIT"
    ],
    "title": "Merging two contacts no longer fails when the primary lacks the duplicate's email or phone",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-MEMORY-COPIES-REWRITE",
@@ -6436,15 +6325,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "56fedd54",
+    "80ddd1eb"
+   ],
    "depends_on": [
     "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
    ],
    "title": "Contract document fetches cap the body size, decompressed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
@@ -6732,15 +6624,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f4175a82",
+    "89ed4969"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "KEY's overdue list and reminder drafts exclude never-sent invoices (D-260)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-RESEARCH-CORPUS-YAML",
@@ -9009,15 +8904,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "5d3e0028"
+   ],
    "depends_on": [
     "SWP-CONTACT-DETAIL"
    ],
    "title": "The contact route's pages show statuses in plain words",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONTACT-DELETE-LEAVE",
@@ -9509,15 +9406,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "915e29f8"
+   ],
    "depends_on": [
     "SWP-CRM-WEB-POLISH"
    ],
    "title": "The contacts list comes first on phones; the cards above it move below or collapse",
-   "deps_met": true
+   "deps_met": null
   }
  ]
 }
