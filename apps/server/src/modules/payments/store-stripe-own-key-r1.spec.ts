@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConflictException } from '@nestjs/common';
-import { PaymentsService } from '../src/modules/payments/payments.service';
+import { PaymentsService } from './payments.service';
 
 function makeService(prismaClient: Record<string, any>, storeOrderService?: any) {
   const prisma = { client: prismaClient } as any;
