@@ -53,24 +53,34 @@ describe('FU-PROPOSAL-MONEY-TAG static writer census (V1-88)', () => {
     'modules/key-autonomy/action-boundary/key-action-boundary.service.ts',
   ]);
 
-  it('every keyActionProposal.create/createMany/upsert in apps/server/src lives in an allowed canonical writer and stamps carriesMoney', () => {
+  it('every keyActionProposal.create/createMany/createManyAndReturn/upsert or raw SQL INSERT in apps/server/src lives in an allowed canonical writer and stamps carriesMoney', () => {
     const files = walkTsFiles(SRC_ROOT);
     const createSites: Array<{ rel: string; line: number; match: string }> = [];
+    const rawInsertSites: Array<{ rel: string; line: number; match: string }> = [];
 
     for (const file of files) {
       const rel = path.relative(SRC_ROOT, file).replace(/\\/g, '/');
       const content = fs.readFileSync(file, 'utf8');
-      const lines = content.split('\n');
-      lines.forEach((lineText, idx) => {
-        const m = /keyActionProposal\.(create|createMany|upsert)\s*\(/.exec(lineText);
-        if (m) {
-          createSites.push({ rel, line: idx + 1, match: m[0] });
-        }
-      });
+
+      const createRe = /keyActionProposal\s*\.\s*(create|createMany|createManyAndReturn|upsert)\s*\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = createRe.exec(content)) !== null) {
+        const line = content.slice(0, m.index).split('\n').length;
+        createSites.push({ rel, line, match: m[0].replace(/\s+/g, ' ') });
+      }
+
+      const sqlRe = /INSERT\s+INTO\s+["']?key_action_proposals["']?/gi;
+      while ((m = sqlRe.exec(content)) !== null) {
+        const line = content.slice(0, m.index).split('\n').length;
+        rawInsertSites.push({ rel, line, match: m[0].replace(/\s+/g, ' ') });
+      }
     }
 
-    // Must not be vacuous
-    expect(createSites.length).toBeGreaterThanOrEqual(2);
+    // Zero raw SQL inserts bypassing canonical writers
+    expect(rawInsertSites, `Raw SQL key_action_proposals inserts found: ${JSON.stringify(rawInsertSites)}`).toEqual([]);
+
+    // Exact create-site count (1 per allowed canonical writer) so an untagged second site in an allowed file cannot slip in
+    expect(createSites.length, `Expected exactly 2 create sites (1 per canonical writer), found: ${JSON.stringify(createSites)}`).toBe(2);
 
     // Zero unregistered writers
     const unregistered = createSites.filter((s) => !ALLOWED_CREATE_WRITERS.has(s.rel));
@@ -78,6 +88,8 @@ describe('FU-PROPOSAL-MONEY-TAG static writer census (V1-88)', () => {
 
     // Every allowed writer calls computeProposalCarriesMoney and writes carriesMoney
     for (const rel of ALLOWED_CREATE_WRITERS) {
+      const sitesForFile = createSites.filter((s) => s.rel === rel);
+      expect(sitesForFile.length, `${rel} must contain exactly 1 create site`).toBe(1);
       const content = fs.readFileSync(path.join(SRC_ROOT, rel), 'utf8');
       expect(content, `${rel} must call computeProposalCarriesMoney`).toContain('computeProposalCarriesMoney(');
       expect(content, `${rel} must persist carriesMoney`).toMatch(/\bcarriesMoney\b/);

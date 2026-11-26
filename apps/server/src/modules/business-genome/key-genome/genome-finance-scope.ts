@@ -717,6 +717,7 @@ function proposalFieldsOfEvent(row: GenomeRowFields): ProposalFields {
     module: str(meta.module),
     toolName: str(meta.toolName),
     title: row.title ?? null,
+    executionResult: meta.executionResult,
   };
 }
 

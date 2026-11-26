@@ -1012,7 +1012,11 @@ export class KeyActionBoundaryService {
     if (!sealed || !('actionFingerprint' in sealed)) {
       throw new BadRequestException('This action has no valid parameters and cannot be approved');
     }
-    const carriesMoney = monotonicCarriesMoney(record.carriesMoney, computeProposalCarriesMoney(record));
+    const computed = computeProposalCarriesMoney(record);
+    const carriesMoney =
+      record.carriesMoney === null
+        ? (computed ? true : null)
+        : monotonicCarriesMoney(record.carriesMoney, computed);
     return tx.keyActionProposal.update({
       where: { id: record.id },
       data: {

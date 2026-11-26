@@ -562,7 +562,14 @@ export class KeyActionProposalService {
         try {
           const rec = await this.prisma.client.genomeRecommendation?.findFirst({
             where: { id: recId, businessId },
-            select: { domain: true, title: true, diagnosis: true },
+            select: {
+              domain: true,
+              title: true,
+              diagnosis: true,
+              insight: true,
+              recommendation: true,
+              expectedGain: true,
+            },
           });
           recFinancial = !rec || isFinanceRecommendation(rec as GenomeRowFields);
         } catch {
