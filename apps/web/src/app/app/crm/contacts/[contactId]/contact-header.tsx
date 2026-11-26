@@ -7,6 +7,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { Mail, Phone, MapPin, Star, ChevronDown, Check, ShieldOff, SearchX, AlertTriangle } from "lucide-react";
 import { CONTACT_STATUSES } from "@/lib/crm-constants";
 import { toast } from "sonner";
+import { statusLabel } from "@/lib/status-labels";
 import { useContactDetailContext } from "./contact-detail-context";
 import { ContactAvatar } from "@/components/contacts/contact-avatar";
 import { classifyContactsLoadError } from "@/app/app/crm/pipeline/hooks/use-contacts-data";
@@ -82,7 +83,7 @@ export default function ContactHeader() {
     try {
       const res = await updateContact({ businessId, contactId: contactId as string, status: newStatus });
       if (res.error) throw new Error(res.error);
-      toast.success(`Status updated to ${newStatus}`);
+      toast.success(`Status updated to ${statusLabel(newStatus)}`);
     } catch {
       toast.error("Failed to update status");
     } finally {
@@ -116,7 +117,7 @@ export default function ContactHeader() {
                     disabled={updatingStatus}
                     className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
                   >
-                    {updatingStatus ? "Saving…" : contact.status}
+                    {updatingStatus ? "Saving…" : statusLabel(contact.status)}
                     <ChevronDown className="h-3 w-3" />
                   </button>
                   {statusMenuOpen && (
@@ -127,7 +128,7 @@ export default function ContactHeader() {
                           onClick={() => handleStatusChange(s)}
                           className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-muted/50 transition-colors ${s === contact.status ? "bg-primary/5 font-medium text-primary" : ""}`}
                         >
-                          {s}
+                          {statusLabel(s)}
                           {s === contact.status && <Check className="h-3 w-3 text-primary" />}
                         </button>
                       ))}
