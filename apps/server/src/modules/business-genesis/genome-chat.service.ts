@@ -99,6 +99,9 @@ export class GenomeChatService {
   private projectMessageForNonRevenueReader(msg: GenomeChatMessage): GenomeChatMessage | null {
     const meta = msg.metadata;
     if (meta && typeof meta === 'object') {
+      if (meta.moneyOnly === true) {
+        return null;
+      }
       const appliedSection = meta.appliedSection;
       if (typeof appliedSection === 'string' && !isServedDnaKey(appliedSection)) {
         return null;
@@ -275,11 +278,13 @@ export class GenomeChatService {
         safeData[k] = v;
       }
       const safeFields = Object.keys(safeData);
+      const moneyOnly = Object.keys(data).length > 0 && safeFields.length === 0;
       const summaryText =
         safeFields.length > 0 ? `Updated ${section} DNA: ${safeFields.join(', ')}.` : `Updated ${section} DNA.`;
       await this.persistMessage(businessId, 'system', summaryText, {
         appliedSection: section,
         ...(safeFields.length > 0 ? { appliedData: safeData } : {}),
+        ...(moneyOnly ? { moneyOnly: true } : {}),
       });
     } else {
       const populatedFields = Object.keys(data).join(', ');

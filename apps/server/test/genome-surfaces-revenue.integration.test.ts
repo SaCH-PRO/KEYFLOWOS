@@ -1419,4 +1419,109 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       }
     }
   });
+
+  it(
+    'SR-22 (R2-SEC-01 & R2-SEC-02) real PATCH /blueprint recomputations leave confidenceScores, blueprint risk DNA, executive-brief, and key-modes/RISK_OFFICER invariant to financialRisks; money-only risk apply-updates stays silent',
+    async () => {
+      const beforeBp = await db.businessBlueprint.findUnique({ where: { businessId: ID.biz } });
+      try {
+        const patchWith = await request(app.getHttpServer())
+          .patch(bp())
+          .set(HEADER, ID.owner)
+          .send({
+            riskProfile: {
+              financialRisks: [{ description: 'Runway 31.7 days' }],
+              legalRisks: ['l'],
+              marketRisks: [],
+              operationalRisks: [],
+              founderRisks: [],
+              mitigationPlan: [],
+            },
+          });
+        expect(patchWith.status).toBeLessThan(300);
+
+        const ownerBpWith = await get(bp(), ID.owner);
+        const bpWith = await get(bp(), ID.staffNone);
+        const briefWith = await get(`/intelligence/businesses/${ID.biz}/executive-brief`, ID.staffNone);
+        const riskModeWith = await get(`/intelligence/businesses/${ID.biz}/key-modes/RISK_OFFICER`, ID.staffNone);
+        expect(bpWith.status).toBe(200);
+        expect(briefWith.status).toBe(200);
+        expect(riskModeWith.status).toBe(200);
+
+        // R2-SEC-01: mixed-column confidenceScores keys with withheld money subfields are stripped; pure keys remain.
+        for (const mixed of ['riskProfile', 'operatingModel', 'constraints', 'intelligence', 'taxProfile']) {
+          expect(bpWith.body.confidenceScores?.[mixed], `confidenceScores.${mixed}`).toBeUndefined();
+        }
+        expect(typeof bpWith.body.confidenceScores?.identity).toBe('number');
+
+        const patchWithout = await request(app.getHttpServer())
+          .patch(bp())
+          .set(HEADER, ID.owner)
+          .send({
+            riskProfile: {
+              financialRisks: [],
+              legalRisks: ['l'],
+              marketRisks: [],
+              operationalRisks: [],
+              founderRisks: [],
+              mitigationPlan: [],
+            },
+          });
+        expect(patchWithout.status).toBeLessThan(300);
+
+        const ownerBpWithout = await get(bp(), ID.owner);
+        // Confirm real PATCH /blueprint actually changed stored riskProfile confidence & genomeDnaScores for owner.
+        expect(ownerBpWith.body.confidenceScores.riskProfile).not.toBe(ownerBpWithout.body.confidenceScores.riskProfile);
+
+        const bpWithout = await get(bp(), ID.staffNone);
+        const briefWithout = await get(`/intelligence/businesses/${ID.biz}/executive-brief`, ID.staffNone);
+        const riskModeWithout = await get(`/intelligence/businesses/${ID.biz}/key-modes/RISK_OFFICER`, ID.staffNone);
+        expect(bpWithout.status).toBe(200);
+        expect(briefWithout.status).toBe(200);
+        expect(riskModeWithout.status).toBe(200);
+
+        // R2-SEC-01 & R2-SEC-02: byte-for-byte invariance across blueprint, executive-brief, and RISK_OFFICER mode.
+        expect(bpWithout.body.confidenceScores).toEqual(bpWith.body.confidenceScores);
+        expect(bpWithout.body.genomeDnaScores.risk).toBe(20);
+        expect(bpWithout.body.genomeDnaScores.risk).toBe(bpWith.body.genomeDnaScores.risk);
+        const riskGapWith = briefWith.body.insights.find((i: any) => i.id === 'genome-gap-risk');
+        expect(riskGapWith).toBeDefined();
+        expect(riskGapWith.evidence).toEqual(['risk integrity: 20%']);
+        expect(briefWithout.body.insights).toEqual(briefWith.body.insights);
+        expect(briefWithout.body.topPriorities).toEqual(briefWith.body.topPriorities);
+        expect(briefWithout.body.summary).toBe(briefWith.body.summary);
+        expect(riskModeWithout.body.findings).toEqual(riskModeWith.body.findings);
+        expect(riskModeWithout.body.risks).toEqual(riskModeWith.body.risks);
+        expect(riskModeWithout.body.summary).toBe(riskModeWith.body.summary);
+        expect(riskModeWithout.body.diagnosis).toBe(riskModeWith.body.diagnosis);
+
+        // Bonus hardening: money-only apply-updates on a mixed served section (risk) is silent to non-revenue readers.
+        const beforeMsgs = await get(`/genome-chat/businesses/${ID.biz}/messages`, ID.staffNone);
+        expect(beforeMsgs.status).toBe(200);
+        const moneyOnlyApply = await request(app.getHttpServer())
+          .post(`/genome-chat/businesses/${ID.biz}/apply-updates`)
+          .set(HEADER, ID.owner)
+          .send({ section: 'risk', data: { financialRisks: [{ description: 'Runway 31.7 days' }] } });
+        expect(moneyOnlyApply.status).toBeLessThan(300);
+        const afterMsgs = await get(`/genome-chat/businesses/${ID.biz}/messages`, ID.staffNone);
+        expect(afterMsgs.status).toBe(200);
+        expect(afterMsgs.body).toHaveLength(beforeMsgs.body.length);
+      } finally {
+        if (beforeBp) {
+          await db.businessBlueprint.update({
+            where: { businessId: ID.biz },
+            data: {
+              riskProfile: beforeBp.riskProfile,
+              confidenceScores: beforeBp.confidenceScores,
+              genomeDnaScores: beforeBp.genomeDnaScores,
+              genomeDnaConfidence: beforeBp.genomeDnaConfidence,
+              completeness: beforeBp.completeness,
+              readinessScore: beforeBp.readinessScore,
+            },
+          });
+        }
+      }
+    },
+    30_000,
+  );
 });
