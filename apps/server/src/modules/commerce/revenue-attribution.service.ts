@@ -64,10 +64,13 @@ export class RevenueAttributionService {
 
   private async assertContactInBusiness(
     businessId: string,
-    contactId: string | null | undefined,
+    contactId: unknown,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || contactId.trim().length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
     const where = { id: contactId, businessId, deletedAt: null };
     const contact = tx
       ? await tx.contact.findFirst({ where, select: { id: true } })
@@ -226,14 +229,17 @@ export class RevenueAttributionService {
           total: true,
           currency: true,
           contactId: true,
-          contact: { select: { deletedAt: true } },
+          contact: { select: { businessId: true, deletedAt: true } },
           paidAt: true,
           issueDate: true,
           createdAt: true,
         },
       });
       if (!inv) return null;
-      const liveContactId = inv.contactId && inv.contact?.deletedAt === null ? inv.contactId : null;
+      const liveContactId =
+        inv.contactId && inv.contact?.businessId === businessId && inv.contact?.deletedAt === null
+          ? inv.contactId
+          : null;
       return {
         amount: Math.max(0.01, Number(inv.total ?? 0)),
         currency: inv.currency ?? 'TTD',
@@ -246,14 +252,17 @@ export class RevenueAttributionService {
         where: { id: revenueId, businessId, deletedAt: null },
         select: {
           contactId: true,
-          contact: { select: { deletedAt: true } },
+          contact: { select: { businessId: true, deletedAt: true } },
           startTime: true,
           createdAt: true,
           invoice: { select: { total: true, currency: true } },
         },
       });
       if (!b) return null;
-      const liveContactId = b.contactId && b.contact?.deletedAt === null ? b.contactId : null;
+      const liveContactId =
+        b.contactId && b.contact?.businessId === businessId && b.contact?.deletedAt === null
+          ? b.contactId
+          : null;
       return {
         amount: Math.max(0.01, Number(b.invoice?.total ?? 0)),
         currency: b.invoice?.currency ?? 'TTD',
