@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "766e00c69fd5a6de7ff05734e086cab52aca6b55",
-  "main_commit_date": "2026-11-26T07:42:37+00:00",
+  "main_sha": "8054c038c3db92af7f54baea0999b7aa9bfc8887",
+  "main_commit_date": "2026-11-26T10:25:03+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 200,
-    "points": 300.5,
-    "pct_by_points": 52.7
+    "packets": 211,
+    "points": 316.5,
+    "pct_by_points": 55.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 196,
-    "points": 270,
-    "pct_by_points": 47.3
+    "packets": 185,
+    "points": 254,
+    "pct_by_points": 44.5
    }
   },
   "by_step": {
@@ -66,21 +66,21 @@
     "total": 7
    },
    "3": {
-    "done": 84,
+    "done": 88,
     "in-progress": 0,
-    "todo": 65,
+    "todo": 61,
     "total": 149
    },
    "4": {
-    "done": 27,
+    "done": 28,
     "in-progress": 0,
-    "todo": 26,
+    "todo": 25,
     "total": 53
    },
    "5": {
-    "done": 49,
+    "done": 54,
     "in-progress": 0,
-    "todo": 43,
+    "todo": 38,
     "total": 92
    },
    "6": {
@@ -90,9 +90,9 @@
     "total": 40
    },
    "7": {
-    "done": 1,
+    "done": 2,
     "in-progress": 0,
-    "todo": 33,
+    "todo": 32,
     "total": 34
    },
    "8": {
@@ -110,24 +110,24 @@
     "total": 87
    },
    "launch": {
-    "done": 112,
+    "done": 122,
     "in-progress": 0,
-    "todo": 143,
+    "todo": 133,
     "total": 255
    },
    "follow-on": {
-    "done": 1,
+    "done": 2,
     "in-progress": 0,
-    "todo": 53,
+    "todo": 52,
     "total": 54
    }
   },
   "by_derivation": {
-   "prior-status-file": 92,
+   "prior-status-file": 90,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 75,
-   "compacted-commit": 78,
-   "no-evidence": 123
+   "code-commit-subject": 84,
+   "compacted-commit": 80,
+   "no-evidence": 114
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -137,7 +137,6 @@
    "TOF-KEY-SELF-MODEL",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
-   "SWP-KEY-SHELL-SMOKE",
    "EXPENSES-HUB-1",
    "CATALOG-1",
    "MIGRATION-SET-A",
@@ -168,6 +167,8 @@
    "W11-QUERY-DTO-COERCION",
    "SWP-CENSUS-V1-A",
    "SWP-CENSUS-V1-B",
+   "NAV-B-LEGACY-SERVER",
+   "W1F-ORDER-TRANSITIONS",
    "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
    "FU-MERGE-CONTACTS-UNIQUE",
@@ -176,6 +177,7 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT",
+   "FU-MARKETPLACE-PAID-PAYMENT-ROW",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
    "FU-DOC-FETCH-BODY-CAP",
@@ -184,18 +186,25 @@
    "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
+   "RR-MODEL-LIFECYCLE-GUARD",
    "RR-UNKNOWN-COST-NOT-ZERO",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
    "RR-TOOL-EFFECT-CLASS",
+   "RR-DISPATCH-NO-BLIND-RETRY",
+   "RR-WEBHOOK-INGRESS-CENSUS",
    "RR-ACTION-INTENT-ONE-CLASSIFIER",
    "RR-EVAL-HARNESS-NO-VACUOUS",
    "RR-LANGFUSE-INGESTION-CUTOVER",
+   "RR-DB-CRYPTO-KEY-CENSUS",
    "RR-BUSINESS-EVENT-REDACT",
    "RR-ADMIN-LOGOUT",
    "RR-RETENTION-EXPIRED-EXPORTS",
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "FU-TIMELINE-CALLERS-SCOPE",
+   "FU-UNTRUSTED-INBOUND-FENCE",
+   "FU-CONTACTID-WRITER-VALIDATION",
    "FU-WEB-PAYLINK-STATUS-BUTTONS",
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL",
@@ -206,8 +215,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 115,
-  "todo_with_dependencies_met_launch": 85
+  "todo_with_dependencies_met": 107,
+  "todo_with_dependencies_met_launch": 77
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -272,16 +281,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 20
-  },
-  {
-   "id": "NAV-B-LEGACY-SERVER",
-   "step": 7,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 14
   },
   {
    "id": "EXPENSES-HUB-2",
@@ -394,6 +393,16 @@
    "unblocks": 5
   },
   {
+   "id": "WEDGE-HIDE-STORE",
+   "step": 7,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
    "id": "S0-DEPENDABOT-FREEZE",
    "step": 0,
    "priority": "P2",
@@ -452,36 +461,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 2
-  },
-  {
-   "id": "RR-DB-CRYPTO-KEY-CENSUS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-DISPATCH-NO-BLIND-RETRY",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-MODEL-LIFECYCLE-GUARD",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 1
   },
   {
    "id": "RR-TOOL-WRITES-SEQUENTIAL",
@@ -564,16 +543,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACTID-WRITER-VALIDATION",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
    "step": 3,
    "priority": "P1",
@@ -614,16 +583,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -644,26 +603,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-TIMELINE-CALLERS-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-UNTRUSTED-INBOUND-FENCE",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "MEM-EVAL-SUITE",
    "step": 4,
    "priority": "P1",
@@ -674,20 +613,10 @@
    "unblocks": 0
   },
   {
-   "id": "RR-WEBHOOK-INGRESS-CENSUS",
+   "id": "RR-DISPATCH-ATOMIC-CLAIM",
    "step": 3,
    "priority": "P1",
    "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-ORDER-TRANSITIONS",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -785,16 +714,6 @@
   },
   {
    "id": "FU-CONTACTS-OPEN-DOORS",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-KEY-CTRLJ-OWNERS",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -1294,6 +1213,16 @@
    "unblocks": 0
   },
   {
+   "id": "RR-MODEL-SELECTION-ONE-SEAM",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
    "step": 7,
    "priority": "P3",
@@ -1426,16 +1355,6 @@
    "unblocks": 20
   },
   {
-   "id": "NAV-B-LEGACY-SERVER",
-   "step": 7,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 14
-  },
-  {
    "id": "EXPENSES-HUB-2",
    "step": 4,
    "priority": "P1",
@@ -1546,6 +1465,16 @@
    "unblocks": 5
   },
   {
+   "id": "WEDGE-HIDE-STORE",
+   "step": 7,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
    "id": "S0-DEPENDABOT-FREEZE",
    "step": 0,
    "priority": "P2",
@@ -1594,26 +1523,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 2
-  },
-  {
-   "id": "RR-DB-CRYPTO-KEY-CENSUS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-DISPATCH-NO-BLIND-RETRY",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
   },
   {
    "id": "RR-TOOL-WRITES-SEQUENTIAL",
@@ -1696,16 +1605,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACTID-WRITER-VALIDATION",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
    "step": 3,
    "priority": "P1",
@@ -1746,16 +1645,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -1776,26 +1665,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-TIMELINE-CALLERS-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-UNTRUSTED-INBOUND-FENCE",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "MEM-EVAL-SUITE",
    "step": 4,
    "priority": "P1",
@@ -1806,20 +1675,10 @@
    "unblocks": 0
   },
   {
-   "id": "RR-WEBHOOK-INGRESS-CENSUS",
+   "id": "RR-DISPATCH-ATOMIC-CLAIM",
    "step": 3,
    "priority": "P1",
    "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-ORDER-TRANSITIONS",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1917,16 +1776,6 @@
   },
   {
    "id": "FU-CONTACTS-OPEN-DOORS",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-KEY-CTRLJ-OWNERS",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -3194,10 +3043,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "c7d6af5d"
+    "f6c6108c"
    ],
    "depends_on": [
     "SWP-KEY-CHAT-WEB",
@@ -5089,10 +4938,12 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "8350593f"
+   ],
    "depends_on": [
     "USAGE-COUNT-SCRIPT",
     "SWP-KEY-SHELL-SMOKE",
@@ -5100,7 +4951,7 @@
     "SWP-CENSUS-V1-B"
    ],
    "title": "Per-business legacy modules: a server read of which hidden modules this business already has data in",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "KEY-TOOL-DOMAIN-HIDE",
@@ -5531,15 +5382,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "41cdd7a7",
+    "95fada07"
+   ],
    "depends_on": [
     "W11-ORDER-CANCEL-RELEASE"
    ],
    "title": "Order status edits are transition-checked and ship/cancel writers compare-and-set, so a shipped order never ends cancelled and a ship never overwrites a cancel",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W1F-SETTLE-NO-STOCK",
@@ -6216,15 +6070,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "727908fc",
+    "911522f0"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "The marketplace order writer records a payment row for a PAID invoice, and rowless PAID invoices are backfilled",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-PENDING-OWED-SERVER",
@@ -6931,13 +6788,15 @@
    "size": "S",
    "lane": "server",
    "track": "follow-on",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "bb2a8924"
+   ],
    "depends_on": [],
    "title": "A model lifecycle catalog the owner maintains: every routed model id must be in it, and a model marked retired is never dispatched to",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-GATEWAY-TYPED-FAILURES",
@@ -7039,7 +6898,7 @@
     "RR-MODEL-LIFECYCLE-GUARD"
    ],
    "title": "One model-selection seam: delete the dead cortex provider-selection map and ratchet model ids outside the gateway",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-DIRECT-PROVIDER-CENSUS",
@@ -7266,16 +7125,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "24ba3109"
+   ],
    "depends_on": [
     "RR-TOOL-EFFECT-CLASS",
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "Plan queue never re-runs a write after a generic error: the step is recorded OUTCOME_UNKNOWN for a person to check",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-DISPATCH-ATOMIC-CLAIM",
@@ -7292,7 +7153,7 @@
     "RR-DISPATCH-NO-BLIND-RETRY"
    ],
    "title": "Plan queue takes an atomic durable claim on the idempotency key before running a step (no find-then-execute)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-MCP-TENANT-BOUND",
@@ -7351,13 +7212,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "dc264cd6"
+   ],
    "depends_on": [],
    "title": "Inbound webhook census (verification, replay, tenant source) and the per-business social webhook bound to the business's own page",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-INTENT-PARSER-ONE-TOOL-LIST",
@@ -8036,13 +7899,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f327f4bf"
+   ],
    "depends_on": [],
    "title": "Read-only census of which key every enc:v1: value was encrypted under, so the production key guard can be landed on evidence",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-DB-CRYPTO-PROD-GUARD",
@@ -8458,15 +8323,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "23dc6487"
+   ],
    "depends_on": [
     "FU-TEMPORAL-FLOW-INBOX-SCOPE"
    ],
    "title": "Every member-facing reader of the temporal-flow timeline applies the reader's module filter",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-UNTRUSTED-INBOUND-FENCE",
@@ -8475,15 +8342,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6545eb54",
+    "0e93636f"
+   ],
    "depends_on": [
     "RR-UNTRUSTED-CONTENT-FENCE"
    ],
    "title": "Customer messages (email, WhatsApp, CRM) reach KEY's prompts only inside the untrusted-content fence",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-STORE-ORDERS-MONEY-SCOPE",
@@ -8618,15 +8488,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "03e6f238",
+    "c032275f"
+   ],
    "depends_on": [
     "RR-ERASURE-BUSINESS-EVENTS"
    ],
    "title": "Writers that store a caller-chosen contactId validate it against a live contact of the business",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-NMS-SERVER-METADATA",
@@ -8820,7 +8693,7 @@
     "NAV-B-LEGACY-SERVER"
    ],
    "title": "Store checkout, Sales > Orders and Quick sale are offered at launch only to a business that already sells online; everyone else gets the booking page and invoices",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "GATE-PILOT-10",
@@ -9014,15 +8887,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "f22deebe"
+   ],
    "depends_on": [
     "FU-C4-CMDK-SEARCH"
    ],
    "title": "Cmd/Ctrl+J, KEY's drawer, has one owner",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONTACTS-OPEN-DOORS",
