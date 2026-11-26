@@ -222,36 +222,50 @@ const UNCLASSIFIED = {
 const withheldEvents = (withheld: readonly EventOwner[]) => ({ OR: [...withheld.map(ownedBy), UNCLASSIFIED] });
 
 /**
- * FU-TIMELINE-CALLERS-SCOPE (R1-SEC-02): classifies an event's owning module(s) from `(module, source, type)`
- * using the exact canonical rules as `ownedBy` / `UNCLASSIFIED`, for write-side authorization on creates/upserts.
+ * FU-TIMELINE-CALLERS-SCOPE (R1-SEC-02, R2-SEC-01): classifies an event's owning module(s) from
+ * `(module, source, type)` using the exact canonical rules as `ownedBy` / `UNCLASSIFIED`, for write-side
+ * authorization on creates/upserts.
+ *
+ * Permissive checks (`knownModule`, `isBusinessWide`) use UNTRIMMED lowercased values so whitespace-padded
+ * strings (e.g. `' business-assets '`, `' manual '`) never bypass SQL `ILIKE` (`ci()`) into `UNCLASSIFIED`
+ * or `revenue`-owned storage. Restrictive checks (`OWNER_PATTERNS`, `KEY_NOTE_SOURCE`) match both raw and
+ * trimmed values so padded owner labels remain conservatively classified as owned.
  */
 function classifyEventOwners(input: { module?: string | null; source?: string | null; type?: string | null }): {
   owners: EventOwner[];
   unclassified: boolean;
 } {
-  const mod = typeof input.module === 'string' ? input.module.trim().toLowerCase() : '';
-  const src = typeof input.source === 'string' ? input.source.trim().toLowerCase() : '';
-  const typ = typeof input.type === 'string' ? input.type.trim().toLowerCase() : '';
+  const rawMod = typeof input.module === 'string' ? input.module.toLowerCase() : '';
+  const rawSrc = typeof input.source === 'string' ? input.source.toLowerCase() : '';
+  const rawTyp = typeof input.type === 'string' ? input.type.toLowerCase() : '';
+  const trimMod = rawMod.trim();
+  const trimSrc = rawSrc.trim();
+  const trimTyp = rawTyp.trim();
 
   const knownModule =
-    mod.length > 0 &&
-    (EVENT_OWNERS.some((o) => OWNER_PATTERNS[o].modules.includes(mod)) || BUSINESS_WIDE.modules.includes(mod));
+    rawMod.length > 0 &&
+    (EVENT_OWNERS.some((o) => OWNER_PATTERNS[o].modules.includes(rawMod)) || BUSINESS_WIDE.modules.includes(rawMod));
 
   const owners: EventOwner[] = [];
   for (const owner of EVENT_OWNERS) {
     const p = OWNER_PATTERNS[owner];
-    const matchesModule = mod.length > 0 && p.modules.includes(mod);
-    const matchesSource = src.length > 0 && p.sources.includes(src);
-    const matchesType = typ.length > 0 && p.typePrefixes.some((prefix) => typ.startsWith(prefix));
-    const matchesKeyNote = owner === 'revenue' && src === KEY_NOTE_SOURCE && !knownModule;
+    const matchesModule =
+      (rawMod.length > 0 && p.modules.includes(rawMod)) || (trimMod.length > 0 && p.modules.includes(trimMod));
+    const matchesSource =
+      (rawSrc.length > 0 && p.sources.includes(rawSrc)) || (trimSrc.length > 0 && p.sources.includes(trimSrc));
+    const matchesType =
+      (rawTyp.length > 0 && p.typePrefixes.some((prefix) => rawTyp.startsWith(prefix))) ||
+      (trimTyp.length > 0 && p.typePrefixes.some((prefix) => trimTyp.startsWith(prefix)));
+    const matchesKeyNote =
+      owner === 'revenue' && (rawSrc === KEY_NOTE_SOURCE || trimSrc === KEY_NOTE_SOURCE) && !knownModule;
     if (matchesModule || matchesSource || matchesType || matchesKeyNote) {
       owners.push(owner);
     }
   }
 
   const isBusinessWide =
-    (mod.length > 0 && BUSINESS_WIDE.modules.includes(mod)) ||
-    (src.length > 0 && BUSINESS_WIDE.sources.includes(src));
+    (rawMod.length > 0 && BUSINESS_WIDE.modules.includes(rawMod)) ||
+    (rawSrc.length > 0 && BUSINESS_WIDE.sources.includes(rawSrc));
   const unclassified = owners.length === 0 && !isBusinessWide;
   return { owners, unclassified };
 }

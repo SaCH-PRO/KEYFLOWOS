@@ -430,4 +430,52 @@ describe('P122 R1 review regressions (FU-TIMELINE-CALLERS-SCOPE)', () => {
       expect(ids).not.toContain(EV.proposalFin);
     }
   });
+
+  it('R2-01 (R2-SEC-01): whitespace-padded module or source cannot bypass classifyEventOwners into UNCLASSIFIED or revenue-owned writes', async () => {
+    const beforeCount = await db.temporalFlowEvent.count({ where: { businessId: ID.biz } });
+
+    // HTTP POST /temporal-flow/businesses/:businessId with padded business-assets module
+    const httpRes = await request(app.getHttpServer())
+      .post(`/temporal-flow/businesses/${ID.biz}`)
+      .set('x-test-user', ID.bookingsOnly)
+      .send({
+        source: 'APP',
+        module: ' business-assets ',
+        type: 'custom.forged',
+        title: `${P}padded_assets_forged`,
+      });
+    expect(httpRes.status).toBe(403);
+
+    // Service emit with key_cortex + padded business-assets module
+    await expect(
+      temporalService.emit(
+        {
+          businessId: ID.biz,
+          source: 'key_cortex',
+          module: ' business-assets ',
+          type: 'note',
+          title: `${P}padded_key_cortex`,
+        },
+        undefined,
+        { id: ID.bookingsOnly, role: 'USER' },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    // Service emit with padded manual source
+    await expect(
+      temporalService.emit(
+        {
+          businessId: ID.biz,
+          source: ' manual ',
+          type: 'custom.x',
+          title: `${P}padded_manual`,
+        },
+        undefined,
+        { id: ID.bookingsOnly, role: 'USER' },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const afterCount = await db.temporalFlowEvent.count({ where: { businessId: ID.biz } });
+    expect(afterCount).toBe(beforeCount);
+  });
 });
