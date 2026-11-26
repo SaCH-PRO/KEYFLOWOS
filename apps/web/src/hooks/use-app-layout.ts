@@ -14,7 +14,7 @@ import {
   getUserInitials,
   refreshWorkspace,
   getCachedBusiness,
-  isSuperAdmin,
+  canOpenOwnerConsole,
   BUSINESS_CHANGED_EVENT,
 } from "@/lib/workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
@@ -259,7 +259,10 @@ export function useAppLayout(): AppLayoutState {
     setDisplayName(getUserDisplayName());
     setInitials(getUserInitials());
     setAvatarUrl(user.avatarUrl ?? null);
-    setIsAdminUser(isSuperAdmin());
+    // The Owner Console link (D-290): only where the admin shell would open (canOpenOwnerConsole, the admin layout's
+    // own guard). A normally signed-in SUPER_ADMIN without the separate admin sign-in is never offered a link that
+    // ends at /admin/login.
+    setIsAdminUser(canOpenOwnerConsole());
     setUserEmail(user.email ?? null);
   }, []);
 
