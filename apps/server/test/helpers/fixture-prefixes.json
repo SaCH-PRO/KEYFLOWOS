@@ -1470,6 +1470,11 @@
       "prefix": "v64f_",
       "owner": "apps/server/test/decimal-quantity.integration.test.ts",
       "packet": "V1-64 (DECIMALS-SERVER)"
+    },
+    {
+      "prefix": "v64l_",
+      "owner": "apps/server/test/census-key-b.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-KEY-B)"
     }
   ],
   "pendingRenames": [],
