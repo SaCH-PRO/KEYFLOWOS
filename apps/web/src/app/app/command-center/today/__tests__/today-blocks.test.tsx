@@ -532,7 +532,7 @@ describe("TODAY-4BLOCK repair round 2 (confirmation reviews at 14934c7c)", () =>
     const BIZ2 = "biz_t4b_other";
     const other = busyToday();
     other.businessId = BIZ2;
-    other.today.invoices = [{ ...other.today.invoices[0], id: "inv_77", invoiceNumber: "INV-0077" }];
+    other.today.invoices = [{ ...(other.today.invoices[0] as Record<string, unknown>), id: "inv_77", invoiceNumber: "INV-0077" }];
     let failFirst: (() => void) | null = null;
     let firstReads = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
