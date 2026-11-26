@@ -62,7 +62,8 @@ export class SiteController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/conversion-funnel/aggregate')
   async aggregateConversionFunnel(
     @Param('businessId') businessId: string,
@@ -73,7 +74,8 @@ export class SiteController {
     return { ok: true, day: day.toISOString().slice(0, 10), upserts };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/abandoned-carts/detect')
   async detectAbandonedCarts(@Param('businessId') businessId: string) {
     return this.conversionService.detectAbandonedCarts(businessId);
@@ -90,7 +92,8 @@ export class SiteController {
     return this.siteService.getStorefrontConfig(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Put('businesses/:businessId/storefront')
   updateStorefrontConfig(
     @Param('businessId') businessId: string,
@@ -154,7 +157,8 @@ export class SiteController {
     return this.siteService.getConversionSuggestions(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/conversion-advice')
   getAiConversionAdvice(@Param('businessId') businessId: string) {
     return this.siteService.getAiConversionAdvice(businessId);
@@ -386,7 +390,8 @@ export class SiteController {
    * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the authenticated member is the actor, never a body field; a
    * SHIPPED by a member with revenue write books the order's shipping fee once per order.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/orders/:orderId/status')
   updateOrderStatus(
     @Param('businessId') businessId: string,
@@ -430,7 +435,8 @@ export class SiteController {
     return this.storeOrderService.refundOrder(orderId, businessId, req?.user?.id ?? null);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/promo-codes')
   createPromoCode(
     @Param('businessId') businessId: string,
@@ -454,7 +460,8 @@ export class SiteController {
     return this.promoCodeService.list(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/promo-codes/:promoId')
   updatePromoCode(
     @Param('businessId') businessId: string,
@@ -464,7 +471,8 @@ export class SiteController {
     return this.promoCodeService.update(businessId, promoId, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/promo-codes/:promoId/delete')
   deletePromoCode(
     @Param('businessId') businessId: string,
@@ -527,7 +535,8 @@ export class SiteController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/reviews/:reviewId')
   moderateReview(
     @Param('businessId') businessId: string,
@@ -594,7 +603,8 @@ export class SiteController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/intake/:id')
   updateIntakeStatus(
     @Param('businessId') businessId: string,
@@ -610,7 +620,8 @@ export class SiteController {
     return this.qualificationService.getQualificationConfig(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Put('businesses/:businessId/qualification-config')
   updateQualificationConfig(
     @Param('businessId') businessId: string,
@@ -708,13 +719,15 @@ export class SiteController {
     return this.caseStudyService.list(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/case-studies/generate')
   generateCaseStudy(@Param('businessId') businessId: string) {
     return this.caseStudyService.generateDraft(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/case-studies/:caseStudyId/publish')
   publishCaseStudy(
     @Param('businessId') businessId: string,
@@ -726,7 +739,8 @@ export class SiteController {
     return this.caseStudyService.publish(businessId, caseStudyId, { consent: !!body?.consent });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/case-studies/:caseStudyId/unpublish')
   unpublishCaseStudy(
     @Param('businessId') businessId: string,

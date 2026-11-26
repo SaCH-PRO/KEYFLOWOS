@@ -2601,6 +2601,7 @@ export class MarketplaceService {
       actorId,
       amount,
       once,
+      { allowApiGatewayBookkeeping: true },
     );
     const refundedTotal = fromCents(toCents(refund.balance.refunded));
     const allRefunded = !(toCents(refund.balance.net) > 0);

@@ -17,6 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
+import { visibleVatNumber } from './invoice-email.types';
 import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -117,6 +118,7 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
       instagram: true,
       twitter: true,
       whatsapp: true,
+      vatNumber: true,
     },
   },
 });
@@ -163,6 +165,7 @@ const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
       email: true,
       website: true,
       primaryColor: true,
+      vatNumber: true,
     },
   },
 });
@@ -386,6 +389,17 @@ const CREATE_IDEMPOTENCY_KEY_MAX = 255;
  * evidence confirm) are stored as before.
  */
 const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set(['stripe', 'paypal', 'wipay']);
+
+/**
+ * FU-REFUND-GATEWAY-REFUSE (P96, owner ruling A2 on #80): gateway providers
+ * that expose an API refund path (`POST /payments/businesses/:businessId/refunds`,
+ * PaymentsOpsController). The manual bookkeeping route
+ * (`POST /commerce/businesses/:businessId/payments/:paymentId/refund`) refuses
+ * these with 409 Conflict unless an internal D-121 order-refund door passes
+ * `allowApiGatewayBookkeeping: true`. WiPay has no refund API and remains
+ * eligible for manual bookkeeping refunds.
+ */
+const API_REFUNDABLE_GATEWAY_PROVIDERS: ReadonlySet<string> = new Set(['stripe', 'paypal']);
 
 /**
  * The create's claim, or null when it carries no key (absent or blank, as the
@@ -1799,6 +1813,7 @@ export class CommerceService {
             instagram: true,
             twitter: true,
             whatsapp: true,
+            vatNumber: true,
           },
         },
       },
@@ -1833,6 +1848,7 @@ export class CommerceService {
       (!invoice.subtotal || invoice.subtotal === 0) && invoice.items.length > 0
         ? invoice.taxAmount ?? (invoice.taxRate ? subtotal * (invoice.taxRate / 100) : 0)
         : invoice.taxAmount;
+    const vat = visibleVatNumber(invoice.business?.vatNumber, taxAmount);
 
     return {
       id: invoice.id,
@@ -1870,6 +1886,7 @@ export class CommerceService {
             instagram: invoice.business.instagram,
             twitter: invoice.business.twitter,
             whatsapp: invoice.business.whatsapp,
+            ...(vat ? { vatNumber: vat } : {}),
           }
         : null,
       // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the net received, max(0, net),
@@ -3010,14 +3027,32 @@ export class CommerceService {
             email: true,
             website: true,
             primaryColor: true,
+            vatNumber: true,
           },
         },
       },
     });
     if (!quote || quote.deletedAt) return null;
+    const vat = visibleVatNumber(quote.business?.vatNumber, quote.taxAmount);
+    const business = quote.business
+      ? {
+          id: quote.business.id,
+          name: quote.business.name,
+          logoUrl: quote.business.logoUrl,
+          address: quote.business.address,
+          phone: quote.business.phone,
+          email: quote.business.email,
+          website: quote.business.website,
+          primaryColor: quote.business.primaryColor,
+          ...(vat ? { vatNumber: vat } : {}),
+        }
+      : null;
     // V1-QUOTE-CHAIN-finish (review SEC-5): the version of the terms this view
     // shows; the customer's accept sends it back (respondToQuoteByToken).
-    return { ...this.decorateQuote(toOperatorQuote(quote)), termsVersion: quoteTermsVersion(quote) };
+    return {
+      ...this.decorateQuote(toOperatorQuote({ ...quote, business })),
+      termsVersion: quoteTermsVersion(quote),
+    };
   }
 
   async markQuoteViewedByToken(token: string, visitorId?: string | null) {
@@ -4540,6 +4575,7 @@ export class CommerceService {
     actorId?: string | null,
     amount?: number,
     once?: { providerPaymentId: string; refusal: string; reported?: string },
+    options?: { allowApiGatewayBookkeeping?: boolean },
   ) {
     if (amount !== undefined && !(Number.isFinite(amount) && toCents(amount) > 0 && fromCents(toCents(amount)) === amount)) {
       throw new BadRequestException('A refund amount is a number above 0 in whole cents');
@@ -4551,6 +4587,11 @@ export class CommerceService {
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
+    const preInvoice = await this.prisma.client.invoice.findFirst({
+      where: { id: payment.invoiceId, businessId },
+      select: { id: true },
+    });
+    if (!preInvoice) throw new NotFoundException('Invoice not found');
     const refusal = (row: { status: string; amount: number }) =>
       new ConflictException(
         row.status !== 'REFUNDED'
@@ -4559,7 +4600,21 @@ export class CommerceService {
             ? 'A refund cannot itself be refunded'
             : 'Payment is already refunded',
       );
+    const gatewayRefusal = (row: { provider: string | null | undefined; providerPaymentId?: string | null }) => {
+      if (options?.allowApiGatewayBookkeeping) return null;
+      // R1-COR-1 / D-55: hand-recorded payments (`recordPayment`, web-form `'PayPal'`,
+      // evidence `'PAYPAL'`, pre-D-55 manual rows) always carry a `manual_` providerPaymentId
+      // and have no provider charge/capture to refund at `/payments/businesses/:b/refunds`.
+      if ((row.providerPaymentId ?? '').startsWith('manual_')) return null;
+      const normalized = (row.provider ?? '').trim().toLowerCase();
+      if (!API_REFUNDABLE_GATEWAY_PROVIDERS.has(normalized)) return null;
+      return new ConflictException(
+        `This payment was settled through ${normalized}; use the gateway refund endpoint (POST /payments/businesses/${businessId}/refunds) so the customer is refunded at the provider.`,
+      );
+    };
     if (payment.status !== 'SUCCESSFUL') throw refusal(payment);
+    const preGatewayErr = gatewayRefusal(payment);
+    if (preGatewayErr) throw preGatewayErr;
     // FIN2 — write the refund row + reverse the original posting in one tx so
     // the refund and the offsetting ledger entries commit together.
     //
@@ -4572,10 +4627,22 @@ export class CommerceService {
       const txClient = tx as unknown as Prisma.TransactionClient;
       // Serialized with payments and other refunds of this invoice
       // (R0-PL-03): the reads below see every refund committed before ours.
-      await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      if (!locked || locked.businessId !== businessId) {
+        throw new NotFoundException('Invoice not found');
+      }
       const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
       if (!current) throw new NotFoundException('Payment not found');
+      if (current.invoiceId !== payment.invoiceId) {
+        const curInv = await tx.invoice.findFirst({
+          where: { id: current.invoiceId, businessId },
+          select: { id: true },
+        });
+        if (!curInv) throw new NotFoundException('Invoice not found');
+      }
       if (current.status !== 'SUCCESSFUL') throw refusal(current);
+      const lockedGatewayErr = gatewayRefusal(current);
+      if (lockedGatewayErr) throw lockedGatewayErr;
       // W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, D-121): this refund, already recorded (read under the lock), is
       // not recorded again; it is the more specific answer than what is left, so it is given first.
       if (once && (await tx.payment.findFirst({ where: { providerPaymentId: once.providerPaymentId, businessId }, select: { id: true } }))) {

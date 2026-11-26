@@ -100,6 +100,13 @@ export interface NotificationPreferences {
   quote_accepted_customer?: boolean;
   quote_rejected_customer?: boolean;
   quote_sent?: boolean;
+  /**
+   * OWNER-ALERTS-WEB: the owner's own alerts (D-154), read by OwnerAlertsListener (resolveOwnerAlertPreferences) and
+   * saved from Settings > Notifications > Your alerts. Not customer emails: no email type has these names.
+   */
+  owner_alert_bookings?: boolean;
+  owner_alert_payments?: boolean;
+  owner_alert_claims?: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -132,6 +139,9 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   quote_accepted_customer: true,
   quote_rejected_customer: true,
   quote_sent: true,
+  owner_alert_bookings: true,
+  owner_alert_payments: true,
+  owner_alert_claims: true,
 };
 
 /**

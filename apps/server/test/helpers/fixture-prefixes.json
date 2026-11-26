@@ -593,6 +593,16 @@
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
     },
     {
+      "prefix": "v80m_",
+      "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
+    },
+    {
+      "prefix": "v80r_",
+      "owner": "apps/server/test/genome-surfaces-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
+    },
+    {
       "prefix": "v81a_",
       "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
@@ -1342,7 +1352,7 @@
       "packet": "V1-85 (FU-OUTBOUND-ATTACHMENT-URL)"
     },
     {
-"prefix": "v90n_",
+      "prefix": "v90n_",
       "owner": "apps/server/test/notifications-prefs-guard.integration.test.ts",
       "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
     },
@@ -1362,7 +1372,7 @@
       "packet": "V1-64 (SWP-CENSUS-GENOME)"
     },
     {
-"prefix": "v64n_",
+      "prefix": "v64n_",
       "owner": "apps/server/test/v1-hold-migration.integration.test.ts",
       "packet": "V1-64 (MIGRATION-SET-A)"
     },
@@ -1375,6 +1385,11 @@
       "prefix": "v65b_",
       "owner": "apps/server/test/today-aggregate.integration.test.ts",
       "packet": "V1-65 (TODAY-AGGREGATE)"
+    },
+    {
+      "prefix": "v65c_",
+      "owner": "apps/server/test/onboarding-no-demo-seed.integration.test.ts",
+      "packet": "V1-65 (DEMO-PREVIEW)"
     },
     {
       "prefix": "v65d_",
@@ -1397,19 +1412,59 @@
       "packet": "V1-65 (TOF-PAYROLL-DISCARD)"
     },
     {
-"prefix": "v91r_",
+      "prefix": "v65h_",
+      "owner": "apps/server/test/owner-alerts-owner-only.integration.test.ts",
+      "packet": "V1-65 (OWNER-ALERTS-WEB)"
+    },
+    {
+      "prefix": "v91r_",
       "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
       "packet": "V1-91 (FU-BULK-DELETE-UNDO, P37)"
     },
     {
-"prefix": "v64a_",
+      "prefix": "v64a_",
       "owner": "apps/server/test/key-proposal-result-reader-scope.integration.test.ts",
       "packet": "V1-64 (W11-PROPOSAL-RESULT-READER-SCOPE)"
+    },
+    {
+      "prefix": "v66l_",
+      "owner": "apps/server/test/census-v1-b.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-V1-B)"
     },
     {
       "prefix": "v91s_",
       "owner": "apps/server/test/flow-search-money-scope.integration.test.ts",
       "packet": "V1-91 (FU-SEARCH-MONEY-SCOPE)"
+    },
+    {
+      "prefix": "v96g_",
+      "owner": "apps/server/test/refund-gateway-refuse.integration.test.ts",
+      "packet": "V1-96 (FU-REFUND-GATEWAY-REFUSE)"
+    },
+    {
+      "prefix": "v97p_",
+      "owner": "apps/server/test/presence-scope.integration.test.ts",
+      "packet": "V1-97 (FU-PRESENCE-REVENUE-SCOPE, P100)"
+    },
+    {
+      "prefix": "v98h_",
+      "owner": "apps/server/test/health-money-scope.integration.test.ts",
+      "packet": "V1-98 (FU-HEALTH-MONEY-SCOPE, P101)"
+    },
+    {
+      "prefix": "v64c_",
+      "owner": "apps/server/test/bill-pay-account.integration.test.ts",
+      "packet": "V1-64 (EXPENSES-HUB-1)"
+    },
+    {
+      "prefix": "v66b_",
+      "owner": "apps/server/test/vat-number.integration.test.ts",
+      "packet": "V1-66 (VAT-BASICS)"
+    },
+    {
+      "prefix": "v63a_",
+      "owner": "apps/server/test/key-cortex-self-model.integration.test.ts",
+      "packet": "V1-63 (TOF-KEY-SELF-MODEL)"
     }
   ],
   "pendingRenames": [],

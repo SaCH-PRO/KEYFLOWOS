@@ -11,10 +11,11 @@ import {
 } from './dto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 
 @Controller('onboarding-concierge/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class OnboardingConciergeController {
   constructor(
     @Inject(OnboardingConciergeService)
@@ -41,6 +42,7 @@ export class OnboardingConciergeController {
   }
 
   @Post('onboarding-step')
+  @RequireModuleScope('settings', 'write')
   async saveOnboardingStep(
     @Param('businessId') businessId: string,
     @Body() body: SaveOnboardingStepDto,
@@ -81,11 +83,12 @@ export class OnboardingConciergeController {
   }
 
   /**
-   * Any member chats; only the owner's answers are persisted as intake
-   * (R0-09b, owner ruling D-11, review SEC-2), decided in the service from the
-   * authenticated caller.
+   * Members holding settings:write chat (SWP-CENSUS-V1-B, owner ruling A1);
+   * only the owner's answers are persisted as intake (R0-09b, owner ruling
+   * D-11, review SEC-2), decided in the service from the authenticated caller.
    */
   @Post('chat')
+  @RequireModuleScope('settings', 'write')
   async chat(
     @Param('businessId') businessId: string,
     @Body() body: ChatDto,
@@ -115,6 +118,7 @@ export class OnboardingConciergeController {
   }
 
   @Post('detect-type')
+  @RequireModuleScope('settings', 'write')
   async detectBusinessType(
     @Param('businessId') businessId: string,
     @Body() body: DetectBusinessTypeDto,
@@ -128,6 +132,7 @@ export class OnboardingConciergeController {
   }
 
   @Post('nudges/:nudgeId/snooze')
+  @RequireModuleScope('settings', 'write')
   async snoozeNudge(
     @Param('businessId') businessId: string,
     @Param('nudgeId') nudgeId: string,
@@ -137,16 +142,19 @@ export class OnboardingConciergeController {
   }
 
   @Post('dismiss')
+  @RequireModuleScope('settings', 'write')
   async dismiss(@Param('businessId') businessId: string) {
     return this.concierge.dismissConcierge(businessId);
   }
 
   @Post('resume')
+  @RequireModuleScope('settings', 'write')
   async resume(@Param('businessId') businessId: string) {
     return this.concierge.resumeConcierge(businessId);
   }
 
   @Post('complete')
+  @RequireModuleScope('settings', 'write')
   async markComplete(@Param('businessId') businessId: string) {
     return this.concierge.markOnboardingComplete(businessId);
   }

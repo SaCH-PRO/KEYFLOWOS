@@ -1,4 +1,7 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { PrismaService } from '../../../core/prisma/prisma.service';
+import { dnaScoresForReader } from '../../business-genome/key-genome/genome-finance-scope';
+import { readsRevenueFor } from '../../business-genome/key-genome/genome-composites-for-reader';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { KeyCortexGenomeBridgeService } from '../key-cortex-genome-bridge.service';
@@ -17,6 +20,9 @@ export class KeyCortexBridgeAdapterService {
     @Optional()
     @Inject(KeyCortexGenomeBridgeService)
     private readonly genomeBridge?: KeyCortexGenomeBridgeService,
+    @Optional()
+    @Inject(PrismaService)
+    private readonly prisma?: PrismaService,
   ) {}
 
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
@@ -35,17 +41,34 @@ export class KeyCortexBridgeAdapterService {
     command: ConnectorCommand,
     start: number,
   ): Promise<ConnectorResult> {
+    const readsRevenue = await readsRevenueFor(
+      this.prisma,
+      command.businessId,
+      command.userId ? { id: command.userId } : null,
+    );
     switch (command.action) {
       case 'get_dna': {
-        const dna = await this.getGenomeDna(command.businessId, (command.parameters.recalculate as boolean) || false);
+        const dna = await this.getGenomeDna(
+          command.businessId,
+          (command.parameters.recalculate as boolean) || false,
+          readsRevenue,
+        );
         return connectorOk(command, start, dna);
       }
       case 'get_stage': {
-        const stage = await this.getGenomeStage(command.businessId, (command.parameters.detailed as boolean) || false);
+        const stage = await this.getGenomeStage(
+          command.businessId,
+          (command.parameters.detailed as boolean) || false,
+          readsRevenue,
+        );
         return connectorOk(command, start, stage);
       }
       case 'get_readiness': {
-        const readiness = await this.getGenomeReadiness(command.businessId, command.parameters.initiative as string);
+        const readiness = await this.getGenomeReadiness(
+          command.businessId,
+          command.parameters.initiative as string,
+          readsRevenue,
+        );
         return connectorOk(command, start, readiness);
       }
       case 'update_dna': {
@@ -66,23 +89,41 @@ export class KeyCortexBridgeAdapterService {
     }
   }
 
-  private async getGenomeDna(businessId: string, recalculate: boolean): Promise<unknown> {
+  private async getGenomeDna(businessId: string, recalculate: boolean, readsRevenue: boolean): Promise<unknown> {
     this.logger.verbose(`getGenomeDna(${businessId}, recalculate=${recalculate})`);
     if (this.genomeBridge) {
       const dna = await this.genomeBridge.getDnaScores(businessId);
+      if (!readsRevenue) {
+        return {
+          businessId,
+          ...dna,
+          scores: dnaScoresForReader(dna.scores, false),
+          confidence: dnaScoresForReader(dna.confidence, false),
+          stage: null,
+          executiveReadiness: null,
+          withheldForRevenue: ['stage', 'executiveReadiness', 'financial', 'sales', 'business'],
+          recalculate,
+        };
+      }
       return { businessId, ...dna, recalculate };
     }
     // Graceful fallback when genome bridge is not available.
     return { businessId, status: 'unavailable', message: 'Genome bridge not available' };
   }
 
-  private async getGenomeStage(businessId: string, detailed: boolean): Promise<unknown> {
+  private async getGenomeStage(businessId: string, detailed: boolean, readsRevenue: boolean): Promise<unknown> {
     this.logger.verbose(`getGenomeStage(${businessId}, detailed=${detailed})`);
+    if (!readsRevenue) {
+      return { businessId, stage: null, detailed, withheldForRevenue: ['stage'] };
+    }
     return { businessId, stage: 'growth', detailed };
   }
 
-  private async getGenomeReadiness(businessId: string, initiative?: string): Promise<unknown> {
+  private async getGenomeReadiness(businessId: string, initiative: string | undefined, readsRevenue: boolean): Promise<unknown> {
     this.logger.verbose(`getGenomeReadiness(${businessId}, initiative=${initiative})`);
+    if (!readsRevenue) {
+      return { businessId, initiative, readinessScore: null, withheldForRevenue: ['readinessScore'] };
+    }
     return { businessId, initiative, readinessScore: 0.75 };
   }
 

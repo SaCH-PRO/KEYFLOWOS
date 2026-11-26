@@ -979,9 +979,9 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `ActionsController.bookingFollowup` | POST | `/actions/booking-followup` | open | membership only; follow-up SWEEP-CENSUS: crm write (send-receipt: revenue write); each sends a customer message |
-| `ActionsController.remindContact` | POST | `/actions/remind-contact` | open | membership only; follow-up SWEEP-CENSUS: crm write (send-receipt: revenue write); each sends a customer message |
-| `ActionsController.sendReceipt` | POST | `/actions/send-receipt` | open | membership only; follow-up SWEEP-CENSUS: crm write (send-receipt: revenue write); each sends a customer message |
+| `ActionsController.bookingFollowup` | POST | `/actions/booking-followup` | applied | crm:write — SWP-CENSUS-V1-B (P90) |
+| `ActionsController.remindContact` | POST | `/actions/remind-contact` | applied | crm:write — SWP-CENSUS-V1-B (P90) |
+| `ActionsController.sendReceipt` | POST | `/actions/send-receipt` | applied | revenue:write — SWP-CENSUS-V1-B (P90) |
 
 ### AdminBusinessController (`admin-platform/admin-business.controller.ts`)
 
@@ -1087,12 +1087,12 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `ApprovalController.approve` | POST | `/businesses/:businessId/approvals/:approvalId/approve` | open | membership only; follow-up SWEEP-CENSUS: operations write; approval decisions; approver identity is the service rule |
-| `ApprovalController.cancel` | DELETE | `/businesses/:businessId/approvals/:approvalId` | open | membership only; follow-up SWEEP-CENSUS: operations write; approval decisions; approver identity is the service rule |
-| `ApprovalController.create` | POST | `/businesses/:businessId/approvals` | open | membership only; follow-up SWEEP-CENSUS: operations write; approval decisions; approver identity is the service rule |
-| `ApprovalController.delegate` | POST | `/businesses/:businessId/approvals/:approvalId/delegate` | open | membership only; follow-up SWEEP-CENSUS: operations write; approval decisions; approver identity is the service rule |
-| `ApprovalController.escalate` | POST | `/businesses/:businessId/approvals/:approvalId/escalate` | open | membership only; follow-up SWEEP-CENSUS: operations write; approval decisions; approver identity is the service rule |
-| `ApprovalController.reject` | POST | `/businesses/:businessId/approvals/:approvalId/reject` | open | membership only; follow-up SWEEP-CENSUS: operations write; approval decisions; approver identity is the service rule |
+| `ApprovalController.approve` | POST | `/businesses/:businessId/approvals/:approvalId/approve` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
+| `ApprovalController.cancel` | DELETE | `/businesses/:businessId/approvals/:approvalId` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
+| `ApprovalController.create` | POST | `/businesses/:businessId/approvals` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
+| `ApprovalController.delegate` | POST | `/businesses/:businessId/approvals/:approvalId/delegate` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
+| `ApprovalController.escalate` | POST | `/businesses/:businessId/approvals/:approvalId/escalate` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
+| `ApprovalController.reject` | POST | `/businesses/:businessId/approvals/:approvalId/reject` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
 
 ### AutomationController (`automation/automation.controller.ts`)
 
@@ -1446,11 +1446,11 @@ reviewed secret read (above).
 | `ConnectorController.disconnect` | POST | `/connectors/businesses/:businessId/disconnect/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin: a connector's disconnect clears its stored credentials, QuickBooksConnector.disconnect); gmail and the Google Suite connections keep their owner rules first |
 | `ConnectorController.reconnect` | POST | `/connectors/businesses/:businessId/reconnect/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin: it disconnects first); gmail and the Google Suite connections keep their owner rules first |
 | `ConnectorController.authenticate` | POST | `/connectors/businesses/:businessId/authenticate/:type` | exempt-check | check:assertConnectorBindingAuthority (round 2 class repair, finding CW-4): a connector that is already connected gets its status answer from any member (R0-CMF6-K04); otherwise Connect binds (WhatsApp's connected verification lifts an explicit disconnect) or starts a binding (the OAuth consent start it answers): settings admin, gmail's and the Google Suite connections' owner rules first (D-11, D-42, D-99) |
-| `ConnectorController.runHealthCheck` | POST | `/connectors/businesses/:businessId/health-check/run` | open | membership only; follow-up SWEEP-CENSUS: settings read; it runs provider checks and writes health rows, no credential |
-| `ConnectorController.smoke` | POST | `/connectors/businesses/:businessId/smoke/:type` | open | membership only for every connector: no connector's passed check records a binding (CONNECTORS_BINDING_ON_CHECK is empty: SWEEP-P0-FOLLOWUP, whatsappsmoke ruling, recommended option, owner question 15: the WhatsApp test only reports its result, records nothing and never lifts an explicit disconnect, so it is open to members again); gmail: GMAIL_OWNER_ONLY (D-11); R0-CMF6-K05 pins it open for the rest; follow-up SWEEP-CENSUS: settings write for the rest |
-| `ConnectorController.sync` | POST | `/connectors/businesses/:businessId/sync/:type` | open | membership only (gmail and Google Suite: owner rules, D-11, D-99); follow-up SWEEP-CENSUS: the synced module's write (crm for contact sources, revenue for accounting); R0-CMF6-K05 and V94D-F02 pin it open for other connectors |
-| `ConnectorController.test` | POST | `/connectors/businesses/:businessId/test/:type` | open | membership only; follow-up SWEEP-CENSUS: settings read; a credential check, no write (R0-CMF6-K04, V94D-F02 pin it open) |
-| `ConnectorController.updateInboxConfig` | PATCH | `/connectors/businesses/:businessId/inbox-config/:type` | open | membership only; follow-up SWEEP-CENSUS: settings write; Key Inbox processing settings only (R0-CMF6-M02 decided it open) |
+| `ConnectorController.runHealthCheck` | POST | `/connectors/businesses/:businessId/health-check/run` | applied | settings:admin — SWP-CENSUS-V1-B (P90, D-181, owner ruling A1) |
+| `ConnectorController.smoke` | POST | `/connectors/businesses/:businessId/smoke/:type` | applied | settings:admin — SWP-CENSUS-V1-B (P90, D-181, owner ruling A1) |
+| `ConnectorController.sync` | POST | `/connectors/businesses/:businessId/sync/:type` | applied | settings:admin — SWP-CENSUS-V1-B (P90, D-181, owner ruling A1) |
+| `ConnectorController.test` | POST | `/connectors/businesses/:businessId/test/:type` | applied | settings:admin — SWP-CENSUS-V1-B (P90, D-181, owner ruling A1) |
+| `ConnectorController.updateInboxConfig` | PATCH | `/connectors/businesses/:businessId/inbox-config/:type` | applied | settings:admin — SWP-CENSUS-V1-B (P90, D-181, owner ruling A1) |
 
 ### GoogleSuiteController (`core/connectors/google-suite.controller.ts`)
 
@@ -1789,13 +1789,13 @@ Every other route is applied (above).
 | `IdentityController.bootstrap` | POST | `/identity/bootstrap` | exempt-own | the caller's own sign-in bootstrap (R0-SEC) |
 | `IdentityController.changePassword` | POST | `/identity/change-password` | exempt-own | the caller's own user (password, logout, profile) or a business the caller creates |
 | `IdentityController.createBusiness` | POST | `/identity/businesses` | exempt-own | creates a new business the caller then owns (no existing business written) |
-| `IdentityController.generateField` | POST | `/identity/businesses/:businessId/ai-generate-field` | open | membership only; follow-up SWEEP-CENSUS: settings write; AI field suggestions for the business profile (writes nothing; the profile PATCH is owner-only, D-11) |
-| `IdentityController.generateProfile` | POST | `/identity/businesses/:businessId/generate-profile` | open | membership only; follow-up SWEEP-CENSUS: settings write; AI profile generation; the profile PATCH is owner-only (D-11) |
+| `IdentityController.generateField` | POST | `/identity/businesses/:businessId/ai-generate-field` | applied | settings:write — SWP-CENSUS-V1-B (P90) |
+| `IdentityController.generateProfile` | POST | `/identity/businesses/:businessId/generate-profile` | applied | settings:write — SWP-CENSUS-V1-B (P90) |
 | `IdentityController.logout` | POST | `/identity/logout` | exempt-own | the caller's own user (password, logout, profile) or a business the caller creates |
 | `IdentityController.updateAdvancedSettings` | PATCH | `/identity/businesses/:businessId/advanced-settings` | exempt-check | service-check:assertAdvancedSettingsWriter (BIZ-SETTINGS-ADMIN-DOOR, owner ruling D-150: the owner or an ADMIN holding settings admin changes advancedCrm and depth; IdentityService.updateAdvancedSettings runs the check before the body is read; sells stays on the owner-only profile PATCH, D-11) |
 | `IdentityController.updateBusiness` | PATCH | `/identity/businesses/:businessId` | exempt-check | check:assertBusinessOwner (D-11, D-116, D-125) |
 | `IdentityController.updateMe` | PATCH | `/identity/me` | exempt-own | the caller's own user (password, logout, profile) or a business the caller creates |
-| `IdentityController.upsertGuidanceSubProfile` | PATCH | `/identity/businesses/:businessId/guidance/:subProfile` | open | membership only; follow-up SWEEP-CENSUS: settings write; a business guidance sub-profile |
+| `IdentityController.upsertGuidanceSubProfile` | PATCH | `/identity/businesses/:businessId/guidance/:subProfile` | applied | settings:write — SWP-CENSUS-V1-B (P90) |
 
 ### KeyActionProposalController (`key-autonomy/key-action-proposal.controller.ts`)
 
@@ -1988,14 +1988,14 @@ Every other route is applied (above).
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `OnboardingConciergeController.autoConfigure` | POST | `/onboarding-concierge/businesses/:businessId/auto-configure` | exempt-check | check:assertProfileOwner (D-11) |
-| `OnboardingConciergeController.chat` | POST | `/onboarding-concierge/businesses/:businessId/chat` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
-| `OnboardingConciergeController.detectBusinessType` | POST | `/onboarding-concierge/businesses/:businessId/detect-type` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
-| `OnboardingConciergeController.dismiss` | POST | `/onboarding-concierge/businesses/:businessId/dismiss` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
-| `OnboardingConciergeController.markComplete` | POST | `/onboarding-concierge/businesses/:businessId/complete` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
-| `OnboardingConciergeController.resume` | POST | `/onboarding-concierge/businesses/:businessId/resume` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
-| `OnboardingConciergeController.saveOnboardingStep` | POST | `/onboarding-concierge/businesses/:businessId/onboarding-step` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
+| `OnboardingConciergeController.chat` | POST | `/onboarding-concierge/businesses/:businessId/chat` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `OnboardingConciergeController.detectBusinessType` | POST | `/onboarding-concierge/businesses/:businessId/detect-type` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `OnboardingConciergeController.dismiss` | POST | `/onboarding-concierge/businesses/:businessId/dismiss` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `OnboardingConciergeController.markComplete` | POST | `/onboarding-concierge/businesses/:businessId/complete` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `OnboardingConciergeController.resume` | POST | `/onboarding-concierge/businesses/:businessId/resume` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `OnboardingConciergeController.saveOnboardingStep` | POST | `/onboarding-concierge/businesses/:businessId/onboarding-step` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
 | `OnboardingConciergeController.seedDemoData` | POST | `/onboarding-concierge/businesses/:businessId/seed-demo` | exempt-check | check:seedDemoDataAsOwner (OWNER only, D-84) |
-| `OnboardingConciergeController.snoozeNudge` | POST | `/onboarding-concierge/businesses/:businessId/nudges/:nudgeId/snooze` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding is owner-led (D-03); the owner-only steps check it (assertProfileOwner, seed-demo D-84) |
+| `OnboardingConciergeController.snoozeNudge` | POST | `/onboarding-concierge/businesses/:businessId/nudges/:nudgeId/snooze` | applied | settings:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
 
 ### PhoneVoiceController (`phone-voice/phone-voice.controller.ts`)
 
@@ -2015,7 +2015,7 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `PublicPresenceController.runAggregator` | POST | `/businesses/:businessId/presence/aggregate` | open | membership only; follow-up SWEEP-CENSUS: content write; aggregates presence stats |
+| `PublicPresenceController.runAggregator` | POST | `/businesses/:businessId/presence/aggregate` | applied | content:write — SWP-CENSUS-V1-B (P90) |
 
 ### PushNotificationController (`push-notifications/push-notification.controller.ts`)
 
@@ -2073,32 +2073,32 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `PresenceController.createPreview` | POST | `/site/presence/businesses/:businessId/preview` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
-| `PresenceController.delegateInsight` | POST | `/site/presence/businesses/:businessId/insights/:insightId/delegate` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
-| `PresenceController.publish` | POST | `/site/presence/businesses/:businessId/publish` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
-| `PresenceController.regenerateInsights` | POST | `/site/presence/businesses/:businessId/insights/regenerate` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
-| `PresenceController.saveDraft` | PUT | `/site/presence/businesses/:businessId/draft` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
-| `PresenceController.syncActionCards` | POST | `/site/presence/businesses/:businessId/action-cards/sync` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
-| `PresenceController.unpublish` | DELETE | `/site/presence/businesses/:businessId/publish` | open | membership only; follow-up SWEEP-CENSUS: content write; the business web presence; publishing the profile is owner-only (D-11, in the service) |
+| `PresenceController.createPreview` | POST | `/site/presence/businesses/:businessId/preview` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `PresenceController.delegateInsight` | POST | `/site/presence/businesses/:businessId/insights/:insightId/delegate` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `PresenceController.publish` | POST | `/site/presence/businesses/:businessId/publish` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `PresenceController.regenerateInsights` | POST | `/site/presence/businesses/:businessId/insights/regenerate` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `PresenceController.saveDraft` | PUT | `/site/presence/businesses/:businessId/draft` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `PresenceController.syncActionCards` | POST | `/site/presence/businesses/:businessId/action-cards/sync` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
+| `PresenceController.unpublish` | DELETE | `/site/presence/businesses/:businessId/publish` | applied | content:write — SWP-CENSUS-V1-B (P90, owner ruling A1) |
 
 ### SiteController (`site/site.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `SiteController.aggregateConversionFunnel` | POST | `/site/businesses/:businessId/conversion-funnel/aggregate` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.createPromoCode` | POST | `/site/businesses/:businessId/promo-codes` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.deletePromoCode` | POST | `/site/businesses/:businessId/promo-codes/:promoId/delete` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.detectAbandonedCarts` | POST | `/site/businesses/:businessId/abandoned-carts/detect` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.generateCaseStudy` | POST | `/site/businesses/:businessId/case-studies/generate` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.getAiConversionAdvice` | POST | `/site/businesses/:businessId/conversion-advice` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.moderateReview` | PATCH | `/site/businesses/:businessId/reviews/:reviewId` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.publishCaseStudy` | POST | `/site/businesses/:businessId/case-studies/:caseStudyId/publish` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.unpublishCaseStudy` | POST | `/site/businesses/:businessId/case-studies/:caseStudyId/unpublish` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.updateIntakeStatus` | PATCH | `/site/businesses/:businessId/intake/:id` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.updateOrderStatus` | PATCH | `/site/businesses/:businessId/orders/:orderId/status` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.updatePromoCode` | PATCH | `/site/businesses/:businessId/promo-codes/:promoId` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.updateQualificationConfig` | PUT | `/site/businesses/:businessId/qualification-config` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
-| `SiteController.updateStorefrontConfig` | PUT | `/site/businesses/:businessId/storefront` | open | membership only; follow-up SWEEP-CENSUS: content write / storefront write |
+| `SiteController.aggregateConversionFunnel` | POST | `/site/businesses/:businessId/conversion-funnel/aggregate` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.createPromoCode` | POST | `/site/businesses/:businessId/promo-codes` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.deletePromoCode` | POST | `/site/businesses/:businessId/promo-codes/:promoId/delete` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.detectAbandonedCarts` | POST | `/site/businesses/:businessId/abandoned-carts/detect` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.generateCaseStudy` | POST | `/site/businesses/:businessId/case-studies/generate` | applied | content:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.getAiConversionAdvice` | POST | `/site/businesses/:businessId/conversion-advice` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.moderateReview` | PATCH | `/site/businesses/:businessId/reviews/:reviewId` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.publishCaseStudy` | POST | `/site/businesses/:businessId/case-studies/:caseStudyId/publish` | applied | content:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.unpublishCaseStudy` | POST | `/site/businesses/:businessId/case-studies/:caseStudyId/unpublish` | applied | content:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.updateIntakeStatus` | PATCH | `/site/businesses/:businessId/intake/:id` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.updateOrderStatus` | PATCH | `/site/businesses/:businessId/orders/:orderId/status` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.updatePromoCode` | PATCH | `/site/businesses/:businessId/promo-codes/:promoId` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.updateQualificationConfig` | PUT | `/site/businesses/:businessId/qualification-config` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
+| `SiteController.updateStorefrontConfig` | PUT | `/site/businesses/:businessId/storefront` | applied | storefront:write — SWP-CENSUS-V1-B (P90) |
 
 ### SocialController (`social/social.controller.ts`)
 

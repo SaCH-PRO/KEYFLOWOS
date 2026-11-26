@@ -5,10 +5,11 @@
  * an open New quote form for that customer, as a contact's own "Create quote" does).
  *
  * Before this the page read ?contactId nowhere (only the retired use-commerce.ts did). The sheet reaches this door
- * with a full page load (new-from-whatsapp.tsx): a client navigation (router.push) mounts the page twice, because
- * RequireAuth remounts the shell on every pathname change, and the first instance strips the id. So the contacts
- * screens' router.push doors (?tab=quotes&contactId=, use-contacts-pipeline.ts) still open no form in a browser
- * (review COR-1; follow-ups FU-REQUIRE-AUTH-REMOUNT and FU-CONTACT-SEND-QUOTE-DOOR).
+ * with a full page load (new-from-whatsapp.tsx). When this was written, a client navigation (router.push) mounted the
+ * page twice, because RequireAuth remounted the shell on every pathname change, and the first instance stripped the
+ * id (review COR-1). FU-REQUIRE-AUTH-REMOUNT removed that remount, so the contacts screens' router.push doors to this
+ * URL (a contact's Send quote, use-contact-actions.ts; the next-action Send quote, use-contacts-pipeline.ts) now open
+ * the form too (FU-CONTACT-SEND-QUOTE-DOOR: contact-send-quote-door.test.tsx, e2e/sweep-contact-send-quote.spec.ts).
  *
  *   QFC-01 a fresh mount at ?tab=quotes&contactId=<id>: Quotes tab, prefill for that customer, and the id leaves the URL
  *          (a reload or Back does not open a second form).

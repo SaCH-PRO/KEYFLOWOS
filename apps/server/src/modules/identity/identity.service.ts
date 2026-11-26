@@ -593,6 +593,7 @@ export class IdentityService {
     primaryColor?: string;
     secondaryColor?: string;
     defaultTaxRate?: number;
+    vatNumber?: string | null;
     complianceStatus?: string;
     complianceData?: Record<string, boolean>;
     lastHealthCheck?: string;
@@ -733,6 +734,15 @@ export class IdentityService {
       for (const key of nonStringFields) {
         if (rest[key] !== undefined) {
           data[key] = rest[key];
+        }
+      }
+
+      const nullableTrimmedFields: (keyof typeof rest)[] = ['vatNumber'];
+      for (const key of nullableTrimmedFields) {
+        if (rest[key] !== undefined) {
+          const val = rest[key];
+          const trimmed = typeof val === 'string' ? val.trim() : '';
+          data[key] = trimmed ? trimmed : null;
         }
       }
 

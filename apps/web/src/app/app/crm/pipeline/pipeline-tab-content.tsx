@@ -160,6 +160,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     handleSelectAll, handleBulkStatusChange, handleBulkTag, handleBulkDelete,
     handleBulkAddToList, bulkLoading,
     handleToggleSelectMode,
+    offerQuote,
   } = state;
 
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
@@ -624,6 +625,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
             onToggleFavorite={handleToggleFavorite}
             onDelete={handleDeleteContact}
             onQuickAction={handleQuickAction}
+            offerQuote={offerQuote}
             onLoadMore={handleLoadMore}
             onRetry={handleRetry}
             onAddContact={handleOpenAddForm}

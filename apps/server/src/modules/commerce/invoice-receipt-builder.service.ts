@@ -8,6 +8,7 @@ import {
   isCreditAwareShareableInvoiceStatus,
   type BalanceSummary,
 } from './invoice-workflow.service';
+import { visibleVatNumber } from './invoice-email.types';
 
 /** The invoice fields a receipt email's figures come from (full Payment rows carry businessId). */
 export interface ReceiptBalanceSource {
@@ -67,13 +68,15 @@ export class InvoiceReceiptBuilderService {
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
 
+    const vat = visibleVatNumber(invoice.business?.vatNumber, invoice.taxAmount);
+
     return {
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
       total: invoice.total,
       currency: invoice.currency,
       contact: invoice.contact ? { name: `${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`.trim(), email: invoice.contact.email } : null,
-      business: invoice.business ? { name: invoice.business.name } : null,
+      business: invoice.business ? { name: invoice.business.name, ...(vat ? { vatNumber: vat } : {}) } : null,
       items: invoice.items?.map((item: any) => ({
         description: item.description,
         quantity: item.quantity,
@@ -129,13 +132,14 @@ export class InvoiceReceiptBuilderService {
         invoiceNumber: true,
         status: true,
         total: true,
+        taxAmount: true,
         currency: true,
         issueDate: true,
         paidAt: true,
         items: { select: { description: true, quantity: true, unitPrice: true, total: true } },
         payments: { where: { businessId }, select: { amount: true, status: true } },
         contact: { select: { firstName: true, lastName: true } },
-        business: { select: { name: true, logoUrl: true, primaryColor: true, email: true, phone: true } },
+        business: { select: { name: true, logoUrl: true, primaryColor: true, email: true, phone: true, vatNumber: true } },
       },
     });
     if (!invoice || !isCreditAwareShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Receipt not found');
@@ -151,6 +155,7 @@ export class InvoiceReceiptBuilderService {
         balance.refunded > 0 ? 'No receipt is available for this invoice' : 'No payment has been received on this invoice yet',
       );
     }
+    const vat = visibleVatNumber(invoice.business?.vatNumber, invoice.taxAmount);
     return {
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
@@ -163,7 +168,16 @@ export class InvoiceReceiptBuilderService {
       issuedAt: invoice.issueDate,
       items: invoice.items,
       contact: invoice.contact ? { firstName: invoice.contact.firstName, lastName: invoice.contact.lastName } : null,
-      business: invoice.business,
+      business: invoice.business
+        ? {
+            name: invoice.business.name,
+            logoUrl: invoice.business.logoUrl,
+            primaryColor: invoice.business.primaryColor,
+            email: invoice.business.email,
+            phone: invoice.business.phone,
+            ...(vat ? { vatNumber: vat } : {}),
+          }
+        : null,
     };
   }
 }

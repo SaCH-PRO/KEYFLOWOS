@@ -57,7 +57,8 @@ export class IntelligenceAdapterService {
   }
 
   async getSnapshot(businessId: string) {
-    return this.commandCenter.snapshot(businessId);
+    // FU-GENOME-SURFACES-REVENUE round 1 (NIT-7, D-233): no member context -> fail closed (null).
+    return this.commandCenter.snapshot(businessId, null);
   }
 
   private async analyzeSentiment(input: { businessId: string; text?: string }) {
@@ -111,11 +112,12 @@ export class IntelligenceAdapterService {
   }
 
   private async runComprehensiveAnalysis(businessId: string, actorId?: string) {
+    const reader = actorId ? { id: actorId } : null;
     const [brief, dashboard, snapshot] = await Promise.all([
-      this.businessIntelligence.generateExecutiveBrief(businessId),
+      this.businessIntelligence.generateExecutiveBrief(businessId, reader),
       this.growth.getDashboard(businessId),
       // D-238 (round 3): read for the command's actor; no actor is no reader (a financial proposal is withheld).
-      this.commandCenter.snapshot(businessId, actorId ? { id: actorId } : null),
+      this.commandCenter.snapshot(businessId, reader),
     ]);
     return { businessId, executiveBrief: brief, growthDashboard: dashboard, commandCenterSnapshot: snapshot };
   }

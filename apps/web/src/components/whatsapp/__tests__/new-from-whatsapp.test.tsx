@@ -15,10 +15,11 @@
  *   WAW-04b (review pin COR-5) what shows is what the server stored (note.body), not what was typed.
  *   WAW-05 New quote opens the Quotes tab with the customer chosen (?tab=quotes&contactId=<id>).
  *   WAW-06 New booking opens Bookings with the customer chosen (?contactId=<id>).
- *          Both doors are a full page load (newFromWhatsAppNavigation.assign), not router.push: RequireAuth
- *          (components/require-auth.tsx) verifies again on every pathname change and shows its spinner in place of
- *          the whole app shell, so a client navigation mounts the destination page twice; the first instance read and
- *          dropped the one-shot ?contactId and the second opened no form (seen in the browser sweep at every width).
+ *          Both doors are a full page load (newFromWhatsAppNavigation.assign), not router.push. That was chosen when
+ *          RequireAuth (components/require-auth.tsx) remounted the app shell on every pathname change, so a client
+ *          navigation mounted the destination page twice and the first instance dropped the one-shot ?contactId (seen
+ *          in the browser sweep at every width). FU-REQUIRE-AUTH-REMOUNT removed that remount; the sheet keeps the full
+ *          load, which still works (FU-CONTACT-SEND-QUOTE-DOOR).
  *   WAW-07 a refusal keeps the sheet open, with what was typed, and says why (400, 403 crm read, 409, network).
  *   WAW-08 nothing is sent to the customer from here: the only request is the capture.
  *   WAW-09 Save waits for a number and a message; a message over 10,000 characters is said, not sent or cut.

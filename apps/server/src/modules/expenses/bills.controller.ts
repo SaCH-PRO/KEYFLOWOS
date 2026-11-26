@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -67,13 +67,38 @@ export class BillsController {
   payBill(
     @Param('businessId') businessId: string,
     @Param('billId') billId: string,
-    @Body() body: { paymentMethod?: string; paidAt?: string },
+    @Body() body: { paymentMethod?: unknown; paidAt?: unknown; paymentAccountId?: unknown },
   ) {
+    let paymentAccountId: string | undefined;
+    if (body?.paymentAccountId !== undefined && body?.paymentAccountId !== null) {
+      if (typeof body.paymentAccountId !== 'string' || body.paymentAccountId.trim().length === 0) {
+        throw new BadRequestException('paymentAccountId must be a non-empty string');
+      }
+      paymentAccountId = body.paymentAccountId.trim();
+    }
+
+    let paidAt: string | undefined;
+    if (body?.paidAt !== undefined && body?.paidAt !== null) {
+      if (typeof body.paidAt !== 'string' || body.paidAt.trim().length === 0) {
+        throw new BadRequestException('paidAt must be a valid date');
+      }
+      paidAt = body.paidAt.trim();
+    }
+
+    let paymentMethod: string | undefined;
+    if (body?.paymentMethod !== undefined && body?.paymentMethod !== null) {
+      if (typeof body.paymentMethod !== 'string') {
+        throw new BadRequestException('paymentMethod must be a string');
+      }
+      paymentMethod = body.paymentMethod;
+    }
+
     return this.expenses.markBillPaid({
       businessId,
       expenseId: billId,
-      paymentMethod: body?.paymentMethod,
-      paidAt: body?.paidAt,
+      paymentMethod,
+      paidAt,
+      paymentAccountId,
     });
   }
 

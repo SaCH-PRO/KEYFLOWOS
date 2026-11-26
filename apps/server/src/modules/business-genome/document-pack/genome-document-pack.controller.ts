@@ -5,16 +5,19 @@ import {
   Inject,
   Param,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
+import type { GenomeReader } from '../key-genome/genome-finance-scope';
 import { GenomeDocumentPackService } from './genome-document-pack.service';
 import type { ExportFormat } from './genome-document-pack.types';
 
 const VALID_FORMATS: ExportFormat[] = ['pdf', 'docx'];
+type DocPackRequest = { user?: { id?: string; role?: string } };
 
 @Controller('business-genome/businesses/:businessId/document-pack')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -23,14 +26,19 @@ export class GenomeDocumentPackController {
     @Inject(GenomeDocumentPackService) private readonly service: GenomeDocumentPackService,
   ) {}
 
+  private readerOf(req?: DocPackRequest): GenomeReader | null {
+    return req?.user?.id ? { id: req.user.id, role: req.user.role } : null;
+  }
+
   @Get('executive-brief/export')
   async exportExecutiveBrief(
     @Param('businessId') businessId: string,
     @Query('format') format: string = 'pdf',
     @Res({ passthrough: false }) res: Response,
+    @Req() req?: DocPackRequest,
   ) {
     const exportFormat = this.parseFormat(format);
-    const result = await this.service.exportExecutiveBrief(businessId, exportFormat);
+    const result = await this.service.exportExecutiveBrief(businessId, exportFormat, this.readerOf(req));
     this.send(res, result);
   }
 
@@ -40,13 +48,19 @@ export class GenomeDocumentPackController {
     @Query('format') format: string = 'pdf',
     @Query('version') version: string,
     @Res({ passthrough: false }) res: Response,
+    @Req() req?: DocPackRequest,
   ) {
     const exportFormat = this.parseFormat(format);
     const versionNumber = version === undefined || version === '' ? undefined : Number(version);
     if (versionNumber !== undefined && (!Number.isFinite(versionNumber) || versionNumber < 1)) {
       throw new BadRequestException('version must be a positive integer');
     }
-    const result = await this.service.exportConstitution(businessId, versionNumber, exportFormat);
+    const result = await this.service.exportConstitution(
+      businessId,
+      versionNumber,
+      exportFormat,
+      this.readerOf(req),
+    );
     this.send(res, result);
   }
 
@@ -55,9 +69,10 @@ export class GenomeDocumentPackController {
     @Param('businessId') businessId: string,
     @Query('format') format: string = 'pdf',
     @Res({ passthrough: false }) res: Response,
+    @Req() req?: DocPackRequest,
   ) {
     const exportFormat = this.parseFormat(format);
-    const result = await this.service.exportDnaReport(businessId, exportFormat);
+    const result = await this.service.exportDnaReport(businessId, exportFormat, this.readerOf(req));
     this.send(res, result);
   }
 
