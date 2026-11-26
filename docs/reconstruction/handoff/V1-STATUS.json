@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "92bbb45a4610e8abdf6a48f091dfd0e508d374f9",
-  "main_commit_date": "2026-11-26T17:29:16+00:00",
+  "main_sha": "ae4a5bebc6141e3daa77c256b72a470e2c4cad7e",
+  "main_commit_date": "2026-11-26T20:19:08+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 215,
-    "points": 324,
-    "pct_by_points": 56.8
+    "packets": 218,
+    "points": 327.5,
+    "pct_by_points": 57.4
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 181,
-    "points": 246.5,
-    "pct_by_points": 43.2
+    "packets": 178,
+    "points": 243,
+    "pct_by_points": 42.6
    }
   },
   "by_step": {
@@ -84,15 +84,15 @@
     "total": 92
    },
    "6": {
-    "done": 23,
+    "done": 25,
     "in-progress": 0,
-    "todo": 17,
+    "todo": 15,
     "total": 40
    },
    "7": {
-    "done": 3,
+    "done": 4,
     "in-progress": 0,
-    "todo": 31,
+    "todo": 30,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 126,
+    "done": 129,
     "in-progress": 0,
-    "todo": 129,
+    "todo": 126,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,12 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 87,
+   "prior-status-file": 86,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 84,
-   "compacted-commit": 84,
-   "no-evidence": 113
+   "code-commit-subject": 83,
+   "compacted-commit": 86,
+   "no-evidence": 111,
+   "compacted-tests-only": 2
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -137,7 +138,6 @@
    "TOF-KEY-SELF-MODEL",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
-   "EXPENSES-HUB-1",
    "CATALOG-1",
    "MIGRATION-SET-A",
    "SWP-STORE-LISTING-SERVER",
@@ -215,8 +215,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 106,
-  "todo_with_dependencies_met_launch": 76
+  "todo_with_dependencies_met": 104,
+  "todo_with_dependencies_met_launch": 74
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -268,7 +268,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 45
+   "unblocks": 44
   },
   {
    "id": "SWP-FIN-WEB-CRASHES",
@@ -289,16 +289,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 11
-  },
-  {
-   "id": "CUSTOMER-PAGE-HONESTY",
-   "step": 6,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -329,6 +319,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
+  },
+  {
+   "id": "W11-STOREFRONT-PAYPAL-LIST",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
   },
   {
    "id": "PLAN-TABLE",
@@ -961,16 +961,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
    "step": 6,
    "priority": "P3",
@@ -1241,16 +1231,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-SESSION-STORAGE-CENSUS",
-   "step": 7,
-   "priority": "P3",
-   "size": "XS",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-SLO-AVAILABILITY-LEDGER",
    "step": 7,
    "priority": "P3",
@@ -1330,7 +1310,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 45
+   "unblocks": 44
   },
   {
    "id": "SWP-FIN-WEB-CRASHES",
@@ -1351,16 +1331,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 11
-  },
-  {
-   "id": "CUSTOMER-PAGE-HONESTY",
-   "step": 6,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -1391,6 +1361,16 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
+  },
+  {
+   "id": "W11-STOREFRONT-PAYPAL-LIST",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
   },
   {
    "id": "PLAN-TABLE",
@@ -1913,16 +1893,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-E2E-MOCKED-SESSION-TOKEN",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-APPROVAL-MODEL-CENSUS",
    "step": 3,
    "priority": "P3",
@@ -2028,16 +1998,6 @@
    "priority": "P3",
    "size": "XS",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-SESSION-STORAGE-CENSUS",
-   "step": 7,
-   "priority": "P3",
-   "size": "XS",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -3345,10 +3305,10 @@
    "lane": "both",
    "track": "launch",
    "status": "done",
-   "derived_from": "code-commit-subject",
-   "uncertain": true,
+   "derived_from": "compacted-commit",
+   "uncertain": false,
    "evidence": [
-    "c68318b5"
+    "7551bf77"
    ],
    "depends_on": [
     "NAV-A2",
@@ -4371,10 +4331,12 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "831ebc07"
+   ],
    "depends_on": [
     "VAT-BASICS",
     "CATALOG-1",
@@ -4382,7 +4344,7 @@
     "OWNER-ALERTS-SERVER"
    ],
    "title": "Honest customer pages: no unearned badges or 'Open Now', slug URLs, product page from the storefront payload, /site/<slug> redirects to /book/<slug>, no client order-notify call",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
@@ -4400,7 +4362,7 @@
     "W11-STORE-OWN-PAYMENT-KEYS"
    ],
    "title": "Storefront checkout offers PayPal only once the server's gateway list carries it",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-STORE-PUBLIC-POLISH",
@@ -7988,15 +7950,17 @@
    "size": "XS",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-tests-only",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "c22421a6"
+   ],
    "depends_on": [
     "RR-ADMIN-LOGOUT"
    ],
    "title": "Census of every browser-readable place the web app stores a credential; a spec fails on a new one",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-RETENTION-EXPIRED-EXPORTS",
@@ -9069,15 +9033,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-tests-only",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "9dc7aae2"
+   ],
    "depends_on": [
     "FU-CONTACT-TIMELINE-CHANNELS"
    ],
    "title": "The mocked e2e helpers store a session the edge middleware accepts",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-UNDO-TOAST-SIGNOUT",
