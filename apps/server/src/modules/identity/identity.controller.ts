@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Headers,
   Inject,
@@ -35,6 +36,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { AdminGuard } from '../../core/auth/admin.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { memberModuleLevels } from '../../core/auth/member-module-level';
@@ -227,7 +229,7 @@ export class IdentityController {
    * resend_verification, rate_limited), `email`, `ip`, optional
    * `since` ISO timestamp. Returns most recent first, capped at 200.
    */
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, AdminGuard)
   @Get('admin/auth-audit')
   async getAuthAudit(
     @CurrentUser() user: AuthenticatedUser,
@@ -237,8 +239,8 @@ export class IdentityController {
     @Query('since') since?: string,
     @Query('limit') limitStr?: string,
   ) {
-    if (user?.role !== 'SUPER_ADMIN') {
-      throw new UnauthorizedException('Admin access required');
+    if (user?.role !== 'SUPER_ADMIN' || user?.authKind !== 'admin') {
+      throw new ForbiddenException('Admin access required');
     }
     const limit = Math.min(200, Math.max(1, Number.parseInt(limitStr ?? '50', 10) || 50));
     const where: Record<string, unknown> = {};
