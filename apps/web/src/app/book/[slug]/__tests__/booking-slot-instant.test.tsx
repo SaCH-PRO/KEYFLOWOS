@@ -10,6 +10,7 @@
  * is reduced to the submit it makes. This file runs on Pacific/Kiritimati (UTC+14), a zone other than the business's.
  *
  *   BSI-01  a visitor in another zone books the instant the server offered (startIso), not the wall time on their clock
+ *   BSI-02  (SEC-M2) a row with no server instant is refused, not posted on the visitor's clock
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -32,6 +33,8 @@ const { SLUG, BUSINESS, SERVICE, nothing, passthrough } = vi.hoisted(() => ({
 }));
 
 const net = vi.hoisted(() => ({ posts: [] as Array<{ path: string; body: Record<string, unknown> }> }));
+/** The instant the stubbed checkout submits for its row (undefined: a row with no server instant, SEC-M2). */
+const row = vi.hoisted(() => ({ startIso: "2026-12-15T15:00:00.000Z" as string | undefined, error: "" }));
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ slug: "bsi-shop" }),
@@ -79,17 +82,20 @@ vi.mock("../components/cart-drawer", () => ({
     <button type="button" onClick={onCheckout}>Checkout</button>
   ),
 }));
-/** The checkout form, reduced to its submit: 11:00 on the business's clock, the instant the slots route offered. */
+/**
+ * The checkout form, reduced to its submit: 11:00 on the business's clock, with `row.startIso` (the instant the
+ * slots route offered). A refused submit's message is kept in `row.error`, as the real checkout shows it.
+ */
 vi.mock("../components/checkout-flow", () => ({
   CheckoutFlow: ({ cart, onSubmit }: { cart: Array<{ id: string; itemType: string }>; onSubmit: (d: unknown) => Promise<void> }) => (
     <button
       type="button"
       onClick={() => {
-        void onSubmit({
+        onSubmit({
           serviceBookings: Object.fromEntries(
             cart.map((c) => [
               `${c.id}_${c.itemType}`,
-              { serviceId: c.id, serviceName: "BSI Session", staffId: "", date: "2026-12-15", time: "11:00", startIso: "2026-12-15T15:00:00.000Z" },
+              { serviceId: c.id, serviceName: "BSI Session", staffId: "", date: "2026-12-15", time: "11:00", startIso: row.startIso },
             ]),
           ),
           firstName: "Bee",
@@ -100,6 +106,8 @@ vi.mock("../components/checkout-flow", () => ({
           deliveryAddress: null,
           shippingZoneId: null,
           termsAccepted: true,
+        }).catch((e: unknown) => {
+          row.error = e instanceof Error ? e.message : String(e);
         });
       }}
     >
@@ -122,6 +130,8 @@ afterAll(() => {
 
 beforeEach(() => {
   net.posts = [];
+  row.startIso = "2026-12-15T15:00:00.000Z";
+  row.error = "";
   window.localStorage.clear();
   window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE]));
 });
@@ -139,5 +149,15 @@ describe("SWP-BOOKING-SLOTS: the storefront books the instant the server offered
     const booking = net.posts.find((p) => p.path === `/bookings/public/businesses/${BUSINESS.id}`)!;
     // At base: 2026-12-15T11:00 on Kiritimati's clock, 2026-12-14T21:00:00.000Z, a day off from the slot offered.
     expect(booking.body.startTime).toBe("2026-12-15T15:00:00.000Z");
+  });
+
+  it("BSI-02 a row with no server instant is refused: nothing is booked and the customer is told to pick a time again", async () => {
+    row.startIso = undefined;
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Checkout" }, { timeout: 3000 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Place booking" }));
+    await waitFor(() => expect(row.error).not.toBe(""));
+    expect(row.error).toMatch(/pick a time/i);
+    expect(net.posts.filter((p) => p.path === `/bookings/public/businesses/${BUSINESS.id}`)).toHaveLength(0);
   });
 });
