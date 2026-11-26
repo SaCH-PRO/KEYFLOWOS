@@ -8,7 +8,8 @@ import {
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
-import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
+import { TemporalFlowService, type TemporalFlowReader } from '../temporal-flow/temporal-flow.service';
+import type { TemporalFlowGenomeCandidate } from '../temporal-flow/temporal-flow.types';
 import { DNA_SECTION_KEYS, type DnaSectionKey } from '../blueprint/blueprint.types';
 import type {
   GenomeEvolutionProposalData,
@@ -85,8 +86,28 @@ export class GenomeEvolutionService {
   async generateFromTemporalFlow(
     businessId: string,
     createdBy?: string,
+    reader?: TemporalFlowReader,
   ): Promise<GenomeEvolutionProposalData[]> {
-    const candidates = await this.temporal.findGenomeSignals(businessId);
+    const trimmedCreator = typeof createdBy === 'string' ? createdBy.trim() : undefined;
+    const effectiveReader: TemporalFlowReader | undefined =
+      reader !== undefined
+        ? reader
+        : createdBy === undefined || createdBy === 'KEY'
+          ? undefined
+          : trimmedCreator
+            ? { id: trimmedCreator }
+            : null;
+    let candidates: TemporalFlowGenomeCandidate[];
+    if (effectiveReader !== undefined) {
+      if (typeof this.temporal.readerFilter !== 'function') {
+        candidates = [];
+      } else {
+        const readerFilter = await this.temporal.readerFilter(businessId, effectiveReader);
+        candidates = await this.temporal.findGenomeSignals(businessId, undefined, effectiveReader, readerFilter);
+      }
+    } else {
+      candidates = await this.temporal.findGenomeSignals(businessId);
+    }
     if (!candidates.length) return [];
 
     const existingPending = await this.prisma.client.genomeEvolutionProposal.findMany({
