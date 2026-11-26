@@ -593,6 +593,16 @@
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
     },
     {
+      "prefix": "v80m_",
+      "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
+    },
+    {
+      "prefix": "v80r_",
+      "owner": "apps/server/test/genome-surfaces-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
+    },
+    {
       "prefix": "v81a_",
       "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
