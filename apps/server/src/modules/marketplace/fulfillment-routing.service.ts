@@ -82,6 +82,7 @@ export interface OrderStatusTimelineEntry {
 export interface OrderMetadata {
   statusTimeline?: OrderStatusTimelineEntry[];
   publicToken?: string;
+  stockNotDecrementedProductIds?: string[];
   [key: string]: unknown;
 }
 
@@ -615,6 +616,18 @@ export class FulfillmentRoutingService {
         .map((item) => item.productId),
     );
 
+    // V1-70 (W1F-SETTLE-NO-STOCK; owner ruling D-199 `paidnostock`): lines the
+    // paid door already alerted the business about via
+    // `store_order.stock_not_decremented` (missing/insufficient own stock or
+    // held-elsewhere stock on a provider settlement) must not trigger a second
+    // `seller_low_stock` email from routing.
+    const orderMeta = (order.metadata ?? {}) as OrderMetadata;
+    const alreadyAlertedProductIds = new Set<string>(
+      Array.isArray(orderMeta.stockNotDecrementedProductIds)
+        ? orderMeta.stockNotDecrementedProductIds.filter((id): id is string => typeof id === 'string')
+        : [],
+    );
+
     const routes: FulfillmentRouteShape[] = [];
 
     for (const item of order.items as OrderItemShape[]) {
@@ -659,7 +672,16 @@ export class FulfillmentRoutingService {
 
       switch (strategy) {
         case 'LOCAL_STOCK':
-          route = await this.routeLocalStock(tx, afterCommit, businessId, orderId, item, listing, lockedStockIds);
+          route = await this.routeLocalStock(
+            tx,
+            afterCommit,
+            businessId,
+            orderId,
+            item,
+            listing,
+            lockedStockIds,
+            alreadyAlertedProductIds,
+          );
           break;
         case 'DROPSHIP':
           route = await this.routeDropship(tx, businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
@@ -677,6 +699,7 @@ export class FulfillmentRoutingService {
             listing,
             order as unknown as MarketplaceOrderShape,
             lockedStockIds,
+            alreadyAlertedProductIds,
           );
           break;
         case 'MANUAL':
@@ -731,6 +754,7 @@ export class FulfillmentRoutingService {
     item: OrderItemShape,
     listing: ListingShape | null,
     lockedStockIds: readonly string[],
+    alreadyAlertedProductIds: ReadonlySet<string> = new Set(),
   ): Promise<FulfillmentRouteShape> {
     // W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-3, CPS-COR-1; D-137): only the business's own stock rows count as stock
     // kept for the product (ownStockRows), as at the paid door: another business's planted row made a no-mode line the
@@ -830,11 +854,13 @@ export class FulfillmentRoutingService {
           `Available: ${available}, Required: ${item.quantity}`,
       );
 
-      afterCommit.push(async () => {
-        this.notifyInsufficientStock(businessId, orderId, item, available).catch((err) =>
-          this.logger.error(`Failed to send insufficient-stock notification: ${(err as Error).message}`),
-        );
-      });
+      if (!alreadyAlertedProductIds.has(item.productId)) {
+        afterCommit.push(async () => {
+          await this.notifyInsufficientStock(businessId, orderId, item, available).catch((err) =>
+            this.logger.error(`Failed to send insufficient-stock notification: ${(err as Error).message}`),
+          );
+        });
+      }
 
       return route as unknown as FulfillmentRouteShape;
     }
@@ -846,6 +872,28 @@ export class FulfillmentRoutingService {
     item: OrderItemShape,
     available: number,
   ): Promise<void> {
+    // V1-70 (W1F-SETTLE-NO-STOCK; D-199): defense-in-depth — never send a
+    // second seller_low_stock email when the paid door already alerted the
+    // business for this order and product line.
+    if (this.prisma.client.notification) {
+      const existingNotices = await this.prisma.client.notification.findMany({
+        where: {
+          businessId,
+          type: 'store_order.stock_not_decremented',
+          data: { path: ['orderId'], equals: orderId },
+        },
+        select: { data: true },
+      });
+      if (
+        existingNotices.some((n) => {
+          const products = (n.data as { products?: Array<{ productId?: string }> } | null)?.products;
+          return Array.isArray(products) && products.some((p) => p?.productId === item.productId);
+        })
+      ) {
+        return;
+      }
+    }
+
     const business = await this.prisma.client.business.findFirst({
       where: { id: businessId },
       select: { email: true, name: true },
@@ -1052,6 +1100,7 @@ export class FulfillmentRoutingService {
     listing: ListingShape | null,
     order: MarketplaceOrderShape,
     lockedStockIds: readonly string[],
+    alreadyAlertedProductIds: ReadonlySet<string> = new Set(),
   ): Promise<FulfillmentRouteShape> {
     const stock = await tx.inventoryStock.findFirst({
       where: { id: { in: [...lockedStockIds] }, productId: item.productId, businessId },
@@ -1064,7 +1113,16 @@ export class FulfillmentRoutingService {
       this.logger.log(
         `Hybrid: local stock satisfied for product ${item.productId} (${available}/${item.quantity})`,
       );
-      return this.routeLocalStock(tx, afterCommit, businessId, orderId, item, listing, lockedStockIds);
+      return this.routeLocalStock(
+        tx,
+        afterCommit,
+        businessId,
+        orderId,
+        item,
+        listing,
+        lockedStockIds,
+        alreadyAlertedProductIds,
+      );
     }
 
     const sourceLink = await this.resolveSupplierSourceLink(tx, item.productId);

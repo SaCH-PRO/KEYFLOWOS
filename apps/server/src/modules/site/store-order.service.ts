@@ -36,7 +36,7 @@ import {
   statusEditMayCancel,
   statusEditMayTransition,
 } from '../marketplace/fulfillment-routing.service';
-import { appendOrderTimeline, recordOrderRefundedTotal } from '../marketplace/order-metadata';
+import { appendOrderTimeline, recordOrderRefundedTotal, setOrderMetadataKeyOnce } from '../marketplace/order-metadata';
 import {
   normalizeStorefrontMethod,
   storePaypalCredentials,
@@ -221,7 +221,22 @@ interface StockHeldElsewhereLine {
   quantity: number;
 }
 
-/** The notification a business is told of such lines with (tellStockHeldElsewhere). */
+/**
+ * V1-70 (W1F-SETTLE-NO-STOCK; owner ruling D-199 `paidnostock`): a tracked line
+ * of a provider online settlement whose own stock is genuinely missing or
+ * insufficient (or whose business has no active warehouse). The payment is
+ * recorded and the order is kept; no stock is taken for that line and the
+ * business is alerted once to restock or refund (tellStockShortfall).
+ */
+interface StockShortfallLine {
+  productId: string;
+  name: string;
+  quantity: number;
+  available: number;
+  reason: 'missing_warehouse' | 'missing_stock' | 'insufficient_stock';
+}
+
+/** The notification a business is told of such lines with (tellStockHeldElsewhere / tellStockShortfall). */
 export const STOCK_NOT_DECREMENTED_NOTIFICATION = 'store_order.stock_not_decremented';
 
 const PROVIDER_LABEL: Record<string, string> = { wipay: 'WiPay', stripe: 'Stripe', paypal: 'PayPal' };
@@ -1587,6 +1602,7 @@ export class StoreOrderService {
               resolvedContactId: saved.invoice.contactId,
               decrementedProductIds: [] as string[],
               stockHeldElsewhere: [] as StockHeldElsewhereLine[],
+              stockShortfall: [] as StockShortfallLine[],
               quickSaleSummary: saved,
             };
           }
@@ -1703,96 +1719,165 @@ export class StoreOrderService {
       // 3. Stock decrement + movement rows.
       const decrementedProductIds: string[] = [];
       const stockHeldElsewhere: StockHeldElsewhereLine[] = [];
+      const stockShortfall: StockShortfallLine[] = [];
+      const notDecrementedProductIds = new Set<string>();
+      const sufficientProducts = new Set<string>();
       const trackedItems = input.stockMovesOnFulfilment
         ? []
         : targetItems.filter((i) => {
             const mode = productMode.get(i.productId) ?? 'untracked';
             return mode === 'tracked';
           });
-      if (trackedItems.length > 0 && !defaultWarehouse) {
-        throw new BadRequestException(
-          'Cannot finalize checkout: no active warehouse configured for tracked products.',
+      const trackedRequestedByProduct = new Map<string, number>();
+      for (const item of trackedItems) {
+        trackedRequestedByProduct.set(
+          item.productId,
+          (trackedRequestedByProduct.get(item.productId) ?? 0) + item.quantity,
         );
       }
-      for (const item of input.stockMovesOnFulfilment ? [] : targetItems) {
-        const mode = productMode.get(item.productId) ?? 'untracked';
-        if (mode !== 'tracked') {
-          this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
-          continue;
-        }
-        const productName = productNameById.get(item.productId) || item.name || 'Product';
-        const ownRows = await tx.inventoryStock.findMany({
-          where: {
-            businessId: targetBusinessId,
-            productId: item.productId,
-            warehouse: { businessId: targetBusinessId, isActive: true },
-          },
-          orderBy: [{ warehouse: { createdAt: 'asc' } }, { id: 'asc' }],
-        });
-        if (ownRows.length === 0) {
-          if (input.providerSettlement) {
-            const holder = await tx.inventoryStock.findUnique({
-              where: { productId_warehouseId: { productId: item.productId, warehouseId: defaultWarehouse!.id } },
-              select: { businessId: true },
+      if (trackedItems.length > 0 && !defaultWarehouse) {
+        if (input.providerSettlement) {
+          // V1-70 (W1F-SETTLE-NO-STOCK; owner ruling D-199 `paidnostock`):
+          // the provider already took the customer's money, so record the
+          // payment, keep the order, and alert the business to restock or refund.
+          for (const [productId, requestedQty] of trackedRequestedByProduct) {
+            const productName =
+              productNameById.get(productId) ||
+              trackedItems.find((i) => i.productId === productId)?.name ||
+              'Product';
+            stockShortfall.push({
+              productId,
+              name: productName,
+              quantity: requestedQty,
+              available: 0,
+              reason: 'missing_warehouse',
             });
-            if (holder && holder.businessId !== targetBusinessId) {
-              stockHeldElsewhere.push({ productId: item.productId, name: item.name, quantity: item.quantity });
-              continue;
-            }
+            notDecrementedProductIds.add(productId);
           }
+        } else {
           throw new BadRequestException(
-            `Cannot finalize checkout: tracked product "${productName}" has no stock row in the default warehouse.`,
+            'Cannot finalize checkout: no active warehouse configured for tracked products.',
           );
         }
-        const orderedRows = [
-          ...ownRows.filter((r) => r.warehouseId === defaultWarehouse!.id),
-          ...ownRows.filter((r) => r.warehouseId !== defaultWarehouse!.id),
-        ];
-        const totalAvailable = orderedRows.reduce((sum, r) => sum + Math.max(0, r.quantity - r.reserved), 0);
-        if (totalAvailable < item.quantity) {
-          const allowBackorder = productOOSBehavior.get(item.productId) === 'allow_backorder';
-          if (!allowBackorder) {
-            throw new ConflictException({
-              code: 'INSUFFICIENT_STOCK',
-              message: `Cannot finalize checkout: insufficient stock for product "${productName}" (have ${totalAvailable}, need ${item.quantity}).`,
-              available: totalAvailable,
-              requested: item.quantity,
+      }
+      if (!input.stockMovesOnFulfilment && defaultWarehouse) {
+        for (const item of targetItems) {
+          const mode = productMode.get(item.productId) ?? 'untracked';
+          if (mode !== 'tracked') {
+            this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
+            continue;
+          }
+          if (notDecrementedProductIds.has(item.productId)) {
+            continue;
+          }
+          const productName = productNameById.get(item.productId) || item.name || 'Product';
+          const ownRows = await tx.inventoryStock.findMany({
+            where: {
+              businessId: targetBusinessId,
+              productId: item.productId,
+              warehouse: { businessId: targetBusinessId, isActive: true },
+            },
+            orderBy: [{ warehouse: { createdAt: 'asc' } }, { id: 'asc' }],
+          });
+          if (ownRows.length === 0) {
+            if (input.providerSettlement) {
+              const requestedQty = trackedRequestedByProduct.get(item.productId) ?? item.quantity;
+              const holder = await tx.inventoryStock.findUnique({
+                where: { productId_warehouseId: { productId: item.productId, warehouseId: defaultWarehouse.id } },
+                select: { businessId: true },
+              });
+              if (holder && holder.businessId !== targetBusinessId) {
+                stockHeldElsewhere.push({ productId: item.productId, name: item.name, quantity: requestedQty });
+                notDecrementedProductIds.add(item.productId);
+                continue;
+              }
+              // V1-70 (W1F-SETTLE-NO-STOCK; D-199 `paidnostock`): genuinely missing
+              // own stock on a provider online settlement records the payment, keeps
+              // the order, and alerts the business to restock or refund.
+              stockShortfall.push({
+                productId: item.productId,
+                name: productName,
+                quantity: requestedQty,
+                available: 0,
+                reason: 'missing_stock',
+              });
+              notDecrementedProductIds.add(item.productId);
+              continue;
+            }
+            throw new BadRequestException(
+              `Cannot finalize checkout: tracked product "${productName}" has no stock row in the default warehouse.`,
+            );
+          }
+          const orderedRows = [
+            ...ownRows.filter((r) => r.warehouseId === defaultWarehouse.id),
+            ...ownRows.filter((r) => r.warehouseId !== defaultWarehouse.id),
+          ];
+          const totalAvailable = orderedRows.reduce((sum, r) => sum + Math.max(0, r.quantity - r.reserved), 0);
+          const neededQty =
+            input.providerSettlement && !sufficientProducts.has(item.productId)
+              ? (trackedRequestedByProduct.get(item.productId) ?? item.quantity)
+              : item.quantity;
+          if (totalAvailable < neededQty) {
+            const allowBackorder = productOOSBehavior.get(item.productId) === 'allow_backorder';
+            if (!allowBackorder) {
+              if (input.providerSettlement) {
+                // V1-70 (W1F-SETTLE-NO-STOCK; D-199 `paidnostock`): genuinely
+                // insufficient own stock on a provider online settlement records
+                // the payment, keeps the order, leaves stock untouched, and alerts
+                // the business to restock or refund.
+                stockShortfall.push({
+                  productId: item.productId,
+                  name: productName,
+                  quantity: neededQty,
+                  available: totalAvailable,
+                  reason: 'insufficient_stock',
+                });
+                notDecrementedProductIds.add(item.productId);
+                continue;
+              }
+              throw new ConflictException({
+                code: 'INSUFFICIENT_STOCK',
+                message: `Cannot finalize checkout: insufficient stock for product "${productName}" (have ${totalAvailable}, need ${item.quantity}).`,
+                available: totalAvailable,
+                requested: item.quantity,
+              });
+            }
+          }
+          sufficientProducts.add(item.productId);
+          const takenFrom = new Map<string, number>();
+          let remaining = item.quantity;
+          for (const stock of orderedRows) {
+            if (remaining <= 0) break;
+            const availInRow = Math.max(0, stock.quantity - stock.reserved);
+            if (availInRow <= 0) continue;
+            const take = Math.min(availInRow, remaining);
+            takenFrom.set(stock.id, take);
+            remaining -= take;
+          }
+          if (remaining > 0) {
+            const primary = orderedRows[0];
+            takenFrom.set(primary.id, (takenFrom.get(primary.id) ?? 0) + remaining);
+          }
+          for (const stock of orderedRows) {
+            const take = takenFrom.get(stock.id) ?? 0;
+            if (take <= 0) continue;
+            await tx.inventoryStock.update({
+              where: { id: stock.id },
+              data: { quantity: stock.quantity - take },
+            });
+            await tx.stockMovement.create({
+              data: {
+                businessId: targetBusinessId,
+                warehouseId: stock.warehouseId,
+                productId: item.productId,
+                quantityChange: -take,
+                type: 'sale',
+                referenceId: targetOrderNumber,
+              },
             });
           }
+          decrementedProductIds.push(item.productId);
         }
-        const takenFrom = new Map<string, number>();
-        let remaining = item.quantity;
-        for (const stock of orderedRows) {
-          if (remaining <= 0) break;
-          const availInRow = Math.max(0, stock.quantity - stock.reserved);
-          if (availInRow <= 0) continue;
-          const take = Math.min(availInRow, remaining);
-          takenFrom.set(stock.id, take);
-          remaining -= take;
-        }
-        if (remaining > 0) {
-          const primary = orderedRows[0];
-          takenFrom.set(primary.id, (takenFrom.get(primary.id) ?? 0) + remaining);
-        }
-        for (const stock of orderedRows) {
-          const take = takenFrom.get(stock.id) ?? 0;
-          if (take <= 0) continue;
-          await tx.inventoryStock.update({
-            where: { id: stock.id },
-            data: { quantity: stock.quantity - take },
-          });
-          await tx.stockMovement.create({
-            data: {
-              businessId: targetBusinessId,
-              warehouseId: stock.warehouseId,
-              productId: item.productId,
-              quantityChange: -take,
-              type: 'sale',
-              referenceId: targetOrderNumber,
-            },
-          });
-        }
-        decrementedProductIds.push(item.productId);
       }
 
       // 4. Revenue attribution — hard requirement; failures roll back.
@@ -1812,8 +1897,10 @@ export class StoreOrderService {
       );
 
       // 4b. W11-CHECKOUT-COGS-TX (D-127): COGS leg inside the same transaction.
+      //     Lines whose stock was not taken on a provider settlement (held
+      //     elsewhere or shortfall) post no COGS until stock is actually moved.
       const soldItems = targetItems
-        .filter((item) => item.productId && item.quantity > 0)
+        .filter((item) => item.productId && item.quantity > 0 && !notDecrementedProductIds.has(item.productId))
         .map((item) => ({ productId: item.productId, quantity: item.quantity }));
       if (soldItems.length > 0) {
         await this.expensePosting.onProductSold(
@@ -1831,6 +1918,19 @@ export class StoreOrderService {
       }
 
       // 5. Order finalization + quick-sale PaymentLink & IdempotencyKey commit.
+      //    V1-70 (W1F-SETTLE-NO-STOCK; D-199): stamp stockNotDecrementedProductIds
+      //    atomically inside the settlement tx so FulfillmentRoutingService
+      //    never sends a duplicate seller_low_stock email for those lines.
+      if (!qs && notDecrementedProductIds.size > 0) {
+        await setOrderMetadataKeyOnce(
+          tx,
+          targetBusinessId,
+          activeOrder.id,
+          'stockNotDecrementedProductIds',
+          [...notDecrementedProductIds],
+        );
+      }
+
       const updatedOrder = qs
         ? activeOrder
         : await tx.marketplaceOrder.update({
@@ -1900,6 +2000,7 @@ export class StoreOrderService {
         resolvedContactId: resolvedContactId!,
         decrementedProductIds,
         stockHeldElsewhere,
+        stockShortfall,
         quickSaleSummary,
       };
     }, qs ? ROUTING_CLAIM_TX_OPTIONS : undefined);
@@ -1919,6 +2020,10 @@ export class StoreOrderService {
 
     if (result.stockHeldElsewhere.length > 0) {
       await this.tellStockHeldElsewhere(result.updatedOrder, defaultWarehouse!, provider, result.stockHeldElsewhere);
+    }
+
+    if (result.stockShortfall.length > 0) {
+      await this.tellStockShortfall(result.updatedOrder, defaultWarehouse, provider, result.stockShortfall);
     }
 
     try {
@@ -2014,6 +2119,65 @@ export class StoreOrderService {
     } catch (err: unknown) {
       this.logger.error(
         `[store-order] could not tell business ${order.businessId} of order ${order.id}'s stock not taken: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * V1-70 (W1F-SETTLE-NO-STOCK; owner ruling D-199 `paidnostock`, CPS-COR-2
+   * class): after a provider online settlement that recorded the payment and
+   * kept the order despite genuinely missing or insufficient own stock (or no
+   * active warehouse), alert the business once to restock or refund. Best
+   * effort: the customer's payment is already recorded, so a failure here is
+   * logged and the settlement stands.
+   */
+  private async tellStockShortfall(
+    order: { id: string; businessId: string; orderNumber: string },
+    warehouse: { id: string; name: string } | null,
+    provider: string,
+    lines: StockShortfallLine[],
+  ): Promise<void> {
+    const label = PROVIDER_LABEL[provider] ?? provider;
+    this.logger.warn(
+      `[store-order] order ${order.id} of business ${order.businessId} settled by ${provider} with missing/insufficient stock for ` +
+        `${lines.map((l) => `${l.productId} (need ${l.quantity}, have ${l.available}, ${l.reason})`).join(', ')}: ` +
+        'payment recorded and order kept (D-199 paidnostock); business alerted to restock or refund',
+    );
+    try {
+      const named = lines
+        .map((l) => `${l.name} (ordered ${l.quantity}, available ${l.available})`)
+        .join(', ');
+      const reason = lines.every((l) => l.reason === lines[0].reason)
+        ? lines[0].reason
+        : 'insufficient_stock';
+      await this.prisma.client.notification.create({
+        data: {
+          businessId: order.businessId,
+          type: STOCK_NOT_DECREMENTED_NOTIFICATION,
+          title: 'Paid order out of stock — restock or refund',
+          body:
+            `Order ${order.orderNumber} was paid through ${label} and the payment is recorded, ` +
+            `but there was not enough stock to fulfil ${named}. ` +
+            'Please restock this item to fulfil the order or refund the customer.',
+          data: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            provider,
+            warehouseId: warehouse?.id ?? null,
+            products: lines.map((l) => ({
+              productId: l.productId,
+              quantity: l.quantity,
+              available: l.available,
+              reason: l.reason,
+            })),
+            reason,
+            action: 'restock_or_refund',
+          },
+        },
+      });
+    } catch (err: unknown) {
+      this.logger.error(
+        `[store-order] could not alert business ${order.businessId} of order ${order.id}'s stock shortfall: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
