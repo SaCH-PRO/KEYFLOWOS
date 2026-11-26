@@ -2517,3 +2517,121 @@ describe("CSC-42 round-6 correctness pins", () => {
     ]);
   });
 });
+
+/* ------------------------------------------------------- repair round 8 */
+
+/**
+ * Repair round 8 (both reviews REJECT on round 7: CSC7-SEC-1/COR7-1, CSC7-SEC-2/COR7-3; and CSC7-SEC-3, CSC7-SEC-5,
+ * COR7-2, COR7-4..7). In the string-code path the census errs toward counting (fail closed), as it does elsewhere.
+ *
+ *   CSC-43 a string is parsed as code when it names any store the scanners know (storage property and element
+ *          assignment included); prose naming none is not parsed (inlineScans counts the parses).
+ *   CSC-44 a template substitution is resolved in the host file (a const, JSON.stringify of a const); one that cannot
+ *          be resolved makes the write a credential write.
+ *   CSC-45 JSX text children of <script> / <Script> are scanned as code.
+ *   CSC-46 document["cookie"] = ….
+ *   CSC-47 a string that only quotes a write (help text) counts: a deliberate, known false positive.
+ *   CSC-48 inner lines map through the raw text, so a "\n" escape does not shift the reported line.
+ *   CSC-49 bracketed property names are escaped in full: K["a(b"] does not throw, K["a.b"] is the right property.
+ *   CSC-50 a string inside a string (depth 2), and inner code that does not parse (the inner text fallback).
+ *   (COR7-7, the dump sort by plain comparison, is pinned in CSC-42's sort case plus one byte-order case here.)
+ */
+describe("CSC-43 every known store name sends a string to the code scanner", () => {
+  for (const [name, fixture, key] of [
+    ["__html with a bracket assignment", "const h = { __html: `localStorage[\"kf_ba_token\"] = window.__t;` };", "localStorage:kf_ba_token"],
+    ["an IIFE string with a bracket assignment", "const s = \"(function(){ localStorage['kf_pre2_token'] = x; })();\";", "localStorage:kf_pre2_token"],
+    ["self.sessionStorage property assignment", "const s = 'self.sessionStorage.kf_x_refresh_token = t;';", "sessionStorage:kf_x_refresh_token"],
+    ["eval of a bracket assignment", "eval('localStorage[\"kf_ea_token\"] = t');", "localStorage:kf_ea_token"],
+    ["a string setTimeout of a bracket assignment", "setTimeout('localStorage[\"kf_sb_token\"] = window.__t', 0);", "localStorage:kf_sb_token"],
+  ]) {
+    it(`${name}: found`, () => {
+      expect(keysOf(scan("src/fixture-hint.ts", fixture))).toContain(key);
+    });
+  }
+
+  it("prose that names no store is not parsed; a string that names one is", () => {
+    const counter = () => (globalThis as unknown as { __kfInlineScans?: number }).__kfInlineScans ?? 0;
+    const before = counter();
+    scan("src/fixture-hint2.ts", `const a = "Hello, world (ok) = fine; done."; const b = 'x.y = 1;';`);
+    expect(counter() - before, "no store name: not parsed").toBe(0);
+    scan("src/fixture-hint3.ts", `const c = "sessionStorage.clear();";`);
+    expect(counter() - before, "a store name: parsed once").toBe(1);
+  });
+});
+
+describe("CSC-44 template substitutions are resolved, and fail closed", () => {
+  for (const [name, fixture, key] of [
+    ['setItem("${KEY}", …)', 'const KEY = "kf_x_refresh_token";\nconst h = { __html: `localStorage.setItem("${KEY}", window.__t);` };', "localStorage:kf_x_refresh_token"],
+    ["setItem(${JSON.stringify(KEY)}, …)", 'const KEY = "kf_x_refresh_token";\nconst h = `localStorage.setItem(${JSON.stringify(KEY)}, t)`;', "localStorage:kf_x_refresh_token"],
+    ['document.cookie = "${KEY}=${t}"', 'const KEY = "kf_x_refresh_token";\nconst h = `document.cookie = "${KEY}=${t}"`;', "cookie:kf_x_refresh_token"],
+  ]) {
+    it(`${name}: the key resolves in the host file`, () => {
+      expect(keysOf(scan("src/fixture-sub.ts", fixture))).toContain(key);
+    });
+  }
+
+  it("an unresolvable substitution in the key makes the write a credential write", () => {
+    const fixture = "const h = `localStorage.setItem(\"${pick()}\", \"plain\")`;";
+    const ws = scan("src/fixture-sub2.ts", fixture).filter((w) => w.store === "localStorage");
+    expect(ws.length).toBe(1);
+    expect(isCredential(ws[0])).toBe(true);
+  });
+});
+
+describe("CSC-45 JSX text children of a script tag are code", () => {
+  for (const tag of ["script", "Script"]) {
+    it(`<${tag}>…</${tag}>: found`, () => {
+      const fixture = `export const P = () => <${tag} id="a">localStorage.setItem("kf_jt_token", window.__t)</${tag}>;`;
+      expect(keysOf(scan("src/fixture-jsxscript.tsx", fixture))).toContain("localStorage:kf_jt_token");
+    });
+  }
+});
+
+describe("CSC-46 document[\"cookie\"]", () => {
+  it("document[\"cookie\"] = … is a cookie write", () => {
+    expect(keysOf(scan("src/fixture-dc.ts", `document["cookie"] = "kf_dc_session=" + t;`))).toContain("cookie:kf_dc_session");
+  });
+});
+
+describe("CSC-47 (deliberate false positive) a string that only quotes a write counts", () => {
+  it("help text quoting a setItem call is counted as that write", () => {
+    const fixture = `const help = "Call localStorage.setItem('kf_help_token', t) to save it.";`;
+    expect(keysOf(scan("src/fixture-help.ts", fixture))).toContain("localStorage:kf_help_token");
+  });
+});
+
+describe("CSC-48 inner lines map through the raw text", () => {
+  it("a \\n escape before the write does not shift its line", () => {
+    const fixture = `eval("var a = 1;\\nvar b = 2;\\nlocalStorage.setItem('kf_nl_token', t)");`;
+    expect(scan("src/fixture-nl.ts", fixture).find((w) => w.key === "kf_nl_token")?.line).toBe(1);
+  });
+});
+
+describe("CSC-49 bracketed property names are escaped in full", () => {
+  it('K["a(b"] does not throw, and K["a.b"] resolves to its own property', () => {
+    const fixture = [`const K = { "a(b": "kf_paren_token", "a.b": "kf_dot_token", aXb: "kf_wrong" };`, `localStorage.setItem(K["a(b"], t);`, `localStorage.setItem(K["a.b"], t);`].join("\n");
+    expect(keysOf(scan("src/fixture-esc.ts", fixture))).toEqual(["localStorage:kf_paren_token", "localStorage:kf_dot_token"]);
+  });
+});
+
+describe("CSC-50 nested strings and the inner text fallback", () => {
+  it("a string inside a string (depth 2) is scanned", () => {
+    const fixture = `eval("eval('localStorage.setItem(\\\\'kf_d2_token\\\\', t)')");`;
+    expect(keysOf(scan("src/fixture-d2.ts", fixture))).toContain("localStorage:kf_d2_token");
+  });
+
+  it("inner code that does not parse is read by the text scanner", () => {
+    const fixture = 'eval(`const f = <T>(x: T) => x;\nconst s = "{ /* "; localStorage.setItem("kf_tf_token", t); const z = " */ }";`);';
+    expect(keysOf(scan("src/fixture-tf.ts", fixture))).toContain("localStorage:kf_tf_token");
+  });
+});
+
+describe("CSC-51 the dump sorts by plain comparison (COR7-7)", () => {
+  it("upper case sorts before lower case, as bytes do", () => {
+    const ws: Write[] = [
+      { store: "localStorage", key: "a", expr: "a", value: "", file: "src/a.ts", line: 1 },
+      { store: "localStorage", key: "B", expr: "B", value: "", file: "src/a.ts", line: 1 },
+    ];
+    expect(dumpLines(ws)).toEqual(["CSC ---- localStorage B @ src/a.ts:1", "CSC ---- localStorage a @ src/a.ts:1"]);
+  });
+});
