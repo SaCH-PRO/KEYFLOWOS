@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -8,6 +8,8 @@ import { ExpensePostingService } from '../finance/expense-posting.service';
 import { PostingService, normalizeCurrency } from '../finance/posting.service';
 import { moneyEquals, roundMoney, toCents } from '../commerce/money';
 import { TimelineService } from '../timeline/timeline.service';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
+import { isSystemActor } from '../../core/auth/system-actor';
 
 type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
 
@@ -379,6 +381,8 @@ export class ExpensesService {
     paymentMethod?: string | null;
     paidAt?: string | Date | null;
     paymentAccountId?: string | null;
+    actorUserId?: string | null;
+    actorRole?: string | null;
   }) {
     let trimmedPaymentAccountId = '';
     if (input.paymentAccountId !== undefined && input.paymentAccountId !== null) {
@@ -386,6 +390,29 @@ export class ExpensesService {
         throw new BadRequestException('paymentAccountId must be a non-empty string');
       }
       trimmedPaymentAccountId = input.paymentAccountId.trim();
+    }
+
+    // V1-91 (FU-RECURRING-EXPENSE-SERVER): naming an explicit paymentAccountId
+    // queries FinancialAccount rows (which live under revenue:read). Refuse any
+    // member without revenue:read uniformly BEFORE touching expenses or
+    // financial_accounts so probing paymentAccountId cannot leak existence,
+    // archive status, account type, currency, or linked COA state.
+    if (
+      trimmedPaymentAccountId &&
+      input.actorUserId &&
+      !isSystemActor(input.actorUserId) &&
+      input.actorRole !== 'SUPER_ADMIN'
+    ) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: input.actorUserId, businessId: input.businessId } },
+        select: { role: true, permissionScopes: true },
+      });
+      const revLevel = membership ? memberModuleLevel(membership, 'revenue') : 'none';
+      if (rankOf(revLevel) < LEVEL_RANK.read) {
+        throw new ForbiddenException(
+          'Insufficient permissions: selecting a payment account requires revenue read access',
+        );
+      }
     }
 
     let requestedPaidAt: Date;

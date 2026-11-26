@@ -33,6 +33,9 @@ interface RecurringExpenseUpdateBody {
   createsBill?: boolean;
   dueOffsetDays?: number | null;
   categoryId?: string | null;
+  projectId?: string | null;
+  contactId?: string | null;
+  serviceId?: string | null;
   isActive?: boolean;
 }
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -59,7 +62,7 @@ export class RecurringExpensesController {
     return this.svc.get(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'recurring_created', 'recurring_expense')
@@ -68,7 +71,7 @@ export class RecurringExpensesController {
     return this.svc.create({ ...body, businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'recurring_updated', 'recurring_expense')
@@ -77,7 +80,7 @@ export class RecurringExpensesController {
     return this.svc.update({ ...body, businessId, id });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'recurring_cancelled', 'recurring_expense')
