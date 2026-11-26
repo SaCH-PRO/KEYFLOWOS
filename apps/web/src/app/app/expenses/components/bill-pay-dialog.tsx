@@ -56,15 +56,20 @@ export function BillPayDialog({
   onClose: () => void;
   onPaid: (paid: Expense | null) => void;
 }) {
-  const [accounts, setAccounts] = useState<Accounts>({ kind: "loading" });
-  const [accountId, setAccountId] = useState("");
+  // Bumped by Retry: reads the accounts again.
+  const [attempt, setAttempt] = useState(0);
+  // Each read's answer and the account chosen from it are kept with the read they belong to (this business, this
+  // bill, this attempt). When the business or the bill changes, or Retry is pressed, the dialog is loading again at
+  // once and no earlier answer or account id can be shown or sent (review SEC MINOR-2, round 2).
+  const readKey = `${businessId}|${bill.id}|${norm(bill.currency)}|${attempt}`;
+  const [loaded, setLoaded] = useState<{ key: string; accounts: Accounts } | null>(null);
+  const [selected, setSelected] = useState<{ key: string; id: string } | null>(null);
+  const accounts: Accounts = loaded?.key === readKey ? loaded.accounts : { kind: "loading" };
+  const accountId = selected?.key === readKey ? selected.id : "";
   const [method, setMethod] = useState(() => defaultMethod(bill));
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  // Bumped by Retry: reads the accounts again.
-  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -73,26 +78,25 @@ export function BillPayDialog({
       if (!live) return;
       const state = readState(res, { what: "the payment accounts" });
       if (state.kind !== "ok") {
-        setAccounts({ kind: state.kind, message: state.message });
+        setLoaded({ key: readKey, accounts: { kind: state.kind, message: state.message } });
         return;
       }
       const items = billPaymentAccounts(res?.data?.items ?? [], bill.currency);
-      setAccounts({ kind: "ok", items });
-      setAccountId(items[0]?.id ?? "");
+      setLoaded({ key: readKey, accounts: { kind: "ok", items } });
+      setSelected({ key: readKey, id: items[0]?.id ?? "" });
     })();
     return () => {
       live = false;
     };
-  }, [businessId, bill.currency, attempt]);
+  }, [businessId, bill.currency, readKey]);
 
-  const retry = () => {
-    setAccounts({ kind: "loading" });
-    setAttempt((n) => n + 1);
-  };
+  const retry = () => setAttempt((n) => n + 1);
 
   // Pay can be pressed once the owner has been asked: the accounts listed, or their read refused (method only).
   const canPay = accounts.kind === "ok" || accounts.kind === "no-access";
 
+  // Pay is the form's submit (the button, or Enter): this guard is what stops a submit while the accounts are
+  // loading or failed, not only the disabled button.
   const pay = async () => {
     if (inFlight.current || !canPay) return;
     inFlight.current = true;
@@ -128,7 +132,12 @@ export function BillPayDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="bill-pay-title">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={busy ? undefined : onClose} aria-hidden="true" />
-      <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-card p-6 shadow-2xl">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void pay();
+        }}
+        className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-card p-6 shadow-2xl">
         <h3 id="bill-pay-title" className="text-lg font-semibold text-foreground mb-1">Pay bill</h3>
         <p className="text-sm text-muted-foreground mb-4">
           {bill.vendor || bill.description} · {formatCurrency(bill.amount, bill.currency, businessId)}
@@ -145,7 +154,7 @@ export function BillPayDialog({
               <select
                 id="bill-pay-account"
                 value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
+                onChange={(e) => setSelected({ key: readKey, id: e.target.value })}
                 disabled={busy}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
               >
@@ -200,12 +209,12 @@ export function BillPayDialog({
           <Button variant="subtle" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={pay} disabled={busy || !canPay} aria-busy={busy || undefined}>
+          <Button type="submit" disabled={busy || !canPay} aria-busy={busy || undefined}>
             {busy && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
             Pay
           </Button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
