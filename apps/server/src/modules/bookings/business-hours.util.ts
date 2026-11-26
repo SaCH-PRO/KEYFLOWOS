@@ -53,41 +53,90 @@ function formatMinutes(minutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function lookupRawDayEntry(hours: Record<string, unknown>, weekday: number): unknown {
+function ownProp(obj: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+
+function parseDayEntry(raw: unknown): ParsedBusinessDayHours | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+
+  const entry = raw as Record<string, unknown>;
+  const closed = ownProp(entry, 'closed');
+  if (closed === true) {
+    return { closed: true };
+  }
+  if (closed !== false && closed !== undefined && closed !== null) {
+    return null;
+  }
+
+  const openMin = parseTimeToMinutes(ownProp(entry, 'open'), false);
+  const closeMin = parseTimeToMinutes(ownProp(entry, 'close'), true);
+  if (openMin === null || closeMin === null || openMin >= closeMin) {
+    return null;
+  }
+
+  return {
+    closed: false,
+    openMin,
+    closeMin,
+    open: formatMinutes(openMin),
+    close: formatMinutes(closeMin),
+  };
+}
+
+/**
+ * Yield raw candidate entries for `weekday` in strict precedence order:
+ *   1. Exact lowercase short key (`mon`)
+ *   2. Case-insensitive own keys matching short key (`MON`, `Mon`, ...)
+ *   3. Exact lowercase long key (`monday`)
+ *   4. Case-insensitive own keys matching long key (`Monday`, `MONDAY`, ...)
+ *
+ * Uses `Object.prototype.hasOwnProperty.call` and `Object.keys` only (never
+ * walks the prototype chain).
+ */
+function candidateDayEntries(hours: Record<string, unknown>, weekday: number): unknown[] {
   const shortKey = SHORT_DAY_KEYS[weekday];
   const longKey = LONG_DAY_KEYS[weekday];
+  const candidates: unknown[] = [];
 
   if (Object.prototype.hasOwnProperty.call(hours, shortKey) && hours[shortKey] != null) {
-    return hours[shortKey];
-  }
-  if (Object.prototype.hasOwnProperty.call(hours, longKey) && hours[longKey] != null) {
-    return hours[longKey];
+    candidates.push(hours[shortKey]);
   }
 
-  // Case-insensitive own-property fallback (Object.keys never walks the prototype chain).
   const keys = Object.keys(hours);
   for (const key of keys) {
-    if (key.toLowerCase() === shortKey && hours[key] != null) {
-      return hours[key];
+    if (key !== shortKey && key.toLowerCase() === shortKey && hours[key] != null) {
+      candidates.push(hours[key]);
     }
   }
+
+  if (Object.prototype.hasOwnProperty.call(hours, longKey) && hours[longKey] != null) {
+    candidates.push(hours[longKey]);
+  }
+
   for (const key of keys) {
-    if (key.toLowerCase() === longKey && hours[key] != null) {
-      return hours[key];
+    if (key !== longKey && key.toLowerCase() === longKey && hours[key] != null) {
+      candidates.push(hours[key]);
     }
   }
-  return undefined;
+
+  return candidates;
 }
 
 /**
  * Read a single weekday's configured hours from `Business.businessHours`.
  *
- * Returns:
+ * Evaluates candidate keys in strict short-over-long precedence order and
+ * returns the first candidate that parses to a valid configuration (so an
+ * incomplete/malformed short key cannot shadow a valid long key like
+ * `{ closed: true }`):
  *   - `{ closed: true }` when the day explicitly has `closed === true`
  *   - `{ closed: false, openMin, closeMin, open, close }` when open with valid
  *     `open < close` times (`00:00`–`23:59`, `close` may be `24:00`)
- *   - `null` when `businessHours` is null/malformed, the day key is absent,
- *     `closed` is a non-boolean sentinel, or open/close are missing/invalid/inverted
+ *   - `null` when `businessHours` is null/malformed, the day key is absent, or
+ *     no candidate entry parses cleanly
  */
 export function readBusinessDayHours(
   businessHours: unknown,
@@ -100,30 +149,12 @@ export function readBusinessDayHours(
     return null;
   }
 
-  const raw = lookupRawDayEntry(businessHours as Record<string, unknown>, weekday);
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return null;
+  const candidates = candidateDayEntries(businessHours as Record<string, unknown>, weekday);
+  for (const raw of candidates) {
+    const parsed = parseDayEntry(raw);
+    if (parsed !== null) {
+      return parsed;
+    }
   }
-
-  const entry = raw as { open?: unknown; close?: unknown; closed?: unknown };
-  if (entry.closed === true) {
-    return { closed: true };
-  }
-  if (entry.closed !== false && entry.closed !== undefined && entry.closed !== null) {
-    return null;
-  }
-
-  const openMin = parseTimeToMinutes(entry.open, false);
-  const closeMin = parseTimeToMinutes(entry.close, true);
-  if (openMin === null || closeMin === null || openMin >= closeMin) {
-    return null;
-  }
-
-  return {
-    closed: false,
-    openMin,
-    closeMin,
-    open: formatMinutes(openMin),
-    close: formatMinutes(closeMin),
-  };
+  return null;
 }
