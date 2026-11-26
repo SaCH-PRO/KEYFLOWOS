@@ -1480,6 +1480,16 @@
       "prefix": "v64l_",
       "owner": "apps/server/test/census-key-b.integration.test.ts",
       "packet": "V1-64 (SWP-CENSUS-KEY-B)"
+    },
+    {
+      "prefix": "v71h_",
+      "owner": "apps/server/test/merge-contacts-unique.integration.test.ts",
+      "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE, P112)"
+    },
+    {
+      "prefix": "v81o_",
+      "owner": "apps/server/test/key-overdue-sent-only.integration.test.ts",
+      "packet": "V1-81 (FU-KEY-OVERDUE-SENT-ONLY, P113)"
     }
   ],
   "pendingRenames": [],
@@ -1491,6 +1501,10 @@
     {
       "file": "apps/server/test/backfill-scripts-cli.integration.test.ts",
       "reason": "Runs the operator scripts' dry runs (no arguments) as child processes against DATABASE_URL; dry runs write no rows, so there is nothing to seed or clean up."
+    },
+    {
+      "file": "apps/server/test/contract-fetch-body-cap.integration.test.ts",
+      "reason": "Tests ContractClauseService decompressed body cap against a real local HTTP server with an in-memory Prisma double; touches no database rows."
     },
     {
       "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",

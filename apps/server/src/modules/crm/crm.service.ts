@@ -22,7 +22,7 @@ import { buildContactWhere, findSearchTags } from './contact-filters.helper';
 import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { contactPhoneKey, normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, livePhoneHolderIds } from './crm-duplicate.util';
-import { contactPhoneForStorage, normalizeToE164, phoneFlagFor, phoneKeyReadsAs, severityFor, type PhoneFlagField } from './crm-data-quality.util';
+import { contactPhoneForStorage, normalizeToE164, phoneFlagFor, phoneKeyReadsAs, severityFor, syntaxValidEmail, type PhoneFlagField } from './crm-data-quality.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
@@ -2127,102 +2127,148 @@ export class CrmService {
       throw new BadRequestException('Cannot merge a contact into itself');
     }
 
-    const primary = await this.assertContact(input.businessId, input.primaryId);
-    const duplicate = await this.assertContact(input.businessId, input.duplicateId);
     // The merge's audit entries name the member who merged (the route passes
     // actorId with actorType USER and no audit context), as its ContactEvent
     // does; KEY and other callers without a member stay SYSTEM.
     const audit = this.memberAuditContext(_audit, input.actorType === 'USER' ? input.actorId : undefined);
-
-    const mergedTags = Array.from(new Set([...(primary.tags ?? []), ...(duplicate.tags ?? [])]));
-    const mergedLeadScore = Math.max(primary.leadScore ?? 0, duplicate.leadScore ?? 0);
-
-    const fillableFields: Array<keyof typeof primary> = [
-      'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNormalized',
-      'displayName', 'secondaryEmail', 'secondaryPhone', 'whatsappNumber',
-      'preferredChannel', 'addressLine1', 'addressLine2', 'city', 'state',
-      'postalCode', 'country', 'timezone', 'companyName', 'jobTitle',
-      'department', 'industry', 'sourceDetail', 'segment', 'language', 'notesInternal',
-    ];
-
-    const contactUpdate: Record<string, unknown> = {
-      tags: mergedTags,
-      leadScore: mergedLeadScore,
-    };
-    const resolvedChoices: Record<string, { from: 'primary' | 'duplicate' | 'override'; value: unknown }> = {};
-
-    for (const field of fillableFields) {
-      const primaryVal = primary[field];
-      const duplicateVal = duplicate[field];
-      if ((primaryVal === null || primaryVal === undefined || primaryVal === '') && duplicateVal) {
-        contactUpdate[field] = duplicateVal;
-        resolvedChoices[String(field)] = { from: 'duplicate', value: duplicateVal };
-      } else if (primaryVal !== null && primaryVal !== undefined && primaryVal !== '') {
-        resolvedChoices[String(field)] = { from: 'primary', value: primaryVal };
-      }
-    }
-
-    if (primary.email && !primary.emailNormalized && duplicate.emailNormalized) {
-      contactUpdate.emailNormalized = duplicate.emailNormalized;
-    }
-    if (primary.phone && !primary.phoneNormalized && duplicate.phoneNormalized) {
-      contactUpdate.phoneNormalized = duplicate.phoneNormalized;
-    }
-
-    const primaryCustom = (typeof primary.custom === 'object' && primary.custom) ? primary.custom as Record<string, unknown> : {};
-    const duplicateCustom = (typeof duplicate.custom === 'object' && duplicate.custom) ? duplicate.custom as Record<string, unknown> : {};
-    // Default behaviour: union with primary winning on key collisions.
-    const mergedCustom: Record<string, unknown> = { ...duplicateCustom, ...primaryCustom };
-
-    if (input.fieldOverrides) {
-      const fillableSet = new Set<string>(fillableFields as readonly string[]);
-      for (const [key, value] of Object.entries(input.fieldOverrides)) {
-        if (key === 'custom' && value && typeof value === 'object') {
-          // Full replace of merged custom map (UI sends the resolved map).
-          for (const k of Object.keys(mergedCustom)) delete mergedCustom[k];
-          Object.assign(mergedCustom, value as Record<string, unknown>);
-          resolvedChoices['custom'] = { from: 'override', value };
-          continue;
-        }
-        if (key.startsWith('custom.')) {
-          // Per-key override: e.g. "custom.preferredColor" → resolve a single key.
-          const customKey = key.slice('custom.'.length);
-          if (customKey) {
-            mergedCustom[customKey] = value;
-            resolvedChoices[`custom.${customKey}`] = { from: 'override', value };
-          }
-          continue;
-        }
-        if (fillableSet.has(key) || key === 'tags' || key === 'status') {
-          contactUpdate[key] = value;
-          resolvedChoices[key] = { from: 'override', value };
-        }
-      }
-    }
-    contactUpdate.custom = mergedCustom;
-
-    // Deterministic repointing: capture explicit row IDs first, then update by IN list.
-    // Storing IDs (not just counts) allows revertMerge to restore precisely the rows
-    // that were moved, avoiding any time-based heuristics.
-    const repointedRows: Record<string, { ids: string[]; count: number }> = {};
-    const repointByIds = async <T extends { id: string }>(
-      label: string,
-      findFn: () => Promise<T[]>,
-      updateFn: (ids: string[]) => Promise<{ count: number }>,
-    ) => {
-      const rows = await findFn();
-      const ids = rows.map((r) => r.id);
-      if (ids.length > 0) {
-        const r = await updateFn(ids);
-        repointedRows[label] = { ids, count: r.count ?? ids.length };
-      } else {
-        repointedRows[label] = { ids: [], count: 0 };
-      }
-    };
-
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+    // Populated inside the transaction from the locked rows; read by the 409 mapping.
+    let emailNormalized: string | null | undefined;
+    let phoneNormalized: string | null | undefined;
+
     const result = await this.prisma.client.$transaction(async (tx) => {
+      emailNormalized = undefined;
+      phoneNormalized = undefined;
+
+      // Lock both contact rows in deterministic id order so concurrent merges or
+      // deletes serialize cleanly, then read the live locked rows inside the tx
+      // so tags, fields, snapshots and audit diffs never race with stale pre-lock reads.
+      const [lockA, lockB] = input.primaryId < input.duplicateId
+        ? [input.primaryId, input.duplicateId]
+        : [input.duplicateId, input.primaryId];
+      const locked = await tx.$queryRaw<Array<{ id: string; deleted_at: Date | null }>>`
+        SELECT id, deleted_at FROM contacts
+        WHERE business_id = ${input.businessId} AND id IN (${lockA}, ${lockB})
+        ORDER BY id FOR UPDATE
+      `;
+      if (locked.length !== 2 || locked.some((r) => r.deleted_at !== null)) {
+        throw new NotFoundException('Contact not found');
+      }
+
+      const lockedContacts = await tx.contact.findMany({
+        where: { businessId: input.businessId, id: { in: [input.primaryId, input.duplicateId] }, deletedAt: null },
+      });
+      const primary = lockedContacts.find((c) => c.id === input.primaryId);
+      const duplicate = lockedContacts.find((c) => c.id === input.duplicateId);
+      if (!primary || !duplicate) {
+        throw new NotFoundException('Contact not found');
+      }
+
+      const mergedTags = Array.from(new Set([...(primary.tags ?? []), ...(duplicate.tags ?? [])]));
+      const mergedLeadScore = Math.max(primary.leadScore ?? 0, duplicate.leadScore ?? 0);
+
+      const fillableFields: Array<keyof typeof primary> = [
+        'firstName', 'lastName', 'email', 'phone',
+        'displayName', 'secondaryEmail', 'secondaryPhone', 'whatsappNumber',
+        'preferredChannel', 'addressLine1', 'addressLine2', 'city', 'state',
+        'postalCode', 'country', 'timezone', 'companyName', 'jobTitle',
+        'department', 'industry', 'sourceDetail', 'segment', 'language', 'notesInternal',
+      ];
+
+      const contactUpdate: Record<string, unknown> = {
+        tags: mergedTags,
+        leadScore: mergedLeadScore,
+      };
+      const resolvedChoices: Record<string, { from: 'primary' | 'duplicate' | 'override'; value: unknown }> = {};
+
+      for (const field of fillableFields) {
+        const primaryVal = primary[field];
+        const duplicateVal = duplicate[field];
+        if ((primaryVal === null || primaryVal === undefined || primaryVal === '') && duplicateVal) {
+          contactUpdate[field] = duplicateVal;
+          resolvedChoices[String(field)] = { from: 'duplicate', value: duplicateVal };
+        } else if (primaryVal !== null && primaryVal !== undefined && primaryVal !== '') {
+          resolvedChoices[String(field)] = { from: 'primary', value: primaryVal };
+        }
+      }
+
+      const primaryCustom = (typeof primary.custom === 'object' && primary.custom) ? primary.custom as Record<string, unknown> : {};
+      const duplicateCustom = (typeof duplicate.custom === 'object' && duplicate.custom) ? duplicate.custom as Record<string, unknown> : {};
+      // Default behaviour: union with primary winning on key collisions.
+      const mergedCustom: Record<string, unknown> = { ...duplicateCustom, ...primaryCustom };
+
+      let emailOverridden = false;
+      if (input.fieldOverrides) {
+        const fillableSet = new Set<string>(fillableFields as readonly string[]);
+        for (const [key, value] of Object.entries(input.fieldOverrides)) {
+          if (value === undefined) continue;
+          if (key === 'custom' && value && typeof value === 'object') {
+            // Full replace of merged custom map (UI sends the resolved map).
+            for (const k of Object.keys(mergedCustom)) delete mergedCustom[k];
+            Object.assign(mergedCustom, value as Record<string, unknown>);
+            resolvedChoices['custom'] = { from: 'override', value };
+            continue;
+          }
+          if (key.startsWith('custom.')) {
+            // Per-key override: e.g. "custom.preferredColor" → resolve a single key.
+            const customKey = key.slice('custom.'.length);
+            if (customKey) {
+              mergedCustom[customKey] = value;
+              resolvedChoices[`custom.${customKey}`] = { from: 'override', value };
+            }
+            continue;
+          }
+          if (fillableSet.has(key) || key === 'tags' || key === 'status') {
+            if ((key === 'email' || key === 'phone' || key === 'whatsappNumber') && value !== null && typeof value !== 'string') {
+              throw new BadRequestException(`Invalid ${key} override`);
+            }
+            contactUpdate[key] = value;
+            resolvedChoices[key] = { from: 'override', value };
+            if (key === 'email') emailOverridden = true;
+          }
+        }
+      }
+      contactUpdate.custom = mergedCustom;
+
+      // Keep emailNormalized in sync whenever email is copied from duplicate or
+      // overridden (FU-MERGE-CONTACTS-UNIQUE, D-221); tracked for 409 mapping.
+      if ('email' in contactUpdate) {
+        const rawEmail = typeof contactUpdate.email === 'string' ? contactUpdate.email.trim() : null;
+        const trimmedEmail = rawEmail ? rawEmail : null;
+        if (emailOverridden && trimmedEmail && !syntaxValidEmail(trimmedEmail)) {
+          throw new BadRequestException('Invalid email address');
+        }
+        emailNormalized = normalizeEmail(trimmedEmail);
+        contactUpdate.email = trimmedEmail;
+        contactUpdate.emailNormalized = emailNormalized;
+      } else if (primary.email && !primary.emailNormalized) {
+        const trimmedPrimary = primary.email.trim();
+        if (trimmedPrimary) {
+          emailNormalized = normalizeEmail(trimmedPrimary);
+          contactUpdate.emailNormalized = emailNormalized;
+        }
+      }
+
+      // Deterministic repointing: capture explicit row IDs first, then update by IN list.
+      // Storing IDs (not just counts) allows revertMerge to restore precisely the rows
+      // that were moved, avoiding any time-based heuristics.
+      const repointedRows: Record<string, { ids: string[]; count: number }> = {};
+      const repointByIds = async <T extends { id: string }>(
+        label: string,
+        findFn: () => Promise<T[]>,
+        updateFn: (ids: string[]) => Promise<{ count: number }>,
+      ) => {
+        const rows = await findFn();
+        const ids = rows.map((r) => r.id);
+        if (ids.length > 0) {
+          const r = await updateFn(ids);
+          repointedRows[label] = { ids, count: r.count ?? ids.length };
+        } else {
+          repointedRows[label] = { ids: [], count: 0 };
+        }
+      };
+
       // 1. Repoint relations that are not unique-per-contact. Errors propagate -> rollback.
       await repointByIds('events',
         () => tx.contactEvent.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
@@ -2255,7 +2301,7 @@ export class CrmService {
         () => tx.recurringInvoice.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
         (ids) => tx.recurringInvoice.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
       await repointByIds('externalMappings',
-        () => tx.contactExternalMapping.findMany({ where: { contactId: input.duplicateId }, select: { id: true } }),
+        () => tx.contactExternalMapping.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
         (ids) => tx.contactExternalMapping.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
       await repointByIds('momentumRecommendations',
         () => tx.momentumRecommendation.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
@@ -2359,14 +2405,66 @@ export class CrmService {
         },
       });
 
-      const mergedContact = await tx.contact.update({
-        where: { id: input.primaryId },
-        data: { ...(contactUpdate as Prisma.ContactUpdateInput), lastMergeId: mergeOp.id },
-      });
+      // FU-MERGE-CONTACTS-UNIQUE (D-221): soft-delete the duplicate BEFORE
+      // updating the primary, inside the same transaction, so the live-row
+      // partial unique indexes (contacts_business_id_email_normalized_live_key
+      // and contacts_business_id_phone_normalized_live_key, D-16) release the
+      // duplicate's email and phone before the primary takes them. Any failure
+      // below (e.g. a third live contact holding the target email or phone)
+      // rolls the entire transaction back atomically.
       await tx.contact.update({
         where: { id: input.duplicateId },
         data: { deletedAt: new Date(), lastMergeId: mergeOp.id, mergedIntoId: input.primaryId },
       });
+
+      const primaryUpdate: Record<string, unknown> = { ...contactUpdate };
+      const phonesTouched: PhoneFlagField[] = [];
+      let phoneCountry: string | null = null;
+      if ('phone' in primaryUpdate || 'whatsappNumber' in primaryUpdate) {
+        phoneCountry = await this.businessPhoneCountry(tx, input.businessId);
+      }
+      if ('phone' in primaryUpdate) {
+        const rawPhone = typeof primaryUpdate.phone === 'string' ? primaryUpdate.phone.trim() : null;
+        const phone = contactPhoneForStorage(rawPhone, phoneCountry);
+        const nextKey = phoneIdentityKey(phone.value);
+        let writesPhone = true;
+        if (phone.e164 && nextKey !== primary.phoneNormalized) {
+          if (phoneKeyReadsAs(primary.phoneNormalized, phone.e164, phoneCountry)) {
+            // Review COR-E164-3 parity with updateContact: if the override re-sends
+            // primary's own number under a legacy spelling while a third live contact
+            // holds that E.164 key, keep primary's phone as stored instead of 409.
+            const others = await livePhoneHolderIds(tx, input.businessId, phone.e164, phoneCountry, { exceptId: input.primaryId });
+            if (others.length > 0) writesPhone = false;
+          } else {
+            const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, phoneCountry, input.primaryId);
+            if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+          }
+        }
+        if (writesPhone) {
+          phoneNormalized = nextKey;
+          primaryUpdate.phone = phone.value;
+          primaryUpdate.phoneNormalized = nextKey;
+          phonesTouched.push('phone');
+        } else {
+          delete primaryUpdate.phone;
+        }
+      } else if (primary.phone && !primary.phoneNormalized) {
+        phoneNormalized = phoneIdentityKey(primary.phone);
+        primaryUpdate.phoneNormalized = phoneNormalized;
+      }
+      if ('whatsappNumber' in primaryUpdate) {
+        const rawWa = typeof primaryUpdate.whatsappNumber === 'string' ? primaryUpdate.whatsappNumber.trim() : null;
+        primaryUpdate.whatsappNumber = contactPhoneForStorage(rawWa, phoneCountry).value;
+        phonesTouched.push('whatsappNumber');
+      }
+
+      const mergedContact = await tx.contact.update({
+        where: { id: input.primaryId },
+        data: { ...(primaryUpdate as Prisma.ContactUpdateInput), lastMergeId: mergeOp.id },
+      });
+      if (phonesTouched.length > 0) {
+        await this.syncPhoneFlag(tx, input.businessId, mergedContact, phoneCountry, phonesTouched);
+      }
 
       // D-25 (TOF-CONTACT-AUDIT-AWAIT; review repair SEC-CAA-2): both entries
       // commit with the merge or nothing does, and they come before the
@@ -2401,7 +2499,7 @@ export class CrmService {
           mergeId: mergeOp.id,
           primaryId: input.primaryId,
           duplicateId: input.duplicateId,
-          mergedFields: Object.keys(contactUpdate),
+          mergedFields: Object.keys(primaryUpdate),
           resolvedChoices,
           repointedCounts: repointedCountsForEvent,
           revertableUntil: expiresAt.toISOString(),
@@ -2410,7 +2508,12 @@ export class CrmService {
         tx,
       );
       return { mergedContact, mergeId: mergeOp.id, repointedCounts: repointedCountsForEvent };
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(
+      err,
+      input.businessId,
+      { emailNormalized, phoneNormalized },
+      input.actorType === 'USER' ? input.actorId : null,
+    ));
     const merged = result.mergedContact;
     if (merged) {
       const payload: ContactMergedPayload = {
