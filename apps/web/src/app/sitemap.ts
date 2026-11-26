@@ -35,7 +35,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     if (res.ok) {
       const data: DirectoryResponse = await res.json();
       businessRoutes = data.items.map((item) => ({
-        url: `${baseUrl}/site/${item.slug}`,
+        url: `${baseUrl}/book/${encodeURIComponent(item.slug)}`,
         lastModified: item.publishedAt ? new Date(item.publishedAt) : new Date(),
         changeFrequency: "weekly" as const,
         priority: 0.7,

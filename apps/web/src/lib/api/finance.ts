@@ -220,7 +220,16 @@ export async function createBill(businessId: string, body: CreateBillBody) {
   return apiPost<Expense>({ path: `/finance/businesses/${encodeURIComponent(businessId)}/bills`, body });
 }
 
-export async function payBill(businessId: string, billId: string, body: { paymentMethod?: string; paidAt?: string } = {}) {
+// EXPENSES-HUB-1 (BUG-025, D-168): the account the bill is paid from. The app always asks (the Pay dialog,
+// expenses/components/bill-pay-dialog.tsx); a request that names none is paid from the method's default account
+// (Cash when there is no method), as the server has always done.
+export interface PayBillBody {
+  paymentAccountId?: string;
+  paymentMethod?: string;
+  paidAt?: string;
+}
+
+export async function payBill(businessId: string, billId: string, body: PayBillBody = {}) {
   return apiPost<Expense>({ path: `/finance/businesses/${encodeURIComponent(businessId)}/bills/${encodeURIComponent(billId)}/pay`, body });
 }
 

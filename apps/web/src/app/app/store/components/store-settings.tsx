@@ -93,9 +93,11 @@ export function StoreSettings({
   }, [qrDataUrl]);
 
   const domain = typeof window !== "undefined" ? window.location.origin : "";
-  const livePreviewUrl = slug.trim()
-    ? `${domain}/book/${slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-")}`
-    : "";
+  const typedSlug = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
+  const livePreviewUrl = typedSlug ? `${domain}/book/${typedSlug}` : "";
+  // CUSTOMER-PAGE-HONESTY (journey F1): only the saved address is offered to copy, open, scan or send; what is typed
+  // and not saved yet is shown as a preview, marked as such.
+  const typedIsSaved = !!currentSlug && typedSlug === currentSlug;
 
   return (
     <div className="space-y-4">
@@ -156,13 +158,25 @@ export function StoreSettings({
         >
           <LinkIcon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
           <span className="text-xs truncate flex-1 font-mono" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{livePreviewUrl}</span>
-          <button onClick={handleCopy} className="p-1 rounded-md transition-colors" title="Copy">
-            {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />}
-          </button>
-          <a href={livePreviewUrl} target="_blank" rel="noopener noreferrer" className="p-1 rounded-md transition-colors" title="Open">
-            <ExternalLink className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-          </a>
+          {typedIsSaved && publicUrl ? (
+            <>
+              <button onClick={handleCopy} className="p-1 rounded-md transition-colors" title="Copy">
+                {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />}
+              </button>
+              <a href={publicUrl} target="_blank" rel="noopener noreferrer" className="p-1 rounded-md transition-colors" title="Open">
+                <ExternalLink className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+              </a>
+            </>
+          ) : (
+            <span className="text-[10px] whitespace-nowrap" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Not saved yet</span>
+          )}
         </div>
+      )}
+
+      {!publicUrl && (
+        <p className="text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Save your store link to share it.
+        </p>
       )}
 
       {publicUrl && (

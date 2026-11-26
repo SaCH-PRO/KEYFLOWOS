@@ -21,7 +21,6 @@ import {
   MessageCircle,
   ChevronDown,
   ChevronUp,
-  Award,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { apiGet } from "@/lib/api";
@@ -1070,7 +1069,6 @@ export function CheckoutFlow({
                 {[
                   { icon: ShieldCheck, label: "Secure Checkout" },
                   { icon: Lock, label: "Encrypted" },
-                  { icon: Award, label: "Guaranteed by KeyFlowOS" },
                 ].map(({ icon: Icon, label }) => (
                   <div key={label} className="flex items-center gap-1.5 text-[11px] text-emerald-400/60">
                     <Icon className="w-3.5 h-3.5" />
