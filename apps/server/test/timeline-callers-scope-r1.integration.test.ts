@@ -475,6 +475,34 @@ describe('P122 R1 review regressions (FU-TIMELINE-CALLERS-SCOPE)', () => {
       ),
     ).rejects.toMatchObject({ status: 403 });
 
+    // R3-COR-01: whitespace-padded own permitted module or type prefix still lands UNCLASSIFIED in SQL -> refused
+    await expect(
+      temporalService.emit(
+        {
+          businessId: ID.biz,
+          source: 'APP',
+          module: ' bookings ',
+          type: 'custom.forged',
+          title: `${P}padded_own_module`,
+        },
+        undefined,
+        { id: ID.bookingsOnly, role: 'USER' },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    await expect(
+      temporalService.emit(
+        {
+          businessId: ID.biz,
+          source: 'APP',
+          type: ' booking.forged',
+          title: `${P}padded_own_type`,
+        },
+        undefined,
+        { id: ID.bookingsOnly, role: 'USER' },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
     const afterCount = await db.temporalFlowEvent.count({ where: { businessId: ID.biz } });
     expect(afterCount).toBe(beforeCount);
   });
