@@ -2281,6 +2281,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * up, through CommerceService.publicInvoiceUrl (the one place such a URL is
    * built). Best effort: the booking is written, so a link that cannot be
    * issued leaves the answer without one rather than failing it.
+   *
+   * FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): intentionally unchanged — this
+   * caller invokes publicInvoiceUrl (not automatedInvoiceUrl) for brand-new
+   * invoices just created inside createPublicBooking after the booking, slot
+   * claim, booking.created event, storefront event, and revenue attribution
+   * are already committed, and sends no email. Propagating a 409 here would
+   * fail a committed public HTTP booking response.
    */
   private async customerInvoiceUrl(businessId: string, invoiceId: string): Promise<string | undefined> {
     try {

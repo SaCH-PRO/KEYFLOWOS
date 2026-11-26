@@ -9,8 +9,10 @@ import { ConflictException } from '@nestjs/common';
  * KEY's plan queue takes a tool's 409 as final (answered once, counted toward no circuit) unless the
  * service throws this class, which FlowOrchestratorService.executeToolDirectly hands the dispatcher
  * as a failure: retried, and counted toward that business's circuit for the tool if it never
- * clears. Today only ProjectsService.updateTask's stale write throws it. A conflict a retry answers
- * the same way (a duplicate, a state that has already moved on, every money conflict) stays a plain
+ * clears. Services that throw it: ProjectsService.updateTask's stale write, and (since
+ * FU-KEY-INVOICE-EMAIL-PAY-LINK, D-248) CommerceService.reissueLink when a pending pay link was
+ * withdrawn under the caller while being handed out. A conflict a retry answers the same way (a
+ * duplicate, a state that has already moved on, every money conflict) stays a plain
  * ConflictException.
  */
 export class RetryableConflictException extends ConflictException {
