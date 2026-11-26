@@ -100,9 +100,10 @@ export interface PipelineToolbarProps {
   onClearSavedView?: () => void;
   /**
    * CONTACTS-LIST-FIRST (D-289): the collapsible "Insights and filters" panel the screen draws under this toolbar.
-   * With onToggleInsights the toolbar shows its toggle in the search row, and below the sm breakpoint folds its
-   * segment chips and All/Pinned/Recent rows into that panel while it is closed, so a phone shows the header, the
-   * search, then the list. Without it the toolbar is drawn as before.
+   * With onToggleInsights the toolbar shows its toggle in the search row and, while the panel is closed, folds its
+   * segment chips into it at every width and its All/Pinned/Recent row below the sm breakpoint, so a phone shows
+   * the header, the search, then the list, and the first row is in view at 1440x900. Without it the toolbar is
+   * drawn as before.
    */
   insightsOpen?: boolean;
   onToggleInsights?: () => void;
@@ -146,8 +147,11 @@ function PipelineToolbarInner({
   onToggleInsights,
   insightsActiveCount = 0,
 }: PipelineToolbarProps) {
-  // Below sm these rows fold into the insights panel while it is closed (D-289); from sm up they always show.
-  const phoneFolded = onToggleInsights && !insightsOpen ? "hidden sm:flex" : "flex";
+  // While the insights panel is closed (D-289) the segment chips fold into it at every width, and the
+  // All/Pinned/Recent row below sm only (it always shows from sm up).
+  const folded = onToggleInsights && !insightsOpen;
+  const segmentsDisplay = folded ? "hidden" : "flex";
+  const phoneFolded = folded ? "hidden sm:flex" : "flex";
   const insightsLabel = `Insights and filters${!insightsOpen && insightsActiveCount > 0 ? ` (${insightsActiveCount} on)` : ""}`;
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -413,7 +417,7 @@ function PipelineToolbarInner({
         )}
       </AnimatePresence>
 
-      <div className={`${phoneFolded} items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5`} data-walkthrough="crm-segments">
+      <div className={`${segmentsDisplay} items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5`} data-walkthrough="crm-segments">
         {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color, description }) => {
           const count = segmentCounts[key];
           const isActive = activeSegment === key;
