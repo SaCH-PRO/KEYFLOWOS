@@ -198,7 +198,8 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   // inventory/transfer require storefront write (SWEEP-P0-SCOPES, browser sweep BUG-015)
   storefront: { inventory_adjust_stock: 'write', inventory_transfer_stock: 'write' },
   // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write; KeyflowCommandController.createNote requires ai write
-  settings: { update_business_blueprint: 'write' },
+  // SWP-CENSUS-V1-B (P90): OnboardingConciergeController.saveOnboardingStep requires settings write
+  settings: { save_onboarding_step: 'write', update_business_blueprint: 'write' },
   ai: { keyflow_create_note: 'write' },
   team: {
     structure_create_delegation_rule: 'write', structure_get_org_tree: 'read',
@@ -208,6 +209,8 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   },
   analytics: {},
   operations: {
+    // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
+    approval_create_request: 'write',
     // command_* and procurement_*: the command-centre item and procurement routes require
     // operations (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
     command_discharge_obligation: 'write', command_list_due_obligations: 'read',
@@ -239,6 +242,8 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
  * not a canonical key, not a legacy family, not the baseline.
  */
 export const GOVERNED_UNGRANTED: Readonly<Record<string, string>> = {
+  approval_decide_step:
+    'operations:write (ApprovalController.approve/reject) but ApprovalRequestService.decideStep finds the approval request by its bare id (AMBIENT-BOUND)',
   bookings_offer_waitlist_slot:
     'bookings:write (BookingsController.offerWaitlistSlot) but BookingWaitlistService.offerSlot finds the waitlist entry by its bare id (AMBIENT-BOUND)',
   commerce_send_invoice:
@@ -298,7 +303,7 @@ export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = [
  * where { id, businessId }.
  */
 export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
-  approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id',
+  // approval_decide_step moved to GOVERNED_UNGRANTED when SWP-CENSUS-V1-B (P90) gated ApprovalController.approve/reject (operations:write)
   // bookings_offer_waitlist_slot moved to GOVERNED_UNGRANTED when SWP-CENSUS-V1-A (P87) gated BookingsController.offerWaitlistSlot (bookings:write)
   content_assign_request: 'ContentRequestService.assignRequest finds the content request by its bare id',
   content_deliver_request: 'ContentRequestService.deliverRequest finds the content request by its bare id',

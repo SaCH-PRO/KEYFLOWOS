@@ -133,6 +133,8 @@
  *  projects_create_task         ProjectsService          POST /projects/businesses/:businessId/projects/:projectId/tasks  projects:write
  *  projects_get_budget          ProjectsService          GET /projects/businesses/:businessId/projects/:projectId/budget  projects:read
  *  inventory_adjust_stock       MarketplaceService       POST /marketplace/businesses/:businessId/inventory/adjust     storefront:write
+ *  approval_create_request      ApprovalRequestService   POST /businesses/:businessId/approvals                        operations:write
+ *  save_onboarding_step         OnboardingStateService   POST /onboarding-concierge/businesses/:businessId/onboarding-step  settings:write
  *
  * NOT GRANTED although their family is (rule 4; UNGRANTED below): among them
  * payroll_set_rate and payroll_generate_run (PayrollService.setRate / generateRun back no
@@ -632,6 +634,31 @@ const ARGUMENT_BOUND: Array<{ file: string; verb: string; path: string; call: st
       /recipientEmail: user\.email,/,
     ],
     why: "mails the caller (or the business's first member) a fixed document_generated notice, never a customer",
+  },
+  // SWP-CENSUS-V1-B (P90): IdentityController.generateField and generateProfile are gated settings:write
+  // and fix their AiUsageService.callAi feature + prompt template to profile-copy generation; they do not
+  // stand in for general AI drafting or seo_apply_remediation (which also writes seoPage/seoIssue).
+  {
+    file: 'modules/identity/identity.controller.ts',
+    verb: 'POST',
+    path: '/identity/businesses/:businessId/ai-generate-field',
+    call: 'AiUsageService.callAi',
+    proof: [
+      /const prompt = fieldPrompts\[body\.field\];/,
+      /feature: 'profile-field-generate',/,
+    ],
+    why: 'fixes feature and prompt to profile-field-generate (tagline, description, or skills); does not stand in for general AiUsageService.callAi',
+  },
+  {
+    file: 'modules/identity/identity.controller.ts',
+    verb: 'POST',
+    path: '/identity/businesses/:businessId/generate-profile',
+    call: 'AiUsageService.callAi',
+    proof: [
+      /Generate a professional profile for this business\/entrepreneur\./,
+      /feature: 'profile-generate',/,
+    ],
+    why: 'fixes feature and prompt to profile-generate (headline and bio); does not stand in for general AiUsageService.callAi',
   },
 ];
 const BOUND = new Set(ARGUMENT_BOUND.map((b) => `${routeKey(b)} ${b.call}`));
@@ -1306,6 +1333,8 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'payroll_approve_run', service: 'PayrollService', route: 'POST /payroll/businesses/:businessId/runs/:runId/approve', scope: 'operations:write', file: 'modules/payroll/payroll.controller.ts' },
   { tool: 'payroll_list_rates', service: 'PayrollService', route: 'GET /payroll/businesses/:businessId/rates', scope: 'operations:read', file: 'modules/payroll/payroll.controller.ts' },
   { tool: 'performance_take_snapshot', service: 'StaffPerformanceService', route: 'POST /staff-performance/businesses/:businessId/snapshot', scope: 'operations:write', file: 'modules/staff-performance/staff-performance.controller.ts' },
+  { tool: 'approval_create_request', service: 'ApprovalRequestService', route: 'POST /businesses/:businessId/approvals', scope: 'operations:write', file: 'modules/approvals/approval.controller.ts' },
+  { tool: 'save_onboarding_step', service: 'OnboardingStateService', route: 'POST /onboarding-concierge/businesses/:businessId/onboarding-step', scope: 'settings:write', file: 'modules/onboarding-concierge/onboarding-concierge.controller.ts' },
 ];
 
 /**
@@ -1314,7 +1343,7 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
  */
 const UNMAPPED: Record<string, string> = {
   // apply: granted since SWP-CENSUS-V1-A (P87) gated CatalogController.updateProduct (revenue write)
-  approval: 'approval.controller declares no module scope',
+  // approval: granted since SWP-CENSUS-V1-B (P90) gated ApprovalController write routes (operations write)
   automations: 'FlowService.createAutomation/updateAutomation back no route; playbook routes (automation.controller) are unscoped',
   // bookings: granted since SWP-CENSUS-V1-A (P87) gated BookingsController write routes (bookings write)
   comms: 'CommunicationsService.sendBroadcast backs no route',
@@ -1322,7 +1351,7 @@ const UNMAPPED: Record<string, string> = {
   content: 'content-ops.controller declares no module scope (the legacy `content` key still grants content_*)',
   delegation: 'DelegationLoopService is reached only through autopilot.controller, which declares no module scope',
   documents: 'reads Prisma directly; no service call',
-  draft: 'AiUsageService.callAi is reached by unscoped AI routes',
+  draft: 'AiUsageService.callAi has no general member route (IdentityController generate-field/generate-profile are ARGUMENT_BOUND)',
   drive: 'google-drive.controller declares no module scope',
   enable: 'FlowService.updateAutomation backs no route',
   evidence: 'evidence.controller declares no module scope',
@@ -1344,10 +1373,10 @@ const UNMAPPED: Record<string, string> = {
   queue: 'EmailMarketingService.queueCampaign backs no route',
   // reconcile: granted since PR195-BOOKS-DOORS (reconcile_run_auto_match, reconcile_match_line, revenue write)
   retainers: 'retainer.controller declares no module scope',
-  save: 'onboarding-concierge.controller declares no module scope',
+  // save: granted since SWP-CENSUS-V1-B (P90) gated OnboardingConciergeController.saveOnboardingStep (settings write)
   segment: 'reads Prisma directly; no service call',
   send: 'send_message_with_approval: crm:write (CrmService.addNote) beside AiMessageSenderService.sendMessage, which backs no route',
-  seo: 'reads Prisma and AiUsageService.callAi (unscoped AI routes)',
+  seo: 'reads Prisma and AiUsageService.callAi (no general member route; IdentityController AI routes are ARGUMENT_BOUND)',
   sequence: 'crm-sequence.controller declares no module scope',
   social: 'social.controller declares no module scope',
   store: 'reads Prisma directly; no service call',
@@ -1369,6 +1398,9 @@ const UNMAPPED_GOVERNED: Record<string, string[]> = {
  * granted exactly these (SEC-V21b-02: payroll_set_rate, payroll_generate_run, ...).
  */
 const UNGRANTED: Record<string, string> = {
+  // SWP-CENSUS-V1-B (P90): approval family now grants approval_create_request (operations write); list stays unscoped and decideStep is ambient-bound
+  approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; operations:write is only a floor)',
+  approval_list: 'ApprovalRequestService.listForBusiness is reached by approval.controller GET, which is unscoped',
   // SWP-CENSUS-V1-A (P87): bookings family now grants its write tools (bookings write); reads stay ungranted and offerSlot is ambient-bound
   bookings_list_bookings: 'reads Prisma directly; no service call',
   bookings_list_services: 'reads Prisma directly; no service call',
@@ -1511,6 +1543,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     // call updated the request by its bare id, rule 2b) until FOLLOW3-D15 bound ProcurementService's writes
     // to the business: they are operations write in the table below
     expect(derived.governedUngranted).toEqual([
+      'approval_decide_step',
       'bookings_offer_waitlist_slot',
       'commerce_send_invoice',
       'execute_custom_logic',
@@ -1651,7 +1684,9 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         inventory_transfer_stock: 'write',
       },
       // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write; KeyflowCommandController.createNote requires ai write
+      // SWP-CENSUS-V1-B (P90): OnboardingConciergeController.saveOnboardingStep requires settings write
       settings: {
+        save_onboarding_step: 'write',
         update_business_blueprint: 'write',
       },
       ai: {
@@ -1669,6 +1704,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       },
       analytics: {},
       operations: {
+        // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
+        approval_create_request: 'write',
         // command_* and procurement_*: D-40 put the command-centre item and procurement routes
         // under operations (R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
         command_discharge_obligation: 'write',
@@ -1863,9 +1900,15 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         }
         return null;
       };
+      const tenantUnbound = ((policyModule as Record<string, unknown>).TENANT_UNBOUND_TOOLS ?? {}) as Record<string, string>;
       const hidden: string[] = [];
       for (const t of reachable) {
         if (derived.toolLevels.get(t)?.size) continue; // governed: the legacy keys do not reach it
+        // SWP-CENSUS-V1-B (P90): TENANT_UNBOUND_TOOLS (e.g. content_assign_request / content_transition_status /
+        // content_submit_for_review, which call ApprovalRequestService.createRequest two calls deep) are denied
+        // to every key — canonical, legacy, and baseline — in JobRolePolicyService.toolMatchesGrant.
+        // If a tool leaves TENANT_UNBOUND_TOOLS, this guard fires immediately.
+        if (t in tenantUnbound) continue;
         for (const u of derived.unknownCalls.get(t) ?? []) {
           const deep = governedDeep(u, 0, new Set());
           if (deep) hidden.push(`${t}: ${u} -> ${deep}`);
@@ -2636,8 +2679,9 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       const ungoverned = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) === 0).sort();
       const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0).sort();
       // a governed one is GOVERNED_UNGRANTED by rule 4 instead: bookings_offer_waitlist_slot moved here when
-      // SWP-CENSUS-V1-A (P87) gated BookingsController.offerWaitlistSlot (bookings:write) while offerSlot still looks up entryId bare
-      expect(governed).toEqual(['bookings_offer_waitlist_slot']);
+      // SWP-CENSUS-V1-A (P87) gated BookingsController.offerWaitlistSlot (bookings:write) while offerSlot still looks up entryId bare;
+      // approval_decide_step moved here when SWP-CENSUS-V1-B (P90) gated ApprovalController.approve/reject (operations:write) while decideStep still looks up approvalRequest bare
+      expect(governed).toEqual(['approval_decide_step', 'bookings_offer_waitlist_slot']);
       for (const t of governed) {
         expect(derived.governedUngranted, t).toContain(t);
         expect(Object.keys(GOVERNED_UNGRANTED), t).toContain(t);

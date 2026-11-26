@@ -201,7 +201,8 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
   settings: {
     read: [],
     // SWP-CENSUS-GENOME (P84): BlueprintController.update requires settings write
-    write: ['update_business_blueprint'],
+    // SWP-CENSUS-V1-B (P90): OnboardingConciergeController.saveOnboardingStep requires settings write
+    write: ['save_onboarding_step', 'update_business_blueprint'],
     admin: [],
     deny: ['commerce_create_invoice', 'structure_get_org_tree'],
   },
@@ -233,6 +234,8 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     // contracts_acknowledge_alert / inbox_mark_resolved are tier 1, but their routes need operations:write
     // inbox_brief: GET brief generates only on a cache miss; POST brief/generate needs write (review 7 DRV-BRIEF)
     write: [
+      // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
+      'approval_create_request',
       'contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief',
       'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
       // FOLLOW3-D15: ProcurementService writes the request where { id, businessId }, so the three vendor
@@ -2911,7 +2914,7 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
     expect(Object.keys(UNBOUND).sort()).toEqual(
       [
         ...CONTENT,
-        'approval_decide_step',
+        // approval_decide_step: governed by operations:write since SWP-CENSUS-V1-B (P90), so GOVERNED_UNGRANTED instead
         // bookings_offer_waitlist_slot: governed by bookings:write since SWP-CENSUS-V1-A (P87), so GOVERNED_UNGRANTED instead; legacy bookings still reaches none of it (below)
         'evidence_verify',
         'people_assign_task',
