@@ -88,14 +88,9 @@ export function isOwnUploadPath(path: unknown, businessId: unknown): boolean {
 export function receiptKind(url: string | null | undefined, businessId: string | null | undefined): ReceiptKind {
   if (!url || !url.trim()) return "none";
   const raw = url.trim();
-  // An address on the API (as the sheets store an upload: API_BASE + objectPath), or a relative path, is judged by its
-  // path as written: only this business's upload is "stored"; anything else there is not claimed (S-m1).
-  const api = API_BASE.replace(/\/+$/, "");
-  let path: string | null = null;
-  if (api && raw.startsWith(`${api}/`)) path = raw.slice(api.length);
-  else if (raw.startsWith("/") && !raw.startsWith("//")) path = raw;
-  if (path !== null) return isOwnUploadPath(path, businessId) ? "stored" : "unavailable";
-  // Anywhere else, only an http(s) address is a link; javascript:, data:, //host and the like never are (S-m2).
+  // A relative path is judged by its path as written: only this business's upload is "stored" (S-m1).
+  if (raw.startsWith("/") && !raw.startsWith("//")) return isOwnUploadPath(raw, businessId) ? "stored" : "unavailable";
+  // Anything else must be an absolute http(s) address; javascript:, data:, //host and the like never are (S-m2).
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -103,8 +98,27 @@ export function receiptKind(url: string | null | undefined, businessId: string |
     return "unavailable";
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "unavailable";
-  // An object path on another host is not this business's receipt.
-  if (/^\/objects\//i.test(parsed.pathname)) return "unavailable";
+  // R4-4: an address on the API's origin is judged by the parsed origin, not a string prefix (http://API.test and
+  // http://api.test:80 are the same origin). It is only ever "stored", for this business's upload written exactly as
+  // the sheets store it (API_BASE + objectPath); any other address there is never a link.
+  const api = API_BASE.replace(/\/+$/, "");
+  let apiOrigin: string | null = null;
+  try {
+    apiOrigin = api ? new URL(api).origin : null;
+  } catch {
+    apiOrigin = null;
+  }
+  if (apiOrigin && parsed.origin === apiOrigin) {
+    return raw.startsWith(`${api}/`) && isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
+  }
+  // An object path on another host is not this business's receipt, encoded or not.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(parsed.pathname);
+  } catch {
+    return "unavailable";
+  }
+  if (/^\/objects(\/|$)/i.test(parsed.pathname) || /^\/objects(\/|$)/i.test(decoded)) return "unavailable";
   return "link";
 }
 export const RECEIPT_UNAVAILABLE_NOTE = "This receipt can't be shown here";

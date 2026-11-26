@@ -144,6 +144,10 @@ export function useExpensesData() {
 
   const loadData = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
+    // R4-1: a load for a business the page has left (a delete started in A returns after a switch to B and calls
+    // A's loadData) writes nothing and takes no generation: taking one would drop B's read still in flight, and
+    // the page would stay loading.
+    if (businessRef.current !== businessId) return;
     const generation = ++generationRef.current;
     const current = () => generation === generationRef.current && businessRef.current === businessId;
     setLoading(true);
