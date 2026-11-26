@@ -598,3 +598,188 @@ describe("TODAY-4BLOCK repair round 2 (confirmation reviews at 14934c7c)", () =>
     expect(api.sent.filter((r) => r.path.endsWith("/identity/me")).length).toBeGreaterThan(0);
   }, CASE_MS);
 });
+
+/**
+ * Two businesses, X (BIZ) and Y (BIZ_Y), each with its own answers. A route listed in `hold` for a business answers
+ * only when `release(business, route)` is called; `releaseAll()` frees every held reply (always called in a finally:
+ * lib/api.ts coalesces identical GETs, so a pending one would leak into the next case).
+ */
+const BIZ_Y = "biz_t4b_y";
+type Route = "today" | "items" | "due" | "action";
+function serveTwo(answers: Record<string, Partial<Record<Route, Answer>>>, hold: Array<[string, Route]> = []) {
+  const held = new Map<string, Array<() => void>>();
+  const sent: Sent[] = [];
+  const answeredRoutes: string[] = [];
+  const isHeld = (biz: string, route: Route) => hold.some(([b, r]) => b === biz && r === route);
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const { pathname } = new URL(url, "http://localhost");
+    const method = (init?.method ?? "GET").toUpperCase();
+    sent.push({ method, path: pathname, body: null });
+    if (pathname.endsWith("/identity/me")) return jsonResponse(200, { id: "u_owner", email: "owner@t4b.test.local", keyDisabled: false });
+    for (const biz of [BIZ, BIZ_Y]) {
+      let route: Route | null = null;
+      if (method === "GET" && pathname.endsWith(`/business-command-center/businesses/${biz}/today`)) route = "today";
+      else if (method === "GET" && pathname.endsWith(`/command/businesses/${biz}/items`)) route = "items";
+      else if (method === "GET" && pathname.endsWith(`/command/businesses/${biz}/items/due`)) route = "due";
+      else if (method === "POST" && pathname.startsWith(`/command/businesses/${biz}/items/`)) route = "action";
+      if (!route) continue;
+      const answer = answers[biz]?.[route] ?? { status: 500, body: { message: "Internal server error" } };
+      if (isHeld(biz, route)) {
+        await new Promise<void>((resolve) => {
+          const key = `${biz}:${route}`;
+          held.set(key, [...(held.get(key) ?? []), resolve]);
+        });
+      }
+      answeredRoutes.push(`${biz}:${route}`);
+      return jsonResponse(answer.status, answer.body);
+    }
+    return jsonResponse(500, { message: "Internal server error" });
+  }));
+  return {
+    sent,
+    /** The server has answered this route for this business (the page then takes a tick to render it). */
+    answered: (biz: string, route: Route) => answeredRoutes.includes(`${biz}:${route}`),
+    release: (biz: string, route: Route) => {
+      const key = `${biz}:${route}`;
+      for (const resolve of held.get(key) ?? []) resolve();
+      held.delete(key);
+      hold = hold.filter(([b, r]) => !(b === biz && r === route));
+    },
+    releaseAll: () => {
+      for (const list of held.values()) for (const resolve of list) resolve();
+      held.clear();
+      hold = [];
+    },
+    wasRequested: (biz: string, route: Route) => sent.some((r) => r.path.includes(`/${biz}/`) && (route === "today" ? r.path.endsWith("/today") : route === "due" ? r.path.endsWith("/items/due") : r.path.endsWith("/items"))),
+  };
+}
+
+async function mountPage() {
+  const { default: Page } = await import("@/app/app/command-center/page");
+  render(
+    <GenomeProvider>
+      <Page />
+    </GenomeProvider>,
+  );
+}
+
+const listedItems = (items: unknown[]): Answer => ok({ items, total: items.length });
+const RESTOCK_X = { ...KEY_ITEM, id: "ci_t4b_x_restock", title: "Reorder low stock for X", executableByKey: false };
+const OBLIGATION_X = { ...KEY_ITEM, id: "ci_t4b_x_ob", title: "File X's quarterly return", executableByKey: false, kind: "OBLIGATION", owedToType: null, owedToId: null, owedToLabel: "Tax office", seriesId: null, dischargedAt: null, dischargeRef: null, overdue: false, daysUntilDue: 2 };
+const OBLIGATION_Y = { ...OBLIGATION_X, id: "ci_t4b_y_ob", title: "Pay Y's rent" };
+const dueList = (items: unknown[]): Answer => ok({ window: { from: NOW, to: NOW, days: 7 }, total: items.length, overdueCount: 0, items });
+
+describe("TODAY-4BLOCK repair round 3 (confirmation reviews at a173d9bc): nothing of the old business after a switch", () => {
+  it("[T4B-22] RED-BEFORE (MAJOR (a)): right after a switch, the old business's queue items are gone before the new business's queue answers", async () => {
+    const api = serveTwo(
+      { [BIZ]: { today: ok(busyToday()), items: listedItems([KEY_ITEM]) }, [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([]) } },
+      [[BIZ_Y, "items"]],
+    );
+    try {
+      await mountPage();
+      await screen.findByText(KEY_ITEM.title, {}, { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await waitFor(() => expect(api.wasRequested(BIZ_Y, "items")).toBe(true));
+      await waitFor(() => expect(screen.queryByText(KEY_ITEM.title)).toBeNull(), { timeout: 2_000 });
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-23] RED-BEFORE (MAJOR (b)): the old business's queue reply landing after the new business's answer is dropped: nothing of X under Y, 'Command Queue (0)'", async () => {
+    const api = serveTwo(
+      { [BIZ]: { today: ok(busyToday()), items: listedItems([KEY_ITEM]) }, [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([]) } },
+      [[BIZ, "items"]],
+    );
+    try {
+      await mountPage();
+      await waitFor(() => expect(api.wasRequested(BIZ, "items")).toBe(true), { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      // Y's own queue answer, not X's 'Command Queue (0)' while X's read is still held.
+      await waitFor(() => expect(api.answered(BIZ_Y, "items")).toBe(true), { timeout: 10_000 });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(screen.getByText("Command Queue (0)")).toBeTruthy();
+      api.release(BIZ, "items");
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.queryByText(KEY_ITEM.title)).toBeNull();
+      expect(screen.getByText("Command Queue (0)")).toBeTruthy();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-24] RED-BEFORE (MAJOR): the operations level learned for X (a refused action: you have read) does not carry to Y", async () => {
+    const api = serveTwo({
+      [BIZ]: {
+        today: ok(busyToday()),
+        items: listedItems([RESTOCK_X]),
+        action: { status: 403, body: { statusCode: 403, message: "Insufficient permissions: operations requires write access (you have read)", error: "Forbidden" } },
+      },
+      [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([{ ...RESTOCK_X, id: "ci_t4b_y_restock", title: "Reorder low stock for Y" }]) },
+    });
+    try {
+      await mountPage();
+      await screen.findByText(RESTOCK_X.title, {}, { timeout: 10_000 });
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await screen.findByTestId("command-actions-withheld", {}, { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await screen.findByText("Reorder low stock for Y", {}, { timeout: 10_000 });
+      expect(screen.queryByTestId("command-actions-withheld")).toBeNull();
+      expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(false);
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-25] RED-BEFORE (MINOR 2): what is due follows the switch: X's due reply landing after Y's answer is dropped, and X's rows never show under Y", async () => {
+    const api = serveTwo(
+      {
+        [BIZ]: { today: ok(busyToday()), items: listedItems([]), due: dueList([OBLIGATION_X]) },
+        [BIZ_Y]: { today: ok({ ...freshToday(), businessId: BIZ_Y }), items: listedItems([]), due: dueList([OBLIGATION_Y]) },
+      },
+      [[BIZ, "due"]],
+    );
+    try {
+      await mountPage();
+      await waitFor(() => expect(api.wasRequested(BIZ, "due")).toBe(true), { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await waitFor(() => expect(api.answered(BIZ_Y, "due")).toBe(true), { timeout: 10_000 });
+      await screen.findByText(OBLIGATION_Y.title, {}, { timeout: 10_000 });
+      api.release(BIZ, "due");
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.queryByText(OBLIGATION_X.title)).toBeNull();
+      expect(screen.getByText(OBLIGATION_Y.title)).toBeTruthy();
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-26] (MINOR 3) X loaded, switch to Y, Y's Today read fails with a 5xx: none of X's figures or rows under Y's alert", async () => {
+    const api = serveTwo({
+      [BIZ]: { today: ok(busyToday()), items: listedItems([]) },
+      [BIZ_Y]: { today: { status: 500, body: { statusCode: 500, message: "Internal server error" } }, items: listedItems([]) },
+    });
+    try {
+      await mountPage();
+      await screen.findByRole("heading", { level: 2, name: /^pulse$/i }, { timeout: 10_000 });
+      selectBusiness(BIZ_Y);
+      await screen.findByTestId("today-unavailable", {}, { timeout: 10_000 });
+      expect(screen.queryByRole("heading", { name: /^pulse$/i })).toBeNull();
+      expect(screen.queryByText(/INV-0042/)).toBeNull();
+      expect(document.body.textContent ?? "").not.toMatch(/400\.00/);
+    } finally {
+      api.releaseAll();
+    }
+  }, CASE_MS);
+
+  it("[T4B-27] (MINOR 4) a refresh answering 401 clears what was shown, like a 403", async () => {
+    serve({ today: [ok(busyToday()), { status: 401, body: { statusCode: 401, message: "Unauthorized" } }] });
+    await renderToday();
+    await screen.findByRole("heading", { level: 2, name: /^pulse$/i });
+    fireEvent.click(screen.getAllByRole("button", { name: /^refresh$/i })[0]);
+    await screen.findByTestId("today-unavailable", {}, { timeout: 10_000 });
+    expect(screen.queryByRole("heading", { name: /^pulse$/i })).toBeNull();
+    expect(screen.queryByText(/INV-0042/)).toBeNull();
+  }, CASE_MS);
+});
