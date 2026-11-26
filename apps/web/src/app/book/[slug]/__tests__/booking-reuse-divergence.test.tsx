@@ -11,6 +11,10 @@
  *
  *   BRD-01  Session first in the cart
  *   BRD-02  Follow-up first in the cart
+ *   BRD-03  the cart lost the Follow-up (the kept key has a line more than the cart): the Session is not filled, its
+ *           held time is not offered, it books afresh at an offered instant, and the kept bookings are not reused
+ *   BRD-04  after the hold is released, going back to the shop and opening checkout again restores the held times,
+ *           and the order reuses the kept bookings (no booking is posted again)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -132,8 +136,19 @@ vi.mock("../components/share-buttons", () => ({ ShareStoreButton: nothing, Share
 vi.mock("../components/guided-selector", () => ({ GuidedSelector: nothing }));
 vi.mock("../components/asset-intake", () => ({ AssetIntake: nothing }));
 vi.mock("../components/cart-drawer", () => ({
-  CartDrawer: ({ onCheckout }: { onCheckout: () => void }) => (
-    <button type="button" onClick={onCheckout}>Checkout</button>
+  CartDrawer: ({ cart, onCheckout, onRemoveFromCart }: {
+    cart: Array<{ id: string; itemType: string; name: string }>;
+    onCheckout: () => void;
+    onRemoveFromCart: (id: string, itemType: string) => void;
+  }) => (
+    <div>
+      <button type="button" onClick={onCheckout}>Checkout</button>
+      {cart.map((c) => (
+        <button key={`${c.itemType}:${c.id}`} type="button" onClick={() => onRemoveFromCart(c.id, c.itemType)}>
+          Remove {c.name}
+        </button>
+      ))}
+    </div>
   ),
 }));
 
@@ -234,5 +249,61 @@ describe("SWP-BOOKING-SLOTS: a held time is never booked once the reuse key no l
   });
   it("BRD-02 Follow-up first in the cart", async () => {
     await moveOneHeldTime([SERVICE_B, SERVICE, PRODUCT]);
+  });
+
+  /** Holds the Session at 11:00 and the Follow-up at 09:00; the payment fails and the customer goes back to the shop. */
+  async function holdBothThenFail(cart: unknown[]) {
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify(cart));
+    render(<PublicBookingPage />);
+    await toSchedule();
+    for (const [service, time] of [[SERVICE, "11:00"], [SERVICE_B, "09:00"]] as const) {
+      const row = rowOf(service.name);
+      fireEvent.change(row.date, { target: { value: "2026-12-15" } });
+      fireEvent.click(await row.q.findByRole("button", { name: time }));
+    }
+    await placeOrder();
+    await screen.findByRole("heading", { name: "Payment Failed" }, { timeout: 3000 });
+    fireEvent.click(button("Back to Shop"));
+    net.slotsBy = FRESH;
+    net.orderPayment = null;
+    return net.posts.length;
+  }
+
+  it("BRD-03 the cart lost the Follow-up: the Session books afresh at an offered instant, the kept bookings are not reused", async () => {
+    const before = await holdBothThenFail([SERVICE, SERVICE_B, PRODUCT]);
+    fireEvent.click(await screen.findByRole("button", { name: `Remove ${SERVICE_B.name}` }));
+    await toSchedule();
+    const session = rowOf(SERVICE.name);
+    expect(session.date.value, "nothing is filled from a hold the cart no longer matches").toBe("");
+    expect(screen.getByText(RELEASED)).toBeInTheDocument();
+    fireEvent.change(session.date, { target: { value: "2026-12-15" } });
+    expect(await session.q.findByRole("button", { name: "12:00" })).toBeInTheDocument();
+    expect(session.q.queryByRole("button", { name: "11:00" }), "the held 11:00 is not offered").toBeNull();
+    fireEvent.click(session.q.getByRole("button", { name: "12:00" }));
+    await placeOrder();
+    await screen.findByRole("heading", { name: "Order Placed!" }, { timeout: 3000 });
+
+    const rebooked = net.posts.slice(before).filter((p) => p.path === BOOK_PATH);
+    expect(rebooked, "the Session is booked afresh; the kept bookings are not reused").toHaveLength(1);
+    expect(rebooked[0].body.serviceId).toBe(SERVICE.id);
+    expect(FRESH[SERVICE.id]).toContain(rebooked[0].body.startTime);
+  });
+
+  it("BRD-04 after the hold is released, going back to the shop and opening checkout again restores it", async () => {
+    const before = await holdBothThenFail([SERVICE, SERVICE_B, PRODUCT]);
+    await toSchedule();
+    fireEvent.click(await rowOf(SERVICE_B.name).q.findByRole("button", { name: "12:00" }));
+    expect(screen.getByText(/To keep your earlier times, go back to the shop and open checkout again\./)).toBeInTheDocument();
+
+    // Previous Step to the details, then Back to Shop, then the checkout again.
+    fireEvent.click(button("Previous Step"));
+    fireEvent.click(button("Back to Shop"));
+    await toSchedule();
+    expect(await rowOf(SERVICE.name).q.findByRole("button", { name: "11:00" })).toBeInTheDocument();
+    expect(await rowOf(SERVICE_B.name).q.findByRole("button", { name: "09:00" })).toBeInTheDocument();
+    expect(screen.queryByText(RELEASED)).toBeNull();
+    await placeOrder();
+    await screen.findByRole("heading", { name: "Order Placed!" }, { timeout: 3000 });
+    expect(net.posts.slice(before).filter((p) => p.path === BOOK_PATH), "the kept bookings are reused").toHaveLength(0);
   });
 });

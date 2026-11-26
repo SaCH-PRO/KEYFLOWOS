@@ -14,6 +14,9 @@
  *   HSF-04  editing a filled row's location releases the held time until the location matches again
  *   HSF-05  changing a filled row's date or staff member releases the held time (date and staff scoping)
  *   HSF-06  a customer whose details no longer match after a fill gets the filled rows cleared
+ *   HSF-07  a kept key with more lines than the cart (the cart lost a service) does not match: nothing is filled,
+ *           only fresh times are offered, and the held time is never offered
+ *   HSF-08  the release notice says how to keep the earlier times
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -32,6 +35,7 @@ import type { Business, CartItem, Staff } from "../types";
 const DAY = "2026-12-15";
 const at = (hhmm: string) => `${DAY}T${String(Number(hhmm.slice(0, 2)) + 4).padStart(2, "0")}:${hhmm.slice(3)}:00.000Z`; // Port of Spain, UTC-4
 const RELEASED = /Changing your booking releases the times we were holding; pick times again\./;
+const KEEP_HOW = /To keep your earlier times, go back to the shop and open checkout again\./;
 
 const business: Business = {
   id: "biz_hsf",
@@ -208,5 +212,27 @@ describe("SWP-BOOKING-SLOTS: held slots only while the whole reuse key matches",
     expect(a.date.value, "the other customer's row does not keep the held date").toBe("");
     expect((a.card.querySelector('input[type="text"]') as HTMLInputElement | null)?.value ?? "").toBe("");
     expect(screen.queryByText(RELEASED), "another customer is not told about someone else's hold").toBeNull();
+  });
+
+  it("HSF-07 a kept key with more lines than the cart does not match: nothing is filled and the held time is never offered", async () => {
+    renderFlow([A], keyOf([{ service: A, time: "11:00" }, { service: B, time: "09:00" }]));
+    fillInfo();
+    const a = rowOf("Service Alpha");
+    expect(a.date.value, "nothing is filled from a hold the cart no longer matches").toBe("");
+    expect(screen.getByText(RELEASED)).toBeInTheDocument();
+    fireEvent.change(a.date, { target: { value: DAY } });
+    expect(await a.q.findByRole("button", { name: "12:00" })).toBeInTheDocument();
+    expect(a.q.queryByRole("button", { name: "11:00" }), "the held 11:00 is never offered").toBeNull();
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeDisabled();
+    fireEvent.click(a.q.getByRole("button", { name: "12:00" }));
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeEnabled();
+  });
+
+  it("HSF-08 the release notice says how to keep the earlier times", async () => {
+    renderFlow([A], keyOf([{ service: A, time: "11:00", location: "Studio 2" }]));
+    fillInfo();
+    const location = rowOf("Service Alpha").card.querySelector('input[type="text"]') as HTMLInputElement;
+    fireEvent.change(location, { target: { value: "Studio 3" } });
+    expect(screen.getByText(KEEP_HOW)).toBeInTheDocument();
   });
 });

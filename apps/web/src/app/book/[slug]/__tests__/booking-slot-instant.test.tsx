@@ -18,6 +18,8 @@
  *   BSI-07  a service with no length gives an hour
  *   BSI-08  a restored confirmation with no instant shows no link; a corrupted one (bad instant or length) never crashes
  *   BSI-09  a hand-edited restored confirmation (service details of the wrong shape) never crashes the page
+ *   BSI-10  a kf_pending_checkout record that is not JSON is removed and ignored: the store opens as usual
+ *   BSI-11  a record whose items, total or payment method have the wrong shape still restores without a crash
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -290,6 +292,31 @@ describe("SWP-BOOKING-SLOTS: the storefront books the instant the server offered
       render(<PublicBookingPage />);
       await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 });
       expect(screen.queryByRole("link", { name: /Add to Calendar/i }), JSON.stringify(confirmedDetails)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("BSI-10 a pending-checkout record that is not JSON is removed and ignored", async () => {
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, "{not json");
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("button", { name: "Checkout" }, { timeout: 3000 })).toBeInTheDocument();
+    await waitFor(() => expect(window.localStorage.getItem(`kf_pending_checkout_${SLUG}`)).toBeNull());
+    expect(screen.queryByRole("heading", { name: /Confirmed|Failed|Processing/ })).toBeNull();
+  });
+
+  it("BSI-11 a record whose items, total or payment method have the wrong shape restores without a crash", async () => {
+    const shapes: Array<Record<string, unknown>> = [
+      { items: "not a list", orderTotal: "abc", paymentMethod: { evil: true } },
+      { items: [null, 7, { id: 1 }], orderTotal: Number.NaN, paymentMethod: "bitcoin" },
+    ];
+    for (const extra of shapes) {
+      window.localStorage.setItem(
+        `kf_pending_checkout_${SLUG}`,
+        JSON.stringify({ bookingResults: [{ bookingId: "bsi_bk_9" }], bookingReuseKey: null, confirmedDetails: null, ...extra }),
+      );
+      render(<PublicBookingPage />);
+      await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 });
+      expect(screen.queryByText("NaN"), JSON.stringify(extra)).toBeNull();
       cleanup();
     }
   });
