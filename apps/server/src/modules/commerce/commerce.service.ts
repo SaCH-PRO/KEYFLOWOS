@@ -856,6 +856,10 @@ export class CommerceService {
   ): Promise<void> {
     for (let i = 0; i < items.length; i++) {
       assertValidLineQuantity(items[i]?.quantity, `items.${i}.quantity`);
+      const pid = items[i]?.productId;
+      if (pid !== undefined && pid !== null && typeof pid !== 'string') {
+        throw new BadRequestException('productId must be a string');
+      }
     }
     const productIds = lineProductIds(items);
     if (productIds.length === 0) return;

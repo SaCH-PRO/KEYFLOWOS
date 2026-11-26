@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, Min, ValidateBy } from 'class-validator';
 
 /**
  * The largest quantity a document line may carry. Bounded by int4 max so
@@ -79,8 +79,21 @@ export class DocumentLineItemDto {
    * A positive finite number with at most 2 decimal places, bounded by
    * MAX_LINE_QUANTITY. Stock-tracked products are additionally restricted to
    * whole units in the service layer (P108 / D-166).
+   *
+   * Uses a custom @ValidateBy backed by decimalPlacesOf() rather than
+   * class-validator's maxDecimalPlaces option, which crashes with TypeError on
+   * scientific-notation floats such as 1e-7 (R1-SEC-01 / R1-COR-01).
    */
-  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: MAX_LINE_QUANTITY_DECIMALS })
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @ValidateBy({
+    name: 'maxLineQuantityDecimals',
+    validator: {
+      validate: (value: unknown) =>
+        typeof value === 'number' && Number.isFinite(value) && decimalPlacesOf(value) <= MAX_LINE_QUANTITY_DECIMALS,
+      defaultMessage: (args) =>
+        `${args?.property ?? 'quantity'} must be a number with at most ${MAX_LINE_QUANTITY_DECIMALS} decimal places`,
+    },
+  })
   @IsPositive()
   @Max(MAX_LINE_QUANTITY)
   quantity!: number;

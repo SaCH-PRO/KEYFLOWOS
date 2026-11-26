@@ -927,3 +927,80 @@ describe('P108 DECIMALS-SERVER: 5. KEY commerce_create_invoice & commerce_create
     expect(await countBizA()).toEqual(beforeQtBad);
   });
 });
+
+describe('P108 DECIMALS-SERVER: 6. R1 review regressions (scientific-notation floats & recurring MAX_DOCUMENT_AMOUNT)', () => {
+  it('R1-SEC-01 / R1-COR-01: quantity 1e-7 (0.0000001) on POST invoices and POST quotes returns 400 (never 500) with zero DB writes', async () => {
+    const before = await countBizA();
+
+    const invRes = await asA(
+      agent()
+        .post(`/commerce/businesses/${ID.bizA}/invoices`)
+        .send({
+          contactId: ID.contactA,
+          items: [{ description: 'Sci notation inv', quantity: 1e-7, unitPrice: 100 }],
+        }),
+    );
+    expect(invRes.status).toBe(400);
+    expect(invRes.body.code).toBe('BAD_REQUEST');
+
+    const qtRes = await asA(
+      agent()
+        .post(`/commerce/businesses/${ID.bizA}/quotes`)
+        .send({
+          contactId: ID.contactA,
+          items: [{ description: 'Sci notation quote', quantity: 1e-7, unitPrice: 100 }],
+        }),
+    );
+    expect(qtRes.status).toBe(400);
+    expect(qtRes.body.code).toBe('BAD_REQUEST');
+
+    expect(await countBizA()).toEqual(before);
+  });
+
+  it('R1-SEC-02: recurring schedule create & update with metadata.items subtotal exceeding MAX_DOCUMENT_AMOUNT returns 400 with zero DB writes', async () => {
+    const pastDate = new Date(Date.now() - 60_000).toISOString();
+    const overflowItems = [{ description: 'Ledger overflow', quantity: 1_000_000, unitPrice: 999_999_999_999 }];
+
+    const beforeCreate = await countBizA();
+    const badCreate = await asA(
+      agent()
+        .post(`/commerce/businesses/${ID.bizA}/recurring-invoices`)
+        .send({
+          contactId: ID.contactA,
+          name: 'Overflow recurring',
+          frequency: 'MONTHLY',
+          amount: 100,
+          startDate: pastDate,
+          nextRunDate: pastDate,
+          metadata: { items: overflowItems },
+        }),
+    );
+    expect(badCreate.status).toBe(400);
+    expect(await countBizA()).toEqual(beforeCreate);
+
+    const okCreate = await asA(
+      agent()
+        .post(`/commerce/businesses/${ID.bizA}/recurring-invoices`)
+        .send({
+          contactId: ID.contactA,
+          name: 'Valid recurring for overflow update check',
+          frequency: 'MONTHLY',
+          amount: 100,
+          startDate: pastDate,
+          nextRunDate: pastDate,
+          metadata: { items: [{ description: 'Normal', quantity: 1, unitPrice: 100 }] },
+        }),
+    );
+    expect(okCreate.status).toBe(201);
+    const scheduleId = okCreate.body.id as string;
+
+    const badUpdate = await asA(
+      agent()
+        .patch(`/commerce/businesses/${ID.bizA}/recurring-invoices/${scheduleId}`)
+        .send({ metadata: { items: overflowItems } }),
+    );
+    expect(badUpdate.status).toBe(400);
+
+    await db.recurringInvoice.update({ where: { id: scheduleId }, data: { status: 'CANCELLED' } });
+  });
+});
