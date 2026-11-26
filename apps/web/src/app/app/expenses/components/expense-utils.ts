@@ -8,7 +8,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { formatCurrency as formatMoney } from "@/lib/currency";
-import { getCachedBusiness } from "@/lib/workspace";
+import { getCachedBusiness, getStoredBusinessId } from "@/lib/workspace";
 import type { RecurringExpense } from "@/lib/client";
 
 export const CATEGORY_COLORS = [
@@ -32,9 +32,24 @@ export const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
 /** Trinidad: the zone a business has unless it names another (Business.timezone's default). */
 export const DEFAULT_TIME_ZONE = "America/Port_of_Spain";
 
-function cachedBusiness(): { currency?: unknown; timezone?: unknown } | null {
+/**
+ * The cached workspace business, only when it is the business in hand (`businessId`, else the stored one):
+ * another tab that switched business can leave Y cached while X's form is open (SEC-EXH2-1).
+ */
+function cachedBusiness(businessId?: string | null): { currency?: unknown; timezone?: unknown } | null {
   try {
-    return (getCachedBusiness() as { currency?: unknown; timezone?: unknown } | null) ?? null;
+    const cached = (getCachedBusiness() as { id?: unknown; currency?: unknown; timezone?: unknown } | null) ?? null;
+    if (!cached) return null;
+    let expected: string | null = businessId ?? null;
+    if (!expected) {
+      try {
+        expected = getStoredBusinessId();
+      } catch {
+        expected = null;
+      }
+    }
+    if (expected && cached.id !== expected) return null;
+    return cached;
   } catch {
     return null;
   }
@@ -45,14 +60,14 @@ function cachedBusiness(): { currency?: unknown; timezone?: unknown } | null {
  * (the server writes it on every expense that names none, FOLLOW3-B4 / D-13).
  * TTD only when nothing is known.
  */
-export function businessCurrency(): string {
-  const c = cachedBusiness()?.currency;
+export function businessCurrency(businessId?: string | null): string {
+  const c = cachedBusiness(businessId)?.currency;
   return typeof c === "string" && /^[A-Za-z]{3}$/.test(c.trim()) ? c.trim().toUpperCase() : "TTD";
 }
 
 /** The business's time zone when the workspace carries one, else Trinidad's. */
-export function businessTimeZone(): string {
-  const tz = cachedBusiness()?.timezone;
+export function businessTimeZone(businessId?: string | null): string {
+  const tz = cachedBusiness(businessId)?.timezone;
   if (typeof tz === "string" && tz.trim()) {
     try {
       new Intl.DateTimeFormat("en-CA", { timeZone: tz.trim() });
@@ -70,8 +85,8 @@ export function dayInZone(at: Date, timeZone: string = businessTimeZone()): stri
 }
 
 /** EXPENSES-HUB-2 (BUG-028): today in the business's zone (Trinidad), never the UTC date. */
-export function todayInBusinessZone(now: Date = new Date()): string {
-  return dayInZone(now);
+export function todayInBusinessZone(now: Date = new Date(), businessId?: string | null): string {
+  return dayInZone(now, businessTimeZone(businessId));
 }
 
 function parseDay(day: string): { y: number; m: number; d: number } | null {
@@ -84,19 +99,36 @@ function parseDay(day: string): { y: number; m: number; d: number } | null {
  * `day` (the expense saved now is this period's). Calendar arithmetic: a
  * month from 31 January is 28 (or 29) February, not 3 March.
  */
-export function nextRunAfter(day: string, frequency: string): string {
+export function nextRunAfter(day: string, frequency: string, periods = 1): string {
   const p = parseDay(day);
   if (!p) return day;
   const months: Record<string, number> = { MONTHLY: 1, QUARTERLY: 3, YEARLY: 12 };
   const days: Record<string, number> = { WEEKLY: 7, BIWEEKLY: 14 };
   let next: Date;
-  if (days[frequency]) next = new Date(Date.UTC(p.y, p.m - 1, p.d + days[frequency]));
+  if (days[frequency]) next = new Date(Date.UTC(p.y, p.m - 1, p.d + days[frequency] * periods));
   else {
-    const add = months[frequency] ?? 1;
+    const add = (months[frequency] ?? 1) * periods;
     const lastDay = new Date(Date.UTC(p.y, p.m - 1 + add + 1, 0)).getUTCDate();
     next = new Date(Date.UTC(p.y, p.m - 1 + add, Math.min(p.d, lastDay)));
   }
   return next.toISOString().slice(0, 10);
+}
+
+/**
+ * COR-F1: the first run of a schedule for an expense dated `day`: the first period boundary from `day` strictly
+ * after `today`. The server generates one expense per due period from nextRunDate, so a first run in the past
+ * would book every missed period at once (a back-dated expense would flood the books); there is no catch-up.
+ * Each boundary is counted from `day` itself, so a month-end date keeps its day where the month has it.
+ */
+export function firstRunAfter(day: string, frequency: string, today: string): string {
+  if (!parseDay(day) || !parseDay(today)) return nextRunAfter(day, frequency);
+  let periods = 1;
+  let next = nextRunAfter(day, frequency, periods);
+  while (next <= today && periods < 100_000) {
+    periods += 1;
+    next = nextRunAfter(day, frequency, periods);
+  }
+  return next;
 }
 
 /** Whole days from `from` to `to` (YYYY-MM-DD), or null when either is not a day. */
@@ -113,22 +145,29 @@ export function formatCurrency(amount: number, currency?: string | null): string
   return formatMoney(amount, code);
 }
 
+const CALENDAR_DAY = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00(?::00(?:\.0+)?)?Z)?$/;
+
 /**
- * A calendar date (an expense's date, a schedule's next run): stored as
- * midnight UTC, so it is read as that day, not as the instant in local time
- * (in Port of Spain that was the day before).
+ * A date as a person reads it. A calendar day (date-only, or exactly midnight UTC, as the forms store an
+ * expense's date) is that day; a stored instant (an expense dated `new Date()` elsewhere, a schedule's run
+ * time) is the day it falls on in the business's zone. Read in local time, a calendar day showed a day early
+ * in Port of Spain (COR-F2).
  */
-export function formatDate(dateStr: string): string {
-  const p = parseDay(dateStr);
-  const at = p ? new Date(Date.UTC(p.y, p.m - 1, p.d)) : new Date(dateStr);
-  return at.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+function displayDay(dateStr: string, options: Intl.DateTimeFormatOptions): string {
+  const day = CALENDAR_DAY.exec(dateStr);
+  if (day) return new Date(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]))).toLocaleDateString("en-US", { ...options, timeZone: "UTC" });
+  const at = new Date(dateStr);
+  if (Number.isNaN(at.getTime())) return dateStr;
+  return at.toLocaleDateString("en-US", { ...options, timeZone: businessTimeZone() });
 }
 
-/** A calendar date, short: "Dec 25". */
+export function formatDate(dateStr: string): string {
+  return displayDay(dateStr, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** A date, short: "Dec 25". */
 export function formatShortDate(dateStr: string): string {
-  const p = parseDay(dateStr);
-  const at = p ? new Date(Date.UTC(p.y, p.m - 1, p.d)) : new Date(dateStr);
-  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return displayDay(dateStr, { month: "short", day: "numeric" });
 }
 
 /** What a saved expense (or bill) gives its recurring schedule. */
@@ -154,14 +193,15 @@ export interface ScheduleSource {
  * saved expense marked recurring. No currency: the server writes the business
  * currency (FOLLOW3-B4, D-13).
  */
-export function recurringScheduleBody(src: ScheduleSource): Partial<RecurringExpense> {
-  const date = parseDay(src.date) ? src.date.slice(0, 10) : todayInBusinessZone();
+export function recurringScheduleBody(src: ScheduleSource, businessId?: string | null): Partial<RecurringExpense> {
+  const today = todayInBusinessZone(new Date(), businessId);
+  const date = parseDay(src.date) ? src.date.slice(0, 10) : today;
   const body: Partial<RecurringExpense> = {
     name: src.description,
     description: src.description,
     amount: src.amount,
     frequency: src.frequency,
-    nextRunDate: nextRunAfter(date, src.frequency),
+    nextRunDate: firstRunAfter(date, src.frequency, today),
     createsBill: Boolean(src.bill),
   };
   if (src.vendor) body.vendor = src.vendor;

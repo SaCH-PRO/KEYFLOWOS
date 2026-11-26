@@ -99,6 +99,8 @@ export interface CachedBusiness {
   primaryColor?: string | null;
   secondaryColor?: string | null;
   currency?: string | null;
+  /** Business.timezone (IANA); the expense forms date "today" in it (EXPENSES-HUB-2). */
+  timezone?: string | null;
 }
 
 export interface CachedUser {

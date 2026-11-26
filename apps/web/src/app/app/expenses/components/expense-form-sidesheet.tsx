@@ -72,7 +72,7 @@ export function ExpenseFormSideSheet({
   onSaved,
 }: ExpenseFormSideSheetProps) {
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
-  const [currency] = useState(businessCurrency);
+  const [currency] = useState(() => businessCurrency(businessId));
   const dueDateId = useId();
   const billToggleId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
@@ -101,10 +101,10 @@ export function ExpenseFormSideSheet({
       };
     }
     // BUG-028: today in Trinidad (the business's zone), not the UTC date (tomorrow after 20:00 in Port of Spain).
-    const dateValue = prefill?.date ?? todayInBusinessZone();
+    const dateValue = prefill?.date ?? todayInBusinessZone(new Date(), businessId);
     const prefillDay = (value: string): string => {
       const at = new Date(value);
-      return Number.isNaN(at.getTime()) ? todayInBusinessZone() : dayInZone(at, businessTimeZone());
+      return Number.isNaN(at.getTime()) ? todayInBusinessZone(new Date(), businessId) : dayInZone(at, businessTimeZone(businessId));
     };
     return {
       description: prefill?.description ?? "",
@@ -156,7 +156,7 @@ export function ExpenseFormSideSheet({
       contactId: formData.contactId || null,
       serviceId: formData.serviceId || null,
       bill: bill ? { dueDate: formData.dueDate || null } : null,
-    });
+    }, businessId);
     try {
       const res = await createRecurringExpense(businessId, body);
       return res?.error ? res.error : null;
@@ -165,7 +165,7 @@ export function ExpenseFormSideSheet({
     }
   };
 
-  const handleSubmit = async () => {
+  const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
     const tags = formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
@@ -246,7 +246,7 @@ export function ExpenseFormSideSheet({
           businessId,
           entityType: "expense",
           entityId: expenseId,
-          fileName: `Receipt-${formData.description || "Expense"}-${todayInBusinessZone()}.${file.name.split(".").pop()}`,
+          fileName: `Receipt-${formData.description || "Expense"}-${todayInBusinessZone(new Date(), businessId)}.${file.name.split(".").pop()}`,
           mimeType: file.type || "application/octet-stream",
           content: arr,
           contentFormat: "binary",
@@ -264,6 +264,21 @@ export function ExpenseFormSideSheet({
       onClose();
     } catch (_err) {
       toast.error(isBill ? "Failed to record bill" : "Failed to save expense");
+    }
+  };
+
+  // COR-F3: one save at a time: a double click (or a second tap while the first is in flight) sends nothing.
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const handleSubmit = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await submit();
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -363,7 +378,8 @@ export function ExpenseFormSideSheet({
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!formData.description.trim() || !formData.amount}
+                disabled={submitting || !formData.description.trim() || !formData.amount}
+                aria-busy={submitting || undefined}
                 className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50"
                 style={{
                   background: ACCENT_BG,
