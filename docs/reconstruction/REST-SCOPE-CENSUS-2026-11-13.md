@@ -1801,17 +1801,17 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyActionProposalController.approve` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve` | open | membership only; follow-up SWEEP-CENSUS: ai write; ModuleScopeGuard runs but these handlers declare no scope |
-| `KeyActionProposalController.cancel` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/cancel` | open | membership only; follow-up SWEEP-CENSUS: ai write; ModuleScopeGuard runs but these handlers declare no scope |
-| `KeyActionProposalController.create` | POST | `/key-autonomy/businesses/:businessId/actions/proposals` | open | membership only; follow-up SWEEP-CENSUS: ai write; ModuleScopeGuard runs but these handlers declare no scope |
-| `KeyActionProposalController.execute` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/execute` | open | membership only; follow-up SWEEP-CENSUS: ai write; ModuleScopeGuard runs but these handlers declare no scope |
-| `KeyActionProposalController.reject` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/reject` | open | membership only; follow-up SWEEP-CENSUS: ai write; ModuleScopeGuard runs but these handlers declare no scope |
+| `KeyActionProposalController.approve` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve` | applied | operations:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyActionProposalController.cancel` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/cancel` | applied | operations:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyActionProposalController.create` | POST | `/key-autonomy/businesses/:businessId/actions/proposals` | applied | operations:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyActionProposalController.execute` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/execute` | applied | operations:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyActionProposalController.reject` | POST | `/key-autonomy/businesses/:businessId/actions/proposals/:proposalId/reject` | applied | operations:write (SWP-CENSUS-KEY-B, Ruling B2) |
 
 ### KeyGenomeBridgeController (`key-autonomy/key-genome-bridge.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyGenomeBridgeController.bridgeRecommendationAction` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/bridge-action` | open | membership only; follow-up SWEEP-CENSUS: ai write |
+| `KeyGenomeBridgeController.bridgeRecommendationAction` | POST | `/business-genome/businesses/:businessId/key-genome/recommendations/:recommendationId/bridge-action` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 
 ### KeyConnectorController (`key-connector/key-connector.controller.ts`)
 
@@ -1826,63 +1826,63 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyCortexAuditController.runEval` | POST | `//api/v1/cortex/eval/run` | open | membership only; follow-up SWEEP-CENSUS: ai write |
+| `KeyCortexAuditController.runEval` | POST | `//api/v1/cortex/eval/run` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 
 ### KeyCortexGoalsController (`key-cortex/key-cortex-goals.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyCortexGoalsController.createGoal` | POST | `//api/v1/cortex/goals` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
-| `KeyCortexGoalsController.createPlanFromCommand` | POST | `//api/v1/cortex/plans` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
-| `KeyCortexGoalsController.createPlanFromGoal` | POST | `//api/v1/cortex/goals/:goalId/plans` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
-| `KeyCortexGoalsController.createTriggerRule` | POST | `//api/v1/cortex/triggers` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
-| `KeyCortexGoalsController.deleteGoal` | DELETE | `//api/v1/cortex/goals/:goalId` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
-| `KeyCortexGoalsController.executePlan` | POST | `//api/v1/cortex/plans/:planId/execute` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
-| `KeyCortexGoalsController.updateTriggerRule` | PATCH | `//api/v1/cortex/triggers/:id` | open | membership only; follow-up SWEEP-CENSUS: projects write; goals_ maps to projects in the KEY member map |
+| `KeyCortexGoalsController.createGoal` | POST | `//api/v1/cortex/goals` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexGoalsController.createPlanFromCommand` | POST | `//api/v1/cortex/plans` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexGoalsController.createPlanFromGoal` | POST | `//api/v1/cortex/goals/:goalId/plans` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexGoalsController.createTriggerRule` | POST | `//api/v1/cortex/triggers` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexGoalsController.deleteGoal` | DELETE | `//api/v1/cortex/goals/:goalId` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexGoalsController.executePlan` | POST | `//api/v1/cortex/plans/:planId/execute` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexGoalsController.updateTriggerRule` | PATCH | `//api/v1/cortex/triggers/:id` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 
 ### KeyCortexController (`key-cortex/key-cortex.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyCortexController.approveAction` | POST | `/api/v1/cortex/actions/approve` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.chat` | POST | `/api/v1/cortex/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs; the contextUsed snapshot carries no money figure without revenue read (W11-CORTEX-SESSION-SNAPSHOT-SCOPE); the genome context, ranked recommendations and proactive suggestions of the turn (prompt, answer, streams) carry no finance row or opportunity without revenue read (FU-KEY-CHAT-GENOME-MONEY-SIGHT) |
-| `KeyCortexController.consciousChat` | POST | `/api/v1/cortex/conscious/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.createMonitor` | POST | `/api/v1/cortex/monitors` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.approveAction` | POST | `/api/v1/cortex/actions/approve` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.chat` | POST | `/api/v1/cortex/chat` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2); the contextUsed snapshot carries no money figure without revenue read (W11-CORTEX-SESSION-SNAPSHOT-SCOPE); the genome context, ranked recommendations and proactive suggestions of the turn (prompt, answer, streams) carry no finance row or opportunity without revenue read (FU-KEY-CHAT-GENOME-MONEY-SIGHT) |
+| `KeyCortexController.consciousChat` | POST | `/api/v1/cortex/conscious/chat` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.createMonitor` | POST | `/api/v1/cortex/monitors` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.createSession` | POST | `/api/v1/cortex/sessions` | exempt-own | a KEY session for the caller; its context snapshot carries no money figure without revenue read (W11-CORTEX-SESSION-SNAPSHOT-SCOPE) |
 | `KeyCortexController.deleteSession` | DELETE | `/api/v1/cortex/sessions/:id` | exempt-check | check:requireOwnSession (the caller's own KEY session) |
-| `KeyCortexController.documentAsk` | POST | `/api/v1/cortex/documents/ask` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.documentCompare` | POST | `/api/v1/cortex/documents/compare` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.documentDelete` | DELETE | `/api/v1/cortex/documents/:id` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.documentExtract` | POST | `/api/v1/cortex/documents/extract` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.documentUpload` | POST | `/api/v1/cortex/documents` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.evolutionTune` | POST | `/api/v1/cortex/evolution/tune` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.documentAsk` | POST | `/api/v1/cortex/documents/ask` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.documentCompare` | POST | `/api/v1/cortex/documents/compare` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.documentDelete` | DELETE | `/api/v1/cortex/documents/:id` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.documentExtract` | POST | `/api/v1/cortex/documents/extract` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.documentUpload` | POST | `/api/v1/cortex/documents` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.evolutionTune` | POST | `/api/v1/cortex/evolution/tune` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.executeBatch` | POST | `/api/v1/cortex/batch` | exempt-guard | guard:CortexMemberAuthorityGuard; check:assertDirectCommands |
 | `KeyCortexController.executeCommand` | POST | `/api/v1/cortex/execute` | exempt-guard | guard:CortexMemberAuthorityGuard; check:assertDirectCommands |
-| `KeyCortexController.flowApplyTemplate` | POST | `/api/v1/cortex/flows/apply-template` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.flowCreate` | POST | `/api/v1/cortex/flows` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.flowDelete` | DELETE | `/api/v1/cortex/flows/:id` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.flowApplyTemplate` | POST | `/api/v1/cortex/flows/apply-template` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.flowCreate` | POST | `/api/v1/cortex/flows` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.flowDelete` | DELETE | `/api/v1/cortex/flows/:id` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.flowExecute` | POST | `/api/v1/cortex/flows/:id/execute` | exempt-guard | guard:CortexMemberAuthorityGuard |
-| `KeyCortexController.flowGenerate` | POST | `/api/v1/cortex/flows/generate` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.flowToggle` | POST | `/api/v1/cortex/flows/:id/toggle` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.flowUpdate` | PUT | `/api/v1/cortex/flows/:id` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.flowGenerate` | POST | `/api/v1/cortex/flows/generate` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.flowToggle` | POST | `/api/v1/cortex/flows/:id/toggle` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.flowUpdate` | PUT | `/api/v1/cortex/flows/:id` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.generateInsights` | POST | `/api/v1/cortex/insights` | applied | `revenue:read` |
-| `KeyCortexController.listen` | POST | `/api/v1/cortex/voice/listen` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.phoneAnalyze` | POST | `/api/v1/cortex/phone/analyze` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.phoneCall` | POST | `/api/v1/cortex/phone/call` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.phoneScript` | POST | `/api/v1/cortex/phone/script` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.listen` | POST | `/api/v1/cortex/voice/listen` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.phoneAnalyze` | POST | `/api/v1/cortex/phone/analyze` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.phoneCall` | POST | `/api/v1/cortex/phone/call` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.phoneScript` | POST | `/api/v1/cortex/phone/script` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.queryModule` | POST | `/api/v1/cortex/query` | exempt-guard | guard:CortexMemberAuthorityGuard (the member's module scope on the queried module) |
-| `KeyCortexController.recordFeedback` | POST | `/api/v1/cortex/feedback` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.rollback` | POST | `/api/v1/cortex/rollback` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.sandboxApply` | POST | `/api/v1/cortex/sandbox/apply` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.sandboxAuto` | POST | `/api/v1/cortex/sandbox/auto` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.sandboxExecute` | POST | `/api/v1/cortex/sandbox/execute` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.sandboxExplain` | POST | `/api/v1/cortex/sandbox/explain` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.sandboxGenerate` | POST | `/api/v1/cortex/sandbox/generate` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.speak` | POST | `/api/v1/cortex/voice/speak` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.switchPersonality` | POST | `/api/v1/cortex/personalities/switch` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.toggleMonitor` | POST | `/api/v1/cortex/monitors/:id/toggle` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.recordFeedback` | POST | `/api/v1/cortex/feedback` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.rollback` | POST | `/api/v1/cortex/rollback` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.sandboxApply` | POST | `/api/v1/cortex/sandbox/apply` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.sandboxAuto` | POST | `/api/v1/cortex/sandbox/auto` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.sandboxExecute` | POST | `/api/v1/cortex/sandbox/execute` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.sandboxExplain` | POST | `/api/v1/cortex/sandbox/explain` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.sandboxGenerate` | POST | `/api/v1/cortex/sandbox/generate` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.speak` | POST | `/api/v1/cortex/voice/speak` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.switchPersonality` | POST | `/api/v1/cortex/personalities/switch` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
+| `KeyCortexController.toggleMonitor` | POST | `/api/v1/cortex/monitors/:id/toggle` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.updateAutonomyProfile` | PATCH | `/api/v1/cortex/autonomy-profile` | exempt-guard | guard:AutonomyProfileWriteGuard |
-| `KeyCortexController.updateMonitor` | PATCH | `/api/v1/cortex/monitors/:id` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.updateMonitor` | PATCH | `/api/v1/cortex/monitors/:id` | applied | ai:write (SWP-CENSUS-KEY-B, Ruling B2) |
 | `KeyCortexController.updateSession` | PATCH | `/api/v1/cortex/sessions/:id` | exempt-check | check:requireOwnSession (the caller's own KEY session) |
 
 ### KeyflowCommandController (`keyflow-command/keyflow-command.controller.ts`)

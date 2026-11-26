@@ -1335,6 +1335,10 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'performance_take_snapshot', service: 'StaffPerformanceService', route: 'POST /staff-performance/businesses/:businessId/snapshot', scope: 'operations:write', file: 'modules/staff-performance/staff-performance.controller.ts' },
   { tool: 'approval_create_request', service: 'ApprovalRequestService', route: 'POST /businesses/:businessId/approvals', scope: 'operations:write', file: 'modules/approvals/approval.controller.ts' },
   { tool: 'save_onboarding_step', service: 'OnboardingStateService', route: 'POST /onboarding-concierge/businesses/:businessId/onboarding-step', scope: 'settings:write', file: 'modules/onboarding-concierge/onboarding-concierge.controller.ts' },
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): KeyCortexGoalsController write routes require ai write
+  { tool: 'goals_create', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
+  { tool: 'goals_create_plan', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals/:goalId/plans', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
+  { tool: 'goals_delete', service: 'KeyCortexPlannerService', route: 'DELETE /api/v1/cortex/goals/:goalId', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
 ];
 
 /**
@@ -1358,7 +1362,7 @@ const UNMAPPED: Record<string, string> = {
   execute: 'execute_custom_logic re-enters the dispatcher for any tool (innerToolExecutor -> executeToolByName), so it is governed by every module the dispatcher reaches and granted by none',
   fetch: 'cross-module reads; already baseline (fetch_*) for every position',
   generate: 'seo.controller declares no module scope',
-  goals: 'key-cortex-goals.controller declares no module scope',
+  // goals: granted since SWP-CENSUS-KEY-B (P109, Ruling B2) gated KeyCortexGoalsController write routes (ai write)
   governance: 'governance.controller declares no module scope',
   helpdesk: 'helpdesk.controller declares no module scope',
   // inventory: granted since PR195-BOOKS-DOORS (inventory_advance_purchase_order, expenses write) and
@@ -1421,6 +1425,9 @@ const UNGRANTED: Record<string, string> = {
   finance_list_coa: 'FinanceCoaService is reached by finance.controller, which is unscoped',
   // finance_post_journal_entry: granted (revenue write) since PR195-JOURNAL-SCOPE (CR-P195-4) gated POST
   // finance journal-entries, the one member route to PostingService.post
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): goals family now grants goals_create/goals_create_plan/goals_delete (ai write); GET reads stay unscoped
+  goals_get: 'KeyCortexPlannerService.getGoal is reached by key-cortex-goals.controller GET, which is unscoped',
+  goals_list: 'KeyCortexPlannerService.listGoals is reached by key-cortex-goals.controller GET, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
   // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
@@ -1690,6 +1697,9 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         update_business_blueprint: 'write',
       },
       ai: {
+        goals_create: 'write',
+        goals_create_plan: 'write',
+        goals_delete: 'write',
         keyflow_create_note: 'write',
       },
       team: {

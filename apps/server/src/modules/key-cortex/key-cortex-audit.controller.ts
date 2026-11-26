@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { getTenantContext, runWithTenant } from '../../core/tenant/tenant-context';
 import { EvalHarnessService, runIsGreen } from './eval-harness.service';
@@ -120,6 +121,8 @@ export class KeyCortexAuditController {
    * endpoint has zero callers in apps/web and apps/server.
    */
   @Post('eval/run')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async runEval(@Body() body: { suite?: string }) {
     const results = body.suite
       ? [await this.evalHarness.runSuite(body.suite)]

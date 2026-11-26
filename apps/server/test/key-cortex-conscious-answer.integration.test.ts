@@ -339,6 +339,7 @@ beforeAll(async () => {
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const controllerModule: any = await import('../src/modules/key-cortex/key-cortex.controller');
   const { KeyCortexController } = controllerModule;
   const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
@@ -507,6 +508,7 @@ beforeAll(async () => {
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      ModuleScopeGuard,
       CrmRateLimitGuard,
       { provide: FlowOrchestratorService, useValue: orchestrator },
       {
@@ -581,10 +583,11 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.coOwner, email: `${P}coowner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizTeam, name: 'V70H Team Biz', ownerId: ID.owner } });
   await db.membership.create({ data: { id: `${P}m_team_owner`, userId: ID.owner, businessId: ID.bizTeam, role: 'OWNER' } });
-  await db.membership.create({ data: { id: `${P}m_team_staff`, userId: ID.staff, businessId: ID.bizTeam, role: 'STAFF', permissionScopes: { bookings: 'write' } } });
-  await db.membership.create({ data: { id: `${P}m_team_staffcrm`, userId: ID.staffCrm, businessId: ID.bizTeam, role: 'STAFF', permissionScopes: { crm: 'read' } } });
+  // SWP-CENSUS-KEY-B (P109, Ruling B2): POST conscious/chat requires ai:write; keep revenue absent so D-129 owner-only proof remains live.
+  await db.membership.create({ data: { id: `${P}m_team_staff`, userId: ID.staff, businessId: ID.bizTeam, role: 'STAFF', permissionScopes: { bookings: 'write', ai: 'write' } } });
+  await db.membership.create({ data: { id: `${P}m_team_staffcrm`, userId: ID.staffCrm, businessId: ID.bizTeam, role: 'STAFF', permissionScopes: { crm: 'read', ai: 'write' } } });
   await db.membership.create({ data: { id: `${P}m_team_admin`, userId: ID.admin, businessId: ID.bizTeam, role: 'ADMIN' } });
-  await db.membership.create({ data: { id: `${P}m_team_coowner`, userId: ID.coOwner, businessId: ID.bizTeam, role: 'OWNER', permissionScopes: { crm: 'admin', bookings: 'admin' } } });
+  await db.membership.create({ data: { id: `${P}m_team_coowner`, userId: ID.coOwner, businessId: ID.bizTeam, role: 'OWNER', permissionScopes: { crm: 'admin', bookings: 'admin', ai: 'write' } } });
   await db.contact.create({ data: { id: ID.contact, businessId: ID.bizTeam, firstName: 'v70h', lastName: 'Private Payer', displayName: PAYER } as any });
   await db.invoice.create({
     data: {
@@ -619,10 +622,10 @@ describe('fixture sanity (real rows)', () => {
     const members = await db.membership.findMany({ where: { businessId: ID.bizTeam }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' } });
     expect(members).toEqual([
       { userId: ID.admin, role: 'ADMIN', permissionScopes: null },
-      { userId: ID.coOwner, role: 'OWNER', permissionScopes: { crm: 'admin', bookings: 'admin' } },
+      { userId: ID.coOwner, role: 'OWNER', permissionScopes: { crm: 'admin', bookings: 'admin', ai: 'write' } },
       { userId: ID.owner, role: 'OWNER', permissionScopes: null },
-      { userId: ID.staff, role: 'STAFF', permissionScopes: { bookings: 'write' } },
-      { userId: ID.staffCrm, role: 'STAFF', permissionScopes: { crm: 'read' } },
+      { userId: ID.staff, role: 'STAFF', permissionScopes: { bookings: 'write', ai: 'write' } },
+      { userId: ID.staffCrm, role: 'STAFF', permissionScopes: { crm: 'read', ai: 'write' } },
     ]);
     const { keyContextSight } = await import('../src/modules/ai/business-graph.service');
     const prisma = { client: db } as any;

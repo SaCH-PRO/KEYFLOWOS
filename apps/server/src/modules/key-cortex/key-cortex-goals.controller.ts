@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexPlannerService, CreateGoalInput } from './key-cortex-planner.service';
@@ -222,6 +223,8 @@ export class KeyCortexGoalsController {
   ) {}
 
   @Post('goals')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async createGoal(@Body() dto: CreateGoalDto, @GuardedBusinessId() businessId: string) {
     if (!businessId || !dto.title) {
       throw new BadRequestException('businessId and title are required');
@@ -249,6 +252,8 @@ export class KeyCortexGoalsController {
   }
 
   @Post('goals/:goalId/plans')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async createPlanFromGoal(
     @Param('goalId') goalId: string,
     @Body() _dto: CreatePlanFromGoalDto,
@@ -265,6 +270,8 @@ export class KeyCortexGoalsController {
   }
 
   @Post('plans')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async createPlanFromCommand(
     @Body() dto: CreatePlanFromCommandDto,
     @GuardedBusinessId() businessId: string,
@@ -309,6 +316,8 @@ export class KeyCortexGoalsController {
    * plan that is running or completed is refused 409 (R0-09e repair, ST-2).
    */
   @Post('plans/:planId/execute')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async executePlan(
     @Param('planId') planId: string,
     @Body() options: { traceId?: string; skipApproval?: boolean },
@@ -329,6 +338,8 @@ export class KeyCortexGoalsController {
   }
 
   @Delete('goals/:goalId')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async deleteGoal(
     @Param('goalId') goalId: string,
     @GuardedBusinessId() businessId: string,
@@ -350,6 +361,8 @@ export class KeyCortexGoalsController {
    * creator in the body's filterJson is dropped), and the plans it fires run as that member.
    */
   @Post('triggers')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async createTriggerRule(@Body() dto: CreateTriggerRuleDto, @CurrentUser() user?: AuthenticatedUser) {
     if (!dto.businessId || !dto.eventType) {
       throw new BadRequestException('businessId and eventType are required');
@@ -360,6 +373,8 @@ export class KeyCortexGoalsController {
 
   /** D-73: the member who changes a rule is the member its plans run as from then on. */
   @Patch('triggers/:id')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   async updateTriggerRule(
     @Param('id') id: string,
     @Body() dto: UpdateTriggerRuleDto,
