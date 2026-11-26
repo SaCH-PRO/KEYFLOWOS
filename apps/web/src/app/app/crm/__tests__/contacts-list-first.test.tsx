@@ -22,9 +22,10 @@
  *                       next action opens the customer, the Priority Queue expands; closing hides them again
  *   CLF-05  RED-BEFORE  focus view: All contacts first, then Contacts requiring action, then Next actions; a card
  *                       and an action row in the moved sections still open the customer
- *   CLF-06  RED-BEFORE  on phones the toolbar's segment chips and All/Pinned/Recent rows fold into the panel
- *                       (hidden below the sm breakpoint while it is closed, shown when it is open); the search row and
- *                       the select/sort/view row stay visible at every width
+ *   CLF-06  RED-BEFORE  the toolbar's segment chips fold into the panel at every width, and its All/Pinned/Recent
+ *                       row on phones (hidden below the sm breakpoint) while it is closed; both show when it is open;
+ *                       the search row and the select/sort/view row stay visible at every width. (Live at e7aa6385
+ *                       the segment row alone kept the first row at y 465.75 at 1440x900, over C8's 450.)
  *   CLF-07  RED-BEFORE  a filter set inside the closed panel is announced on its toggle ("1 on"), so a filtered list
  *                       is never mistaken for the whole list
  *
@@ -272,16 +273,16 @@ describe("CONTACTS-LIST-FIRST (D-289, C8): the customer list comes first", () =>
     await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), T);
   });
 
-  it("CLF-06 RED-BEFORE: on phones the segment chips and All/Pinned/Recent fold into the panel; the other rows stay", async () => {
+  it("CLF-06 RED-BEFORE: the segment chips (every width) and All/Pinned/Recent (phones) fold into the panel; the other rows stay", async () => {
     renderPage("list");
     await screen.findAllByRole("option", { name: /byron|baker/i }, T);
     const segments = document.querySelector<HTMLElement>('[data-walkthrough="crm-segments"]')!;
     const tabs = screen.getByRole("tablist", { name: "Contact list views" });
     expect(segments).toBeTruthy();
-    // Closed: hidden below sm, shown from sm up.
-    for (const row of [segments, tabs]) {
-      expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(["hidden", "sm:flex"]));
-    }
+    // Closed: the segment chips are hidden at every width; All/Pinned/Recent below sm only.
+    expect(segments.className.split(/\s+/)).toContain("hidden");
+    expect(segments.className, "segment chips hidden at every width while closed").not.toMatch(/(^|\s)(sm|md|lg|xl):(flex|block)\b/);
+    expect(tabs.className.split(/\s+/)).toEqual(expect.arrayContaining(["hidden", "sm:flex"]));
     // The search row and the select/sort/view row are never hidden.
     const search = screen.getByRole("textbox", { name: "Search contacts" });
     const selectButton = screen.getByRole("button", { name: "Select contacts" });
