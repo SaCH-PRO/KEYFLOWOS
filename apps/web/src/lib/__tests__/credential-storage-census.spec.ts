@@ -19,9 +19,10 @@
  *   - Cache Storage: the names opened (`[self.]caches.open`) and what is `put` into a cache bound from it (`const`,
  *     `let` or a later assignment, `.then((c) => …)`, `.then(function (c) …)`, or `(await caches.open(n)).put(…)`);
  *   - `window.name`.
- * A cookie may be built with `+`, a template or `[…].join("")`. A match inside a real comment is not a write; comments
- * are found by one forward pass that skips strings, templates and regex literals and opens a comment only after
- * whitespace or ; { } ( ) , [ (commentRanges), so "image/*", "/api/*", "https://" and `/\/*$/` hide nothing.
+ * A cookie may be built with `+`, a template or `[…].join("")`. A match inside a real comment is not a write; the
+ * comments are the ones the TypeScript parser finds (commentRanges: the file parsed as TSX/TS/JSX/JS by its extension,
+ * leading and trailing comment ranges at every node and token, none read where JSX text starts), so "/*" or "//" in a
+ * string, a template, a regex literal or JSX text hides nothing.
  * A write that only clears (an empty value with Max-Age=0 / maxAge: 0) stores nothing and is not counted.
  *
  * Arguments are read across line breaks and comments, so a Prettier-shaped call (key on the next line) resolves.
@@ -53,13 +54,16 @@
  * here: a storage wrapper defined in another file (only same-file wrappers expand); a bracket write on an aliased
  * receiver (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `self.name` /
  * `globalThis.name`; a cookie string built up in a variable (`let c = …; c += …; document.cookie = c`); Dexie / idb
- * library databases (contacts-db.ts `new Dexie(name)`); the registry pins keys and cookie attributes, not values;
- * and JSX text holding " // " (after a space) followed by code on the same line: the pass, which does not parse JSX,
- * reads the rest of that line as a comment.
+ * library databases (contacts-db.ts `new Dexie(name)`); and the registry pins keys and cookie attributes, not values.
+ *
+ * Counting (CSC_DUMP=1 prints one line per write found): a write reached through a wrapper is one line per call site,
+ * so the same id can print twice (cookie kf_sid @ presence-sdk.ts:93, once per writeCookie call). The registry has one
+ * row per credential id.
  */
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 const WEB = path.join(__dirname, "..", "..", "..");
 const WEB_SRC = path.join(WEB, "src");
@@ -515,97 +519,58 @@ function callSites(src: string, fn: string): Array<{ args: string[]; at: number 
   return sites;
 }
 
-/** A string on one line: ends at its closing quote or, unterminated (JSX text such as "Don't"), at the line break. */
-function skipLineString(src: string, i: number): number {
-  const q = src[i];
-  let j = i + 1;
-  while (j < src.length && src[j] !== q && src[j] !== "\n") j += src[j] === "\\" ? 2 : 1;
-  return src[j] === q ? j + 1 : j;
-}
-
-/** A regex literal from its opening "/": past the closing "/" and its flags, or to the line break. */
-function skipRegex(src: string, i: number): number {
-  let j = i + 1;
-  let inClass = false;
-  while (j < src.length && src[j] !== "\n") {
-    const c = src[j];
-    if (c === "\\") j += 2;
-    else if (c === "[" || c === "]") {
-      inClass = c === "[";
-      j++;
-    } else if (c === "/" && !inClass) {
-      j++;
-      while (j < src.length && /[a-z]/i.test(src[j])) j++;
-      return j;
-    } else j++;
-  }
-  return j;
-}
-
 /**
- * The comments of a file, by one forward pass (CSC-A1): strings, templates (with ${} nesting) and regex literals are
- * skipped, so a "/*" or "//" inside them is not a comment. A comment opens only in code and only after whitespace,
- * the start of the file or one of ; { } ( ) , [ , so "https://" (JSX text, after ":") and "image/*" or "\/*" (after a
- * letter or "\") never open one; and a block comment counts only when it closes. Every way this pass can misread the
- * file errs toward fewer comments, so a write is never hidden by a misreading, only, at worst, counted.
+ * The comments of a file, as the TypeScript parser finds them (CSC-B1..B3, CSC3-COR-1). The file is parsed as TSX,
+ * TS, JSX or JS by its extension, and the leading and trailing comment ranges are collected at every node and token
+ * (getChildren), so a comment is found wherever the language puts one, a JSX expression comment included. JSX text is text:
+ * no range is read from a position where JSX text starts, so "Upload (paths like /* allowed)", a lone backtick or
+ * " // " in JSX text opens nothing. Strings, templates and regex literals are tokens, never trivia, so a "/*" or "//"
+ * inside them opens nothing either.
  */
 const commentCache = new Map<string, Array<[number, number]>>();
-function commentRanges(src: string): Array<[number, number]> {
-  const cached = commentCache.get(src);
+function commentRanges(file: string, src: string): Array<[number, number]> {
+  const cacheKey = `${file}\u0000${src}`;
+  const cached = commentCache.get(cacheKey);
   if (cached) return cached;
+  const kind = /\.tsx$/.test(file)
+    ? ts.ScriptKind.TSX
+    : /\.ts$/.test(file)
+      ? ts.ScriptKind.TS
+      : /\.jsx$/.test(file)
+        ? ts.ScriptKind.JSX
+        : ts.ScriptKind.JS;
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
+  const jsxTextStarts = new Set<number>();
+  const visitText = (node: ts.Node) => {
+    if (node.kind === ts.SyntaxKind.JsxText) jsxTextStarts.add(node.pos);
+    ts.forEachChild(node, visitText);
+  };
+  visitText(sf);
+  const seen = new Set<string>();
   const ranges: Array<[number, number]> = [];
-  const opens = (k: number) => k === 0 || /[\s;{}(),[]/.test(src[k - 1]);
-  let prev = "";
-  let prevWord = "";
-  let j = 0;
-  while (j < src.length) {
-    const c = src[j];
-    if (c === '"' || c === "'") {
-      j = skipLineString(src, j);
-      prev = c;
-      prevWord = "";
-    } else if (c === "`") {
-      j = skipTemplate(src, j);
-      prev = c;
-      prevWord = "";
-    } else if (c === "/" && src[j + 1] === "/" && opens(j)) {
-      const nl = src.indexOf("\n", j);
-      const end = nl === -1 ? src.length : nl;
-      ranges.push([j, end]);
-      j = end;
-    } else if (c === "/" && src[j + 1] === "*" && opens(j) && src.indexOf("*/", j + 2) !== -1) {
-      const end = src.indexOf("*/", j + 2) + 2;
-      ranges.push([j, end]);
-      j = end;
-    } else if (
-      c === "/" &&
-      src[j + 1] !== "/" &&
-      (prev === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev) || /^(?:return|typeof|case|void|in|of|delete|new|yield|await)$/.test(prevWord))
-    ) {
-      j = skipRegex(src, j);
-      prev = "/";
-      prevWord = "";
-    } else if (/[\w$]/.test(c)) {
-      let k = j;
-      while (k < src.length && /[\w$]/.test(src[k])) k++;
-      prevWord = src.slice(j, k);
-      prev = "a";
-      j = k;
-    } else {
-      if (!/\s/.test(c)) {
-        prev = c;
-        prevWord = "";
+  const add = (list: ts.CommentRange[] | undefined) => {
+    for (const r of list ?? []) {
+      const k = `${r.pos}:${r.end}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        ranges.push([r.pos, r.end]);
       }
-      j++;
     }
-  }
-  commentCache.set(src, ranges);
+  };
+  const visit = (node: ts.Node) => {
+    if (node.kind === ts.SyntaxKind.JsxText) return;
+    if (!jsxTextStarts.has(node.pos)) add(ts.getLeadingCommentRanges(src, node.pos));
+    if (!jsxTextStarts.has(node.end)) add(ts.getTrailingCommentRanges(src, node.end));
+    for (const child of node.getChildren(sf)) visit(child);
+  };
+  visit(sf); // getChildren includes the end-of-file token, so comments after the last token are read too.
+  commentCache.set(cacheKey, ranges);
   return ranges;
 }
 
 /** Is offset `at` inside a real comment of the file (commentRanges)? */
-function inComment(src: string, at: number): boolean {
-  return commentRanges(src).some(([a, b]) => at >= a && at < b);
+function inComment(file: string, src: string, at: number): boolean {
+  return commentRanges(file, src).some(([a, b]) => at >= a && at < b);
 }
 
 function lineOf(src: string, at: number): number {
@@ -666,7 +631,7 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   const writes: Write[] = [];
   // A match inside a comment is prose, not a write ("cache.put() below", sw.js).
   const push = (w: Omit<Write, "file" | "line">, at: number) => {
-    if (!inComment(src, at)) writes.push({ ...w, file, line: lineOf(src, at) });
+    if (!inComment(file, src, at)) writes.push({ ...w, file, line: lineOf(src, at) });
   };
 
   /** A keyed store write: key expression, value expression. */
@@ -1470,6 +1435,11 @@ describe("CSC-19 only a real comment hides a write", () => {
     });
   }
 
+  it("a comment after the last token of a file is a comment", () => {
+    const fixture = [`localStorage.setItem("kf_e_token", t);`, `// localStorage.setItem("kf_eof_token", t);`].join("\n");
+    expect(keysOf(scan("src/fixture-eof.ts", fixture))).toEqual(["localStorage:kf_e_token"]);
+  });
+
   it("a write inside a real block or line comment is still not counted", () => {
     const fixture = [
       `/* localStorage.setItem("kf_c1_token", t); */`,
@@ -1662,6 +1632,16 @@ describe("CSC-28 JSX text never opens a comment", () => {
       [
         `export const F = () => <p>Press \` to open the console</p>;`,
         "const s = `a // b`; localStorage.setItem(\"kf_jx_token\", t);",
+      ],
+    ],
+    [
+      "a JSX text line that starts with '//'",
+      [
+        `export const F = ({ t }: { t: string }) => (`,
+        `  <p>`,
+        `    // not a comment <button onClick={() => localStorage.setItem("kf_jx_token", t)} />`,
+        `  </p>`,
+        `);`,
       ],
     ],
     [
