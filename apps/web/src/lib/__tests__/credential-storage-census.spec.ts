@@ -3775,3 +3775,14 @@ describe("CSC-74 (pins) round-13 rules a fail-closed '*' would otherwise hide", 
     });
   }
 });
+
+describe("CSC-75 (pin) a const cycle stops at the cycle guard, not at the depth cap (R14)", () => {
+  it("a four-way const cycle fails closed at once", () => {
+    const fixture = "const A = B + B + B + B;\nconst B = A + A + A + A;\nlocalStorage.setItem(A, \"1\");";
+    const t0 = Date.now();
+    const n = credIn("src/fixture-r13r.ts", fixture, "localStorage").length;
+    expect(n).toBe(1);
+    // Without the guard each hop re-expands four ways until the depth cap (4^12 paths): far slower than this bound.
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+});
