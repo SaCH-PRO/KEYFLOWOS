@@ -330,3 +330,78 @@ describe("SWP-KEY-SHELL-SMOKE repair: Settings > KEY when the switch cannot be r
     expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
   });
 });
+
+/**
+ * Repair round 2 (tests only): /identity/me reads the test holds open and answers when it chooses, so a case can act
+ * while a read is in flight.
+ *   KSR-05  COR-R1: a signed-out tab's read is in flight when the member signs in; once it is refused, the switch is
+ *           read again for the new token and KEY comes on (use-key-enabled.ts: the re-read in the read's finally)
+ *   KSR-06  COR-R2: Settings > KEY's Try again takes the error and its button away while the retry is in flight
+ *           (use-key-enabled.ts: the notify when a failed state is cleared)
+ */
+function holdIdentityMe() {
+  const held: Array<(r: Response) => void> = [];
+  const original = vi.mocked(globalThis.fetch).getMockImplementation();
+  vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (new URL(url, "http://api.test.local").pathname === "/identity/me") {
+      return new Promise<Response>((resolve) => held.push(resolve));
+    }
+    return original ? original(input, init) : Promise.resolve(json(200, {}));
+  });
+  return {
+    get waiting() {
+      return held.length;
+    },
+    /** Answers the oldest read still held. */
+    answerNext(status: number, body: unknown) {
+      const resolve = held.shift();
+      if (!resolve) throw new Error("no /identity/me read is held");
+      resolve(json(status, body));
+    },
+  };
+}
+
+describe("SWP-KEY-SHELL-SMOKE repair 2: reads in flight (COR-R1, COR-R2)", { timeout: 15_000 }, () => {
+  it("KSR-05: a sign-in while the signed-out read is out turns KEY on once that read is refused", async () => {
+    const useKeyEnabled = await loadHook();
+    window.localStorage.removeItem("kf_token");
+    const me = holdIdentityMe();
+    const hook = renderHook(() => useKeyEnabled());
+    await waitFor(() => expect(me.waiting, "the signed-out read is out").toBe(1));
+
+    window.localStorage.setItem("kf_token", `kssr-signed-in-${Math.random().toString(36).slice(2)}`);
+    hook.rerender();
+    await settle(50);
+    expect(me.waiting, "no second read while the first is out").toBe(1);
+
+    await act(async () => {
+      me.answerNext(401, { message: "Unauthorized" });
+    });
+    await waitFor(() => expect(me.waiting, "the switch is read again for the signed-in token").toBe(1), { timeout: 2000 });
+    await act(async () => {
+      me.answerNext(200, { id: "usr_kss", keyDisabled: false });
+    });
+    await waitFor(() => expect(hook.result.current.enabled, "KEY after signing in").toBe(true), { timeout: 2000 });
+  });
+
+  it("KSR-06: Try again takes Settings > KEY's error and its button away while the retry is in flight", async () => {
+    serveMe({ status: 403, body: { message: "Forbidden" } });
+    nav.pathname = "/app/settings/ai";
+    const { default: Page } = await import("@/app/app/settings/ai/page");
+    render(<Page />);
+    const retry = await screen.findByRole("button", { name: /try again/i }, { timeout: 2000 });
+
+    const me = holdIdentityMe();
+    fireEvent.click(retry);
+    await waitFor(() => expect(me.waiting, "Try again reads the switch").toBe(1));
+    await settle(50);
+    expect(screen.queryByRole("alert"), "the error while the retry is out").toBeNull();
+    expect(screen.queryByRole("button", { name: /try again/i }), "Try again while the retry is out").toBeNull();
+
+    await act(async () => {
+      me.answerNext(200, { id: "usr_kss", keyDisabled: false });
+    });
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /ai settings/i })).not.toBeNull(), { timeout: 3000 });
+  });
+});
