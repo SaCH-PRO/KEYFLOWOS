@@ -1445,6 +1445,11 @@
       "prefix": "v66b_",
       "owner": "apps/server/test/vat-number.integration.test.ts",
       "packet": "V1-66 (VAT-BASICS)"
+    },
+    {
+      "prefix": "v83c_",
+      "owner": "apps/server/test/contactid-writer-validation.integration.test.ts",
+      "packet": "V1-83 (FU-CONTACTID-WRITER-VALIDATION, P114)"
     }
   ],
   "pendingRenames": [],
