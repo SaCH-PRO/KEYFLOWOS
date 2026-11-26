@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useId } from "react";
 import {
   X,
   Upload,
@@ -21,7 +21,11 @@ import {
   createExpense,
   updateExpense,
   extractReceipt,
+  createRecurringExpense,
 } from "@/lib/client";
+import { createBill, type CreateBillBody } from "@/lib/api/finance";
+import { formatCurrency as formatMoney } from "@/lib/currency";
+import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
@@ -37,6 +41,8 @@ interface ExpenseFormSideSheetProps {
   contacts?: ContactOption[];
   services?: ServiceOption[];
   prefill?: ExpensePrefill | null;
+  /** EXPENSES-HUB-2 (BUG-059): "bill" opens the sheet as a bill to pay later (the page's Record bill). */
+  initialKind?: "expense" | "bill";
   onClose: () => void;
   onSaved: () => void;
 }
@@ -61,9 +67,14 @@ export function ExpenseFormSideSheet({
   contacts = [],
   services = [],
   prefill,
+  initialKind = "expense",
   onClose,
   onSaved,
 }: ExpenseFormSideSheetProps) {
+  // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
+  const [currency] = useState(businessCurrency);
+  const dueDateId = useId();
+  const billToggleId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
   const { uploadToDrive } = useDriveUpload();
   const selectedFileRef = useRef<File | null>(null);
@@ -85,17 +96,23 @@ export function ExpenseFormSideSheet({
         projectId: editingExpense.projectId || "",
         contactId: editingExpense.contactId || "",
         serviceId: editingExpense.serviceId || "",
+        isBill: false,
+        dueDate: "",
       };
     }
-    const dateValue =
-      prefill?.date ?? new Date().toISOString().split("T")[0];
+    // BUG-028: today in Trinidad (the business's zone), not the UTC date (tomorrow after 20:00 in Port of Spain).
+    const dateValue = prefill?.date ?? todayInBusinessZone();
+    const prefillDay = (value: string): string => {
+      const at = new Date(value);
+      return Number.isNaN(at.getTime()) ? todayInBusinessZone() : dayInZone(at, businessTimeZone());
+    };
     return {
       description: prefill?.description ?? "",
       amount: typeof prefill?.amount === "number" ? String(prefill.amount) : "",
       date:
         typeof dateValue === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
           ? dateValue
-          : new Date(dateValue).toISOString().split("T")[0] ?? "",
+          : prefillDay(String(dateValue)),
       vendor: prefill?.vendor ?? "",
       categoryId: "",
       notes: "",
@@ -108,15 +125,49 @@ export function ExpenseFormSideSheet({
       projectId: "",
       contactId: "",
       serviceId: "",
+      isBill: initialKind === "bill",
+      dueDate: "",
     };
   });
+  // A bill is recorded new; an expense being edited stays what it is.
+  const isBill = !editingExpense && formData.isBill;
 
   const [extracting, setExtracting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
 
+  /**
+   * EXPENSES-HUB-2 (BUG-061): a recurring expense (new, or an edit that makes
+   * it recurring) creates its schedule through the existing route; the expense
+   * saved now is this period's, so the schedule is next due one period later.
+   * Answers the refusal, if any.
+   */
+  const createSchedule = async (bill: boolean): Promise<string | null> => {
+    const body = recurringScheduleBody({
+      description: formData.description.trim(),
+      amount: parseFloat(formData.amount),
+      date: formData.date,
+      frequency: formData.recurringFrequency,
+      vendor: formData.vendor.trim() || null,
+      paymentMethod: formData.paymentMethod || null,
+      categoryId: formData.categoryId || null,
+      notes: formData.notes.trim() || null,
+      projectId: formData.projectId || null,
+      contactId: formData.contactId || null,
+      serviceId: formData.serviceId || null,
+      bill: bill ? { dueDate: formData.dueDate || null } : null,
+    });
+    try {
+      const res = await createRecurringExpense(businessId, body);
+      return res?.error ? res.error : null;
+    } catch (err) {
+      return err instanceof Error ? err.message : "the request failed";
+    }
+  };
+
   const handleSubmit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    const tags = formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
       description: formData.description.trim(),
@@ -127,24 +178,65 @@ export function ExpenseFormSideSheet({
       notes: formData.notes.trim() || undefined,
       receiptUrl: formData.receiptUrl.trim() || undefined,
       paymentMethod: formData.paymentMethod || undefined,
-      tags: formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+      tags,
       isRecurring: formData.isRecurring,
       recurringFrequency: formData.isRecurring ? formData.recurringFrequency : undefined,
       projectId: formData.projectId || null,
       contactId: formData.contactId || null,
       serviceId: formData.serviceId || null,
     };
+    const makesSchedule = formData.isRecurring && !(editingExpense && editingExpense.isRecurring);
     try {
       let expenseId = editingExpense?.id;
-      const res = editingExpense
-        ? await updateExpense(businessId, editingExpense.id, payload)
-        : await createExpense(businessId, payload);
-      // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
-      if (res?.error) {
-        toast.error(res.error);
-        return;
+      const notices: string[] = [];
+      if (isBill) {
+        // BUG-059: a bill to pay later goes through the bill door (status BILL, payables), never as a paid expense.
+        const billBody: CreateBillBody = {
+          description: payload.description!,
+          amount: payload.amount!,
+          date: formData.date || undefined,
+          dueDate: formData.dueDate || undefined,
+          vendor: payload.vendor ?? undefined,
+          notes: payload.notes ?? undefined,
+          categoryId: formData.categoryId || undefined,
+          contactId: formData.contactId || undefined,
+        };
+        const res = await createBill(businessId, billBody);
+        if (res?.error || !res?.data) {
+          toast.error(res?.error || "Failed to record bill");
+          return;
+        }
+        expenseId = res.data.id;
+        // The bill door takes no receipt, tags, project or service: they are written onto the bill it created.
+        const extra: Partial<Expense> = {};
+        if (payload.receiptUrl) extra.receiptUrl = payload.receiptUrl;
+        if (tags.length) extra.tags = tags;
+        if (formData.isRecurring) {
+          extra.isRecurring = true;
+          extra.recurringFrequency = formData.recurringFrequency;
+        }
+        if (formData.projectId) extra.projectId = formData.projectId;
+        if (formData.serviceId) extra.serviceId = formData.serviceId;
+        if (Object.keys(extra).length) {
+          const patched = await updateExpense(businessId, res.data.id, extra);
+          if (patched?.error) notices.push(`its receipt and tags were not saved: ${patched.error}`);
+        }
+      } else {
+        const res = editingExpense
+          ? await updateExpense(businessId, editingExpense.id, payload)
+          : await createExpense(businessId, payload);
+        // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
+        if (res?.error) {
+          toast.error(res.error);
+          return;
+        }
+        if (!editingExpense && res.data) expenseId = res.data.id;
       }
-      if (!editingExpense && res.data) expenseId = res.data.id;
+
+      if (makesSchedule) {
+        const refused = await createSchedule(isBill);
+        if (refused) notices.push(`its recurring schedule was not created: ${refused}`);
+      }
 
       // Upload receipt to Google Drive if a file was selected
       if (expenseId && selectedFileRef.current && formData.receiptUrl) {
@@ -154,7 +246,7 @@ export function ExpenseFormSideSheet({
           businessId,
           entityType: "expense",
           entityId: expenseId,
-          fileName: `Receipt-${formData.description || "Expense"}-${new Date().toISOString().split("T")[0]}.${file.name.split(".").pop()}`,
+          fileName: `Receipt-${formData.description || "Expense"}-${todayInBusinessZone()}.${file.name.split(".").pop()}`,
           mimeType: file.type || "application/octet-stream",
           content: arr,
           contentFormat: "binary",
@@ -164,12 +256,14 @@ export function ExpenseFormSideSheet({
         });
       }
 
-      toast.success("Expense saved");
+      const what = isBill ? "Bill recorded" : "Expense saved";
+      if (notices.length) toast.error(`${what}, but ${notices.join("; and ")}`);
+      else toast.success(isBill ? "Bill recorded: pay it when it is due" : what);
       selectedFileRef.current = null;
       onSaved();
       onClose();
     } catch (_err) {
-      toast.error("Failed to save expense");
+      toast.error(isBill ? "Failed to record bill" : "Failed to save expense");
     }
   };
 
@@ -241,8 +335,8 @@ export function ExpenseFormSideSheet({
       <SideSheet
         open={true}
         onClose={onClose}
-        title={editingExpense ? "Edit Expense" : "New Expense"}
-        subtitle={editingExpense ? `Editing ${editingExpense.description}` : "Record a business expense"}
+        title={editingExpense ? "Edit Expense" : isBill ? "New Bill" : "New Expense"}
+        subtitle={editingExpense ? `Editing ${editingExpense.description}` : isBill ? "Record a bill to pay later" : "Record a business expense"}
         width="md"
         icon={
           <div
@@ -257,7 +351,7 @@ export function ExpenseFormSideSheet({
             <div className="text-xs text-muted-foreground">
               <span className="block">Amount</span>
               <span className="font-semibold" style={{ color: ACCENT }}>
-                {amountNum > 0 ? `TTD ${amountNum.toLocaleString("en-TT", { minimumFractionDigits: 2 })}` : "—"}
+                {amountNum > 0 ? formatMoney(amountNum, currency) : "—"}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -277,13 +371,33 @@ export function ExpenseFormSideSheet({
                   border: `1px solid ${ACCENT_BORDER}`,
                 }}
               >
-                {editingExpense ? "Update Expense" : "Add Expense"}
+                {editingExpense ? "Update Expense" : isBill ? "Record bill" : "Add Expense"}
               </button>
             </div>
           </div>
         }
       >
         <div className="space-y-5">
+          {/* EXPENSES-HUB-2 (BUG-059): a bill to pay later, or an expense paid now */}
+          {!editingExpense && (
+            <div className="p-3 rounded-xl bg-white/[0.02] border border-border/40">
+              <label htmlFor={billToggleId} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  id={billToggleId}
+                  type="checkbox"
+                  checked={formData.isBill}
+                  onChange={(e) => setFormData({ ...formData, isBill: e.target.checked })}
+                  className="accent-rose-500"
+                />
+                <FileText className="w-3.5 h-3.5 text-blue-400" />
+                Bill to pay later
+              </label>
+              <p className="text-[10px] text-muted-foreground mt-1 ml-6">
+                {formData.isBill ? "Recorded as owed, not paid. Pay it from the bill when it is due." : "Leave unticked for an expense already paid."}
+              </p>
+            </div>
+          )}
+
           {/* Description */}
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">Description *</label>
@@ -298,7 +412,7 @@ export function ExpenseFormSideSheet({
           {/* Amount + Date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Amount (TTD) *</label>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency}) *</label>
               <input
                 type="number"
                 step="0.01"
@@ -358,21 +472,35 @@ export function ExpenseFormSideSheet({
 
           {/* Payment Method + Tags */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Payment Method</label>
-              <select
-                value={formData.paymentMethod}
-                onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
-              >
-                <option value="">Select method</option>
-                {PAYMENT_METHODS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {isBill ? (
+              <div>
+                <label htmlFor={dueDateId} className="text-xs text-muted-foreground mb-1.5 block">Due date</label>
+                <input
+                  id={dueDateId}
+                  type="date"
+                  value={formData.dueDate}
+                  min={formData.date || undefined}
+                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-rose-500/40"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">Payment Method</label>
+                <select
+                  value={formData.paymentMethod}
+                  onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
+                >
+                  <option value="">Select method</option>
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-xs text-muted-foreground mb-1.5 block">Tags</label>
               <input

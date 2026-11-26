@@ -11,7 +11,9 @@ import {
   createExpense,
   updateExpense,
   extractReceipt,
+  createRecurringExpense,
 } from "@/lib/client";
+import { businessCurrency, recurringScheduleBody, todayInBusinessZone } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { API_BASE } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -29,6 +31,8 @@ interface ExpenseFormModalProps {
 
 export function ExpenseFormModal({ businessId, categories, editingExpense, projects = [], contacts = [], services = [], onClose, onSaved }: ExpenseFormModalProps) {
   const { uploadFile, isUploading: uploading } = useUpload();
+  // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
+  const [currency] = useState(businessCurrency);
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
       return {
@@ -40,7 +44,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       };
     }
     return {
-      description: "", amount: "", date: new Date().toISOString().split("T")[0],
+      // BUG-028: today in Trinidad (the business's zone), not the UTC date.
+      description: "", amount: "", date: todayInBusinessZone(),
       vendor: "", categoryId: "", notes: "", receiptUrl: "", paymentMethod: "",
       tags: "" as string, isRecurring: false, recurringFrequency: "MONTHLY",
       projectId: "", contactId: "", serviceId: "",
@@ -71,7 +76,27 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         toast.error(res.error);
         return;
       }
-      toast.success("Expense saved");
+      // EXPENSES-HUB-2 (BUG-061): a recurring expense (new, or an edit that makes it recurring) creates its
+      // schedule through the existing route, next due one period after this expense's date.
+      if (formData.isRecurring && !(editingExpense && editingExpense.isRecurring)) {
+        let refused: string | null = null;
+        try {
+          const scheduled = await createRecurringExpense(businessId, recurringScheduleBody({
+            description: formData.description.trim(), amount: parseFloat(formData.amount), date: formData.date,
+            frequency: formData.recurringFrequency, vendor: formData.vendor.trim() || null,
+            paymentMethod: formData.paymentMethod || null, categoryId: formData.categoryId || null,
+            notes: formData.notes.trim() || null, projectId: formData.projectId || null,
+            contactId: formData.contactId || null, serviceId: formData.serviceId || null,
+          }));
+          refused = scheduled?.error ? scheduled.error : null;
+        } catch (err) {
+          refused = err instanceof Error ? err.message : "the request failed";
+        }
+        if (refused) toast.error(`Expense saved, but its recurring schedule was not created: ${refused}`);
+        else toast.success("Expense saved");
+      } else {
+        toast.success("Expense saved");
+      }
       onSaved();
       onClose();
     } catch (_err) { toast.error("Failed to save expense"); }
@@ -168,7 +193,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><DollarSign className="w-3 h-3" /> Amount (TTD) *</label>
+              <label className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5"><DollarSign className="w-3 h-3" /> Amount ({currency}) *</label>
               <input type="number" step="0.01" min="0" value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
             </div>
             <div>

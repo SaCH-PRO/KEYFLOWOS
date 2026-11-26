@@ -21,6 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { businessCurrency, formatShortDate } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -81,13 +82,15 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
         createsBill: form.createsBill,
         dueOffsetDays: form.dueOffsetDays ? parseInt(form.dueOffsetDays) : null,
       };
-      if (editing) {
-        await updateRecurringExpense(businessId, editing.id, payload);
-        toast.success("Recurring expense updated");
-      } else {
-        await createRecurringExpense(businessId, payload);
-        toast.success("Recurring expense created");
+      // A refused save is said, never reported as saved (EXPENSES-HUB-2: the schedule is real or it is not).
+      const res = editing
+        ? await updateRecurringExpense(businessId, editing.id, payload)
+        : await createRecurringExpense(businessId, payload);
+      if (res?.error) {
+        toast.error(res.error);
+        return;
       }
+      toast.success(editing ? "Recurring expense updated" : "Recurring expense created");
       setShowBuilder(false);
       setEditing(null);
       void load();
@@ -211,7 +214,7 @@ function RecurringCard({
               </>
             )}
             <span className="text-border">·</span>
-            <span>Next: {new Date(item.nextRunDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+            <span>Next: {formatShortDate(item.nextRunDate)}</span>
             <span className="text-border">·</span>
             <span>{item.runCount} runs</span>
           </div>
@@ -317,6 +320,8 @@ function RecurringBuilder({
   });
 
   const amountNum = parseFloat(form.amount || "0");
+  // BUG-027: the business currency (the server writes it on the schedule), never a literal TTD.
+  const currency = businessCurrency();
 
   return (
     <SideSheet
@@ -335,7 +340,7 @@ function RecurringBuilder({
           <div className="text-xs text-muted-foreground">
             <span className="block">Per Invoice</span>
             <span className="font-semibold text-rose-400">
-              {amountNum > 0 ? formatCurrency(amountNum, "TTD") : "—"}
+              {amountNum > 0 ? formatCurrency(amountNum, currency) : "—"}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -377,7 +382,7 @@ function RecurringBuilder({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Amount (TTD) *</label>
+            <label className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency}) *</label>
             <input
               type="number"
               step="0.01"

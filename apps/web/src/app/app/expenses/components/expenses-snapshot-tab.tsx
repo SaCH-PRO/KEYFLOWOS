@@ -16,7 +16,7 @@ import {
   ArrowRight,
   Wallet,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/currency";
+import { formatCurrency } from "./expense-utils";
 import type { Expense, ExpenseCategory, ExpenseSummary, ExpenseBudget } from "@/lib/client";
 
 interface ExpensesSnapshotTabProps {
@@ -58,7 +58,7 @@ export function ExpensesSnapshotTab({
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Spent</p>
-            <p className="text-3xl font-bold text-foreground mt-1">{formatCurrency(totalSpent, "TTD")}</p>
+            <p className="text-3xl font-bold text-foreground mt-1">{formatCurrency(totalSpent)}</p>
             <div className="flex items-center gap-1.5 mt-2">
               {direction === "up" ? (
                 <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
@@ -79,7 +79,7 @@ export function ExpensesSnapshotTab({
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground">Average</p>
-              <p className="text-sm font-semibold">{formatCurrency(summary?.averageExpense ?? 0, "TTD")}</p>
+              <p className="text-sm font-semibold">{formatCurrency(summary?.averageExpense ?? 0)}</p>
             </div>
           </div>
         </div>
