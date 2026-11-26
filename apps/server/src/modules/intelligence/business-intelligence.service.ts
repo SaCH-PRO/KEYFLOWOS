@@ -7,6 +7,7 @@ import { BusinessAssetsService } from '../business-assets/business-assets.servic
 import { dnaScoresForReader, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import {
   analyzeTemporalForReader,
+  blueprintForReader,
   GENOME_COMPOSITES,
   isServedDnaKey,
   readsRevenueFor,
@@ -35,12 +36,16 @@ export class BusinessIntelligenceService {
     reader?: GenomeReader | null,
   ): Promise<BusinessExecutiveBrief> {
     const readsRevenue = await readsRevenueFor(this.prisma, businessId, reader);
-    const [blueprint, rawProposals, temporalAnalysis, assets] = await Promise.all([
+    const [rawBlueprint, rawProposals, temporalAnalysis, assets] = await Promise.all([
       this.blueprint.getBlueprint(businessId),
       this.genomeEvolution.list(businessId, { status: 'PENDING' }),
       analyzeTemporalForReader(this.temporal, businessId, reader, readsRevenue),
       this.businessAssets.list(businessId),
     ]);
+    const blueprint = blueprintForReader(
+      rawBlueprint as unknown as Record<string, unknown>,
+      readsRevenue,
+    ) as unknown as typeof rawBlueprint;
 
     const proposals = readsRevenue
       ? rawProposals

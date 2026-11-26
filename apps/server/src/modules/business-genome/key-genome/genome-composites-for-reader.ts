@@ -367,7 +367,9 @@ export function blueprintForReader<T extends Record<string, unknown>>(blueprint:
   if (isPlainObject(confidence)) {
     const kept: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(confidence)) {
-      if (!MONEY_WHOLE_COLUMNS.includes(key)) kept[key] = value;
+      if (!MONEY_WHOLE_COLUMNS.includes(key) && !(key in MONEY_BLUEPRINT_FIELDS)) {
+        kept[key] = value;
+      }
     }
     out.confidenceScores = kept;
   }

@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import {
   analyzeTemporalForReader,
+  blueprintForReader,
   isServedDnaKey,
   readsRevenueFor,
 } from '../business-genome/key-genome/genome-composites-for-reader';
@@ -75,13 +76,17 @@ export class KeyExecutiveModeService {
     const config = KEY_EXECUTIVE_MODE_CONFIG[keyMode];
 
     const readsRevenue = await readsRevenueFor(this.prisma, businessId, reader);
-    const [executiveBrief, blueprint, temporalAnalysis, proposals, assets] = await Promise.all([
+    const [executiveBrief, rawBlueprint, temporalAnalysis, proposals, assets] = await Promise.all([
       this.intelligence.generateExecutiveBrief(businessId, reader),
       this.blueprint.getBlueprint(businessId),
       analyzeTemporalForReader(this.temporal, businessId, reader, readsRevenue),
       this.genomeEvolution.list(businessId, { status: 'PENDING' }),
       this.businessAssets.list(businessId),
     ]);
+    const blueprint = blueprintForReader(
+      rawBlueprint as unknown as Record<string, unknown>,
+      readsRevenue,
+    ) as unknown as BlueprintData;
 
     const findings: KeyModeFinding[] = [
       ...this.fromExecutiveBrief(keyMode, config.focusDomains, executiveBrief),
