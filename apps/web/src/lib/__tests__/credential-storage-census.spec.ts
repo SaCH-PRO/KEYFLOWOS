@@ -87,7 +87,10 @@
  *   CSC-05 no credential is written to IndexedDB, Cache Storage or window.name, and no response cookie stores a
  *          credential (the only server writes are clears); the one known exception, kf-sync-queue, is a registered
  *          follow-up. A write flagged only because its name is UNRESOLVED passes when a row marked nonCredential
- *          covers it and exactly its pinned number of writes (round 15, CSC-81).
+ *          covers it and exactly its pinned number of writes (round 15, CSC-81). This admits an UNRESOLVED
+ *          response-cookie write too: a deliberate, narrow loosening of the old store exclusion (which let no
+ *          response-cookie credential write through but the follow-up), made so the src/lib/api.ts:94 request-header
+ *          copy (buildHeaders) can be registered; window.name is never admitted.
  *   CSC-06..12 repair round 1, CSC-13..17 repair round 2, below.
  *
  * Known gaps, recorded as follow-ups (FU-CENSUS-HARDENING), not closed here:
@@ -101,7 +104,11 @@
  *   - cookie strings: a cookie built up in a variable (`let c = …; c += …; document.cookie = c`); the RECORDED value
  *     and attributes of a cookie with a ternary take its first resolvable branch (a clear is decided strictly, above);
  *     a Set-Cookie header whose name is not proven, whose source does not name a set-cookie and whose receiver is not
- *     header-like (an imported `HDR` through an alias: `const h = res.headers; h.set(HDR, c)`) is not seen;
+ *     header-like is not seen. These response-header shapes drop the write entirely (none is in the tree today):
+ *     `res.writeHead(status, { [HDR]: c })`; `new Headers([[HDR, c]])` (a tuple whose name is not proven); a headers
+ *     object held in a variable and then passed (`const hh = { [HDR]: c }; fetch(u, { headers: hh })`);
+ *     `Headers.prototype.set.call(h, k, v)`; framework helpers (`reply.header(HDR, c)`, `c.header(HDR, v)`); an
+ *     aliased receiver (`const h = res.headers; h.set(HDR, c)`);
  *   - string code: code built by concatenating strings, `new Function(args, body)` with its parameters as keys,
  *     srcDoc HTML, data: URLs, minified dynamic code, comments inside string code, string code nested deeper than 3;
  *   - values are classed by pattern on their source text (VALUE_PATTERN), not resolved: a credential reached only
@@ -252,10 +259,10 @@ const REGISTRY: RegistryRow[] = [
   { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "caches.open(cacheName) in cacheFirst and networkFirstWithTimeout: STATIC_CACHE (kf-static-v3) or API_CACHE (kf-api-v4).", keyExpr: "cacheName", valueExpr: "", nonCredential: true, writes: 2 },
   { store: "cacheStorage", key: UNRESOLVED, file: "public/sw.js", why: "The 200 responses those two helpers put: static assets, and API GETs with no authorization header.", keyExpr: "cacheName", valueExpr: "request response.clone()", nonCredential: true, writes: 2 },
 
-  // src/lib/api.ts mergeHeaders (round 15): `new Headers(initHeaders).forEach((value, key) => headers.set(key, value))`
+  // src/lib/api.ts buildHeaders (round 15): `new Headers(initHeaders).forEach((value, key) => headers.set(key, value))`
   // copies a caller's request headers into the Headers object fetch sends. The name is a parameter, so on a headers
   // receiver it may be Set-Cookie; but these are REQUEST headers held in memory for one fetch: no cookie is stored.
-  { store: "response-cookie", key: UNRESOLVED, file: "src/lib/api.ts", why: "mergeHeaders copies a caller's request headers into the outgoing fetch Headers (in memory); a request header stores no cookie.", keyExpr: "value", valueExpr: "value", nonCredential: true, writes: 1 },
+  { store: "response-cookie", key: UNRESOLVED, file: "src/lib/api.ts", why: "buildHeaders copies a caller's request headers into the outgoing fetch Headers (in memory); a request header stores no cookie.", keyExpr: "value", valueExpr: "value", nonCredential: true, writes: 1 },
 
   // The service worker's offline write queue, public/sw.js. enqueue() stores each queued request's headers, so the
   // user's Authorization bearer is written to IndexedDB in clear (security review follow-up, not fixed here).
@@ -718,8 +725,11 @@ const isClear = (value: string, attrs: string[]) =>
 
 /** The branches a cookie expression can take: each arm of a top-level ternary, recursively (round 15, F3). */
 const cookieBranches = (t: string): string[] => {
-  const br = ternaryBranches(t.trim());
-  return br ? br.flatMap(cookieBranches) : [t];
+  let u = t.trim();
+  // A parenthesised arm `(b ? x : y)` is unwrapped first (round 16), so its own branches are read.
+  while (u.startsWith("(") && readExpr(u, 1, ")").end === u.length - 1) u = u.slice(1, -1).trim();
+  const br = ternaryBranches(u);
+  return br ? br.flatMap(cookieBranches) : [u];
 };
 
 /**
