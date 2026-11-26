@@ -316,6 +316,14 @@ describe("SEC-R6-m1: the backfill POST is made only for the business selected", 
     expect(backfillsFor(B), "B's backfill used up by A's stale load").toBe(1);
   });
 
+  it("a reload of A sends no second backfill for A (mutant: backfillRan never set)", async () => {
+    const hook = await loadA();
+    await settle();
+    await act(async () => { await hook.result.current.loadData(); });
+    await settle();
+    expect(backfillsFor(A), "a backfill POST with every reload").toBe(1);
+  });
+
   it("control: A -> B sends one backfill for each", async () => {
     const hook = await loadA();
     select(B);
