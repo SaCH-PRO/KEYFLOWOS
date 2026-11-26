@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { KeyInboxMessage } from '@prisma/client';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { fenceUntrusted, withUntrustedContentRule } from '../ai/untrusted-content';
+import { normalizeKeyInboxChannel } from './key-inbox.constants';
 import type { InboxAnalysis, InboxEntities, InboxSuggestedAction } from './key-inbox.types';
 
 const SYSTEM_PROMPT = `You are KEY, the inbox intelligence engine for KeyFlowOS.
@@ -100,7 +101,7 @@ export class KeyInboxAnalysisService {
 
   private buildUserContent(content: string, context?: { subject?: string; channel?: string }): string {
     const headerParts: string[] = [];
-    if (context?.channel) headerParts.push(`Channel: ${context.channel}`);
+    if (context?.channel) headerParts.push(`Channel: ${normalizeKeyInboxChannel(context.channel)}`);
 
     const untrustedParts: string[] = [];
     if (context?.subject) untrustedParts.push(`Subject: ${context.subject}`);
