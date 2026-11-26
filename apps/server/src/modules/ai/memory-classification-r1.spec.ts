@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   classifyEmbeddingWrite,
   classifyTemporalMemoryWrite,
+  mergeMemoryClassifications,
 } from './memory-classification';
 import { upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
 import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory.service';
@@ -295,6 +296,99 @@ describe('MEM-CLASS-COLUMNS R1 regressions', () => {
         data: expect.objectContaining({
           dataClass: 'REVENUE',
           moduleScope: ['bookings', 'revenue'],
+        }),
+      }),
+    );
+  });
+
+  it('[R2-COR-01] revenue/expenses scope added via tag or moduleScope patch promotes GENERAL rows to REVENUE', async () => {
+    // 1. mergeMemoryClassifications enforces revenue/expenses -> dataClass >= REVENUE while preserving PERSONAL/SECRET_BEARING
+    expect(
+      mergeMemoryClassifications([
+        { dataClass: 'GENERAL', moduleScope: ['bookings'] },
+        { dataClass: null, moduleScope: ['revenue'] },
+      ]),
+    ).toEqual({ dataClass: 'REVENUE', moduleScope: ['bookings', 'revenue'] });
+    expect(
+      mergeMemoryClassifications([
+        { dataClass: 'PERSONAL', moduleScope: ['crm'] },
+        { dataClass: 'GENERAL', moduleScope: ['expenses'] },
+      ]),
+    ).toEqual({ dataClass: 'PERSONAL', moduleScope: ['crm', 'expenses'] });
+
+    // 2. classifyTemporalMemoryWrite promotes non-opaque GENERAL rows on financial or expense-only tags ('rent')
+    const taggedRev = classifyTemporalMemoryWrite({
+      entityType: 'thread',
+      entityId: 'thread_1',
+      type: 'summary',
+      sourceModule: 'key_inbox',
+      content: 'Booking confirmed for Tuesday',
+      sourceEventIds: ['ev_bk'],
+      sourceEvents: [
+        { id: 'ev_bk', source: 'calendar', type: 'booking.confirmed', module: 'bookings', entityType: 'booking', title: 'Booking confirmed' },
+      ],
+      tags: ['revenue'],
+    });
+    expect(taggedRev.dataClass).toBe('REVENUE');
+    expect(taggedRev.moduleScope).toContain('revenue');
+
+    const taggedRent = classifyTemporalMemoryWrite({
+      entityType: 'thread',
+      entityId: 'thread_1',
+      type: 'summary',
+      sourceModule: 'key_inbox',
+      content: 'Booking confirmed for Tuesday',
+      sourceEventIds: ['ev_bk'],
+      sourceEvents: [
+        { id: 'ev_bk', source: 'calendar', type: 'booking.confirmed', module: 'bookings', entityType: 'booking', title: 'Booking confirmed' },
+      ],
+      tags: ['rent'],
+    });
+    expect(taggedRent.dataClass).toBe('REVENUE');
+    expect(taggedRent.moduleScope).toContain('expenses');
+
+    // 3. TemporalFlowMemoryService.updateMemory with explicit moduleScope: ['revenue'] or metadata.tags: ['rent'] promotes GENERAL -> REVENUE
+    const baseRow = {
+      id: 'tfm_gen',
+      businessId: 'biz_1',
+      entityType: 'thread',
+      entityId: 'thread_1',
+      type: 'summary',
+      content: 'Booking confirmed',
+      sourceEventIds: [],
+      sourceModule: 'key_inbox',
+      metadata: {},
+      confidence: 0.8,
+      dataClass: 'GENERAL',
+      moduleScope: ['bookings', 'operations'],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const updateMock = vi.fn(async (args: any) => ({ ...baseRow, ...args.data }));
+    const findFirstMock = vi.fn().mockResolvedValue(baseRow);
+    const tx = {
+      temporalFlowMemory: { findFirst: findFirstMock, update: updateMock, create: vi.fn() },
+      temporalFlowEvent: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const prisma = { client: { ...tx, $transaction: vi.fn(async (fn: any) => fn(tx)) } } as any;
+    const service = new TemporalFlowMemoryService(prisma);
+
+    await service.updateMemory('biz_1', 'tfm_gen', { moduleScope: ['revenue'] });
+    expect(updateMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dataClass: 'REVENUE',
+          moduleScope: ['bookings', 'operations', 'revenue'],
+        }),
+      }),
+    );
+
+    await service.updateMemory('biz_1', 'tfm_gen', { metadata: { tags: ['rent'] } });
+    expect(updateMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dataClass: 'REVENUE',
+          moduleScope: ['bookings', 'expenses', 'operations', 'revenue'],
         }),
       }),
     );

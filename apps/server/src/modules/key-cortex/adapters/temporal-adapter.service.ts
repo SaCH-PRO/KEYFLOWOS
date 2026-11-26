@@ -7,8 +7,6 @@ import {
   classifyTemporalMemoryWrite,
   isMemoryRowDataClass,
   mergeMemoryClassifications,
-  modulesFromIdentifiers,
-  unionModuleScopes,
   type MemoryRowDataClass,
 } from '../../ai/memory-classification';
 
@@ -138,41 +136,44 @@ export class TemporalAdapterService {
     // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): under an actor, written only onto the row that was checked, and the row
     // handed back is the one written (a row rewritten since the check is neither written nor handed back).
     const checked = await this.visibleRowFor(input);
-    const existing = checked ?? (await this.temporal.findById(input.businessId, input.memoryId));
-    let classified: { dataClass: MemoryRowDataClass; moduleScope: string[] } | undefined;
-    if (existing) {
-      const existingEventIds = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
-      const isOpaque = existing.entityType === 'business' || existing.sourceModule === 'key_cortex';
+    if (checked) {
+      const existingEventIds = Array.isArray(checked.sourceEventIds) ? checked.sourceEventIds : [];
+      const isOpaque = checked.entityType === 'business' || checked.sourceModule === 'key_cortex';
       const resolved =
         !isOpaque && existingEventIds.length > 0 && typeof this.temporal.resolveSourceEvents === 'function'
           ? await this.temporal.resolveSourceEvents(input.businessId, existingEventIds)
           : { sourceEvents: [], hasMissingSourceEvents: false };
-      classified = mergeMemoryClassifications([
+      const classified = mergeMemoryClassifications([
         {
-          dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
-            ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+          dataClass: isMemoryRowDataClass((checked as { dataClass?: unknown }).dataClass)
+            ? ((checked as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
             : null,
-          moduleScope: (existing as { moduleScope?: string[] }).moduleScope ?? null,
+          moduleScope: (checked as { moduleScope?: string[] }).moduleScope ?? null,
         },
         classifyTemporalMemoryWrite({
-          entityType: existing.entityType,
-          entityId: existing.entityId,
-          type: existing.type,
-          sourceModule: existing.sourceModule,
-          content: nextContent ?? existing.content,
+          entityType: checked.entityType,
+          entityId: checked.entityId,
+          type: checked.type,
+          sourceModule: checked.sourceModule,
+          content: nextContent ?? checked.content,
           sourceEvents: resolved.sourceEvents,
           sourceEventIds: existingEventIds,
           hasMissingSourceEvents: resolved.hasMissingSourceEvents,
         }),
       ]);
+      return this.written(
+        await this.flow.updateMemoryIfUnchanged(input.businessId, checked, {
+          content: nextContent,
+          confidence,
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
+        }),
+      );
     }
-    const patch = {
+    return this.temporal.updateMemory(input.businessId, input.memoryId, {
       content: nextContent,
       confidence,
-      ...(classified ? { dataClass: classified.dataClass, moduleScope: classified.moduleScope } : {}),
-    };
-    if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
-    return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
+    });
   }
 
   async tagMemory(input: {
@@ -191,43 +192,47 @@ export class TemporalAdapterService {
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
     const added = stringTags(input.tags);
     const tags = Array.from(new Set([...existingTags, ...added]));
-    const isOpaque = existing.entityType === 'business' || existing.sourceModule === 'key_cortex';
-    const resolved =
-      !isOpaque && existingTags.length > 0 && typeof this.temporal.resolveSourceEvents === 'function'
-        ? await this.temporal.resolveSourceEvents(input.businessId, existingTags)
-        : { sourceEvents: [], hasMissingSourceEvents: false };
-    const classified = mergeMemoryClassifications([
-      {
-        dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
-          ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
-          : null,
-        moduleScope: unionModuleScopes(
-          (existing as { moduleScope?: string[] }).moduleScope,
-          modulesFromIdentifiers(...added),
-        ),
-      },
-      classifyTemporalMemoryWrite({
-        entityType: existing.entityType,
-        entityId: existing.entityId,
-        type: existing.type,
-        sourceModule: existing.sourceModule,
-        content: existing.content,
-        sourceEvents: resolved.sourceEvents,
-        sourceEventIds: tags,
-        hasMissingSourceEvents: resolved.hasMissingSourceEvents,
-      }),
-    ]);
-    const patch = {
+    const basePatch = {
       sourceEventIds: tags,
       metadata: {
         ...(existing.metadata as Record<string, unknown> | undefined),
         tags,
       },
-      dataClass: classified.dataClass,
-      moduleScope: classified.moduleScope,
     };
-    if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
-    return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
+    if (checked) {
+      const isOpaque = existing.entityType === 'business' || existing.sourceModule === 'key_cortex';
+      const resolved =
+        !isOpaque && existingTags.length > 0 && typeof this.temporal.resolveSourceEvents === 'function'
+          ? await this.temporal.resolveSourceEvents(input.businessId, existingTags)
+          : { sourceEvents: [], hasMissingSourceEvents: false };
+      const classified = mergeMemoryClassifications([
+        {
+          dataClass: isMemoryRowDataClass((existing as { dataClass?: unknown }).dataClass)
+            ? ((existing as { dataClass?: MemoryRowDataClass }).dataClass ?? null)
+            : null,
+          moduleScope: (existing as { moduleScope?: string[] }).moduleScope ?? null,
+        },
+        classifyTemporalMemoryWrite({
+          entityType: existing.entityType,
+          entityId: existing.entityId,
+          type: existing.type,
+          sourceModule: existing.sourceModule,
+          content: existing.content,
+          sourceEvents: resolved.sourceEvents,
+          sourceEventIds: tags,
+          hasMissingSourceEvents: resolved.hasMissingSourceEvents,
+          tags: added,
+        }),
+      ]);
+      return this.written(
+        await this.flow.updateMemoryIfUnchanged(input.businessId, checked, {
+          ...basePatch,
+          dataClass: classified.dataClass,
+          moduleScope: classified.moduleScope,
+        }),
+      );
+    }
+    return this.temporal.updateMemory(input.businessId, input.memoryId, basePatch);
   }
 
   async consolidateMemories(input: {
