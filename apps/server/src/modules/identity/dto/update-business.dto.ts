@@ -164,6 +164,11 @@ export class UpdateBusinessDto {
   @Type(() => Number)
   defaultTaxRate?: number;
 
+  @ValidateIf((o: UpdateBusinessDto) => o.vatNumber !== undefined && o.vatNumber !== null)
+  @IsString()
+  @MaxLength(64)
+  vatNumber?: string | null;
+
   @IsString()
   @IsOptional()
   @MaxLength(50)
