@@ -18,7 +18,7 @@
  *
  * Mounted on the real components; only the HTTP edge (fetch, lib/api's apiGet) and next/navigation are stubbed.
  */
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
@@ -62,6 +62,18 @@ import { OrderConfirmation } from "../components/order-confirmation";
 import PublicSitePage from "../../../site/[slug]/page";
 
 const UNEARNED = ["Verified Business", "Instant Booking", "Guaranteed by KeyFlowOS"];
+
+// Repair round 1 (surviving mutant): the process clock runs in Pacific/Kiritimati (UTC+14), so a page that reads the
+// visitor's clock instead of Business.timezone lands on another day than Port of Spain and fails, on any runner.
+let savedTz: string | undefined;
+beforeAll(() => {
+  savedTz = process.env.TZ;
+  process.env.TZ = "Pacific/Kiritimati";
+});
+afterAll(() => {
+  if (savedTz === undefined) delete process.env.TZ;
+  else process.env.TZ = savedTz;
+});
 
 beforeAll(() => {
   // jsdom has no IntersectionObserver; the trust bar only uses it to fade in.
@@ -149,7 +161,7 @@ describe("store hero: no unearned badges", () => {
     cleanup();
 
     // Friday 2026-11-27 02:30 UTC is still Thursday 22:30 in Port of Spain: a late shop is open there,
-    // whatever the visitor's own clock says (the test machine runs on UTC, where it is a closed Friday).
+    // whatever the visitor's own clock says (on UTC, and on this file's UTC+14, it is a closed Friday).
     at("2026-11-27T02:30:00Z");
     renderHero(business({
       thursday: { open: "18:00", close: "23:30", closed: false },
