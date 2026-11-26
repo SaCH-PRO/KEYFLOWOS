@@ -255,8 +255,10 @@ describe("W7-WEB-OPS-SCOPE (D-40, D-96): the command queue's actions follow the 
       expect(screen.queryAllByRole("button", { name }).filter((b) => !(b as HTMLButtonElement).disabled)).toHaveLength(0);
     }
     expect(api.actions()).toHaveLength(0);
-    // D-96: the cockpit itself is every member's, its briefing still shown.
-    expect(screen.getByText("No urgent actions today.")).toBeTruthy();
+    // D-96: Today itself is every member's: its blocks still render. Release 0 AMEND under owner ruling D-295 (#80 7188960928):
+    // this replaces the old cockpit briefing check ("No urgent actions today."). Here GET .../today answers 503, so Needs you
+    // and Today render and Pulse and Get set up, which need that read's data, do not.
+    for (const name of [/^needs you$/i, /^today$/i]) expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
   }, PAGE_CASE_MS);
 
   it("[WOS-C02] RED-BEFORE: a member with operations read: once the server refuses an action (403, you have read), every item's Done, Approve and Dismiss are disabled with the reason, and a further click sends nothing", async () => {
