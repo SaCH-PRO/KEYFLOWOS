@@ -262,9 +262,9 @@ const EXPECTED_OPEN_SCOPES: Array<{
 async function cleanup() {
   if (!db) return;
   await db.connectorStatus.deleteMany({ where: { businessId: { startsWith: P } } }).catch(() => {});
-  await db.invoice.deleteMany({ where: { id: { startsWith: P } } }).catch(() => {});
-  await db.contact.deleteMany({ where: { id: { startsWith: P } } }).catch(() => {});
   for (const sql of [
+    `DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE user_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
