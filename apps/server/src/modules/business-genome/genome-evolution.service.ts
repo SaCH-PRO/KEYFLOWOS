@@ -88,12 +88,15 @@ export class GenomeEvolutionService {
     createdBy?: string,
     reader?: TemporalFlowReader,
   ): Promise<GenomeEvolutionProposalData[]> {
+    const trimmedCreator = typeof createdBy === 'string' ? createdBy.trim() : undefined;
     const effectiveReader: TemporalFlowReader | undefined =
       reader !== undefined
         ? reader
-        : typeof createdBy === 'string' && createdBy && createdBy !== 'KEY'
-          ? { id: createdBy }
-          : undefined;
+        : createdBy === undefined || createdBy === 'KEY'
+          ? undefined
+          : trimmedCreator
+            ? { id: trimmedCreator }
+            : null;
     let candidates: TemporalFlowGenomeCandidate[];
     if (effectiveReader !== undefined) {
       if (typeof this.temporal.readerFilter !== 'function') {

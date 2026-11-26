@@ -35,7 +35,10 @@ function stringTags(tags: unknown): string[] {
  * `actor` key at all (KEY's context assembly) reads as before and is that caller's to project.
  */
 type ActorInput = { actor?: TemporalFlowReader };
-const actorOf = (userId: unknown): TemporalFlowReader => (typeof userId === 'string' && userId ? { id: userId } : null);
+const actorOf = (userId: unknown): TemporalFlowReader => {
+  const id = typeof userId === 'string' ? userId.trim() : '';
+  return id ? { id } : null;
+};
 const projected = (input: ActorInput) => Object.prototype.hasOwnProperty.call(input, 'actor');
 
 /**

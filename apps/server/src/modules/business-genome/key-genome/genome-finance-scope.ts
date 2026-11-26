@@ -738,7 +738,11 @@ export async function genomeReaderRevenueLevel(prisma: PrismaService, businessId
   if (reader.role === undefined) {
     let platformRole: string | undefined;
     try {
-      platformRole = (await prisma.client.user?.findUnique({ where: { id: reader.id }, select: { role: true } }))?.role;
+      const user = await prisma.client.user?.findUnique({
+        where: { id: reader.id },
+        select: { role: true, deletedAt: true, bannedAt: true },
+      });
+      platformRole = user && !user.deletedAt && !user.bannedAt ? user.role : undefined;
     } catch {
       platformRole = undefined;
     }
