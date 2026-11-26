@@ -21,7 +21,7 @@ import { Button, Input } from "@keyflow/ui";
 import { Dialog } from "@keyflow/ui";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { useKeyEnabled } from "@/hooks/use-key-enabled";
+import { retryKeySwitch, useKeyEnabled, useKeySwitchFailed } from "@/hooks/use-key-enabled";
 import {
   fetchAiSettings,
   updateAiSettings,
@@ -83,10 +83,12 @@ function getUtilizationBg(pct: number) {
 /**
  * Settings > KEY. SWP-KEY-SHELL-SMOKE: it renders, and reads, KEY's settings only once /identity/me has said KEY is
  * on. Under the server's KEY_DISABLED it renders none of them and sends the member back to the Settings index (the
- * index does not offer KEY then either); while that read is in flight it draws the loading skeleton.
+ * index does not offer KEY then either); while that read is in flight it draws the loading skeleton. When the read
+ * fails it says so and offers Try again, with KEY still off and none of its settings read (repair round 1, COR-4).
  */
 export default function AiSettingsPage() {
   const { enabled, known } = useKeyEnabled();
+  const failed = useKeySwitchFailed();
   const router = useRouter();
   const keyOff = known && !enabled;
 
@@ -96,6 +98,18 @@ export default function AiSettingsPage() {
 
   if (enabled) return <AiSettingsContent />;
   if (keyOff) return null;
+  if (failed) {
+    return (
+      <div className="max-w-5xl space-y-3">
+        <p role="alert" className="text-sm text-muted-foreground">
+          We couldn&apos;t check whether KEY is on for your business.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => retryKeySwitch()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
   return (
     <div className="max-w-5xl space-y-6">
       <Skeleton />
