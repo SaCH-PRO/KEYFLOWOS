@@ -40,16 +40,19 @@
  * comments are the ones the TypeScript parser finds (commentRanges: the file parsed as TSX/TS/JSX/JS by its extension,
  * leading and trailing comment ranges at every node and token, none read where JSX text starts), so "/*" or "//" in a
  * string, a template, a regex literal or JSX text hides nothing.
- * A write that only clears (an empty value with Max-Age=0 / maxAge: 0) stores nothing and is not counted.
+ * A write that only clears (an empty value with Max-Age=0 / maxAge: 0) stores nothing and is not counted; it is a
+ * clear only when EVERY branch of a top-level ternary proves one, read strictly (a ternary inside the value or the
+ * Max-Age proves nothing), so an unknown arm is a write (round 15, CSC-83).
  *
  * Keys and names (round 14). Every key or name position (storage keys, cookieStore / response-cookie /
  * document.cookie / Set-Cookie names, Set-Cookie header names, cache and database names, string-code substitutions)
  * goes through one resolver, resolveKeySet, on the host file's AST. It PROVES only this grammar, and nothing else:
  *   - a string literal or a no-substitution template literal;
  *   - an identifier bound to a TOP-LEVEL `const` of the same file whose initialiser is itself provable, where the
- *     name is declared nowhere else in the file (no var, parameter, inner const, function, class, enum, import or
- *     catch of that name) and is never the target of an assignment, ++ / --, delete, a destructuring pattern or a
- *     for…of / for…in head; a file with a `with` statement or an `eval` call proves no const (provenConsts);
+ *     name is declared nowhere else in the file (no var, parameter, inner const, function, class, enum, enum member,
+ *     import or catch of that name) and is never the target of an assignment, ++ / --, delete, a destructuring
+ *     pattern or a for…of / for…in head; a file with a `with` statement, or naming `eval` anywhere but as a property
+ *     name or a declaration's own name, proves no const (provenConsts, CSC-79, CSC-80);
  *   - `a + b` and templates whose every part is provable: the cartesian product, capped at 64;
  *   - `a ? b : c`, `a || b` and `a ?? b` whose result branches are provable: the union, capped at 64;
  *   - parentheses, `as T`, `satisfies T` and `!` around a provable expression;
@@ -59,8 +62,10 @@
  * and wrappers included), parameters, imports, let / var / using, numbers, `&&`, `void`, `await`, `<T>x`, tagged
  * templates, computed names, and every identifier in a file that does not parse. A whole "*" is recorded as the key
  * UNRESOLVED. A database or cache name, and a string-code substitution, must prove ONE string, else it is UNRESOLVED
- * too. A Set-Cookie header name counts when it is proven to be "set-cookie", or when it is not proven and its source
- * names a set-cookie (`H.SET_COOKIE`). Cookie VALUES and attributes are rendered by literalValue from the same
+ * too. A Set-Cookie header name counts when it is proven to be "set-cookie", or when it is not proven and either its
+ * source names a set-cookie (`H.SET_COOKIE`) or it is set on a header-like receiver (.set / .append / .setHeader on a
+ * name ending in header(s), `new Headers(…)`, res / response / NextResponse) or is a computed key of a `headers:`
+ * object or a `new Headers({…})` argument (round 15, CSC-82); a Map or URLSearchParams .set is not one. Cookie VALUES and attributes are rendered by literalValue from the same
  * proven pieces plus numbers, and a local const that is exactly the https-only Secure ternary (CSC-78).
  *
  * A write is a CREDENTIAL write when a resolved key holds "*", when it or the key's source text matches
@@ -81,7 +86,8 @@
  *          kf_admin_user_cache, kf_auth_mode and the OAuth state cookie.
  *   CSC-05 no credential is written to IndexedDB, Cache Storage or window.name, and no response cookie stores a
  *          credential (the only server writes are clears); the one known exception, kf-sync-queue, is a registered
- *          follow-up.
+ *          follow-up. A write flagged only because its name is UNRESOLVED passes when a row marked nonCredential
+ *          covers it and exactly its pinned number of writes (round 15, CSC-81).
  *   CSC-06..12 repair round 1, CSC-13..17 repair round 2, below.
  *
  * Known gaps, recorded as follow-ups (FU-CENSUS-HARDENING), not closed here:
@@ -92,11 +98,10 @@
  *     `document` (`d = document`); a destructured jar; a Headers tuple held in its own variable; `cache.add` /
  *     `cache.addAll`; `globalThis.Cache` types; `with` blocks; Dexie / idb library databases (contacts-db.ts
  *     `new Dexie(name)`);
- *   - cookie strings: a cookie built up in a variable (`let c = …; c += …; document.cookie = c`); a cookie string's
- *     VALUE and ATTRIBUTES still take a ternary's first resolvable branch (parseCookie), so `document.cookie =
- *     \`kf_session=${on ? token : ""}; Max-Age=${on ? age : 0}\`` reads as a clear (its NAME goes through the
- *     resolver); a Set-Cookie header whose name is not proven and whose source does not name a set-cookie (an
- *     imported `HDR` holding "Set-Cookie") is not seen (round 14: before it, imports and members were followed);
+ *   - cookie strings: a cookie built up in a variable (`let c = …; c += …; document.cookie = c`); the RECORDED value
+ *     and attributes of a cookie with a ternary take its first resolvable branch (a clear is decided strictly, above);
+ *     a Set-Cookie header whose name is not proven, whose source does not name a set-cookie and whose receiver is not
+ *     header-like (an imported `HDR` through an alias: `const h = res.headers; h.set(HDR, c)`) is not seen;
  *   - string code: code built by concatenating strings, `new Function(args, body)` with its parameters as keys,
  *     srcDoc HTML, data: URLs, minified dynamic code, comments inside string code, string code nested deeper than 3;
  *   - values are classed by pattern on their source text (VALUE_PATTERN), not resolved: a credential reached only
@@ -496,30 +501,32 @@ function numberValue(t: string): string | null {
  * "; secure-on-https" (CSC-12); any other ternary takes its first resolvable branch (a known gap, see the header).
  * Cookie NAMES, database and cache names never come from here: they go through resolveKeySet.
  */
-function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
+function literalValue(ctx: Ctx, text: string, depth = 0, strict = false): string | null {
   const t = text.trim().replace(/\s+as\s+const$/, "");
   if (depth > MAX_DEPTH || t === "") return null;
   // One whole string literal only: a yoda `"https:" === p ? "; Secure" : ""` starts and ends with a quote too (CSC-A4).
   if ((t[0] === '"' || t[0] === "'") && skipString(t, 0) === t.length) return t.slice(1, -1);
   if (t.startsWith("`") && t.endsWith("`") && splitTop(t, "+").length === 1) {
     return templateParts(t.slice(1, -1))
-      .map((p, i) => (i % 2 === 0 ? p : (literalValue(ctx, p, depth + 1) ?? "*")))
+      .map((p, i) => (i % 2 === 0 ? p : (literalValue(ctx, p, depth + 1, strict) ?? "*")))
       .join("");
   }
   const sum = splitTop(t, "+");
   if (sum.length > 1) {
     const num = numberValue(t);
     if (num !== null) return num;
-    return sum.map((p) => literalValue(ctx, p, depth + 1) ?? "*").join("");
+    return sum.map((p) => literalValue(ctx, p, depth + 1, strict) ?? "*").join("");
   }
   const num = numberValue(t);
   if (num !== null) return num;
   if (SECURE_TERNARY.test(t)) return SECURE_MARK;
   const branches = ternaryBranches(t);
+  // Strict (deciding a clear, round 15): a ternary is not one value, so it proves nothing.
+  if (branches && strict) return null;
   if (branches) {
     for (const b of branches) {
       if (/^(?:null|undefined)$/.test(b)) continue;
-      const v = literalValue(ctx, b, depth + 1);
+      const v = literalValue(ctx, b, depth + 1, strict);
       if (v !== null) return v;
     }
     return null;
@@ -527,7 +534,7 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
   if (IDENT.test(t)) {
     const parsed = parseFile(ctx.file, ctx.src);
     const init = parsed.ok ? provenConsts(parsed.sf).consts.get(t) : undefined;
-    if (init) return literalValue(ctx, init.getText(parsed.sf), depth + 1);
+    if (init) return literalValue(ctx, init.getText(parsed.sf), depth + 1, strict);
     // A local `const secure = isHttps() ? "; Secure" : ""` (workspace.ts): only the https-only Secure mark is read
     // from an unproven const. It is an attribute, never a value or a Max-Age, so it cannot make a write a clear.
     const local = constText(ctx.src, t, ctx.at);
@@ -676,8 +683,8 @@ function lineOf(src: string, at: number): number {
 }
 
 /** A cookie string rendered from its source: name, value and the attributes (lower-case, in order). */
-function parseCookie(ctx: Ctx, raw: string): { name: string; value: string; attrs: string[] } {
-  const rendered = literalValue(ctx, raw) ?? "*";
+function parseCookie(ctx: Ctx, raw: string, strict = false): { name: string; value: string; attrs: string[] } {
+  const rendered = literalValue(ctx, raw, 0, strict) ?? "*";
   const [pair, ...rest] = rendered.split(";");
   const eq = pair.indexOf("=");
   const name = (eq === -1 ? pair : pair.slice(0, eq)).trim();
@@ -687,7 +694,7 @@ function parseCookie(ctx: Ctx, raw: string): { name: string; value: string; attr
 }
 
 /** The options object of a response cookie, as cookie attributes. */
-function optionAttrs(ctx: Ctx, opts: string): string[] {
+function optionAttrs(ctx: Ctx, opts: string, strict = false): string[] {
   const attrs: string[] = [];
   const prop = (k: string) => {
     const m = opts.match(new RegExp(`\\b${k}\\s*:\\s*`));
@@ -696,7 +703,7 @@ function optionAttrs(ctx: Ctx, opts: string): string[] {
   const p = prop("path");
   if (p !== null) attrs.push(`path=${literalValue(ctx, p) ?? "*"}`);
   const age = prop("maxAge");
-  if (age !== null) attrs.push(`max-age=${literalValue(ctx, age) ?? "*"}`);
+  if (age !== null) attrs.push(`max-age=${literalValue(ctx, age, 0, strict) ?? "*"}`);
   const same = prop("sameSite");
   if (same !== null) attrs.push(`samesite=${(literalValue(ctx, same) ?? "*").toLowerCase()}`);
   const secure = prop("secure");
@@ -708,6 +715,22 @@ function optionAttrs(ctx: Ctx, opts: string): string[] {
 
 const isClear = (value: string, attrs: string[]) =>
   value === "" && attrs.some((a) => a === "max-age=0" || /^expires=thu, 01 jan 1970/.test(a));
+
+/** The branches a cookie expression can take: each arm of a top-level ternary, recursively (round 15, F3). */
+const cookieBranches = (t: string): string[] => {
+  const br = ternaryBranches(t.trim());
+  return br ? br.flatMap(cookieBranches) : [t];
+};
+
+/**
+ * A cookie string write that only clears: EVERY branch proves an empty value and Max-Age=0 (or a 1970 Expires), read
+ * strictly (a ternary inside proves nothing). Otherwise it is a write, its value unknown, and it counts (F3).
+ */
+const clearsOnly = (ctx: Ctx, raw: string) =>
+  cookieBranches(raw).every((b) => {
+    const { value, attrs } = parseCookie(ctx, b, true);
+    return isClear(value, attrs);
+  });
 
 const KEY_CAP = 64;
 
@@ -721,7 +744,10 @@ interface ConstFacts {
 
 const isAssignOp = (k: ts.SyntaxKind) => k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
 
-/** Is this identifier the name a declaration binds: a variable, binding element, parameter, function, class, enum, namespace or import, in any scope? */
+/**
+ * Is this identifier the name a declaration binds: a variable, binding element, parameter, function, class, enum, enum
+ * member (inside its enum body an unqualified name is the member, round 15), namespace or import, in any scope?
+ */
 function isDeclName(n: ts.Identifier): boolean {
   const p = n.parent;
   return (
@@ -733,6 +759,7 @@ function isDeclName(n: ts.Identifier): boolean {
       ts.isClassDeclaration(p) ||
       ts.isClassExpression(p) ||
       ts.isEnumDeclaration(p) ||
+      ts.isEnumMember(p) ||
       ts.isModuleDeclaration(p) ||
       ts.isImportClause(p) ||
       ts.isNamespaceImport(p) ||
@@ -774,12 +801,31 @@ function isWritten(n: ts.Identifier): boolean {
   }
 }
 
+/** Is this identifier a property name (of an access, an object literal, a class or type member, a JSX attribute or an import / export alias), not a reference? */
+function isPropertyNamePos(n: ts.Identifier): boolean {
+  const p = n.parent;
+  return (
+    ((ts.isPropertyAccessExpression(p) || ts.isQualifiedName(p)) && (ts.isPropertyAccessExpression(p) ? p.name : p.right) === n) ||
+    ((ts.isPropertyAssignment(p) ||
+      ts.isMethodDeclaration(p) ||
+      ts.isMethodSignature(p) ||
+      ts.isPropertyDeclaration(p) ||
+      ts.isPropertySignature(p) ||
+      ts.isGetAccessorDeclaration(p) ||
+      ts.isSetAccessorDeclaration(p) ||
+      ts.isJsxAttribute(p)) &&
+      p.name === n) ||
+    ((ts.isBindingElement(p) || ts.isImportSpecifier(p) || ts.isExportSpecifier(p)) && p.propertyName === n)
+  );
+}
+
 const factsCache = new WeakMap<ts.SourceFile, ConstFacts>();
 /**
  * The consts the resolver may read in a file that parses: a TOP-LEVEL `const NAME = init` (an identifier binding;
  * not let, var or using) where NAME is declared nowhere else in the file (no var, parameter, inner const, function,
- * class, enum, import or catch of that name, so no scope holds another NAME) and is never written (isWritten). A
- * file with a `with` statement or an `eval` call proves no const: either can put another NAME in scope.
+ * class, enum, enum member, import or catch of that name, so no scope holds another NAME) and is never written
+ * (isWritten). A file with a `with` statement, or that names `eval` anywhere but as a property name or a declaration's
+ * own name, proves no const: either can put another NAME in scope.
  */
 function provenConsts(sf: ts.SourceFile): ConstFacts {
   const hit = factsCache.get(sf);
@@ -796,7 +842,9 @@ function provenConsts(sf: ts.SourceFile): ConstFacts {
   let opaque = false;
   const visit = (n: ts.Node) => {
     if (ts.isWithStatement(n)) opaque = true;
-    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "eval") opaque = true;
+    // `eval` anywhere but as a property name or a declaration's own name: `eval(…)`, `(eval)(…)`, `(eval as any)(…)`,
+    // `const e = eval` (round 15, F1). A direct eval can declare another NAME in the calling scope.
+    if (ts.isIdentifier(n) && n.text === "eval" && !isDeclName(n) && !isPropertyNamePos(n)) opaque = true;
     if (ts.isIdentifier(n)) {
       if (isDeclName(n)) decls.set(n.text, (decls.get(n.text) ?? 0) + 1);
       else if (isWritten(n)) written.add(n.text);
@@ -916,8 +964,8 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
     const joined = rawIn.match(/^\[([\s\S]*)\]\s*\.\s*join\s*\(\s*(?:(["'`])([\s\S]*?)\2)?\s*\)$/);
     const raw = joined ? splitTop(joined[1], ",").filter((x) => x !== "").join(joined[3] ? ` + ${JSON.stringify(joined[3])} + ` : " + ") : rawIn;
     const c = { ...base, at };
-    const { value, attrs } = parseCookie(c, raw);
-    if (isClear(value, attrs)) return;
+    if (clearsOnly(c, raw)) return;
+    const { attrs } = parseCookie(c, raw);
     const keySource = raw.split("=")[0];
     const valueSource = raw.slice(raw.indexOf("=") + 1).split(";")[0];
     // The cookie's name through the key resolver (round 12): each candidate string's part before its first "=".
@@ -943,7 +991,8 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
       };
       const value = prop("value");
       const attrs = optionAttrs(base, obj);
-      if (/^(["'`])\1$/.test(value) && attrs.includes("max-age=0")) return;
+      // A clear only when the Max-Age proves 0 strictly (a ternary proves nothing, F3).
+      if (/^(["'`])\1$/.test(value) && optionAttrs(base, obj, true).includes("max-age=0")) return;
       for (const key of keysFrom(resolveKeySet({ ...base, at }, prop("name")))) {
         push({ store, key, expr: prop("name"), value: valueText(base, value), attrs }, at);
       }
@@ -951,7 +1000,7 @@ function handlersFor(file: string, src: string, base: Ctx, push: (w: Omit<Write,
     }
     const second = args[1] ?? "";
     const attrs = optionAttrs(base, args[2] ?? "");
-    if (/^(["'`])\1$/.test(second) && attrs.includes("max-age=0")) return;
+    if (/^(["'`])\1$/.test(second) && optionAttrs(base, args[2] ?? "", true).includes("max-age=0")) return;
     for (const key of keysFrom(resolveKeySet({ ...base, at }, first))) push({ store, key, expr: first, value: valueText(base, second), attrs }, at);
   };
 
@@ -1254,10 +1303,28 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
    * CSC6-SEC-2). A name it cannot prove counts when its source names a set-cookie (`H.SET_COOKIE`, an imported
    * SET_COOKIE_HEADER), as the member and import resolution before round 14 found it.
    */
-  const isSetCookieExpr = (n: ts.Node | undefined) =>
+  const isSetCookieExpr = (n: ts.Node | undefined, headerLike = false) =>
     !!n &&
     (isSetCookieName(n) ||
-      resolveKeySet({ ...base, at: n.getStart(sf) }, text(n)).some((k) => k.toLowerCase() === "set-cookie" || (k.includes("*") && /set[\W_]*cookie/i.test(text(n)))));
+      resolveKeySet({ ...base, at: n.getStart(sf) }, text(n)).some(
+        (k) => k.toLowerCase() === "set-cookie" || (k.includes("*") && (headerLike || /set[\W_]*cookie/i.test(text(n)))),
+      ));
+  /**
+   * A receiver that holds headers (round 15): a name ending in header / headers, `new Headers(…)`, or res / response /
+   * NextResponse (whose .headers ends in headers too). On one, an unproven header name may be Set-Cookie (fail closed).
+   * A Map or URLSearchParams `.set` is not one.
+   */
+  const isHeaderReceiver = (e: ts.Expression) => {
+    const u = unwrap(e);
+    if (ts.isNewExpression(u) && ts.isIdentifier(u.expression) && u.expression.text === "Headers") return true;
+    const name = lastName(u);
+    return /headers?$/i.test(name) || /^(?:res|response|NextResponse)$/.test(name);
+  };
+  /** An object literal of headers: the value of a `headers:` property, or the argument of `new Headers(…)`. */
+  const isHeadersObject = (o: ts.Node) =>
+    ts.isObjectLiteralExpression(o) &&
+    ((ts.isPropertyAssignment(o.parent) && o.parent.initializer === o && propertyName(o.parent.name) === "headers") ||
+      (ts.isNewExpression(o.parent) && ts.isIdentifier(o.parent.expression) && o.parent.expression.text === "Headers"));
   const setCookieNode = (v: ts.Node | undefined, pos: number) => {
     if (!v) return;
     if (ts.isArrayLiteralExpression(v)) for (const el of v.elements) cookieString("response-cookie", text(el), pos);
@@ -1377,7 +1444,9 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
       if (m.name === "set" && (isCookiesProp(u) || isCookiesCall(u) || (ts.isIdentifier(u) && jars.has(u.text)))) {
         cookieArgs("response-cookie", pos, a);
       }
-      if ((m.name === "set" || m.name === "append" || m.name === "setHeader") && isSetCookieExpr(n.arguments[0])) setCookieNode(n.arguments[1], pos);
+      if ((m.name === "set" || m.name === "append" || m.name === "setHeader") && isSetCookieExpr(n.arguments[0], isHeaderReceiver(m.recv))) {
+        setCookieNode(n.arguments[1], pos);
+      }
       if (m.name === "open" && lastName(m.recv) === "caches") keyed("cacheStorage", a[0] ?? "", "", pos);
       if (m.name === "put") {
         if (ts.isIdentifier(u) && cacheVars.has(u.text)) cachePut(pos, a[0] ?? "", a[1] ?? "", cacheVars.get(u.text)!);
@@ -1436,7 +1505,7 @@ function scanSourceAst(file: string, src: string, sf: ts.SourceFile, base: Ctx, 
     }
     if (ts.isPropertyAssignment(n)) {
       const name = propertyName(n.name);
-      const isSc = typeof name === "string" ? name.toLowerCase() === "set-cookie" : isSetCookieExpr(name);
+      const isSc = typeof name === "string" ? name.toLowerCase() === "set-cookie" : isSetCookieExpr(name, isHeadersObject(n.parent));
       if (isSc) setCookieNode(n.initializer, at(n));
       return;
     }
