@@ -31,6 +31,7 @@ import {
   Settings,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 import { getStoredBusinessId, ensureWorkspace, getCachedBusiness } from "@/lib/workspace";
 import { fetchToday, fetchKeyDisabled, type TodayAggregate } from "@/lib/api/today";
 import {
@@ -264,7 +265,7 @@ export default function CommandCenterPage() {
   return (
     <WorkspaceShell
       icon={LayoutDashboard}
-      title="Today"
+      title={NAV_ROUTE_LABELS["/app/command-center"]}
       subtitle={businessName ?? "What needs you, what is on today, and how the money stands"}
       actionLabel="Refresh"
       actionIcon={RefreshCw}
