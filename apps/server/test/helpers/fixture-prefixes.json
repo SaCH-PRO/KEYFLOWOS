@@ -1560,6 +1560,11 @@
       "prefix": "v72c_",
       "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
       "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
+    },
+    {
+      "prefix": "v91c_",
+      "owner": "apps/server/test/key-invoice-email-pay-link.integration.test.ts",
+      "packet": "V1-91 (FU-KEY-INVOICE-EMAIL-PAY-LINK)"
     }
   ],
   "pendingRenames": [],
