@@ -763,8 +763,14 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   for (const m of src.matchAll(/(["'])set-cookie\1\s*:/gi)) {
     setCookieValue(readExpr(src, m.index! + m[0].length, ",}").text, m.index!);
   }
+  // The tuple form only (CSC2-COR-D): a two-element ["Set-Cookie", value] that is itself an entry of an outer array
+  // (its "[" follows "[" or ","), as in new Headers([[…], …]) or headers: [[…]]. A header-name list such as
+  // ["set-cookie", "content-length"] is not a write.
   for (const m of src.matchAll(/\[\s*(["'])set-cookie\1\s*,/gi)) {
-    setCookieValue(readExpr(src, m.index! + m[0].length).text, m.index!);
+    if (!/[[,]\s*$/.test(src.slice(Math.max(0, m.index! - 40), m.index!))) continue;
+    const value = readExpr(src, m.index! + m[0].length);
+    if (!/^\s*,?\s*\]/.test(src.slice(value.end))) continue;
+    setCookieValue(value.text, m.index!);
   }
 
   // Cache Storage: the names opened (CSC-07), and what is put into each (CSC-17, CSC-A2). A put's receiver is bound
@@ -1606,7 +1612,11 @@ describe("CSC-26 String(x) of a const is followed one hop", () => {
 
 describe("CSC-27 only the Headers tuple shape is a Set-Cookie write", () => {
   it("a header-name list starting with set-cookie is not a cookie write", () => {
-    const fixture = [`const HOP = ["set-cookie", "content-length"];`, `const H2 = ['Set-Cookie', 'x-kf-session'];`].join("\n");
+    const fixture = [
+      `const HOP = ["set-cookie", "content-length"];`,
+      `const H2 = ['Set-Cookie', 'x-kf-session'];`,
+      `const GROUPS = [["set-cookie", "x-kf-token", "content-length"]];`,
+    ].join("\n");
     expect(scan("src/fixture-hop-list.ts", fixture).filter((w) => w.store === "response-cookie")).toEqual([]);
   });
 
