@@ -350,6 +350,8 @@ export class ExpensePostingService {
       currency: string;
       paidAt: Date;
       paymentMethod: string | null;
+      paymentCoaId?: string | null;
+      paymentAccountId?: string | null;
       description: string;
       contactId?: string | null;
       vendor?: string | null;
@@ -358,7 +360,12 @@ export class ExpensePostingService {
   ) {
     if (expense.amount <= 0) return null;
     const apCoaId = await this.resolveSystemCoa(expense.businessId, 'ACCOUNTS_PAYABLE');
-    const cashCoaId = await this.resolvePaymentCoa(expense.businessId, expense.paymentMethod);
+    const creditCoaId =
+      expense.paymentCoaId ?? (await this.resolvePaymentCoa(expense.businessId, expense.paymentMethod));
+    const metadata = {
+      ...(expense.paymentAccountId ? { paymentAccountId: expense.paymentAccountId } : {}),
+      ...(expense.paymentMethod ? { paymentMethod: expense.paymentMethod } : {}),
+    };
     return this.posting.post(
       {
         businessId: expense.businessId,
@@ -372,9 +379,10 @@ export class ExpensePostingService {
         sourceId: expense.id,
         kind: 'bill_paid',
         reference: expense.vendor ?? null,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
         entries: [
           { accountId: apCoaId, debit: expense.amount, memo: `Pay bill: ${expense.vendor ?? expense.description}` },
-          { accountId: cashCoaId, credit: expense.amount, memo: expense.vendor ?? expense.description },
+          { accountId: creditCoaId, credit: expense.amount, memo: expense.vendor ?? expense.description },
         ],
       },
       txClient,

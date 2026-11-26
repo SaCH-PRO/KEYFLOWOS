@@ -332,8 +332,20 @@ beforeAll(async () => {
   });
 
   const now = new Date();
-  const inTwoHours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  const inThreeHours = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  // Seed today's booking at local noon in bizA's timezone (America/Port_of_Spain, UTC-4)
+  // so it always falls inside TodayService's [dayStart, dayEnd] window at every hour of the UTC day.
+  const localNoonToday = (() => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Port_of_Spain',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    // America/Port_of_Spain is fixed UTC-4 (no DST): 12:00 local = 16:00 UTC on that local date.
+    return new Date(Date.UTC(get('year'), get('month') - 1, get('day'), 16, 0, 0, 0));
+  })();
+  const bookingEnd = new Date(localNoonToday.getTime() + 60 * 60 * 1000);
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
   // Today's booking
@@ -343,8 +355,8 @@ beforeAll(async () => {
       businessId: ID.bizA,
       contactId: ID.contactMaria,
       serviceId: ID.serviceA,
-      startTime: inTwoHours,
-      endTime: inThreeHours,
+      startTime: localNoonToday,
+      endTime: bookingEnd,
       status: 'CONFIRMED',
     },
   });
@@ -646,7 +658,18 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
       },
     });
     const now = new Date();
-    const soonStart = new Date(now.getTime() + 90 * 60_000);
+    // 14:00 local time in America/Port_of_Spain (fixed UTC-4 -> 18:00 UTC on that local date)
+    // stays inside TodayService's [dayStart, dayEnd] window at every hour of the UTC day.
+    const soonStart = (() => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Port_of_Spain',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(now);
+      const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+      return new Date(Date.UTC(get('year'), get('month') - 1, get('day'), 18, 0, 0, 0));
+    })();
     await db.booking.create({
       data: {
         id: privateBookingId,

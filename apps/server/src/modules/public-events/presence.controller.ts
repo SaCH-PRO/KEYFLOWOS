@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Param, Post, Query, Req, Res, UseGuards 
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimit, PublicRateLimitGuard } from '../../core/guards/public-rate-limit.guard';
 import { PresenceStatsService } from './presence-stats.service';
 import { PublicEventsIngestService, type IngestEventInput } from './public-events.ingest.service';
@@ -195,7 +196,8 @@ export class PublicPresenceController {
    * Maintenance trigger — used by the verify script and admin tools to
    * force a daily aggregation pass without waiting for the scheduler.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/presence/aggregate')
   async runAggregator(
     @Param('businessId') businessId: string,
