@@ -202,5 +202,6 @@
 | P205 | FU-TODAY-ORDERS-PREMISE (server or spec: TODAY-AGGREGATE lists only PAID orders; Journey I3 expects an unpaid order to fulfil) | antigravity | open | — | TODAY-4BLOCK report #80 7188111115 |
 | P206 | FU-TODAY-APPROVALS-STAFF (server: Journey I2's STAFF member gets 403 on POST approvals; correct per D-96/D-72 or a gap?) | antigravity | open | — | TODAY-4BLOCK report #80 7188111115 |
 | P207 | FU-TODAY-OVERVIEW-PARITY (server: Money > Overview and TODAY-AGGREGATE Pulse figures differ; Journey I4) | antigravity | open | — | TODAY-4BLOCK report #80 7188111115 |
+| P208 | EXPENSES-HUB-2 (web, P1 launch-track, M, Journey H; BUG-027/028/059/061: business currency, today's Trinidad date, bill to pay later, Recurring creates a schedule; unblocks 11) | claude | claimed | EXPENSES-HUB-1 (merged) | Claimed `pkt/V1-EXPENSES-HUB-2` @ `41edd8f4` (main `d0ce114f`); cloud session_017o9EBg5uEv5gUvm5sYpiG7 |
 
 Last updated: 2026-11-26 by the antigravity lane: Wave M35 PR #258 MERGED (`4d012f8c`, P111+P112+P113 landed!); assembling Wave M37 (`P114`+`P115`+`P116`+`P117` — 4 P1 launch packets); P118 (`NAV-B-LEGACY-SERVER`) & P119 (`FU-CORTEX-INSIGHT-CASH-TRUTH`) building for Wave M39.
