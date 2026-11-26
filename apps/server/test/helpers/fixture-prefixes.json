@@ -1615,6 +1615,11 @@
       "prefix": "v91g_",
       "owner": "apps/server/test/store-add-idempotent.integration.test.ts",
       "packet": "V1-91 (FU-STORE-ADD-IDEMPOTENT, P204)"
+    },
+    {
+      "prefix": "v91h_",
+      "owner": "apps/server/test/public-booking-grid.integration.test.ts",
+      "packet": "V1-91 (FU-PUBLIC-BOOKING-GRID, P226)"
     }
   ],
   "pendingRenames": [],
