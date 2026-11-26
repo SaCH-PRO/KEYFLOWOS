@@ -62,7 +62,6 @@ import { Providers } from "@/components/providers";
 import { TtsProvider } from "@/components/tts";
 import { KeyChatProvider, useKeyChat } from "@/components/key/chat";
 import { KeyAgent } from "@/components/key/key-agent";
-import { KeyAwarenessPanel } from "@/components/key/KeyAwarenessPanel";
 
 const BIZ = "biz_kss";
 const HOOK_PATH = "@/hooks/use-key-enabled";
@@ -126,7 +125,6 @@ let tokenSeq = 0;
 function serveMe(me: MeAnswer) {
   server.me = me;
 }
-const keyOff = () => serveMe({ status: 200, body: { id: "usr_kss", email: "owner@kss.test", keyDisabled: true } });
 const keyOn = () => serveMe({ status: 200, body: { id: "usr_kss", email: "owner@kss.test", keyDisabled: false } });
 
 beforeEach(async () => {
@@ -166,23 +164,11 @@ const settle = (ms = 100) =>
 /** KEY's chat drawer (KeyChatPanel), found as journey K's keyUiFindings finds it: by its heading. */
 const drawer = () => screen.queryByRole("heading", { name: /^KEY$/ });
 const askKey = () => screen.queryByRole("button", { name: /ask key/i });
-const palette = () => screen.queryByRole("dialog", { name: "Command palette" });
 
 async function loadHook(): Promise<() => { enabled: boolean; known: boolean }> {
   // Imported here, not at the top, so the other cases of this file still run where the hook does not exist yet.
   const mod = (await import(/* @vite-ignore */ HOOK_PATH)) as { useKeyEnabled: () => { enabled: boolean; known: boolean } };
   return mod.useKeyEnabled;
-}
-
-async function renderShell(page: ReactNode = <p>Today</p>) {
-  render(
-    <Providers>
-      <AppLayout>{page}</AppLayout>
-    </Providers>,
-  );
-  await waitFor(() => expect(document.querySelector("header"), "the app header renders").not.toBeNull(), { timeout: 4000 });
-  // /identity/me has answered for the shell; give the KEY switch's own read the same moment.
-  await settle(150);
 }
 
 /** Opens KEY's chat store directly, as openGenomeConversation does (no kf:open-key event). */
@@ -197,22 +183,6 @@ function OpenStoreButton() {
     </>
   );
 }
-
-async function renderAgent() {
-  render(
-    <Providers>
-      <TtsProvider>
-        <KeyChatProvider>
-          <KeyAgent />
-          <OpenStoreButton />
-        </KeyChatProvider>
-      </TtsProvider>
-    </Providers>,
-  );
-  await settle(150);
-  expect(drawer(), "KEY's drawer is shut before anything is pressed").toBeNull();
-}
-
 
 /** A JWT-shaped access token for one user: RequireAuth keeps the shell across a refresh that keeps the user (sub). */
 function userToken(sub = "usr_kss"): string {
