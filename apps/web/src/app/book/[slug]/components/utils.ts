@@ -1,4 +1,5 @@
 import { apiGet } from "@/lib/api";
+import { isClosedOnDate } from "./store-hours";
 import type { BusinessHours, CartItem, PromoCode } from "./types";
 
 /**
@@ -9,14 +10,30 @@ import type { BusinessHours, CartItem, PromoCode } from "./types";
  * accepts. null when the route cannot be read, answers something else, or the zone is unknown: no local guess knows
  * the bookings, so nothing is offered then.
  */
-export async function fetchAvailableSlots(params: {
+export async function fetchAvailableSlots(params: SlotQuery): Promise<string[] | null> {
+  const slots = await fetchAvailableSlotTimes(params);
+  return slots ? slots.map((s) => s.time) : null;
+}
+
+/** The query fetchAvailableSlots and fetchAvailableSlotTimes ask the public slots route. */
+export type SlotQuery = {
   businessId: string;
   serviceId: string;
   date: string;
   staffId?: string;
   timeZone?: string | null;
   signal?: AbortSignal;
-}): Promise<string[] | null> {
+};
+
+/** A time the picker offers: HH:MM on the business's clock and the exact instant the server offered for it. */
+export type SlotTime = { time: string; startIso: string };
+
+/**
+ * fetchAvailableSlots, with each time's instant: the booking posts that instant as is, so a visitor on another
+ * clock books exactly the slot offered. Where one wall time is offered twice (the hour repeated when clocks go
+ * back), the first instant is kept.
+ */
+export async function fetchAvailableSlotTimes(params: SlotQuery): Promise<SlotTime[] | null> {
   const { businessId, serviceId, date, staffId, timeZone, signal } = params;
   if (!businessId || !serviceId || !/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) return null;
   const query = new URLSearchParams({ serviceId, date });
@@ -34,7 +51,7 @@ export async function fetchAvailableSlots(params: {
     );
     const slots = res?.data?.slots;
     if (res?.error || !Array.isArray(slots)) return null;
-    const shown: string[] = [];
+    const shown: SlotTime[] = [];
     for (const s of slots) {
       const at = typeof s === "string" ? new Date(s) : null;
       if (!at || Number.isNaN(at.getTime())) return null;
@@ -43,42 +60,16 @@ export async function fetchAvailableSlots(params: {
       const mm = parts.find((p) => p.type === "minute")?.value ?? "";
       const text = `${hh}:${mm}`;
       if (!/^\d{2}:\d{2}$/.test(text)) return null;
-      if (!shown.includes(text)) shown.push(text);
+      if (!shown.some((t) => t.time === text)) shown.push({ time: text, startIso: at.toISOString() });
     }
-    return shown.sort();
+    return shown.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
   } catch {
     return null;
   }
 }
 
-const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-export function getAvailableSlots(date: string, businessHours?: BusinessHours | null): string[] {
-  if (!date) return [];
-  const d = new Date(date + "T00:00:00");
-  const dayKey = dayKeys[d.getDay()];
-  const dayH = businessHours?.[dayKey];
-  if (dayH?.closed) return [];
-  const open = dayH?.open || "09:00";
-  const close = dayH?.close || "17:00";
-  const [oh, om] = open.split(":").map(Number);
-  const [ch, cm] = close.split(":").map(Number);
-  const slots: string[] = [];
-  let t = oh * 60 + om;
-  const end = ch * 60 + cm;
-  while (t < end) {
-    const h = Math.floor(t / 60).toString().padStart(2, "0");
-    const m = (t % 60).toString().padStart(2, "0");
-    slots.push(`${h}:${m}`);
-    t += 30;
-  }
-  return slots;
-}
-
 export function isDayClosed(date: string, businessHours?: BusinessHours | null): boolean {
-  if (!date || !businessHours) return false;
-  const d = new Date(date + "T00:00:00");
-  return businessHours[dayKeys[d.getDay()]]?.closed === true;
+  return isClosedOnDate(businessHours, date);
 }
 
 export function loadCart(slug: string): CartItem[] {

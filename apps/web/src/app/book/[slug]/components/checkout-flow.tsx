@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Calendar,
   Clock,
@@ -35,8 +35,9 @@ import type {
   ShippingZone,
 } from "./types";
 import {
-  getAvailableSlots,
+  fetchAvailableSlotTimes,
   isDayClosed,
+  type SlotTime,
   calculateDiscount,
   loadCheckoutDetails,
   saveCheckoutDetails,
@@ -102,6 +103,33 @@ function paymentMethodsFor(currency: string, gateways: StorefrontGateways | null
 }
 
 /** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
+/** SWP-BOOKING-SLOTS: what a schedule row asks the public slots route: the service, date and staff member chosen. */
+type SlotRequest = { serviceId: string; date: string; staffId: string };
+const slotRequestKey = (r: SlotRequest) => JSON.stringify([r.serviceId, r.date, r.staffId]);
+
+/**
+ * SWP-BOOKING-SLOTS (BUG-122): the times each schedule row offers, as the server's public slots route answers them
+ * (fetchAvailableSlotTimes), kept by the (service, date, staff) asked. A row shows only the answer for its current
+ * request: undefined while it is pending, null when it failed; an answer for an older request never reaches it.
+ */
+function useSlotAnswers(businessId: string, timeZone: string | null | undefined, requests: SlotRequest[]) {
+  const [answers, setAnswers] = useState<Record<string, SlotTime[] | null>>({});
+  const asked = useRef(new Set<string>());
+  const signature = JSON.stringify(requests.map(slotRequestKey).sort());
+  useEffect(() => {
+    for (const key of JSON.parse(signature) as string[]) {
+      const id = `${businessId}|${timeZone ?? ""}|${key}`;
+      if (asked.current.has(id)) continue;
+      asked.current.add(id);
+      const [serviceId, date, staffId] = JSON.parse(key) as [string, string, string];
+      void fetchAvailableSlotTimes({ businessId, serviceId, date, staffId: staffId || undefined, timeZone })
+        .catch(() => null)
+        .then((slots) => setAnswers((prev) => ({ ...prev, [id]: slots })));
+    }
+  }, [businessId, timeZone, signature]);
+  return (r: SlotRequest): SlotTime[] | null | undefined => answers[`${businessId}|${timeZone ?? ""}|${slotRequestKey(r)}`];
+}
+
 type StorefrontGateways = { wipay: boolean; paypal: boolean };
 
 /**
@@ -184,6 +212,17 @@ export function CheckoutFlow({
   const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
 
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
+  // SWP-BOOKING-SLOTS: each row's request to the public slots route, once a date is picked on a day not closed.
+  const slotRequestOf = (si: CartItem): SlotRequest | null => {
+    const bd = serviceBookings[`${si.id}_${si.itemType}`];
+    if (!bd?.date || isDayClosed(bd.date, business.businessHours)) return null;
+    return { serviceId: bd.serviceId || si.sourceServiceId || si.id, date: bd.date, staffId: bd.staffId || "" };
+  };
+  const slotAnswerFor = useSlotAnswers(
+    business.id,
+    business.timezone,
+    serviceItemsInCart.map(slotRequestOf).filter((r): r is SlotRequest => r !== null),
+  );
   const hasPhysicalProducts = cart.some((c) => c.itemType === "product");
   const hasServicesOnly = serviceItemsInCart.length > 0 && !hasPhysicalProducts;
 
@@ -641,8 +680,11 @@ export function CheckoutFlow({
                       date: "",
                       time: "",
                     };
-                    const slots = getAvailableSlots(bd.date, business.businessHours);
                     const closed = isDayClosed(bd.date, business.businessHours);
+                    const slotRequest = slotRequestOf(si);
+                    // undefined: still loading; null: the route could not be read. Neither offers a time.
+                    const slotAnswer = slotRequest ? slotAnswerFor(slotRequest) : undefined;
+                    const slots: SlotTime[] = slotAnswer ?? [];
                     const updateBd = (patch: Partial<ServiceBookingData>) => {
                       setServiceBookings((prev) => ({ ...prev, [key]: { ...bd, ...patch } }));
                     };
@@ -685,7 +727,7 @@ export function CheckoutFlow({
                               <div className="flex gap-2 flex-wrap">
                                 <button
                                   type="button"
-                                  onClick={() => updateBd({ staffId: "" })}
+                                  onClick={() => updateBd({ staffId: "", time: "", startIso: undefined })}
                                   className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-all duration-200 min-h-[44px]"
                                   style={{
                                     borderColor: !bd.staffId ? `${primaryColor}40` : "rgba(0,0,0,0.04)",
@@ -699,7 +741,7 @@ export function CheckoutFlow({
                                   <button
                                     key={s.id}
                                     type="button"
-                                    onClick={() => updateBd({ staffId: s.id })}
+                                    onClick={() => updateBd({ staffId: s.id, time: "", startIso: undefined })}
                                     className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-all duration-200 min-h-[44px]"
                                     style={{
                                       borderColor: bd.staffId === s.id ? `${secondaryColor}40` : "rgba(0,0,0,0.04)",
@@ -727,7 +769,7 @@ export function CheckoutFlow({
                             <input
                               type="date"
                               value={bd.date}
-                              onChange={(e) => updateBd({ date: e.target.value, time: "" })}
+                              onChange={(e) => updateBd({ date: e.target.value, time: "", startIso: undefined })}
                               min={new Date().toISOString().split("T")[0]}
                               className="w-full rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-900 focus:outline-none transition-all duration-200 min-h-[44px]"
                               style={{
@@ -745,6 +787,20 @@ export function CheckoutFlow({
                             </div>
                           )}
 
+                          {bd.date && !closed && slotAnswer === undefined && (
+                            <div className="rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-400 text-center flex items-center justify-center gap-2">
+                              <Clock className="w-4 h-4" />
+                              Loading times…
+                            </div>
+                          )}
+
+                          {bd.date && !closed && slotAnswer === null && (
+                            <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                              Couldn&apos;t load times
+                            </div>
+                          )}
+
                           {bd.date && !closed && slots.length > 0 && (
                             <div className="space-y-2.5">
                               <label className="text-[10px] uppercase tracking-widest text-gray-400 flex items-center gap-1.5 font-medium">
@@ -756,12 +812,12 @@ export function CheckoutFlow({
                               >
                                 {slots.map((slot) => (
                                   <button
-                                    key={slot}
+                                    key={slot.startIso}
                                     type="button"
-                                    onClick={() => updateBd({ time: slot })}
+                                    onClick={() => updateBd({ time: slot.time, startIso: slot.startIso })}
                                     className="px-2 py-2.5 rounded-lg text-xs font-medium border transition-all duration-200 active:scale-95 min-h-[44px]"
                                     style={
-                                      bd.time === slot
+                                      bd.time === slot.time
                                         ? {
                                             backgroundColor: primaryColor,
                                             borderColor: primaryColor,
@@ -775,14 +831,14 @@ export function CheckoutFlow({
                                           }
                                     }
                                   >
-                                    {slot}
+                                    {slot.time}
                                   </button>
                                 ))}
                               </div>
                             </div>
                           )}
 
-                          {bd.date && !closed && slots.length === 0 && (
+                          {bd.date && !closed && slotAnswer && slotAnswer.length === 0 && (
                             <div className="rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-400 text-center">
                               No time slots available for this date.
                             </div>

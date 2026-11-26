@@ -767,7 +767,9 @@ function PublicBookingPageInner() {
         const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
         if (!bd) continue;
 
-        const startTime = new Date(`${bd.date}T${bd.time}`).toISOString();
+        // SWP-BOOKING-SLOTS: the instant the public slots route offered, as is; the date and time shown are the
+        // business's clock, so reading them on the visitor's clock booked another instant in another zone.
+        const startTime = bd.startIso ?? new Date(`${bd.date}T${bd.time}`).toISOString();
 
         for (let q = 0; q < si.quantity; q++) {
           const trimmedLocation = bd.location?.trim() || undefined;

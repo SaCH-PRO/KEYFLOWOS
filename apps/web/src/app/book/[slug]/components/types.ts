@@ -82,6 +82,8 @@ export type ServiceBookingData = {
   staffId: string;
   date: string;
   time: string;
+  /** SWP-BOOKING-SLOTS: the instant the public slots route offered for `time`, posted as the booking's startTime. */
+  startIso?: string;
   location?: string;
   locationPlaceId?: string | null;
   locationLatLng?: { lat: number; lng: number } | null;
