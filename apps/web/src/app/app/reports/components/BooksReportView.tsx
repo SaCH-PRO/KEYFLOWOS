@@ -49,7 +49,8 @@ export function BooksReportView({ businessId, kind, startDate, endDate, asOf }: 
   const settled = answer?.key === reportKey ? answer : null;
   const data = settled?.data ?? null;
   const error = settled?.error ?? null;
-  const showLoading = loading || (!!businessId && !settled);
+  // No business, nothing loads: a fetch cancelled because the business went away never clears `loading` itself.
+  const showLoading = !!businessId && (loading || !settled);
 
   useEffect(() => {
     if (!businessId) return;
