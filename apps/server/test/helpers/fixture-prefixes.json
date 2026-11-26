@@ -1420,6 +1420,11 @@
       "prefix": "v96g_",
       "owner": "apps/server/test/refund-gateway-refuse.integration.test.ts",
       "packet": "V1-96 (FU-REFUND-GATEWAY-REFUSE)"
+    },
+    {
+      "prefix": "v97p_",
+      "owner": "apps/server/test/presence-scope.integration.test.ts",
+      "packet": "V1-97 (FU-PRESENCE-REVENUE-SCOPE, P100)"
     }
   ],
   "pendingRenames": [],
