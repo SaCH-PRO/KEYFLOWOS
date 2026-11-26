@@ -134,18 +134,23 @@ export default function CommandCenterPage() {
   const keySwitch = useKeyEnabled();
   const keySwitchFailed = useKeySwitchFailed();
 
-  const [commandItems, setCommandItems] = useState<CommandItem[]>([]);
-  const [queueTotal, setQueueTotal] = useState(0);
-  const [queueLoading, setQueueLoading] = useState(false);
+  /**
+   * The command queue, kept with the business it was read for (repair round 3): after a switch nothing of the old
+   * business shows, and a reply for an older request (the old business, or a refresh since) is dropped.
+   */
+  const [queue, setQueue] = useState<{ businessId: string; items: CommandItem[]; total: number } | null>(null);
+  const [queueLoadingFor, setQueueLoadingFor] = useState<string | null>(null);
+  const queueRequest = useRef(0);
   /**
    * W7-WEB-OPS-SCOPE (D-40): the member's operations level as the server's refusals name it; the
-   * queue disables the item actions below write. Today itself is every member's (D-96).
+   * queue disables the item actions below write. Today itself is every member's (D-96). Kept with its business: a
+   * level learned in one business is not applied in another (repair round 3).
    */
-  const [operationsLevel, setOperationsLevel] = useState<OperationsLevel>("unknown");
-  /** An item action's answer: a refusal names the level, and every item action needs write. */
-  const noteActionAnswer = (res: { error?: string | null; status?: number }) => {
+  const [ops, setOps] = useState<{ businessId: string; level: OperationsLevel } | null>(null);
+  /** An item action's answer, for the business it was sent for: a refusal names the level, and every item action needs write. */
+  const noteActionAnswer = (forBusiness: string, res: { error?: string | null; status?: number }) => {
     const refused = operationsLevelFromAnswer(res);
-    if (refused) setOperationsLevel(refused);
+    if (refused) setOps({ businessId: forBusiness, level: refused });
   };
 
   useEffect(() => {
@@ -206,18 +211,19 @@ export default function CommandCenterPage() {
 
   const loadQueue = useCallback(async () => {
     if (!businessId) return;
-    setQueueLoading(true);
+    const request = ++queueRequest.current;
+    setQueueLoadingFor(businessId);
     try {
       const res = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      if (request !== queueRequest.current) return;
       const { data } = res;
-      setCommandItems(data?.items ?? []);
-      setQueueTotal(data?.total ?? 0);
+      setQueue({ businessId, items: data?.items ?? [], total: data?.total ?? 0 });
       // A refused read names the level (none); a read that succeeds means at least read.
       const refused = operationsLevelFromAnswer(res);
-      if (refused) setOperationsLevel(refused);
-      else if (data) setOperationsLevel((prev) => (prev === "none" ? "unknown" : prev));
+      if (refused) setOps({ businessId, level: refused });
+      else if (data) setOps((prev) => (prev && prev.businessId === businessId && prev.level !== "none" ? prev : { businessId, level: "unknown" }));
     } finally {
-      setQueueLoading(false);
+      if (request === queueRequest.current) setQueueLoadingFor(null);
     }
   }, [businessId]);
 
@@ -228,44 +234,44 @@ export default function CommandCenterPage() {
 
   const handleComplete = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await completeCommandItem(businessId, id));
+    noteActionAnswer(businessId, await completeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleApprove = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await approveCommandItem(businessId, id));
+    noteActionAnswer(businessId, await approveCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleExecute = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await executeCommandItem(businessId, id));
+    noteActionAnswer(businessId, await executeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleAssign = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await assignCommandItem(businessId, id, "USER", "me"));
+    noteActionAnswer(businessId, await assignCommandItem(businessId, id, "USER", "me"));
     await loadQueue();
   };
 
   const handleDismiss = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await dismissCommandItem(businessId, id));
+    noteActionAnswer(businessId, await dismissCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleSnooze = async (id: string) => {
     if (!businessId) return;
     const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    noteActionAnswer(await snoozeCommandItem(businessId, id, until));
+    noteActionAnswer(businessId, await snoozeCommandItem(businessId, id, until));
     await loadQueue();
   };
 
   const handleReopen = async (id: string) => {
     if (!businessId) return;
-    noteActionAnswer(await reopenCommandItem(businessId, id));
+    noteActionAnswer(businessId, await reopenCommandItem(businessId, id));
     await loadQueue();
   };
 
@@ -273,7 +279,7 @@ export default function CommandCenterPage() {
     if (!businessId) return;
     // W7-WEB-OPS-SCOPE review SEC-WOS-2 (D-40): discharge is an item action too (operations write);
     // its refusal names the level like the queue's actions do.
-    noteActionAnswer(await dischargeObligation(businessId, id, "manual"));
+    noteActionAnswer(businessId, await dischargeObligation(businessId, id, "manual"));
     // The queue reads the same table, so a discharged obligation has to leave both lists.
     await loadQueue();
   };
@@ -288,6 +294,10 @@ export default function CommandCenterPage() {
   const keyOff = !keySwitch.enabled;
   const keyReadSettled = keySwitch.known || keySwitchFailed;
   const current = today && today.businessId === businessId ? today.data : null;
+  const commandItems = queue && queue.businessId === businessId ? queue.items : [];
+  const queueTotal = queue && queue.businessId === businessId ? queue.total : 0;
+  const queueLoading = queueLoadingFor !== null && queueLoadingFor === businessId;
+  const operationsLevel: OperationsLevel = ops && ops.businessId === businessId ? ops.level : "unknown";
   const todayError = todayFailure && todayFailure.businessId === businessId ? todayFailure.message : null;
 
   return (
