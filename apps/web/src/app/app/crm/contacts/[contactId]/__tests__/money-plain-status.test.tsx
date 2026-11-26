@@ -76,6 +76,15 @@ describe("contact Money tab: statuses and events in plain words", () => {
     expect(document.body.textContent ?? "").not.toContain("invoice.paid");
   });
 
+  it("the server's own label wins over the code read in plain words (review MIN-1)", async () => {
+    // eventLabel("invoice.payment_recorded") would read "Invoice payment recorded"; the server says otherwise.
+    seed([{ type: "invoice.payment_recorded", label: "Payment recorded" }]);
+    render(<ContactMoneyPage />);
+    expect(await screen.findByText("Payment recorded")).toBeInTheDocument();
+    expect(screen.queryByText("Invoice payment recorded")).not.toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toContain("invoice.payment_recorded");
+  });
+
   it("an event the server has no label for (its label is its code) reads in plain words", async () => {
     seed([{ type: "invoice.written_off", label: "invoice.written_off" }]);
     render(<ContactMoneyPage />);
