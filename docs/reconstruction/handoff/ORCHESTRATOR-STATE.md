@@ -59,7 +59,7 @@ merged in. The only conflict was `fixture-prefixes.json`, resolved as the exact 
 A worker that is gone leaves its branch pushed: read its last PACKET REPORT on #80 and continue with
 PACKET-WORKER-BRIEF.md.
 
-**Next Claude wave (M33 or the next free number):** P28, P98, P34 + P99 (once P99 returns), the admin gate and the
+**Next Claude wave (M24; Antigravity uses odd numbers):** P28, P98, P34 + P99 (once P99 returns), the admin gate and the
 census (once returned, with the CSC-12 wave action). CATALOG-1 web goes in its own wave.
 
 ### 0.3 Antigravity (server lane)
