@@ -83,10 +83,11 @@ referred to on the board but is not yet a row.
   merge_method=merge` (M16 went in this way).
 
 <<<<<<< HEAD
-- **Answered by the owner 2026-11-25 ~23:20 UTC, in session.** Recorded as D-286 to D-289 in BUILD-MAP-001.md on `wave/v1-docs-p19`; they reach main with the next Claude wave's docs squash.
+- **Answered by the owner 2026-11-25 ~23:20 UTC, in session.** Recorded as D-286 to D-290 in BUILD-MAP-001.md on `wave/v1-docs-p19`; they reach main with the next Claude wave's docs squash.
   - **D-286 (question 52):** P90 SWP-CENSUS-V1-B gates all 46 rows (Option A). The ten Release 0-pinned STAFF cases are updated under the ruling. This unblocks Antigravity's P90 (P0).
   - **D-287 (questions 51 and 55):** refunds stay as built. The bookkeeping route keeps gateway rows (D-121). The web offers WiPay "Record refund" and links Stripe/PayPal to the gateway refund. FU-REFUND-GATEWAY-REFUSE is withdrawn.
   - **D-288 (question 56):** only an owner may change the owner's alerts. This is what OWNER-ALERTS-WEB built.
+  - **D-290 (asked 2026-11-26 ~00:40):** the Owner Console is reached only through the separate admin sign-in. RR-ADMIN-SHELL-SERVER-GATE hides the link from anyone without a local admin session and lets /admin/login render. Owner step: set ADMIN_EMAIL and ADMIN_PASSWORD_HASH in production before the redeploy.
   - **D-289 (question 53):** a new launch packet, CONTACTS-LIST-FIRST (web, M), puts the list first on phones and starts the cards collapsed on desktop (journey C8). The plan row has been added.
 
 ## 0. Next session starts here (2026-11-25 ~21:05 UTC)
