@@ -404,18 +404,19 @@ export class ActionDispatcherService {
     }
 
     if (succeeded) {
+      const result = successResult;
       const durationMs = Date.now() - startTime;
       this.recordSuccess(ctx.businessId, ctx.toolName);
 
       if (activeClaim) {
-        await activeClaim.complete(successResult);
+        await activeClaim.complete(result);
       }
 
       await this.executionLog.logToolExecution(
         ctx.businessId,
         ctx.toolName,
         ctx.args,
-        successResult,
+        result,
         true,
         durationMs,
         {
@@ -433,13 +434,13 @@ export class ActionDispatcherService {
         dispatchId,
         planId: ctx.planId,
         planStepId: ctx.planStepId,
-        result: successResult,
+        result,
       });
 
       // Register for undo if result contains entity info
       const resultObj =
-        successResult && typeof successResult === 'object'
-          ? (successResult as { id?: unknown; entityId?: unknown })
+        result && typeof result === 'object'
+          ? (result as { id?: unknown; entityId?: unknown })
           : null;
       const entityId =
         typeof resultObj?.id === 'string'
@@ -460,9 +461,9 @@ export class ActionDispatcherService {
         }
       }
 
-      await this.runFeedback(ctx, successResult, true);
+      await this.runFeedback(ctx, result, true);
 
-      return { success: true, result: successResult, dispatchId, durationMs };
+      return { success: true, result, dispatchId, durationMs };
     }
 
     const durationMs = Date.now() - startTime;
