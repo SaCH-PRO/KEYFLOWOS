@@ -156,7 +156,17 @@ async function readDocumentBody(
     await discardBody(res);
     throw signal.reason;
   }
-  if (!res.body) return Buffer.alloc(0);
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    if (typeof res.arrayBuffer !== 'function') return Buffer.alloc(0);
+    const ab: ArrayBuffer | ArrayBufferView = await underSignal(res.arrayBuffer(), signal);
+    if (ab.byteLength > maxBytes) {
+      abort();
+      throw documentBodyTooLarge(maxBytes);
+    }
+    return ArrayBuffer.isView(ab)
+      ? Buffer.from(ab.buffer, ab.byteOffset, ab.byteLength)
+      : Buffer.from(ab);
+  }
 
   const reader = res.body.getReader();
   const chunks: Buffer[] = [];

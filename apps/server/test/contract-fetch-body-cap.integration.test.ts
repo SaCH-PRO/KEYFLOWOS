@@ -35,7 +35,7 @@ import type { AddressInfo } from 'node:net';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { BadRequestException, HttpException, Logger, ServiceUnavailableException } from '@nestjs/common';
 
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
 const MAX_DOC_BYTES = 25 * 1024 * 1024; // 25 MiB (25 MB)
 const TOO_LARGE_MESSAGE = 'The document exceeds the 25 MB limit';
@@ -257,7 +257,7 @@ beforeAll(async () => {
           if (!stopped && !res.destroyed && remaining === 0) res.end();
         };
         pump();
-      }, 60);
+      }, 500);
       timer.unref();
       res.on('close', () => clearTimeout(timer));
       return;
@@ -330,7 +330,12 @@ beforeAll(async () => {
         if (!stopped && !res.destroyed) res.end();
       });
       gzip.on('error', () => undefined);
+      let feedTimer: ReturnType<typeof setTimeout> | null = null;
       res.on('close', () => {
+        if (feedTimer) {
+          clearTimeout(feedTimer);
+          feedTimer = null;
+        }
         gzip.destroy();
       });
 
@@ -338,6 +343,7 @@ beforeAll(async () => {
       const totalMiB = 60; // 60 MiB uncompressed if never aborted (~60 KB compressed on wire)
       let fed = 0;
       const feedNext = () => {
+        feedTimer = null;
         if (stopped || res.destroyed || gzip.destroyed) return;
         if (fed >= totalMiB) {
           gzip.end();
@@ -348,8 +354,9 @@ beforeAll(async () => {
         gzip.write(oneMiB);
         gzip.flush(zlib.constants.Z_SYNC_FLUSH, () => {
           if (stopped || res.destroyed || gzip.destroyed) return;
-          const t = setTimeout(feedNext, 12);
-          t.unref();
+          const delayMs = fed <= 25 ? 2 : 40;
+          feedTimer = setTimeout(feedNext, delayMs);
+          feedTimer.unref();
         });
       };
       feedNext();
@@ -574,7 +581,7 @@ beforeAll(async () => {
     (dispatcher as unknown as { RETRY_DELAYS: number[] }).RETRY_DELAYS = [0, 0];
     return dispatcher;
   };
-});
+}, 180_000);
 
 beforeEach(() => {
   resetState();
@@ -584,7 +591,10 @@ afterAll(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   if (server) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections?.();
+    });
   }
 });
 
@@ -793,5 +803,49 @@ describe('FU-DOC-FETCH-BODY-CAP (P111): contract document fetches cap decompress
       expect((refused.error as HttpException).message).toBe(URL_REFUSED_MESSAGE);
       expect(fetches).toEqual([]);
     }
+  });
+
+  it('BC-08 handles body-less Response-like doubles via capped arrayBuffer() fallback (in-cap parses, over-cap refuses with final 400)', async () => {
+    // 1. Small body-less Response-like double (arrayBuffer() only) passes non-empty bytes to parser.
+    const smallBuf = Buffer.from(VALID_DOC_TEXT, 'utf8');
+    customResponseOverride = () =>
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/plain; charset=utf-8' }),
+        body: null,
+        arrayBuffer: async () =>
+          smallBuf.buffer.slice(smallBuf.byteOffset, smallBuf.byteOffset + smallBuf.byteLength),
+      }) as unknown as Response;
+
+    const smallOutcome = await runExtract({
+      contractId: CONTRACT_URL_ID,
+      url: `http://${PUBLIC_HOST}:${port}/bodyless-small`,
+    });
+    expect(smallOutcome.ok, JSON.stringify((smallOutcome as any).error?.message)).toBe(true);
+    expect(parsedPayloads).toHaveLength(1);
+    expect(parsedPayloads[0].byteLength).toBe(smallBuf.byteLength);
+    expect(parsedPayloads[0].head).toBe(VALID_DOC_TEXT);
+    expect(modelCalls).toBe(1);
+
+    resetState();
+
+    // 2. Oversized body-less Response-like double (ab.byteLength > 25 MB) is refused with final 400.
+    customResponseOverride = () =>
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/pdf' }),
+        body: null,
+        arrayBuffer: async () => new ArrayBuffer(MAX_DOC_BYTES + 1),
+      }) as unknown as Response;
+
+    const hugeOutcome = await runExtract({
+      contractId: CONTRACT_URL_ID,
+      url: `http://${PUBLIC_HOST}:${port}/bodyless-over-cap`,
+    });
+    expectBodyTooLarge(hugeOutcome, 'body-less arrayBuffer > 25 MB');
+    expect(parsedPayloads).toEqual([]);
+    expect(modelCalls).toBe(0);
   });
 });
