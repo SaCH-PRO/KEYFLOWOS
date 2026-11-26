@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { structuredPayloadCarriesMoney } from '../../key-autonomy/proposal-money-tag';
 import { GenomeMemoryService } from './genome-memory.service';
 import type {
   GenomeExperimentData,
@@ -333,6 +334,11 @@ export class OutcomeLearningService {
 
     const title = row?.title ?? 'KEY action proposal';
     const actionType = row?.actionType ?? 'UNKNOWN';
+    const carriesMoney =
+      row?.carriesMoney === true ||
+      (executionResult !== null && executionResult !== undefined && structuredPayloadCarriesMoney(executionResult))
+        ? true
+        : (row?.carriesMoney ?? null);
 
     if (status === 'EXECUTED') {
       const success = executionResult && executionResult.success === true;
@@ -354,7 +360,7 @@ export class OutcomeLearningService {
           },
         ],
         // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
-        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney: row?.carriesMoney ?? null, executionResult },
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney, executionResult },
       });
     }
 
@@ -375,7 +381,7 @@ export class OutcomeLearningService {
           },
         ],
         // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
-        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney: row?.carriesMoney ?? null, executionResult },
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney, executionResult },
       });
     }
 
@@ -395,7 +401,7 @@ export class OutcomeLearningService {
         },
       ],
       // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
-        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney: row?.carriesMoney ?? null, executionResult },
+      metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, carriesMoney, executionResult },
     });
   }
 

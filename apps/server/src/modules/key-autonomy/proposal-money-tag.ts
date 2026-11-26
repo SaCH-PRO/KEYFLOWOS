@@ -91,24 +91,6 @@ export const NON_MONEY_APPROVAL_REQUEST_TYPES: ReadonlySet<string> = new Set([
   'evidence_verification',
 ]);
 
-const NON_MONEY_PROPOSAL_MODULES: ReadonlySet<string> = new Set([
-  'crm',
-  'contacts',
-  'bookings',
-  'calendar',
-  'content',
-  'social',
-  'communications',
-  'projects',
-  'tasks',
-  'inbox',
-  'key_inbox',
-  'notifications',
-  'operations',
-  'helpdesk',
-  'automations',
-]);
-
 /** Pro Auto insight categories that structurally carry financial/revenue/expense data. */
 export const MONEY_PRO_AUTO_CATEGORIES: ReadonlySet<string> = new Set([
   'overdue_invoices',
@@ -145,6 +127,18 @@ const STRUCTURAL_MONEY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'reconcile_sweep_statements',
   'draft_payment_reminder',
   'bookings.add_service',
+  'bookings.update_service',
+  'bookings.get_services',
+  'bookings_list_services',
+  'contracts_stats',
+  'contracts_get',
+  'contracts_list',
+  'contracts_update',
+  'contracts_delete',
+  'contract_extract_terms',
+  'contract_extract_clauses',
+  'approval_list',
+  'approval_decide_step',
   'monitoring_overdue_invoices',
   'monitoring_cost_pressure',
   'monitoring_revenue_trend',
@@ -201,14 +195,14 @@ const PROPOSAL_MONEY_WORDS_RE =
 const SCHEMA_MONEY_KEY_RE = new RegExp(
   [
     '^(?:currency|currency_code|iso_currency|money_currency)$',
-    '^(?:price|unit_price|base_price|sale_price|list_price|amount|subtotal|tax|tax_rate|vat|discount|fee|fees|cost|unit_cost|budget|salary|wage|hourly_rate|pay_rate|rate_per_hour|commission|bonus|stipend|refund|deposit|payout|balance|revenue|margin|profit|deal_value|order_total|invoice_total|payment_amount|expense_amount|total_amount|total_price|total_cost|line_total)$',
-    '(?:^|_)(?:invoice|payment|quote|expense|bill|payroll|purchase_order|refund|retainer|credit_note|price|amount|cost|budget|currency|discount|tax|fee|salary|wage|commission|balance|revenue|margin|profit|payout|deposit)(?:_|s?$|$)',
+    '^(?:price|unit_price|base_price|sale_price|list_price|amount|subtotal|tax|tax_rate|vat|discount|fee|fees|cost|unit_cost|budget|salary|wage|hourly_rate|pay_rate|rate_per_hour|commission|bonus|stipend|refund|deposit|payout|balance|revenue|margin|profit|deal_value|contract_value|billable|order_total|invoice_total|payment_amount|expense_amount|total_amount|total_price|total_cost|line_total)$',
+    '(?:^|_)(?:invoice|payment|quote|expense|bill|billable|payroll|purchase_order|refund|retainer|credit_note|price|amount|cost|budget|currency|discount|tax|fee|salary|wage|commission|balance|revenue|margin|profit|payout|deposit|contract_value)(?:_|s?$|$)',
   ].join('|'),
   'i',
 );
 
 const SCHEMA_MONEY_ENTITY_RE =
-  /^(?:invoice|quote|payment|expense|deal|payroll|purchaseOrder|purchase_order|bill|refund|retainer|ledger|creditNote|credit_note|order|product|transaction|subscription)s?$/i;
+  /^(?:invoice|quote|payment|expense|deal|contract|payroll|purchaseOrder|purchase_order|bill|refund|retainer|ledger|creditNote|credit_note|order|product|transaction|subscription)s?$/i;
 
 const QUANTITY_KEY_PARTS =
   'counts?|items?|pages?|results?|records?|rows?|tasks?|hits?|matches|entries|contacts?|bookings?|leads?|messages?|tokens?|runs?|ms|duration(?:_?ms)?|latency(?:_?ms)?|steps?|clicks?|views?|shown|users?|members?|events?|calls?|emails?|posts?|files?|attempts?|retries';
@@ -223,7 +217,7 @@ const EXEMPT_COUNT_KEY_RE = new RegExp(
 const PURE_COUNT_LEAF_KEY_RE = new RegExp(`^(?:${COUNT_KEY_PARTS})(?:_?\\d+)?$`, 'i');
 
 const FIGURE_TRIGGER_KEY_RE =
-  /^(?:totals?|rates?|bills?|billed|billing|retainers?|tips?|loans?|spent|spend|spending|charged|wire|wired|settle|settled)(?:$|[_ -])/i;
+  /(?:^|[_ -])(?:totals?|rates?|bills?|billed|billing|retainers?|tips?|loans?|spent|spend|spending|charged|wire|wired|settle|settled)(?:$|[_ -])/i;
 
 const CURRENCY_KEY_RE = /^(?:currency|currency_code|iso_currency|money_currency)$/i;
 
@@ -283,8 +277,8 @@ const NON_MONEY_FIGURE_GUARD = `(?!${DATE_OR_PHONE_FRAG}|${TIME_OF_DAY_FRAG})`;
 /** Wide-window money figure detection (up to 12 words in same clause) without over-hiding on durations, times, or person names. */
 const WIDE_MONEY_WORD_FIGURE_RE = new RegExp(
   [
-    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?![\\s_-]*limit)(?![a-z])(?:[\\s,:;()=*~>—–-]+(?:[a-z0-9'/-]{1,30})){0,12}[\\s,:;()=*~>—–-]+[$€£¥₹]?${NON_MONEY_FIGURE_GUARD}\\d`,
-    `(?<![a-z])(?:totals?|retainers?|loans?|charged|wire[sd]?|settle(?:s|d)?|bill(?:s|ed|ing)?|tips?|spent|spend(?:s|ing)?|transfer(?:s|red)?)(?![a-z])(?:[\\s,:;()=*~>—–-]+(?:[a-z0-9'/-]{1,30})){0,12}[\\s,:;()=*~>—–-]+[$€£¥₹]?${NON_MONEY_FIGURE_GUARD}\\d`,
+    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?![\\s_-]*limit)(?![a-z])(?:[\\s_,:;()=*~>—–-]+(?:[a-z0-9'/-]{1,30})){0,12}[\\s_,:;()=*~>—–-]+[$€£¥₹]?${NON_MONEY_FIGURE_GUARD}\\d`,
+    `(?<![a-z])(?:totals?|retainers?|loans?|charged|wire[sd]?|settle(?:s|d)?|bill(?:s|ed|ing)?|tips?|spent|spend(?:s|ing)?|transfer(?:s|red)?)(?![a-z])(?:[\\s_,:;()=*~>—–-]+(?:[a-z0-9'/-]{1,30})){0,12}[\\s_,:;()=*~>—–-]+[$€£¥₹]?${NON_MONEY_FIGURE_GUARD}\\d`,
     `(?:(?<![\\d.,])[.,]+|(?<![\\d.,]))[$€£¥₹]?\\d[\\d,.]*(?:\\s*k)?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
   ].join('|'),
   'i',
@@ -330,12 +324,35 @@ function extractToolName(proposal: StructuralProposalInput): string | null {
 
 function extractRequestType(proposal: StructuralProposalInput): string | null {
   for (const source of [proposal.affectedEntities, proposal.payload, proposal.inputPayload]) {
-    if (source && typeof source === 'object' && !Array.isArray(source)) {
-      const t = (source as Record<string, unknown>).requestType;
-      if (t !== undefined && t !== null) return typeof t === 'string' ? t.trim().toLowerCase() : '?';
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    const rec = source as Record<string, unknown>;
+    const t = rec.requestType;
+    if (t !== undefined && t !== null) return typeof t === 'string' ? t.trim().toLowerCase() : '?';
+    const nestedParams = rec.params ?? rec.args ?? rec.input ?? rec.arguments;
+    if (nestedParams && typeof nestedParams === 'object' && !Array.isArray(nestedParams)) {
+      const nt = (nestedParams as Record<string, unknown>).requestType;
+      if (nt !== undefined && nt !== null) return typeof nt === 'string' ? nt.trim().toLowerCase() : '?';
     }
   }
   return null;
+}
+
+function extractHasThreshold(proposal: StructuralProposalInput): boolean {
+  for (const source of [proposal.affectedEntities, proposal.payload, proposal.inputPayload]) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    const rec = source as Record<string, unknown>;
+    if ('threshold' in rec && rec.threshold !== null && rec.threshold !== undefined && rec.threshold !== '') {
+      return true;
+    }
+    const nestedParams = rec.params ?? rec.args ?? rec.input ?? rec.arguments;
+    if (nestedParams && typeof nestedParams === 'object' && !Array.isArray(nestedParams)) {
+      const pRec = nestedParams as Record<string, unknown>;
+      if ('threshold' in pRec && pRec.threshold !== null && pRec.threshold !== undefined && pRec.threshold !== '') {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function extractStringField(sources: unknown[], key: string): string | null {
@@ -379,6 +396,7 @@ export function toolSchemaCarriesMoney(schema: ToolParamSchema | Record<string, 
 /**
  * Determines whether a tool name is structurally financial by authority map,
  * canonical module mapping, FLOW_TOOLS input/output schema, or known tool lists.
+ * Unknown/unmapped tools always fail closed (`true`).
  */
 export function isStructurallyFinancialTool(toolName: string, seen = new Set<string>()): boolean {
   const tool = toolName.trim();
@@ -389,37 +407,48 @@ export function isStructurallyFinancialTool(toolName: string, seen = new Set<str
   if (NON_MONEY_PRO_AUTO_TOOLS.has(lower)) return false;
   if (STRUCTURAL_MONEY_TOOL_NAMES.has(lower)) return true;
   if (STRUCTURAL_MONEY_TOOL_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true;
-  if (isMoneyLabelText(tool)) return true;
+  if (isMoneyLabelText(tool) || PROPOSAL_MONEY_WORDS_RE.test(tool) || PROPOSAL_MONEY_WORDS_RE.test(splitHumps(tool))) {
+    return true;
+  }
 
   if (Object.prototype.hasOwnProperty.call(KEY_ORGAN_TOOLS_UNMAPPED, tool)) return true;
 
-  const organ = keyOrganToolAuthority(tool);
-  if (organ) {
-    if ('twin' in organ) return isStructurallyFinancialTool(organ.twin, seen);
-    return organ.scopes.some((s) => MONEY_SCOPES.has(s.module));
-  }
+  const candidates = tool.includes('.') ? [tool, lower.replace(/\./g, '_')] : [tool];
+  let knownTool = false;
 
-  const canonicalMod = CANONICAL_TOOL_MODULE_MAP.get(tool);
-  if (canonicalMod && MONEY_SCOPES.has(canonicalMod)) return true;
+  for (const candidate of candidates) {
+    if (STRUCTURAL_MONEY_TOOL_NAMES.has(candidate.toLowerCase())) return true;
+    if (Object.prototype.hasOwnProperty.call(KEY_ORGAN_TOOLS_UNMAPPED, candidate)) return true;
 
-  const flowTool = getToolByName(tool);
-  if (flowTool) {
-    if (toolSchemaCarriesMoney(flowTool.parameters)) return true;
-    if (Array.isArray(flowTool.changedEntities) && flowTool.changedEntities.some((e) => SCHEMA_MONEY_ENTITY_RE.test(e))) {
-      return true;
+    const organ = keyOrganToolAuthority(candidate);
+    if (organ) {
+      knownTool = true;
+      if ('twin' in organ) {
+        if (isStructurallyFinancialTool(organ.twin, seen)) return true;
+      } else if (organ.scopes.some((s) => MONEY_SCOPES.has(s.module))) {
+        return true;
+      }
     }
-    return false;
+
+    const canonicalMod = CANONICAL_TOOL_MODULE_MAP.get(candidate);
+    if (canonicalMod) {
+      knownTool = true;
+      if (MONEY_SCOPES.has(canonicalMod)) return true;
+    }
+
+    const flowTool = getToolByName(candidate);
+    if (flowTool) {
+      knownTool = true;
+      if (toolSchemaCarriesMoney(flowTool.parameters)) return true;
+      if (Array.isArray(flowTool.changedEntities) && flowTool.changedEntities.some((e) => SCHEMA_MONEY_ENTITY_RE.test(e))) {
+        return true;
+      }
+    }
   }
 
-  // Tool is neither in FLOW_TOOLS nor in KEY_ORGAN_TOOL_AUTHORITY:
-  // allow only when its dot-prefix belongs to a known non-money module.
-  const dotPrefix = tool.includes('.') ? tool.split('.')[0].trim().toLowerCase() : '';
-  if (dotPrefix && NON_MONEY_PROPOSAL_MODULES.has(dotPrefix)) return false;
-  const snakePrefix = tool.includes('_') ? tool.split('_')[0].trim().toLowerCase() : '';
-  if (snakePrefix && NON_MONEY_PROPOSAL_MODULES.has(snakePrefix)) return false;
-
-  // Unknown / unmapped tool fails closed.
-  return true;
+  // Known non-financial tool (verified across organ authority, canonical module map,
+  // and FLOW_TOOLS schema/entities); any unknown/unmapped tool fails closed.
+  return !knownTool;
 }
 
 /**
@@ -453,25 +482,36 @@ export function isStructurallyFinancialProposal(proposal: StructuralProposalInpu
     if (suggestedTool && isStructurallyFinancialTool(suggestedTool)) return true;
   }
 
-  // Approval requests (including HUMAN_WORKFLOW shadows).
-  const isApproval = typeof actionType === 'string' && actionType.trim().toUpperCase() === 'REQUEST_APPROVAL';
-  const requestType = extractRequestType(proposal);
-  if (isApproval && requestType !== null) {
-    return !NON_MONEY_APPROVAL_REQUEST_TYPES.has(requestType);
-  }
-  if (isApproval && sourceType === 'HUMAN_WORKFLOW') return true;
+  const normalizedActionType = typeof actionType === 'string' ? actionType.trim().toUpperCase() : '';
 
-  // Known non-financial tool (verified above) makes EXECUTE_TOOL non-financial structurally.
-  if (tool) return false;
-
-  if (typeof actionType === 'string' && NON_MONEY_PROPOSAL_ACTIONS.has(actionType.trim().toUpperCase())) {
+  // Approval requests (both REQUEST_APPROVAL actions and approval_create_request tool calls):
+  // fail closed on threshold or non-allowlisted requestType, and fail closed when requestType
+  // is missing on approval_create_request or HUMAN_WORKFLOW shadow proposals.
+  const isApprovalTool = tool !== null && tool.toLowerCase() === 'approval_create_request';
+  const isApprovalAction = normalizedActionType === 'REQUEST_APPROVAL';
+  if (isApprovalTool || isApprovalAction) {
+    if (extractHasThreshold(proposal)) return true;
+    const requestType = extractRequestType(proposal);
+    if (requestType !== null) {
+      return !NON_MONEY_APPROVAL_REQUEST_TYPES.has(requestType);
+    }
+    if (isApprovalTool || sourceType === 'HUMAN_WORKFLOW') return true;
     return false;
   }
 
-  const owner = (typeof module === 'string' ? module : '').trim().toLowerCase();
-  if (owner && NON_MONEY_PROPOSAL_MODULES.has(owner)) return false;
+  // EXECUTE_TOOL without a resolvable tool name must fail closed.
+  if (normalizedActionType === 'EXECUTE_TOOL') {
+    return !tool;
+  }
 
-  // Unclassified action/tool/module fails closed.
+  // Known non-financial tool (verified above) makes a tool-bearing proposal non-financial structurally.
+  if (tool) return false;
+
+  if (normalizedActionType && NON_MONEY_PROPOSAL_ACTIONS.has(normalizedActionType)) {
+    return false;
+  }
+
+  // Unclassified / unknown actionType fails closed (no blind module-only fallback).
   return true;
 }
 
@@ -586,13 +626,9 @@ function idTokenCarriesMoney(val: unknown): boolean {
       .split(/\d+/)
       .some((letters) => letters.length >= 5 && (MONEY_TERMS_RE.test(letters) || PROPOSAL_MONEY_WORDS_RE.test(letters)));
   }
-  if (/\s/.test(trimmed)) return structuralTextCarriesMoney(trimmed);
-  // Single token under an id-named key (e.g. `balance_900`, `invoice-900-usd`, `tsk_1`):
-  // inspect alphabetic segments against money vocabulary.
-  const alphaWords = trimmed.split(/[^A-Za-z]+/).filter((w) => w.length >= 3);
-  if (alphaWords.length === 0) return false;
-  const joined = alphaWords.join(' ');
-  return MONEY_TERMS_RE.test(joined) || MONEY_WORDS_RE.test(joined) || PROPOSAL_MONEY_WORDS_RE.test(joined);
+  if (structuralTextCarriesMoney(trimmed)) return true;
+  const spaced = trimmed.replace(/[_-]+/g, ' ');
+  return spaced !== trimmed && structuralTextCarriesMoney(spaced);
 }
 
 function subtreeHasNumericValue(val: unknown, depth = 0): boolean {
@@ -633,9 +669,10 @@ const MAX_WALK_NODES = 10_000;
 /**
  * Walks a structured payload / evidence / result tree to detect money fields
  * at ANY nesting depth (including after sibling fields, separate `currency`
- * fields, spaced 9+ word money keys, and `balance_900` under id-named keys)
- * while exempting count keys (e.g. `totalCount2`, `total_items_2`,
- * `{ total: { count: 12 } }`). Fails closed on cycles or unreadable objects.
+ * fields, spaced 9+ word money keys, `toJSON()` outputs, and `$500`/`usd_500`/
+ * `balance_900` under id-named keys) while exempting count keys (e.g.
+ * `totalCount2`, `total_items_2`, `{ total: { count: 12 } }`). Fails closed on
+ * cycles or unreadable objects.
  */
 export function structuredPayloadCarriesMoney(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -660,10 +697,14 @@ export function structuredPayloadCarriesMoney(value: unknown): boolean {
 
     try {
       if (typeof (node as { toJSON?: unknown }).toJSON === 'function') {
+        let serialized: unknown;
         try {
-          (node as { toJSON: () => unknown }).toJSON();
+          serialized = (node as { toJSON: () => unknown }).toJSON();
         } catch {
           return true; // throwing toJSON -> fail closed
+        }
+        if (serialized !== node) {
+          return walk(serialized, depth + 1);
         }
       }
 
@@ -697,17 +738,20 @@ export function structuredPayloadCarriesMoney(value: unknown): boolean {
           continue;
         }
 
-        // ID-named keys: inspect for worded money tokens like `balance_900` or `invoice-900-usd`
+        // ID-named keys: inspect for money tokens (`$500`, `usd_500`, `total_900`, `balance_900`, homoglyphs)
+        // and financial entity key names (`invoiceId`, `paymentId`, `balanceId`, `rentId`, etc.).
         if (ID_KEY_RE.test(rawKey)) {
+          const idKeyIsMoney =
+            isMoneyLabelText(rawKey) ||
+            PROPOSAL_MONEY_WORDS_RE.test(rawKey) ||
+            PROPOSAL_MONEY_WORDS_RE.test(splitHumps(rawKey)) ||
+            SCHEMA_MONEY_KEY_RE.test(normKey);
           if (typeof val === 'string') {
-            if (idTokenCarriesMoney(val)) return true;
-            // Also check if the key itself names a financial entity (e.g. `invoiceId`, `paymentId`)
-            if (isMoneyLabelText(rawKey)) return true;
+            if (idKeyIsMoney || idTokenCarriesMoney(val)) return true;
             continue;
           }
           if (Array.isArray(val) && val.every((item) => typeof item === 'string')) {
-            if (val.some((item) => idTokenCarriesMoney(item))) return true;
-            if (isMoneyLabelText(rawKey)) return true;
+            if (idKeyIsMoney || val.some((item) => idTokenCarriesMoney(item))) return true;
             continue;
           }
         }
@@ -716,13 +760,14 @@ export function structuredPayloadCarriesMoney(value: unknown): boolean {
         const keyText = rawKey.replace(/\p{Cc}+/gu, ' ');
         if (
           isMoneyLabelText(keyText) ||
+          SCHEMA_MONEY_KEY_RE.test(normKey) ||
           PROPOSAL_MONEY_WORDS_RE.test(keyText) ||
           PROPOSAL_MONEY_WORDS_RE.test(splitHumps(keyText))
         ) {
           return true;
         }
 
-        // Figure-trigger keys (`total`, `totalDue`, `total due for the main client...`, `rate`, `retainer`, etc.)
+        // Figure-trigger keys (`total`, `grandTotal`, `hourlyRate`, `monthlyRetainer`, `total due for...`, etc.)
         // with numeric or worded-number values at ANY nesting depth (including after sibling fields!)
         if (FIGURE_TRIGGER_KEY_RE.test(keyText) || FIGURE_TRIGGER_KEY_RE.test(normKey)) {
           if (subtreeHasNumericValue(val)) return true;

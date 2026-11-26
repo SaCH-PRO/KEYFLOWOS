@@ -124,6 +124,7 @@ export class KeyCortexApprovalOrchestratorService {
           module: input.module,
           actionType: input.actionType,
           title,
+          carriesMoney: proposal.carriesMoney,
         },
       },
       undefined,
