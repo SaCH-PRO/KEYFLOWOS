@@ -1,5 +1,13 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Optional } from '@nestjs/common';
 import type { BusinessAsset } from '@prisma/client';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import {
+  analyzeTemporalForReader,
+  blueprintForReader,
+  isServedDnaKey,
+  readsRevenueFor,
+} from '../business-genome/key-genome/genome-composites-for-reader';
 import { BusinessIntelligenceService } from './business-intelligence.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
@@ -47,13 +55,18 @@ export class KeyExecutiveModeService {
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
     @Inject(GenomeEvolutionService) private readonly genomeEvolution: GenomeEvolutionService,
     @Inject(BusinessAssetsService) private readonly businessAssets: BusinessAssetsService,
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
   ) {}
 
   listModes() {
     return KEY_EXECUTIVE_MODE_LIST;
   }
 
-  async generateModeBrief(businessId: string, mode: string): Promise<KeyExecutiveModeBrief> {
+  async generateModeBrief(
+    businessId: string,
+    mode: string,
+    reader?: GenomeReader | null,
+  ): Promise<KeyExecutiveModeBrief> {
     if (!MODE_VALUES.has(mode)) {
       throw new BadRequestException(
         `Invalid executive mode. Must be one of: ${Array.from(MODE_VALUES).join(', ')}`,
@@ -62,19 +75,24 @@ export class KeyExecutiveModeService {
     const keyMode = mode as KeyExecutiveMode;
     const config = KEY_EXECUTIVE_MODE_CONFIG[keyMode];
 
-    const [executiveBrief, blueprint, temporalAnalysis, proposals, assets] = await Promise.all([
-      this.intelligence.generateExecutiveBrief(businessId),
+    const readsRevenue = await readsRevenueFor(this.prisma, businessId, reader);
+    const [executiveBrief, rawBlueprint, temporalAnalysis, proposals, assets] = await Promise.all([
+      this.intelligence.generateExecutiveBrief(businessId, reader),
       this.blueprint.getBlueprint(businessId),
-      this.temporal.analyze(businessId),
+      analyzeTemporalForReader(this.temporal, businessId, reader, readsRevenue),
       this.genomeEvolution.list(businessId, { status: 'PENDING' }),
       this.businessAssets.list(businessId),
     ]);
+    const blueprint = blueprintForReader(
+      rawBlueprint as unknown as Record<string, unknown>,
+      readsRevenue,
+    ) as unknown as BlueprintData;
 
     const findings: KeyModeFinding[] = [
       ...this.fromExecutiveBrief(keyMode, config.focusDomains, executiveBrief),
-      ...this.fromDnaScores(keyMode, config.dnaSections, blueprint),
-      ...this.fromTemporal(keyMode, temporalAnalysis),
-      ...this.fromProposals(keyMode, config.dnaSections, proposals),
+      ...this.fromDnaScores(keyMode, config.dnaSections, blueprint, readsRevenue),
+      ...this.fromTemporal(keyMode, temporalAnalysis, readsRevenue),
+      ...this.fromProposals(keyMode, config.dnaSections, proposals, readsRevenue),
       ...this.fromAssets(keyMode, assets),
     ];
 
@@ -119,11 +137,17 @@ export class KeyExecutiveModeService {
       });
   }
 
-  private fromDnaScores(mode: KeyExecutiveMode, dnaSections: DnaSectionKey[], blueprint: BlueprintData): KeyModeFinding[] {
+  private fromDnaScores(
+    mode: KeyExecutiveMode,
+    dnaSections: DnaSectionKey[],
+    blueprint: BlueprintData,
+    readsRevenue: boolean,
+  ): KeyModeFinding[] {
     const scores = (blueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>;
     const findings: KeyModeFinding[] = [];
 
     for (const key of dnaSections) {
+      if (!readsRevenue && !isServedDnaKey(key)) continue;
       const score = scores[key] ?? 0;
       if (score < 50) {
         const label = this.titleCase(key);
@@ -148,7 +172,7 @@ export class KeyExecutiveModeService {
     return findings;
   }
 
-  private fromTemporal(mode: KeyExecutiveMode, temporal: TemporalFlowAnalysis): KeyModeFinding[] {
+  private fromTemporal(mode: KeyExecutiveMode, temporal: TemporalFlowAnalysis, readsRevenue: boolean): KeyModeFinding[] {
     const findings: KeyModeFinding[] = [];
     const textMatches = (text: string, keywords: string[]) =>
       keywords.some((keyword) => text.toLowerCase().includes(keyword));
@@ -234,6 +258,7 @@ export class KeyExecutiveModeService {
     }
 
     for (const candidate of temporal.genomeProposalCandidates) {
+      if (!readsRevenue && !isServedDnaKey(candidate.section)) continue;
       if (mode === 'STRATEGIST' || mode === 'GROWTH_ADVISOR' || mode === 'EXECUTIVE_ASSISTANT') {
         findings.push({
           id: `${mode.toLowerCase()}-candidate-${candidate.section}`,
@@ -260,6 +285,7 @@ export class KeyExecutiveModeService {
     mode: KeyExecutiveMode,
     dnaSections: DnaSectionKey[],
     proposals: GenomeEvolutionProposalData[],
+    readsRevenue: boolean,
   ): KeyModeFinding[] {
     if (
       ![
@@ -274,7 +300,7 @@ export class KeyExecutiveModeService {
     }
 
     const sectionSet = new Set(dnaSections);
-    const relevant = proposals.filter((p) => sectionSet.has(p.section));
+    const relevant = proposals.filter((p) => sectionSet.has(p.section) && (readsRevenue || isServedDnaKey(p.section)));
     if (relevant.length === 0) return [];
 
     return [
@@ -356,7 +382,9 @@ export class KeyExecutiveModeService {
     const weakDna = findings.filter((f) => f.id.includes('-dna-')).length;
 
     const parts: string[] = [];
-    parts.push(`${config.label} sees Executive Readiness ${brief.executiveReadinessScore}% and Genome Integrity ${brief.genomeIntegrity}%.`);
+    if (brief.executiveReadinessScore !== null && brief.genomeIntegrity !== null) {
+      parts.push(`${config.label} sees Executive Readiness ${brief.executiveReadinessScore}% and Genome Integrity ${brief.genomeIntegrity}%.`);
+    }
 
     if (high > 0) {
       parts.push(`${high} high-priority issue${high === 1 ? '' : 's'} need${high === 1 ? 's' : ''} attention.`);
@@ -389,7 +417,8 @@ export class KeyExecutiveModeService {
     const risks = findings.filter((f) => f.priority === 'HIGH' || f.priority === 'CRITICAL');
 
     if (mode === 'STRATEGIST') {
-      return `The business is at the ${brief.genomeStage.replace(/_/g, ' ')} stage. ${weakDna.length > 0 ? `Strategic clarity is limited by ${weakDna.length} underdeveloped DNA section(s).` : 'Strategic DNA is well-formed.'} ${risks.length > 0 ? `Address ${risks.length} priority risk(s) before major commitments.` : ''}`;
+      const stagePrefix = brief.genomeStage ? `The business is at the ${brief.genomeStage.replace(/_/g, ' ')} stage. ` : '';
+      return `${stagePrefix}${weakDna.length > 0 ? `Strategic clarity is limited by ${weakDna.length} underdeveloped DNA section(s).` : 'Strategic DNA is well-formed.'} ${risks.length > 0 ? `Address ${risks.length} priority risk(s) before major commitments.` : ''}`.trim();
     }
 
     if (mode === 'CFO') {
@@ -409,6 +438,9 @@ export class KeyExecutiveModeService {
     }
 
     if (mode === 'GROWTH_ADVISOR') {
+      if (brief.executiveReadinessScore === null) {
+        return 'Strengthen core DNA and review growth signals before aggressive growth.';
+      }
       return brief.executiveReadinessScore >= 60
         ? `Executive Readiness is ${brief.executiveReadinessScore}%. The business may be ready to scale if growth DNA and conversion signals are addressed.`
         : `Executive Readiness is ${brief.executiveReadinessScore}%. Strengthen core DNA before aggressive growth.`;
