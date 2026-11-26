@@ -10,9 +10,13 @@
  *     or a wrapper such as `ls?.setItem`), and property or bracket assignment (`localStorage["k"] = v`);
  *   - a script-readable cookie: `document.cookie = "key=…"`, and the Cookie Store API (`cookieStore.set`);
  *   - a response cookie: `.cookies.set(…)`, `cookies().set(…)` or a `cookies()` jar's `.set(…)` (middleware, route
- *     handlers, server actions), and a `Set-Cookie` header;
- *   - IndexedDB: `indexedDB.open(name, …)` and, in a file that opens one, object-store `put` / `add`;
- *   - Cache Storage names (`caches.open`) and `window.name`.
+ *     handlers, server actions), and a `Set-Cookie` header (`headers.set/append`, `res.setHeader`, a string or an
+ *     array, `{ "Set-Cookie": … }`, `new Headers([["Set-Cookie", …]])`);
+ *   - IndexedDB: `indexedDB.open(name, …)`, and object-store `put` / `add` and `cursor.update` in any file that works
+ *     with object stores (the database opened there or elsewhere);
+ *   - Cache Storage: the names opened (`caches.open`) and what is `put` into a cache bound from it;
+ *   - `window.name`.
+ * A cookie may be built with `+`, a template or `[…].join("")`. A match inside a comment is not a write.
  * A write that only clears (an empty value with Max-Age=0 / maxAge: 0) stores nothing and is not counted.
  *
  * Arguments are read across line breaks and comments, so a Prettier-shaped call (key on the next line) resolves.
@@ -23,7 +27,9 @@
  *
  * A write is a CREDENTIAL write when the resolved key or the key's source text matches CREDENTIAL_PATTERN
  * (token, refresh, secret, session, auth, plus admin, verifier, password, jwt, bearer, credential, api key and sid),
- * when the VALUE's source text names a credential (VALUE_PATTERN), when an IndexedDB or Cache Storage write keeps
+ * when the VALUE's source text names a credential (VALUE_PATTERN: token, refresh, secret, session, auth, password,
+ * bearer, jwt, credential, api key, verifier; through JSON.stringify(x) and a const one hop away), when an IndexedDB
+ * or Cache Storage write keeps
  * request headers, and always for window.name. Every credential write must have exactly one REGISTRY row (store,
  * key, file) saying why it is there, and every row must still match a write. A new unregistered write fails CSC-02;
  * a stale row fails CSC-03. Every cookie row pins the attributes the source writes (CSC-12).
@@ -36,7 +42,13 @@
  *   CSC-05 no credential is written to IndexedDB, Cache Storage or window.name, and no response cookie stores a
  *          credential (the only server writes are clears); the one known exception, kf-sync-queue, is a registered
  *          follow-up.
- *   CSC-06..12 repair round 1, below.
+ *   CSC-06..12 repair round 1, CSC-13..17 repair round 2, below.
+ *
+ * Known gaps, recorded as follow-ups (security review CSC-SEC-5 and correctness review, repair round 2), not closed
+ * here: a storage wrapper defined in another file (only same-file wrappers expand); a bracket write on an aliased
+ * receiver (`const ls = localStorage; ls["k"] = v`); `Object.assign(localStorage, …)`; `self.name` /
+ * `globalThis.name`; a cookie string built up in a variable (`let c = …; c += …; document.cookie = c`); Dexie / idb
+ * library databases (contacts-db.ts `new Dexie(name)`); and the registry pins keys and cookie attributes, not values.
  */
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
@@ -166,8 +178,8 @@ function skipWs(src: string, i: number): number {
 /**
  * Reads one argument or expression starting at i (leading whitespace, line breaks and comments skipped, CSC-1), up
  * to a top-level stop character. Inside a call's parentheses a line break never ends it. In `statement` mode (the
- * right-hand side of an assignment) a line break ends it unless the next line carries the expression on. Comments
- * are dropped from the returned text.
+ * right-hand side of an assignment) a line break ends it unless the line ends with an operator or the next line
+ * starts with one. Comments are dropped from the returned text.
  */
 function readExpr(src: string, i: number, stops = ",)", statement = false): { text: string; end: number } {
   let depth = 0;
@@ -198,8 +210,10 @@ function readExpr(src: string, i: number, stops = ",)", statement = false): { te
       depth--;
     } else if (depth === 0 && stops.includes(c)) break;
     else if (depth === 0 && c === "\n" && statement) {
+      // The expression carries on when the next line starts with an operator, or (Prettier's shape, CSC-COR-1) when
+      // this one ends with one.
       const rest = src.slice(j + 1).trimStart();
-      if (!/^[+.?:|&]/.test(rest)) break;
+      if (!/^[+.?:|&]/.test(rest) && !/[+\-*/|&?:,(=[{]\s*$/.test(out)) break;
     }
     out += c;
     j++;
@@ -406,7 +420,7 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
   if (/^(["'])(?:[^\\]|\\.)*?\1$/s.test(t) && splitTop(t, "+").length === 1) return t.slice(1, -1);
   if (t.startsWith("`") && t.endsWith("`") && splitTop(t, "+").length === 1) {
     return templateParts(t.slice(1, -1))
-      .map((p, i) => (i % 2 === 0 ? p : SECURE_TERNARY.test(p) ? SECURE_MARK : (literalValue(ctx, p, depth + 1) ?? "*")))
+      .map((p, i) => (i % 2 === 0 ? p : (literalValue(ctx, p, depth + 1) ?? "*")))
       .join("");
   }
   const sum = splitTop(t, "+");
@@ -450,12 +464,16 @@ function literalValue(ctx: Ctx, text: string, depth = 0): string | null {
 /** The raw text a value expression stands for, one hop: an identifier's own const text is added (CSC-08). */
 function valueText(ctx: Ctx, text: string): string {
   const t = text.trim();
+  const hop = (id: string) => ctx.bindings?.[id] ?? constText(ctx.src, id, ctx.at);
   if (IDENT.test(t)) {
-    const bound = ctx.bindings?.[t];
-    const own = bound ?? constText(ctx.src, t, ctx.at);
+    const own = hop(t);
     if (own !== null && own !== undefined) return `${t} ${own}`;
   }
-  return t;
+  // JSON.stringify(x) / String(x) of a const: x's own text too, one hop (CSC-13).
+  const extra = [...t.matchAll(/\b(?:JSON\s*\.\s*stringify|String)\s*\(\s*([A-Za-z_$][\w$]*)\s*[,)]/g)]
+    .map((m) => hop(m[1]))
+    .filter((x): x is string => typeof x === "string");
+  return [t, ...extra].join(" ");
 }
 
 /** The enclosing function's name when `param` is one of its parameters (`function f(param, …)` or `const f = (param`). */
@@ -487,6 +505,27 @@ function callSites(src: string, fn: string): Array<{ args: string[]; at: number 
     sites.push({ args, at: m.index! });
   }
   return sites;
+}
+
+/** Is offset `at` inside a block comment, or after `//` on its line (outside a string)? */
+function inComment(src: string, at: number): boolean {
+  const open = src.lastIndexOf("/*", at);
+  if (open !== -1) {
+    const close = src.indexOf("*/", open + 2);
+    if (close === -1 || close >= at) return true;
+  }
+  const lineStart = src.lastIndexOf("\n", at - 1) + 1;
+  let j = lineStart;
+  while (j < at) {
+    const c = src[j];
+    if (c === '"' || c === "'" || c === "`") {
+      const e = c === "`" ? skipTemplate(src, j) : skipString(src, j);
+      if (e > at) return false;
+      j = e;
+    } else if (src.startsWith("//", j)) return true;
+    else j++;
+  }
+  return false;
 }
 
 function lineOf(src: string, at: number): number {
@@ -545,7 +584,10 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   const read = opts.read ?? (opts.files ? (rel: string) => opts.files![rel] ?? null : undefined);
   const base: Ctx = { file, src, read };
   const writes: Write[] = [];
-  const push = (w: Omit<Write, "file" | "line">, at: number) => writes.push({ ...w, file, line: lineOf(src, at) });
+  // A match inside a comment is prose, not a write ("cache.put() below", sw.js).
+  const push = (w: Omit<Write, "file" | "line">, at: number) => {
+    if (!inComment(src, at)) writes.push({ ...w, file, line: lineOf(src, at) });
+  };
 
   /** A keyed store write: key expression, value expression. */
   const keyed = (store: Store, keyExpr: string, valueExpr: string, at: number) => {
@@ -558,7 +600,10 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   };
 
   /** A cookie string write (document.cookie, a Set-Cookie header). */
-  const cookieString = (store: Store, raw: string, at: number) => {
+  const cookieString = (store: Store, rawIn: string, at: number) => {
+    // [NAME, "=", t].join("") builds the same string as NAME + "=" + t (CSC-16).
+    const joined = rawIn.match(/^\[([\s\S]*)\]\s*\.\s*join\s*\(\s*(?:(["'`])([\s\S]*?)\2)?\s*\)$/);
+    const raw = joined ? splitTop(joined[1], ",").filter((x) => x !== "").join(joined[3] ? ` + ${JSON.stringify(joined[3])} + ` : " + ") : rawIn;
     const id = raw.match(/^`\$\{\s*([\w$]+)\s*\}=/)?.[1];
     for (const c of contexts({ ...base, at }, at, id)) {
       const { name, value, attrs } = parseCookie(c, raw);
@@ -625,17 +670,42 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   );
   for (const m of src.matchAll(responseCookie)) cookieCall("response-cookie", m.index!, m.index! + m[0].length);
 
-  // Set-Cookie headers: headers.set/append("Set-Cookie", …) and { "Set-Cookie": … } (CSC-07)
-  for (const m of src.matchAll(/\.(?:set|append)\s*\(\s*(["'])set-cookie\1\s*,/gi)) {
-    cookieString("response-cookie", readExpr(src, m.index! + m[0].length).text, m.index!);
+  // Set-Cookie headers: headers.set/append(…), res.setHeader(…) (a string or an array of them), { "Set-Cookie": … }
+  // and the tuple form new Headers([["Set-Cookie", …]]) (CSC-07, CSC-16)
+  const setCookieValue = (text: string, at: number) => {
+    const t = text.trim();
+    const items = t.startsWith("[") && t.endsWith("]") ? splitTop(t.slice(1, -1), ",").filter((x) => x !== "") : [t];
+    for (const item of items) cookieString("response-cookie", item, at);
+  };
+  for (const m of src.matchAll(/\.(?:set|append|setHeader)\s*\(\s*(["'])set-cookie\1\s*,/gi)) {
+    setCookieValue(readExpr(src, m.index! + m[0].length).text, m.index!);
   }
   for (const m of src.matchAll(/(["'])set-cookie\1\s*:/gi)) {
-    cookieString("response-cookie", readExpr(src, m.index! + m[0].length, ",}").text, m.index!);
+    setCookieValue(readExpr(src, m.index! + m[0].length, ",}").text, m.index!);
+  }
+  for (const m of src.matchAll(/\[\s*(["'])set-cookie\1\s*,/gi)) {
+    setCookieValue(readExpr(src, m.index! + m[0].length).text, m.index!);
   }
 
-  // Cache Storage names (CSC-07)
+  // Cache Storage: the names opened (CSC-07), and what is put into each (CSC-17). A put's receiver is bound from
+  // caches.open: `const cache = await caches.open(name)` or `caches.open(name).then((c) => c.put(…))`.
+  const cacheVars = new Map<string, string>();
   for (const m of src.matchAll(/\bcaches\s*\.\s*open\s*\(/g)) {
-    keyed("cacheStorage", readExpr(src, m.index! + m[0].length).text, "", m.index!);
+    const nameExpr = readExpr(src, m.index! + m[0].length);
+    keyed("cacheStorage", nameExpr.text, "", m.index!);
+    const before = src.slice(Math.max(0, m.index! - 80), m.index!).match(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*(?:await\s+)?$/);
+    if (before) cacheVars.set(before[1], nameExpr.text);
+    const then = src.slice(nameExpr.end + 1).match(/^\s*\.\s*then\s*\(\s*(?:async\s*)?\(?\s*([\w$]+)/);
+    if (then) cacheVars.set(then[1], nameExpr.text);
+  }
+  for (const [v, nameExpr] of cacheVars) {
+    for (const m of src.matchAll(new RegExp(`\\b${v.replace(/\$/g, "\\$")}\\s*\\.\\s*put\\s*\\(`, "g"))) {
+      const req = readExpr(src, m.index! + m[0].length);
+      const res = src[req.end] === "," ? readExpr(src, req.end + 1).text : "";
+      const c = { ...base, at: m.index! };
+      const key = literalValue(c, nameExpr) ?? nameExpr;
+      push({ store: "cacheStorage", key, expr: nameExpr, value: `${valueText(c, req.text)} ${valueText(c, res)}` }, m.index!);
+    }
   }
 
   // window.name survives navigations, to other origins too (CSC-07)
@@ -643,20 +713,26 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
     push({ store: "window.name", key: "window.name", expr: "window.name", value: readExpr(src, m.index! + m[0].length, ";", true).text }, m.index!);
   }
 
-  // IndexedDB: the databases opened, and the object-store writes (put/add) in a file that opens one
-  // A file that opens one database: its puts are that database's value, so the database itself is the credential
-  // store (kf-sync-queue, CSC-10). A file that opens several: each put is its own write, database "*".
+  // IndexedDB: the databases opened, and the writes into object stores: put/add on a store (a variable bound from
+  // .objectStore(…), a chained .objectStore(…), or in a file that opens a database any store-named receiver) and
+  // cursor.update, in any file that works with object stores, opened there or elsewhere (CSC-17).
+  // A file that opens one database: its writes are that database's value, so the database itself is the credential
+  // store (kf-sync-queue, CSC-10). Otherwise each write is its own, database "*".
   const opens = [...src.matchAll(/indexedDB\s*\.\s*open\s*\(/g)].map((m) => {
     const { text } = readExpr(src, m.index! + m[0].length);
     return { key: literalValue(base, text) ?? text, expr: text, at: m.index! };
   });
-  const puts =
-    opens.length === 0
-      ? []
-      : [...src.matchAll(/(?:\b[\w$]*[sS]tore[\w$]*|\.objectStore\s*\([^)]*\))\s*\.\s*(?:put|add)\s*\(/g)].map((m) => ({
-          value: valueText(base, readExpr(src, m.index! + m[0].length).text),
-          at: m.index!,
-        }));
+  const idbFile = opens.length > 0 || /\.objectStore\s*\(|\bIDB(?:ObjectStore|Cursor)/.test(src);
+  const storeVars = [...src.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*[^;\n]*\.objectStore\s*\(/g)].map((m) => m[1].replace(/\$/g, "\\$"));
+  const receivers = [
+    "\\.objectStore\\s*\\([^)]*\\)",
+    ...storeVars.map((v) => `\\b${v}`),
+    ...(opens.length > 0 ? ["\\b[\\w$]*[sS]tore[\\w$]*"] : []),
+  ];
+  const writeRe = new RegExp(`(?:(?:${receivers.join("|")})\\s*\\.\\s*(?:put|add)|\\b[\\w$]*[cC]ursor[\\w$]*\\s*\\.\\s*update)\\s*\\(`, "g");
+  const puts = !idbFile
+    ? []
+    : [...src.matchAll(writeRe)].map((m) => ({ value: valueText({ ...base, at: m.index! }, readExpr(src, m.index! + m[0].length).text), at: m.index! }));
   if (opens.length === 1) {
     push({ store: "indexedDB", key: opens[0].key, expr: opens[0].expr, value: puts.map((p) => p.value).join(" ") }, opens[0].at);
   } else {
@@ -667,8 +743,8 @@ export function scanSource(file: string, src: string, opts: { files?: Record<str
   return writes;
 }
 
-/** A credential in a value: a token-like name or a header set, in the value's source text (CSC-08). */
-const VALUE_PATTERN = /token|refresh|secret|password|passwd|bearer|authorization|jwt|credential|api[_-]?key|verifier/i;
+/** A credential in a value: a token-, session- or auth-like name, in the value's source text (CSC-08, CSC-13). */
+const VALUE_PATTERN = /token|refresh|secret|session|auth|password|passwd|bearer|jwt|credential|api[_-]?key|verifier/i;
 /** A stored request's headers carry its Authorization bearer (kf-sync-queue, CSC-10). */
 const HEADERS_PATTERN = /\bheaders\b/;
 
@@ -1232,5 +1308,22 @@ describe("CSC-17 Cache Storage and IndexedDB values are scanned", () => {
       `useStore.update({ token });`,
     ].join("\n");
     expect(scan("src/fixture-not-idb.ts", fixture).filter((w) => w.store === "indexedDB")).toEqual([]);
+  });
+});
+
+describe("CSC-18 a match inside a comment is not a write", () => {
+  it("prose that names a write is not counted", () => {
+    const fixture = [
+      `async function f(request: Request, token: string) {`,
+      `  const cache = await caches.open("kf-doc-cache");`,
+      `  /* cache.put(request, new Response(token)) would keep the bearer */`,
+      `  // localStorage.setItem("kf_doc_token", token);`,
+      `  cache.put(request, new Response("ok")); // not localStorage.setItem("kf_tail_token", token)`,
+      `}`,
+    ].join("\n");
+    const ws = scan("public/fixture-comments.js", fixture);
+    expect(ws.filter((w) => w.store === "cacheStorage").map((w) => `${w.key}:${w.line}`)).toEqual(["kf-doc-cache:2", "kf-doc-cache:5"]);
+    expect(ws.some((w) => w.key === "kf_doc_token" || w.key === "kf_tail_token")).toBe(false);
+    expect(compare(ws, []).unregistered).toEqual([]);
   });
 });
