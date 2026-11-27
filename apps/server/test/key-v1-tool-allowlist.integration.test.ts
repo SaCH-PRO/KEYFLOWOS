@@ -54,7 +54,7 @@ async function cleanupExtra() {
     `DELETE FROM cortex_action_logs WHERE session_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payroll_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payroll_runs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM staff_compensation WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM pay_rates WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try {
@@ -241,7 +241,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): real-DB runtime refusal & 
       expect(String(toolRes.error ?? '').toLowerCase()).toContain('not available in this version');
     }
 
-    expect(await db.staffCompensation.count({ where: { businessId: ID.bizA } })).toBe(0);
+    expect(await db.payRate.count({ where: { businessId: ID.bizA } })).toBe(0);
     expect(await db.payrollRun.count({ where: { businessId: ID.bizA } })).toBe(0);
     expect(await fx.actions(ID.bizA)).toHaveLength(0);
   });
