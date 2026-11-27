@@ -1,7 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { fromCents, toCents } from '../commerce/money';
-import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from './cash-position.service';
+import {
+  CashPositionService,
+  UNCODED_CURRENCY_LABEL,
+  otherCurrencyCash,
+  sanitizeCurrencyCode,
+  type OtherCurrencyCash,
+} from './cash-position.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 import { normalizeCurrency } from './posting.service';
 
@@ -140,18 +146,29 @@ export class SafeToSpendService {
 
     // V1-34 review CR-34-01: say so when an account opening balance that has
     // not been posted yet is part of a cash figure; V1-37c: under the figure
-    // of its own currency.
+    // of its own currency. FU-CASH-LABEL-SANITISER (D-135): non-code labels are
+    // aggregated into UNCODED and never echoed in otherCurrencyCash or prose.
     const unpostedIn = (code: string) => cashPosition.unpostedOpeningBalances
       .filter((o) => o.currency === code)
       .map((o) => `  - includes ${o.name} opening balance not yet posted: ${o.currency} ${o.amount.toFixed(2)}`);
+    const unpostedUncoded = () => cashPosition.unpostedOpeningBalances
+      .filter((o) => o.currency !== currency && !sanitizeCurrencyCode(o.currency))
+      .map((o) => `  - includes ${o.name} opening balance not yet posted (uncoded currency): ${o.amount.toFixed(2)}`);
     const explanation: string[] = [
       `Cash balance: ${currency} ${cashBalance.toFixed(2)} (ledger)`,
       ...unpostedIn(currency),
       // V1-37c (D-13): cash in another currency is said, never added or converted.
-      ...otherCash.flatMap((o) => [
-        `Cash in ${o.currency}, not included (never added to ${currency}): ${o.currency} ${o.amount.toFixed(2)} (ledger)`,
-        ...unpostedIn(o.currency),
-      ]),
+      ...otherCash.flatMap((o) => (
+        o.currency === UNCODED_CURRENCY_LABEL
+          ? [
+              `Cash in ${o.count ?? 1} uncoded ${(o.count ?? 1) === 1 ? 'currency' : 'currencies'}, not included (never added to ${currency}): ${o.amount.toFixed(2)} (ledger)`,
+              ...unpostedUncoded(),
+            ]
+          : [
+              `Cash in ${o.currency}, not included (never added to ${currency}): ${o.currency} ${o.amount.toFixed(2)} (ledger)`,
+              ...unpostedIn(o.currency),
+            ]
+      )),
       `Tax reserved: ${currency} ${taxReserved.toFixed(2)}`,
       `Bills due next 30 days: ${currency} ${billsDueNext30Days.toFixed(2)}`,
       `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,

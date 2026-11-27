@@ -27,8 +27,10 @@ export interface CashflowForecastDto {
   /** W11-CASH-READERS-LEDGER (D-135): the ledger cash in `currency` (CashPositionService.cashBalance). */
   openingCash: number;
   /**
-   * W11-CASH-READERS-LEDGER (D-135, D-13): cash held in other currencies, each in its own currency,
-   * never converted nor added to openingCash or any projection.
+   * W11-CASH-READERS-LEDGER (D-135, D-13) + FU-CASH-LABEL-SANITISER: cash held
+   * in other currencies, sanitised to 3-letter ISO codes plus at most one
+   * aggregated generic `UNCODED` bucket for non-code labels; never converted
+   * nor added to openingCash or any projection.
    */
   otherCurrencyCash: OtherCurrencyCash[];
   projectedClosingCash: number;
