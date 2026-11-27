@@ -823,6 +823,11 @@
       "packet": "V1-91 (FU-RECURRING-EXPENSE-SERVER)"
     },
     {
+      "prefix": "v92a_",
+      "owner": "apps/server/test/memory-eval-leak.integration.test.ts",
+      "packet": "V1-92 (MEM-EVAL-SUITE, P150)"
+    },
+    {
       "prefix": "v92d_",
       "owner": "apps/server/test/identity-rekey-creator.integration.test.ts",
       "packet": "V1-92 (W6-IDENTITY-REKEY-CREATOR)"
