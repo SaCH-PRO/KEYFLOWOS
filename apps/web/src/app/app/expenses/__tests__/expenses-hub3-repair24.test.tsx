@@ -336,10 +336,12 @@ describe("R24-1: the sheet's save, in the client's real shapes", () => {
 });
 
 describe("R24-1: the recurring panel's read, refused in the client's real shape", () => {
-  it("shows the empty state, as a rejected read does (R23-3)", async () => {
+  // R25-2 (correction, not a weakening): a refused read is said, never shown as "No recurring expenses".
+  it("says it could not load, never the empty state (R25-2)", async () => {
     client.fetchRecurringExpenses.mockResolvedValue(refusedAnswer());
     render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} />);
-    expect(await screen.findByText(/no recurring expenses/i)).toBeTruthy();
+    expect(await screen.findByText(/Couldn't load recurring expenses/)).toBeTruthy();
+    expect(screen.queryByText(/no recurring expenses/i)).toBeNull();
   });
   it("refused for A after the panel shows B, leaves B loading", async () => {
     const readA = deferred<unknown>();

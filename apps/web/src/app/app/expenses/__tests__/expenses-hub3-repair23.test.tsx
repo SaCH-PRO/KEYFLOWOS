@@ -207,10 +207,13 @@ describe("R23-2: the sheet's Extract that throws, with no switch", () => {
 });
 
 describe("R23-3: the recurring panel's read that fails, with no switch", () => {
-  it("shows the empty state", async () => {
+  // R25-2 (correction, not a weakening): the same-business failure ends loading, and is said as a failure, never
+  // shown as "No recurring expenses".
+  it("ends loading and says it could not load (R25-2)", async () => {
     client.fetchRecurringExpenses.mockRejectedValue(new TypeError("Failed to fetch"));
     render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} />);
-    expect(await screen.findByText(/no recurring expenses/i)).toBeTruthy();
+    expect(await screen.findByText(/Couldn't load recurring expenses/)).toBeTruthy();
+    expect(screen.queryByText(/no recurring expenses/i)).toBeNull();
   });
 });
 
