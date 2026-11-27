@@ -235,7 +235,6 @@ beforeAll(async () => {
         name: 'Haircut',
         duration: 60,
         price: 150,
-        currency: 'TTD',
         invoiceTiming: 'BOOKING',
       },
       {
@@ -244,7 +243,6 @@ beforeAll(async () => {
         name: 'Blowout',
         duration: 60,
         price: 100,
-        currency: 'TTD',
         invoiceTiming: 'BOOKING',
       },
       {
@@ -253,7 +251,6 @@ beforeAll(async () => {
         name: 'Foreign Cut',
         duration: 60,
         price: 150,
-        currency: 'TTD',
         invoiceTiming: 'BOOKING',
       },
     ],
