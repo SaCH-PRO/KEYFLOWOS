@@ -1675,6 +1675,11 @@
       "prefix": "v92b_",
       "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
+    },
+    {
+      "prefix": "v92i_",
+      "owner": "apps/server/test/today-orders-premise.integration.test.ts",
+      "packet": "P205 (FU-TODAY-ORDERS-PREMISE)"
     }
   ],
   "pendingRenames": [],
