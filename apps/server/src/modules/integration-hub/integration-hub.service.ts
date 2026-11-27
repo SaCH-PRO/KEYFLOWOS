@@ -141,6 +141,70 @@ const DEFAULT_PROVIDERS: ProviderSeed[] = [
   },
 ];
 
+/**
+ * Allowlist of non-secret IntegrationConnection fields returned by IntegrationHubService.
+ * Never selects or returns `authData` or `authDataRef` (FU-SECRET-READS-PORTAL-INTEGRATION, P145).
+ */
+const INTEGRATION_CONNECTION_PUBLIC_SELECT = {
+  id: true,
+  businessId: true,
+  providerKey: true,
+  displayName: true,
+  status: true,
+  scopes: true,
+  settings: true,
+  healthScore: true,
+  lastSyncAt: true,
+  lastError: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export type IntegrationConnectionView = {
+  id: string;
+  businessId: string;
+  providerKey: string;
+  displayName: string | null;
+  status: string;
+  scopes: unknown;
+  settings: unknown;
+  healthScore: number;
+  lastSyncAt: Date | null;
+  lastError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export function integrationConnectionView(connection: {
+  id: string;
+  businessId: string;
+  providerKey: string;
+  displayName: string | null;
+  status: string;
+  scopes: unknown;
+  settings: unknown;
+  healthScore: number;
+  lastSyncAt: Date | null;
+  lastError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): IntegrationConnectionView {
+  return {
+    id: connection.id,
+    businessId: connection.businessId,
+    providerKey: connection.providerKey,
+    displayName: connection.displayName,
+    status: connection.status,
+    scopes: connection.scopes,
+    settings: connection.settings,
+    healthScore: connection.healthScore,
+    lastSyncAt: connection.lastSyncAt,
+    lastError: connection.lastError,
+    createdAt: connection.createdAt,
+    updatedAt: connection.updatedAt,
+  };
+}
+
 @Injectable()
 export class IntegrationHubService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -192,7 +256,10 @@ export class IntegrationHubService {
   async getDashboard(businessId: string) {
     const [providers, connections, recentSyncs] = await Promise.all([
       this.prisma.client.integrationProvider.findMany({ where: { status: 'ACTIVE' } }),
-      this.prisma.client.integrationConnection.findMany({ where: { businessId } }),
+      this.prisma.client.integrationConnection.findMany({
+        where: { businessId },
+        select: INTEGRATION_CONNECTION_PUBLIC_SELECT,
+      }),
       this.prisma.client.integrationSyncRun.findMany({
         where: { businessId },
         orderBy: { startedAt: 'desc' },
@@ -200,7 +267,7 @@ export class IntegrationHubService {
       }),
     ]);
 
-    const connectionMap = new Map(connections.map((c) => [c.providerKey, c]));
+    const connectionMap = new Map(connections.map((c) => [c.providerKey, integrationConnectionView(c)]));
 
     const entries = providers.map((p) => {
       const c = connectionMap.get(p.key);
@@ -239,7 +306,7 @@ export class IntegrationHubService {
     const provider = await this.prisma.client.integrationProvider.findUnique({ where: { key: providerKey } });
     if (!provider) throw new NotFoundException(`Provider ${providerKey} not found`);
 
-    return this.prisma.client.integrationConnection.upsert({
+    const row = await this.prisma.client.integrationConnection.upsert({
       where: { businessId_providerKey: { businessId, providerKey } },
       update: {
         status: 'CONNECTED',
@@ -257,19 +324,24 @@ export class IntegrationHubService {
         scopes: data.scopes ?? [],
         settings: data.settings ?? {},
       },
+      select: INTEGRATION_CONNECTION_PUBLIC_SELECT,
     });
+    return integrationConnectionView(row);
   }
 
   async disconnect(businessId: string, providerKey: string) {
     const conn = await this.prisma.client.integrationConnection.findUnique({
       where: { businessId_providerKey: { businessId, providerKey } },
+      select: { id: true },
     });
     if (!conn) throw new NotFoundException('Connection not found');
 
-    return this.prisma.client.integrationConnection.update({
+    const row = await this.prisma.client.integrationConnection.update({
       where: { id: conn.id },
       data: { status: 'DISCONNECTED', updatedAt: new Date() },
+      select: INTEGRATION_CONNECTION_PUBLIC_SELECT,
     });
+    return integrationConnectionView(row);
   }
 
   async recordSyncRun(

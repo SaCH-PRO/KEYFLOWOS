@@ -1339,6 +1339,8 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'goals_create', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
   { tool: 'goals_create_plan', service: 'KeyCortexPlannerService', route: 'POST /api/v1/cortex/goals/:goalId/plans', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
   { tool: 'goals_delete', service: 'KeyCortexPlannerService', route: 'DELETE /api/v1/cortex/goals/:goalId', scope: 'ai:write', file: 'modules/key-cortex/key-cortex-goals.controller.ts' },
+  // FU-SECRET-READS-PORTAL-INTEGRATION (P145): PortalController.listAccess requires crm:read
+  { tool: 'portal_list_access', service: 'PortalService', route: 'GET /portal/businesses/:businessId/access', scope: 'crm:read', file: 'modules/portal/portal.controller.ts' },
 ];
 
 /**
@@ -1371,7 +1373,7 @@ const UNMAPPED: Record<string, string> = {
   marketing: 'email-marketing.controller declares no module scope',
   marketplace: 'reads Prisma directly; no service call',
   people: 'StructureService.listPeople backs no route; TaskAssignmentService routes are unscoped',
-  portal: 'portal.controller declares no module scope',
+  // portal: granted since FU-SECRET-READS-PORTAL-INTEGRATION (P145) gated PortalController.listAccess (crm read)
   present: 'renders an onboarding card; no service call',
   // projects: granted since SWEEP-P0-SCOPES (every ProjectsController route requires projects)
   queue: 'EmailMarketingService.queueCampaign backs no route',
@@ -1430,6 +1432,10 @@ const UNGRANTED: Record<string, string> = {
   goals_list: 'KeyCortexPlannerService.listGoals is reached by key-cortex-goals.controller GET, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
+  // FU-SECRET-READS-PORTAL-INTEGRATION (P145): portal family now grants portal_list_access (crm read); write handlers are gated via @HiddenModuleWrites (unscoped in this handler-level derivation)
+  portal_grant_access: 'PortalService.createAccess is reached by portal.controller POST, which is unscoped at the handler level (gated by @HiddenModuleWrites)',
+  portal_revoke_access: 'PortalService.revoke is reached by portal.controller DELETE, which is unscoped at the handler level (gated by @HiddenModuleWrites)',
+  portal_update_settings: 'PortalService.updateSettings is reached by portal.controller PATCH, which is unscoped at the handler level (gated by @HiddenModuleWrites)',
   // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
   // FOLLOW3-D15, whose ProcurementService writes the request where { id, businessId }
   structure_find_person: 'StructureService.findPeople backs no route',
@@ -1594,6 +1600,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         deals_move_stage: 'write',
         deals_pipeline_velocity: 'read',
         deals_update: 'write',
+        portal_list_access: 'read',
         tag_contact: 'write',
       },
       revenue: {

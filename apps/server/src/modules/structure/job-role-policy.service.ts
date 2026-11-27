@@ -127,7 +127,10 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     crm_update_deal: 'write', deals_create: 'write', deals_delete: 'write', deals_forecast: 'read',
     deals_get: 'read', deals_list: 'read', deals_list_stages: 'read', deals_mark_lost: 'write',
     deals_mark_won: 'write', deals_move_stage: 'write', deals_pipeline_velocity: 'read',
-    deals_update: 'write', tag_contact: 'write',
+    deals_update: 'write',
+    // FU-SECRET-READS-PORTAL-INTEGRATION (P145): PortalController.listAccess requires crm:read
+    portal_list_access: 'read',
+    tag_contact: 'write',
   },
   revenue: {
     commerce_convert_quote: 'write', commerce_create_invoice: 'write',
