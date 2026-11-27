@@ -552,6 +552,12 @@ beforeAll(async () => {
       data: { id: `${id}_listing`, businessId, name: 'V33A Widget', duration: 30, price: UNIT_PRICE, sourceProductId: id },
     });
   }
+  // P233 WEDGE-HIDE-STORE-SERVER: this suite tests public store checkout retries on businesses that already sell online.
+  for (const [businessId, currency] of [[ID.bizA, 'TTD'], [ID.bizB, 'TTD'], [ID.bizUsd, 'USD']] as const) {
+    await db.marketplaceOrder.create({
+      data: { id: `${businessId}_legacy_seed`, businessId, orderNumber: `${businessId.toUpperCase()}-LEGACY-0`, status: 'completed', customerName: 'Legacy Seed', total: 1, subtotal: 1, currency },
+    });
+  }
 }, 60_000);
 
 beforeEach(async () => {
