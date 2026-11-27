@@ -3,7 +3,13 @@ import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service'
 import type { Prisma, RevenueAction } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
-import { CashPositionService, otherCurrencyCash, type CashPosition, type OtherCurrencyCash } from './cash-position.service';
+import {
+  CashPositionService,
+  ISO_CURRENCY_CODE_RE,
+  otherCurrencyCash,
+  type CashPosition,
+  type OtherCurrencyCash,
+} from './cash-position.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { D13_CURRENCIES, normalizeCurrency } from './posting.service';
 import { ReceivablesService } from './receivables.service';
@@ -131,7 +137,12 @@ function cashLabels(position: CashPosition): Pick<FinanceOverview, 'cashCurrency
 function sameOtherCurrencyCash(cached: OtherCurrencyCash[] | undefined, now: OtherCurrencyCash[]): boolean {
   return Array.isArray(cached)
     && cached.length === now.length
-    && cached.every((o, i) => o?.currency === now[i].currency && o?.amount === now[i].amount);
+    && cached.every(
+      (o, i) =>
+        o?.currency === now[i].currency
+        && o?.amount === now[i].amount
+        && (o?.count ?? undefined) === (now[i].count ?? undefined),
+    );
 }
 
 /**
@@ -140,7 +151,7 @@ function sameOtherCurrencyCash(cached: OtherCurrencyCash[] | undefined, now: Oth
  * the account routes check membership only), and the cash position bridges an unposted opening under
  * whatever label its row holds, so a label is named only when it is a three-letter code.
  */
-const LOW_RUNWAY_CURRENCY_CODE = /^[A-Z]{3}$/;
+const LOW_RUNWAY_CURRENCY_CODE = ISO_CURRENCY_CODE_RE;
 
 /** SEC-W10LR-1 (D-107): the most other currencies the LOW_RUNWAY text names; the rest are counted. */
 export const LOW_RUNWAY_LISTED_CURRENCY_LIMIT = 5;
@@ -187,7 +198,8 @@ export function lowRunwayDetail(
  * other-currency cash an alarm names. Only cash held under a three-letter code, at most
  * LOW_RUNWAY_LISTED_CURRENCY_LIMIT of them (D-13's currencies first, then the others in code
  * order; `listed` is in code order); `unlisted` counts the codes past the limit and `unlabelled`
- * the amounts held under a label that is not a code. No label that is not a code is returned.
+ * the amounts held under a label that is not a code (respecting `entry.count` on aggregated
+ * `UNCODED` buckets from FU-CASH-LABEL-SANITISER). No label that is not a code is returned.
  */
 function namedOtherCurrencyCash(other: OtherCurrencyCash[]): { listed: OtherCurrencyCash[]; unlisted: number; unlabelled: number } {
   const coded = other.filter((o) => LOW_RUNWAY_CURRENCY_CODE.test(o.currency));
@@ -195,10 +207,16 @@ function namedOtherCurrencyCash(other: OtherCurrencyCash[]): { listed: OtherCurr
     ...coded.filter((o) => D13_CURRENCIES.includes(o.currency)),
     ...coded.filter((o) => !D13_CURRENCIES.includes(o.currency)),
   ].slice(0, LOW_RUNWAY_LISTED_CURRENCY_LIMIT));
+  const unlabelled = other
+    .filter((o) => !LOW_RUNWAY_CURRENCY_CODE.test(o.currency))
+    .reduce(
+      (sum, o) => sum + (typeof o.count === 'number' && Number.isInteger(o.count) && o.count > 0 ? o.count : 1),
+      0,
+    );
   return {
     listed: coded.filter((o) => named.has(o)),
     unlisted: coded.length - named.size,
-    unlabelled: other.length - coded.length,
+    unlabelled,
   };
 }
 
