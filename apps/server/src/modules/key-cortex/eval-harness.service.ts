@@ -7,7 +7,6 @@ import { KeyCortexPlannerService } from './key-cortex-planner.service';
 import {
   MEMORY_TASK_SUITE_NAME,
   MEMORY_TASK_SUITE_VERSION,
-  MEMORY_TASK_EVAL_RUNNER_TOKEN,
   computeMemoryTaskSuiteDefinitionHash,
   scoreMemoryTaskSuite,
   type MemoryTaskEvalRunner,
@@ -156,7 +155,7 @@ export class EvalHarnessService {
     @Optional() @Inject(ConstitutionValuesService) private readonly constitutionValues?: ConstitutionValuesService,
     @Optional() @Inject(UnifiedMemoryRetrievalService) private readonly unifiedMemory?: UnifiedMemoryRetrievalService,
     @Optional() @Inject(KeyCortexPlannerService) private readonly planner?: KeyCortexPlannerService,
-    @Optional() @Inject(MEMORY_TASK_EVAL_RUNNER_TOKEN) private memoryTaskRunner?: MemoryTaskEvalRunner,
+    @Optional() private memoryTaskRunner?: MemoryTaskEvalRunner,
   ) {
     this.registerBuiltInSuites();
   }
@@ -402,7 +401,7 @@ export class EvalHarnessService {
     this.registerSuite({
       name: MEMORY_TASK_SUITE_NAME,
       description:
-        'Versioned 50-question KEY Memory Task Suite + E-CONF unanswerable calibration eval (MEM-EVAL-SUITE, D-257). Fails closed (NOT_RUN) unless a MemoryTaskEvalRunner is wired.',
+        'Versioned 50-question KEY Memory Task Suite + E-CONF unanswerable calibration evaluation (MEM-EVAL-SUITE, D-257). Fails closed (NOT_RUN) unless a MemoryTaskEvalRunner is wired.',
       version: MEMORY_TASK_SUITE_VERSION,
       definitionHash: computeMemoryTaskSuiteDefinitionHash(),
       assertions: [
