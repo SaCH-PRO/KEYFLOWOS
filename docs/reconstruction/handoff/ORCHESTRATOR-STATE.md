@@ -38,6 +38,18 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 
 ### 0.1 Waves this session
 
+**Checkpoint 2026-11-27 13:50 UTC (no merge since M38/M65; main `178ef400`).**
+- M40 (#284) is held. EXPENSES-HUB-3 is at R17 `1eee70b` under two reviews; R16 was CONFIRMED by both. When R17 is confirmed: rebuild M40 with EH3 `1eee70b`, WEDGE part 1 `207a2513` and docs; re-run the proof; correct the #284 body; run two wave confirmations; enqueue.
+- WEDGE-HIDE-STORE part 2 (P225) is at R8 `defc5191` (tests only) under two reviews. It is admitted only with or after P233 and M40.
+- P231 TRUST-BADGES-TRUE-ONLY is at R6 `cc16d7a`. R7 is with worker `session_017o9EBgz5HFUDMDrWzuesH1`: category nouns, mirroring the /book hiding, the full catalog for analysis tools, and two false FAQ answers.
+- P232 is done (`b5bbba5`) and goes into M42.
+- **Owner, 13:4x UTC (typed in `session_017o9EBgPURGAKurygwgEU8p`, Android; #273 7219969638):** "Packets? And yes cintinue work with antigravity". P233 stays an Antigravity row and is not reassigned. The Claude lane follows up with that lane on #273.
+- Orchestrator rulings this session:
+  - EH3 multi-step save: once the first write lands, the rest of that save completes for A, silently on B.
+  - EH3 export: the CSV still downloads after a switch, named after the business.
+  - WEDGE part 2: a transient storefront-read error neither prunes nor offers; only a definite non-true answer prunes.
+  - WEDGE part 2: tests use a 50 ms settle window, never weaker than their round-5 versions.
+
 Earlier waves M22 to M36 (2026-11-26) are in git history and on #80; each merged with two wave confirmations.
 
 - **M38** (#281, merged 2026-11-27 05:53 UTC): P224 SWP-BOOKING-SLOTS (11 repair rounds) + P230 FU-CASE-STUDY-WEB-OPTIONAL-METRICS + docs (D-299 to D-303, the move to #273). Proof at `153e2344`: server 16,926 passed with one load timeout (CRB-CR-1, green alone 10x at head and 3x at base), R0 39/39, web 3,622, mocked e2e 25; live Journey F: **F2 (BUG-122) red→green on both widths**, F9 green at both, the rest fail identically at head and base (other packets: F1 staff, F3 payment methods, F4/F7b/F7c/F7e BUG-048, F6/F7a/F7d BUG-120). The first M38 assembly (54 files) exceeded the 50-file divergence limit and was split; EXPENSES-HUB-3 moved to M40.
