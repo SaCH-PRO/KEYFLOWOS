@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AnalyticsEngineService } from './analytics-engine.service';
 import { ProjectionService } from './projection.service';
@@ -6,6 +6,8 @@ import { GrowthInsightGeneratorService } from './growth-insight-generator.servic
 import { MaturityAssessmentService } from './maturity-assessment.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { analyticsSchedulerDisabled, schedulersDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcDateSlot, utcMonthSlot } from '../../core/scheduling/occurrence-claim';
 
 @Injectable()
 export class AnalyticsSchedulerService {
@@ -17,6 +19,7 @@ export class AnalyticsSchedulerService {
     @Inject(GrowthInsightGeneratorService) private readonly intelligence: GrowthInsightGeneratorService,
     @Inject(MaturityAssessmentService) private readonly maturity: MaturityAssessmentService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_1AM)
@@ -62,6 +65,7 @@ export class AnalyticsSchedulerService {
   async generateProjections() {
     if (schedulersDisabled()) return;
     if (analyticsSchedulerDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'analytics-projections', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     this.logger.log('Starting projection generation');
     try {
       const businesses = await this.prisma.client.business.findMany({
@@ -86,6 +90,7 @@ export class AnalyticsSchedulerService {
   async generateInsights() {
     if (schedulersDisabled()) return;
     if (analyticsSchedulerDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'analytics-insights', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     this.logger.log('Starting insight generation');
     try {
       const businesses = await this.prisma.client.business.findMany({
@@ -110,6 +115,7 @@ export class AnalyticsSchedulerService {
   async assessMaturity() {
     if (schedulersDisabled()) return;
     if (analyticsSchedulerDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'analytics-maturity', utcMonthSlot(), 25 * 24 * 60 * 60 * 1000))) return;
     this.logger.log('Starting maturity assessment');
     try {
       const businesses = await this.prisma.client.business.findMany({

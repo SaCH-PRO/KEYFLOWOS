@@ -17,6 +17,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcIntervalSlot } from '../../core/scheduling/occurrence-claim';
 import { InvoiceStatus, DealStatus } from '@prisma/client';
 import { subDays, startOfMonth, subMonths } from 'date-fns';
 import { keyCronsDisabled } from '../../core/config/env';
@@ -91,6 +92,7 @@ export class KeyBiEngineService {
   async refreshAll(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-bi-refresh', utcIntervalSlot(15 * 60 * 1000), 14 * 60 * 1000))) return;
     this.logger.log('[refreshAll] Refreshing business mental models...');
 
     const businessIds = await this.getActiveBusinesses();

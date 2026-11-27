@@ -4,6 +4,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { modulesFromIdentifiers, unionModuleScopes } from '../ai/memory-classification';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcIntervalSlot } from '../../core/scheduling/occurrence-claim';
 
 /**
  * The cerebellum — compare intended against actual, and correct the error.
@@ -94,6 +96,7 @@ export class KeyCortexCerebellumService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() private readonly memory?: AiMemoryService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /**
@@ -106,6 +109,16 @@ export class KeyCortexCerebellumService {
   async scheduledConsolidation(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (
+      !(await claimOccurrence(
+        this.redis,
+        'key-cerebellum-consolidation',
+        utcIntervalSlot(6 * 60 * 60 * 1000),
+        (5 * 60 + 50) * 60 * 1000,
+      ))
+    ) {
+      return;
+    }
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {
