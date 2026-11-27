@@ -165,6 +165,7 @@ describe('SecuritySignals counter invariants (P158 / RR-SECURITY-SIGNAL-COUNTERS
     counter.record('bearer_verification_failed', 'auth_middleware');
     counter.record('cross_business_refusal', 'business_guard');
     counter.record('webhook_signature_failed', 'stripe');
+    counter.record('authority_shadow_mismatch', 'operations:explicit_deny');
 
     counter.reset();
     const snap = counter.snapshot();
@@ -172,11 +173,13 @@ describe('SecuritySignals counter invariants (P158 / RR-SECURITY-SIGNAL-COUNTERS
       bearer_verification_failed: 0,
       cross_business_refusal: 0,
       webhook_signature_failed: 0,
+      authority_shadow_mismatch: 0,
     });
     expect(snap.byLabel).toEqual({
       bearer_verification_failed: {},
       cross_business_refusal: {},
       webhook_signature_failed: {},
+      authority_shadow_mismatch: {},
     });
     expect(snap.hourly).toEqual([]);
   });

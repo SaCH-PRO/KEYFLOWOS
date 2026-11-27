@@ -133,6 +133,10 @@ export class ModuleScopeGuard implements CanActivate {
 
       if (resolverAllows === legacyAllows) return;
 
+      const reason =
+        typeof decision.reason === 'string' && decision.reason ? decision.reason : 'unknown';
+      securitySignals.record('authority_shadow_mismatch', `${requirement.module}:${reason}`);
+
       this.logger.warn(
         `[authority-shadow] MISMATCH business=${businessId} user=${userId} ` +
           `module=${requirement.module} min=${requirement.minLevel} ` +
