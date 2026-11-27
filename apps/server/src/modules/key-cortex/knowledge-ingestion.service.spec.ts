@@ -152,7 +152,7 @@ describe('KnowledgeIngestionService reachability foundation', () => {
 
     expect(knowledgeSource.findMany).toHaveBeenCalledWith({
       where: { businessId: 'biz-1', status: 'quarantined' },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 25,
       skip: 50,
       select: {

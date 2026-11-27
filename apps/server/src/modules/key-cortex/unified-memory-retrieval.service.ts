@@ -251,7 +251,7 @@ export class UnifiedMemoryRetrievalService {
       const fetchPage = (skip: number) =>
         this.prisma.client.aiMemory.findMany({
           where: aiMemoryWhere,
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           ...(skip > 0 ? { skip } : {}),
           take: 50,
           select: {
@@ -302,7 +302,7 @@ export class UnifiedMemoryRetrievalService {
       const fetchPage = (skip: number) =>
         this.prisma.client.temporalFlowMemory.findMany({
           where: temporalWhere,
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           ...(skip > 0 ? { skip } : {}),
           take: 50,
           select: {

@@ -156,7 +156,7 @@ export class AdminAnalyticsService {
   async getFeedbackInbox(limit = 50, offset = 0) {
     const [items, total] = await Promise.all([
       this.prisma.client.userFeedback.findMany({
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         skip: offset,
       }),

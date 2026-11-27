@@ -179,7 +179,7 @@ export class KeyCortexAwarenessService {
         this.prisma.client.keyCortexMemory.findMany({
           where: whereClause,
           select: { id: true, key: true, userId: true, value: true, confidence: true, createdAt: true },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           ...(skip > 0 ? { skip } : {}),
           take,
         }) as Promise<AwarenessRow[]>;
