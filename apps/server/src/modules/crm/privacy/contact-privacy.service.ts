@@ -609,7 +609,13 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         // matches and the cancel aborts, so it can neither overwrite 'purged'
         // nor un-delete the anonymised row.
         const cancelled = await tx.contactForgetRequest.updateMany({
-          where: { id: req.id, businessId: input.businessId, contactId: input.contactId, status: 'requested' },
+          where: {
+            id: req.id,
+            businessId: input.businessId,
+            contactId: input.contactId,
+            status: 'requested',
+            requestedAt: req.requestedAt,
+          },
           data: { status: 'cancelled', cancelledAt: new Date() },
         });
         if (cancelled.count === 0) {
