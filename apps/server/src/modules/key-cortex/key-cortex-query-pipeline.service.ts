@@ -690,6 +690,12 @@ export class KeyCortexQueryPipelineService {
       const structured = this.structuredOutputService.parseStructuredResponse(
         completionResult.content ?? '',
       );
+      const parseState = structured.state ?? 'unstructured';
+      const statedConfidence =
+        typeof structured.confidence === 'number' &&
+        Number.isFinite(structured.confidence)
+          ? Math.max(0, Math.min(1, structured.confidence / 100))
+          : null;
 
       const finalContent =
         toolLoopResult?.content ??
@@ -730,15 +736,22 @@ export class KeyCortexQueryPipelineService {
           correlationId,
           genomeEnriched: flags.genomeV3Enabled && !!genomeContext,
           role: structured.role,
-          confidence: Math.max(
-            0,
-            Math.min(1, (structured.confidence ?? 70) / 100),
-          ),
+          parseState,
+          ...(statedConfidence !== null
+            ? { confidence: statedConfidence }
+            : {}),
           taskCategory,
           fallbackUsed: completionResult.fallbackUsed,
           fallbackProvider: completionResult.fallbackProvider,
         } as any,
       };
+
+      const resolvedConfidence =
+        statedConfidence !== null
+          ? statedConfidence
+          : this.calculateConfidence(assistantMessage.content, contextSnapshot);
+      const confidenceSource: 'stated' | 'estimated' =
+        statedConfidence !== null ? 'stated' : 'estimated';
 
       await this.logEvent(correlationId, 'STEP_8_AI_REASONING', {
         provider,
@@ -774,12 +787,14 @@ export class KeyCortexQueryPipelineService {
             functionId: session.detectedFunction,
             query: query.text,
             recommendation: assistantMessage.content,
-            confidence: assistantMessage.metadata?.confidence ?? 0.7,
+            confidence: resolvedConfidence,
+            confidenceSource,
             metadata: {
               correlationId,
               taskCategory,
               provider,
               model,
+              parseState,
             },
           });
         } catch (err: any) {
@@ -1055,9 +1070,7 @@ export class KeyCortexQueryPipelineService {
         hasExplanation: !!explanation,
       });
 
-      let calibratedConfidence =
-        assistantMessage.metadata?.confidence ??
-        this.calculateConfidence(assistantMessage.content, contextSnapshot);
+      let calibratedConfidence = resolvedConfidence;
       let knowledgeGap: string | undefined;
       if (this.learningService) {
         try {
@@ -1676,6 +1689,12 @@ export class KeyCortexQueryPipelineService {
 
       const structured =
         this.structuredOutputService.parseStructuredResponse(accumulatedText);
+      const parseState = structured.state ?? 'unstructured';
+      const statedConfidence =
+        typeof structured.confidence === 'number' &&
+        Number.isFinite(structured.confidence)
+          ? Math.max(0, Math.min(1, structured.confidence / 100))
+          : null;
 
       const latencyMs = Date.now() - startTime;
       const assistantMessage: CortexMessage = {
@@ -1691,10 +1710,10 @@ export class KeyCortexQueryPipelineService {
           correlationId,
           genomeEnriched: flags.genomeV3Enabled && !!genomeContext,
           role: structured.role,
-          confidence: Math.max(
-            0,
-            Math.min(1, (structured.confidence ?? 70) / 100),
-          ),
+          parseState,
+          ...(statedConfidence !== null
+            ? { confidence: statedConfidence }
+            : {}),
           taskCategory,
           fallbackUsed,
           fallbackProvider,
@@ -1715,6 +1734,42 @@ export class KeyCortexQueryPipelineService {
         llmCallsMade: 1,
         responseTimeMs: latencyMs,
       });
+
+      if (this.learningService) {
+        try {
+          const observationConfidence =
+            statedConfidence !== null
+              ? statedConfidence
+              : this.calculateConfidence(
+                  assistantMessage.content,
+                  contextSnapshot,
+                );
+          const confidenceSource: 'stated' | 'estimated' =
+            statedConfidence !== null ? 'stated' : 'estimated';
+          await this.learningService.recordObservation({
+            sessionId: session.id,
+            businessId: query.businessId,
+            userId: query.userId,
+            roleId: session.detectedRole,
+            functionId: session.detectedFunction,
+            query: query.text,
+            recommendation: assistantMessage.content,
+            confidence: observationConfidence,
+            confidenceSource,
+            metadata: {
+              correlationId,
+              taskCategory,
+              provider: finalProvider,
+              model: finalModel,
+              parseState,
+            },
+          });
+        } catch (err: unknown) {
+          this.logger.warn(
+            `[streamQuery] Learning observation failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       await this.logEvent(correlationId, 'STREAM_QUERY_COMPLETE', {
         sessionId: session.id,
@@ -2467,7 +2522,7 @@ export class KeyCortexQueryPipelineService {
     if (content.length < 50) score -= 0.2;
     if (/I don't have|I cannot|I'm not sure/i.test(content)) score -= 0.15;
 
-    return Math.min(Math.max(score, 0), 1);
+    return Math.round(Math.min(Math.max(score, 0), 1) * 100) / 100;
   }
 
   private getCalmModeDetailLevel(
