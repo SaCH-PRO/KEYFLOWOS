@@ -70,12 +70,7 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { ExpenseFormModal } from "../components/expense-form-modal";
-import { BillPayDialog } from "../components/bill-pay-dialog";
-import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { useExpensesData } from "../components/use-expenses-data";
 import { renderHook } from "@testing-library/react";
