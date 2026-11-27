@@ -422,10 +422,14 @@ export class CommerceController {
   resolveProductPrice(
     @Param('businessId') businessId: string,
     @Param('productId') productId: string,
-    @Query('contactId') contactId: unknown,
+    @Query() query: Record<string, unknown>,
     @Req() req: Request & { user?: { id?: string } },
   ) {
-    if (contactId !== undefined && typeof contactId !== 'string') {
+    const contactId = query?.contactId;
+    if (
+      (contactId !== undefined && typeof contactId !== 'string') ||
+      Object.keys(query ?? {}).some((key) => key.startsWith('contactId['))
+    ) {
       throw new BadRequestException('contactId must be a single string');
     }
     const actorUserId = req?.user?.id;
