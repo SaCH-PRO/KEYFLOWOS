@@ -55,6 +55,10 @@ export function useExpensesData() {
   // R6 C-4: bumped when a call from before the latest switch asks for a reload of the business the page shows again
   // (a delete that returns after A -> B -> A): the current view is read afresh, never with that call's old filters.
   const [refresh, setRefresh] = useState(0);
+  // R7-4: the read parameters of this render, and (in a ref, set before the read effect runs) the current ones. A
+  // loadData whose parameters are not the current ones (a delete started under filter X returns after the filter
+  // was cleared) is a stale closure: it asks for one fresh read with the current parameters instead.
+  const paramsRef = useRef("");
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -153,6 +157,9 @@ export function useExpensesData() {
     // R6 S-3: and again on every adopted switch (a batched A -> B -> A clears the lists and leaves businessId as it was).
   }, [businessId, switchEpoch]);
 
+  const readParams = JSON.stringify([period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  useEffect(() => { paramsRef.current = readParams; }, [readParams]);
+
   const loadData = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
     // R4-1: a load for a business the page has left (a delete started in A returns after a switch to B and calls
@@ -163,7 +170,7 @@ export function useExpensesData() {
     // `refresh` is a trigger (R6 C-4): each bump makes a new loadData, so the read effect runs again.
     void refresh;
     if (businessRef.current !== businessId) return;
-    if (switchEpoch !== switchRef.current) {
+    if (switchEpoch !== switchRef.current || readParams !== paramsRef.current) {
       setRefresh((n) => n + 1);
       return;
     }
@@ -209,7 +216,7 @@ export function useExpensesData() {
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-  }, [clearAll, businessId, switchEpoch, refresh, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  }, [clearAll, businessId, switchEpoch, refresh, readParams, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);

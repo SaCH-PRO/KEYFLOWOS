@@ -96,16 +96,28 @@ const MAX_DECODE_ROUNDS = 4;
 function isObjectLikePath(path: string): boolean {
   let p = path;
   for (let round = 0; round <= MAX_DECODE_ROUNDS; round += 1) {
-    if (/^\/+objects(\/|$)/i.test(p)) return true;
+    // R7-1: "/__api/..." is the API on any host that serves the app (next.config rewrites it), so a leading
+    // "/__api" (after any run of slashes) is looked through.
+    if (/^\/+(?:__api\/+)*objects(\/|$)/i.test(p)) return true;
     let next: string;
     try {
       next = decodeURIComponent(p);
     } catch {
-      // R6 C-1: a path that will not decode at all, or whose decoded form still holds an escape, may hide anything:
-      // refused. A decoded form left with only a literal "%" (a receipt named "100%") is judged as it is.
-      return round === 0 || /%[0-9A-Fa-f]{2}/.test(p);
+      // R7: a path with a literal "%" ("100%.pdf", "invoice 50% deposit.pdf") will not decode as a whole: each run of
+      // valid escapes is decoded on its own instead, and escapes that never decode are left as they are.
+      next = p.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+        try {
+          return decodeURIComponent(run);
+        } catch {
+          return run;
+        }
+      });
     }
-    if (next === p) return false;
+    if (next === p) {
+      // Nothing more decodes. What is left still holding an escape (%XX that never decodes, or %uXXXX) may hide
+      // anything once a server reads it differently: refused (R6 C-1, R7-2). A literal "%" alone is judged as it is.
+      return /%[0-9A-Fa-f]{2}|%u[0-9A-Fa-f]{4}/i.test(p);
+    }
     p = next;
   }
   return true;
