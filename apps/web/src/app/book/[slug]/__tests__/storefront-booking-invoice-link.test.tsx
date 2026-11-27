@@ -419,4 +419,31 @@ describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it d
     await waitFor(() => expect(storedIds()).toEqual([]));
     expect(orderPosts()).toHaveLength(0);
   });
+
+  for (const [label, payment] of [
+    ["cash (no payment step)", null],
+    ["paid at once", { status: "PAID" }],
+  ] as Array<[string, Record<string, unknown> | null]>) {
+    it(`WHS2-42 offered: a placed store order, ${label}, empties the stored cart and removes the promo`, async () => {
+      net.storeCheckout = true;
+      net.bookingAnswer = { success: true, bookingId: "v95q_bk_w42" };
+      net.orderAnswer = storeOrder(payment);
+      window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
+      window.localStorage.setItem(`kf_promo_${SLUG}`, JSON.stringify({ code: "TEN", discountType: "percentage", discountValue: 10 }));
+      render(<PublicBookingPage />);
+      await checkOut();
+      await waitFor(() => expect(orderPosts()).toHaveLength(1));
+      await waitFor(() => expect(storedIds()).toEqual([]));
+      expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+    });
+  }
+
+  it("WHS2-44 a booking-only checkout removes the stored promo", async () => {
+    net.storeCheckout = false;
+    net.bookingAnswer = { success: true, bookingId: "v95q_bk_w44" };
+    window.localStorage.setItem(`kf_promo_${SLUG}`, JSON.stringify({ code: "TEN", discountType: "percentage", discountValue: 10 }));
+    await bookTheService();
+    await waitFor(() => expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull());
+    expect(storedIds()).toEqual([]);
+  });
 });
