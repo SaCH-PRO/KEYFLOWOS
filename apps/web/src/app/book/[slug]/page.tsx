@@ -102,13 +102,14 @@ function orderItemsOf(raw: unknown): CartItem[] {
     if (!o || typeof o !== "object" || typeof o.id !== "string" || typeof o.name !== "string") return [];
     // A positive whole quantity and a finite, non-negative price and line total; anything else is no order line.
     const { price, quantity } = o;
-    if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1) return [];
+    if (typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 999) return [];
     if (typeof price !== "number" || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * quantity)) return [];
-    // The shown strings are kept only when they are strings.
+    // The shown strings are kept only when they are strings; an image only from an http(s) or same-site URL.
     const line = { ...o } as Record<string, unknown>;
     for (const field of ["currency", "imageUrl"]) {
       if (line[field] !== undefined && line[field] !== null && typeof line[field] !== "string") delete line[field];
     }
+    if (typeof line.imageUrl === "string" && !/^(https?:\/\/[^\s]+|\/(?!\/)\S*)$/i.test(line.imageUrl.trim())) delete line.imageUrl;
     return [line as unknown as CartItem];
   });
 }
@@ -413,7 +414,7 @@ function PublicBookingPageInner() {
       // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
       const pending = parsed as ReturnType<typeof JSON.parse>;
       // SWP-BOOKING-SLOTS (round 6): the strings the confirmation shows or puts into a URL, only when they are strings.
-      const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+      const text = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);
       const orderNumber = text(pending.orderNumber);
       const orderId = text(pending.orderId);
       const customerEmail = text(pending.customerEmail);
