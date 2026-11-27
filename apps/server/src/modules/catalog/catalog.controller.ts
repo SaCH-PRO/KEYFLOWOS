@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGu
 import { CatalogService } from './catalog.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireAlternativeModuleScope, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { CreateProductDto } from '../commerce/dto/create-product.dto';
 import { BulkProductsDto } from '../commerce/dto/bulk-products.dto';
@@ -85,14 +85,16 @@ export class CatalogController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Post('businesses/:businessId/services')
   createService(@Param('businessId') businessId: string, @Body() body: CreateCatalogServiceDto) {
     return this.catalog.createService({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Patch('businesses/:businessId/services/:serviceId')
   updateService(
     @Param('businessId') businessId: string,
@@ -103,14 +105,16 @@ export class CatalogController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Delete('businesses/:businessId/services/:serviceId')
   deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
     return this.catalog.deleteService(businessId, serviceId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Post('businesses/:businessId/services/batch')
   batchServices(@Param('businessId') businessId: string, @Body() body: BatchCatalogServicesDto) {
     return this.catalog.batchServices(businessId, body);
