@@ -159,6 +159,8 @@ const EXEMPT: Record<string, string> = {
   replyGmailThread: GMAIL,
   backfillStoreLinks: 'store/backfill-links: storefront link maintenance, not an invoice, quote or payment write',
   listPaymentClaims: 'claims: read-only GET listing of pending customer payment claims (D-46 rules writes; confirm/dismiss are GUARDED)',
+  setProductTierPrices: PRODUCTS,
+  setContactPricingTier: 'contacts/:contactId/pricing-tier: contact pricing tier metadata, not an invoice, quote or payment write (D-46 is ruled for invoice writes)',
 };
 
 /**
