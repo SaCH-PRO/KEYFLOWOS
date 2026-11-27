@@ -495,7 +495,7 @@ export function OrderConfirmation({
             onClick={() => {
               if (orderId) {
                 const emailParam = customerEmail ? `?email=${encodeURIComponent(customerEmail)}` : "";
-                window.open(`${apiBase}/site/storefront/public/order/${orderId}${emailParam}`, "_blank");
+                window.open(`${apiBase}/site/storefront/public/order/${encodeURIComponent(orderId)}${emailParam}`, "_blank");
               } else if (bookingInvoiceUrl) {
                 // V1-28 (D-07): the customer's token page (payment state and
                 // receipt), never the operator's authenticated receipt (401).

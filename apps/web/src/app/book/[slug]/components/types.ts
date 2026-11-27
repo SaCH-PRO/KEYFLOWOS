@@ -76,12 +76,29 @@ export type CatalogItem = {
 
 export type CartItem = CatalogItem & { quantity: number };
 
+/**
+ * SWP-BOOKING-SLOTS (with SEC-W9WCN-1): a booking already made for this checkout and kept for its customer after a
+ * failed or abandoned payment. The public slots route counts it as taken, so the checkout offers its time itself.
+ */
+export type HeldSlot = {
+  /** Whose booking it is, as bookingReuseKey writes the customer: first, last, email (lower-cased), phone. */
+  customer: string[];
+  serviceId: string;
+  date: string;
+  time: string;
+  staffId: string;
+  location: string;
+  startIso: string;
+};
+
 export type ServiceBookingData = {
   serviceId: string;
   serviceName: string;
   staffId: string;
   date: string;
   time: string;
+  /** SWP-BOOKING-SLOTS: the instant the public slots route offered for `time`, posted as the booking's startTime. */
+  startIso?: string;
   location?: string;
   locationPlaceId?: string | null;
   locationLatLng?: { lat: number; lng: number } | null;

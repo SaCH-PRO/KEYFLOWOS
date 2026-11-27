@@ -7,6 +7,8 @@
  */
 
 import type { SemanticMemory } from '../ai/semantic-memory.service';
+import type { CanonicalModule } from '../../core/authority/module-vocabulary';
+import type { MemoryRowDataClass } from '../ai/memory-classification';
 
 export type MemorySourceType =
   | 'ai_memory'
@@ -19,6 +21,38 @@ export type MemorySourceType =
   | 'business_event'
   | 'ai_execution_log'
   | 'cortex_action_log';
+
+/**
+ * MEM-CLASS-READ (P137, D-257): the key under which a retrieved fragment's metadata
+ * carries its canonical persisted/provenance classification metadata so the unified
+ * reader projection can decide access without re-parsing rendered strings.
+ */
+export const MEMORY_CLASS_METADATA_KEY = '__memoryClass';
+
+/** Canonical classification metadata attached to a MemoryFragment by retrieval. */
+export interface MemoryClassFragmentMeta {
+  store: MemorySourceType;
+  dataClass: MemoryRowDataClass | string | null;
+  moduleScope: readonly string[] | null;
+  ownerUserId?: string | null;
+  hasOwnerColumn?: boolean;
+  category?: string | null;
+  key?: string | null;
+  source?: string | null;
+  sourceModule?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  type?: string | null;
+  sourceEventIds?: readonly string[];
+}
+
+/** Reader scope passed to the unified MEM-CLASS-READ projection. */
+export interface MemoryReaderContext {
+  /** Authenticated member userId in this business, or null for memberless turns / non-members. */
+  reader: string | null;
+  /** Module read-level predicate (`rankOf(memberModuleLevel(membership, mod)) >= LEVEL_RANK.read`). */
+  sight: (module: CanonicalModule) => boolean;
+}
 
 /**
  * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-3; D-128, D-100): the key under which a genome_memory_event fragment's
@@ -140,4 +174,11 @@ export interface MemoryRetrievalOptions {
    * false: a pattern is classified by its text, so none is read, and a withheld pattern takes no place in its limits.
    */
   aiMemoryPatterns?: boolean;
+  /**
+   * MEM-CLASS-READ (P137, D-257, D-234, D-100): unified reader projection context.
+   * When supplied, `UnifiedMemoryRetrievalService` filters by `data_class`, `module_scope`,
+   * `PERSONAL` ownership, and fail-closed backstop BEFORE ranking and BEFORE any count/slice
+   * so withheld items change nothing the reader sees (design 6.1).
+   */
+  readerContext?: MemoryReaderContext;
 }

@@ -24,7 +24,7 @@ import type {
   ShippingZone,
   StoreOrderResponse,
 } from "./components/types";
-import { loadCart, saveCart, loadPromoCode, savePromoCode } from "./components/utils";
+import { loadCart, saveCart, loadPromoCode, savePromoCode, bookingReuseKey } from "./components/utils";
 import { BusinessHero } from "./components/business-hero";
 import { todaysHoursLabel } from "./components/store-hours";
 import { CatalogGrid } from "./components/catalog-grid";
@@ -60,34 +60,85 @@ const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
  */
 type BookingRef = { bookingId: string; invoiceId?: string; invoiceUrl?: string };
 
+type ConfirmedDetails = {
+  serviceNames: string[];
+  dates: string[];
+  times: string[];
+  /** SWP-BOOKING-SLOTS: each booking's instant as the slots route offered it, and the service's length in minutes. */
+  starts?: (string | null)[];
+  durations?: (number | null)[];
+  locations: (string | null)[];
+  businessName: string;
+};
+
 /**
- * SEC-W9WCN-1 (W9-WEB-COMMERCE-NAV review; D-07: the token link is the
- * customer's own). A mixed cart books its services before it places the store
- * order; when that order's payment fails or its provider redirect is
- * abandoned, the bookings made are kept so the same customer who comes back
- * (Try Again, or Back to Shop and another payment method) is not booked twice.
- * They are kept under this key: the customer and the service lines they booked.
- * The next checkout reuses them only under the same key; any other checkout
- * (another customer in the tab or browser, or other services) books its own,
- * so it neither skips its bookings nor shows the first customer's token link.
+ * SWP-BOOKING-SLOTS (round 4): the service details a kf_pending_checkout record holds, only when they have the shape
+ * the confirmation reads; the record outlives the tab and can be edited by hand, so anything else is none.
  */
-function bookingReuseKey(
-  data: { firstName: string; lastName: string; email: string; phone: string; serviceBookings: Record<string, ServiceBookingData> },
-  serviceItems: CartItem[],
-): string {
-  const services = serviceItems.flatMap((si) => {
-    const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
-    return bd
-      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || ""]]
-      : [];
+function confirmedDetailsOf(raw: unknown): ConfirmedDetails | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+  if (!strings(d.serviceNames) || !strings(d.dates) || !strings(d.times)) return null;
+  const locations = Array.isArray(d.locations)
+    ? d.locations.map((l) => (typeof l === "string" ? l : null))
+    : d.serviceNames.map(() => null);
+  return {
+    serviceNames: d.serviceNames,
+    dates: d.dates,
+    times: d.times,
+    starts: Array.isArray(d.starts) ? d.starts.map((v) => (typeof v === "string" ? v : null)) : undefined,
+    durations: Array.isArray(d.durations) ? d.durations.map((v) => (typeof v === "number" ? v : null)) : undefined,
+    locations,
+    businessName: typeof d.businessName === "string" ? d.businessName : "",
+  };
+}
+
+/**
+ * SWP-BOOKING-SLOTS (round 8): a restored line's image, trimmed, only when it resolves (against this page) to an
+ * http: or https: URL: absolute, protocol-relative or a path, any host, as the live cart renders images.
+ */
+function httpImageOf(raw: string): string | null {
+  const value = raw.trim();
+  // A control character anywhere (trim leaves them) is no image URL.
+  if (value === "" || /[\u0000-\u001F\u007F]/.test(value)) return null;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const { protocol } = new URL(value, base);
+    return protocol === "http:" || protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** SWP-BOOKING-SLOTS (round 5): a restored record's order lines, only those shaped as cart lines. */
+function orderItemsOf(raw: unknown): CartItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item): CartItem[] => {
+    const o = item as Record<string, unknown> | null;
+    if (!o || typeof o !== "object" || typeof o.id !== "string" || typeof o.name !== "string") return [];
+    // A positive whole quantity and a finite, non-negative price and line total; anything else is no order line.
+    const { price, quantity } = o;
+    if (typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1_000_000) return [];
+    if (typeof price !== "number" || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * quantity)) return [];
+    // The shown strings are kept only when they are strings; an image only when it is an http(s) image (any host, as
+    // the live cart renders it), and what is rendered is the trimmed value checked.
+    const line = { ...o } as Record<string, unknown>;
+    for (const field of ["currency", "imageUrl"]) {
+      if (line[field] !== undefined && line[field] !== null && typeof line[field] !== "string") delete line[field];
+    }
+    if (typeof line.imageUrl === "string") {
+      const image = httpImageOf(line.imageUrl);
+      if (image) line.imageUrl = image;
+      else delete line.imageUrl;
+    }
+    return [line as unknown as CartItem];
   });
-  const customer = [
-    (data.firstName || "").trim(),
-    (data.lastName || "").trim(),
-    (data.email || "").trim().toLowerCase(),
-    (data.phone || "").trim(),
-  ];
-  return JSON.stringify({ customer, services });
+}
+
+/** SWP-BOOKING-SLOTS (round 5): a restored record's payment method, only one the storefront offers. */
+function paymentMethodOf(raw: unknown): PaymentMethod | undefined {
+  return raw === "wipay" || raw === "paypal" || raw === "cash" ? raw : undefined;
 }
 
 /** The bookings a pending checkout record keeps: never a token link (SEC-W9WCN-1). */
@@ -120,13 +171,7 @@ function PublicBookingPageInner() {
   const [paymentFailed, setPaymentFailed] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
   const [bookingResults, setBookingResults] = useState<BookingRef[]>([]);
-  const [confirmedDetails, setConfirmedDetails] = useState<{
-    serviceNames: string[];
-    dates: string[];
-    times: string[];
-    locations: (string | null)[];
-    businessName: string;
-  } | null>(null);
+  const [confirmedDetails, setConfirmedDetails] = useState<ConfirmedDetails | null>(null);
   const [confirmedOrderItems, setConfirmedOrderItems] = useState<CartItem[]>([]);
   const [confirmedOrderTotal, setConfirmedOrderTotal] = useState(0);
   const [confirmedPaymentMethod, setConfirmedPaymentMethod] = useState<PaymentMethod | undefined>();
@@ -378,18 +423,40 @@ function PublicBookingPageInner() {
       const pendingKey = `kf_pending_checkout_${slug}`;
       const raw = localStorage.getItem(pendingKey);
       if (!raw) return;
-      const pending = JSON.parse(raw);
+      // SWP-BOOKING-SLOTS (round 5): the record outlives the tab and can be edited by hand. It is removed before it is
+      // read, and one that is not a JSON object is ignored, so a corrupt record never breaks every later load.
       localStorage.removeItem(pendingKey);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+      // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
+      const pending = parsed as ReturnType<typeof JSON.parse>;
+      // SWP-BOOKING-SLOTS (round 6): the strings the confirmation shows or puts into a URL, only when they are strings.
+      // Invisible and unreadable characters (format, combining, space, control, default-ignorable, unassigned,
+      // private-use and lone-surrogate code points, and the Hangul and Braille blanks) are stripped for the blank check
+      // only: a field of only those is none; any other value is kept as it is.
+      const text = (v: unknown): string | null =>
+        typeof v === "string"
+        && v.replace(/[\p{Cf}\p{Mn}\p{Zs}\p{Cc}\p{Cn}\p{Co}\p{Cs}\p{Default_Ignorable_Code_Point}\u115F\u1160\u3164\uFFA0\u2800]/gu, "").trim() !== ""
+          ? v
+          : null;
+      const orderNumber = text(pending.orderNumber);
+      const orderId = text(pending.orderId);
+      const customerEmail = text(pending.customerEmail);
 
       type PaymentOutcome = "success" | "failed" | "pending";
       let outcome: PaymentOutcome = "pending";
 
-      if (pending.orderId && pending.customerEmail) {
+      if (orderId && customerEmail) {
         try {
           const { data: orderStatus } = await apiGet<{
             paymentStatus: string;
             status: string;
-          }>(`/site/storefront/public/order/${pending.orderId}?email=${encodeURIComponent(pending.customerEmail)}`);
+          }>(`/site/storefront/public/order/${encodeURIComponent(orderId)}?email=${encodeURIComponent(customerEmail)}`);
           if (orderStatus) {
             const ps = orderStatus.paymentStatus?.toUpperCase();
             if (ps === "PAID" || ps === "COMPLETED" || ps === "CAPTURED") {
@@ -405,12 +472,12 @@ function PublicBookingPageInner() {
         outcome = "success";
       }
 
-      setConfirmedOrderItems(pending.items ?? []);
-      setConfirmedOrderTotal(pending.orderTotal ?? 0);
-      setConfirmedPaymentMethod(pending.paymentMethod ?? undefined);
-      setConfirmedOrderNumber(pending.orderNumber ?? null);
-      setConfirmedOrderId(pending.orderId ?? null);
-      setConfirmedCustomerEmail(pending.customerEmail ?? null);
+      setConfirmedOrderItems(orderItemsOf(pending.items));
+      setConfirmedOrderTotal(typeof pending.orderTotal === "number" && Number.isFinite(pending.orderTotal) ? pending.orderTotal : 0);
+      setConfirmedPaymentMethod(paymentMethodOf(pending.paymentMethod));
+      setConfirmedOrderNumber(orderNumber);
+      setConfirmedOrderId(orderId);
+      setConfirmedCustomerEmail(customerEmail);
       // SEC-W9WCN-1: the record holds no token link; the bookings it names are
       // kept for the customer it names (its reuse key) only while the payment
       // is not through, and a record without a key is reused by nobody.
@@ -418,11 +485,11 @@ function PublicBookingPageInner() {
       const keepRefs = outcome !== "success";
       setCompletedBookingResults(keepRefs ? pendingRefs : []);
       setCompletedBookingKey(keepRefs && typeof pending.bookingReuseKey === "string" ? pending.bookingReuseKey : null);
-      setConfirmedDetails(pending.confirmedDetails ?? null);
+      setConfirmedDetails(confirmedDetailsOf(pending.confirmedDetails));
 
       const allResults: BookingRef[] = [...pendingRefs];
-      if (pending.orderNumber) {
-        allResults.push({ bookingId: pending.orderNumber });
+      if (orderNumber) {
+        allResults.push({ bookingId: orderNumber });
       }
       setBookingResults(allResults);
 
@@ -750,6 +817,16 @@ function PublicBookingPageInner() {
   }) => {
     if (!business) return;
 
+    // SWP-BOOKING-SLOTS (SEC-M2): every service row books the instant the public slots route offered. A row without
+    // one is refused before anything is booked, never read as a wall time on the visitor's clock.
+    const withoutInstant = serviceItemsInCart
+      .filter((si) => {
+        const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+        return bd && !bd.startIso;
+      })
+      .map((si) => si.name);
+    if (withoutInstant.length > 0) throw new Error(`Please pick a time again for ${withoutInstant.join(", ")}.`);
+
     // SEC-W9WCN-1: the bookings an unfinished checkout made are reused only
     // by the same customer booking the same services; any other checkout
     // drops them and books its own.
@@ -767,7 +844,10 @@ function PublicBookingPageInner() {
         const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
         if (!bd) continue;
 
-        const startTime = new Date(`${bd.date}T${bd.time}`).toISOString();
+        // SWP-BOOKING-SLOTS: the instant the public slots route offered, as is; the date and time shown are the
+        // business's clock, so reading them on the visitor's clock booked another instant in another zone. A row
+        // without one was refused above (SEC-M2).
+        const startTime = bd.startIso as string;
 
         for (let q = 0; q < si.quantity; q++) {
           const trimmedLocation = bd.location?.trim() || undefined;
@@ -812,12 +892,16 @@ function PublicBookingPageInner() {
     const svcDates: string[] = [];
     const svcTimes: string[] = [];
     const svcLocations: (string | null)[] = [];
+    const svcStarts: (string | null)[] = [];
+    const svcDurations: (number | null)[] = [];
     for (const si of serviceItemsInCart) {
       const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
       if (bd) {
         svcNames.push(si.name);
         svcDates.push(bd.date);
         svcTimes.push(bd.time);
+        svcStarts.push(bd.startIso ?? null);
+        svcDurations.push(typeof si.duration === "number" && si.duration > 0 ? si.duration : null);
         svcLocations.push(bd.location?.trim() ? bd.location.trim() : null);
       }
     }
@@ -825,6 +909,8 @@ function PublicBookingPageInner() {
       serviceNames: svcNames,
       dates: svcDates,
       times: svcTimes,
+      starts: svcStarts,
+      durations: svcDurations,
       locations: svcLocations,
       businessName: business?.name || "",
     } : null;
@@ -948,14 +1034,21 @@ function PublicBookingPageInner() {
   if (success) {
     const hasStoreOrder = confirmedOrderNumber !== null;
     const isOrder = hasStoreOrder || (bookingResults.length > 0 && bookingResults.every((br) => br.bookingId.startsWith("ORD-")));
-    const firstDate = confirmedDetails?.dates[0];
-    const firstTime = confirmedDetails?.times[0];
-    const calendarUrl = firstDate && firstTime && confirmedDetails
+    // SWP-BOOKING-SLOTS: the calendar event is the booked instant (the slots route's), never the date and time read
+    // on the visitor's clock; it lasts the service's length (an hour when unknown). No instant, no link.
+    // A length that is not a whole day's worth of minutes or less (a corrupted record, 1e13) is an hour.
+    const firstStart = typeof confirmedDetails?.starts?.[0] === "string" ? new Date(confirmedDetails.starts[0]) : null;
+    const rawMinutes = confirmedDetails?.durations?.[0];
+    const minutes = typeof rawMinutes === "number" && Number.isFinite(rawMinutes) && rawMinutes >= 1 && rawMinutes <= 1440
+      ? Math.round(rawMinutes)
+      : 60;
+    const firstEnd = firstStart ? new Date(firstStart.getTime() + minutes * 60 * 1000) : null;
+    const calendarUrl = firstStart && firstEnd && !Number.isNaN(firstStart.getTime()) && !Number.isNaN(firstEnd.getTime()) && confirmedDetails
       ? (() => {
-          const start = new Date(`${firstDate}T${firstTime}`);
-          const end = new Date(start.getTime() + 60 * 60 * 1000);
+          const start = firstStart;
+          const end = firstEnd;
           const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-          const title = encodeURIComponent(`${confirmedDetails.serviceNames[0] || "Appointment"} - ${confirmedDetails.businessName}`);
+          const title = encodeURIComponent(`${confirmedDetails.serviceNames?.[0] || "Appointment"} - ${confirmedDetails.businessName}`);
           const firstBookingLocation = confirmedDetails.locations?.[0] || null;
           const location = encodeURIComponent(firstBookingLocation || business?.address || "");
           return `https://calendar.google.com/calendar/event?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&location=${location}`;
@@ -1098,6 +1191,7 @@ function PublicBookingPageInner() {
           onBack={() => setCheckoutMode(false)}
           onUpdateQuantity={updateQuantity}
           onSubmit={handleCheckoutSubmit}
+          heldReuseKey={completedBookingResults.length > 0 ? completedBookingKey : null}
         />
       </main>
     );

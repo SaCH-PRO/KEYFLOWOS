@@ -31,18 +31,19 @@ interface CaseStudy {
   industry: string | null;
   metrics: {
     windowDays: number;
-    recentOrders: number;
-    priorOrders: number;
-    recentRevenue: number;
-    priorRevenue: number;
+    // P230: these seven are withheld by the server (P139) for members below revenue:read and on booking-only drafts.
+    recentOrders?: number;
+    priorOrders?: number;
+    recentRevenue?: number;
+    priorRevenue?: number;
     currency: string;
     recentBookings: number;
     priorBookings: number;
-    orderGrowthPct: number | null;
-    revenueGrowthPct: number | null;
+    orderGrowthPct?: number | null;
+    revenueGrowthPct?: number | null;
     bookingGrowthPct: number | null;
     topService: string | null;
-    topProduct: string | null;
+    topProduct?: string | null;
   };
   status: "draft" | "published";
   consent: boolean;
@@ -52,7 +53,12 @@ interface CaseStudy {
   publishedAt: string | null;
 }
 
-function formatCurrency(amount: number, currency: string) {
+/**
+ * P230: an amount the server withheld (members below revenue:read, booking-only studies; server P139) or that is not
+ * a finite number is never formatted: it reads "—", never "TTD NaN" (and never reaches toFixed on undefined).
+ */
+function formatCurrency(amount: number | null | undefined, currency: string) {
+  if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -324,20 +330,25 @@ function CaseStudyRow({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Metric
-          icon={ShoppingCart}
-          label="Orders (60d)"
-          value={String(m.recentOrders)}
-          prior={`${m.priorOrders} prior 60d`}
-          delta={m.orderGrowthPct}
-        />
-        <Metric
-          icon={TrendingUp}
-          label="Revenue (60d)"
-          value={formatCurrency(m.recentRevenue, m.currency)}
-          prior={`${formatCurrency(m.priorRevenue, m.currency)} prior 60d`}
-          delta={m.revenueGrowthPct}
-        />
+        {/* P230: the Orders and Revenue tiles show only when the server sent those figures. */}
+        {typeof m.recentOrders === "number" && (
+          <Metric
+            icon={ShoppingCart}
+            label="Orders (60d)"
+            value={String(m.recentOrders)}
+            prior={typeof m.priorOrders === "number" ? `${m.priorOrders} prior 60d` : undefined}
+            delta={m.orderGrowthPct}
+          />
+        )}
+        {typeof m.recentRevenue === "number" && (
+          <Metric
+            icon={TrendingUp}
+            label="Revenue (60d)"
+            value={formatCurrency(m.recentRevenue, m.currency)}
+            prior={typeof m.priorRevenue === "number" ? `${formatCurrency(m.priorRevenue, m.currency)} prior 60d` : undefined}
+            delta={m.revenueGrowthPct}
+          />
+        )}
         <Metric
           icon={CalendarCheck}
           label="Bookings (60d)"

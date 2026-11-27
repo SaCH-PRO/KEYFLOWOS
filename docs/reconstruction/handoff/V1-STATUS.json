@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "ae4a5bebc6141e3daa77c256b72a470e2c4cad7e",
-  "main_commit_date": "2026-11-26T20:19:08+00:00",
+  "main_sha": "d54b3e15a2073cde6de1510ea6cff24d83874b18",
+  "main_commit_date": "2026-11-27T03:21:14+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 218,
-    "points": 327.5,
-    "pct_by_points": 57.4
+    "packets": 235,
+    "points": 352.5,
+    "pct_by_points": 61.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 178,
-    "points": 243,
-    "pct_by_points": 42.6
+    "packets": 161,
+    "points": 218,
+    "pct_by_points": 38.2
    }
   },
   "by_step": {
@@ -66,33 +66,33 @@
     "total": 7
    },
    "3": {
-    "done": 88,
+    "done": 93,
     "in-progress": 0,
-    "todo": 61,
+    "todo": 56,
     "total": 149
    },
    "4": {
-    "done": 29,
+    "done": 33,
     "in-progress": 0,
-    "todo": 24,
+    "todo": 20,
     "total": 53
    },
    "5": {
-    "done": 56,
+    "done": 62,
     "in-progress": 0,
-    "todo": 36,
+    "todo": 30,
     "total": 92
    },
    "6": {
-    "done": 25,
+    "done": 26,
     "in-progress": 0,
-    "todo": 15,
+    "todo": 14,
     "total": 40
    },
    "7": {
-    "done": 4,
+    "done": 5,
     "in-progress": 0,
-    "todo": 30,
+    "todo": 29,
     "total": 34
    },
    "8": {
@@ -110,24 +110,24 @@
     "total": 87
    },
    "launch": {
-    "done": 129,
+    "done": 145,
     "in-progress": 0,
-    "todo": 126,
+    "todo": 110,
     "total": 255
    },
    "follow-on": {
-    "done": 2,
+    "done": 3,
     "in-progress": 0,
-    "todo": 52,
+    "todo": 51,
     "total": 54
    }
   },
   "by_derivation": {
-   "prior-status-file": 86,
+   "prior-status-file": 80,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 83,
-   "compacted-commit": 86,
-   "no-evidence": 111,
+   "code-commit-subject": 99,
+   "compacted-commit": 87,
+   "no-evidence": 100,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -165,33 +165,46 @@
    "SWP-CENSUS-OPEN-WRITES",
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
+   "SWP-QUERY-CORS-HEADERS",
    "SWP-CENSUS-V1-A",
    "SWP-CENSUS-V1-B",
    "NAV-B-LEGACY-SERVER",
+   "W11-TRANSIENT-CONFLICT",
    "W1F-ORDER-TRANSITIONS",
+   "W1F-SETTLE-NO-STOCK",
+   "W1F-STORE-STRIPE-R0",
    "W1F-STORE-PAYPAL",
    "FU-IDENTITY-FINANCE-COLUMNS",
+   "FU-CONTACT-AUDIT-RESIDUAL",
    "FU-MERGE-CONTACTS-UNIQUE",
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT",
+   "FU-PROPOSAL-MONEY-TAG",
+   "FU-KEY-INVOICE-EMAIL-PAY-LINK",
    "FU-MARKETPLACE-PAID-PAYMENT-ROW",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
+   "FU-CASH-LABEL-SANITISER",
    "FU-DOC-FETCH-BODY-CAP",
    "MEM-CENSUS",
    "MEM-EXPIRED-NOT-SERVED",
+   "MEM-CLASS-COLUMNS",
+   "MEM-CLASS-BACKFILL",
    "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
+   "FU-CASE-STUDY-REVENUE",
    "RR-MODEL-LIFECYCLE-GUARD",
    "RR-UNKNOWN-COST-NOT-ZERO",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
    "RR-TOOL-EFFECT-CLASS",
+   "RR-TOOL-WRITES-SEQUENTIAL",
    "RR-DISPATCH-NO-BLIND-RETRY",
+   "RR-DISPATCH-ATOMIC-CLAIM",
    "RR-WEBHOOK-INGRESS-CENSUS",
    "RR-ACTION-INTENT-ONE-CLASSIFIER",
    "RR-EVAL-HARNESS-NO-VACUOUS",
@@ -204,6 +217,9 @@
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
    "FU-TIMELINE-CALLERS-SCOPE",
    "FU-UNTRUSTED-INBOUND-FENCE",
+   "FU-STORE-ORDERS-MONEY-SCOPE",
+   "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
+   "FU-OPENAI-FINISH-REASON",
    "FU-CONTACTID-WRITER-VALIDATION",
    "FU-WEB-PAYLINK-STATUS-BUTTONS",
    "SEC-KEY-CUSTOM-LOGIC",
@@ -215,8 +231,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 104,
-  "todo_with_dependencies_met_launch": 74
+  "todo_with_dependencies_met": 94,
+  "todo_with_dependencies_met_launch": 61
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -232,9 +248,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 23,
+   "weight": 22,
    "chain": [
-    "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
     "W11-WEB-INVENTORY-REFUSALS",
     "SWP-CALENDAR-TRUTH",
@@ -268,27 +283,17 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 44
+   "unblocks": 43
   },
   {
-   "id": "SWP-FIN-WEB-CRASHES",
+   "id": "SWP-UI-COPY",
    "step": 5,
-   "priority": "P1",
+   "priority": "P3",
    "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 19
-  },
-  {
-   "id": "W11-TRANSIENT-CONFLICT",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 11
+   "unblocks": 18
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -321,6 +326,16 @@
    "unblocks": 10
   },
   {
+   "id": "W11-LOAD-SENSITIVE-TESTS",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
@@ -336,16 +351,6 @@
    "priority": "P1",
    "size": "L",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8
-  },
-  {
-   "id": "SWP-QUERY-CORS-HEADERS",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
@@ -411,26 +416,6 @@
    "unblocks": 5
   },
   {
-   "id": "FU-PROPOSAL-MONEY-TAG",
-   "step": 3,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
-   "id": "MEM-CLASS-COLUMNS",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
    "id": "SWP-STORE-FRAME",
    "step": 4,
    "priority": "P1",
@@ -451,6 +436,16 @@
    "unblocks": 2
   },
   {
+   "id": "RR-ACTION-UNDERSTANDING-SERVER",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
    "id": "RR-ANTHROPIC-TOOL-PARITY",
    "step": 7,
    "priority": "P3",
@@ -461,10 +456,10 @@
    "unblocks": 2
   },
   {
-   "id": "RR-TOOL-WRITES-SEQUENTIAL",
-   "step": 3,
+   "id": "MEM-CLASS-READ",
+   "step": 4,
    "priority": "P1",
-   "size": "S",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -531,30 +526,10 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACT-AUDIT-RESIDUAL",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
    "step": 3,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -571,31 +546,11 @@
    "unblocks": 0
   },
   {
-   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
    "step": 5,
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -611,61 +566,11 @@
    "unblocks": 0
   },
   {
-   "id": "RR-DISPATCH-ATOMIC-CLAIM",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-SETTLE-NO-STOCK",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-STORE-STRIPE-R0",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
    "step": 5,
    "priority": "P2",
    "size": "S",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASE-STUDY-REVENUE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASH-LABEL-SANITISER",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -756,16 +661,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-OPENAI-FINISH-REASON",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -901,6 +796,16 @@
    "unblocks": 0
   },
   {
+   "id": "RR-KEY-RUN-BUDGET",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-KEY-SAFETY-POLICY",
    "step": 3,
    "priority": "P2",
@@ -947,6 +852,16 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W11-ORDER-METADATA-WRITERS",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1310,27 +1225,17 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 44
+   "unblocks": 43
   },
   {
-   "id": "SWP-FIN-WEB-CRASHES",
+   "id": "SWP-UI-COPY",
    "step": 5,
-   "priority": "P1",
+   "priority": "P3",
    "size": "S",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 19
-  },
-  {
-   "id": "W11-TRANSIENT-CONFLICT",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 11
+   "unblocks": 18
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -1363,6 +1268,16 @@
    "unblocks": 10
   },
   {
+   "id": "W11-LOAD-SENSITIVE-TESTS",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
@@ -1378,16 +1293,6 @@
    "priority": "P1",
    "size": "L",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8
-  },
-  {
-   "id": "SWP-QUERY-CORS-HEADERS",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
@@ -1453,26 +1358,6 @@
    "unblocks": 5
   },
   {
-   "id": "FU-PROPOSAL-MONEY-TAG",
-   "step": 3,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
-   "id": "MEM-CLASS-COLUMNS",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
    "id": "FU-VITEST-DECORATOR-METADATA",
    "step": 3,
    "priority": "P1",
@@ -1493,10 +1378,10 @@
    "unblocks": 2
   },
   {
-   "id": "RR-TOOL-WRITES-SEQUENTIAL",
-   "step": 3,
+   "id": "MEM-CLASS-READ",
+   "step": 4,
    "priority": "P1",
-   "size": "S",
+   "size": "L",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1563,30 +1448,10 @@
    "unblocks": 0
   },
   {
-   "id": "FU-CONTACT-AUDIT-RESIDUAL",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
    "step": 3,
    "priority": "P1",
    "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1603,31 +1468,11 @@
    "unblocks": 0
   },
   {
-   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
    "step": 5,
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1643,61 +1488,11 @@
    "unblocks": 0
   },
   {
-   "id": "RR-DISPATCH-ATOMIC-CLAIM",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-SETTLE-NO-STOCK",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "W1F-STORE-STRIPE-R0",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
    "step": 5,
    "priority": "P2",
    "size": "S",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASE-STUDY-REVENUE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASH-LABEL-SANITISER",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1788,16 +1583,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-OPENAI-FINISH-REASON",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -4125,15 +3910,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "3581d281"
+   ],
    "depends_on": [
     "SWP-TEAM-WEB"
    ],
    "title": "Reports: switching Books tabs never crashes",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-UI-COPY",
@@ -4151,7 +3938,7 @@
     "SWP-KEY-SHELL-SMOKE"
    ],
    "title": "Plain words instead of developer text in Calendar, Events and Settings",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-WEB-INVENTORY-REFUSALS",
@@ -4693,15 +4480,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "fb9744d4"
+   ],
    "depends_on": [
     "W11-QUERY-DTO-COERCION"
    ],
    "title": "Public visitor/cart/checkout events pass CORS (X-Visitor-Id, X-Session-Id allowed)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-ORDER-METADATA-WRITERS",
@@ -4718,7 +4507,7 @@
     "SWP-QUERY-CORS-HEADERS"
    ],
    "title": "Abandoned-checkout flag and Shopify order sync write order metadata in one statement (F-27)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-READ-SCOPE-CENSUS",
@@ -5021,10 +4810,12 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "747205c2"
+   ],
    "depends_on": [
     "W11-SHIP-STOCK-DECREMENT",
     "W11-STORE-OWN-PAYMENT-KEYS",
@@ -5032,7 +4823,7 @@
     "VAT-BASICS"
    ],
    "title": "Share isLostTransactionConflict with identity bootstrap, PayPal capture recording and the KEY action boundary (F-37)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-LOAD-SENSITIVE-TESTS",
@@ -5049,7 +4840,7 @@
     "W11-TRANSIENT-CONFLICT"
    ],
    "title": "Three suites that fail only under machine load get deterministic budgets (MW-06 pool, ST-2 5s, EE-08/MR-02 waits)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-PAGING-TOTAL-ORDER-A",
@@ -5348,16 +5139,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "10a14b67"
+   ],
    "depends_on": [
     "W11-CHECKOUT-PAIR-SCOPE",
     "SWP-STORE-OVERSELL"
    ],
    "title": "A provider settlement whose stock has run out records the money and alerts the business; stock reads are business-scoped everywhere",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W1F-STORE-STRIPE-R0",
@@ -5366,15 +5159,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "34eb3c40"
+   ],
    "depends_on": [
     "W11-STORE-OWN-PAYMENT-KEYS"
    ],
    "title": "The platform's Stripe signature never settles a store order; store refunds map to their order",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W1F-STORE-PAYPAL",
@@ -5572,15 +5367,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "45343458"
+   ],
    "depends_on": [
     "TOF-CONTACT-AUDIT-CREATE"
    ],
    "title": "Every remaining contact write records its audit row durably (D-25), notes and tasks included (D-207)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-MERGE-CONTACTS-UNIQUE",
@@ -5945,15 +5742,17 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "bcb194c0"
+   ],
    "depends_on": [
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "KEY proposal writers tag money at creation, so proposal visibility stops depending on wording",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-BOOKING-PAGE-PAYMENT-METHOD",
@@ -5999,15 +5798,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "69a61dfb"
+   ],
    "depends_on": [
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "KEY does not email an invoice without its pay button on a transient pay-link conflict, and never sends it twice",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
@@ -6111,15 +5912,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e4fd193c"
+   ],
    "depends_on": [
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "One code-only currency label sanitiser for every structured other-currency cash list",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-DOC-FETCH-BODY-CAP",
@@ -6271,15 +6074,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e8d44688",
+    "fa20c217"
+   ],
    "depends_on": [
     "MEM-CENSUS"
    ],
    "title": "Memory rows and embedding copies record data class and module scope at write, from provenance",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-CLASS-BACKFILL",
@@ -6288,15 +6094,17 @@
    "size": "S",
    "lane": "server",
    "track": "follow-on",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "2f88979f"
+   ],
    "depends_on": [
     "MEM-CLASS-COLUMNS"
    ],
    "title": "Classify legacy memory rows: dry-run report by default, apply on owner authority",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "MEM-CLASS-READ",
@@ -6317,7 +6125,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "One reader projection decides every memory read by data class; derived items inherit their sources' class",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-TEMPORAL-EMBED-DEDUP",
@@ -6549,13 +6357,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "599b7ea5"
+   ],
    "depends_on": [],
    "title": "Case-study metrics withhold recent revenue without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-PAY-LINK-STATUS-GATE",
@@ -7009,7 +6819,7 @@
     "RR-TOOL-WRITES-SEQUENTIAL"
    ],
    "title": "A typed per-turn run budget for KEY: a cap on tool calls executed per model response, and pinned worst-case model attempts per turn",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-TOOL-EFFECT-CLASS",
@@ -7054,15 +6864,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b0d721e7"
+   ],
    "depends_on": [
     "RR-TOOL-EFFECT-CLASS"
    ],
    "title": "Flow chat runs the writes of one model turn one at a time in model order; only reads run in parallel",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-DISPATCH-NO-BLIND-RETRY",
@@ -7091,15 +6903,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "db146c7a",
+    "a68cfa6e"
+   ],
    "depends_on": [
     "RR-DISPATCH-NO-BLIND-RETRY"
    ],
    "title": "Plan queue takes an atomic durable claim on the idempotency key before running a step (no find-then-execute)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-MCP-TENANT-BOUND",
@@ -7285,7 +7100,7 @@
     "FU-PROPOSAL-MONEY-TAG"
    ],
    "title": "Server ActionUnderstanding projection on every KEY proposal: phase, authority, outcome verified only from outcome evidence, reversibility",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-ACTION-UNDERSTANDING-WEB",
@@ -8312,15 +8127,17 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "ca760763"
+   ],
    "depends_on": [
     "FU-SITE-ANALYTICS-REVENUE-SCOPE"
    ],
    "title": "Store order lists and order detail withhold money fields from readers without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
@@ -8404,15 +8221,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "54108e20"
+   ],
    "depends_on": [
     "RR-STREAM-ERROR-NO-EFFECTS"
    ],
    "title": "A failed flow follow-up stream still saves the tool turn that already ran",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-OPENAI-FINISH-REASON",
@@ -8421,15 +8240,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "808a068d"
+   ],
    "depends_on": [
     "RR-STREAM-ERROR-NO-EFFECTS"
    ],
    "title": "OpenAI-compatible stream adapters treat a close without a finish reason as a failure",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONTACTID-WRITER-VALIDATION",

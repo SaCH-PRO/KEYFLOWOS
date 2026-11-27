@@ -1,33 +1,75 @@
-import type { BusinessHours, CartItem, PromoCode } from "./types";
+import { apiGet } from "@/lib/api";
+import { isClosedOnDate } from "./store-hours";
+import type { BusinessHours, CartItem, HeldSlot, PromoCode, ServiceBookingData } from "./types";
 
-const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+/**
+ * SWP-BOOKING-SLOTS (BUG-122): the times a customer can book a service on a day, as HH:MM on the business's own
+ * clock (Business.timezone; the visitor's when the business has none), read from the server's public slots route.
+ * That route puts every candidate through the guard the booking write paths use (existing bookings, buffer, lead
+ * time, business and staff hours, the appointment ending by closing), so the picker offers only what Place Order
+ * accepts. null when the route cannot be read, answers something else, or the zone is unknown: no local guess knows
+ * the bookings, so nothing is offered then.
+ */
+export async function fetchAvailableSlots(params: SlotQuery): Promise<string[] | null> {
+  const slots = await fetchAvailableSlotTimes(params);
+  return slots ? slots.map((s) => s.time) : null;
+}
 
-export function getAvailableSlots(date: string, businessHours?: BusinessHours | null): string[] {
-  if (!date) return [];
-  const d = new Date(date + "T00:00:00");
-  const dayKey = dayKeys[d.getDay()];
-  const dayH = businessHours?.[dayKey];
-  if (dayH?.closed) return [];
-  const open = dayH?.open || "09:00";
-  const close = dayH?.close || "17:00";
-  const [oh, om] = open.split(":").map(Number);
-  const [ch, cm] = close.split(":").map(Number);
-  const slots: string[] = [];
-  let t = oh * 60 + om;
-  const end = ch * 60 + cm;
-  while (t < end) {
-    const h = Math.floor(t / 60).toString().padStart(2, "0");
-    const m = (t % 60).toString().padStart(2, "0");
-    slots.push(`${h}:${m}`);
-    t += 30;
+/** The query fetchAvailableSlots and fetchAvailableSlotTimes ask the public slots route. */
+export type SlotQuery = {
+  businessId: string;
+  serviceId: string;
+  date: string;
+  staffId?: string;
+  timeZone?: string | null;
+  signal?: AbortSignal;
+};
+
+/** A time the picker offers: HH:MM on the business's clock and the exact instant the server offered for it. */
+export type SlotTime = { time: string; startIso: string };
+
+/**
+ * fetchAvailableSlots, with each time's instant: the booking posts that instant as is, so a visitor on another
+ * clock books exactly the slot offered. Where one wall time is offered twice (the hour repeated when clocks go
+ * back), the first instant is kept.
+ */
+export async function fetchAvailableSlotTimes(params: SlotQuery): Promise<SlotTime[] | null> {
+  const { businessId, serviceId, date, staffId, timeZone, signal } = params;
+  if (!businessId || !serviceId || !/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) return null;
+  const query = new URLSearchParams({ serviceId, date });
+  if (staffId) query.set("staffId", staffId);
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat("en-US", { timeZone: timeZone || undefined, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  } catch {
+    return null;
   }
-  return slots;
+  try {
+    const res = await apiGet<{ date?: string; slots?: unknown }>(
+      `/bookings/public/businesses/${encodeURIComponent(businessId)}/slots?${query.toString()}`,
+      signal ? { signal } : undefined,
+    );
+    const slots = res?.data?.slots;
+    if (res?.error || !Array.isArray(slots)) return null;
+    const shown: SlotTime[] = [];
+    for (const s of slots) {
+      const at = typeof s === "string" ? new Date(s) : null;
+      if (!at || Number.isNaN(at.getTime())) return null;
+      const parts = format.formatToParts(at);
+      const hh = String(Number(parts.find((p) => p.type === "hour")?.value) % 24).padStart(2, "0");
+      const mm = parts.find((p) => p.type === "minute")?.value ?? "";
+      const text = `${hh}:${mm}`;
+      if (!/^\d{2}:\d{2}$/.test(text)) return null;
+      if (!shown.some((t) => t.time === text)) shown.push({ time: text, startIso: at.toISOString() });
+    }
+    return shown.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  } catch {
+    return null;
+  }
 }
 
 export function isDayClosed(date: string, businessHours?: BusinessHours | null): boolean {
-  if (!date || !businessHours) return false;
-  const d = new Date(date + "T00:00:00");
-  return businessHours[dayKeys[d.getDay()]]?.closed === true;
+  return isClosedOnDate(businessHours, date);
 }
 
 export function loadCart(slug: string): CartItem[] {
@@ -109,4 +151,56 @@ export function typeBadge(itemType: "service" | "product" | "package", primaryCo
     package: { label: "Package", icon: "\u{1F381}", color: accentColor || "#a78bfa" },
   }[itemType];
   return { label: `${cfg.icon} ${cfg.label}`, color: cfg.color };
+}
+
+/**
+ * SEC-W9WCN-1 (W9-WEB-COMMERCE-NAV review; D-07: the token link is the
+ * customer's own). A mixed cart books its services before it places the store
+ * order; when that order's payment fails or its provider redirect is
+ * abandoned, the bookings made are kept so the same customer who comes back
+ * (Try Again, or Back to Shop and another payment method) is not booked twice.
+ * They are kept under this key: the customer and the service lines they booked.
+ * The next checkout reuses them only under the same key; any other checkout
+ * (another customer in the tab or browser, or other services) books its own,
+ * so it neither skips its bookings nor shows the first customer's token link.
+ */
+export function bookingReuseKey(
+  data: { firstName: string; lastName: string; email: string; phone: string; serviceBookings: Record<string, ServiceBookingData> },
+  serviceItems: CartItem[],
+): string {
+  const services = serviceItems.flatMap((si) => {
+    const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+    return bd
+      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || "", bd.startIso ?? ""]]
+      : [];
+  });
+  const customer = [
+    (data.firstName || "").trim(),
+    (data.lastName || "").trim(),
+    (data.email || "").trim().toLowerCase(),
+    (data.phone || "").trim(),
+  ];
+  return JSON.stringify({ customer, services });
+}
+
+/**
+ * SWP-BOOKING-SLOTS: the slots the kept bookings hold, read from their reuse key (bookingReuseKey's service lines),
+ * so the same customer's next checkout offers and keeps them while it still matches that whole key; the slots route
+ * counts them as taken.
+ */
+export function heldSlotsOf(reuseKey: string | null | undefined): HeldSlot[] {
+  if (!reuseKey) return [];
+  try {
+    const { customer, services } = JSON.parse(reuseKey) as { customer?: unknown; services?: unknown };
+    if (!Array.isArray(services) || !Array.isArray(customer) || !customer.every((c) => typeof c === "string")) return [];
+    return services.flatMap((line): HeldSlot[] => {
+      if (!Array.isArray(line) || line.length < 7) return [];
+      const [serviceId, , date, time, staffId, location, startIso] = line as unknown[];
+      const text = [serviceId, date, time, staffId, location, startIso];
+      if (!text.every((v) => typeof v === "string") || !startIso || Number.isNaN(new Date(startIso as string).getTime())) return [];
+      return [{ customer, serviceId, date, time, staffId, location, startIso } as HeldSlot];
+    });
+  } catch {
+    return [];
+  }
 }

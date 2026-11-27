@@ -593,19 +593,33 @@ function readsEveryPattern(reader: string | null, sight: ModuleSight): boolean {
  * reader with revenue read, an expense only for one with expenses read, for the reader and modules turnMemorySight
  * resolves (as the perception block and the semantic section read). A sight that cannot be resolved keeps no pattern.
  */
-async function turnPatternVisibility(
+async function turnMemoryContextOptions(
   self: Parameters<typeof turnMemorySight>[0],
   businessId: string,
   userId?: string,
   server?: FlowServerContext,
-): Promise<(row: { category: string; key: string; value: string }) => boolean> {
-  if (!userId && !server) return () => false;
+): Promise<{
+  patternVisible: (row: { category: string; key: string; value: string }) => boolean;
+  readerContext: { reader: string | null; sight: ModuleSight };
+}> {
+  if (!userId && !server) {
+    return {
+      patternVisible: () => false,
+      readerContext: { reader: null, sight: NO_MODULE_SIGHT },
+    };
+  }
   try {
     const who = await turnMemorySight(self, businessId, userId, server, 'memoryPatterns');
-    return (row) => aiMemoryRowVisibleTo(row, who);
+    return {
+      patternVisible: (row) => aiMemoryRowVisibleTo(row, who),
+      readerContext: who,
+    };
   } catch (err: unknown) {
     self.logger.warn(`[memoryPatterns][${businessId}] reader sight unresolved, no pattern served: ${err instanceof Error ? err.message : String(err)}`);
-    return () => false;
+    return {
+      patternVisible: () => false,
+      readerContext: { reader: null, sight: NO_MODULE_SIGHT },
+    };
   }
 }
 
@@ -1788,6 +1802,7 @@ export class FlowOrchestratorService {
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
           documentExtractions: readsDocumentExtractions(sight, reader),
+          readerContext: { reader, sight },
           // MEM-PATTERNS-SIGHT (security review F1; D-100, D-146): the perception block renders AiMemory rows too, and a
           // pattern states money ("N overdue invoices totaling X") or an expense in its text. A reader who may not read
           // every pattern (aiMemoryRowVisibleTo: a member reader with revenue and expenses read reads them all) gets none
@@ -2660,9 +2675,9 @@ export class FlowOrchestratorService {
     const businessName = snapshot.business.name || 'your business';
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
 
-    // MEM-PATTERNS-SIGHT (D-100, D-203): the behavioural patterns this turn's reader may read (turnPatternVisibility).
-    const patternVisible = await turnPatternVisibility({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
-    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
+    // MEM-PATTERNS-SIGHT / MEM-CLASS-READ (D-100, D-203, D-257): project every AiMemory category through the reader's sight.
+    const memoryOpts = await turnMemoryContextOptions({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+    const memoryCtx = await this.memory.buildContextBlock(businessId, memoryOpts);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     // Semantic memory search based on last user message (optional enrichment:
@@ -3184,9 +3199,9 @@ ${triage.standingContext}`;
     // viewer projection); a turn with no member, none.
     const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
-    // MEM-PATTERNS-SIGHT (D-100, D-203): the behavioural patterns this turn's reader may read (turnPatternVisibility).
-    const patternVisible = await turnPatternVisibility({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
-    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
+    // MEM-PATTERNS-SIGHT / MEM-CLASS-READ (D-100, D-203, D-257): project every AiMemory category through the reader's sight.
+    const memoryOpts = await turnMemoryContextOptions({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+    const memoryCtx = await this.memory.buildContextBlock(businessId, memoryOpts);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     // Semantic memory search based on current message (optional enrichment:

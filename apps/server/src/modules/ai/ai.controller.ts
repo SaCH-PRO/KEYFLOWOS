@@ -657,8 +657,13 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/suggestions')
-  async getSuggestions(@Param('businessId') businessId: string) {
-    return this.suggestions.getPendingSuggestions(businessId);
+  async getSuggestions(
+    @Param('businessId') businessId: string,
+    @Req() req?: AuthenticatedRequest,
+  ) {
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'aiSuggestions');
+    return this.suggestions.getPendingSuggestions(businessId, { reader, sight });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1035,11 +1040,14 @@ export class AiController {
     @Query('category') category?: string,
     @Req() req?: AuthenticatedRequest,
   ) {
-    // MEM-DOC-EXTRACTION-SIGHT: a reader without revenue read is handed no document extraction (none by category either).
-    const sees = await this.readsDocumentExtractions(businessId, req);
+    // MEM-DOC-EXTRACTION-SIGHT / MEM-CLASS-READ: project every AiMemory row through the reader's sight.
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'aiMemory');
+    const readerContext = { reader, sight };
+    const sees = readsDocumentExtractions(sight, reader);
     const entries = category
-      ? await this.memory.getByCategory(businessId, category as MemoryCategory)
-      : await this.memory.getAll(businessId);
+      ? await this.memory.getByCategory(businessId, category as MemoryCategory, readerContext)
+      : await this.memory.getAll(businessId, readerContext);
     return { memories: sees ? entries : withoutDocumentExtractions(entries) };
   }
 
@@ -1090,8 +1098,13 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/memory/context')
-  async getMemoryContext(@Param('businessId') businessId: string) {
-    const ctx = await this.memory.buildContextBlock(businessId);
+  async getMemoryContext(
+    @Param('businessId') businessId: string,
+    @Req() req?: AuthenticatedRequest,
+  ) {
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'aiMemoryContext');
+    const ctx = await this.memory.buildContextBlock(businessId, { readerContext: { reader, sight } });
     return ctx;
   }
 
