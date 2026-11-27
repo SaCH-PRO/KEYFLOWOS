@@ -19,7 +19,7 @@ import { fetchFinanceAccounts, PAYMENT_METHODS, type Expense, type FinancialAcco
 import { payBill } from "@/lib/api/finance";
 import { toast } from "sonner";
 import { readState, refusalMessage } from "@/lib/failure-kit";
-import { formatCurrency } from "./expense-utils";
+import { formatCurrency, useShownBusiness } from "./expense-utils";
 
 const FOCUSABLE = "select:not([disabled]), button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
 
@@ -52,12 +52,17 @@ export function BillPayDialog({
   bill,
   onClose,
   onPaid,
+  isCurrentBusiness: hookCheck,
 }: {
   businessId: string;
   bill: Expense;
   onClose: () => void;
   onPaid: (paid: Expense | null) => void;
+  /** R14: the parent's check that the business this bill is for is still the one shown (fallback: this prop's own). */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
   // Bumped by Retry: reads the accounts again.
   const [attempt, setAttempt] = useState(0);
   // Each read's answer and the account chosen from it are kept with the read they belong to (this business, this
@@ -169,11 +174,13 @@ export function BillPayDialog({
       const body: { paymentAccountId?: string; paymentMethod: string } = { paymentMethod: method };
       if (accounts.kind === "ok" && accountId) body.paymentAccountId = accountId;
       const res = await payBill(businessId, bill.id, body);
+      // R14: a pay that answers after a switch to another business says nothing there and reports nothing paid.
+      if (!isCurrentBusiness(businessId)) return;
       const refusal = refusalMessage(res, { what: "pay this bill" });
       if (refusal !== null) refused(refusal);
       else onPaid(res.data ?? null);
     } catch {
-      refused("Couldn't pay this bill.");
+      if (isCurrentBusiness(businessId)) refused("Couldn't pay this bill.");
     } finally {
       inFlight.current = false;
       setBusy(false);

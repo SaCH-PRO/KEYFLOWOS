@@ -26,7 +26,7 @@ import {
 } from "@/lib/client";
 import { createBill, type CreateBillBody } from "@/lib/api/finance";
 import { formatCurrency as formatMoney } from "@/lib/currency";
-import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone } from "./expense-utils";
+import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
@@ -47,6 +47,11 @@ interface ExpenseFormSideSheetProps {
   initialKind?: "expense" | "bill";
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * R14: the check that the business this was opened for is still the one shown. A parent with the data hook passes
+   * its ref-based `isCurrentBusiness`; without it, the component's own latest `businessId` (useShownBusiness).
+   */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
 export interface ExpensePrefill {
@@ -210,7 +215,13 @@ export function ExpenseFormSideSheet({
   initialKind = "expense",
   onClose,
   onSaved,
+  isCurrentBusiness: hookCheck,
 }: ExpenseFormSideSheetProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R14 MAJOR: a reply for the business this sheet was opened for, landing after the switch to another, says
+  // nothing and neither saves nor closes: the sheet now open may be the other business's.
+  const live = () => isCurrentBusiness(businessId);
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
   const [currency] = useState(() => businessCurrency(businessId));
   const dueDateId = useId();
@@ -342,6 +353,7 @@ export function ExpenseFormSideSheet({
           contactId: formData.contactId || undefined,
         };
         const res = await createBill(businessId, billBody);
+        if (!live()) return;
         if (res?.error || !res?.data) {
           toast.error(res?.error || "Failed to record bill");
           return;
@@ -365,6 +377,7 @@ export function ExpenseFormSideSheet({
         const res = editingExpense
           ? await updateExpense(businessId, editingExpense.id, payload)
           : await createExpense(businessId, payload);
+        if (!live()) return;
         // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
         if (res?.error) {
           toast.error(res.error);
@@ -399,10 +412,12 @@ export function ExpenseFormSideSheet({
           contentFormat: "binary",
           silent: true,
         }).then((ok) => {
-          if (ok) toast.success("Receipt saved to Drive");
-        }).catch(() => toast.error("Expense saved, but its Drive copy was not made"));
+          if (ok && live()) toast.success("Receipt saved to Drive");
+        }).catch(() => { if (live()) toast.error("Expense saved, but its Drive copy was not made"); });
       }
 
+      // The schedule and Drive steps await too: the business is checked again before anything is said or closed.
+      if (!live()) return;
       const what = isBill ? "Bill recorded" : "Expense saved";
       if (notices.length) toast.error(`${what}, but ${notices.join("; and ")}`);
       else toast.success(isBill ? "Bill recorded: pay it when it is due" : what);
@@ -410,7 +425,7 @@ export function ExpenseFormSideSheet({
       onSaved();
       onClose();
     } catch (_err) {
-      toast.error(isBill ? "Failed to record bill" : "Failed to save expense");
+      if (live()) toast.error(isBill ? "Failed to record bill" : "Failed to save expense");
     }
   };
 
@@ -440,6 +455,7 @@ export function ExpenseFormSideSheet({
     selectedFileRef.current = file;
     try {
       const uploaded = await uploadFile(file);
+      if (!live()) return;
       if (uploaded && !isOwnUploadPath(uploaded.objectPath, businessId)) {
         // SEC-EXH3-1: a path issued for another business is never attached to this one's expense.
         selectedFileRef.current = null;
@@ -454,7 +470,7 @@ export function ExpenseFormSideSheet({
         toast.error("Failed to upload receipt");
       }
     } catch (_err) {
-      toast.error("Failed to upload receipt");
+      if (live()) toast.error("Failed to upload receipt");
     }
   };
 
@@ -471,6 +487,7 @@ export function ExpenseFormSideSheet({
     setScanError(null);
     try {
       const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });
+      if (!live()) return;
       if (res.error) {
         setScanError(res.error);
         toast.error(res.error);
@@ -492,7 +509,7 @@ export function ExpenseFormSideSheet({
         toast.info("Could not extract data from receipt");
       }
     } catch (_err) {
-      toast.error("Extraction failed");
+      if (live()) toast.error("Extraction failed");
     }
     setExtracting(false);
   };

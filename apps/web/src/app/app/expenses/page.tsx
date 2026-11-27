@@ -329,7 +329,10 @@ export default function ExpensesInboxPage() {
 
   const handleExport = () => {
     if (!d.businessId) return;
-    fetch(getExpenseExportUrl(d.businessId), { headers: getAuthHeaders() })
+    const forBusiness = d.businessId;
+    // R14-3: a failure after a switch is not said on the other business. A CSV that arrives after the switch still
+    // downloads: the owner asked for that export, and the file names nothing but the rows it holds.
+    fetch(getExpenseExportUrl(forBusiness), { headers: getAuthHeaders() })
       .then(async (r) => {
         // A refused or failed export used to download the error body as the CSV.
         if (!r.ok) throw new Error(r.status === 403 ? "You don't have access to export expenses. Ask the owner for access." : "Couldn't export expenses.");
@@ -341,7 +344,9 @@ export default function ExpensesInboxPage() {
         a.download = `expenses-${new Date().toISOString().split("T")[0]}.csv`;
         a.click();
       })
-      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Couldn't export expenses."));
+      .catch((err: unknown) => {
+        if (d.isCurrentBusiness(forBusiness)) toast.error(err instanceof Error ? err.message : "Couldn't export expenses.");
+      });
   };
 
   // SEC-EXH3-1: the business this page shows. An upload started for it attaches only to it: the presign is sent for
@@ -891,6 +896,7 @@ export default function ExpensesInboxPage() {
             setPrefill(null);
             void d.loadData();
           }}
+          isCurrentBusiness={d.isCurrentBusiness}
         />
       )}
 

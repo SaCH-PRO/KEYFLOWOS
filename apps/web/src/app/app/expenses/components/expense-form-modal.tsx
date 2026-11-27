@@ -13,7 +13,7 @@ import {
   extractReceipt,
   createRecurringExpense,
 } from "@/lib/client";
-import { businessCurrency, recurringScheduleBody, todayInBusinessZone } from "./expense-utils";
+import { businessCurrency, recurringScheduleBody, todayInBusinessZone, useShownBusiness } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { API_BASE } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -27,9 +27,18 @@ interface ExpenseFormModalProps {
   services?: ServiceOption[];
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * R14: the check that the business this was opened for is still the one shown. A parent with the data hook passes
+   * its ref-based `isCurrentBusiness`; without it, the component's own latest `businessId` (useShownBusiness).
+   */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
-export function ExpenseFormModal({ businessId, categories, editingExpense, projects = [], contacts = [], services = [], onClose, onSaved }: ExpenseFormModalProps) {
+export function ExpenseFormModal({ businessId, categories, editingExpense, projects = [], contacts = [], services = [], onClose, onSaved, isCurrentBusiness: hookCheck }: ExpenseFormModalProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R14: a reply for a business no longer shown says nothing and neither saves nor closes.
+  const live = () => isCurrentBusiness(businessId);
   const { uploadFile, isUploading: uploading } = useUpload();
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
   const [currency] = useState(() => businessCurrency(businessId));
@@ -71,6 +80,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       const res = editingExpense
         ? await updateExpense(businessId, editingExpense.id, payload)
         : await createExpense(businessId, payload);
+      if (!live()) return;
       // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
       if (res?.error) {
         toast.error(res.error);
@@ -92,6 +102,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         } catch (err) {
           refused = err instanceof Error ? err.message : "the request failed";
         }
+        if (!live()) return;
         if (refused) toast.error(`Expense saved, but its recurring schedule was not created: ${refused}`);
         else toast.success("Expense saved");
       } else {
@@ -99,7 +110,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       }
       onSaved();
       onClose();
-    } catch (_err) { toast.error("Failed to save expense"); }
+    } catch (_err) { if (live()) toast.error("Failed to save expense"); }
   };
 
   // COR-F3: one save at a time: a double click (or a second tap while the first is in flight) sends nothing.
@@ -124,6 +135,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
     if (!file) return;
     try {
       const uploaded = await uploadFile(file);
+      if (!live()) return;
       if (uploaded) {
         // Persist a directly-resolvable URL (matches the prior behaviour
         // before this callsite was migrated onto `useUpload`). The render
@@ -138,7 +150,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       } else {
         toast.error("Failed to upload receipt");
       }
-    } catch (_err) { toast.error("Failed to upload receipt"); }
+    } catch (_err) { if (live()) toast.error("Failed to upload receipt"); }
   };
 
   const handleExtractReceipt = async () => {
@@ -146,6 +158,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
     setExtracting(true);
     try {
       const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });
+      if (!live()) return;
       if (res.error) {
         toast.error(res.error);
         setExtracting(false);
@@ -166,7 +179,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         toast.info("Could not extract data from receipt");
       }
     } catch (_err) {
-      toast.error("Extraction failed");
+      if (live()) toast.error("Extraction failed");
     }
     setExtracting(false);
   };

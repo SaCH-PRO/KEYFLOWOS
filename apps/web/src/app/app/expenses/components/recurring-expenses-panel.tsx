@@ -48,6 +48,14 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
+  // R14-6: an editor opened for one business closes when the panel shows another, so Update can never send a
+  // schedule of the old business to the new one (React's "reset state on a prop change", during render).
+  const [editorFor, setEditorFor] = useState(businessId);
+  if (editorFor !== businessId) {
+    setEditorFor(businessId);
+    setShowBuilder(false);
+    setEditing(null);
+  }
 
   const load = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }

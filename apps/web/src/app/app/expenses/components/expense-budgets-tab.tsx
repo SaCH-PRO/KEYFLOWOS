@@ -24,6 +24,13 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
   const isCurrentBusiness = hookCheck ?? shownCheck;
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetForm, setBudgetForm] = useState({ categoryId: "", amount: "", alertAt: "80" });
+  // R14-6: a budget modal opened for one business closes, and its form clears, when the tab shows another.
+  const [modalFor, setModalFor] = useState(businessId);
+  if (modalFor !== businessId) {
+    setModalFor(businessId);
+    setShowBudgetModal(false);
+    setBudgetForm({ categoryId: "", amount: "", alertAt: "80" });
+  }
 
   const dayOfMonth = new Date().getDate();
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -77,6 +77,13 @@ function expenseMonth(date: string, businessId: string | null): { month: number;
   return { year: Number(day.slice(0, 4)), month: Number(day.slice(5, 7)) };
 }
 
+/**
+ * R14-4: the workspace's switch announcement and stored-id key (lib/workspace.ts BUSINESS_CHANGED_EVENT and
+ * BUSINESS_ID_KEY), as use-expenses-data.ts spells the key: this page listens for both.
+ */
+const BUSINESS_CHANGED = "kf:business-changed";
+const BUSINESS_ID_KEY = "kf_business_id";
+
 export default function ExpenseDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -92,6 +99,25 @@ export default function ExpenseDetailPage() {
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [showPay, setShowPay] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  // R14-4: this page shows one business's expense. A switch (this tab's switcher, or another tab's stored id) leaves
+  // for the Expenses list and stops showing it; a reply for it that lands after the switch says nothing.
+  const [left, setLeft] = useState(false);
+  const isCurrentBusiness = useCallback((forBusiness: string) => getStoredBusinessId() === forBusiness, []);
+  useEffect(() => {
+    if (!businessId) return;
+    const check = () => {
+      if (getStoredBusinessId() === businessId) return;
+      setLeft(true);
+      router.replace("/app/expenses");
+    };
+    const onStorage = (e: StorageEvent) => { if (e.key === null || e.key === BUSINESS_ID_KEY) check(); };
+    window.addEventListener(BUSINESS_CHANGED, check);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED, check);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [businessId, router]);
 
   useEffect(() => {
     if (!businessId || !expenseId) return;
@@ -102,20 +128,22 @@ export default function ExpenseDetailPage() {
           getExpense(businessId, expenseId),
           fetchExpenseCategories(businessId),
         ]);
+        if (!isCurrentBusiness(businessId)) return;
         if (expRes.data) setExpense(expRes.data);
         if (catRes.data) setCategories(catRes.data);
         // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
         if (expRes.data) {
           const { month, year } = expenseMonth(expRes.data.date, businessId);
           const budRes = await fetchExpenseBudgets(businessId, month, year);
+          if (!isCurrentBusiness(businessId)) return;
           if (budRes.data) setBudgets(budRes.data);
         }
       } catch {
-        toast.error("Failed to load expense");
+        if (isCurrentBusiness(businessId)) toast.error("Failed to load expense");
       }
       setLoading(false);
     })();
-  }, [businessId, expenseId]);
+  }, [businessId, expenseId, isCurrentBusiness]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);
@@ -126,10 +154,11 @@ export default function ExpenseDetailPage() {
   // at once from Cash; it opens Pay, which asks the account and the method (components/bill-pay-dialog.tsx). Each
   // door answers the row as it now stands; a refusal is said in the server's words (FAILURE-KIT).
   const runVoid = async (action: "reject" | "void", success: string) => {
-    if (!businessId || !expense) return;
+    if (!businessId || !expense || !isCurrentBusiness(businessId)) return;
     setActionLoading(action);
     try {
       const res = await voidBill(businessId, expense.id);
+      if (!isCurrentBusiness(businessId)) return;
       const refusal = refusalMessage(res, { what: action === "void" ? "void this expense" : "reject this bill" });
       if (refusal !== null) {
         toast.error(refusal);
@@ -138,7 +167,7 @@ export default function ExpenseDetailPage() {
         if (res.data) setExpense({ ...expense, ...res.data });
       }
     } catch {
-      toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
+      if (isCurrentBusiness(businessId)) toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
     }
     setActionLoading(null);
     setConfirmVoid(false);
@@ -151,10 +180,11 @@ export default function ExpenseDetailPage() {
   // EXPENSES-HUB-1 (BUG-031): deleteExpense answers a refusal as { error } and does not throw, so the page reads
   // the answer: "Expense deleted" only when it went through.
   const handleDelete = async () => {
-    if (!businessId || !expense) return;
+    if (!businessId || !expense || !isCurrentBusiness(businessId)) return;
     setActionLoading("delete");
     try {
       const res = await deleteExpense(businessId, expense.id);
+      if (!isCurrentBusiness(businessId)) return;
       const refusal = refusalMessage(res, { what: "delete this expense" });
       if (refusal !== null) {
         toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? postedDeleteWords(expense.status) : refusal);
@@ -163,11 +193,20 @@ export default function ExpenseDetailPage() {
         router.push("/app/expenses");
       }
     } catch {
-      toast.error("Couldn't delete this expense.");
+      if (isCurrentBusiness(businessId)) toast.error("Couldn't delete this expense.");
     }
     setActionLoading(null);
     setConfirmDelete(false);
   };
+
+  if (left) {
+    // R14-4: the business changed: nothing of the old one's expense is shown, and nothing can be done to it.
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">The business changed. Opening your expenses…</p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -472,8 +511,9 @@ export default function ExpenseDetailPage() {
           onSaved={async () => {
             setShowEdit(false);
             const res = await getExpense(businessId, expenseId);
-            if (res.data) setExpense(res.data);
+            if (res.data && isCurrentBusiness(businessId)) setExpense(res.data);
           }}
+          isCurrentBusiness={isCurrentBusiness}
         />
       )}
 
@@ -507,6 +547,7 @@ export default function ExpenseDetailPage() {
           businessId={businessId}
           bill={expense}
           onClose={() => setShowPay(false)}
+          isCurrentBusiness={isCurrentBusiness}
           onPaid={(paid) => {
             setShowPay(false);
             toast.success("Bill paid");
