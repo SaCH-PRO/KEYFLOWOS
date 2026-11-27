@@ -287,10 +287,13 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  if (asyncWrites) await asyncWrites.drain();
-  if (app) await app.close();
-  if (db) await cleanup();
-  asyncWrites?.restore();
+  try {
+    if (asyncWrites) await asyncWrites.drain();
+    if (app) await app.close();
+    if (db) await cleanup();
+  } finally {
+    asyncWrites?.restore();
+  }
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -930,7 +933,18 @@ describe('P142 FU-CONTACTS-AUDIT-FLAKE: deterministic drain under forced team-ac
       record: (row: Record<string, unknown>, oncePerEntity: boolean) => Promise<void>;
     };
     const realPrisma = interceptor.prisma;
-    const FORCED_DELAY_MS = 400; // exceeds the old 300 ms fixed-sleep settle()
+
+    const createDeferred = () => {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { promise, release };
+    };
+
+    const initialGate = createDeferred();
+    const controlGate = createDeferred();
+    let activeGate: Promise<void> = initialGate.promise;
 
     await settle();
     const atStart = await traceCounts();
@@ -946,7 +960,7 @@ describe('P142 FU-CONTACTS-AUDIT-FLAKE: deterministic drain under forced team-ac
               get(dTarget, dProp, dReceiver) {
                 if (dProp === 'create') {
                   return async (...args: unknown[]) => {
-                    await new Promise((r) => setTimeout(r, FORCED_DELAY_MS));
+                    await activeGate;
                     return dTarget.create(...args);
                   };
                 }
@@ -964,9 +978,21 @@ describe('P142 FU-CONTACTS-AUDIT-FLAKE: deterministic drain under forced team-ac
       expect((await patch(ID.staff, prior.id, { status: 'CLIENT' })).status).toBe(200);
       expect((await del(ID.owner, prior.id)).status).toBe(200);
 
-      // Both HTTP responses answered while their teamActivityLog inserts are still in flight.
+      // Both HTTP responses answered while their teamActivityLog inserts are deterministically held in flight.
       expect(asyncWrites!.inFlight()).toBeGreaterThanOrEqual(2);
       expect((await traceCounts()).teamLogs).toBe(atStart.teamLogs);
+
+      // Verify settle() stays pending while the gate holds those two writes in flight.
+      let settledWhileHeld = false;
+      const drained = settle().then(() => {
+        settledWhileHeld = true;
+      });
+      await new Promise<void>((r) => setImmediate(r));
+      expect(settledWhileHeld).toBe(false);
+
+      initialGate.release();
+      await drained;
+      expect(settledWhileHeld).toBe(true);
 
       await settle();
       const before = await traceCounts();
@@ -989,8 +1015,9 @@ describe('P142 FU-CONTACTS-AUDIT-FLAKE: deterministic drain under forced team-ac
       await settle();
       expect(await traceCounts()).toEqual(before);
 
-      // Negative control: if a refusal path erroneously writes a delayed teamActivityLog row,
+      // Negative control: if a refusal path erroneously writes a held teamActivityLog row,
       // settle() waits for it and traceCounts() strictly catches the +1 teamLogs regression.
+      activeGate = controlGate.promise;
       void interceptor.record(
         {
           businessId: ID.bizA,
@@ -1004,11 +1031,23 @@ describe('P142 FU-CONTACTS-AUDIT-FLAKE: deterministic drain under forced team-ac
         false,
       );
       expect(asyncWrites!.inFlight()).toBeGreaterThanOrEqual(1);
-      await settle();
+      let controlSettledWhileHeld = false;
+      const controlDrained = settle().then(() => {
+        controlSettledWhileHeld = true;
+      });
+      await new Promise<void>((r) => setImmediate(r));
+      expect(controlSettledWhileHeld).toBe(false);
+
+      controlGate.release();
+      await controlDrained;
+      expect(controlSettledWhileHeld).toBe(true);
+
       const afterControlWrite = await traceCounts();
       expect(afterControlWrite.teamLogs).toBe(before.teamLogs + 1);
       expect(afterControlWrite).not.toEqual(before);
     } finally {
+      initialGate.release();
+      controlGate.release();
       await settle();
       interceptor.prisma = realPrisma;
     }
