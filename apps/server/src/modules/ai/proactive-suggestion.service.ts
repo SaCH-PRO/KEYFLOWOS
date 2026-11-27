@@ -8,6 +8,9 @@ import { classifyAiMemoryWrite, modulesFromIdentifiers } from './memory-classifi
 import { SemanticMemoryService } from './semantic-memory.service';
 import {
   buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
+  fetchProjectedBatch,
+  filterOutSecretRows,
   getMemoryClassReadMode,
   projectAiMemoryRowsForReader,
   type MemoryReaderContext,
@@ -125,27 +128,54 @@ export class ProactiveSuggestionService {
     businessId: string,
     readerContext?: MemoryReaderContext,
   ): Promise<ChatSuggestion[]> {
+    const mode = getMemoryClassReadMode();
     const preFilter =
-      readerContext && getMemoryClassReadMode() === 'ACTIVE'
+      readerContext && mode === 'ACTIVE'
         ? buildDbMemoryClassPreFilter(readerContext)
-        : undefined;
-    const memories = await this.prisma.client.aiMemory.findMany({
-      where: {
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
+    const where = {
+      businessId,
+      category: 'suggestion',
+      expiresAt: { gte: new Date() },
+      ...(preFilter ? { AND: [preFilter] } : {}),
+    };
+    const fetchPage = (skip: number, take: number) =>
+      this.prisma.client.aiMemory.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(skip > 0 ? { skip } : {}),
+        take,
+      });
+
+    let visible: Awaited<ReturnType<typeof fetchPage>>;
+    if (!readerContext) {
+      const rows = await fetchPage(0, 10);
+      visible = filterOutSecretRows(rows, (m) => ({
+        dataClass: (m as { dataClass?: unknown }).dataClass,
+        texts: [m.category, m.key, m.value],
+      }));
+    } else if (mode !== 'ACTIVE') {
+      const rows = await fetchPage(0, 50);
+      visible = projectAiMemoryRowsForReader(rows, readerContext, {
         businessId,
-        category: 'suggestion',
-        expiresAt: { gte: new Date() },
-        ...(preFilter ? { AND: [preFilter] } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: readerContext ? 50 : 10,
-    });
-    const visible = readerContext
-      ? projectAiMemoryRowsForReader(memories, readerContext, {
-          businessId,
-          path: 'ProactiveSuggestionService.getPendingSuggestions',
-          logger: this.logger,
-        }).slice(0, 10)
-      : memories;
+        path: 'ProactiveSuggestionService.getPendingSuggestions',
+        logger: this.logger,
+      }).slice(0, 10);
+    } else {
+      visible = await fetchProjectedBatch({
+        targetCount: 10,
+        batchSize: 50,
+        fetchPage,
+        projectPage: (page) =>
+          projectAiMemoryRowsForReader(page, readerContext, {
+            businessId,
+            path: 'ProactiveSuggestionService.getPendingSuggestions',
+            logger: this.logger,
+          }),
+      });
+    }
 
     return visible
       .map(m => {

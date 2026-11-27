@@ -378,7 +378,8 @@ export class KeyCortexQueryPipelineService {
 
       if (flags.integrationV2Enabled && this.contextV2Service) {
         try {
-          v2Context = await this.contextV2Service.getFullContext(query.businessId);
+          const v2ReaderCtx = await this.readerContextForQuery(query, 'v2Context');
+          v2Context = await this.contextV2Service.getFullContext(query.businessId, v2ReaderCtx);
           contextSnapshot =
             await this.contextService.buildContextSnapshot(query.businessId);
           this.systemPromptService.enrichSnapshotFromV2(contextSnapshot, v2Context);
@@ -1212,7 +1213,8 @@ export class KeyCortexQueryPipelineService {
       let v2Context: any;
       if (flags.integrationV2Enabled && this.contextV2Service) {
         try {
-          v2Context = await this.contextV2Service.getFullContext(query.businessId);
+          const v2ReaderCtx = await this.readerContextForQuery(query, 'v2ContextStream');
+          v2Context = await this.contextV2Service.getFullContext(query.businessId, v2ReaderCtx);
           this.systemPromptService.enrichSnapshotFromV2(contextSnapshot, v2Context);
         } catch {
           // Non-critical
@@ -2154,12 +2156,18 @@ export class KeyCortexQueryPipelineService {
    * scope is none no longer reads an owner's expense, a payment or an invoice total here. Its headroom bounds the
    * events that rule leaves out too (they come from the same two stores).
    */
+  private async readerContextForQuery(
+    query: CortexQuery,
+    logTag: string,
+  ): Promise<import('./memory-class-read-projection').MemoryReaderContext> {
+    const reader = await this.episodicMemoryReader(query.businessId, query.userId);
+    const sight = await readersModuleSight(this.prisma, query.businessId, reader, this.logger, logTag);
+    return { reader, sight };
+  }
+
   private async chatMemoryFragments(query: CortexQuery): Promise<MemoryFragment[]> {
     if (!this.memoryRetrieval) return [];
-    const reader = await this.episodicMemoryReader(query.businessId, query.userId);
-    // MEM-DOC-EXTRACTION-SIGHT (D-234): the reader's module sight first: the read takes document extractions only for a
-    // reader with revenue read.
-    const sight = await readersModuleSight(this.prisma, query.businessId, reader, this.logger, 'chatMemory');
+    const { reader, sight } = await this.readerContextForQuery(query, 'chatMemory');
     const fragments = await this.memoryRetrieval.retrieveContext(query.businessId, {
       query: query.text,
       limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,

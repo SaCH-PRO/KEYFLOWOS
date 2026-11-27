@@ -22,6 +22,8 @@ import type { PromptVariant } from '@prisma/client';
 import {
   evaluateMemoryClassAccess,
   getMemoryClassReadMode,
+  isRowUnconditionallySecret,
+  runCrashIsolatedShadow,
   type MemoryReaderContext,
 } from './memory-class-read-projection';
 
@@ -245,7 +247,9 @@ export class KeyCortexLearningService {
     try {
       const limit = options.limit ?? 5;
       const readerCtx = options.readerContext;
-      const activeClassMode = Boolean(readerCtx) && getMemoryClassReadMode() === 'ACTIVE';
+      const mode = getMemoryClassReadMode();
+      const activeClassMode = Boolean(readerCtx) && mode === 'ACTIVE';
+      const shadowClassMode = Boolean(readerCtx) && mode === 'SHADOW';
 
       // MEM-CLASS-READ (P137, D-130): CognitionMemory is PERSONAL; a memberless turn owns none.
       if (activeClassMode && readerCtx?.reader === null) {
@@ -265,20 +269,56 @@ export class KeyCortexLearningService {
         take: limit * 3,
       });
 
-      const visibleMemories =
-        activeClassMode && readerCtx
-          ? memories.filter((m: any) =>
-              evaluateMemoryClassAccess(
-                {
-                  dataClass: 'PERSONAL',
-                  moduleScope: [],
-                  hasOwnerColumn: true,
-                  ownerUserId: m.userId ?? null,
-                },
-                readerCtx,
-              ).allowed,
-            )
-          : memories;
+      const backstopTextsOf = (m: any): ReadonlyArray<string | null | undefined> => [
+        m.query,
+        m.recommendation,
+        ...(Array.isArray(m.lessonsLearned) ? m.lessonsLearned : []),
+      ];
+
+      let visibleMemories: any[];
+      if (activeClassMode && readerCtx) {
+        visibleMemories = memories.filter(
+          (m: any) =>
+            evaluateMemoryClassAccess(
+              {
+                dataClass: 'PERSONAL',
+                moduleScope: [],
+                hasOwnerColumn: true,
+                ownerUserId: m.userId ?? null,
+                backstopTexts: backstopTextsOf(m),
+              },
+              readerCtx,
+            ).allowed,
+        );
+      } else if (shadowClassMode && readerCtx) {
+        visibleMemories = runCrashIsolatedShadow({
+          rows: memories as any[],
+          store: 'cognition_memory',
+          path: 'KeyCortexLearningService.retrieveLessons',
+          businessId,
+          readerPresent: readerCtx.reader !== null,
+          logger: this.logger,
+          idOf: (m: any) => m.id,
+          legacyFilter: () => true,
+          evaluate: (m: any) =>
+            evaluateMemoryClassAccess(
+              {
+                dataClass: 'PERSONAL',
+                moduleScope: [],
+                hasOwnerColumn: true,
+                ownerUserId: m.userId ?? null,
+                backstopTexts: backstopTextsOf(m),
+              },
+              readerCtx,
+            ),
+        });
+      } else if (mode !== 'OFF') {
+        visibleMemories = memories.filter(
+          (m: any) => !isRowUnconditionallySecret(null, backstopTextsOf(m)),
+        );
+      } else {
+        visibleMemories = memories;
+      }
 
       // Simple keyword relevance: prefer memories whose query/recommendation shares words with current query
       const queryWords = new Set(

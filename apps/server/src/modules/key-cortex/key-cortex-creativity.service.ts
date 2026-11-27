@@ -28,6 +28,11 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  projectKeyCortexMemoryRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 // node:crypto, not the `uuid` package: uuid@14 is ESM-only, this server
@@ -563,6 +568,7 @@ explanations this signal suggests. Ground every idea in the business's own data.
    */
   private async recentWeakSignals(
     businessId: string,
+    readerContext?: MemoryReaderContext,
   ): Promise<Array<{ description: string; confidence: number }>> {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     try {
@@ -570,11 +576,22 @@ explanations this signal suggests. Ground every idea in the business's own data.
         where: { businessId, type: 'weak_signal', createdAt: { gte: since } },
         orderBy: { confidence: 'desc' },
         take: 5,
-        select: { value: true, confidence: true },
+        select: { id: true, key: true, userId: true, value: true, confidence: true },
       });
+      const visible = readerContext
+        ? projectKeyCortexMemoryRowsForReader(
+            rows.map((r) => ({ ...r, type: 'weak_signal' })),
+            readerContext,
+            {
+              businessId,
+              path: 'KeyCortexCreativityService.recentWeakSignals',
+              logger: this.logger,
+            },
+          )
+        : filterOutSecretRows(rows, (r) => ({ dataClass: null, texts: [r.value] }));
 
       const out: Array<{ description: string; confidence: number }> = [];
-      for (const row of rows) {
+      for (const row of visible) {
         try {
           const parsed = JSON.parse(row.value) as { description?: string };
           if (parsed.description) {

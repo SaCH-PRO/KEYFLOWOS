@@ -19,6 +19,12 @@ import {
   Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  projectEpisodicLogRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { KeyToolRegistryService } from '../ai/key-tool-registry.service';
 import { KeyCommandService } from '../ai/key-command.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
@@ -537,12 +543,33 @@ export class KeyCortexActionsService implements OnModuleInit {
     }
   }
 
-  async getActionHistory(sessionId: string): Promise<CortexActionResult[]> {
+  async getActionHistory(
+    sessionId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<CortexActionResult[]> {
     try {
-      const logs = await (this.prisma.client as any).cortexActionLog.findMany({
-        where: { sessionId },
+      const mode = getMemoryClassReadMode();
+      const activeScoped = Boolean(readerContext) && mode === 'ACTIVE';
+      if (activeScoped && readerContext?.reader === null) {
+        return [];
+      }
+      const rawLogs = await (this.prisma.client as any).cortexActionLog.findMany({
+        where: {
+          sessionId,
+          ...(activeScoped && readerContext?.reader ? { userId: readerContext.reader } : {}),
+        },
         orderBy: { createdAt: 'asc' },
       });
+      const logs = readerContext
+        ? projectEpisodicLogRowsForReader(rawLogs, readerContext, {
+            store: 'cortex_action_log',
+            path: 'KeyCortexActionsService.getActionHistory',
+            logger: this.logger,
+          })
+        : filterOutSecretRows(rawLogs, (log: any) => ({
+            dataClass: null,
+            texts: [log.actionType, log.description, log.result, log.error],
+          }));
 
       return logs.map((log: any) => ({
         actionType: log.actionType as CortexActionType,

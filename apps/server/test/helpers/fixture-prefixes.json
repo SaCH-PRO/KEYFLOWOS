@@ -1615,6 +1615,11 @@
       "prefix": "v91g_",
       "owner": "apps/server/test/store-add-idempotent.integration.test.ts",
       "packet": "V1-91 (FU-STORE-ADD-IDEMPOTENT, P204)"
+    },
+    {
+      "prefix": "v91m_",
+      "owner": "apps/server/test/memory-class-read.integration.test.ts",
+      "packet": "V1-91 (MEM-CLASS-READ, P137)"
     }
   ],
   "pendingRenames": [],

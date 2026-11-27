@@ -184,6 +184,8 @@ export function aiMemoryRowVisibleTo(
     {
       dataClass: classified.dataClass,
       moduleScope: classified.moduleScope,
+      invalidDataClass: classified.invalidDataClass,
+      invalidModuleScope: classified.invalidModuleScope,
       hasOwnerColumn: false,
       backstopTexts: [row.category, row.key, row.value, copyContent],
       skipExpenseBackstop: row.category === DOCUMENT_EXTRACTION_CATEGORY,
@@ -326,6 +328,8 @@ export async function semanticHitsVisibleTo(
             {
               dataClass: merged.dataClass,
               moduleScope: merged.moduleScope,
+              invalidDataClass: merged.invalidDataClass,
+              invalidModuleScope: merged.invalidModuleScope,
               hasOwnerColumn: false,
               backstopTexts: [row.category, row.key, row.value, hit.content],
               skipExpenseBackstop: row.category === DOCUMENT_EXTRACTION_CATEGORY,
@@ -346,6 +350,8 @@ export async function semanticHitsVisibleTo(
             {
               dataClass: merged.dataClass,
               moduleScope: [...new Set([...merged.moduleScope, ...legacyMods])],
+              invalidDataClass: merged.invalidDataClass,
+              invalidModuleScope: merged.invalidModuleScope,
               hasOwnerColumn: false,
               backstopTexts: [row.entityType, row.type, row.sourceModule, row.content, hit.content],
               unclassifiedRequiresAllModules: true,
@@ -366,6 +372,8 @@ export async function semanticHitsVisibleTo(
             {
               dataClass: merged.dataClass,
               moduleScope: merged.moduleScope,
+              invalidDataClass: merged.invalidDataClass,
+              invalidModuleScope: merged.invalidModuleScope,
               hasOwnerColumn: false,
               backstopTexts: [hit.content],
             },
@@ -378,35 +386,38 @@ export async function semanticHitsVisibleTo(
     };
 
     if (mode === 'SHADOW') {
-      const legacyResults: boolean[] = [];
-      let projectedCount = 0;
-      const diffs: MemoryClassShadowDiffEntry[] = [];
-      for (const hit of hits) {
-        const legacyAllowed = evalLegacy(hit);
-        const decision = evalProjected(hit);
-        legacyResults.push(legacyAllowed);
-        if (decision.allowed) projectedCount += 1;
-        if (legacyAllowed !== decision.allowed) {
-          diffs.push({
-            id: hit.id ?? `${hit.sourceType}:${hit.sourceId}`,
-            store: 'ai_memory_embedding',
-            dataClass: decision.effectiveDataClass,
-            moduleScope: decision.effectiveModuleScope,
-            legacyAllowed,
-            projectedAllowed: decision.allowed,
-            reason: decision.reason,
-          });
-        }
+      const legacyResults = hits.map(evalLegacy);
+      try {
+        let projectedCount = 0;
+        const diffs: MemoryClassShadowDiffEntry[] = [];
+        hits.forEach((hit, i) => {
+          const legacyAllowed = legacyResults[i];
+          const decision = evalProjected(hit);
+          if (decision.allowed) projectedCount += 1;
+          if (legacyAllowed !== decision.allowed) {
+            diffs.push({
+              id: hit.id ?? 'unknown',
+              store: 'ai_memory_embedding',
+              dataClass: decision.effectiveDataClass,
+              moduleScope: decision.effectiveModuleScope,
+              legacyAllowed,
+              projectedAllowed: decision.allowed,
+              reason: decision.reason,
+            });
+          }
+        });
+        logMemoryClassShadowDiff(logger ? { warn: (m) => logger.warn(m), log: (m) => logger.warn(m) } : undefined, {
+          path: 'semanticHitsVisibleTo',
+          businessId,
+          readerPresent: who.reader !== null,
+          totalCandidates: hits.length,
+          legacyCount: legacyResults.filter(Boolean).length,
+          projectedCount,
+          diffs,
+        });
+      } catch {
+        // Crash-isolated: shadow failure never impacts live semantic search.
       }
-      logMemoryClassShadowDiff(logger ? { warn: (m) => logger.warn(m), log: (m) => logger.warn(m) } : undefined, {
-        path: 'semanticHitsVisibleTo',
-        businessId,
-        readerPresent: who.reader !== null,
-        totalCandidates: hits.length,
-        legacyCount: legacyResults.filter(Boolean).length,
-        projectedCount,
-        diffs,
-      });
       return legacyResults;
     }
 

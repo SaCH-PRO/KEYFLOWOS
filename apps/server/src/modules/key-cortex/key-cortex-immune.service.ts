@@ -60,6 +60,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { filterOutSecretRows } from './memory-class-read-projection';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 
 /** Discriminators for the KeyCortexMemory rows this service owns. */
@@ -326,8 +327,13 @@ export class KeyCortexImmuneService {
         return [] as any[];
       });
 
+    const safeRows = filterOutSecretRows(rows, (row: any) => ({
+      dataClass: row?.dataClass ?? null,
+      texts: [row?.value],
+    }));
+
     const forBusiness = this.incidents.get(businessId) ?? new Map<string, ImmuneIncident>();
-    for (const row of rows) {
+    for (const row of safeRows) {
       const parsed = this.parse((row as any).value);
       // Merge, never overwrite: a concurrent record() may already have written a
       // fresher encounter into working state while this read was in flight.
