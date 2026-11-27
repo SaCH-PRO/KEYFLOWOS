@@ -29,6 +29,8 @@ import {
 
 export type UserResponse = 'accepted' | 'rejected' | 'modified' | 'no_action';
 
+export type ConfidenceSource = 'stated' | 'estimated';
+
 export interface RecordObservationInput {
   sessionId: string;
   businessId: string;
@@ -38,6 +40,7 @@ export interface RecordObservationInput {
   query: string;
   recommendation: string;
   confidence: number;
+  confidenceSource?: ConfidenceSource;
   metadata?: Record<string, unknown>;
 }
 
@@ -89,6 +92,12 @@ export class KeyCortexLearningService {
 
   async recordObservation(input: RecordObservationInput): Promise<void> {
     try {
+      const metadata: Record<string, unknown> = {
+        ...(input.metadata ?? {}),
+        ...(input.confidenceSource
+          ? { confidenceSource: input.confidenceSource }
+          : {}),
+      };
       await (this.prisma.client as any).cognitionMemory.create({
         data: {
           businessId: input.businessId,
@@ -102,7 +111,7 @@ export class KeyCortexLearningService {
           confidence: input.confidence,
           confidenceDelta: 0,
           lessonsLearned: [],
-          metadata: input.metadata ?? {},
+          metadata,
         },
       });
 
