@@ -970,3 +970,78 @@ describe('CONTROLS: visible contacts, OWNER and another tenant (pass before and 
     });
   }
 });
+
+describe('W11-PAGING-TOTAL-ORDER-C: CrmService.listContacts deterministic id tie-breaker on MVCC heap update', () => {
+  it('[PAGING-C01] offset (skip/take) and cursor pagination over tied createdAt contacts survive an MVCC heap update with zero duplicates or skips', async () => {
+    const tieAt = new Date('2026-06-15T12:00:00.000Z');
+    const tieTag = `${P}tie_tag`;
+    const tieIds = [`${P}tie_a`, `${P}tie_b`, `${P}tie_c`, `${P}tie_d`];
+    const expectedDesc = [...tieIds].reverse();
+
+    await db.contact.createMany({
+      data: tieIds.map((id, idx) => ({
+        id,
+        businessId: ID.bizA,
+        ownerId: ID.owner,
+        visibility: 'TEAM',
+        firstName: `Tie${idx}`,
+        lastName: 'Contact',
+        email: `${id}@test.local`,
+        tags: [tieTag],
+        createdAt: tieAt,
+        updatedAt: tieAt,
+      })),
+    });
+
+    try {
+      // 1) Offset pagination with MVCC heap update on a page-1 row between page 1 and page 2
+      const off1 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&take=2&skip=0`)
+        .set('x-test-user', ID.owner);
+      expect(off1.status, off1.text).toBe(200);
+      const off1Ids = (off1.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(off1Ids).toEqual(expectedDesc.slice(0, 2));
+
+      // Trigger MVCC heap tuple relocation on the first returned row (createdAt untouched)
+      await db.contact.update({
+        where: { id: off1Ids[0] },
+        data: { lastName: 'MVCCOffset' },
+      });
+
+      const off2 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&take=2&skip=2`)
+        .set('x-test-user', ID.owner);
+      expect(off2.status, off2.text).toBe(200);
+      const off2Ids = (off2.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(off2Ids).toEqual(expectedDesc.slice(2, 4));
+      expect([...off1Ids, ...off2Ids]).toEqual(expectedDesc);
+
+      // 2) Cursor pagination over the same tied rows with another MVCC heap update between pages
+      const cur1 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&take=2`)
+        .set('x-test-user', ID.owner);
+      expect(cur1.status, cur1.text).toBe(200);
+      const cur1Ids = (cur1.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(cur1Ids).toEqual(expectedDesc.slice(0, 2));
+      expect(cur1.body.hasMore).toBe(true);
+      expect(cur1.body.nextCursor).toBe(expectedDesc[1]);
+
+      await db.contact.update({
+        where: { id: cur1Ids[1] },
+        data: { lastName: 'MVCCCursor' },
+      });
+
+      const cur2 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&take=2&cursor=${encodeURIComponent(cur1.body.nextCursor)}`)
+        .set('x-test-user', ID.owner);
+      expect(cur2.status, cur2.text).toBe(200);
+      const cur2Ids = (cur2.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(cur2Ids).toEqual(expectedDesc.slice(2, 4));
+      expect(cur2.body.hasMore).toBe(false);
+      expect([...cur1Ids, ...cur2Ids]).toEqual(expectedDesc);
+    } finally {
+      await db.contact.deleteMany({ where: { id: { in: tieIds } } });
+    }
+  });
+});
+

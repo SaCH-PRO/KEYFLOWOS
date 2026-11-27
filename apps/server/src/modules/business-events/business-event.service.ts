@@ -387,7 +387,7 @@ export class BusinessEventService {
     const [rawEvents, rawTotal] = await Promise.all([
       this.prisma.client.businessEvent.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: readerContext ? 0 : offset,
         take: readerContext ? Math.min(offset + limit + 200, 1000) : limit,
       }),

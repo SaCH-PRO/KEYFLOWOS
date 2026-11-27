@@ -547,23 +547,25 @@ export class CrmService {
     const sortBy = input.sortBy;
     const needsPostSort = sortBy === 'revenue';
 
-    let orderBy: any;
-    if (!sortBy || needsPostSort) {
-      orderBy = { createdAt: 'desc' };
-    } else if (sortBy === 'score') {
-      orderBy = { leadScore: input.sortOrder ?? 'desc' };
-    } else if (sortBy === 'name') {
-      const dir = input.sortOrder ?? 'asc';
-      orderBy = [{ firstName: dir }, { lastName: dir }];
-    } else if (sortBy === 'newest') {
-      orderBy = { createdAt: input.sortOrder ?? 'desc' };
-    } else if (sortBy === 'oldest') {
-      orderBy = { createdAt: input.sortOrder ?? 'asc' };
-    } else if (sortBy === 'lastInteraction') {
-      orderBy = { updatedAt: input.sortOrder ?? 'desc' };
-    } else {
-      orderBy = { createdAt: 'desc' };
-    }
+    const sortDir = input.sortOrder;
+    const orderBy =
+      !sortBy || needsPostSort
+        ? [{ createdAt: 'desc' as const }, { id: 'desc' as const }]
+        : sortBy === 'score'
+          ? [{ leadScore: sortDir ?? ('desc' as const) }, { id: sortDir ?? ('desc' as const) }]
+          : sortBy === 'name'
+            ? [
+                { firstName: sortDir ?? ('asc' as const) },
+                { lastName: sortDir ?? ('asc' as const) },
+                { id: sortDir ?? ('asc' as const) },
+              ]
+            : sortBy === 'newest'
+              ? [{ createdAt: sortDir ?? ('desc' as const) }, { id: sortDir ?? ('desc' as const) }]
+              : sortBy === 'oldest'
+                ? [{ createdAt: sortDir ?? ('asc' as const) }, { id: sortDir ?? ('asc' as const) }]
+                : sortBy === 'lastInteraction'
+                  ? [{ updatedAt: sortDir ?? ('desc' as const) }, { id: sortDir ?? ('desc' as const) }]
+                  : [{ createdAt: 'desc' as const }, { id: 'desc' as const }];
 
     if (needsPostSort) {
       const skip = input.skip ?? 0;
