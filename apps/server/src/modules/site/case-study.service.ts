@@ -14,13 +14,29 @@ const REVENUE_OR_PAID_ORDER_METRIC_KEYS = [
   'topProduct',
 ] as const;
 
-const REVENUE_HEADLINE_PATTERN = /\b(?:revenue|online orders)\b/i;
-
 const GENERATED_HEADLINE_RE =
-  /^(.*?) ((?:grew online orders \d+%|grew revenue \d+%|grew bookings \d+%|completed \d+ online orders|booked \d+ appointments)(?: and (?:grew online orders \d+%|grew revenue \d+%|grew bookings \d+%|completed \d+ online orders|booked \d+ appointments))*) in (\d+) days$/i;
+  /^(.*?) ((?:grew online orders \d+%|grew revenue \d+%|grew bookings \d+%|completed \d+ online orders|booked \d+ appointments|recorded storefront activity)(?: and (?:grew online orders \d+%|grew revenue \d+%|grew bookings \d+%|completed \d+ online orders|booked \d+ appointments|recorded storefront activity))*) in (\d+) days$/i;
+
+const SAFE_FALLBACK_HEADLINE_RE =
+  /^(?:Booking activity grew \d+% over the last \d+ days|Booked \d+ appointments over the last \d+ days|Business activity summary \(last \d+ days\))$/;
 
 const PAID_ORDER_OR_REVENUE_CLAUSE_RE =
   /^(?:grew revenue \d+%|grew online orders \d+%|completed \d+ online orders)$/i;
+
+const MONETARY_OR_ORDER_KEYWORDS_RE =
+  /[$£€¥₹₦₵]|\b(?:revenue|sales|orders?|earned|earning|earnings|gross|net|income|profit|profits|aov|gmv|paid|turnover|dollars?|cents?|cash|billing|billed|invoices?|receipts?|usd|ttd|eur|gbp|cad|jmd|bbd|xcd|bzd|gyd|srd|bsd|kyd|aud|nzd)\b/i;
+
+const ISO_CURRENCY_AMOUNT_RE = /(?:\b[A-Z]{3}\s*[\d,.]|[\d,.]\s*[A-Z]{3}\b)/;
+
+const UNPARSED_NUMERIC_OR_MULTILINE_RE = /\d|[\r\n]/;
+
+/**
+ * Whether a headline mentions money, revenue, sales, orders, or ISO currency
+ * figures (used to fail closed on custom/legacy case-study headlines).
+ */
+export function isMonetaryOrOrderHeadline(headline: string): boolean {
+  return MONETARY_OR_ORDER_KEYWORDS_RE.test(headline) || ISO_CURRENCY_AMOUNT_RE.test(headline);
+}
 
 /**
  * Whether a stored case study carries revenue or paid-order metrics/copy.
@@ -34,39 +50,75 @@ export function hasRevenueMetrics(study: CaseStudy): boolean {
       if (m[key] !== undefined) return true;
     }
   }
-  return typeof study.headline === 'string' && REVENUE_HEADLINE_PATTERN.test(study.headline);
+  if (typeof study.headline !== 'string') return false;
+  if (isMonetaryOrOrderHeadline(study.headline)) return true;
+  if (
+    !GENERATED_HEADLINE_RE.test(study.headline) &&
+    !SAFE_FALLBACK_HEADLINE_RE.test(study.headline) &&
+    UNPARSED_NUMERIC_OR_MULTILINE_RE.test(study.headline)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Builds a strictly allow-listed non-money summary headline from booking metrics
+ * when an unparsed/custom/legacy headline cannot be safely stripped.
+ */
+function buildAllowListedNonRevenueHeadline(metrics: CaseStudyMetrics): string {
+  if (typeof metrics.bookingGrowthPct === 'number' && metrics.bookingGrowthPct > 0) {
+    return `Booking activity grew ${metrics.bookingGrowthPct}% over the last ${metrics.windowDays} days`;
+  }
+  if (metrics.recentBookings > 0) {
+    return `Booked ${metrics.recentBookings} appointments over the last ${metrics.windowDays} days`;
+  }
+  return `Business activity summary (last ${metrics.windowDays} days)`;
 }
 
 /**
  * Strips paid-order and revenue growth clauses from a case-study headline for
  * callers below `revenue:read`, preserving non-money booking copy cleanly.
+ *
+ * Fails closed on any non-canonical (custom/legacy/multi-line) headline that
+ * carried revenue metrics, matches monetary/sales/order terms or currency
+ * figures, or contains unparsed digits/line breaks by reconstructing strictly
+ * from the non-money booking allow-list rather than returning regex-patched prose.
  */
-export function sanitizeHeadlineForNonRevenueReader(headline: string, metrics: CaseStudyMetrics): string {
-  if (!REVENUE_HEADLINE_PATTERN.test(headline)) return headline;
-
-  const fallbackClause =
-    metrics.recentBookings > 0
-      ? `booked ${metrics.recentBookings} appointments`
-      : 'recorded storefront activity';
-
+export function sanitizeHeadlineForNonRevenueReader(
+  headline: string,
+  metrics: CaseStudyMetrics,
+  hadRevenueMetrics = false,
+): string {
   const generatedMatch = GENERATED_HEADLINE_RE.exec(headline);
   if (generatedMatch) {
     const [, prefix, clausesRaw, days] = generatedMatch;
-    const kept = clausesRaw
-      .split(/ and /i)
-      .filter((clause) => !PAID_ORDER_OR_REVENUE_CLAUSE_RE.test(clause.trim()));
-    const summary = kept.length > 0 ? kept.join(' and ') : fallbackClause;
-    return `${prefix} ${summary} in ${days} days`;
+    if (!isMonetaryOrOrderHeadline(prefix)) {
+      const kept = clausesRaw
+        .split(/ and /i)
+        .filter((clause) => !PAID_ORDER_OR_REVENUE_CLAUSE_RE.test(clause.trim()));
+      const fallbackClause =
+        metrics.recentBookings > 0
+          ? `booked ${metrics.recentBookings} appointments`
+          : 'recorded storefront activity';
+      const summary = kept.length > 0 ? kept.join(' and ') : fallbackClause;
+      return `${prefix} ${summary} in ${days} days`;
+    }
   }
 
-  const cleaned = headline
-    .replace(/(?:\band\s+)?(?:grew revenue \d+%|grew online orders \d+%|completed \d+ online orders)(?:\s+and\b)?/gi, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  if (cleaned.length > 0 && !REVENUE_HEADLINE_PATTERN.test(cleaned)) {
-    return cleaned;
+  if (SAFE_FALLBACK_HEADLINE_RE.test(headline)) {
+    return headline;
   }
-  return `${fallbackClause} in ${metrics.windowDays} days`;
+
+  if (
+    hadRevenueMetrics ||
+    isMonetaryOrOrderHeadline(headline) ||
+    UNPARSED_NUMERIC_OR_MULTILINE_RE.test(headline)
+  ) {
+    return buildAllowListedNonRevenueHeadline(metrics);
+  }
+
+  return headline;
 }
 
 /**
@@ -74,10 +126,12 @@ export function sanitizeHeadlineForNonRevenueReader(headline: string, metrics: C
  * study for callers below `revenue:read`. Withholds `recentRevenue`,
  * `priorRevenue`, `revenueGrowthPct`, `recentOrders`, `priorOrders`,
  * `orderGrowthPct`, `topProduct` (keys absent, never zero), and strips
- * revenue/paid-order clauses from `headline` while keeping `currency` and all
- * non-money booking/study fields intact.
+ * revenue/paid-order clauses from `headline` (failing closed to an allow-listed
+ * booking summary on non-canonical/monetary headlines) while keeping `currency`
+ * and all non-money booking/study fields intact.
  */
 export function redactCaseStudyForNonRevenueReader(study: CaseStudy): CaseStudy {
+  const hadRevenue = hasRevenueMetrics(study);
   const m = study.metrics;
   const redactedMetrics: CaseStudyMetrics = {
     windowDays: m.windowDays,
@@ -89,7 +143,7 @@ export function redactCaseStudyForNonRevenueReader(study: CaseStudy): CaseStudy 
   };
   return {
     ...study,
-    headline: sanitizeHeadlineForNonRevenueReader(study.headline, redactedMetrics),
+    headline: sanitizeHeadlineForNonRevenueReader(study.headline, redactedMetrics, hadRevenue),
     metrics: redactedMetrics,
   };
 }
@@ -356,21 +410,9 @@ export class CaseStudyService {
   }
 
   async publish(businessId: string, caseStudyId: string, opts: { consent: boolean; userId?: string }) {
-    if (!opts.consent) {
-      throw new ForbiddenException('Explicit consent is required before publishing a case study.');
-    }
-    return this.changeCaseStudies(businessId, (caseStudies) => {
-      const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
-      if (idx < 0) throw new NotFoundException('Case study not found');
-      caseStudies[idx] = {
-        ...caseStudies[idx],
-        consent: true,
-        consentedAt: new Date().toISOString(),
-        consentedBy: opts.userId ?? null,
-        status: 'published',
-        publishedAt: new Date().toISOString(),
-      };
-      return caseStudies[idx];
+    return this.publishForReader(businessId, caseStudyId, {
+      consent: opts.consent,
+      actor: opts.userId ? { id: opts.userId } : undefined,
     });
   }
 
