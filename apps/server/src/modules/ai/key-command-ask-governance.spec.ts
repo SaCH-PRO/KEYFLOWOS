@@ -350,12 +350,13 @@ describe("V1-09 'ask' is read-only", () => {
   });
 
   it('keeps answering every read intent it plans (control)', async () => {
+    // Note: social.listRecentEngagement was retired as OBSOLETE in P154 (RR-LEGACY-TOOLS-CLASSIFY,
+    // hidden v1 module per D-152) and fails closed; covered in legacy-tool-equivalence.spec.ts.
     const intents = [
       { domain: 'commerce', action: 'revenue_summary' },
       { domain: 'contacts', action: 'follow_up' },
       { domain: 'connect', action: 'drive_findings' },
       { domain: 'messages', action: 'message_intake' },
-      { domain: 'social', action: 'recent_engagement' },
     ];
     for (const intent of intents) {
       const h = harness();
@@ -499,7 +500,7 @@ describe("SEC-V109-2 'ask' honours the business's module and tool blocks on dott
   it.each([
     ['contacts.recommendFollowUps', 'recommendFollowUps', 'contacts', 'crm'],
     ['commerce.summarizeRevenue', 'summarizeRevenue', 'commerce', 'commerce'],
-    ['social.listRecentEngagement', 'listRecentEngagement', 'social', 'content'],
+    ['messages.listMessageIntake', 'listMessageIntake', 'messages', 'messages'],
   ])('runs no %s while blockedModules holds %s', async (_name, tool, module, blockedModule) => {
     const h = harness({ policy: { blockedModules: [blockedModule] } });
 
