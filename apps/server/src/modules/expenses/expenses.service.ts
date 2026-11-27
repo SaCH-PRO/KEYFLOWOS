@@ -10,6 +10,23 @@ import { moneyEquals, roundMoney, toCents } from '../commerce/money';
 import { TimelineService } from '../timeline/timeline.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { isSystemActor } from '../../core/auth/system-actor';
+import {
+  ObjectNotFoundError,
+  ObjectStorageService,
+  isObjectPathOfBusiness,
+} from '../../core/object-storage/objectStorage';
+
+const RECEIPT_READ_DEFAULT_TTL_SEC = 300;
+const RECEIPT_READ_MIN_TTL_SEC = 60;
+const RECEIPT_READ_MAX_TTL_SEC = 900;
+const RECEIPT_EXT_BY_CONTENT_TYPE: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+  'application/pdf': 'pdf',
+};
 
 type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
 
@@ -175,6 +192,135 @@ export class ExpensesService {
     });
   }
 
+  /**
+   * P222 (FU-RECEIPT-READ-ROUTE): validate a client-supplied `receiptUrl` at
+   * write time (`createExpense` / `updateExpense`). Rejects dangerous URL
+   * schemes, non-object relative paths, path-traversal segments, and any
+   * `/objects/...` or bucket URL pointing outside `businessId`'s own upload
+   * namespace (`isObjectPathOfBusiness`). Empty strings normalize to `null`.
+   */
+  private validateReceiptUrl(
+    businessId: string,
+    receiptUrl: string | null | undefined,
+  ): string | null {
+    if (receiptUrl === undefined || receiptUrl === null) return null;
+    if (typeof receiptUrl !== 'string') {
+      throw new BadRequestException('Receipt URL must be a string');
+    }
+    const trimmed = receiptUrl.trim();
+    if (trimmed.length === 0) return null;
+
+    const isRelative = trimmed.startsWith('/') && !trimmed.startsWith('//');
+    if (!isRelative) {
+      let parsed: URL;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        throw new BadRequestException('Receipt URL must be an http(s) URL or an uploaded object path');
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new BadRequestException('Receipt URL must use http(s) or an uploaded object path');
+      }
+    }
+
+    const storage = new ObjectStorageService();
+    const objectPath = storage.objectPathFromClientUrl(trimmed);
+    const mentionsObjects = /\/objects\//i.test(trimmed);
+
+    if (objectPath !== null || mentionsObjects) {
+      if (
+        !objectPath ||
+        !isObjectPathOfBusiness(objectPath, businessId) ||
+        /(?:^|\/)(?:\.\.?|%2e%2e?)(?:\/|$|[?#])/i.test(trimmed)
+      ) {
+        throw new BadRequestException('Receipt URL does not belong to this business');
+      }
+      return trimmed;
+    }
+
+    if (isRelative) {
+      throw new BadRequestException('Relative receipt URLs must reference an uploaded object path for this business');
+    }
+
+    return trimmed;
+  }
+
+  /**
+   * P222 (FU-RECEIPT-READ-ROUTE, D-299): mint a short-lived, business-scoped
+   * presigned GET URL + stored content metadata (`contentType`, `contentLength`)
+   * for an expense's uploaded receipt. Fails closed with `404 NotFoundException`
+   * before calling S3 if the expense is absent, deleted, has no stored object
+   * path, or points outside `businessId`'s upload namespace.
+   */
+  async getExpenseReceiptReadUrl(
+    businessId: string,
+    expenseId: string,
+    opts?: { download?: boolean; expiresIn?: number },
+  ): Promise<{
+    url: string;
+    objectPath: string;
+    contentType: string;
+    contentLength: number | null;
+    expiresIn: number;
+  }> {
+    const expense = await this.prisma.client.expense.findFirst({
+      where: { id: expenseId, businessId, deletedAt: null },
+      select: { id: true, receiptUrl: true },
+    });
+    if (!expense || !expense.receiptUrl) {
+      throw new NotFoundException('Expense receipt not found');
+    }
+
+    const storage = new ObjectStorageService();
+    const objectPath = storage.objectPathFromClientUrl(expense.receiptUrl);
+    if (
+      !objectPath ||
+      !isObjectPathOfBusiness(objectPath, businessId) ||
+      /(?:^|\/)(?:\.\.?|%2e%2e?)(?:\/|$|[?#])/i.test(expense.receiptUrl)
+    ) {
+      throw new NotFoundException('Expense receipt not found');
+    }
+
+    let stat: { contentType?: string; contentLength?: number };
+    try {
+      stat = await storage.statObjectForBusiness(objectPath, businessId);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        throw new NotFoundException('Expense receipt not found');
+      }
+      throw err;
+    }
+
+    const rawTtl =
+      typeof opts?.expiresIn === 'number' && Number.isFinite(opts.expiresIn)
+        ? Math.floor(opts.expiresIn)
+        : RECEIPT_READ_DEFAULT_TTL_SEC;
+    const expiresIn = Math.max(
+      RECEIPT_READ_MIN_TTL_SEC,
+      Math.min(rawTtl, RECEIPT_READ_MAX_TTL_SEC),
+    );
+    const contentType = stat.contentType ?? 'application/octet-stream';
+    const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
+    const ext = RECEIPT_EXT_BY_CONTENT_TYPE[mediaType];
+    const safeId = expense.id.replace(/[^A-Za-z0-9_-]/g, '') || 'expense';
+    const downloadFilename = opts?.download
+      ? (ext ? `receipt-${safeId}.${ext}` : `receipt-${safeId}`)
+      : undefined;
+
+    const url = await storage.getReadSignedUrl(objectPath, {
+      expiresIn,
+      ...(downloadFilename ? { downloadFilename } : {}),
+    });
+
+    return {
+      url,
+      objectPath,
+      contentType,
+      contentLength: stat.contentLength ?? null,
+      expiresIn,
+    };
+  }
+
   async createExpense(input: {
     businessId: string;
     description: string;
@@ -182,7 +328,7 @@ export class ExpensesService {
     currency?: string;
     date?: string | Date;
     vendor?: string;
-    receiptUrl?: string;
+    receiptUrl?: string | null;
     notes?: string;
     paymentMethod?: string;
     tags?: string[];
@@ -199,6 +345,7 @@ export class ExpensesService {
     recurringExpenseId?: string;
     items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }> | null;
   }) {
+    const validReceiptUrl = this.validateReceiptUrl(input.businessId, input.receiptUrl);
     let validProjectId: string | null = null;
     let validContactId: string | null = null;
     let validServiceId: string | null = null;
@@ -249,7 +396,7 @@ export class ExpensesService {
           currency,
           date: expenseDate,
           vendor: input.vendor ?? null,
-          receiptUrl: input.receiptUrl ?? null,
+          receiptUrl: validReceiptUrl,
           notes: input.notes ?? null,
           paymentMethod: input.paymentMethod ?? null,
           tags: input.tags ?? [],
@@ -754,7 +901,7 @@ export class ExpensesService {
     currency?: string;
     date?: string | Date;
     vendor?: string;
-    receiptUrl?: string;
+    receiptUrl?: string | null;
     notes?: string;
     paymentMethod?: string;
     tags?: string[];
@@ -773,7 +920,9 @@ export class ExpensesService {
     if (input.currency !== undefined) updateData.currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
     if (input.date !== undefined) updateData.date = new Date(input.date);
     if (input.vendor !== undefined) updateData.vendor = input.vendor;
-    if (input.receiptUrl !== undefined) updateData.receiptUrl = input.receiptUrl;
+    if (input.receiptUrl !== undefined) {
+      updateData.receiptUrl = this.validateReceiptUrl(input.businessId, input.receiptUrl);
+    }
     if (input.notes !== undefined) updateData.notes = input.notes;
     if (input.paymentMethod !== undefined) updateData.paymentMethod = input.paymentMethod;
     if (input.tags !== undefined) updateData.tags = input.tags;
