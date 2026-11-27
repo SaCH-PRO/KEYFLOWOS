@@ -229,11 +229,27 @@ export function useExpensesData() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
 
+  // R11-1 (M40 security confirmation): the tabs write into this hook's lists only through these, and only while the
+  // business they acted for is still the one shown. A create or delete started on A that answers after the switch
+  // to B writes nothing (and its caller says nothing): the hook stays mounted across a switch.
+  const isCurrentBusiness = useCallback((forBusiness: string) => businessRef.current === forBusiness, []);
+  const addCategory = useCallback((forBusiness: string, category: ExpenseCategory) => {
+    if (businessRef.current !== forBusiness) return false;
+    setCategories((prev) => (prev.some((c) => c.id === category.id) ? prev : [...prev, category]));
+    return true;
+  }, []);
+  const removeCategory = useCallback((forBusiness: string, categoryId: string) => {
+    if (businessRef.current !== forBusiness) return false;
+    setCategories((prev) => prev.filter((c) => c.id !== categoryId));
+    return true;
+  }, []);
+
   const overBudgetCount = budgets.filter(b => b.isOverBudget).length;
   const nearAlertCount = budgets.filter(b => b.isNearAlert && !b.isOverBudget).length;
 
   return {
-    businessId, read, summaryRead, budgetsRead, expenses, totalExpenses, categories, setCategories,
+    businessId, read, summaryRead, budgetsRead, expenses, totalExpenses, categories,
+    isCurrentBusiness, addCategory, removeCategory,
     summary, vendors, budgets, marginData, recurringCandidates, loading, loadData,
     projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,

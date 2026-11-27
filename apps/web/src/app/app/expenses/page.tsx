@@ -529,7 +529,9 @@ export default function ExpensesInboxPage() {
             <ExpenseCategoriesTab
               businessId={d.businessId}
               categories={d.categories}
-              setCategories={d.setCategories}
+              isCurrentBusiness={d.isCurrentBusiness}
+              addCategory={d.addCategory}
+              removeCategory={d.removeCategory}
               summary={d.summary}
               budgets={d.budgets}
             />

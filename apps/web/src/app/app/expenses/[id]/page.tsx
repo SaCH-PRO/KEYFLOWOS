@@ -295,11 +295,12 @@ export default function ExpenseDetailPage() {
                 <FileText className="w-10 h-10 text-muted-foreground/40 mb-2" />
                 <p className="text-sm text-foreground">{receipt === "stored" ? RECEIPT_STORED_NOTE : RECEIPT_UNAVAILABLE_NOTE}</p>
               </div>
-            ) : expense.receiptUrl ? (
-              expense.receiptUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+            ) : receipt === "link" && expense.receiptUrl ? (
+              // R11-4: only an address receiptKind calls a link is linked; a blank one (whitespace only) is "none".
+              expense.receiptUrl.trim().match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={expense.receiptUrl}
+                  src={expense.receiptUrl.trim()}
                   alt="Receipt"
                   className="w-full max-h-96 object-contain rounded-lg border border-border/40"
                 />
@@ -307,7 +308,7 @@ export default function ExpenseDetailPage() {
                 <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-dashed border-border bg-muted/30">
                   <FileText className="w-10 h-10 text-muted-foreground/40 mb-2" />
                   <a
-                    href={expense.receiptUrl}
+                    href={expense.receiptUrl.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-sm text-[hsl(var(--kf-accent1))] hover:underline"

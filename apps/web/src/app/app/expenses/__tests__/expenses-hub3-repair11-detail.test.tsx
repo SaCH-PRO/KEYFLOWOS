@@ -9,7 +9,6 @@ import React from "react";
 import { render, screen, cleanup } from "@testing-library/react";
 import type { Expense } from "@/lib/client";
 
-const BUSINESS = "biz_hub3_r11";
 const EXPENSE_ID = "exp_hub3_r11";
 const getExpense = vi.hoisted(() => vi.fn());
 const fetchExpenseBudgets = vi.hoisted(() => vi.fn());

@@ -11,12 +11,15 @@ import { CATEGORY_COLORS, formatCurrency } from "./expense-utils";
 interface ExpenseCategoriesTabProps {
   businessId: string;
   categories: ExpenseCategory[];
-  setCategories: React.Dispatch<React.SetStateAction<ExpenseCategory[]>>;
+  /** R11-1: the data hook's guarded writers; a reply for a business no longer shown writes and says nothing. */
+  isCurrentBusiness: (businessId: string) => boolean;
+  addCategory: (businessId: string, category: ExpenseCategory) => boolean;
+  removeCategory: (businessId: string, categoryId: string) => boolean;
   summary: ExpenseSummary | null;
   budgets: ExpenseBudget[];
 }
 
-export function ExpenseCategoriesTab({ businessId, categories, setCategories, summary, budgets }: ExpenseCategoriesTabProps) {
+export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness, addCategory, removeCategory, summary, budgets }: ExpenseCategoriesTabProps) {
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0]);
   // EXPENSES-HUB-3: the client answers a refused create as { error } and does not throw; it used to say
@@ -49,21 +52,25 @@ export function ExpenseCategoriesTab({ businessId, categories, setCategories, su
     if (!newCatName.trim()) return;
     try {
       const res = await createExpenseCategory(businessId, { name: newCatName.trim(), color: newCatColor });
+      // R11-1: answered after a switch to another business: nothing is added there and nothing is said.
+      if (!isCurrentBusiness(businessId)) return;
       if (refused(res, { what: "add expense categories" })) return;
       if (!res.data) { toast.error("Failed to create category"); return; }
-      setCategories(prev => [...prev, res.data!]);
+      if (!addCategory(businessId, res.data)) return;
       setNewCatName(""); setNewCatColor(CATEGORY_COLORS[0]);
       toast.success("Category created");
-    } catch { toast.error("Failed to create category"); }
+    } catch { if (isCurrentBusiness(businessId)) toast.error("Failed to create category"); }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
     try {
       const res = await deleteExpenseCategory(businessId, categoryId);
+      // R11-2: answered after a switch to another business: nothing is removed there and nothing is said.
+      if (!isCurrentBusiness(businessId)) return;
       if (refused(res, { what: "delete expense categories" })) return;
-      setCategories(prev => prev.filter(c => c.id !== categoryId));
+      if (!removeCategory(businessId, categoryId)) return;
       toast.success("Category deleted");
-    } catch { toast.error("Failed to delete category"); }
+    } catch { if (isCurrentBusiness(businessId)) toast.error("Failed to delete category"); }
   };
 
   return (
