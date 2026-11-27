@@ -24,7 +24,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense, RecurringCandidate } from "@/lib/client";
-import { formatCurrency, formatDate } from "./expense-utils";
+import { formatCurrency, formatDate, useShownBusiness } from "./expense-utils";
 import { toast } from "sonner";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
@@ -50,6 +50,8 @@ interface ExpenseListProps {
   contacts?: ContactOption[];
   services?: ServiceOption[];
   recurringCandidates?: RecurringCandidate[];
+  /** R12: the data hook's check that the business an action was for is still the one shown. */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
 const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
@@ -76,7 +78,10 @@ export function ExpenseList({
   businessId, onReload,
   projects = [], contacts = [], services = [],
   recurringCandidates = [],
+  isCurrentBusiness: hookCheck,
 }: ExpenseListProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -125,12 +130,14 @@ export function ExpenseList({
           updateExpense(businessId, id, { categoryId: bulkCategoryId })
         )
       );
+      // R12: answered after a switch to another business: nothing is said or reloaded there.
+      if (!isCurrentBusiness(businessId)) return;
       toast.success(`${selectedIds.size} expense${selectedIds.size > 1 ? "s" : ""} categorized`);
       setSelectedIds(new Set());
       setBulkCategoryId("");
       onReload?.();
     } catch {
-      toast.error("Failed to bulk categorize");
+      if (isCurrentBusiness(businessId)) toast.error("Failed to bulk categorize");
     }
   };
 
@@ -138,11 +145,12 @@ export function ExpenseList({
     if (!businessId) return;
     try {
       await updateExpense(businessId, expenseId, { categoryId: categoryId || null });
+      if (!isCurrentBusiness(businessId)) return;
       toast.success("Category updated");
       setInlineCatExpId(null);
       onReload?.();
     } catch {
-      toast.error("Failed to update category");
+      if (isCurrentBusiness(businessId)) toast.error("Failed to update category");
     }
   };
 

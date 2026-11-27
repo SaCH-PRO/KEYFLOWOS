@@ -334,13 +334,17 @@ export default function ExpensesInboxPage() {
 
   const handleDelete = async (id: string) => {
     if (!d.businessId) return;
+    const forBusiness = d.businessId;
     setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: true }));
     try {
-      await deleteExpense(d.businessId, id);
-      toast.success("Expense deleted");
-      void d.loadData();
+      await deleteExpense(forBusiness, id);
+      // R12: answered after a switch to another business: nothing is said there (loadData is guarded itself).
+      if (d.isCurrentBusiness(forBusiness)) {
+        toast.success("Expense deleted");
+        void d.loadData();
+      }
     } catch {
-      toast.error("Failed to delete expense");
+      if (d.isCurrentBusiness(forBusiness)) toast.error("Failed to delete expense");
     }
     setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: false }));
     setConfirmDelete(null);
@@ -348,13 +352,16 @@ export default function ExpensesInboxPage() {
 
   const _handleMarkPaid = async (expense: Expense) => {
     if (!d.businessId) return;
+    const forBusiness = d.businessId;
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
     try {
-      await updateExpense(d.businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
-      toast.success("Marked as paid");
-      void d.loadData();
+      await updateExpense(forBusiness, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
+      if (d.isCurrentBusiness(forBusiness)) {
+        toast.success("Marked as paid");
+        void d.loadData();
+      }
     } catch {
-      toast.error("Failed to mark as paid");
+      if (d.isCurrentBusiness(forBusiness)) toast.error("Failed to mark as paid");
     }
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
   };
@@ -549,7 +556,7 @@ export default function ExpensesInboxPage() {
                 New recurring expense
               </button>
             </div>
-            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} />
+            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} isCurrentBusiness={d.isCurrentBusiness} />
           </div>
         )}
 

@@ -21,7 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, todayInBusinessZone } from "./expense-utils";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -29,6 +29,8 @@ interface RecurringExpensesPanelProps {
   businessId: string | null;
   categories: ExpenseCategory[];
   triggerNew?: number;
+  /** R12: the data hook's check that the business an action was for is still the one shown. */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
 const FREQUENCIES: Record<string, string> = {
@@ -39,7 +41,9 @@ const FREQUENCIES: Record<string, string> = {
   YEARLY: "Yearly",
 };
 
-export default function RecurringExpensesPanel({ businessId, categories, triggerNew }: RecurringExpensesPanelProps) {
+export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck }: RecurringExpensesPanelProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
@@ -50,10 +54,12 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     setLoading(true);
     try {
       const res = await fetchRecurringExpenses(businessId);
+      // R12: a read for a business no longer shown writes nothing.
+      if (!isCurrentBusiness(businessId)) return;
       if (res.data) setRecurring(res.data);
     } catch {}
     setLoading(false);
-  }, [businessId]);
+  }, [businessId, isCurrentBusiness]);
 
   useEffect(() => { queueMicrotask(load); }, [load]);
   useEffect(() => {
@@ -94,6 +100,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       const res = editing
         ? await updateRecurringExpense(businessId, editing.id, payload)
         : await createRecurringExpense(businessId, payload);
+      // R12: answered after a switch to another business: nothing is said or reloaded there.
+      if (!isCurrentBusiness(businessId)) return;
       if (res?.error) {
         toast.error(res.error);
         return;
@@ -103,7 +111,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       setEditing(null);
       void load();
     } catch {
-      toast.error("Failed to save");
+      if (isCurrentBusiness(businessId)) toast.error("Failed to save");
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -115,10 +123,11 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     if (!window.confirm("Cancel this recurring expense?")) return;
     try {
       await cancelRecurringExpense(businessId, id);
+      if (!isCurrentBusiness(businessId)) return;
       toast.success("Cancelled");
       void load();
     } catch {
-      toast.error("Failed to cancel");
+      if (isCurrentBusiness(businessId)) toast.error("Failed to cancel");
     }
   };
 
@@ -126,10 +135,11 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     if (!businessId) return;
     try {
       await runRecurringExpenseNow(businessId, id);
+      if (!isCurrentBusiness(businessId)) return;
       toast.success("Expense generated");
       void load();
     } catch {
-      toast.error("Failed to run");
+      if (isCurrentBusiness(businessId)) toast.error("Failed to run");
     }
   };
 

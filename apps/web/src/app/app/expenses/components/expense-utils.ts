@@ -7,6 +7,7 @@ import {
   FileText,
   DollarSign,
 } from "lucide-react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { formatCurrency as formatMoney } from "@/lib/currency";
 import { getCachedBusiness, getStoredBusinessId } from "@/lib/workspace";
 import type { RecurringExpense } from "@/lib/client";
@@ -233,4 +234,15 @@ export function recurringScheduleBody(src: ScheduleSource, businessId?: string |
     if (offset !== null && offset >= 0) body.dueOffsetDays = offset;
   }
   return body;
+}
+
+/**
+ * EXPENSES-HUB-3 R12: a check that the business an action was started for is still the one this component shows (its
+ * latest `businessId` prop). A reply to an action started on A that lands after the switch to B says and reloads
+ * nothing. The default for components rendered without the data hook's `isCurrentBusiness`.
+ */
+export function useShownBusiness(businessId: string | null | undefined): (forBusiness: string) => boolean {
+  const shown = useRef(businessId);
+  useLayoutEffect(() => { shown.current = businessId; }, [businessId]);
+  return useCallback((forBusiness: string) => Boolean(forBusiness) && shown.current === forBusiness, []);
 }

@@ -278,7 +278,7 @@ export default function ExpenseDetailPage() {
               <h3 className="text-sm font-semibold text-foreground">Receipt preview</h3>
               {expense.receiptUrl && receipt === "link" && (
                 <a
-                  href={expense.receiptUrl}
+                  href={expense.receiptUrl.trim()}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
