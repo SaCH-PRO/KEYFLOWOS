@@ -46,16 +46,16 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 
 ## Summary
 
-- Total `@Get` routes scanned in `apps/server/src`: **998**
-- Member `@Get` routes (with `AuthGuard`, `BusinessGuard`, or `OptionalAuthGuard`): **919**
+- Total `@Get` routes scanned in `apps/server/src`: **999**
+- Member `@Get` routes (with `AuthGuard`, `BusinessGuard`, or `OptionalAuthGuard`): **920**
 - Enforced-scope member `@Get` routes (`@RequireModuleScope` + `ModuleScopeGuard`): **318**
-- Membership-only `@Get` routes (unenforced population): **601**
-- Total rows pinned in this census: **607** (601 membership-only + 6 pinned enforced `applied`/`secret-read`)
+- Membership-only `@Get` routes (unenforced population): **602**
+- Total rows pinned in this census: **608** (602 membership-only + 6 pinned enforced `applied`/`secret-read`)
 
 | Disposition | Count |
 | --- | ---: |
 | applied | 3 |
-| exempt-admin | 25 |
+| exempt-admin | 26 |
 | exempt-check | 75 |
 | exempt-guard | 6 |
 | exempt-membership | 1 |
@@ -655,13 +655,14 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `DeviceController.listIntakes` | GET | `/api/device/businesses/:businessId/intakes` | open | follow-up: `operations:read` (membership-only read; no enforced module scope) |
 | `DeviceController.listVoiceSessions` | GET | `/api/device/businesses/:businessId/voice-sessions` | open | follow-up: `operations:read` (membership-only read; no enforced module scope) |
 
-### `modules/diagnostics/diagnostics.controller.ts` (6)
+### `modules/diagnostics/diagnostics.controller.ts` (7)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `DiagnosticsController.crossModule` | GET | `/api/diagnostics/cross-module` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
 | `DiagnosticsController.envVars` | GET | `/api/diagnostics/env-vars` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
 | `DiagnosticsController.errors` | GET | `/api/diagnostics/errors` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
+| `DiagnosticsController.getSecuritySignals` | GET | `/api/diagnostics/security-signals` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
 | `DiagnosticsController.infrastructure` | GET | `/api/diagnostics/infrastructure` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
 | `DiagnosticsController.integrations` | GET | `/api/diagnostics/integrations` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
 | `DiagnosticsController.modules` | GET | `/api/diagnostics/modules` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |

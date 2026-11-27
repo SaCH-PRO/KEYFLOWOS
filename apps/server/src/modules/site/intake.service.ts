@@ -149,7 +149,7 @@ export class IntakeService {
     const [items, total] = await Promise.all([
       this.prisma.client.intakeSubmission.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: opts?.limit ?? 50,
         skip: opts?.offset ?? 0,
       }),

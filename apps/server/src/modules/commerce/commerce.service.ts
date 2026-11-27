@@ -1237,7 +1237,7 @@ export class CommerceService {
     const [data, total] = await Promise.all([
       this.prisma.client.invoice.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         // DEP-R3-OWN-ROW-READS (D-75): the list row's payments are the invoice's
         // own tenant's (the web reads its paid share from them, M31).
         include: { contact: true, quote: true, payments: { where: { businessId } }, items: true },
@@ -2916,7 +2916,7 @@ export class CommerceService {
     const [data, total] = await Promise.all([
       this.prisma.client.quote.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: { contact: true, items: true, invoice: true },
         skip: (page - 1) * pageSize,
         take: pageSize,
