@@ -56,7 +56,13 @@ const selectionKey = (): string | null => {
   return businessId ? `${actingMemberNow()}\n${businessId}` : null;
 };
 
-const noSelectionOnServer = () => null;
+/**
+ * On the server and while hydrating, the selection is not known yet (repair round 2): the hook answers
+ * `known: false` there, so a consumer acting on `known && !has` never acts on a hard load before the client has read
+ * who is signed in and which business is selected. Not a value selectionKey() can return (it holds no newline).
+ */
+const HYDRATING = "hydrating";
+const selectionWhileHydrating = () => HYDRATING;
 
 export interface LegacyModuleState {
   /** The server's answer for the member and business on screen is in (or there is no business). */
@@ -67,11 +73,11 @@ export interface LegacyModuleState {
 
 /** Whether the business on screen is on the legacy list for the hidden module `key` (fail closed). */
 export function useLegacyModule(key: string): LegacyModuleState {
-  const selection = useSyncExternalStore(subscribeToSelection, selectionKey, noSelectionOnServer);
+  const selection = useSyncExternalStore(subscribeToSelection, selectionKey, selectionWhileHydrating);
   const [read, setRead] = useState<{ selection: string; modules: readonly string[] } | null>(null);
 
   useEffect(() => {
-    if (!selection || answers.has(selection)) return;
+    if (!selection || selection === HYDRATING || answers.has(selection)) return;
     const businessId = selection.slice(selection.indexOf("\n") + 1);
     // A later selection (another business or member) disposes this read: its reply is then dropped.
     let disposed = false;
@@ -88,6 +94,7 @@ export function useLegacyModule(key: string): LegacyModuleState {
     };
   }, [selection]);
 
+  if (selection === HYDRATING) return { known: false, has: false };
   if (!selection) return { known: true, has: false };
   const modules = answers.get(selection) ?? (read && read.selection === selection ? read.modules : null);
   if (!modules) return { known: false, has: false };
