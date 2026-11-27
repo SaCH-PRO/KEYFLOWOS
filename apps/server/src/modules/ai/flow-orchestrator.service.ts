@@ -8073,22 +8073,26 @@ ${triage.standingContext}`;
         return { rates };
       }
       case 'payroll_set_rate': {
+        const actor = (await this.contactBindMember(businessId, action)) ?? null;
+        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
         const rate = await this.getPayroll().setRate(businessId, {
           assignmentId: args.assignmentId,
           amount: args.amount,
           currency: args.currency,
           periodType: args.periodType,
         });
-        return { id: rate.id, amount: Number(rate.amount) };
+        return { id: rate.id, amount: includeMoney ? Number(rate.amount) : null };
       }
       case 'payroll_generate_run': {
+        const actor = (await this.contactBindMember(businessId, action)) ?? null;
+        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
         const run = await this.getPayroll().generateRun(
           businessId,
           new Date(args.periodStart),
           new Date(args.periodEnd),
           { notes: args.notes },
         );
-        return { id: run.id, totalGross: Number(run.totalGross), itemCount: run.itemCount };
+        return { id: run.id, totalGross: includeMoney ? Number(run.totalGross) : null, itemCount: run.itemCount };
       }
       case 'payroll_list_runs': {
         const actor = (await this.contactBindMember(businessId, action)) ?? null;

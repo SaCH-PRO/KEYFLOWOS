@@ -132,9 +132,7 @@ export class PayrollService {
     });
   }
 
-  /** Latest effective rate per assignment. */
-  async listRates(businessId: string, opts: { includeMoney?: boolean } = {}) {
-    const includeMoney = opts.includeMoney ?? true;
+  private async latestEffectiveRates(businessId: string) {
     const rates = await this.prisma.client.payRate.findMany({
       where: { businessId },
       orderBy: { effectiveFrom: 'desc' },
@@ -148,10 +146,20 @@ export class PayrollService {
       id: r.id,
       assignmentId: r.assignmentId,
       staffName: this.assignmentName(r.assignment),
-      amount: includeMoney ? Number(r.amount) : null,
+      amount: Number(r.amount),
       currency: r.currency,
       periodType: r.periodType,
       effectiveFrom: r.effectiveFrom,
+    }));
+  }
+
+  /** Latest effective rate per assignment. */
+  async listRates(businessId: string, opts: { includeMoney?: boolean } = {}) {
+    const includeMoney = opts.includeMoney ?? true;
+    const rates = await this.latestEffectiveRates(businessId);
+    return rates.map((r) => ({
+      ...r,
+      amount: includeMoney ? r.amount : null,
     }));
   }
 
@@ -184,7 +192,7 @@ export class PayrollService {
       throw new BadRequestException(`A payroll run already overlaps this period (${overlap.id}, status ${overlap.status})`);
     }
 
-    const rates = await this.listRates(businessId);
+    const rates = await this.latestEffectiveRates(businessId);
     if (rates.length === 0) {
       throw new BadRequestException('No pay rates configured — set staff rates first (payroll_set_rate)');
     }
