@@ -166,10 +166,10 @@ beforeAll(async () => {
   });
 
   await db.orgUnit.create({
-    data: { id: ID.orgUnitA, businessId: ID.bizA, name: 'Operations', kind: 'DEPARTMENT' },
+    data: { id: ID.orgUnitA, businessId: ID.bizA, name: 'Operations', type: 'DEPARTMENT' },
   });
   await db.jobRole.create({
-    data: { id: ID.jobRoleA, businessId: ID.bizA, title: 'Technician', orgUnitId: ID.orgUnitA },
+    data: { id: ID.jobRoleA, businessId: ID.bizA, name: 'Technician' },
   });
   await db.orgAssignment.create({
     data: {
