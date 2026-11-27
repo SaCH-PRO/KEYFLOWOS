@@ -20,14 +20,19 @@ export const ISO_CURRENCY_CODE_RE = /^[A-Z]{3}$/;
  */
 export const UNCODED_CURRENCY_LABEL = 'UNCODED';
 
+const ASCII_CURRENCY_INPUT_RE = /^[A-Za-z]{3}$/;
+
 /**
- * FU-CASH-LABEL-SANITISER (D-135): normalize (trim + uppercase) and validate a
- * currency label as a strict 3-letter ASCII alphabetic code, returning null for
- * any free text, symbols, HTML/XSS, non-ASCII, digits, or wrong-length value.
+ * FU-CASH-LABEL-SANITISER (D-135, R1-SEC-02): validate strictly 3 ASCII letters
+ * BEFORE uppercasing so Unicode confusables/ligatures (e.g. 'u\u017Fd',
+ * '\uFB03', 'u\u00DF', 't\u0131d') cannot expand/fold into ISO codes, and
+ * return null for any non-string, free text, symbol, HTML/XSS, non-ASCII,
+ * digit, or wrong-length value.
  */
 export function sanitizeCurrencyCode(raw: string | null | undefined): string | null {
-  const normalized = normalizeCurrency(raw);
-  return ISO_CURRENCY_CODE_RE.test(normalized) ? normalized : null;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return ASCII_CURRENCY_INPUT_RE.test(trimmed) ? trimmed.toUpperCase() : null;
 }
 
 /**
@@ -160,7 +165,12 @@ export function sanitizeOtherCurrencyCash(entries: ReadonlyArray<OtherCurrencyCa
   let uncodedCount = 0;
 
   for (const entry of entries) {
-    if (!entry || !Number.isFinite(entry.amount) || entry.amount === 0) continue;
+    const isAggregatedUncoded =
+      entry?.currency === UNCODED_CURRENCY_LABEL
+      && typeof entry.count === 'number'
+      && Number.isInteger(entry.count)
+      && entry.count > 0;
+    if (!entry || !Number.isFinite(entry.amount) || (entry.amount === 0 && !isAggregatedUncoded)) continue;
     const code = sanitizeCurrencyCode(entry.currency);
     if (code) {
       const bucket = codedParts.get(code);
@@ -168,10 +178,7 @@ export function sanitizeOtherCurrencyCash(entries: ReadonlyArray<OtherCurrencyCa
       else codedParts.set(code, [entry.amount]);
     } else {
       uncodedParts.push(entry.amount);
-      const entryCount = typeof entry.count === 'number' && Number.isInteger(entry.count) && entry.count > 0
-        ? entry.count
-        : 1;
-      uncodedCount += entryCount;
+      uncodedCount += isAggregatedUncoded ? entry.count! : 1;
     }
   }
 
@@ -192,14 +199,24 @@ export function sanitizeOtherCurrencyCash(entries: ReadonlyArray<OtherCurrencyCa
 }
 
 /**
- * V1-37c + FU-CASH-LABEL-SANITISER (D-135): the non-zero cash a position holds
- * outside its business currency, sanitised through `sanitizeOtherCurrencyCash`
+ * V1-37c + FU-CASH-LABEL-SANITISER (D-135, R1-SEC-04): the non-zero cash a
+ * position holds outside its business currency (compared normalized, and by
+ * sanitized code when both are valid ISO codes, so unnormalized keys like
+ * `' ttd '` never leak home cash), sanitised through `sanitizeOtherCurrencyCash`
  * so valid 3-letter codes remain intact and non-code free-text labels are never
  * echoed (aggregated into a single counted `UNCODED` bucket).
  */
 export function otherCurrencyCash(position: Pick<CashPosition, 'currency' | 'byCurrency'>): OtherCurrencyCash[] {
+  const homeNorm = normalizeCurrency(position.currency);
+  const homeCode = sanitizeCurrencyCode(position.currency);
   const raw = Object.entries(position.byCurrency ?? {})
-    .filter(([code, amount]) => code !== position.currency && amount !== 0)
+    .filter(([code, amount]) => {
+      if (amount === 0) return false;
+      if (normalizeCurrency(code) === homeNorm) return false;
+      const entryCode = sanitizeCurrencyCode(code);
+      if (homeCode && entryCode && entryCode === homeCode) return false;
+      return true;
+    })
     .map(([currency, amount]) => ({ currency, amount }));
   return sanitizeOtherCurrencyCash(raw);
 }
