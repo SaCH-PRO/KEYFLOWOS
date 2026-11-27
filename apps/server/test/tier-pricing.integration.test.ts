@@ -583,6 +583,50 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     const afterContactB = await db.contact.findUnique({ where: { id: ID.contactB } });
     expect(afterTierB).toEqual(beforeTierB);
     expect(afterContactB).toEqual(beforeContactB);
+
+    // Symmetric direction: Owner B targeting Business A paths (403) and Business B paths with Business A IDs (404)
+    const beforeTierA = await db.productTierPrice.findMany({
+      where: { businessId: ID.bizA },
+      orderBy: { tier: 'asc' },
+    });
+    const beforeContactA = await db.contact.findUnique({ where: { id: ID.contactWholesaleA } });
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+          .set(HEADER, ID.ownerB)
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+          .set(HEADER, ID.ownerB)
+          .send({ tierPrices: [{ tier: 'WHOLESALE', price: 1 }] })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizB}/products/${ID.prodA}/price`)
+          .set(HEADER, ID.ownerB)
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizB}/contacts/${ID.contactWholesaleA}/pricing-tier`)
+          .set(HEADER, ID.ownerB)
+          .send({ pricingTier: 'RETAIL' })
+      ).status,
+    ).toBe(404);
+    expect(
+      await db.productTierPrice.findMany({
+        where: { businessId: ID.bizA },
+        orderBy: { tier: 'asc' },
+      }),
+    ).toEqual(beforeTierA);
+    expect(await db.contact.findUnique({ where: { id: ID.contactWholesaleA } })).toEqual(beforeContactA);
   });
 
   it('[TP-05] RED-BEFORE (D-133): enforces crm_view=owned (hides SHARED non-owned) and PRIVATE hiding separately, while allowing own contacts', async () => {
@@ -776,12 +820,37 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     ).toBe(400);
 
     // PUT { tierPrices: [] } clears all tier prices and reverts GET price to BASE
+    const auditBeforeClear = await db.teamActivityLog.count({
+      where: {
+        businessId: ID.bizA,
+        module: 'revenue',
+        action: 'product_tier_prices_updated',
+        entityType: 'product',
+        entityId: ID.prodA,
+      },
+    });
     const clearAll = await request(app.getHttpServer())
       .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
       .set(HEADER, ID.ownerA)
       .send({ tierPrices: [] });
     expect(clearAll.status).toBe(200);
     expect(clearAll.body).toEqual([]);
+
+    // Drain async TeamAuditInterceptor write before afterAll cleanup runs
+    let auditAfterClear = auditBeforeClear;
+    for (let i = 0; i < 20 && auditAfterClear <= auditBeforeClear; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      auditAfterClear = await db.teamActivityLog.count({
+        where: {
+          businessId: ID.bizA,
+          module: 'revenue',
+          action: 'product_tier_prices_updated',
+          entityType: 'product',
+          entityId: ID.prodA,
+        },
+      });
+    }
+    expect(auditAfterClear).toBeGreaterThan(auditBeforeClear);
 
     const reverted = await request(app.getHttpServer())
       .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
