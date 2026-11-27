@@ -1625,6 +1625,11 @@
       "prefix": "v91j_",
       "owner": "apps/server/test/cash-label-sanitiser.integration.test.ts",
       "packet": "V1-91 (FU-CASH-LABEL-SANITISER, P138)"
+    },
+    {
+      "prefix": "v91k_",
+      "owner": "apps/server/test/case-study-revenue-scope.integration.test.ts",
+      "packet": "V1-91 (FU-CASE-STUDY-REVENUE, P139)"
     }
   ],
   "pendingRenames": [],
