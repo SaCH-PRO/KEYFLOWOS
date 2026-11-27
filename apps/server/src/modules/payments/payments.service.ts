@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { securitySignals } from '../../core/observability/security-signals';
 import { isLostTransactionConflict } from '../../core/prisma/transaction-conflict';
 import { CommerceService } from '../commerce/commerce.service';
 import {
@@ -1457,6 +1458,7 @@ export class PaymentsService {
     }
 
     if (!signatureOk) {
+      securitySignals.record('webhook_signature_failed', 'stripe');
       if (!envSecret) {
         this.logger.error('Stripe webhook secret not configured; rejecting webhook');
       } else {
@@ -2477,6 +2479,7 @@ export class PaymentsService {
     const businessCreds = await this.resolvePaypalBusinessCreds(event.resource || {}, event.event_type);
     const verified = await this.verifyPaypalSignature(headers, rawPayload, sandbox, businessCreds ?? undefined);
     if (!verified) {
+      securitySignals.record('webhook_signature_failed', 'paypal');
       throw new BadRequestException('Invalid PayPal webhook signature');
     }
     const verifier: PaypalVerifier = {
@@ -3511,6 +3514,7 @@ export class PaymentsService {
           total: platformTotal,
         });
       }
+      securitySignals.record('webhook_signature_failed', 'wipay');
       this.logger.error(
         `WiPay callback for ${order_id} refused: ${apiKey ? 'its hash is not WiPay\'s keyed response hash' : 'no WiPay API key is configured to verify it'}`,
       );

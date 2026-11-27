@@ -329,7 +329,7 @@ export class BookingWaitlistService {
             select: { id: true, startTime: true, endTime: true, status: true },
           },
         },
-        orderBy: [{ createdAt: 'asc' }],
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         take: Math.min(filters.limit ?? 50, 200),
         skip: filters.offset ?? 0,
       }),

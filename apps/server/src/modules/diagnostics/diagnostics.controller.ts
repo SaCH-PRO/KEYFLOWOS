@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Param, Query, ForbiddenException, Req, Inject, UseGuards } from '@nestjs/common';
 import { errorRegistry } from '../../core/observability/error-registry';
+import { securitySignals } from '../../core/observability/security-signals';
 import { DiagnosticsService } from './diagnostics.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { AdminGuard, isAdminSignIn, type AdminRequestLike } from '../../core/auth/admin.guard';
@@ -64,6 +65,12 @@ export class DiagnosticsController {
     // NaN from a junk ?limit must not become take:NaN — clamp to a sane range.
     const n = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 200) : 50;
     return errorRegistry.snapshot(n);
+  }
+
+  @Get('security-signals')
+  getSecuritySignals(@Req() req: Request) {
+    this.assertSuperAdmin(req);
+    return securitySignals.snapshot();
   }
 
   @Get('env-vars')

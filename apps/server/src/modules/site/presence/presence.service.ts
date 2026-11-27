@@ -776,7 +776,7 @@ export class PresenceService {
         this.prisma.client.business.count({ where: businessWhere }),
         this.prisma.client.business.findMany({
           where: businessWhere,
-          orderBy: [{ name: 'asc' }],
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
           skip: (page - 1) * pageSize,
           take: pageSize,
           select: {

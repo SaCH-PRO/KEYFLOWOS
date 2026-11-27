@@ -222,7 +222,9 @@ beforeAll(async () => {
     });
   }
 
-  const blockedPolicy = JSON.stringify({ blockedModules: ['crm', 'commerce'], blockedTools: ['listRecentEngagement'] });
+  // P154 (RR-LEGACY-TOOLS-CLASSIFY): social.listRecentEngagement is OBSOLETE and refused before policy blocks;
+  // pin bare-tool-name blocking on active legacy read listMessageIntake instead.
+  const blockedPolicy = JSON.stringify({ blockedModules: ['crm', 'commerce'], blockedTools: ['listMessageIntake'] });
   await db.aiMemory.create({
     data: { businessId: ID.bizBlocked, category: 'settings', key: 'autonomy', source: 'user', value: blockedPolicy },
   });
@@ -323,9 +325,9 @@ describe("SEC-V109-2 a business's module and tool blocks stop the dotted 'ask' r
   });
 
   it('a bare tool name in blockedTools stops that read; an unblocked read still runs (control)', async () => {
-    const social = await ask(ID.owner, 'any recent engagement on instagram?', ID.bizBlocked);
-    expect(social.body.results[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(social.body.results[0].error).toContain('Tool "listRecentEngagement" is blocked');
+    const messages = await ask(ID.owner, 'check messages in my inbox', ID.bizBlocked);
+    expect(messages.body.results[0]).toMatchObject({ success: false, notExecuted: true });
+    expect(messages.body.results[0].error).toContain('Tool "listMessageIntake" is blocked');
 
     const drive = await ask(ID.owner, 'what did key find in drive intake?', ID.bizBlocked);
     expect(drive.body.results[0]).toMatchObject({ success: true, tool: 'connect.listDriveIntake' });

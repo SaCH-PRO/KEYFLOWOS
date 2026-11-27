@@ -80,7 +80,7 @@ export class ContractsService {
       take,
       skip: filters.cursor ? 1 : 0,
       cursor: filters.cursor ? { id: filters.cursor } : undefined,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       include: {
         parties: { orderBy: { createdAt: 'asc' } },
         tags: { include: { tag: true } },
