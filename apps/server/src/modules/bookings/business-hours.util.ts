@@ -24,6 +24,9 @@ export const LONG_DAY_KEYS = [
 export const DEFAULT_BUSINESS_OPEN_MIN = 9 * 60;
 export const DEFAULT_BUSINESS_CLOSE_MIN = 17 * 60;
 
+/** Public booking slot grid interval in minutes, shared by getAvailableSlots and publicCreateBooking (P226). */
+export const PUBLIC_SLOT_INTERVAL_MINS = 30;
+
 export type ParsedBusinessDayHours =
   | { closed: true }
   | { closed: false; openMin: number; closeMin: number; open: string; close: string };
@@ -158,3 +161,31 @@ export function readBusinessDayHours(
   }
   return null;
 }
+
+/**
+ * V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): whether a booking start
+ * instant lands on the exact slot grid that `getAvailableSlots` emits for a
+ * window opening at `openMin` (minutes past midnight in the business timezone):
+ *   - zero seconds and zero milliseconds (`zonedInstant` emits whole minutes)
+ *   - `(startMinsOfDay - Math.max(0, openMin)) % intervalMins === 0`
+ */
+export function isOnSlotGrid(
+  start: Date,
+  startMinsOfDay: number,
+  openMin: number,
+  intervalMins = PUBLIC_SLOT_INTERVAL_MINS,
+): boolean {
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
+    return false;
+  }
+  if (start.getUTCSeconds() !== 0 || start.getUTCMilliseconds() !== 0) {
+    return false;
+  }
+  if (!Number.isInteger(startMinsOfDay) || !Number.isFinite(openMin) || !Number.isFinite(intervalMins) || intervalMins <= 0) {
+    return false;
+  }
+  const anchor = Math.max(0, openMin);
+  const remainder = (((startMinsOfDay - anchor) % intervalMins) + intervalMins) % intervalMins;
+  return remainder === 0;
+}
+

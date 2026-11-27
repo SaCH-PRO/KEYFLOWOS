@@ -30,7 +30,7 @@ export class PublicCreateBookingDto {
   @IsOptional()
   staffId?: string | null;
 
-  @IsISO8601()
+  @IsISO8601({ strict: true })
   startTime!: string;
 
   @IsString()
