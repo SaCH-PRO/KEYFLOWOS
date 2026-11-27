@@ -102,7 +102,7 @@ beforeAll(async () => {
   app.use((req: any, _res: any, next: () => void) => {
     const uid = req.headers[HEADER];
     if (typeof uid === 'string' && uid.trim()) {
-      req.user = { id: uid.trim(), email: `${uid.trim()}@test.local`, role: 'USER' };
+      req.user = { id: uid.trim(), email: `${P}${uid.trim()}@test.local`, role: 'USER' };
     }
     next();
   });

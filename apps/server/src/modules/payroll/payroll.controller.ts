@@ -85,12 +85,10 @@ export class PayrollController {
     @Body() body: { paymentAccountId?: string; paymentMethod?: string } | undefined,
     @Req() req: { user?: { id?: string } },
   ) {
-    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
     return this.payroll.markRunPaid(businessId, runId, {
       paymentAccountId: typeof body?.paymentAccountId === 'string' ? body.paymentAccountId : undefined,
       paymentMethod: typeof body?.paymentMethod === 'string' ? body.paymentMethod : undefined,
       actorId: req?.user?.id ?? null,
-      includeMoney,
     });
   }
 

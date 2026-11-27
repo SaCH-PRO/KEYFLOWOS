@@ -432,7 +432,10 @@ export class PayrollService {
       return run;
     });
     invalidateBusinessFinancialSnapshotCache(businessId);
-    const includeMoney = input.includeMoney ?? true;
+    const moneyActorId =
+      input.initiatedBy ?? (input.actorId && input.actorId !== KEY_SYSTEM_ACTOR_ID ? input.actorId : null);
+    const includeMoney =
+      input.includeMoney ?? (moneyActorId ? await this.canReadPayrollMoney(businessId, moneyActorId) : false);
     return includeMoney ? paid : { ...paid, totalGross: null };
   }
 
