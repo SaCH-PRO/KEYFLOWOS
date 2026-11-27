@@ -27,6 +27,8 @@
  *   POT-13  for the same business, only the latest read applies (A, B, A with the answers arriving newest first)
  *   POT-14  the Grant form starts empty: its Contact ID and error are cleared by Cancel, by reopening and by a switch
  *   POT-15  a Grant or a Revoke that succeeds reads the list again
+ *   POT-16  a Grant finishing in A after a switch to B, while B's read is still running, neither reads A again nor
+ *           keeps B's answer from landing
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -383,5 +385,32 @@ describe("P232: the Client Portal page without the portal token", () => {
     } finally {
       confirmSpy.mockRestore();
     }
+  });
+
+  it("POT-16 a Grant finishing in A after a switch, while B's read runs, neither reads A again nor blocks B's answer", async () => {
+    member.levels = { crm: "write" };
+    let finishGrant: (v: unknown) => void = () => undefined;
+    portal.create.mockImplementation(() => new Promise((resolve) => (finishGrant = resolve)));
+    const pendingB: Array<(v: unknown) => void> = [];
+    portal.list.mockImplementation((business: string) =>
+      business === "biz_a" ? Promise.resolve(accessOf("biz_a")) : new Promise((resolve) => pendingB.push(resolve)),
+    );
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_a");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    fireEvent.change(screen.getByPlaceholderText("Contact ID"), { target: { value: "contact_new" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Grant$/ }));
+
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    await waitFor(() => expect(pendingB).toHaveLength(1));
+    const readsOfA = portal.list.mock.calls.filter(([b]) => b === "biz_a").length;
+    await act(async () => finishGrant({ data: { id: "pa_new" }, error: null }));
+    expect(portal.list.mock.calls.filter(([b]) => b === "biz_a").length, "A is not read again under B").toBe(readsOfA);
+
+    await act(async () => pendingB[0](accessOf("biz_b")));
+    expect(await screen.findByText("contact_of_biz_b")).toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).toBeNull();
   });
 });
