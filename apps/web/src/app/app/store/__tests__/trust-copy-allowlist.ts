@@ -277,11 +277,11 @@ export const ALLOWED = new Set<string>([
  * absent is "not known", as null is, never the whole catalog. A spec's store with all of its catalog on the store:
  * the view is the lists given (a view the spec gives itself, null included, is kept).
  */
-export function onStore<D extends { products?: unknown[]; services?: unknown[] }>(d: D): D & { storeProducts: unknown; storeServices: unknown } {
-  const v = d as D & { storeProducts?: unknown; storeServices?: unknown };
+export function onStore<D extends object>(d: D): D & { storeProducts: unknown; storeServices: unknown } {
+  const v = d as D & { products?: unknown[]; services?: unknown[]; storeProducts?: unknown; storeServices?: unknown };
   return {
     ...d,
-    storeProducts: "storeProducts" in v ? v.storeProducts : (d.products ?? []),
-    storeServices: "storeServices" in v ? v.storeServices : (d.services ?? []),
+    storeProducts: "storeProducts" in v ? v.storeProducts : (v.products ?? []),
+    storeServices: "storeServices" in v ? v.storeServices : (v.services ?? []),
   };
 }
