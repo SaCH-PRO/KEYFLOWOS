@@ -23,10 +23,11 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({}),
 }));
 
-import { clip, liveProducts, bookableServices } from "../storefront-counts";
+import { clip, liveProducts, bookableServices, offerWords } from "../storefront-counts";
 import { AiContentPanel } from "../components/ai-content-panel";
 import { AiHeroCopyPanel } from "../components/ai-hero-copy-panel";
 import { MerchandisingMode } from "../components/merchandising-mode";
+import { DesignMode } from "../components/design-mode";
 import { useStoreAiHub, generateStoreSuggestions } from "../hooks/use-store-ai-hub";
 
 afterEach(() => cleanup());
@@ -125,6 +126,44 @@ describe("R11-M: what is on the store not known: no total, only what is known", 
     const panel = (screen.getByText("Generate FAQ").closest(".rounded-2xl")?.textContent ?? "").replace(/\s+/g, " ");
     expect(panel).not.toMatch(TOTAL);
     expect(panel).toMatch(/Browse 1 service at Pepper Co\./);
+  });
+  it("the Design tab, given the store view not known, passes it to the AI Hero Copy panel", async () => {
+    render(
+      <DesignMode
+        businessData={{ name: "Pepper Co" }}
+        services={[{ ...SERVICE, price: 5, currency: "TTD" }] as never}
+        commerceProducts={[product("p0", { price: 5, currency: "TTD" })] as never}
+        liveProductIds={new Set(["p0"])}
+        storeView={{ productsKnown: false, servicesKnown: true }}
+        storefrontConfig={{} as never}
+        onConfigChange={vi.fn()}
+        onSaveConfig={vi.fn(async () => {})}
+        configSaving={false}
+        slug="pepper-co"
+      />,
+    );
+    fireEvent.click(screen.getByText("AI Hero Copy"));
+    await generate("Generate");
+    expect(text()).not.toMatch(TOTAL);
+    expect(text()).toMatch(/Browse 1 service\. Book online\./);
+  });
+});
+
+describe("R11-M: offerWords counts only what is known", () => {
+  const ALL = { products: 2, packages: 1, services: 3, orderableServices: 4 };
+  it("products not known: no product, package or bought service is counted", () => {
+    const w = offerWords({ ...ALL, productsKnown: false });
+    expect([w.partial, w.total, w.counted, w.shops, w.buys, w.books]).toEqual([true, 3, "3 services", false, false, true]);
+  });
+  it("services not known: no booked service is counted", () => {
+    const w = offerWords({ ...ALL, servicesKnown: false });
+    expect([w.partial, w.total, w.counted, w.books, w.buys]).toEqual([true, 7, "2 products, 1 package and 4 services", false, true]);
+  });
+  it("neither known: nothing counted; both known: everything (control)", () => {
+    const none = offerWords({ ...ALL, productsKnown: false, servicesKnown: false });
+    expect([none.partial, none.total, none.counted, none.action]).toEqual([true, 0, "", ""]);
+    const all = offerWords(ALL);
+    expect([all.partial, all.total, all.counted]).toEqual([false, 10, "2 products, 1 package and 7 services"]);
   });
 });
 

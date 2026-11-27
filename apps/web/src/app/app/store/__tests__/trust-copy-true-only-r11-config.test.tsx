@@ -21,12 +21,13 @@ const client = vi.hoisted(() => ({
   backfillStoreLinks: vi.fn(),
 }));
 const api = vi.hoisted(() => ({ apiGet: vi.fn() }));
+const ws = vi.hoisted(() => ({ businessId: "biz_r11" }));
 vi.mock("@/lib/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/client")>()), ...client }));
 vi.mock("@/lib/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/api")>()), apiGet: api.apiGet }));
 vi.mock("@/lib/workspace", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/workspace")>()),
-  refreshWorkspace: vi.fn(async () => A),
-  getStoredBusinessId: vi.fn(() => A),
+  refreshWorkspace: vi.fn(async () => ws.businessId),
+  getStoredBusinessId: vi.fn(() => ws.businessId),
 }));
 vi.mock("@/hooks/use-app-layout", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/hooks/use-app-layout")>()), useMemberModuleLevels: () => null }));
 vi.mock("@/hooks/use-module-events", () => ({ useModuleEmit: () => vi.fn() }));
@@ -41,6 +42,7 @@ const products = [
 
 beforeEach(() => {
   window.localStorage.clear();
+  ws.businessId = A;
   client.getBusinessById.mockImplementation(async () => ok({ id: A, name: "Pepper Co", slug: "pepper-co", storeEnabled: true }));
   client.fetchStorefrontConfig.mockImplementation(async () => ok({}));
   client.fetchServices.mockImplementation(async () => ok([{ id: "s_l1", name: "Sauce", price: 5, sourceProductId: "p1" }, { id: "s_l2", name: "Rub", price: 5, sourceProductId: "p2" }]));
@@ -76,6 +78,21 @@ describe("R11-1: storefrontConfigRead", () => {
     client.fetchStoreGraph.mockImplementation(async () => ok(GRAPH));
     client.fetchStorefrontConfig.mockImplementation(async () => ok({ catalog: { itemOverrides: {} } }));
     const { result } = renderHook(() => useStoreData());
+    await waitFor(() => expect(result.current.storefrontConfigRead).toBe(true), { timeout: 4000 });
+  });
+
+  it("reset on a switch: B's config not read yet is not known, though A's was", async () => {
+    client.fetchStoreGraph.mockImplementation(async () => ok(GRAPH));
+    let releaseB!: (v: Res<unknown>) => void;
+    client.fetchStorefrontConfig.mockImplementation(async (id: string) =>
+      id === A ? ok({}) : new Promise<Res<unknown>>((r) => { releaseB = r; }));
+    const { result } = renderHook(() => useStoreData());
+    await waitFor(() => expect(result.current.storefrontConfigRead).toBe(true), { timeout: 4000 });
+    ws.businessId = "biz_r11_B";
+    window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: ws.businessId } }));
+    await waitFor(() => expect(client.fetchStorefrontConfig).toHaveBeenCalledWith("biz_r11_B"), { timeout: 4000 });
+    expect(result.current.storefrontConfigRead).toBe(false);
+    releaseB(ok({}));
     await waitFor(() => expect(result.current.storefrontConfigRead).toBe(true), { timeout: 4000 });
   });
 });
