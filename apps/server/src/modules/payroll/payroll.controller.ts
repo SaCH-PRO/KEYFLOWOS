@@ -25,8 +25,7 @@ export class PayrollController {
     @Param('businessId') businessId: string,
     @Req() req?: { user?: { id?: string } },
   ) {
-    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
-    return this.payroll.listRates(businessId, { includeMoney });
+    return this.payroll.listRates(businessId, { viewerUserId: req?.user?.id ?? null });
   }
 
   @Get('runs')
@@ -37,11 +36,10 @@ export class PayrollController {
     @Query('limit') limit?: string,
     @Req() req?: { user?: { id?: string } },
   ) {
-    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
     return this.payroll.listRuns(businessId, {
       status,
       limit: limit ? Number(limit) : undefined,
-      includeMoney,
+      viewerUserId: req?.user?.id ?? null,
     });
   }
 
@@ -52,8 +50,7 @@ export class PayrollController {
     @Param('runId') runId: string,
     @Req() req?: { user?: { id?: string } },
   ) {
-    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
-    return this.payroll.getRun(businessId, runId, { includeMoney });
+    return this.payroll.getRun(businessId, runId, { viewerUserId: req?.user?.id ?? null });
   }
 
   @Post('runs/:runId/approve')
@@ -63,8 +60,7 @@ export class PayrollController {
     @Param('runId') runId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
-    return this.payroll.approveRun(businessId, runId, req?.user?.id, { includeMoney });
+    return this.payroll.approveRun(businessId, runId, req?.user?.id);
   }
 
   /**
@@ -107,11 +103,9 @@ export class PayrollController {
     @Body() body: { reason?: unknown } | undefined,
     @Req() req: { user?: { id?: string } },
   ) {
-    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
     return this.payroll.discardRun(businessId, runId, {
       reason: body?.reason,
       actorId: req?.user?.id ?? null,
-      includeMoney,
     });
   }
 }

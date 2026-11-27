@@ -738,4 +738,52 @@ describe('W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): name_mismatch withheld rows
     const staff = await resolveTimelineViewer(prismaFor('USER', { role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } }), 'b', 'u');
     expect([staff.readsOwnerWithheld, staff.readsUnmapped], 'STAFF membership').toEqual([false, false]);
   });
+
+  it('TV-11 (P235 FU-PAYROLL-IS-MONEY, D-310 / D-100 / D-140): payrollRowCarriesMoney and canReadActivityRow withhold payroll Activity rows without revenue:read across snake_case/PascalCase entityTypes, payroll.* prefixes, and object/JSON data fields, while leaving non-payroll operations rows visible', async () => {
+    const { canReadActivityRow, payrollRowCarriesMoney } = await visibility();
+    const viewer = (modules: string[], extra: Partial<{ readsUnmapped: boolean; readsOwnerWithheld: boolean }> = {}) => ({
+      readableModules: new Set(modules),
+      readsUnmapped: extra.readsUnmapped ?? false,
+      readsOwnerWithheld: extra.readsOwnerWithheld ?? false,
+    });
+
+    const opsNoRev = viewer(['operations']);
+    const scopedOwnerNoRev = viewer(['operations'], { readsUnmapped: true, readsOwnerWithheld: true });
+    const opsWithRev = viewer(['operations', 'revenue']);
+
+    const payrollRows: Array<[string, Record<string, unknown>]> = [
+      ['entityType payroll_run', { module: 'operations', entityType: 'payroll_run', action: 'discarded', data: { totalGross: 1800 } }],
+      ['entityType PayrollRun (PascalCase)', { module: 'operations', entityType: 'PayrollRun', action: 'posted' }],
+      ['entityType payrollItem (camelCase)', { module: 'operations', entityType: 'payrollItem', action: 'created' }],
+      ['entityType pay_rate (trimmed/upper)', { module: 'operations', entityType: ' PAY_RATE ', action: 'set' }],
+      ['module payroll', { module: 'payroll', action: 'run_created' }],
+      ['type payroll_run.discarded', { module: 'operations', type: 'payroll_run.discarded' }],
+      ['type payroll.paid', { module: 'operations', type: 'payroll.paid' }],
+      ['action pay_rate.updated', { module: 'operations', action: 'pay_rate.updated' }],
+      ['data totalGross = 0', { module: 'operations', action: 'audit', data: { totalGross: 0 } }],
+      ['data grossPay JSON string', { module: 'operations', action: 'audit', data: JSON.stringify({ grossPay: 450 }) }],
+      ['data snake_case total_gross', { module: 'operations', action: 'audit', data: { total_gross: 1200 } }],
+      ['data hourly_rate', { module: 'operations', action: 'audit', data: { hourly_rate: 55 } }],
+    ];
+
+    for (const [label, row] of payrollRows) {
+      expect(payrollRowCarriesMoney(row), `${label} carries money`).toBe(true);
+      expect(canReadActivityRow(opsNoRev, row), `${label} withheld from ops-only STAFF`).toBe(false);
+      expect(canReadActivityRow(scopedOwnerNoRev, row), `${label} withheld from D-140 scoped OWNER`).toBe(false);
+      expect(canReadActivityRow(opsWithRev, row), `${label} allowed with revenue:read`).toBe(true);
+    }
+
+    // Negative controls: non-payroll operations rows (including null/malformed/array/primitive data) stay visible.
+    const nonPayrollRows: Array<[string, Record<string, unknown>]> = [
+      ['plain operations note', { module: 'operations', entityType: 'checklist', action: 'completed', data: { count: 3 } }],
+      ['null totalGross', { module: 'operations', entityType: 'task', action: 'updated', data: { totalGross: null, grossPay: undefined } }],
+      ['malformed JSON string data', { module: 'operations', entityType: 'task', action: 'updated', data: '{not-json' }],
+      ['array data', { module: 'operations', entityType: 'task', action: 'updated', data: ['totalGross'] }],
+      ['primitive data', { module: 'operations', entityType: 'task', action: 'updated', data: 42 }],
+    ];
+    for (const [label, row] of nonPayrollRows) {
+      expect(payrollRowCarriesMoney(row), `${label} is not payroll money`).toBe(false);
+      expect(canReadActivityRow(opsNoRev, row), `${label} stays visible to ops-only STAFF`).toBe(true);
+    }
+  });
 });

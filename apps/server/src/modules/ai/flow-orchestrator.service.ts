@@ -44,7 +44,7 @@ import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { MEMBERLESS_CONTACT_ANSWER, memberlessKeyToolRefusal } from './memberless-key-tools';
-import { PayrollService } from '../payroll/payroll.service';
+import { PayrollService, canReadPayrollMoney } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
@@ -8068,13 +8068,12 @@ ${triage.standingContext}`;
       // === PAYROLL ===
       case 'payroll_list_rates': {
         const actor = (await this.contactBindMember(businessId, action)) ?? null;
-        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
-        const rates = await this.getPayroll().listRates(businessId, { includeMoney });
+        const rates = await this.getPayroll().listRates(businessId, { viewerUserId: actor });
         return { rates };
       }
       case 'payroll_set_rate': {
         const actor = (await this.contactBindMember(businessId, action)) ?? null;
-        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
+        const includeMoney = await canReadPayrollMoney(this.prisma, businessId, actor);
         const rate = await this.getPayroll().setRate(businessId, {
           assignmentId: args.assignmentId,
           amount: args.amount,
@@ -8085,7 +8084,7 @@ ${triage.standingContext}`;
       }
       case 'payroll_generate_run': {
         const actor = (await this.contactBindMember(businessId, action)) ?? null;
-        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
+        const includeMoney = await canReadPayrollMoney(this.prisma, businessId, actor);
         const run = await this.getPayroll().generateRun(
           businessId,
           new Date(args.periodStart),
@@ -8096,18 +8095,17 @@ ${triage.standingContext}`;
       }
       case 'payroll_list_runs': {
         const actor = (await this.contactBindMember(businessId, action)) ?? null;
-        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
-        const runs = await this.getPayroll().listRuns(businessId, { status: args.status, limit: args.limit, includeMoney });
+        const runs = await this.getPayroll().listRuns(businessId, { status: args.status, limit: args.limit, viewerUserId: actor });
         return { runs };
       }
       case 'payroll_get_run': {
         const actor = (await this.contactBindMember(businessId, action)) ?? null;
-        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
-        const run = await this.getPayroll().getRun(businessId, args.runId, { includeMoney });
+        const run = await this.getPayroll().getRun(businessId, args.runId, { viewerUserId: actor });
         return { run };
       }
       case 'payroll_approve_run': {
-        const run = await this.getPayroll().approveRun(businessId, args.runId);
+        const actor = (await this.contactBindMember(businessId, action)) ?? undefined;
+        const run = await this.getPayroll().approveRun(businessId, args.runId, actor);
         return { id: run.id, status: run.status };
       }
       case 'payroll_mark_paid': {

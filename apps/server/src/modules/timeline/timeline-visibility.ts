@@ -137,6 +137,27 @@ export const MONEY_DATA_FIELDS: readonly string[] = Object.freeze([
 export const PAYROLL_MONEY_DATA_FIELDS: readonly string[] = Object.freeze([
   'totalGross',
   'grossPay',
+  'total_gross',
+  'gross_pay',
+  'payRate',
+  'pay_rate',
+  'hourlyRate',
+  'hourly_rate',
+]);
+
+const PAYROLL_ENTITY_TYPES: ReadonlySet<string> = new Set([
+  'payrollrun',
+  'payrollitem',
+  'payrate',
+  'payroll',
+]);
+
+const PAYROLL_TAG_PREFIXES: readonly string[] = Object.freeze([
+  'payroll_run.',
+  'payroll_item.',
+  'pay_rate.',
+  'payroll.',
+  'payroll_',
 ]);
 
 function parseActivityDataObject(data: unknown): Record<string, unknown> | null {
@@ -171,17 +192,21 @@ export function dataCarriesMoney(data: unknown): boolean {
 /**
  * P235 (FU-PAYROLL-IS-MONEY, D-310 / D-100): payroll amounts count as money
  * under D-100 and require `revenue:read`. Covers Activity rows written for
- * payroll runs (e.g. `payroll_run.discarded` with `module: 'operations'`,
- * `entityType: 'payroll_run'`, `data.totalGross`) and any row whose `data`
- * carries `totalGross` or `grossPay` (object or JSON string).
+ * payroll runs/items/rates (snake_case, camelCase, or PascalCase `entityType`,
+ * `module: 'payroll'`, `payroll.*`/`payroll_*`/`pay_rate.*` type/action tags)
+ * and any row whose `data` carries payroll amount/rate fields (object or JSON string).
  */
 export function payrollRowCarriesMoney(row: ActivityRowLike): boolean {
-  const entityType = typeof row.entityType === 'string' ? row.entityType.trim().toLowerCase() : '';
-  if (entityType === 'payroll_run' || entityType === 'payroll_item' || entityType === 'pay_rate') return true;
+  const entityType =
+    typeof row.entityType === 'string' ? row.entityType.trim().toLowerCase().replace(/[_-]/g, '') : '';
+  if (PAYROLL_ENTITY_TYPES.has(entityType)) return true;
   const mod = typeof row.module === 'string' ? row.module.trim().toLowerCase() : '';
   if (mod === 'payroll') return true;
   for (const tag of [row.type, row.action]) {
-    if (typeof tag === 'string' && tag.trim().toLowerCase().startsWith('payroll_run.')) return true;
+    if (typeof tag === 'string') {
+      const normalized = tag.trim().toLowerCase();
+      if (PAYROLL_TAG_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
+    }
   }
   const record = parseActivityDataObject(row.data);
   if (!record) return false;

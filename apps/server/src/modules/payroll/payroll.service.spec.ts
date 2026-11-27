@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { PayrollService } from './payroll.service';
+import { PayrollService, canReadPayrollMoney } from './payroll.service';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
+import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 
 /**
  * PR195-PORT (owner PR #195 part 2): marking a payroll run paid posts the
@@ -450,5 +451,158 @@ describe('PayrollService rates and runs take the business currency (PR195-PORT r
     await expect(svc.generateRun('biz_1', new Date('2026-09-01T00:00:00Z'), new Date('2026-09-30T00:00:00Z')))
       .rejects.toThrow(/more than one currency/);
     expect(prisma.client.payrollRun.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140): fail-closed redaction, markRunPaid, and KEY tools', () => {
+  it('PS-27 markRunPaid withholds totalGross when caller lacks revenue:read (incl. dual-actor mismatch) and preserves it for revenue:read / SUPER_ADMIN', async () => {
+    const noRev = makeStubs({
+      members: {
+        'biz_1|u_ops_exp': { role: 'STAFF', permissionScopes: { operations: 'write', expenses: 'write', revenue: 'none' } },
+      },
+    });
+    const paidHidden = await noRev.svc.markRunPaid('biz_1', 'run_1', { paymentMethod: 'cash', actorId: 'u_ops_exp' });
+    expect(paidHidden.status).toBe('PAID');
+    expect(paidHidden.totalGross).toBeNull();
+
+    // Dual human actors: if either lacks revenue:read, totalGross fails closed to null.
+    const dualMismatch = makeStubs({
+      members: {
+        'biz_1|u_owner': { role: 'OWNER', permissionScopes: null },
+        'biz_1|u_ops_exp': { role: 'STAFF', permissionScopes: { operations: 'write', expenses: 'write', revenue: 'none' } },
+      },
+    });
+    const paidDual = await dualMismatch.svc.markRunPaid('biz_1', 'run_1', {
+      paymentMethod: 'cash',
+      actorId: 'u_owner',
+      initiatedBy: 'u_ops_exp',
+    });
+    expect(paidDual.totalGross).toBeNull();
+
+    // Positive control: member with expenses:write + revenue:read sees totalGross.
+    const withRev = makeStubs({
+      members: {
+        'biz_1|u_ops_rev': { role: 'STAFF', permissionScopes: { operations: 'write', expenses: 'write', revenue: 'read' } },
+      },
+    });
+    const paidVisible = await withRev.svc.markRunPaid('biz_1', 'run_1', { paymentMethod: 'cash', actorId: 'u_ops_rev' });
+    expect(paidVisible.totalGross).toBe(5_000);
+
+    // Positive control: member SUPER_ADMIN sees totalGross.
+    const memberSa = makeStubs({
+      members: { 'biz_1|u_sa': { role: 'STAFF', permissionScopes: { expenses: 'none', revenue: 'none' } } },
+      userRoles: { u_sa: 'SUPER_ADMIN' },
+    });
+    const paidSa = await memberSa.svc.markRunPaid('biz_1', 'run_1', { paymentMethod: 'cash', actorId: 'u_sa' });
+    expect(paidSa.totalGross).toBe(5_000);
+  });
+
+  it('PS-28 canReadPayrollMoney authority matrix and fail-closed defaults on listRates / listRuns / getRun / approveRun', async () => {
+    const { prisma } = makeStubs({
+      members: {
+        'biz_1|u_owner': { role: 'OWNER', permissionScopes: null },
+        'biz_1|u_scoped_owner': { role: 'OWNER', permissionScopes: { operations: 'admin', revenue: 'none' } },
+        'biz_1|u_array_scopes': { role: 'STAFF', permissionScopes: [] },
+        'biz_1|u_rev': { role: 'STAFF', permissionScopes: { revenue: 'read' } },
+        'biz_2|u_other': { role: 'OWNER', permissionScopes: null },
+      },
+      userRoles: { u_sa: 'SUPER_ADMIN' },
+    });
+
+    expect(await canReadPayrollMoney(prisma, 'biz_1', null)).toBe(false);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', '   ')).toBe(false);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', KEY_SYSTEM_ACTOR_ID)).toBe(false);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', 'u_other')).toBe(false);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', 'u_scoped_owner')).toBe(false);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', 'u_array_scopes')).toBe(false);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', 'u_owner')).toBe(true);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', 'u_rev')).toBe(true);
+    expect(await canReadPayrollMoney(prisma, 'biz_1', 'u_sa')).toBe(true);
+
+    // Fail-closed default when caller omits includeMoney and viewerUserId
+    const { svc: rateSvc } = makeRateStubs({ businessCurrency: 'TTD', rates: [{ currency: 'TTD', amount: 750 }] });
+    const ratesNoOpts = await rateSvc.listRates('biz_1');
+    expect(ratesNoOpts[0].amount).toBeNull();
+  });
+
+  it('PS-29 KEY payroll_* tools withhold money figures for members without revenue:read and unattributed turns, and preserve them with revenue:read', async () => {
+    const { prisma } = makeStubs({
+      members: {
+        'biz_1|u_no_rev': { role: 'STAFF', permissionScopes: { operations: 'write', revenue: 'none' } },
+        'biz_1|u_scoped_owner': { role: 'OWNER', permissionScopes: { operations: 'admin', revenue: 'none' } },
+        'biz_1|u_rev': { role: 'STAFF', permissionScopes: { operations: 'write', revenue: 'read' } },
+      },
+    });
+    const listRates = vi.fn(async (_b: string, opts: { viewerUserId?: string | null }) => [
+      { id: 'r1', amount: (await canReadPayrollMoney(prisma, 'biz_1', opts.viewerUserId)) ? 80 : null },
+    ]);
+    const listRuns = vi.fn(async (_b: string, opts: { viewerUserId?: string | null }) => [
+      { id: 'run_1', totalGross: (await canReadPayrollMoney(prisma, 'biz_1', opts.viewerUserId)) ? 3200 : null },
+    ]);
+    const getRun = vi.fn(async (_b: string, _id: string, opts: { viewerUserId?: string | null }) => ({
+      id: 'run_1',
+      totalGross: (await canReadPayrollMoney(prisma, 'biz_1', opts.viewerUserId)) ? 3200 : null,
+    }));
+    const setRate = vi.fn(async () => ({ id: 'r2', amount: 95 }));
+    const generateRun = vi.fn(async () => ({ id: 'run_2', totalGross: 4100, itemCount: 2 }));
+    const approveRun = vi.fn(async () => ({ id: 'run_1', status: 'APPROVED', totalGross: null }));
+
+    const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma,
+      getPayroll: () => ({ listRates, listRuns, getRun, setRate, generateRun, approveRun }),
+    });
+
+    for (const action of [
+      undefined,
+      { surface: 'CHAT', principalUserId: 'u_no_rev' },
+      { surface: 'CHAT', principalUserId: 'u_scoped_owner' },
+    ]) {
+      expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_list_rates', {}, action)).toEqual({
+        rates: [{ id: 'r1', amount: null }],
+      });
+      expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_list_runs', {}, action)).toEqual({
+        runs: [{ id: 'run_1', totalGross: null }],
+      });
+      expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_get_run', { runId: 'run_1' }, action)).toEqual({
+        run: { id: 'run_1', totalGross: null },
+      });
+      expect(
+        await (orchestrator as any).executeToolAction('biz_1', 'payroll_set_rate', { assignmentId: 'a1', amount: 95 }, action),
+      ).toEqual({ id: 'r2', amount: null });
+      expect(
+        await (orchestrator as any).executeToolAction(
+          'biz_1',
+          'payroll_generate_run',
+          { periodStart: '2026-09-01', periodEnd: '2026-09-30' },
+          action,
+        ),
+      ).toEqual({ id: 'run_2', totalGross: null, itemCount: 2 });
+    }
+
+    const revAction = { surface: 'CHAT', principalUserId: 'u_rev' };
+    expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_list_rates', {}, revAction)).toEqual({
+      rates: [{ id: 'r1', amount: 80 }],
+    });
+    expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_list_runs', {}, revAction)).toEqual({
+      runs: [{ id: 'run_1', totalGross: 3200 }],
+    });
+    expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_get_run', { runId: 'run_1' }, revAction)).toEqual({
+      run: { id: 'run_1', totalGross: 3200 },
+    });
+    expect(
+      await (orchestrator as any).executeToolAction('biz_1', 'payroll_set_rate', { assignmentId: 'a1', amount: 95 }, revAction),
+    ).toEqual({ id: 'r2', amount: 95 });
+    expect(
+      await (orchestrator as any).executeToolAction(
+        'biz_1',
+        'payroll_generate_run',
+        { periodStart: '2026-09-01', periodEnd: '2026-09-30' },
+        revAction,
+      ),
+    ).toEqual({ id: 'run_2', totalGross: 4100, itemCount: 2 });
+    expect(
+      await (orchestrator as any).executeToolAction('biz_1', 'payroll_approve_run', { runId: 'run_1' }, revAction),
+    ).toEqual({ id: 'run_1', status: 'APPROVED' });
+    expect(approveRun).toHaveBeenLastCalledWith('biz_1', 'run_1', 'u_rev');
   });
 });
