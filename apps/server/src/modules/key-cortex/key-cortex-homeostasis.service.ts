@@ -4,6 +4,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEndocrineService, type EndocrineSignal } from './key-cortex-endocrine.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcIntervalSlot } from '../../core/scheduling/occurrence-claim';
 import { runForTenant } from '../../core/tenant/tenant-context';
 
 /**
@@ -143,6 +145,7 @@ export class KeyCortexHomeostasisService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() private readonly endocrine?: KeyCortexEndocrineService,
     @Optional() private readonly interoception?: KeyCortexInteroceptionService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /**
@@ -154,6 +157,9 @@ export class KeyCortexHomeostasisService {
   async scheduledHomeostasis(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-homeostasis', utcIntervalSlot(30 * 60 * 1000), 28 * 60 * 1000))) {
+      return;
+    }
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {

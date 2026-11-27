@@ -29,6 +29,15 @@ export class RedisService implements OnModuleDestroy {
     await this.redis.set(key, value, 'EX', seconds);
   }
 
+  /**
+   * Atomically set `key` only if absent (`SET key value PX ttlMs NX`).
+   * Returns `true` when this caller claimed the key, `false` when it already exists.
+   */
+  async setNx(key: string, value: string, ttlMs: number): Promise<boolean> {
+    const res = await (this.redis as any).set(key, value, 'PX', ttlMs, 'NX');
+    return res === 'OK';
+  }
+
   async keys(pattern: string): Promise<string[]> {
     return this.redis.keys(pattern);
   }

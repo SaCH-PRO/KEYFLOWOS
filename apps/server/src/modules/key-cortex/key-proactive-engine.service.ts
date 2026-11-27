@@ -7,7 +7,7 @@
  * Connects to: Temporal Flow, Notifications, Command Center, KEY Inbox, Autonomy.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceStatus } from '@prisma/client';
@@ -27,6 +27,8 @@ import {
 import { KeyCortexDigestService } from './key-cortex-digest.service';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcHourSlot, utcIntervalSlot } from '../../core/scheduling/occurrence-claim';
 
 interface SignalSummary {
   dnaTrend: 'improving' | 'stable' | 'declining';
@@ -52,6 +54,7 @@ export class KeyProactiveEngineService {
     @Optional() private readonly sentimentWatcher?: SentimentWatcherService,
     @Optional() private readonly digestService?: KeyCortexDigestService,
     @Optional() private readonly circadian?: KeyCortexCircadianService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════
@@ -74,6 +77,7 @@ export class KeyProactiveEngineService {
   async generateMorningBriefs(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-proactive-morning-briefs', utcHourSlot(), 55 * 60 * 1000))) return;
     const due = this.circadian ? await this.circadian.businessesAtLocalHour(8) : [];
     if (this.circadian && due.length === 0) return;
 
@@ -117,6 +121,7 @@ export class KeyProactiveEngineService {
   async generateWeeklyDigests(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-proactive-weekly-digests', utcHourSlot(), 55 * 60 * 1000))) return;
     const due = this.circadian ? await this.circadian.businessesAtLocalTime(9, 1) : [];
     if (this.circadian && due.length === 0) return;
 
@@ -144,6 +149,7 @@ export class KeyProactiveEngineService {
   async generateEndOfDayReports(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-proactive-eod-reports', utcHourSlot(), 55 * 60 * 1000))) return;
     const dueEod = this.circadian ? await this.circadian.businessesAtLocalHour(18) : [];
     if (this.circadian && dueEod.length === 0) return;
 
@@ -178,6 +184,9 @@ export class KeyProactiveEngineService {
   async evaluateProactiveActions(): Promise<ProactiveTrigger[]> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return [];
+    if (!(await claimOccurrence(this.redis, 'key-proactive-evaluate', utcIntervalSlot(15 * 60 * 1000), 14 * 60 * 1000))) {
+      return [];
+    }
     this.logger.debug('[proactive] Evaluating signals...');
 
     const activeBusinesses = await this.getActiveBusinesses();
