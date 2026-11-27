@@ -11,14 +11,16 @@
  * family 'crud', and 115 read-family tools (114 at the plan's snapshot) carried no changedEntities whether
  * or not their handler sent anything.
  *
- * Now FlowTool has a required `effectClass: 'READ' | 'WRITE'`, and
- * `isReadOnlyTool(name)` is true only for a registered tool whose effectClass
+ * After slice 2 (RR-TOOL-EFFECT-METADATA), FlowTool has a required
+ * `effectClass: 'READ' | 'INTERNAL_WRITE' | 'EXTERNAL_EFFECT' | 'MONEY' | 'DESTRUCTIVE'`,
+ * and `isReadOnlyTool(name)` is true only for a registered tool whose effectClass
  * is 'READ'; an unknown name, an MCP bridged name (mcp__*) or a dotted cortex
  * name answers false. The rules this census enforces, each with a negative
  * control over a fixture tool:
- *   R1 every entry declares effectClass, 'READ' or 'WRITE';
- *   R2 a 'READ' entry has family 'read' and no changedEntities;
- *   R3 a read-family tool known to send or call a provider is 'WRITE'
+ *   R1 every entry declares a valid 5-class ToolEffectClass (no legacy 'WRITE');
+ *   R2 a 'READ' entry has family 'read' (or is cited in
+ *      REVIEWED_NON_READ_FAMILY_READ_TOOLS) and no changedEntities;
+ *   R3 a read-family tool known to send or call a provider is non-READ
  *      (KNOWN_SENDERS below, from the handler census recorded in the packet).
  * No tool's name, family, riskTier or route changes (R0 KEEP:
  * job-role-tool-families.spec.ts stays green unchanged).
