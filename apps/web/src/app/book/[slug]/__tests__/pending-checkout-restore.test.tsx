@@ -21,7 +21,9 @@
  *           and no blank booking reference
  *   RST-10  a quantity that is not a safe whole number from 1 to 1,000,000 (1e21, 1e308) is dropped, a real large
  *           order (1000) is kept, and so is the total of a line whose total would overflow dropped
- *   RST-11  an order number, order id or e-mail made only of invisible characters is none
+ *   RST-11  an order number, order id or e-mail made only of invisible characters (format, combining, space,
+ *           filler and blank-pattern characters) is none; an accented value with real letters is kept as it is
+ *   RST-12  an image URL holding a control character anywhere renders no image
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ReactNode } from "react";
@@ -325,13 +327,34 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
   });
 
   it("RST-11 an order number, order id or e-mail made only of invisible characters is none", async () => {
-    for (const invisible of ["\u200B", "\u180E\u200C", "\u200D \u2060", "\uFEFF"]) {
+    for (const invisible of [
+      "\u200B", "\u180E\u200C", "\u200D \u2060", "\uFEFF",
+      "\u00AD", "\u034F", "\u115F\u1160", "\u3164", "\uFFA0", "\u2061\u2064", "\u200E\u200F",
+      "\u202A\u202E", "\u2066\u2069", "\uFE0F", "\u2800", "\u3000",
+    ]) {
       net.gets = [];
       window.localStorage.setItem(KEY, record({ orderNumber: invisible, orderId: invisible, customerEmail: invisible }));
       render(<PublicBookingPage />);
       expect(await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 }), JSON.stringify(invisible)).toBeInTheDocument();
       expect(screen.queryByText("Order #")).toBeNull();
       expect(net.gets.some((p) => p.startsWith("/site/storefront/public/order/")), "no status read").toBe(false);
+      cleanup();
+    }
+  });
+
+  it("RST-11b an accented e-mail with real letters is kept as it is (combining marks are not stripped from it)", async () => {
+    const email = "jose\u0301@example.test";
+    await restored({ customerEmail: email });
+    const reads = net.gets.filter((p) => p.startsWith("/site/storefront/public/order/"));
+    expect(reads).toHaveLength(1);
+    expect(reads[0].endsWith(`?email=${encodeURIComponent(email)}`)).toBe(true);
+  });
+
+  it("RST-12 an image URL holding a control character anywhere renders no image", async () => {
+    for (const imageUrl of ["\u0000https://cdn.rst.test/a.png", "https://cdn.rst.test/a.png\u0001", "https://cdn.rst.test/a\u007F.png", "https://cdn.rst.test/\u001Fa.png"]) {
+      await restored({ items: [{ ...ITEMS[0], imageUrl }] });
+      expect(screen.getByText("RST Candle")).toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "RST Candle" }), JSON.stringify(imageUrl)).toBeNull();
       cleanup();
     }
   });
