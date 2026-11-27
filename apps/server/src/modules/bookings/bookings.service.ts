@@ -1589,9 +1589,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         const coveringSpillover = schedule.windows.filter(
           (w) => startMinsOfDay >= w.openMin && endMins <= w.closeMin,
         );
+        const withinDefaultWindow =
+          startMinsOfDay >= DEFAULT_BUSINESS_OPEN_MIN && endMins <= DEFAULT_BUSINESS_CLOSE_MIN;
         const onGrid =
-          isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN) ||
-          coveringSpillover.some((w) => isOnSlotGrid(start, startMinsOfDay, w.gridAnchorMin));
+          coveringSpillover.length > 0
+            ? coveringSpillover.some((w) => isOnSlotGrid(start, startMinsOfDay, w.gridAnchorMin)) ||
+              (withinDefaultWindow && isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN))
+            : isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN);
         if (!onGrid) {
           throw new BadRequestException(
             `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
@@ -1721,7 +1725,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           (w) => startMinsOfDay >= w.openMin && bookingEndMin <= w.closeMin,
         );
         if (!withinAny) {
-          const summary = schedule.windows.map((w) => `${w.open} – ${w.close}`).join(', ');
+          const summary = schedule.windows
+            .map((w) => (w.spillover ? `00:00 – ${w.close}` : `${w.open} – ${w.close}`))
+            .join(', ');
           throw new BadRequestException(
             `The selected time is outside business hours (${summary}).`,
           );
