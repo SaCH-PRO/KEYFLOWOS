@@ -140,7 +140,8 @@ export class ExpensesController {
     @Query('download') download?: string,
     @Query('expiresIn') expiresIn?: string,
   ) {
-    const parsedTtl = expiresIn !== undefined && expiresIn.trim() !== '' ? Number(expiresIn) : undefined;
+    const parsedTtl =
+      typeof expiresIn === 'string' && expiresIn.trim() !== '' ? Number(expiresIn) : undefined;
     return this.expenses.getExpenseReceiptReadUrl(businessId, expenseId, {
       download: download === '1' || download === 'true',
       expiresIn: parsedTtl !== undefined && Number.isFinite(parsedTtl) ? parsedTtl : undefined,

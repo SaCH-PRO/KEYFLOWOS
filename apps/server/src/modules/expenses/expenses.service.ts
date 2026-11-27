@@ -19,14 +19,84 @@ import {
 const RECEIPT_READ_DEFAULT_TTL_SEC = 300;
 const RECEIPT_READ_MIN_TTL_SEC = 60;
 const RECEIPT_READ_MAX_TTL_SEC = 900;
-const RECEIPT_EXT_BY_CONTENT_TYPE: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-  'image/svg+xml': 'svg',
-  'application/pdf': 'pdf',
-};
+const RECEIPT_EXT_BY_CONTENT_TYPE = new Map<string, string>([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/gif', 'gif'],
+  ['image/webp', 'webp'],
+  ['image/svg+xml', 'svg'],
+  ['application/pdf', 'pdf'],
+]);
+const SAFE_INLINE_RECEIPT_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+]);
+const RECEIPT_DOT_SEGMENT_RE = /^(?:\.|%2e|%252e){1,2}$/i;
+
+function hasControlOrBackslashChar(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f || code === 0x5c) return true;
+  }
+  return false;
+}
+
+/**
+ * P222 R2 (SEC-P222-1, SEC-P222-2, SEC-P222-6): inspect the raw receipt URL
+ * BEFORE `new URL()` normalizes backslashes, strips CR/LF/TAB, or collapses
+ * dot segments, and also inspect single- and double-percent-decoded forms so
+ * encoded `/objects/` references (`/%6fbjects/`, `/objects%2f`, `..%2fobjects/`)
+ * and obfuscated dot-segments (`.%2e`, `%2e.`, `%252e`) cannot bypass tenancy.
+ */
+function inspectRawReceiptPath(raw: string): {
+  hasControlOrBackslash: boolean;
+  hasMalformedPercent: boolean;
+  hasTraversal: boolean;
+  mentionsObjects: boolean;
+} {
+  const hasControlOrBackslash = hasControlOrBackslashChar(raw);
+  const rawPath = (
+    raw.startsWith('/') ? raw : raw.replace(/^https?:\/\/[^/?#]*/i, '')
+  ).split(/[?#]/, 1)[0];
+
+  let hasMalformedPercent = false;
+  let decodedPath = rawPath;
+  try {
+    decodedPath = decodeURIComponent(rawPath);
+  } catch {
+    hasMalformedPercent = true;
+  }
+
+  let doubleDecodedPath = decodedPath;
+  if (!hasMalformedPercent) {
+    try {
+      doubleDecodedPath = decodeURIComponent(decodedPath);
+    } catch {
+      // A literal '%' after one decode (e.g. a benign '%25' followed by text)
+      // is not itself malformed, so keep single-decoded form.
+    }
+  }
+
+  const candidates = [rawPath, decodedPath, doubleDecodedPath];
+  const hasTraversal = candidates.some((candidate) =>
+    candidate
+      .split(/(?:\/|\\|%2f|%5c)/i)
+      .some((seg) => RECEIPT_DOT_SEGMENT_RE.test(seg)),
+  );
+  const mentionsObjects = candidates.some((candidate) =>
+    /(?:^|\/)objects(?:\/|$)/i.test(candidate.replace(/(?:\\|%2f|%5c)/gi, '/')),
+  );
+
+  return {
+    hasControlOrBackslash,
+    hasMalformedPercent,
+    hasTraversal,
+    mentionsObjects,
+  };
+}
 
 type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
 
@@ -194,8 +264,9 @@ export class ExpensesService {
 
   /**
    * P222 (FU-RECEIPT-READ-ROUTE): validate a client-supplied `receiptUrl` at
-   * write time (`createExpense` / `updateExpense`). Rejects dangerous URL
-   * schemes, non-object relative paths, path-traversal segments, and any
+   * write time (`createExpense` / `updateExpense`). Rejects control chars,
+   * backslashes, embedded credentials, malformed percent-encoding, dangerous
+   * URL schemes, non-object relative paths, path-traversal segments, and any
    * `/objects/...` or bucket URL pointing outside `businessId`'s own upload
    * namespace (`isObjectPathOfBusiness`). Empty strings normalize to `null`.
    */
@@ -210,6 +281,14 @@ export class ExpensesService {
     const trimmed = receiptUrl.trim();
     if (trimmed.length === 0) return null;
 
+    const rawCheck = inspectRawReceiptPath(trimmed);
+    if (rawCheck.hasControlOrBackslash) {
+      throw new BadRequestException('Receipt URL contains disallowed characters');
+    }
+    if (rawCheck.hasMalformedPercent) {
+      throw new BadRequestException('Receipt URL contains malformed percent-encoding');
+    }
+
     const isRelative = trimmed.startsWith('/') && !trimmed.startsWith('//');
     if (!isRelative) {
       let parsed: URL;
@@ -221,17 +300,19 @@ export class ExpensesService {
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new BadRequestException('Receipt URL must use http(s) or an uploaded object path');
       }
+      if (parsed.username !== '' || parsed.password !== '') {
+        throw new BadRequestException('Receipt URL must not contain embedded credentials');
+      }
     }
 
     const storage = new ObjectStorageService();
     const objectPath = storage.objectPathFromClientUrl(trimmed);
-    const mentionsObjects = /\/objects\//i.test(trimmed);
 
-    if (objectPath !== null || mentionsObjects) {
+    if (objectPath !== null || rawCheck.mentionsObjects) {
       if (
         !objectPath ||
         !isObjectPathOfBusiness(objectPath, businessId) ||
-        /(?:^|\/)(?:\.\.?|%2e%2e?)(?:\/|$|[?#])/i.test(trimmed)
+        rawCheck.hasTraversal
       ) {
         throw new BadRequestException('Receipt URL does not belong to this business');
       }
@@ -271,13 +352,18 @@ export class ExpensesService {
       throw new NotFoundException('Expense receipt not found');
     }
 
+    const rawCheck = inspectRawReceiptPath(expense.receiptUrl);
+    if (
+      rawCheck.hasControlOrBackslash ||
+      rawCheck.hasMalformedPercent ||
+      rawCheck.hasTraversal
+    ) {
+      throw new NotFoundException('Expense receipt not found');
+    }
+
     const storage = new ObjectStorageService();
     const objectPath = storage.objectPathFromClientUrl(expense.receiptUrl);
-    if (
-      !objectPath ||
-      !isObjectPathOfBusiness(objectPath, businessId) ||
-      /(?:^|\/)(?:\.\.?|%2e%2e?)(?:\/|$|[?#])/i.test(expense.receiptUrl)
-    ) {
+    if (!objectPath || !isObjectPathOfBusiness(objectPath, businessId)) {
       throw new NotFoundException('Expense receipt not found');
     }
 
@@ -299,11 +385,12 @@ export class ExpensesService {
       RECEIPT_READ_MIN_TTL_SEC,
       Math.min(rawTtl, RECEIPT_READ_MAX_TTL_SEC),
     );
-    const contentType = stat.contentType ?? 'application/octet-stream';
+    const contentType = stat.contentType?.trim() || 'application/octet-stream';
     const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
-    const ext = RECEIPT_EXT_BY_CONTENT_TYPE[mediaType];
+    const ext = RECEIPT_EXT_BY_CONTENT_TYPE.get(mediaType);
     const safeId = expense.id.replace(/[^A-Za-z0-9_-]/g, '') || 'expense';
-    const downloadFilename = opts?.download
+    const mustDownload = Boolean(opts?.download) || !SAFE_INLINE_RECEIPT_TYPES.has(mediaType);
+    const downloadFilename = mustDownload
       ? (ext ? `receipt-${safeId}.${ext}` : `receipt-${safeId}`)
       : undefined;
 

@@ -106,6 +106,7 @@ beforeAll(async () => {
         return updated;
       }),
     },
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (fn: any) => fn(prismaClientMock)),
   };
 
