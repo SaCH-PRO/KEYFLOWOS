@@ -14,8 +14,8 @@
  *   1. Every AiMemory upsert that can rewrite a row goes through one door (upsertAiMemoryDroppingStaleCopies in
  *      ai-memory.service.ts): the row, then the deletion of its copies that do not hold what it now holds, in one
  *      transaction. AiMemoryService.upsert (PUT .../ai/memory and .../ai/memory/bulk, the KEY writers through
- *      UnifiedMemoryWriterService, approval signals, pattern summaries), the proactive suggestions, the
- *      consolidation's promotion and KEY's self-tuning all write through it. The settings rows (the gateway's
+ *      UnifiedMemoryWriterService, approval signals, pattern summaries), the proactive suggestions and the
+ *      consolidation's promotion all write through it. The settings rows (the gateway's
  *      preferences and routing table, the governance autonomy settings) are named exceptions (V71I-09).
  *   2. AiMemoryService.upsert copies a rewritten row again when its rewrite dropped copies: one copy per form it had
  *      (the backfill's and the writer's), of the new value, through SemanticMemoryService (which writes a copy only
@@ -30,7 +30,7 @@
  * (GET/PUT .../ai/memory, PUT .../ai/memory/bulk) behind its real AuthGuard, BusinessGuard and CrmRateLimitGuard, and
  * on the real AgentController (POST .../agent/memory/backfill, GET .../agent/memory/search) behind AuthGuard and
  * BusinessGuard; AiMemoryService (wired with SemanticMemoryService, as AiModule wires it), SemanticMemoryService,
- * UnifiedMemoryWriterService, MemoryConsolidationService, KeyCortexEvolutionService's tuning write, KEY's memory block
+ * UnifiedMemoryWriterService, MemoryConsolidationService, KEY's memory block
  * (KeyCortexPromptContextService.buildMemoryContext over UnifiedMemoryRetrievalService), the cleanup script's main()
  * and its package.json command; with the embedding path off, the real AiUsageService.trackEmbedding (no OpenAI key,
  * or KEY_DISABLED).
@@ -45,7 +45,7 @@
  *     drop and starts no re-copy, and the first re-copy is refused (the row holds another value): the row was left with
  *     no copy. The re-copy now copies what the row holds when its insert is refused.
  *   - COR-V71I-3 (V71I-06, V71I-15): every writer through the door re-copies a row it rewrote, not only
- *     AiMemoryService.upsert (the consolidation's promotion, KEY's self-tuning, the proactive suggestions).
+ *     AiMemoryService.upsert (the consolidation's promotion, the proactive suggestions).
  *   - COR-V71I-4 (V71I-11): the re-copy runs after the rewrite answers; the answer does not wait on the embedding
  *     provider. KEY's writer indexing a row whose re-copy is in flight waits for it and adds no duplicate.
  *   - SEC-FUMCR-1, SEC-FUMCR-2, COR-V71I-2 (V71I-12, V71I-13, V71I-14): a settings row (ModelGatewayService's
@@ -750,7 +750,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const cognition = await db.cognitionMemory.create({
         data: { businessId: ID.biz, roleId: 'key_cortex', functionId: fn, query: 'what next?', recommendation: 'V71I-06-OLD-PROMOTED: call the Arima leads first', userResponse: 'accepted', confidence: 0.95 },
       });
-      // Positionally, as Nest constructs them, with the re-copier KeyCortexModule provides (AiModule's
+      // Positionally, as Nest constructs it, with the re-copier KeyCortexModule provides (AiModule's
       // SemanticMemoryService) last.
       const consolidation = new (MemoryConsolidationService as any)(prisma, undefined, app.semantic);
       await consolidation.run(ID.biz);

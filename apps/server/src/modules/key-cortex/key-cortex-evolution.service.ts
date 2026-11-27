@@ -494,7 +494,7 @@ Respond ONLY with a JSON array of patterns in this exact shape:
   }
 
   // ========================================================================
-  // 5. Learning Report Generation (preserved)
+  // 4. Learning Report Generation (preserved)
   // ========================================================================
 
   /**
@@ -662,7 +662,7 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
   }
 
   // ========================================================================
-  // 6. Decision Explanation (preserved)
+  // 5. Decision Explanation (preserved)
   // ========================================================================
 
   /**
@@ -794,7 +794,7 @@ ${relevantPatterns.map((p: any) => `- ${p.description} (${p.type}, confidence: $
   }
 
   // ========================================================================
-  // 7. v3 NEW METHODS — Genome-Evolution Integration
+  // 6. v3 NEW METHODS — Genome-Evolution Integration
   // ========================================================================
 
   /**
