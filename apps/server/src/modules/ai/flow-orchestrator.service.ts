@@ -56,7 +56,7 @@ import { GenomeFactService } from '../business-genome/key-genome/genome-fact.ser
 // for flow-tool-effect-metadata REVIEWED_NON_READ_FAMILY_READ_TOOLS citations.
 import { genomeReaderReadsRevenue, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 import { createReminderTask, createSentOverdueInvoiceReminderDraft, listSentOverdueInvoices, recommendStaleFollowUps, summarizePaidRevenue } from './legacy-promoted-tools.helper';
-import { isToolAllowedInV1, v1ToolRefusalReason } from './v1-tool-allowlist';
+import { isToolAllowedInV1, v1ToolRefusalReason, V1_TOOL_UNAVAILABLE_MESSAGE } from './v1-tool-allowlist';
 import {
   blueprintForReader,
   genomeFactsForReader,
@@ -2213,7 +2213,7 @@ export class FlowOrchestratorService {
     /** The member whose chat turn this is (member chat only; the staff bridge passes none). */
     principalUserId?: string | null,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
-    const all = getOpenAiToolDefinitions().filter((t) => isToolAllowedInV1(t.function.name));
+    const all = getOpenAiToolDefinitions();
     let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
     if (envelope) {
       // Position-scoped: the envelope's patterns decide, not department roles.
@@ -2232,7 +2232,7 @@ export class FlowOrchestratorService {
     } else {
       candidates = all;
     }
-
+    candidates = candidates.filter((t) => isToolAllowedInV1(t.function.name));
     // PR195-KEY-GATES (review SEC-P195BW-3, SEC-P195BW-5, CRR-P195BD-2): in a member's own chat a tool is offered
     // only when the member holds every module scope its REST routes require, read or write (keyMemberMenuScopes,
     // derived from CANONICAL_MODULE_TOOLS, the governed part of a GOVERNED_UNGRANTED tool and the authority map's
@@ -4428,7 +4428,7 @@ ${triage.standingContext}`;
       // KEY-cortex turn's bridged call; review SEC-W8KRG-1, SEC-W8KRG-2), judged with these arguments
       // (review CR-W8KRG-1).
       const refusal = await this.memberScopeRefusal(businessId, toolName, action, args);
-      if (refusal) throw new Error(refusal);
+      if (refusal) throw v1ToolRefusalReason(toolName) ? new ForbiddenException(refusal) : new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
@@ -4703,8 +4703,7 @@ ${triage.standingContext}`;
     action?: KeyDispatchAction,
     args?: unknown,
   ): Promise<string | null> {
-    const v1Refusal = v1ToolRefusalReason(toolName);
-    if (v1Refusal) return v1Refusal;
+    if (!isToolAllowedInV1(toolName)) return V1_TOOL_UNAVAILABLE_MESSAGE;
     if (memberlessKeyTurn(action)) return memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
     const { memberToolScopeRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
     const memberId = memberRevenueGateMember(action);
@@ -9780,14 +9779,22 @@ ${triage.standingContext}`;
     // human, so the action boundary still sends a write it adopted to a human for approval.
     // Refused before anything runs, and recorded. (Imported at call time: plan-step-authority imports
     // graph-actions.controller, which imports this file.)
-    const v1Refusal = v1ToolRefusalReason(toolName);
-    const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
     const memberId = options.memberId || undefined;
-    const refusal =
-      v1Refusal ??
-      (memberId
-        ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
-        : noMemberToolRefusal(toolName));
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) {
+      await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${v1Refusal}`, false, 0, {
+        riskTier: this.governance.getToolTier(toolName),
+        mode: 'pro_auto',
+        rationale: 'Refused for Pro Auto monitoring: tool is disabled in v1 (V1-63)',
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
+        this.logger.error(`Failed to log refused auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return { success: false, error: `Refused: ${v1Refusal}`, blocked: true };
+    }
+    const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
+    const refusal = memberId
+      ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
+      : noMemberToolRefusal(toolName);
     if (refusal) {
       await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${refusal}`, false, 0, {
         riskTier: this.governance.getToolTier(toolName),

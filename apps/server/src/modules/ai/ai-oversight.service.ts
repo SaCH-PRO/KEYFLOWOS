@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
+import { v1ToolRefusalReason } from './v1-tool-allowlist';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 // W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): redactContactDetails
 // redacts addresses (the shared redactAddresses) and phone-shaped numbers.
@@ -190,6 +191,17 @@ export class AiOversightService {
     // omits this and reads through the shared client, exactly as before.
     reader?: AutonomySettingsReader,
   ): Promise<GovernanceDecision> {
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) {
+      return {
+        allowed: false,
+        requiresQuickConfirm: false,
+        requiresFormalApproval: false,
+        requiresAdminApproval: false,
+        tier: this.getToolTier(toolName),
+        reason: v1Refusal,
+      };
+    }
     const crew: readonly BusinessRole[] = Array.isArray(role) ? role : role ? [role as BusinessRole] : [];
     const tier = this.getToolTier(toolName);
     const businessSettings = await this.getAutonomySettings(businessId, reader);

@@ -12,6 +12,7 @@ import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrat
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
+import { v1ToolRefusalReason } from './v1-tool-allowlist';
 
 export interface PlanExecutionResult {
   planId: string;
@@ -338,6 +339,15 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     businessId: string,
     toolName: string,
   ): Promise<{ allowed: boolean; reason: string; requiresFormalApproval: boolean; requiresAdminApproval: boolean }> {
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) {
+      return {
+        allowed: false,
+        reason: v1Refusal,
+        requiresFormalApproval: false,
+        requiresAdminApproval: false,
+      };
+    }
     if (this.autonomyOrchestrator) {
       try {
         const verdict = await this.autonomyOrchestrator.evaluateAction(businessId, toolName);
