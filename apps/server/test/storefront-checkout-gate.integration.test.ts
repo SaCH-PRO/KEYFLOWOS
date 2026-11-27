@@ -19,7 +19,7 @@
  *   WHS-S03  CONTROL (D-304): GET /commerce/public/businesses/:id/products still returns bizNone's active product
  *   WHS-S04  RED-BEFORE: POST /site/storefront/public/:slug/checkout on bizNone refuses 403
  *            STORE_CHECKOUT_NOT_OFFERED before ANY write (0 orders, 0 items, 0 idempotency_keys,
- *            promo currentUses unchanged, stockQty unchanged, 0 contacts, 0 payment sessions)
+ *            promo currentUses unchanged, 0 contacts, 0 payment sessions)
  *   WHS-S05  CONTROL: POST /site/storefront/public/:slug/checkout on bizStore, bizQuick (D-305),
  *            and bizCancelled succeeds (201) and creates the order
  *   WHS-S06  CONTROL: storeEnabled=false (even with prior order) and unknown slug return 404 on GET & POST
@@ -40,6 +40,8 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v92g_';
 const RATE_LIMIT_NS = `${P}rl`;
+const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
+process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
 
 const ID = {
   owner: `${P}owner`,
@@ -233,8 +235,8 @@ beforeAll(async () => {
       {
         provide: CrmService,
         useValue: {
-          findOrCreateContact: async (input: { businessId: string; email?: string }) => {
-            crmContactCalls.push({ businessId: input.businessId, email: input.email });
+          findOrCreateContact: async (businessId: string, data?: { email?: string }) => {
+            crmContactCalls.push({ businessId, email: data?.email });
             return { id: `${P}ct_stub` };
           },
         },
@@ -351,6 +353,11 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await clearRateLimits();
+  if (PREVIOUS_RATE_LIMIT_NS === undefined) {
+    delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  } else {
+    process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
+  }
   await app?.close();
   await cleanup();
   await redis?.quit();
