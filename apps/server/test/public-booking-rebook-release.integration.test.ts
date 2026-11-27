@@ -52,6 +52,15 @@ let db: typeof import('@keyflow/db').db;
 let app: import('@nestjs/common').INestApplication;
 let onBeforeContactHook: (() => Promise<void>) | null = null;
 
+/** Read raw deleted_at directly from Postgres (bypasses Prisma soft-delete middleware). */
+async function readInvoiceDeletedAt(invoiceId: string): Promise<Date | null> {
+  const rows = await db.$queryRaw<Array<{ deleted_at: Date | null }>>`
+    SELECT deleted_at FROM invoices WHERE id = ${invoiceId}
+  `;
+  expect(rows).toHaveLength(1);
+  return rows[0].deleted_at;
+}
+
 async function cleanup() {
   for (const sql of [
     `DELETE FROM revenue_attributions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -385,14 +394,12 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
     // Earlier booking cancelled & its draft invoice soft-deleted
     const oldBooking = await db.booking.findUnique({ where: { id: firstId } });
     expect(oldBooking?.status).toBe('CANCELLED');
-    const oldInv = await db.invoice.findUnique({ where: { id: firstInvId } });
-    expect(oldInv?.deletedAt).not.toBeNull();
+    expect(await readInvoiceDeletedAt(firstInvId)).not.toBeNull();
 
     // Unrelated Cash/Manual PENDING booking & its invoice are untouched (no age/auto-expiry)
     const cashRow = await db.booking.findUnique({ where: { id: unrelatedCash.body.bookingId } });
     expect(cashRow?.status).toBe('PENDING');
-    const cashInv = await db.invoice.findUnique({ where: { id: unrelatedCash.body.invoiceId } });
-    expect(cashInv?.deletedAt).toBeNull();
+    expect(await readInvoiceDeletedAt(unrelatedCash.body.invoiceId)).toBeNull();
 
     // 10:00 is free again; 11:00 is now held
     const slotsAfter = await request(app.getHttpServer())
@@ -515,9 +522,8 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.status === 'CANCELLED')).toBe(true);
 
-    const invRows = await Promise.all([inv1, inv2].map((id) => db.invoice.findUnique({ where: { id } })));
-    expect(invRows).toHaveLength(2);
-    expect(invRows.every((r) => r !== null && r.deletedAt !== null)).toBe(true);
+    expect(await readInvoiceDeletedAt(inv1)).not.toBeNull();
+    expect(await readInvoiceDeletedAt(inv2)).not.toBeNull();
 
     const slots1 = await request(app.getHttpServer())
       .get(`/bookings/public/businesses/${ID.bizA}/slots`)
@@ -573,7 +579,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(201);
     expect((await db.booking.findUnique({ where: { id: aBookingId } }))?.status).toBe('PENDING');
-    expect((await db.invoice.findUnique({ where: { id: aInvoiceId } }))?.deletedAt).toBeNull();
+    expect(await readInvoiceDeletedAt(aInvoiceId)).toBeNull();
 
     // 3. Customer B books 15:00; Customer A tries to rebook into 15:00 -> 400 and A's hold+invoice survive
     await request(app.getHttpServer())
@@ -597,7 +603,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(400);
     expect((await db.booking.findUnique({ where: { id: aBookingId } }))?.status).toBe('PENDING');
-    expect((await db.invoice.findUnique({ where: { id: aInvoiceId } }))?.deletedAt).toBeNull();
+    expect(await readInvoiceDeletedAt(aInvoiceId)).toBeNull();
 
     // 4. Foreign business booking cannot be released cross-tenant
     const bizBBooking = await request(app.getHttpServer())
@@ -621,7 +627,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(201);
     expect((await db.booking.findUnique({ where: { id: bizBBooking.body.bookingId } }))?.status).toBe('PENDING');
-    expect((await db.invoice.findUnique({ where: { id: bizBBooking.body.invoiceId } }))?.deletedAt).toBeNull();
+    expect(await readInvoiceDeletedAt(bizBBooking.body.invoiceId)).toBeNull();
   });
 
   it('[PBR-05] payment, invoice-status, credit-note, and depositInvoice protection (R1-SEC-02, CR-P228-4)', async () => {
@@ -678,7 +684,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(201);
     expect((await db.booking.findUnique({ where: { id: depHold.body.bookingId } }))?.status).toBe('CANCELLED');
-    expect((await db.invoice.findUnique({ where: { id: depHold.body.depositInvoiceId } }))?.deletedAt).not.toBeNull();
+    expect(await readInvoiceDeletedAt(depHold.body.depositInvoiceId)).not.toBeNull();
 
     // 2. PAID depositInvoice protects booking even while booking.paymentStatus is still UNPAID
     await db.invoice.update({
@@ -754,6 +760,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
         amount: 100,
         currency: 'TTD',
         provider: 'STRIPE',
+        providerPaymentId: `${P}ppid_succ`,
         method: 'STRIPE',
         status: 'SUCCESSFUL',
       },
@@ -769,6 +776,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
         amount: 100,
         currency: 'TTD',
         provider: 'MANUAL',
+        providerPaymentId: `${P}ppid_pend`,
         method: 'MANUAL',
         status: 'PENDING',
       },
@@ -784,7 +792,6 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
         invoiceId: cnSeed.invId!,
         creditNoteNumber: `${P}CN-1`,
         amount: 100,
-        currency: 'TTD',
         reason: 'Customer credit',
         status: 'APPLIED',
       },
@@ -839,7 +846,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
 
     // Earlier hold and its deposit DRAFT invoice MUST remain intact after tx rollback
     expect((await db.booking.findUnique({ where: { id: holdId } }))?.status).toBe('PENDING');
-    expect((await db.invoice.findUnique({ where: { id: holdDepInvId } }))?.deletedAt).toBeNull();
+    expect(await readInvoiceDeletedAt(holdDepInvId)).toBeNull();
   });
 
   it('[PBR-07] DTO & controller input bounds reject invalid or oversized replaceBookingId / releaseBookingIds with 400', async () => {
