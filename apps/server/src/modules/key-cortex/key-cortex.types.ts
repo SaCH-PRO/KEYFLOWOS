@@ -100,6 +100,7 @@ export interface CortexMessage {
     // KEY 10/10: cognition metadata
     role?: string;
     confidence?: number;
+    parseState?: 'sections' | 'unstructured';
     taskCategory?: string;
     fallbackUsed?: boolean;
     fallbackProvider?: string;
