@@ -217,10 +217,30 @@ export default function ExpensesInboxPage() {
   // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
   const { uploadFile, isUploading: uploadingReceipt } = useUpload();
 
-  // Debounced search sync with hook
+  // R23-5: a sheet opened for the business the page has left closes in the render that shows the new one, so no
+  // instance of it is ever given the new business's id while it holds the old one's state (React's reset on a prop
+  // change, during render). Not on the first business: a device capture's prefill opens the sheet then.
+  const [sheetBusiness, setSheetBusiness] = useState(d.businessId);
+  if (sheetBusiness !== d.businessId) {
+    setSheetBusiness(d.businessId);
+    if (sheetBusiness) {
+      setShowAddDrawer(false);
+      setPrefill(null);
+      setEditingExpense(null);
+    }
+  }
+
+  // Debounced search sync with hook. R23-7: the hook's setter (a state setter, so stable) is the dependency, not
+  // the hook's whole result, which is a new object on every render.
+  const { setSearchQuery: setDataSearchQuery } = d;
   useEffect(() => {
-    d.setSearchQuery(searchQuery);
-  }, [searchQuery]);
+    setDataSearchQuery(searchQuery);
+  }, [searchQuery, setDataSearchQuery]);
+
+  // R23-7: the router is read through a ref, so a router object that changes identity between renders never runs
+  // the prefill effect again (it runs when the search params change, as before).
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; }, [router]);
 
   // Open add drawer when redirected from a device capture with prefill data
   useEffect(() => {
@@ -248,7 +268,7 @@ export default function ExpensesInboxPage() {
     const next = new URLSearchParams(searchParams.toString());
     next.delete("prefill");
     const url = next.toString() ? `?${next.toString()}` : window.location.pathname;
-    router.replace(url, { scroll: false });
+    routerRef.current.replace(url, { scroll: false });
   }, [searchParams]);
 
   const filteredExpenses = useMemo(() => {
@@ -354,16 +374,7 @@ export default function ExpensesInboxPage() {
   // its answer, and a path issued for another business is never attached.
   const pageBusiness = useRef<string | null>(null);
   useEffect(() => {
-    const was = pageBusiness.current;
     pageBusiness.current = d.businessId;
-    // A sheet opened for the business the page has left closes with it (not on the first business: a device
-    // capture's prefill opens the sheet then).
-    if (was && was !== d.businessId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- a business switch closes what was open for the old one
-      setShowAddDrawer(false);
-      setPrefill(null);
-      setEditingExpense(null);
-    }
   }, [d.businessId]);
 
   const handleReceiptChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {

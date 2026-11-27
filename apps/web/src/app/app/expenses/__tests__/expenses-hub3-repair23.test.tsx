@@ -80,11 +80,6 @@ beforeEach(() => { sheetRenders.length = 0; });
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
-import { BillPayDialog } from "../components/bill-pay-dialog";
-import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import ExpensesInboxPage from "../page";
 
@@ -147,10 +142,6 @@ function expense(over: Partial<Expense> = {}): Expense {
     paymentMethod: "cash", tags: [], isRecurring: false, status: "BILL", categoryId: "cat_A_fuel",
     createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
   } as Expense;
-}
-function fill(description = "A rent", amount = "500") {
-  fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: description } });
-  fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: amount } });
 }
 afterEach(() => {
   ZONES.biz_A = "America/Port_of_Spain";

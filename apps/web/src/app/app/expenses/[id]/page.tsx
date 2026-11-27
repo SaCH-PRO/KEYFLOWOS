@@ -155,7 +155,8 @@ export default function ExpenseDetailPage() {
           if (budRes.data) setBudgets(budRes.data);
         }
       } catch {
-        if (active && isCurrentBusiness(businessId)) toast.error("Failed to load expense");
+        // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
+        if (active && canStartFor(businessId, isCurrentBusiness)) toast.error("Failed to load expense");
       }
       if (active) setLoading(false);
     })();
@@ -539,8 +540,13 @@ export default function ExpenseDetailPage() {
           onClose={() => setShowEdit(false)}
           onSaved={async () => {
             setShowEdit(false);
-            const res = await getExpense(businessId, expenseId);
-            if (res.data && isCurrentBusiness(businessId)) setExpense(res.data);
+            // R23-4: the saved expense is read again for this page only; a failed refresh is said, never thrown.
+            try {
+              const res = await getExpense(businessId, expenseId);
+              if (res.data && live(businessId)) setExpense(res.data);
+            } catch {
+              if (live(businessId)) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
+            }
           }}
           isCurrentBusiness={isCurrentBusiness}
         />

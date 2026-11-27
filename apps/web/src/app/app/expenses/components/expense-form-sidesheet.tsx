@@ -500,11 +500,11 @@ export function ExpenseFormSideSheet({
     setScanError(null);
     try {
       const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });
+      // R23-1: a reply after a switch says and writes nothing; the button is freed in the finally below.
       if (!live()) return;
       if (res.error) {
         setScanError(res.error);
         toast.error(res.error);
-        setExtracting(false);
         return;
       }
       const data = res.data;
@@ -522,11 +522,13 @@ export function ExpenseFormSideSheet({
         toast.info("Could not extract data from receipt");
       }
     } catch (_err) {
-      // R22-2: as the reply above, a failure answering after the switch changes nothing of this sheet.
-      if (!live()) return;
-      toast.error("Extraction failed");
+      // R22-2: as the reply above, a failure answering after the switch says nothing.
+      if (live()) toast.error("Extraction failed");
+    } finally {
+      // R23-1: whatever answered, and whichever business is shown now, Extract is usable again: another tab can
+      // switch away and back while it is out, and the sheet is then this business's again.
+      setExtracting(false);
     }
-    setExtracting(false);
   };
 
   const selectedCategory = categories.find((c) => c.id === formData.categoryId);

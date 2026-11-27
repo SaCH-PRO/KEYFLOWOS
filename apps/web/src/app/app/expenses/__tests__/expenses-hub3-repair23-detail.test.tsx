@@ -85,11 +85,6 @@ async function mount(over: Partial<Expense> = {}) {
 
 afterEach(() => { blocked.on = false; });
 
-async function openConfirm(button: RegExp, confirm: (b: HTMLButtonElement) => boolean) {
-  fireEvent.click(screen.getByRole("button", { name: button }));
-  const dialog = await screen.findByRole("dialog");
-  return Array.from(dialog.querySelectorAll("button")).find((b) => confirm(b as HTMLButtonElement))!;
-}
 
 
 
