@@ -390,9 +390,18 @@ export function ExpenseFormSideSheet({
         if (formData.projectId) extra.projectId = formData.projectId;
         if (formData.serviceId) extra.serviceId = formData.serviceId;
         if (Object.keys(extra).length) {
+          // R25-7: the notice names what this bill carried and was not saved (not a receipt it never had).
+          const parts = [
+            extra.receiptUrl ? "receipt" : null,
+            extra.tags ? "tags" : null,
+            extra.isRecurring ? "recurring frequency" : null,
+            extra.projectId ? "project" : null,
+            extra.serviceId ? "service" : null,
+          ].filter((p): p is string => p !== null);
+          const named = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
           const patched = await updateExpense(businessId, res.data.id, extra);
-          const notSaved = writeFailure(patched, "save its receipt and tags", true);
-          if (notSaved) notices.push(`its receipt and tags were not saved: ${notSaved}`);
+          const notSaved = writeFailure(patched, `save its ${named}`, true);
+          if (notSaved) notices.push(`its ${named} ${parts.length > 1 || parts[0] === "tags" ? "were" : "was"} not saved: ${notSaved}`);
         }
       } else {
         const res = editingExpense

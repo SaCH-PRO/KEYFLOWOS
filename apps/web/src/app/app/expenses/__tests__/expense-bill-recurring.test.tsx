@@ -341,6 +341,7 @@ describe("COR-F3: a double click on Record bill records one bill", () => {
   });
 });
 
+// R25-7 (a correction, not a weakening): the bill carried tags only, so the notice names its tags, not a receipt.
 describe("COR-F5: a bill whose receipt and tags are refused says so", () => {
   it("the refused PATCH after the bill is shown, not 'Bill recorded' alone", async () => {
     updateExpense.mockResolvedValue({ data: null, error: "Forbidden", status: 403 });
@@ -348,7 +349,7 @@ describe("COR-F5: a bill whose receipt and tags are refused says so", () => {
     fillBasics(container, "Water bill", "75");
     fireEvent.change(screen.getByPlaceholderText(/tag1/i), { target: { value: "utilities" } });
     fireEvent.click(screen.getByRole("button", { name: /^record bill$/i }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^Bill recorded, but its receipt and tags were not saved: Forbidden/)));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^Bill recorded, but its tags were not saved: Forbidden/)));
     expect(toast.success).not.toHaveBeenCalled();
     expect(onSaved, "the bill exists: the sheet closes and the list reloads").toHaveBeenCalled();
   });

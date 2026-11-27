@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Expense, ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
+import type { ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ZONES: Record<string, string> = vi.hoisted(() => ({ biz_A: "America/Port_of_Spain", biz_B: "America/Port_of_Spain" } as Record<string, string>));
 const CURRENCIES: Record<string, string> = vi.hoisted(() => ({ biz_A: "TTD", biz_B: "USD" } as Record<string, string>));
@@ -70,11 +70,6 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
-import { BillPayDialog } from "../components/bill-pay-dialog";
-import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { useExpensesData } from "../components/use-expenses-data";
 import ExpensesInboxPage from "../page";
@@ -127,20 +122,9 @@ afterEach(() => {
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 
 
-const noToast2 = () => {
-  expect(toast.success).not.toHaveBeenCalled();
-  expect(toast.error).not.toHaveBeenCalled();
-};
 
 
 
-function expense(over: Partial<Expense> = {}): Expense {
-  return {
-    id: "exp_A1", description: "Diesel", amount: 50, currency: "TTD", date: "2026-11-20T00:00:00.000Z", vendor: "Shell",
-    paymentMethod: "cash", tags: [], isRecurring: false, status: "BILL", categoryId: "cat_A_fuel",
-    createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
-  } as Expense;
-}
 function fill(description = "A rent", amount = "500") {
   fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: description } });
   fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: amount } });

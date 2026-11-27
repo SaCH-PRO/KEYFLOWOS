@@ -1,6 +1,7 @@
 "use client";
 
-import { ReadFailureNote } from "./read-failure-note";
+import { ReadFailureNote, readFailure } from "./read-failure-note";
+import { readState } from "@/lib/failure-kit";
 import type { BlockRead } from "./use-expenses-data";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
@@ -53,6 +54,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   const live = () => canStartFor(businessId, isCurrentBusiness);
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
+  // R25-2: the list's own read state: a refused, thrown or no-access read is said, never "No recurring expenses".
+  const [listRead, setListRead] = useState<BlockRead>({ kind: "loading" });
   const [showBuilder, setShowBuilder] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
   // R14-6: an editor opened for one business closes when the panel shows another, so Update can never send a
@@ -68,6 +71,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     setRecurring([]);
     // R21-3: and the new business's read is out, so no "No recurring expenses" shows before it answers.
     setLoading(true);
+    setListRead({ kind: "loading" });
   }
 
   const load = useCallback(async () => {
@@ -78,10 +82,13 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       // R12: a read for a business no longer shown writes nothing. (A read, not a write's reply: it is judged by the
       // business this panel shows, which may be one other than the stored, R19-5 leaves it so.)
       if (!isCurrentBusiness(businessId)) return;
-      if (res.data) setRecurring(res.data);
+      const st = readState(res, { what: "recurring expenses" });
+      setListRead(st);
+      setRecurring(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
       // R22-1: a read that fails for a business no longer shown leaves the one shown loading: its own read is out.
       if (!isCurrentBusiness(businessId)) return;
+      setListRead({ kind: "failed", message: "Couldn't load recurring expenses." });
     }
     setLoading(false);
   }, [businessId, isCurrentBusiness]);
@@ -181,7 +188,11 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   return (
     <div className="space-y-4">
       <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} />
-      {recurring.length === 0 && !loading ? (
+      {readFailure(listRead) ? (
+        <div className="kf-card rounded-xl p-6 text-center">
+          <ReadFailureNote read={listRead} onRetry={() => { void load(); }} className="text-sm text-muted-foreground" />
+        </div>
+      ) : recurring.length === 0 && !loading ? (
         <EmptyState
           icon={Repeat}
           title="No recurring expenses"

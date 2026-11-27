@@ -306,7 +306,7 @@ describe("R24-1: the sheet's save, in the client's real shapes", () => {
     fill("A supplier", "300");
     fireEvent.change(screen.getByPlaceholderText(/tag/i), { target: { value: "urgent" } });
     fireEvent.click(screen.getByRole("button", { name: "Record bill" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("its receipt and tags were not saved")));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("its tags were not saved") /* R25-7: tags only, so no receipt is named */));
     expect(toast.success).not.toHaveBeenCalled();
   });
   it("a Drive copy that answers false (the hook's failure) is said", async () => {

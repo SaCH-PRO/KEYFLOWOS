@@ -84,6 +84,8 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
 
   return (
     <div className="space-y-6">
+      {/* R25-7: no Add while the list could not be read: a new category would land beside ones nobody can see. */}
+      {!readFailure(categoriesRead) && (
       <div className="kf-card rounded-xl p-4 space-y-4">
         <h3 className="text-sm font-semibold flex items-center gap-2"><Palette className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />Create Category</h3>
         <div className="flex items-center gap-2 flex-wrap">
@@ -96,6 +98,7 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
           <button onClick={handleAddCategory} disabled={!newCatName.trim()} aria-label="Add category" className="kf-btn-primary px-4 py-2 min-h-[44px] sm:min-h-0 rounded-lg text-sm font-medium disabled:opacity-40"><Plus className="w-4 h-4" /></button>
         </div>
       </div>
+      )}
 
       {readFailure(categoriesRead) ? (
         <div className="kf-card rounded-xl p-8 text-center">

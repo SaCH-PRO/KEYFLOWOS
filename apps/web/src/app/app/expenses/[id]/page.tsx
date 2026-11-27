@@ -91,8 +91,14 @@ export default function ExpenseDetailPage() {
   // "Uncategorized" or "No budget set". Retry reads the page again.
   const [catRead, setCatRead] = useState<BlockRead>({ kind: "loading" });
   const [budRead, setBudRead] = useState<BlockRead>({ kind: "loading" });
+  // R25-3: the expense read's own state: a refusal or a failure is said with Retry, "not found" is a real 404 only.
+  const [expRead, setExpRead] = useState<BlockRead | { kind: "not-found" }>({ kind: "loading" });
   const [readAgain, setReadAgain] = useState(0);
-  const retryRead = useCallback(() => setReadAgain((n) => n + 1), []);
+  const retryExpense = useCallback(() => setReadAgain((n) => n + 1), []);
+  // R25-1: each block's read has a generation, so a Retry (which reads only that block, leaving the page and an
+  // open edit sheet mounted) and the page's own read never land over a newer one.
+  const catGen = useRef(0);
+  const budGen = useRef(0);
   const [loading, setLoading] = useState(true);
   const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [showEdit, setShowEdit] = useState(false);
@@ -141,8 +147,11 @@ export default function ExpenseDetailPage() {
     // R16-1: a read that lands after this page has gone (unmounted, or the read replaced) does nothing, and above
     // all navigates nowhere: the user may be on another page by then.
     let active = true;
+    const cat = ++catGen.current;
+    const bud = ++budGen.current;
     (async () => {
       setLoading(true);
+      setExpRead({ kind: "loading" });
       try {
         const [expRes, catRes] = await Promise.all([
           getExpense(businessId, expenseId),
@@ -155,32 +164,77 @@ export default function ExpenseDetailPage() {
         // R24-1: the client answers a failed read as { data: null, error } (it does not throw): said, as a throw is.
         if (expRes.error || !expRes.data) {
           toast.error("Failed to load expense");
+          // The client's answer carries the HTTP status at run time (lib/api.ts handleErrorResponse); its type omits it.
+          setExpRead((expRes as { status?: number }).status === 404 ? { kind: "not-found" } : readState(expRes, { what: "this expense" }));
           setLoading(false);
           return;
         }
         setExpense(expRes.data);
-        const catState = readState(catRes, { what: "the category" });
-        setCatRead(catState);
-        setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
+        setExpRead({ kind: "ok" });
+        if (cat === catGen.current) {
+          const catState = readState(catRes, { what: "the category" });
+          setCatRead(catState);
+          setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
+        }
         // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
         const { month, year } = expenseMonth(expRes.data.date, businessId);
         const budRes = await fetchExpenseBudgets(businessId, month, year);
         if (!active) return;
         if (!isCurrentBusiness(businessId)) { leave(); return; }
-        const budState = readState(budRes, { what: "this category's budget" });
-        setBudRead(budState);
-        setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
+        if (bud === budGen.current) {
+          const budState = readState(budRes, { what: "this category's budget" });
+          setBudRead(budState);
+          setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
+        }
       } catch {
         // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
-        if (active && canStartFor(businessId, isCurrentBusiness)) toast.error("Failed to load expense");
+        if (active && canStartFor(businessId, isCurrentBusiness)) {
+          toast.error("Failed to load expense");
+          setExpRead((prev) => (prev.kind === "ok" ? prev : { kind: "failed", message: "Couldn't load this expense." }));
+        }
       }
       if (active) setLoading(false);
     })();
     return () => {
       active = false;
     };
-    // R24b: readAgain is a Retry of a refused categories or budgets read.
+    // R25-3: readAgain is a Retry of a refused or failed expense read (the page shows no expense then).
   }, [businessId, expenseId, isCurrentBusiness, leave, readAgain]);
+
+  // R25-1: a Retry of the categories read reads only the categories: no loading state, no expense read, so the page
+  // and an open edit sheet (with its unsaved edits) stay mounted.
+  const retryCategories = useCallback(async () => {
+    if (!businessId) return;
+    const gen = ++catGen.current;
+    setCatRead({ kind: "loading" });
+    try {
+      const res = await fetchExpenseCategories(businessId);
+      if (gen !== catGen.current || leftRef.current) return;
+      if (!isCurrentBusiness(businessId)) { leave(); return; }
+      const st = readState(res, { what: "the category" });
+      setCatRead(st);
+      setCategories(st.kind === "ok" ? res.data ?? [] : []);
+    } catch {
+      if (gen === catGen.current && canStartFor(businessId, isCurrentBusiness)) setCatRead({ kind: "failed", message: "Couldn't load the category." });
+    }
+  }, [businessId, isCurrentBusiness, leave]);
+  // R25-1: and a Retry of the budgets read reads only the budgets of the expense's own month.
+  const retryBudgets = useCallback(async () => {
+    if (!businessId || !expense) return;
+    const gen = ++budGen.current;
+    setBudRead({ kind: "loading" });
+    try {
+      const { month, year } = expenseMonth(expense.date, businessId);
+      const res = await fetchExpenseBudgets(businessId, month, year);
+      if (gen !== budGen.current || leftRef.current) return;
+      if (!isCurrentBusiness(businessId)) { leave(); return; }
+      const st = readState(res, { what: "this category's budget" });
+      setBudRead(st);
+      setBudgets(st.kind === "ok" ? res.data ?? [] : []);
+    } catch {
+      if (gen === budGen.current && canStartFor(businessId, isCurrentBusiness)) setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
+    }
+  }, [businessId, expense, isCurrentBusiness, leave]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
   // R24b: an expense with a category the page could not read is never called "Uncategorized".
@@ -271,7 +325,12 @@ export default function ExpenseDetailPage() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <FileText className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Expense not found</p>
+          {expRead.kind === "failed" || expRead.kind === "no-access" ? (
+            // R25-3: a refused or failed read is said in the server's words, with Retry where reading again can help.
+            <ReadFailureNote read={expRead} onRetry={retryExpense} className="text-sm text-muted-foreground" />
+          ) : (
+            <p className="text-sm text-muted-foreground">Expense not found</p>
+          )}
           <button onClick={() => router.push("/app/expenses")} className="mt-3 text-sm text-[hsl(var(--kf-accent1))] hover:underline">
             Back to expenses
           </button>
@@ -424,7 +483,7 @@ export default function ExpenseDetailPage() {
                   {category?.color && <div className="w-2 h-2 rounded-full" style={{ background: category.color }} />}
                   <span className="text-sm text-foreground">{categoryLabel}</span>
                 </div>
-                {categoryUnread && <ReadFailureNote read={catRead} onRetry={retryRead} className="mt-1 text-xs text-muted-foreground" />}
+                {categoryUnread && <ReadFailureNote read={catRead} onRetry={() => { void retryCategories(); }} className="mt-1 text-xs text-muted-foreground" />}
               </div>
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Budget line</label>
@@ -497,7 +556,7 @@ export default function ExpenseDetailPage() {
                 </div>
               ) : (
                 readFailure(budRead) ? (
-                  <ReadFailureNote read={budRead} onRetry={retryRead} className="text-sm text-muted-foreground" />
+                  <ReadFailureNote read={budRead} onRetry={() => { void retryBudgets(); }} className="text-sm text-muted-foreground" />
                 ) : (
                   <p className="text-sm text-muted-foreground">No budget set for this category.</p>
                 )
@@ -562,7 +621,7 @@ export default function ExpenseDetailPage() {
           businessId={businessId}
           categories={categories}
           categoriesRead={catRead}
-          onRetryCategories={retryRead}
+          onRetryCategories={() => { void retryCategories(); }}
           editingExpense={expense}
           onClose={() => setShowEdit(false)}
           onSaved={async () => {

@@ -50,6 +50,8 @@ export function useExpensesData() {
   const [candidatesRead, setCandidatesRead] = useState<BlockRead>({ kind: "loading" });
   const [pickersRead, setPickersRead] = useState<BlockRead>({ kind: "loading" });
   const [pickersAgain, setPickersAgain] = useState(0);
+  // R25-4: the picker read's generation, as the main read has: an older reply never lands over a newer one.
+  const pickersGen = useRef(0);
   const [businessId, setBusinessId] = useState<string | null>(null);
   // SEC-EXH3-1: the business every reply is checked against, and the generation of the latest read; a reply for
   // another business, or for an older read, writes nothing.
@@ -150,17 +152,19 @@ export function useExpensesData() {
 
   useEffect(() => {
     if (!businessId) return;
+    const gen = ++pickersGen.current;
     (async () => {
       try {
-        const still = () => businessRef.current === businessId;
+        const still = () => gen === pickersGen.current && businessRef.current === businessId;
         const [projRes, svcRes, ctRes] = await Promise.all([
           fetchProjects(businessId),
           fetchServices(businessId),
           fetchContacts(businessId),
         ]);
         if (!still()) return;
-        const failedPicker = [projRes, svcRes, ctRes].map((r) => readState(r, { what: "the projects, services and contacts to link" })).find((st) => st.kind !== "ok");
-        setPickersRead(failedPicker ?? { kind: "ok" });
+        // R25-5: a part that failed is offered Retry even when another part is no-access.
+        const states = [projRes, svcRes, ctRes].map((r) => readState(r, { what: "the projects, services and contacts to link" }));
+        setPickersRead(states.find((st) => st.kind === "failed") ?? states.find((st) => st.kind === "no-access") ?? { kind: "ok" });
         if (projRes.data) {
           setProjects(projRes.data.map((p) => ({ id: p.id, name: p.name })));
         }
@@ -174,7 +178,7 @@ export function useExpensesData() {
           })));
         }
       } catch {
-        if (businessRef.current === businessId) setPickersRead({ kind: "failed", message: "Couldn't load the projects, services and contacts to link." });
+        if (gen === pickersGen.current && businessRef.current === businessId) setPickersRead({ kind: "failed", message: "Couldn't load the projects, services and contacts to link." });
       }
     })();
     // R6 S-3: and again on every adopted switch (a batched A -> B -> A clears the lists and leaves businessId as it was).
