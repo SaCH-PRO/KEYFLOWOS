@@ -1675,6 +1675,11 @@
       "prefix": "v92b_",
       "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
+    },
+    {
+      "prefix": "v92k_",
+      "owner": "apps/server/test/public-booking-rebook-release.integration.test.ts",
+      "packet": "V1-92 (P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK)"
     }
   ],
   "pendingRenames": [],
