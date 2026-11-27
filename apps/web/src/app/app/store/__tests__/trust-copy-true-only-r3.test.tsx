@@ -47,7 +47,7 @@ async function hubTrust(testimonials: unknown[]) {
   const { result } = renderHook(() => useStoreAiHub());
   const tool = result.current.tools.find((t) => t.id === "trust-copy-generator")!;
   return (await tool.execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", testimonials } })) as {
-    guarantees: string[]; trustBadges: string[]; socialProofCopy: string[];
+    trustBadges: string[]; socialProofCopy: string[];
   };
 }
 
@@ -75,7 +75,7 @@ describe("the store AI hub's Trust Copy Generator", () => {
     const out = await hubTrust([]);
     expect(out.trustBadges).toEqual([]);
     expect(out.socialProofCopy).toEqual([]);
-    expect(out.guarantees).toEqual([]);
+    expect(out).not.toHaveProperty("guarantees"); // round 5: the hub returns no guarantees key at all
     expect(JSON.stringify(out)).not.toMatch(UNBACKED);
     expect(JSON.stringify(out)).not.toMatch(UNCHECKED);
   });
