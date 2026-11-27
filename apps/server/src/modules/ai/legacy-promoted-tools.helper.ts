@@ -94,17 +94,6 @@ export async function listSentOverdueInvoices(
       return { inv, daysOverdue };
     });
 
-  const contactIds = Array.from(
-    new Set(overdueSent.map(({ inv }) => inv.contactId).filter((id): id is string => Boolean(id))),
-  );
-  const contacts = contactIds.length
-    ? await prisma.client.contact.findMany({
-        where: { businessId, deletedAt: null, id: { in: contactIds } },
-        select: { id: true, firstName: true, lastName: true, email: true },
-      })
-    : [];
-  const contactOf = new Map(contacts.map((c) => [c.id, c]));
-
   // D-13 / D-251: never add different currencies together; keep top-level total in homeCurrency
   // and expose every currency separately in totalsByCurrency.
   const amountsByCurrency = new Map<string, number[]>();
@@ -120,25 +109,38 @@ export async function listSentOverdueInvoices(
   }
 
   const total = totalsByCurrency[homeCurrency] ?? 0;
-  const invoices = overdueSent
+  // Sort and slice to `limit` BEFORE fetching contacts so contact.findMany never
+  // exceeds defaultTakeExtension (1000 rows) on large overdue books (P160 R1 MINOR-1).
+  const topOverdue = overdueSent
     .sort((a, b) => b.daysOverdue - a.daysOverdue || a.inv.id.localeCompare(b.inv.id))
-    .slice(0, limit)
-    .map(({ inv, daysOverdue }) => {
-      const contact = inv.contactId ? contactOf.get(inv.contactId) : undefined;
-      const contactName = contact
-        ? [contact.firstName, contact.lastName].filter(Boolean).join(' ').trim() || contact.email || 'Unknown'
-        : 'Unknown';
-      return {
-        id: inv.id,
-        invoiceNumber: inv.invoiceNumber ?? undefined,
-        status: inv.status,
-        total: inv.remaining,
-        currency: normalizeCurrency(inv.currency) || homeCurrency,
-        dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString() : '',
-        contactName,
-        daysOverdue,
-      };
-    });
+    .slice(0, limit);
+  const contactIds = Array.from(
+    new Set(topOverdue.map(({ inv }) => inv.contactId).filter((id): id is string => Boolean(id))),
+  );
+  const contacts = contactIds.length
+    ? await prisma.client.contact.findMany({
+        where: { businessId, deletedAt: null, id: { in: contactIds } },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      })
+    : [];
+  const contactOf = new Map(contacts.map((c) => [c.id, c]));
+
+  const invoices = topOverdue.map(({ inv, daysOverdue }) => {
+    const contact = inv.contactId ? contactOf.get(inv.contactId) : undefined;
+    const contactName = contact
+      ? [contact.firstName, contact.lastName].filter(Boolean).join(' ').trim() || contact.email || 'Unknown'
+      : 'Unknown';
+    return {
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber ?? undefined,
+      status: inv.status,
+      total: inv.remaining,
+      currency: normalizeCurrency(inv.currency) || homeCurrency,
+      dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString() : '',
+      contactName,
+      daysOverdue,
+    };
+  });
   return { invoices, total, currency: homeCurrency, totalsByCurrency };
 }
 
@@ -239,6 +241,9 @@ export async function summarizePaidRevenue(
   prisma: PrismaService,
   businessId: string,
 ): Promise<{ totalRevenue: number; paidInvoiceCount: number; currency: string }> {
+  if (typeof businessId !== 'string' || businessId.length === 0) {
+    return { totalRevenue: 0, paidInvoiceCount: 0, currency: 'TTD' };
+  }
   const [agg, count, sample] = await Promise.all([
     prisma.client.invoice.aggregate({
       where: { businessId, deletedAt: null, status: 'PAID' },
@@ -248,7 +253,8 @@ export async function summarizePaidRevenue(
       where: { businessId, deletedAt: null, status: 'PAID' },
     }),
     prisma.client.invoice.findFirst({
-      where: { businessId, deletedAt: null },
+      where: { businessId, deletedAt: null, status: 'PAID' },
+      orderBy: { id: 'asc' },
       select: { currency: true },
     }),
   ]);
@@ -269,6 +275,9 @@ export async function recommendStaleFollowUps(
   contacts: Array<{ id: string; name: string; email: string; daysSinceContact: number; status: string }>;
   count: number;
 }> {
+  if (typeof businessId !== 'string' || businessId.length === 0) {
+    return { contacts: [], count: 0 };
+  }
   let daysStale = 14;
   if (rawDaysStale !== undefined && rawDaysStale !== null && rawDaysStale !== '') {
     const n = typeof rawDaysStale === 'boolean' ? Number.NaN : Number(rawDaysStale);
@@ -319,6 +328,9 @@ export async function createReminderTask(
   rawDueDate?: unknown,
   visClause?: Prisma.ContactWhereInput | null,
 ): Promise<{ reminderId: string }> {
+  if (typeof businessId !== 'string' || businessId.length === 0) {
+    throw new Error('Contact not found');
+  }
   const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
   if (!title) {
     throw new Error('title is required');

@@ -569,6 +569,7 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
   const ROUTE_GOVERNED = new Set([
     ...Object.values(CANONICAL_MODULE_TOOLS).flatMap((tools) => Object.keys(tools)),
     ...Object.keys(((policyExports as Record<string, unknown>).GOVERNED_UNGRANTED ?? {}) as Record<string, string>),
+    ...(((policyExports as Record<string, unknown>).EXTRA_SCOPED_GOVERNED_TOOLS as ReadonlySet<string> | undefined) ?? []),
   ]);
 
   /** Tools that find their row by a bare id, which on the staff bridge is any business's: no key reaches them (review 8 DD8-1). */
@@ -592,19 +593,19 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     // read: finance_customer_balance, finance_list_action_items, finance_list_bank_accounts (D-35's narrowing)
     expect(lost('finance')).toEqual([
       'expenses_create', 'expenses_list', 'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_cashflow_forecast', 'finance_create_bill',
-      'finance_create_coa_account', 'finance_customer_balance', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
-      'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_safe_to_spend',
+      'finance_create_coa_account', 'finance_create_invoice_reminder_draft', 'finance_customer_balance', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
+      'finance_list_overdue_invoices', 'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_safe_to_spend',
       'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
     ]);
     expect(lost('commerce')).toEqual([
       'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_product', 'commerce_create_quote',
       'commerce_delete_invoice', 'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice',
-      'commerce_update_invoice', 'commerce_update_product',
+      'commerce_summarize_revenue', 'commerce_update_invoice', 'commerce_update_product',
     ]);
     expect(lost('calendar')).toEqual(['calendar_create_event', 'calendar_list_events']);
     expect(lost('sales').filter((t) => t.startsWith('crm_'))).toEqual([
-      'crm_add_note', 'crm_add_task', 'crm_create_contact', 'crm_delete_contact', 'crm_find_duplicates', 'crm_list_contacts',
-      'crm_list_deals', 'crm_merge_execute', 'crm_merge_preview', 'crm_move_deal_stage', 'crm_search_contacts', 'crm_update_contact', 'crm_update_deal',
+      'crm_add_note', 'crm_add_task', 'crm_create_contact', 'crm_create_reminder', 'crm_delete_contact', 'crm_find_duplicates', 'crm_list_contacts',
+      'crm_list_deals', 'crm_merge_execute', 'crm_merge_preview', 'crm_move_deal_stage', 'crm_recommend_follow_ups', 'crm_search_contacts', 'crm_update_contact', 'crm_update_deal',
     ]);
     expect(lost('inbox')).toEqual(['inbox_brief', 'inbox_list_threads', 'inbox_mark_resolved', 'inbox_read_thread', 'inbox_reply_thread', 'inbox_update_thread_status']);
     expect(lost('hr')).toEqual(lost('structure'));

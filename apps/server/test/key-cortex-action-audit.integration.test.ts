@@ -435,7 +435,7 @@ beforeAll(async () => {
 
   // W9-KEY-CORTEX-AUDIT: the legacy facade registers its cortex.* tools (cortex.execute_tool among
   // them) into the same registry, as onModuleInit does in the app. Positionally, as Nest constructs
-  // it: prisma, the AI-module tool registry, the command service, the canonical registry.
+  // it: prisma, the command service, the canonical registry.
   const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
   actions = new KeyCortexActionsService(prisma, {} as any, registry);
   actions.onModuleInit();

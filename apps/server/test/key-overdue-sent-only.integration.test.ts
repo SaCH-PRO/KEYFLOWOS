@@ -8,7 +8,8 @@
  * `PENDING` invoices under D-256.
  *
  * REAL Postgres via PrismaService + REAL ReceivablesService + REAL
- * ChartOfAccountsSeederService + REAL KeyToolRegistryService.
+ * ChartOfAccountsSeederService + REAL FlowOrchestratorService (canonical
+ * `finance_list_overdue_invoices` and `finance_create_invoice_reminder_draft`).
  *
  * Fixtures: prefix `v81o_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted via raw SQL (`sqlLikePrefix`) in beforeAll and afterAll.

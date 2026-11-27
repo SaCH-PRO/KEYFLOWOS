@@ -4,13 +4,13 @@
  * POST /ai/businesses/:businessId/key/command with mode 'ask' and
  * GET /ai/businesses/:businessId/key/commands, on the real AiController with
  * its real AuthGuard, BusinessGuard and CrmRateLimitGuard. The 'ask' pipeline
- * behind it is real: KeyCommandService, KeyToolRegistryService (the legacy
- * reads), AiOversightService (policy reads and evaluate), KeyAutonomySafetyService
+ * behind it is real: KeyCommandService, FlowOrchestratorService (canonical
+ * promoted tools), AiOversightService (policy reads and evaluate), KeyAutonomySafetyService
  * (the kill switch), TimelineService (the Activity ledger) and PrismaService,
  * against the database at DATABASE_URL. The only stand-ins are identity
  * attachment (a test middleware reads `x-v09a-user` and attaches the seeded
  * user row, as the Supabase-verifying AuthMiddleware would), the tool audit log
- * (a recorder), and the collaborators AiController and KeyToolRegistryService
+ * (a recorder), and the collaborators AiController and FlowOrchestratorService
  * hold for routes and tools this suite does not call (an allow-listed mocker;
  * any other missing token fails the compile).
  *
@@ -19,7 +19,7 @@
  *               list route's visibility clause; and the KeyCommand row, which
  *               GET key/commands shows every member, keeps no member-scoped data.
  *   SEC-V109-2  a business's blockedModules / bare-name blockedTools stop the
- *               dotted legacy reads.
+ *               promoted canonical reads (and legacy aliases).
  *   SEC-V109-3  the Activity ledger entry matches the KeyCommand status and
  *               names the member who asked.
  *   CR-V109-1   ruling: an advisory business's 'ask' reads are refused, as
@@ -45,7 +45,7 @@ const ID = {
   staffRead: `${P}staffRead`,  // STAFF, no scope map: role defaults (crm read, revenue read)
   staffNone: `${P}staffNone`,  // STAFF, explicit map { crm: none, revenue: none }
   biz: `${P}biz`,              // no AI policy rows: oversight's default ('assisted')
-  bizBlocked: `${P}bizBlocked`, // AiMemory policy blocks the crm and commerce modules
+  bizBlocked: `${P}bizBlocked`, // AiMemory policy blocks crm/commerce modules and bare tool name summarizeRevenue
   bizAdvisory: `${P}bizAdv`,   // AutopilotSettings at its schema default (level 0 = advisory)
   bizKill: `${P}bizKill`,      // autonomy kill switch on
   cTeam: `${P}cTeam`,          // TEAM contact, owned by the owner, stale
@@ -56,7 +56,7 @@ const PRIVATE_EMAIL = `${P}private@test.local`;
 
 /**
  * AiController's collaborators for routes this suite does not call, and
- * KeyToolRegistryService's for tools it does not call. Anything else that is
+ * FlowOrchestratorService's for tools it does not call. Anything else that is
  * unresolved fails the compile.
  */
 const OFF_BOUNDARY = new Set([
@@ -353,6 +353,22 @@ describe("SEC-V109-2 a business's module and tool blocks stop the promoted 'ask'
     const revenue = await ask(ID.owner, 'how much revenue', ID.bizBlocked);
     expect(revenue.body.results[0]).toMatchObject({ success: false, notExecuted: true });
     expect(revenue.body.results[0].error).toContain('Tool "summarizeRevenue" is blocked');
+
+    // P160 R1 MINOR-5: preserve real-DB blockedModules=['commerce'] assertion alongside blockedTools=['summarizeRevenue']
+    await db.aiMemory.updateMany({
+      where: { businessId: ID.bizBlocked, category: 'settings', key: 'autonomy' },
+      data: { value: JSON.stringify({ blockedModules: ['crm', 'commerce'], blockedTools: [] }) },
+    });
+    try {
+      const revenueByModule = await ask(ID.owner, 'how much revenue', ID.bizBlocked);
+      expect(revenueByModule.body.results[0]).toMatchObject({ success: false, notExecuted: true });
+      expect(revenueByModule.body.results[0].error).toContain('Module "commerce" is blocked');
+    } finally {
+      await db.aiMemory.updateMany({
+        where: { businessId: ID.bizBlocked, category: 'settings', key: 'autonomy' },
+        data: { value: JSON.stringify({ blockedModules: ['crm'], blockedTools: ['summarizeRevenue'] }) },
+      });
+    }
   });
 
   it('hidden-v1 obsolete reads (message intake, drive intake) fail closed without executing', async () => {

@@ -182,8 +182,19 @@ describe('P160 promoted canonical tool specs (all 6 tools)', () => {
       await expect(
         orchestrator.executeToolAction('biz_1', 'command_create_item', { title: 'Test', dueAt: 'not-a-date' }),
       ).rejects.toThrow(/dueAt/i);
+      // Missing actor with contactId fails closed (P160 R1 MAJOR-2)
       await expect(
         orchestrator.executeToolAction('biz_1', 'command_create_item', { title: 'Test', contactId: 'c_foreign' }),
+      ).rejects.toThrow(/authenticated member context/i);
+
+      // Authenticated OWNER with missing/foreign contactId throws Contact not found
+      await expect(
+        orchestrator.executeToolAction(
+          'biz_1',
+          'command_create_item',
+          { title: 'Test', contactId: 'c_foreign' },
+          { principalUserId: 'u_1' },
+        ),
       ).rejects.toThrow(/Contact not found/i);
 
       const created = await orchestrator.executeToolAction('biz_1', 'command_create_item', {
@@ -202,6 +213,133 @@ describe('P160 promoted canonical tool specs (all 6 tools)', () => {
           sourceModule: 'KEY_AI',
         }),
       );
+    });
+  });
+
+  describe('7. P160 R1 security & correctness regression pins (MAJOR-1/2/3 + MINOR-1/2/3)', () => {
+    it('fails closed on missing actor for crm_recommend_follow_ups and crm_create_reminder, and binds PLAN_QUEUE plan.userId', async () => {
+      const contactFindMany = vi.fn().mockResolvedValue([]);
+      const contactFindFirst = vi.fn().mockResolvedValue(null);
+      const prisma = {
+        client: {
+          aiPlan: { findFirst: vi.fn().mockResolvedValue({ userId: 'u_staff_owned' }) },
+          user: { findUnique: vi.fn().mockResolvedValue({ id: 'u_staff_owned', role: 'USER' }) },
+          membership: {
+            findUnique: vi.fn().mockResolvedValue({
+              role: 'STAFF',
+              permissionScopes: { crm: 'write', crm_view: 'owned', operations: 'write' },
+            }),
+          },
+          contact: { findMany: contactFindMany, findFirst: contactFindFirst },
+        },
+      } as any;
+      const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+        prisma,
+        governance: { getToolTier: () => 1 },
+        executionLog: { logToolExecution: async () => 'log' },
+        businessGraph: { invalidateCache() {} },
+        attributeExecutionLog: async () => undefined,
+        moduleRef: { get: () => undefined },
+      });
+
+      await expect(
+        orchestrator.executeToolAction('biz_1', 'crm_recommend_follow_ups', {}),
+      ).rejects.toThrow(/authenticated member context/i);
+      await expect(
+        orchestrator.executeToolAction('biz_1', 'crm_create_reminder', { title: 'Call', contactId: 'c_1' }),
+      ).rejects.toThrow(/authenticated member context/i);
+
+      // PLAN_QUEUE resolves aiPlan.userId and applies that member's D-37 visibility clause
+      await orchestrator.executeToolAction(
+        'biz_1',
+        'crm_recommend_follow_ups',
+        {},
+        { surface: 'PLAN_QUEUE', planId: 'plan_1' },
+      );
+      expect(contactFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            businessId: 'biz_1',
+            AND: [expect.objectContaining({ OR: expect.any(Array) })],
+          }),
+        }),
+      );
+    });
+
+    it('command_create_item with contactId enforces crm:read for STAFF crm:none and D-140 scoped OWNER before querying Contact', async () => {
+      const contactFindFirst = vi.fn();
+      const makeOrchestrator = (membership: { role: string; permissionScopes: Record<string, string> | null }) =>
+        Object.assign(Object.create(FlowOrchestratorService.prototype), {
+          prisma: {
+            client: {
+              user: { findUnique: vi.fn().mockResolvedValue({ id: 'u_actor', role: 'USER' }) },
+              membership: { findUnique: vi.fn().mockResolvedValue(membership) },
+              contact: { findFirst: contactFindFirst },
+            },
+          },
+          governance: { getToolTier: () => 1 },
+          executionLog: { logToolExecution: async () => 'log' },
+          businessGraph: { invalidateCache() {} },
+          attributeExecutionLog: async () => undefined,
+          moduleRef: { get: () => undefined },
+        });
+
+      const staffNoCrm = makeOrchestrator({ role: 'STAFF', permissionScopes: { operations: 'write', crm: 'none' } });
+      await expect(
+        staffNoCrm.executeToolAction(
+          'biz_1',
+          'command_create_item',
+          { title: 'Ping', contactId: 'c_1' },
+          { principalUserId: 'u_actor' },
+        ),
+      ).rejects.toThrow(/crm:read/i);
+
+      const d140OwnerNoCrm = makeOrchestrator({ role: 'OWNER', permissionScopes: { operations: 'write', crm: 'none' } });
+      await expect(
+        d140OwnerNoCrm.executeToolAction(
+          'biz_1',
+          'command_create_item',
+          { title: 'Ping', contactId: 'c_1' },
+          { principalUserId: 'u_actor' },
+        ),
+      ).rejects.toThrow(/crm:read/i);
+      expect(contactFindFirst).not.toHaveBeenCalled();
+    });
+
+    it('RoleEngineService reaches command_create_item; JobRolePolicyService blocks STAFF_BRIDGE wildcard bypasses; graphActionRequirement deduplicates scopes and marks visibility-bound tools', async () => {
+      const { RoleEngineService } = await import('./role-engine.service');
+      const { EXTRA_SCOPED_GOVERNED_TOOLS, JobRolePolicyService } = await import('../structure/job-role-policy.service');
+      const { graphActionBoundByContactVisibility, graphActionRequirement } = await import('./graph-actions.controller');
+
+      const roleEngine = new RoleEngineService();
+      expect(roleEngine.isToolAllowed('general', 'command_create_item')).toBe(true);
+
+      // Every promoted Prisma-backed tool is in EXTRA_SCOPED_GOVERNED_TOOLS so family wildcards cannot grant it
+      for (const tool of [
+        'finance_list_overdue_invoices',
+        'finance_create_invoice_reminder_draft',
+        'commerce_summarize_revenue',
+        'crm_recommend_follow_ups',
+        'crm_create_reminder',
+      ]) {
+        expect(EXTRA_SCOPED_GOVERNED_TOOLS.has(tool), tool).toBe(true);
+      }
+
+      const policy = new JobRolePolicyService({ client: {} } as any);
+      const crmReadEnv = policy.envelopeForJobRole({ id: 'r1', name: 'CRM Read', permissions: { crm: 'read', crm_view: 'owned' } as any });
+      expect(policy.isToolAllowed(crmReadEnv, 'crm_create_reminder')).toBe(false);
+      expect(policy.isToolAllowed(crmReadEnv, 'crm_recommend_follow_ups')).toBe(false);
+      const legacyFinanceEnv = policy.envelopeForJobRole({ id: 'r2', name: 'Legacy Fin', permissions: { finance: 'read', commerce: 'read', sales: 'read' } as any });
+      expect(policy.isToolAllowed(legacyFinanceEnv, 'finance_list_overdue_invoices')).toBe(false);
+      expect(policy.isToolAllowed(legacyFinanceEnv, 'commerce_summarize_revenue')).toBe(false);
+
+      // Deduplicated scopes + visibility-bound flags on crm_create_reminder and command_create_item
+      const revReq = graphActionRequirement('finance_list_overdue_invoices');
+      expect(revReq && 'scopes' in revReq ? revReq.scopes : []).toEqual([{ module: 'revenue', minLevel: 'read' }]);
+      expect(graphActionBoundByContactVisibility('crm_create_reminder')).toBe(true);
+      expect(graphActionBoundByContactVisibility('command_create_item')).toBe(true);
+      const remReq = graphActionRequirement('crm_create_reminder');
+      expect(remReq && 'ownerOnlyWithoutPrincipal' in remReq && Boolean(remReq.ownerOnlyWithoutPrincipal)).toBe(true);
     });
   });
 });

@@ -42,7 +42,7 @@ import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, defaultScopesForRole, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { MEMBERLESS_CONTACT_ANSWER, memberlessKeyToolRefusal } from './memberless-key-tools';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
@@ -7644,12 +7644,7 @@ ${triage.standingContext}`;
         return summarizePaidRevenue(this.prisma, businessId);
 
       case 'crm_recommend_follow_ups': {
-        const actorId = action?.principalUserId ?? action?.onBehalfOfUserId;
-        let visClause: Prisma.ContactWhereInput | null = null;
-        if (actorId) {
-          const access = await resolveCrmAccess(this.prisma, businessId, actorId);
-          visClause = visibilityClause(access, actorId) as Prisma.ContactWhereInput | null;
-        }
+        const visClause = await this.resolvePromotedContactScope(businessId, action);
         return recommendStaleFollowUps(this.prisma, businessId, args.daysStale, args.limit, visClause);
       }
 
@@ -7671,12 +7666,7 @@ ${triage.standingContext}`;
         const contactId =
           typeof args.contactId === 'string' && args.contactId.trim().length > 0 ? args.contactId.trim() : undefined;
         if (contactId) {
-          const actorId = action?.principalUserId ?? action?.onBehalfOfUserId;
-          let visClause: Prisma.ContactWhereInput | null = null;
-          if (actorId) {
-            const access = await resolveCrmAccess(this.prisma, businessId, actorId);
-            visClause = visibilityClause(access, actorId) as Prisma.ContactWhereInput | null;
-          }
+          const visClause = await this.resolvePromotedContactScope(businessId, action, { requireCrmRead: true });
           const contact = await this.prisma.client.contact.findFirst({
             where: { id: contactId, businessId, deletedAt: null, ...(visClause ? { AND: [visClause] } : {}) },
             select: { id: true },
@@ -7698,12 +7688,7 @@ ${triage.standingContext}`;
       }
 
       case 'crm_create_reminder': {
-        const actorId = action?.principalUserId ?? action?.onBehalfOfUserId;
-        let visClause: Prisma.ContactWhereInput | null = null;
-        if (actorId && args.contactId) {
-          const access = await resolveCrmAccess(this.prisma, businessId, actorId);
-          visClause = visibilityClause(access, actorId) as Prisma.ContactWhereInput | null;
-        }
+        const visClause = await this.resolvePromotedContactScope(businessId, action);
         return createReminderTask(this.prisma, businessId, args.title, args.contactId, args.dueDate, visClause);
       }
 
@@ -9532,5 +9517,44 @@ ${triage.standingContext}`;
       if (memberId) await logged;
       return { success: false, error: (error as Error).message };
     }
+  }
+
+  /**
+   * P160 (RR-LEGACY-FALLBACK-REMOVE) R1 MAJOR-2 & MAJOR-3 (D-37, D-73, D-140):
+   * Resolve the acting member via `contactBindMember` (supporting chat, HTTP,
+   * CORTEX_BRIDGE, and PLAN_QUEUE), fail closed when no actor can be resolved,
+   * optionally enforce `crm:read` via `memberModuleLevel` (respecting D-140
+   * explicit maps on OWNER memberships), and delegate to `contactReadAccess`
+   * so static visibility census (`graph-action-visibility-bound.spec.ts`)
+   * covers every caller automatically.
+   */
+  private async resolvePromotedContactScope(
+    businessId: string,
+    action: KeyDispatchAction | undefined,
+    options: { requireCrmRead?: boolean } = {},
+  ): Promise<Prisma.ContactWhereInput | null> {
+    const actorId = await this.contactBindMember(businessId, action);
+    if (!actorId) {
+      throw new ForbiddenException('This contact-scoped tool requires an authenticated member context');
+    }
+    if (options.requireCrmRead) {
+      const [user, membership] = await Promise.all([
+        this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } }),
+        this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: actorId, businessId } },
+          select: { role: true, permissionScopes: true },
+        }),
+      ]);
+      const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+      if (!isSuperAdmin) {
+        const level = membership ? memberModuleLevel(membership, 'crm') : 'none';
+        if (level === 'none') {
+          throw new ForbiddenException('You do not have crm:read permission to bind a contact');
+        }
+      }
+    }
+    const boundAction: ActionContext = { ...(action ?? {}), surface: action?.surface ?? 'UNDECLARED', principalUserId: actorId };
+    const scope = await this.contactReadAccess(businessId, boundAction);
+    return scope?.clause ?? null;
   }
 }

@@ -111,6 +111,7 @@ interface AskRead {
 const ASK_READ_CAPABILITIES: ReadonlyMap<string, AskRead> = new Map<string, AskRead>([
   // The commerce invoice reads: RequireModuleScope('revenue', 'read').
   ['commerce_summarize_revenue', { blockableAs: ['commerce', 'revenue'], memberScope: 'revenue' }],
+  ['finance_list_overdue_invoices', { blockableAs: ['finance', 'revenue'], memberScope: 'revenue' }],
   // GET crm/businesses/:b/contacts: RequireModuleScope('crm', 'read') + visibilityClause.
   ['crm_recommend_follow_ups', { blockableAs: ['crm', 'contacts'], memberScope: 'crm', contactVisibility: true }],
 ]);
@@ -618,26 +619,24 @@ export class KeyCommandService {
       // exact-name blocks and its own fail-closed state through `allowed`.
       const needsHuman = decision.requiresQuickConfirm || decision.requiresFormalApproval || decision.requiresAdminApproval;
       if (needsHuman && getToolByName(name)) return refuse(name, decision.reason, true);
-      // Check business-level blockedTools / blockedModules across canonical, aliased legacy, and bare names (SEC-V109-2).
-      if (read || capability.aliasedFrom) {
-        const settings = await this.oversight.getAutonomySettings(businessId);
-        if (settings.degraded) return refuse(name, "KEY oversight could not read this business's AI policy; nothing was run");
-        const tools = settings.blockedTools ?? [];
-        const candidateTools = Array.from(
-          new Set([name, ...(capability.aliasedFrom ? [capability.aliasedFrom] : []), step.tool]),
-        );
-        const toolBlock = candidateTools.find((t) => tools.includes(t));
-        if (toolBlock) return refuse(name, `Tool "${toolBlock}" is blocked by business settings`);
-        const modules = settings.blockedModules ?? [];
-        const { keyMemberToolScopes } = await import('./plan-step-authority');
-        const scopeModules = keyMemberToolScopes(name, step.input).map((s) => s.module);
-        const candidateModules = Array.from(
-          new Set([...(read?.blockableAs ?? []), step.module, ...scopeModules]),
-        );
-        const blockedModulesLower = new Set(modules.map((m) => m.toLowerCase()));
-        const moduleBlock = candidateModules.find((m) => blockedModulesLower.has(m.toLowerCase()));
-        if (moduleBlock) return refuse(name, `Module "${moduleBlock}" is blocked by business settings`);
-      }
+      // Check business-level blockedTools / blockedModules across canonical, aliased legacy, and bare names (SEC-V109-2, P160 R1 MINOR-1).
+      const settings = await this.oversight.getAutonomySettings(businessId);
+      if (settings.degraded) return refuse(name, "KEY oversight could not read this business's AI policy; nothing was run");
+      const tools = settings.blockedTools ?? [];
+      const candidateTools = Array.from(
+        new Set([name, ...(capability.aliasedFrom ? [capability.aliasedFrom] : []), step.tool]),
+      );
+      const toolBlock = candidateTools.find((t) => tools.includes(t));
+      if (toolBlock) return refuse(name, `Tool "${toolBlock}" is blocked by business settings`);
+      const modules = settings.blockedModules ?? [];
+      const { keyMemberToolScopes } = await import('./plan-step-authority');
+      const scopeModules = keyMemberToolScopes(name, step.input).map((s) => s.module);
+      const candidateModules = Array.from(
+        new Set([...(read?.blockableAs ?? []), step.module, ...scopeModules]),
+      );
+      const blockedModulesLower = new Set(modules.map((m) => m.toLowerCase()));
+      const moduleBlock = candidateModules.find((m) => blockedModulesLower.has(m.toLowerCase()));
+      if (moduleBlock) return refuse(name, `Module "${moduleBlock}" is blocked by business settings`);
     } catch (err) {
       this.logger.error(`[ask] oversight check failed for ${businessId}: ${(err as Error).message}`);
       return refuse(name, 'KEY oversight could not be checked; nothing was run');

@@ -65,9 +65,9 @@
  * POST /connect/businesses/:b/contacts/sync (control [V94D-J01]; the five
  * STAFF-started Google Contacts cases of connect-sync-actor.integration.test.ts
  * are re-pointed at the owner, or at the Outlook source, in the same change),
- * [V94D-T06] POST /drive/businesses/:b/sync (DriveIntakeController.sync) and the
- * KEY tool connect.scanDrive (KeyToolRegistryService: the driving member must be
- * the owner, else a refusal envelope and nothing run; control [V94D-J02]), and
+ * [V94D-T06] POST /drive/businesses/:b/sync (DriveIntakeController.sync; the
+ * legacy KEY tool connect.scanDrive was retired as OBSOLETE in P160
+ * RR-LEGACY-FALLBACK-REMOVE; control [V94D-J02]), and
  * [V94D-T07] POST /calendar/businesses/:b/sync/google/temporal-flow (control
  * [V94D-J03]). Its review repair (SEC-W10GDR-1; D-99, D-111) gates the Google
  * Calendar sync settings writes, PATCH /calendar/businesses/:b/sync/settings
@@ -75,9 +75,8 @@
  * control [V94D-J04]; the reads stay a member's). For these cases the
  * Drive pull (ConnectorIntelligenceService.syncGoogleDrive) and the calendar
  * pull (GoogleCalendarTemporalSyncService.syncBusiness) are recording
- * stand-ins, the KEY tool registry is the real KeyToolRegistryService with
- * stand-ins for the services no case here reaches, and DriveIntakeController is
- * mounted as the commerce module mounts it.
+ * stand-ins, and DriveIntakeController is mounted as the commerce module
+ * mounts it.
  *
  * For these cases the connector registry behind ConnectorController is a
  * stand-in recording what reaches it, its credential store is the real
