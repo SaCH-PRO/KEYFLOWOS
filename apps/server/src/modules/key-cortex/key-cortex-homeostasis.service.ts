@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEndocrineService, type EndocrineSignal } from './key-cortex-endocrine.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
 import { keyCronsDisabled } from '../../core/config/env';
+import { runForTenant } from '../../core/tenant/tenant-context';
 
 /**
  * Homeostasis — the control loop KEY did not have.
@@ -156,7 +157,7 @@ export class KeyCortexHomeostasisService {
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {
-        await this.regulate(businessId);
+        await runForTenant(businessId, () => this.regulate(businessId));
       } catch (err: unknown) {
         // One business's readings must never stop the loop for the rest.
         this.logger.warn(
