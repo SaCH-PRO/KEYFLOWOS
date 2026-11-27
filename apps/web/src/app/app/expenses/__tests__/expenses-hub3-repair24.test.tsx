@@ -73,6 +73,7 @@ import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
 import { ExpenseList } from "../components/expense-list";
 import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
+import { writeFailure } from "../components/expense-utils";
 import ExpensesInboxPage from "../page";
 
 const ok = <T,>(data: T) => ({ data, error: null });
@@ -363,4 +364,14 @@ describe("R24-3: the page's search reaches the read", () => {
     fireEvent.change(box, { target: { value: "toner" } });
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.objectContaining({ search: "toner" })), LONG);
   }, 30000);
+});
+
+describe("R24-1: writeFailure, the one reading of a write's answer", () => {
+  it("names a refusal in the server's words, no answer, and a missing row where the row is the success", () => {
+    expect(writeFailure({ data: null, error: WORDS, status: 409 }, "save this")).toBe(WORDS);
+    expect(writeFailure(null, "save this")).toBe("Couldn't save this.");
+    expect(writeFailure({ data: null, error: null }, "save this", true)).toBe("Couldn't save this.");
+    expect(writeFailure({ data: null, error: null }, "delete this"), "a delete needs no row").toBeNull();
+    expect(writeFailure({ data: { id: "x" }, error: null }, "save this", true)).toBeNull();
+  });
 });
