@@ -58,7 +58,6 @@ function createService(options: {
 } = {}): KeyCortexActionsService {
   return new KeyCortexActionsService(
     mockPrisma as any,
-    mockToolRegistry as any,
     mockCommandService as any,
     mockKeyCortexToolRegistry as any,
     options.includeProposalService !== false ? (mockProposalService as any) : undefined,

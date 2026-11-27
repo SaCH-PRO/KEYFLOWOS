@@ -58,7 +58,6 @@ import { StructureModule } from '../structure/structure.module';
 import { PayrollModule } from '../payroll/payroll.module';
 import { StaffPerformanceModule } from '../staff-performance/staff-performance.module';
 import { KeyCommandService } from './key-command.service';
-import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { FeedbackLoopService } from './feedback-loop.service';
@@ -128,7 +127,6 @@ import { AiApprovalsService } from './ai-approvals.service';
     BusinessMatchingService,
     MatchRefreshSchedulerService,
     KeyCommandService,
-    KeyToolRegistryService,
     AutopilotRulesService,
     PlanExecutorService,
     WorkloadAggregatorService,
@@ -188,7 +186,6 @@ import { AiApprovalsService } from './ai-approvals.service';
     WorkspaceRecommendationsService,
     BusinessMatchingService,
     KeyCommandService,
-    KeyToolRegistryService,
     AutopilotRulesService,
     PlanExecutorService,
     FeedbackLoopService,

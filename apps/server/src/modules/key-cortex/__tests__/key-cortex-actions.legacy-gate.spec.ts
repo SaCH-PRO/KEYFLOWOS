@@ -98,7 +98,6 @@ function setup() {
 
   const service = new KeyCortexActionsService(
     prisma as any,
-    undefined,
     { enqueue: vi.fn() } as any,
     keyCortexToolRegistry as any,
     proposalService as any,

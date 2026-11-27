@@ -1539,7 +1539,6 @@ describe('KeyCortexQueryPipelineService parsed-command autonomy fails closed', (
     const toolExecute = vi.fn().mockResolvedValue({ success: true, data: { id: 'task_1' } });
     const realActions = new (KeyCortexActionsService as any)(
       { client: { cortexActionLog: { create: vi.fn().mockResolvedValue({}) } } },
-      undefined,
       {},
       { execute: toolExecute },
       undefined,

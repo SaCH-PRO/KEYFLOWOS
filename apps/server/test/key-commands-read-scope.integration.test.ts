@@ -189,7 +189,7 @@ beforeAll(async () => {
         provide: KeyCommandService,
         // No 'ask' runs here: the registries, oversight and the kill switch are not reached.
         useFactory: (prisma: any, timeline: any) =>
-          new KeyCommandService(prisma, timeline, undefined, commandItems as any, undefined, undefined, undefined),
+          new KeyCommandService(prisma, timeline, commandItems as any, undefined, undefined, undefined),
         inject: [PrismaService, TimelineService],
       },
     ],

@@ -161,7 +161,7 @@ export class GenomeRecommendationOutcomeService {
         ...(query.decision ? { decision: query.decision } : {}),
         ...(query.recommendationId ? { recommendationId: query.recommendationId } : {}),
       },
-      orderBy: { decidedAt: 'desc' },
+      orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
       take: query.limit,
       skip: query.offset,
     });

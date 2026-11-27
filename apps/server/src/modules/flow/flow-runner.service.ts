@@ -389,7 +389,7 @@ export class FlowRunnerService {
     const [items, total] = await Promise.all([
       this.prisma.client.flowRun.findMany({
         where,
-        orderBy: { startedAt: 'desc' },
+        orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 25,
         skip: filters.offset ?? 0,
         select: {

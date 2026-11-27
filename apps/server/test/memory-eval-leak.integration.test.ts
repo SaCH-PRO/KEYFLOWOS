@@ -376,7 +376,6 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     );
     cortexActionsService = new KeyCortexActionsService(
       prisma,
-      undefined,
       {} as any,
       {} as any,
     );

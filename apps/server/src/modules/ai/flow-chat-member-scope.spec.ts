@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { keyMemberMenuScopes, keyMemberToolScopes } from './plan-step-authority';
 import { assertMayRunGraphAction, graphActionExtraScopes, graphActionRequirement } from './graph-actions.controller';
-import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
+import { CANONICAL_MODULE_TOOLS, EXTRA_SCOPED_GOVERNED_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { FLOW_TOOLS } from './flow-tool-registry';
 
 /**
@@ -227,7 +227,14 @@ describe('KMS-01: the gate is derived from the canonical tool table', () => {
   });
 
   it('KMS-01: a tool no route governs needs no scope in member chat (D-98\'s narrowest reading; the plan queue keeps its prefix floor), but the money reads (KMS-08)', () => {
-    const governed = new Set([...Object.values(CANONICAL_MODULE_TOOLS).flatMap((t) => Object.keys(t)), ...Object.keys(GOVERNED_UNGRANTED)]);
+    const governed = new Set([
+      ...Object.values(CANONICAL_MODULE_TOOLS).flatMap((t) => Object.keys(t)),
+      ...Object.keys(GOVERNED_UNGRANTED),
+      ...EXTRA_SCOPED_GOVERNED_TOOLS,
+    ]);
+    for (const tool of EXTRA_SCOPED_GOVERNED_TOOLS) {
+      expect(keyMemberToolScopes(tool, {}).length, tool).toBeGreaterThan(0);
+    }
     const ungoverned = FLOW_TOOLS.map((t) => t.name).filter((t) => !governed.has(t) && !Object.prototype.hasOwnProperty.call(KEY_MONEY_READS, t));
     expect(ungoverned.length).toBeGreaterThan(50);
     for (const tool of ungoverned) expect(keyMemberToolScopes(tool, {}), tool).toEqual([]);
