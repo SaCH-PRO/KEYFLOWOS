@@ -10,6 +10,7 @@ import {
 import { ModuleRef } from '@nestjs/core';
 import type { KeyActionProposal, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { isLostTransactionConflict } from '../../../core/prisma/transaction-conflict';
 import { AiExecutionLogService } from '../../ai/ai-execution-log.service';
 import { AiOversightService } from '../../ai/ai-oversight.service';
 import type { BusinessRole } from '../../ai/role-engine.service';
@@ -214,7 +215,8 @@ function isUniqueViolation(err: unknown): boolean {
  */
 const TRANSIENT_PRISMA_CODES: ReadonlySet<string> = new Set(['P2024', 'P2028', 'P2034']);
 
-function isDeterministicWriteRejection(err: unknown): boolean {
+export function isDeterministicWriteRejection(err: unknown): boolean {
+  if (isLostTransactionConflict(err)) return false;
   const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
   return typeof code === 'string' && /^P2\d{3}$/.test(code) && !TRANSIENT_PRISMA_CODES.has(code);
 }
