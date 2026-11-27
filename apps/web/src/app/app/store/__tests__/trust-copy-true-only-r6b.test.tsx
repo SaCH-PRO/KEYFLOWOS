@@ -36,7 +36,8 @@ async function generate(label: string) {
   await new Promise((r) => setTimeout(r, 50));
 }
 
-const twelve = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, name: `Sauce ${i}`, price: 1 }));
+// r7: PRODUCT, the kind /book draws as a product (a product without a category is a SERVICE, as /book shows it).
+const twelve = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, name: `Sauce ${i}`, price: 1, category: "PRODUCT" }));
 const listings = [{ id: "s_l0", name: "Sauce 0", price: 1, sourceProductId: "p0" }, { id: "s_l1", name: "Sauce 1", price: 1, sourceProductId: "p1" }];
 
 describe("R6B-1: the storefront-count helper", () => {

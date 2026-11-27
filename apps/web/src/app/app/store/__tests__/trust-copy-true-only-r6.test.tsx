@@ -64,7 +64,8 @@ function hubTool(id: string) {
 type Data = Record<string, unknown>;
 const store = (products: number, services: number, extra: Data = {}): Data => ({
   storeName: "Pepper Co",
-  products: Array.from({ length: products }, (_, i) => ({ id: `p${i}`, category: i % 2 ? "Sauces" : "PRODUCT" })),
+  // r7: PRODUCT, the kind /book draws as a product ("Sauces" is not a category /book draws).
+  products: Array.from({ length: products }, (_, i) => ({ id: `p${i}`, category: "PRODUCT" })),
   services: Array.from({ length: services }, (_, i) => ({ id: `s${i}`, category: "Tasting" })),
   ...extra,
 });
@@ -121,7 +122,7 @@ describe("R6-1: a count goes with the noun it counts", () => {
 });
 
 describe("R6-2: the counts are what the storefront shows", () => {
-  const merch = (commerceProducts: { id: string; isActive?: boolean }[], live: string[], services: { id: string; sourceProductId?: string | null }[]) =>
+  const merch = (commerceProducts: { id: string; category?: string; isActive?: boolean }[], live: string[], services: { id: string; sourceProductId?: string | null }[]) =>
     render(
       <MerchandisingMode
         businessData={{ name: "Pepper Co" }}
@@ -136,7 +137,7 @@ describe("R6-2: the counts are what the storefront shows", () => {
         hasTestimonials={false}
       />,
     );
-  const twelve = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}` }));
+  const twelve = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, category: "PRODUCT" }));
 
   it("12 products with none live on the store: no buy, order or shop claim and no count", async () => {
     for (const label of ["Generate SEO", "Launch Posts"]) {
@@ -149,14 +150,14 @@ describe("R6-2: the counts are what the storefront shows", () => {
   }, LONG);
 
   it("12 products with 2 live (and 1 more live but inactive): the count is 2", async () => {
-    merch([...twelve, { id: "off", isActive: false }], ["p0", "p1", "off"], []);
+    merch([...twelve, { id: "off", category: "PRODUCT", isActive: false }], ["p0", "p1", "off"], []);
     fireEvent.click(screen.getByText("AI Content Intelligence"));
     await generate("Launch Posts");
     expect(text()).toMatch(/Browse our 2 items\./);
   });
 
   it("a product's store-listing service is not a bookable service: no book claim, and it is not counted", async () => {
-    merch([{ id: "p0" }], ["p0"], [{ id: "s_listing", sourceProductId: "p0" }]);
+    merch([{ id: "p0", category: "PRODUCT" }], ["p0"], [{ id: "s_listing", sourceProductId: "p0" }]);
     fireEvent.click(screen.getByText("AI Content Intelligence"));
     await generate("Generate SEO");
     expect(text()).not.toMatch(/\bbook/i);

@@ -52,7 +52,8 @@ function hubTool(id: string) {
 }
 const store = (products: number, services: number, testimonials = 0) => ({
   storeName: "Pepper Co",
-  products: Array.from({ length: products }, (_, i) => ({ id: `p${i}`, category: "Sauces" })),
+  // r7: a real category (the kind /book draws the product as), not "Sauces", which /book does not draw.
+  products: Array.from({ length: products }, (_, i) => ({ id: `p${i}`, category: "PRODUCT" })),
   services: Array.from({ length: services }, (_, i) => ({ id: `s${i}`, category: "Tasting" })),
   testimonials: Array.from({ length: testimonials }, (_, i) => ({ id: `t${i}` })),
 });

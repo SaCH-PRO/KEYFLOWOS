@@ -50,7 +50,9 @@ function hubTool(id: string) {
 describe("R2-2: FAQ suggestions", () => {
   it("the AI content panel's payment FAQ does not say 'securely'", async () => {
     await panelAction("Generate FAQ", { storeName: "Pepper Co", productsCount: 2 }, /What payment methods do you accept\?/);
-    expect(text()).toMatch(/processed at checkout/);
+    // r7: not "processed at checkout" either: cash or manual payment is always offered at checkout.
+    expect(text()).not.toMatch(/processed at checkout/);
+    expect(text()).toMatch(/We accept \[your payment methods\]\./);
     expect(text()).not.toMatch(/securely/i);
   });
 
@@ -58,7 +60,8 @@ describe("R2-2: FAQ suggestions", () => {
     const out = await hubTool("faq-generator").execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", products: [{ id: "p1" }] } });
     const json = JSON.stringify(out);
     expect(json).toMatch(/What payment methods do you accept\?/);
-    expect(json).toMatch(/processed at checkout/);
+    expect(json).not.toMatch(/processed at checkout/);
+    expect(json).toMatch(/We accept \[your payment methods\]\./);
     expect(json).not.toMatch(/securely/i);
   });
 });

@@ -47,7 +47,8 @@ afterEach(() => {
   hub.updateStoreContext.mockReset();
 });
 
-const lastProducts = () => (hub.updateStoreContext.mock.calls.at(-1)?.[0] as { products: { id: string }[] }).products.map((p) => p.id);
+// r7: the copy tools read what the storefront shows (storeProducts); the analysis tools read the whole catalog.
+const lastProducts = () => (hub.updateStoreContext.mock.calls.at(-1)?.[0] as { storeProducts: { id: string }[] }).storeProducts.map((p) => p.id);
 
 describe("R6-2: the hub is given only the products live on the storefront", () => {
   it("12 products, none live: none", async () => {
@@ -77,8 +78,8 @@ describe("R6B: the hub's services, and the Design tab's counts", () => {
     const { default: StorePage } = await import("@/app/app/store/page");
     render(<StorePage />);
     await waitFor(() => expect(hub.updateStoreContext).toHaveBeenCalled());
-    const ctx = hub.updateStoreContext.mock.calls.at(-1)?.[0] as { services: { id: string }[] };
-    expect(ctx.services.map((s) => s.id)).toEqual(["s1", "s2"]);
+    const ctx = hub.updateStoreContext.mock.calls.at(-1)?.[0] as { storeServices: { id: string }[] };
+    expect(ctx.storeServices.map((s) => s.id)).toEqual(["s1", "s2"]);
     data.services = [];
   });
 

@@ -69,7 +69,8 @@ function hubTool(id: string) {
   return tool;
 }
 
-const FULL = { storeName: "Pepper Co", products: [{ id: "p1", category: "Sauces" }], services: [{ id: "s1", category: "Tasting" }], activeDeliveryCount: 1 };
+// r7: a commerce product's category is the kind /book draws it as (PRODUCT, PACKAGE or SERVICE), not "Sauces".
+const FULL = { storeName: "Pepper Co", products: [{ id: "p1", category: "PRODUCT" }], services: [{ id: "s1", category: "Tasting" }], activeDeliveryCount: 1 };
 const PANEL_PROPS = { storeName: "Pepper Co", productsCount: 2, servicesCount: 1, hasDelivery: true } as const;
 
 describe("R4B-1: the three claims noticed in round 4", () => {
