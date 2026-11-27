@@ -6,7 +6,7 @@ import { Plus, Palette, X, Receipt, Target } from "lucide-react";
 import { toast } from "sonner";
 import { ExpenseCategory, ExpenseBudget, ExpenseSummary, createExpenseCategory, deleteExpenseCategory } from "@/lib/client";
 import { useRefusal } from "@/lib/failure-kit";
-import { CATEGORY_COLORS, formatCurrency, refusedStart } from "./expense-utils";
+import { CATEGORY_COLORS, formatCurrency, refusedStart, canStartFor } from "./expense-utils";
 
 interface ExpenseCategoriesTabProps {
   businessId: string;
@@ -25,6 +25,8 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
   // EXPENSES-HUB-3: the client answers a refused create as { error } and does not throw; it used to say
   // "Category created" anyway. A refusal says why and keeps what was typed.
   const { refused } = useRefusal();
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
 
   const categoryData = useMemo(() => {
     return categories.map(cat => {
@@ -54,13 +56,13 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
     try {
       const res = await createExpenseCategory(businessId, { name: newCatName.trim(), color: newCatColor });
       // R11-1: answered after a switch to another business: nothing is added there and nothing is said.
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       if (refused(res, { what: "add expense categories" })) return;
       if (!res.data) { toast.error("Failed to create category"); return; }
       if (!addCategory(businessId, res.data)) return;
       setNewCatName(""); setNewCatColor(CATEGORY_COLORS[0]);
       toast.success("Category created");
-    } catch { if (isCurrentBusiness(businessId)) toast.error("Failed to create category"); }
+    } catch { if (live()) toast.error("Failed to create category"); }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
@@ -68,11 +70,11 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
     try {
       const res = await deleteExpenseCategory(businessId, categoryId);
       // R11-2: answered after a switch to another business: nothing is removed there and nothing is said.
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       if (refused(res, { what: "delete expense categories" })) return;
       if (!removeCategory(businessId, categoryId)) return;
       toast.success("Category deleted");
-    } catch { if (isCurrentBusiness(businessId)) toast.error("Failed to delete category"); }
+    } catch { if (live()) toast.error("Failed to delete category"); }
   };
 
   return (

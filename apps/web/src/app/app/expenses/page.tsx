@@ -33,7 +33,7 @@ import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
-import { PERIODS, formatCurrency, formatDate, expenseExportFileName, startRefusal, BUSINESS_CHANGED_ELSEWHERE } from "./components/expense-utils";
+import { PERIODS, formatCurrency, formatDate, expenseExportFileName, startRefusal, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./components/expense-utils";
 import { NoAccessState } from "@/components/ui/no-access-state";
 
 /* ───────────────────────────────────────────
@@ -378,7 +378,8 @@ export default function ExpensesInboxPage() {
       return;
     }
     const uploaded = await uploadFile(file);
-    if (pageBusiness.current !== bid) return;
+    // R19-5: the reply is judged by the start check's test too (a silent switch moves only the stored id).
+    if (pageBusiness.current !== bid || !canStartFor(bid, d.isCurrentBusiness)) return;
     if (!uploaded) {
       toast.error("Couldn't upload the receipt. Try again.");
       return;

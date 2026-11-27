@@ -61,6 +61,21 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       projectId: "", contactId: "", serviceId: "",
     };
   });
+  // R19-1: a form opened for one business keeps nothing of it when the modal shows another: the fields clear, and an
+  // edit of the old business's expense is no longer an edit (React's reset-on-prop-change, during render).
+  const [formFor, setFormFor] = useState(businessId);
+  const [editingFor] = useState(businessId); // the business the edit (if any) was opened for
+  if (formFor !== businessId) {
+    setFormFor(businessId);
+    setFormData({
+        // BUG-028: today in Trinidad (the business's zone), not the UTC date.
+        description: "", amount: "", date: todayInBusinessZone(new Date(), businessId),
+        vendor: "", categoryId: "", notes: "", receiptUrl: "", paymentMethod: "",
+        tags: "" as string, isRecurring: false, recurringFrequency: "MONTHLY",
+        projectId: "", contactId: "", serviceId: "",
+      });
+  }
+  const editing = editingFor === businessId ? editingExpense : null;
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
@@ -80,8 +95,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       serviceId: formData.serviceId || null,
     };
     try {
-      const res = editingExpense
-        ? await updateExpense(businessId, editingExpense.id, payload)
+      const res = editing
+        ? await updateExpense(businessId, editing.id, payload)
         : await createExpense(businessId, payload);
       // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
       if (res?.error) {
@@ -92,7 +107,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       // when the save started), silently once the business is no longer chosen.
       // EXPENSES-HUB-2 (BUG-061): a recurring expense (new, or an edit that makes it recurring) creates its
       // schedule through the existing route, next due one period after this expense's date.
-      if (formData.isRecurring && !(editingExpense && editingExpense.isRecurring)) {
+      if (formData.isRecurring && !(editing && editing.isRecurring)) {
         let refused: string | null = null;
         try {
           const scheduled = await createRecurringExpense(businessId, recurringScheduleBody({
@@ -211,7 +226,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] overflow-y-auto">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.1))" }}>
           <div>
-            <h2 id="expense-modal-title" className="text-base font-semibold">{editingExpense ? "Edit Expense" : "Add Expense"}</h2>
+            <h2 id="expense-modal-title" className="text-base font-semibold">{editing ? "Edit Expense" : "Add Expense"}</h2>
             <div className="flex items-center gap-2 mt-1">
               <div className="h-1 w-24 rounded-full bg-muted/30 overflow-hidden">
                 <div className="h-full rounded-full transition-all duration-300" style={{ width: `${completionPct}%`, background: completionPct === 100 ? "hsl(var(--kf-success))" : "hsl(var(--kf-accent1))" }} />
@@ -351,7 +366,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
           <div className="flex justify-end gap-2 pt-2 border-t border-border/30">
             <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted/30">Cancel</button>
-            <button onClick={handleSubmit} disabled={submitting || !formData.description.trim() || !formData.amount} aria-busy={submitting || undefined} className="kf-btn-primary px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-40">{editingExpense ? "Update" : "Add Expense"}</button>
+            <button onClick={handleSubmit} disabled={submitting || !formData.description.trim() || !formData.amount} aria-busy={submitting || undefined} className="kf-btn-primary px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-40">{editing ? "Update" : "Add Expense"}</button>
           </div>
         </div>
       </motion.div>

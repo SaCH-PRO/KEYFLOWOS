@@ -12,7 +12,7 @@ import { FileText } from "lucide-react";
 import type { Expense, ExpenseCategory, ExpenseSummary } from "@/lib/client";
 import { deleteExpense, updateExpense } from "@/lib/client";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
-import { refusedStart, useShownBusiness } from "./expense-utils";
+import { refusedStart, useShownBusiness, canStartFor } from "./expense-utils";
 
 interface ExpensePipelineProps {
   businessId: string | null;
@@ -74,6 +74,8 @@ export function ExpensePipeline({
 }: ExpensePipelineProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const searchParams = useSearchParams();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [_actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -142,12 +144,12 @@ export function ExpensePipeline({
     try {
       await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
       // R12: answered after a switch to another business: nothing is said or reloaded there.
-      if (isCurrentBusiness(businessId)) {
+      if (live()) {
         toast.success("Bill marked as paid");
         onReload();
       }
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to mark as paid");
+      if (live()) toast.error("Failed to mark as paid");
     }
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
   };
@@ -161,12 +163,12 @@ export function ExpensePipeline({
     setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: true }));
     try {
       await deleteExpense(businessId, expense.id);
-      if (isCurrentBusiness(businessId)) {
+      if (live()) {
         toast.success("Expense deleted");
         onReload();
       }
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to delete");
+      if (live()) toast.error("Failed to delete");
     }
     setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: false }));
   };

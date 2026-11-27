@@ -85,10 +85,6 @@ async function mount(over: Partial<Expense> = {}) {
   render(<ExpenseDetailPage />);
   await screen.findByRole("heading", { name: "Office Depot" });
 }
-function switchTo(bid: string) {
-  ws.bid = bid;
-  act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: bid } })); });
-}
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 const noToast = () => {
   expect(toast.success).not.toHaveBeenCalled();
@@ -97,7 +93,6 @@ const noToast = () => {
 
 
 /** Another tab has switched: the stored id says B, but no storage event has reached this tab yet. */
-const silentSwitch = (bid: string) => { ws.bid = bid; };
 
 
 afterEach(() => { blocked.on = false; });

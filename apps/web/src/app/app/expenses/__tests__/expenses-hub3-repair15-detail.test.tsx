@@ -2,7 +2,7 @@
  * EXPENSES-HUB-3 repair round 15 (R14 reviews at 0622e7a, MINORs), the expense detail page.
  *
  *   R15-1  Pay checks the business before it sends: a switch in another tab whose storage event has not arrived yet
- *          (the stored id already says B) sends no payBill for A
+ *          (the stored id already says B) sends no payBill for A (since R19-3 it says why, as void and delete do)
  *   R15-3  the page's stored-id key is the one the workspace writes (setStoredBusinessId, the real module)
  *   R15-4  another tab's switch, as a real StorageEvent, leaves the page; the listeners are removed on unmount
  *   R15-5  with the stored id already B (no event yet): A's reads that land write nothing (no A expense, no A budget),
@@ -53,7 +53,7 @@ vi.mock("@/lib/api/finance", () => finance);
 
 import { toast } from "sonner";
 import ExpenseDetailPage from "../[id]/page";
-import { EXPENSES_BUSINESS_ID_KEY } from "../components/expense-utils";
+import { EXPENSES_BUSINESS_ID_KEY, BUSINESS_CHANGED_ELSEWHERE } from "../components/expense-utils";
 
 const ok = <T,>(data: T) => ({ data, error: null });
 function deferred<T>() {
@@ -103,7 +103,7 @@ const noToast = () => {
 const silentSwitch = (bid: string) => { ws.bid = bid; };
 
 describe("R15-1: Pay checks the business before sending", () => {
-  it("a stored id already B sends no payBill for A, and says nothing", async () => {
+  it("a stored id already B sends no payBill for A, and says the business changed (R19-3: a refused start says why)", async () => {
     await mount({ status: "BILL" });
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
     const pay = await screen.findByRole("button", { name: /^Pay$/ });
@@ -112,7 +112,8 @@ describe("R15-1: Pay checks the business before sending", () => {
     fireEvent.click(pay);
     await settle();
     expect(finance.payBill).not.toHaveBeenCalled();
-    noToast();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(BUSINESS_CHANGED_ELSEWHERE);
   });
 });
 
@@ -205,7 +206,7 @@ describe("R15-5: with the stored id already B", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Failed to load expense"));
   });
 
-  it("void sends nothing for A", async () => {
+  it("void sends nothing for A, and says the business changed (R19-3)", async () => {
     await mount({ status: "PAID" });
     fireEvent.click(screen.getByRole("button", { name: /Void expense/ }));
     const dialog = await screen.findByRole("dialog");
@@ -213,10 +214,11 @@ describe("R15-5: with the stored id already B", () => {
     fireEvent.click(Array.from(dialog.querySelectorAll("button")).find((b) => /Void expense/.test(b.textContent ?? ""))!);
     await settle();
     expect(finance.voidBill).not.toHaveBeenCalled();
-    noToast();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(BUSINESS_CHANGED_ELSEWHERE);
   });
 
-  it("delete sends nothing for A", async () => {
+  it("delete sends nothing for A, and says the business changed (R19-3)", async () => {
     await mount({ status: "PAID" });
     fireEvent.click(screen.getByRole("button", { name: /Delete expense/ }));
     const dialog = await screen.findByRole("dialog");
@@ -224,7 +226,8 @@ describe("R15-5: with the stored id already B", () => {
     fireEvent.click(Array.from(dialog.querySelectorAll("button")).find((b) => (b.textContent ?? "").trim() === "Delete")!);
     await settle();
     expect(client.deleteExpense).not.toHaveBeenCalled();
-    noToast();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(BUSINESS_CHANGED_ELSEWHERE);
   });
 
   it("the edit sheet's save answering after the switch says nothing (the page gives the sheet its check)", async () => {

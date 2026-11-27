@@ -24,7 +24,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense, RecurringCandidate } from "@/lib/client";
-import { formatCurrency, formatDate, useShownBusiness, refusedStart } from "./expense-utils";
+import { formatCurrency, formatDate, useShownBusiness, refusedStart, canStartFor } from "./expense-utils";
 import { toast } from "sonner";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
@@ -82,6 +82,8 @@ export function ExpenseList({
 }: ExpenseListProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -132,13 +134,13 @@ export function ExpenseList({
         )
       );
       // R12: answered after a switch to another business: nothing is said or reloaded there.
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       toast.success(`${selectedIds.size} expense${selectedIds.size > 1 ? "s" : ""} categorized`);
       setSelectedIds(new Set());
       setBulkCategoryId("");
       onReload?.();
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to bulk categorize");
+      if (live()) toast.error("Failed to bulk categorize");
     }
   };
 
@@ -147,12 +149,12 @@ export function ExpenseList({
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await updateExpense(businessId, expenseId, { categoryId: categoryId || null });
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       toast.success("Category updated");
       setInlineCatExpId(null);
       onReload?.();
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to update category");
+      if (live()) toast.error("Failed to update category");
     }
   };
 

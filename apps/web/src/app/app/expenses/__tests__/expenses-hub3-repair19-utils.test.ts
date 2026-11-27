@@ -42,6 +42,9 @@ describe("R19-4: the slug", () => {
     ["Shop ⃝", "shop"],
     ["1́x", "1x"],
     ["Caf⃝e", "cafe"],
+    // after a letter of another script, where only these rules drop them
+    ["\u6771\u{E0100}\u4EAC", "\u6771\u4EAC"],
+    ["\u0E01\u20DD", "\u0E01"],
   ])("%j gives %s", (name, slug) => {
     expect(slugOf(fileFor(name))).toBe(slug);
   });

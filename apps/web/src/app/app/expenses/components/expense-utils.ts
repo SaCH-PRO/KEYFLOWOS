@@ -281,10 +281,14 @@ export function expenseExportFileName(businessId: string, now: Date = new Date()
 }
 
 const EXPORT_SLUG_MAX = 60;
+// R19-4: and at most 200 bytes of UTF-8, so the whole name (expenses-, the slug, -YYYY-MM-DD.csv) stays under 255.
+const EXPORT_SLUG_MAX_BYTES = 200;
 function exportSlug(text: string): string {
   const kept = text
     // R18-7: emoji variation selectors and the keycap mark carry no letter of their own.
-    .replace(/[\uFE00-\uFE0F\u20E3]/g, "")
+    .replace(/[\uFE00-\uFE0F\u20E3\u{E0100}-\u{E01EF}]/gu, "")
+    // R19-4: enclosing marks (a keycap, a circle) belong to no word.
+    .replace(/\p{Me}/gu, "")
     .normalize("NFKD")
     // R17-4: combining marks are dropped only after a Latin letter (accents: "Café Ñandú" is cafe-nandu). In other
     // scripts they are part of the word (Devanagari vowel signs, Japanese voicing, Thai tone marks, Arabic harakat).
@@ -292,22 +296,30 @@ function exportSlug(text: string): string {
     .normalize("NFC")
     .toLowerCase()
     .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
-    // R18-7: a mark with no letter before it (at the start, or after a dash) is not part of any word.
-    .replace(/(^|-)\p{M}+/gu, "$1")
+    // R18-7 / R19-4: a mark with no letter before it (at the start, after a dash, after a digit) is part of no word.
+    .replace(/(?<![\p{L}\p{M}])\p{M}+/gu, "")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return capGraphemes(kept, EXPORT_SLUG_MAX).replace(/-+$/g, "");
+  return capGraphemes(kept, EXPORT_SLUG_MAX, EXPORT_SLUG_MAX_BYTES).replace(/-+$/g, "");
 }
 
-/** R18-7: the first `max` user-perceived characters (graphemes): a cluster is kept whole or not at all. */
-function capGraphemes(text: string, max: number): string {
+/**
+ * R18-7 / R19-4: the first `max` user-perceived characters (graphemes), within `maxBytes` of UTF-8: a cluster is kept
+ * whole or not at all, and one too large to fit (a letter with hundreds of marks) is not kept.
+ */
+function capGraphemes(text: string, max: number, maxBytes: number): string {
   const Segmenter = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter;
-  if (!Segmenter) return Array.from(text).slice(0, max).join("");
+  const clusters = Segmenter ? Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(text), (g) => g.segment) : Array.from(text);
+  const encoder = new TextEncoder();
   let out = "";
   let n = 0;
-  for (const { segment } of new Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
+  let size = 0;
+  for (const cluster of clusters) {
     if (n >= max) break;
-    out += segment;
+    const bytes = encoder.encode(cluster).length;
+    if (size + bytes > maxBytes) break;
+    out += cluster;
+    size += bytes;
     n += 1;
   }
   return out;

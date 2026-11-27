@@ -6,7 +6,7 @@ import { Plus, Trash2, Target, AlertTriangle, X, TrendingUp, TrendingDown, Calen
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { ExpenseBudget, ExpenseCategory, ExpenseSummary, Expense, upsertExpenseBudget, deleteExpenseBudget } from "@/lib/client";
-import { businessCurrency, formatCurrency, useShownBusiness, refusedStart } from "./expense-utils";
+import { businessCurrency, formatCurrency, useShownBusiness, refusedStart, canStartFor } from "./expense-utils";
 
 interface ExpenseBudgetsTabProps {
   businessId: string;
@@ -22,6 +22,8 @@ interface ExpenseBudgetsTabProps {
 export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _expenses, summary: _summary, onReload, isCurrentBusiness: hookCheck }: ExpenseBudgetsTabProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetForm, setBudgetForm] = useState({ categoryId: "", amount: "", alertAt: "80" });
   // R14-6: a budget modal opened for one business closes, and its form clears, when the tab shows another.
@@ -53,22 +55,22 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
         alertAt: parseFloat(budgetForm.alertAt) || 80,
       });
       // R12: answered after a switch to another business: nothing is said or reloaded there.
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       setShowBudgetModal(false);
       setBudgetForm({ categoryId: "", amount: "", alertAt: "80" });
       toast.success("Budget saved");
       onReload();
-    } catch { if (isCurrentBusiness(businessId)) toast.error("Failed to save budget"); }
+    } catch { if (live()) toast.error("Failed to save budget"); }
   };
 
   const handleDeleteBudget = async (budgetId: string) => {
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await deleteExpenseBudget(businessId, budgetId);
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       toast.success("Budget deleted");
       onReload();
-    } catch { if (isCurrentBusiness(businessId)) toast.error("Failed to delete budget"); }
+    } catch { if (live()) toast.error("Failed to delete budget"); }
   };
 
   return (

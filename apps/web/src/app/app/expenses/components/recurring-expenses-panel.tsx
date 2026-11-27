@@ -21,7 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, refusedStart } from "./expense-utils";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, refusedStart, canStartFor } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -44,6 +44,8 @@ const FREQUENCIES: Record<string, string> = {
 export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck }: RecurringExpensesPanelProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
@@ -64,7 +66,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     setLoading(true);
     try {
       const res = await fetchRecurringExpenses(businessId);
-      // R12: a read for a business no longer shown writes nothing.
+      // R12: a read for a business no longer shown writes nothing. (A read, not a write's reply: it is judged by the
+      // business this panel shows, which may be one other than the stored, R19-5 leaves it so.)
       if (!isCurrentBusiness(businessId)) return;
       if (res.data) setRecurring(res.data);
     } catch {}
@@ -112,7 +115,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
         ? await updateRecurringExpense(businessId, editing.id, payload)
         : await createRecurringExpense(businessId, payload);
       // R12: answered after a switch to another business: nothing is said or reloaded there.
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       if (res?.error) {
         toast.error(res.error);
         return;
@@ -122,7 +125,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       setEditing(null);
       void load();
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to save");
+      if (live()) toast.error("Failed to save");
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -137,11 +140,11 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await cancelRecurringExpense(businessId, id);
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       toast.success("Cancelled");
       void load();
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to cancel");
+      if (live()) toast.error("Failed to cancel");
     }
   };
 
@@ -150,11 +153,11 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await runRecurringExpenseNow(businessId, id);
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live()) return;
       toast.success("Expense generated");
       void load();
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Failed to run");
+      if (live()) toast.error("Failed to run");
     }
   };
 

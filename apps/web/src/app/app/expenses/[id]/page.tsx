@@ -28,7 +28,7 @@ import {
 } from "@/lib/client";
 import { voidBill } from "@/lib/api/finance";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
-import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate, canStartFor } from "../components/expense-utils";
+import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate, canStartFor, refusedStart } from "../components/expense-utils";
 import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, RECEIPT_UNAVAILABLE_NOTE, receiptKind } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { refusalMessage } from "@/lib/failure-kit";
@@ -96,6 +96,8 @@ export default function ExpenseDetailPage() {
   // for the Expenses list and stops showing it; a reply for it that lands after the switch says nothing.
   const [left, setLeft] = useState(false);
   const isCurrentBusiness = useCallback((forBusiness: string) => getStoredBusinessId() === forBusiness, []);
+  // R19-5: replies to this page's actions are judged by the start check's test.
+  const live = (forBusiness: string) => canStartFor(forBusiness, isCurrentBusiness);
   // R15-5: leaving is one step, used by the listeners and by a read that lands after the stored business moved on.
   // The router is read through a ref: a router object that changes identity between renders must not re-run the
   // read effect (which depends on leave).
@@ -169,11 +171,13 @@ export default function ExpenseDetailPage() {
   // at once from Cash; it opens Pay, which asks the account and the method (components/bill-pay-dialog.tsx). Each
   // door answers the row as it now stands; a refusal is said in the server's words (FAILURE-KIT).
   const runVoid = async (action: "reject" | "void", success: string) => {
-    if (!businessId || !expense || !canStartFor(businessId, isCurrentBusiness)) return;
+    if (!businessId || !expense) return;
+    // R19-3: a refused start says why (another business chosen, or the choice could not be read).
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setActionLoading(action);
     try {
       const res = await voidBill(businessId, expense.id);
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live(businessId)) return;
       const refusal = refusalMessage(res, { what: action === "void" ? "void this expense" : "reject this bill" });
       if (refusal !== null) {
         toast.error(refusal);
@@ -182,7 +186,7 @@ export default function ExpenseDetailPage() {
         if (res.data) setExpense({ ...expense, ...res.data });
       }
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
+      if (live(businessId)) toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
     }
     setActionLoading(null);
     setConfirmVoid(false);
@@ -195,11 +199,12 @@ export default function ExpenseDetailPage() {
   // EXPENSES-HUB-1 (BUG-031): deleteExpense answers a refusal as { error } and does not throw, so the page reads
   // the answer: "Expense deleted" only when it went through.
   const handleDelete = async () => {
-    if (!businessId || !expense || !canStartFor(businessId, isCurrentBusiness)) return;
+    if (!businessId || !expense) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setActionLoading("delete");
     try {
       const res = await deleteExpense(businessId, expense.id);
-      if (!isCurrentBusiness(businessId)) return;
+      if (!live(businessId)) return;
       const refusal = refusalMessage(res, { what: "delete this expense" });
       if (refusal !== null) {
         toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? postedDeleteWords(expense.status) : refusal);
@@ -208,7 +213,7 @@ export default function ExpenseDetailPage() {
         router.push("/app/expenses");
       }
     } catch {
-      if (isCurrentBusiness(businessId)) toast.error("Couldn't delete this expense.");
+      if (live(businessId)) toast.error("Couldn't delete this expense.");
     }
     setActionLoading(null);
     setConfirmDelete(false);
