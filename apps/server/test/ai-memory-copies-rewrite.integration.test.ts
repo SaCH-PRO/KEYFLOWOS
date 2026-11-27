@@ -742,11 +742,10 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
     }
   }, 60_000);
 
-  it("V71I-06 the in-place writers outside AiMemoryService drop the copies of the old value too, and copy the row again with its new value (review COR-V71I-3): memory consolidation promoting a changed member-less recommendation into learning:learned:<fn> (the same row), and KEY's self-tuning rewriting an evolution_tuning row; search serves the new values with no backfill run; a promotion that does not change the value keeps the copy and embeds nothing", async () => {
+  it("V71I-06 the in-place writers outside AiMemoryService drop the copies of the old value too, and copy the row again with its new value (review COR-V71I-3): memory consolidation promoting a changed member-less recommendation into learning:learned:<fn> (the same row); search serves the new value with no backfill run; a promotion that does not change the value keeps the copy and embeds nothing", async () => {
     const app = await memoryApp();
     try {
       const { MemoryConsolidationService } = await import('../src/modules/key-cortex/memory-consolidation.service');
-      const { KeyCortexEvolutionService } = await import('../src/modules/key-cortex/key-cortex-evolution.service');
       const fn = `${P}fn_followup`;
       const cognition = await db.cognitionMemory.create({
         data: { businessId: ID.biz, roleId: 'key_cortex', functionId: fn, query: 'what next?', recommendation: 'V71I-06-OLD-PROMOTED: call the Arima leads first', userResponse: 'accepted', confidence: 0.95 },
@@ -756,11 +755,8 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const consolidation = new (MemoryConsolidationService as any)(prisma, undefined, app.semantic);
       await consolidation.run(ID.biz);
       const promoted = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'learning', key: `learned:${fn}` } });
-      const evolution = new (KeyCortexEvolutionService as any)(prisma, {} as any, {} as any, {} as any, undefined, undefined, app.semantic);
-      await (evolution as any).applyTuningAdjustment(ID.biz, { parameter: 'personality_tone', newValue: 'V71I-06-OLD-TONE: formal' });
-      const tuning = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'evolution_tuning', key: 'personality_tone' } });
-      expect(await app.api.backfill(ID.owner)).toBe(2);
-      expect(await atRest('V71I-06-OLD')).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
+      expect(await atRest('V71I-06-OLD')).toBe(1);
 
       // The same recommendation promoted again: the value does not change, the copy stays, nothing is embedded.
       const promotedCopy = await copyIdsOf(promoted.id);
@@ -772,31 +768,23 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
 
       await db.cognitionMemory.update({ where: { id: cognition.id }, data: { recommendation: 'V71I-06-NEW-PROMOTED: call the Chaguanas leads first' } });
       await consolidation.run(ID.biz);
-      await (evolution as any).applyTuningAdjustment(ID.biz, { parameter: 'personality_tone', newValue: 'V71I-06-NEW-TONE: warm' });
       await settle(app.semantic);
       const promotedNow = await db.aiMemory.findUniqueOrThrow({ where: { id: promoted.id } });
-      const tuningNow = await db.aiMemory.findUniqueOrThrow({ where: { id: tuning.id } });
       expect(promotedNow.value).toContain('V71I-06-NEW-PROMOTED');
-      expect(tuningNow.value).toContain('V71I-06-NEW-TONE');
 
       expect(await atRest('V71I-06-OLD'), 'copies of the old values left').toBe(0);
-      // Each row is copied again, in the form it had (the backfill's), with its new value: no backfill needed.
+      // The row is copied again, in the form it had (the backfill's), with its new value: no backfill needed.
       expect(await copiesOf(promoted.id), 'the promoted row, copied again').toEqual([backfillCopy('learning', `learned:${fn}`, promotedNow.value)]);
-      expect(await copiesOf(tuning.id), 'the tuning row, copied again').toEqual([backfillCopy('evolution_tuning', 'personality_tone', tuningNow.value)]);
       embeddedBefore = app.embedded.length;
       const memberSearch = await app.api.search(ID.member);
       expect(memberSearch).not.toContain('V71I-06-OLD');
       expect(memberSearch, 'served with no backfill run').toContain('V71I-06-NEW-PROMOTED');
-      // MEM-CLASS-READ (P137): evolution_tuning carries moduleScope=['ai'] (MEM-CLASS-COLUMNS);
-      // default STAFF has ai:none, so evolution_tuning is withheld from member and served to owner.
-      expect(memberSearch, 'ai-scoped evolution_tuning withheld from default STAFF').not.toContain('V71I-06-NEW-TONE');
       expect(app.embedded.length - embeddedBefore, 'only the question').toBe(1);
 
       embeddedBefore = app.embedded.length;
       const ownerSearch = await app.api.search(ID.owner);
       expect(ownerSearch).not.toContain('V71I-06-OLD');
       expect(ownerSearch, 'owner sees promoted learning copy with no backfill run').toContain('V71I-06-NEW-PROMOTED');
-      expect(ownerSearch, 'owner sees rewritten evolution_tuning copy with no backfill run').toContain('V71I-06-NEW-TONE');
       expect(app.embedded.length - embeddedBefore, 'only the question').toBe(1);
     } finally {
       await app.close();
@@ -1298,7 +1286,7 @@ function aiMemoryRewrites(): Array<{ site: string; file: string; fn: string | un
 }
 
 describe('FU-MEMORY-COPIES-REWRITE static: every AiMemory rewrite in apps/server/src goes through upsertAiMemoryDroppingStaleCopies', () => {
-  it('V71I-09 finds the door (the scan is not empty) and no AiMemory upsert or update outside it but the named settings writers, each of which is still there: AiMemoryService.upsert, ProactiveSuggestionService, MemoryConsolidationService.promoteFacts and KeyCortexEvolutionService write through it', () => {
+  it('V71I-09 finds the door (the scan is not empty) and no AiMemory upsert or update outside it but the named settings writers, each of which is still there: AiMemoryService.upsert, ProactiveSuggestionService and MemoryConsolidationService.promoteFacts write through it', () => {
     const writes = aiMemoryRewrites();
     const inDoor = writes.filter((w) => w.file === DOOR.file && w.fn === DOOR.fn);
     expect(inDoor.length, 'the door writes AiMemory rows').toBeGreaterThan(0);
@@ -1341,11 +1329,12 @@ function doorCalls(): Array<{ site: string; fn: string | undefined; args: ts.Nod
 }
 
 describe('FU-MEMORY-COPIES-REWRITE review repair, static: every writer through the door copies the row it rewrote again', () => {
-  it('V71I-15 (COR-V71I-3) every call of upsertAiMemoryDroppingStaleCopies in apps/server/src passes it the re-copier (its fifth argument, not undefined): AiMemoryService.upsert, ProactiveSuggestionService.generateSuggestions and blockCategory, MemoryConsolidationService.promoteFacts and KeyCortexEvolutionService.applyTuningAdjustment', () => {
+  it('V71I-15 (COR-V71I-3) every call of upsertAiMemoryDroppingStaleCopies in apps/server/src passes it the re-copier (its fifth argument, not undefined): AiMemoryService.upsert, ProactiveSuggestionService.generateSuggestions and blockCategory, and MemoryConsolidationService.promoteFacts (applyTuningAdjustment deleted in RR-SELFTUNE-CANDIDATE-ONLY)', () => {
     const calls = doorCalls();
     expect(calls.map((c) => c.fn).sort()).toEqual(
-      expect.arrayContaining(['applyTuningAdjustment', 'blockCategory', 'generateSuggestions', 'promoteFacts', 'upsert']),
+      expect.arrayContaining(['blockCategory', 'generateSuggestions', 'promoteFacts', 'upsert']),
     );
+    expect(calls.map((c) => c.fn)).not.toContain('applyTuningAdjustment');
     const withoutRecopier = calls.filter((c) => {
       const recopier = c.args[4];
       return !recopier || recopier.kind === ts.SyntaxKind.UndefinedKeyword || (ts.isIdentifier(recopier) && recopier.text === 'undefined');

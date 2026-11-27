@@ -3,8 +3,6 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
-import { upsertAiMemoryDroppingStaleCopies } from '../ai/ai-memory.service';
-import { SemanticMemoryService } from '../ai/semantic-memory.service';
 
 // ── Genome Integration Layer v3 (optional — services may not exist yet) ──
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
@@ -49,18 +47,6 @@ export interface DetectedPattern {
   timeRange: { start: Date; end: Date };
   recommendation?: string;
   severity?: 'low' | 'medium' | 'high';
-}
-
-export interface TuningReport {
-  businessId: string;
-  tunedAt: Date;
-  adjustments: Array<{
-    parameter: string;
-    oldValue: unknown;
-    newValue: unknown;
-    reason: string;
-  }>;
-  summary: string;
 }
 
 export interface LearningReport {
@@ -148,7 +134,6 @@ export interface UnifiedReport {
  * - Track every KEY interaction (queries, recommendations, outcomes)
  * - Learn user preferences from interaction history
  * - Detect business patterns using AI-driven time-series analysis
- * - Self-tune KEY's behaviour based on learned insights
  * - Generate weekly learning reports
  * - Explain individual recommendation decisions
  *
@@ -182,10 +167,6 @@ export class KeyCortexEvolutionService {
     @Optional()
     @Inject(KeyCortexEventService)
     private readonly eventService?: KeyCortexEventService,
-    // FU-MEMORY-COPIES-REWRITE review COR-V71I-3: copies a tuning row the door rewrote again (AiModule's).
-    @Optional()
-    @Inject(SemanticMemoryService)
-    private readonly semanticMemory?: SemanticMemoryService,
   ) {}
 
   // ========================================================================
@@ -510,129 +491,6 @@ Respond ONLY with a JSON array of patterns in this exact shape:
     );
 
     return patterns;
-  }
-
-  // ========================================================================
-  // 4. Self-Tuning (preserved)
-  // ========================================================================
-
-  /**
-   * Based on learned preferences and detected patterns, adjust KEY's
-   * behaviour for a specific business. Modifies personality, response
-   * length, recommendation types, and proactive notification frequency.
-   *
-   * All tuning decisions are logged.
-   *
-   * @param businessId  Tenant-scoped business identifier
-   * @returns           A report of all adjustments made
-   */
-  async selfTune(businessId: string): Promise<TuningReport> {
-    this.logger.log(`Starting self-tuning for business=${businessId}`);
-
-    // Gather inputs
-    const since = new Date();
-    since.setDate(since.getDate() - 30);
-
-    const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
-      where: {
-        businessId,
-        createdAt: { gte: since },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 500,
-    });
-
-    const patterns = await this.detectPatterns(businessId);
-
-    // Pull current AI preferences
-    const currentPreferences = await this.gateway.getPreferences(businessId);
-
-    // Use AI to decide what tuning adjustments to make
-    const tuningPrompt = this.buildTuningPrompt(interactions, patterns, currentPreferences);
-
-    const response = await this.gateway.complete({
-      businessId,
-      taskCategory: 'analysis',
-      messages: [
-        {
-          role: 'system',
-          content: `You are KEY's self-tuning engine. Based on interaction history, detected patterns, and current preferences, decide what adjustments to make to KEY's behaviour.
-
-Respond ONLY with a JSON object in this exact shape:
-{
-  "adjustments": [
-    {
-      "parameter": "personality_tone | response_length | recommendation_types | proactive_frequency | ai_mode | writing_style",
-      "oldValue": "current value",
-      "newValue": "recommended value",
-      "reason": "Why this change is recommended"
-    }
-  ],
-  "summary": "Brief summary of all tuning decisions"
-}`,
-        },
-        { role: 'user', content: tuningPrompt },
-      ],
-      maxTokens: 1200,
-      temperature: 0.3,
-    });
-
-    const tuningResult = this.safeParseJson<{
-      adjustments: Array<{
-        parameter: string;
-        oldValue: unknown;
-        newValue: unknown;
-        reason: string;
-      }>;
-      summary: string;
-    }>(response.content ?? '{"adjustments":[],"summary":"No adjustments needed"}');
-
-    // Apply the adjustments
-    const adjustments = tuningResult.adjustments ?? [];
-
-    for (const adj of adjustments) {
-      try {
-        await this.applyTuningAdjustment(businessId, adj);
-      } catch (err: any) {
-        this.logger.warn(
-          `Failed to apply tuning adjustment ${adj.parameter}: ${(err as Error).message}`,
-        );
-      }
-    }
-
-    // Persist the tuning report
-    const report: TuningReport = {
-      businessId,
-      tunedAt: new Date(),
-      adjustments: adjustments.map((adj: any) => ({
-        parameter: adj.parameter,
-        oldValue: adj.oldValue ?? 'unknown',
-        newValue: adj.newValue ?? 'unknown',
-        reason: adj.reason ?? 'No reason provided',
-      })),
-      summary: tuningResult.summary ?? 'Tuning completed with no significant changes.',
-    };
-
-    await (this.prisma.client as any).keyTuningLog.create({
-      data: {
-        businessId,
-        adjustments: JSON.stringify(report.adjustments),
-        summary: report.summary,
-      },
-    });
-
-    // Cache the latest tuning report
-    await this.redis.setJson(
-      `evolution:tuning:${businessId}`,
-      report,
-      86400,
-    );
-
-    this.logger.log(
-      `Self-tuning complete for business=${businessId}: ${report.adjustments.length} adjustments made`,
-    );
-
-    return report;
   }
 
   // ========================================================================
@@ -1878,71 +1736,6 @@ Be warm, specific, and insightful.`;
   }
 
   /**
-   * Apply a single tuning adjustment to KEY's behaviour.
-   */
-  private async applyTuningAdjustment(
-    businessId: string,
-    adj: { parameter: string; newValue: unknown },
-  ): Promise<void> {
-    switch (adj.parameter) {
-      case 'ai_mode': {
-        const validModes = ['balanced', 'premium', 'fast'];
-        const mode = String(adj.newValue);
-        if (validModes.includes(mode)) {
-          const prefs = await this.gateway.getPreferences(businessId);
-          await this.gateway.updatePreferences(businessId, {
-            ...prefs,
-            aiMode: mode as 'balanced' | 'premium' | 'fast',
-          });
-          this.logger.log(`Tuned ai_mode to "${mode}" for business=${businessId}`);
-        }
-        break;
-      }
-
-      case 'writing_style': {
-        const style = String(adj.newValue);
-        const prefs = await this.gateway.getPreferences(businessId);
-        await this.gateway.updatePreferences(businessId, {
-          ...prefs,
-          preferredWritingStyle: style,
-        });
-        this.logger.log(`Tuned writing_style to "${style}" for business=${businessId}`);
-        break;
-      }
-
-      case 'personality_tone':
-      case 'response_length':
-      case 'recommendation_types':
-      case 'proactive_frequency': {
-        // Store these in aiMemory as tuning-specific settings. FU-MEMORY-COPIES-REWRITE: through the write door, so
-        // a re-tuned parameter leaves no copy of its old value, and its copies are made again with the new one.
-        await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'evolution_tuning', key: adj.parameter }, {
-          create: {
-            value: JSON.stringify(adj.newValue),
-            source: 'key_self_tuning',
-            dataClass: 'GENERAL',
-            moduleScope: ['ai'],
-          },
-          update: {
-            value: JSON.stringify(adj.newValue),
-            source: 'key_self_tuning',
-            dataClass: 'GENERAL',
-            moduleScope: ['ai'],
-          },
-        }, this.semanticMemory);
-        this.logger.log(
-          `Tuned ${adj.parameter} to ${JSON.stringify(adj.newValue)} for business=${businessId}`,
-        );
-        break;
-      }
-
-      default: {
-        this.logger.warn(`Unknown tuning parameter: ${adj.parameter}`);
-      }
-    }
-  }
-
-  /**
    * Map a recommendation type to a genome DNA section.
    */
   private mapRecommendationTypeToDnaSection(recommendationType: string): string {
@@ -2049,50 +1842,6 @@ ${contactTrends.map((t: any) => `- ${t.date}: ${t.count} new contacts`).join('\n
 ${supportTrends.map((t: any) => `- ${t.date}: ${t.count} tickets`).join('\n')}
 
 Analyse this data and detect all meaningful business patterns.`;
-  }
-
-  /**
-   * Build the AI prompt for self-tuning decisions.
-   */
-  private buildTuningPrompt(
-    interactions: Array<{ userAction: string; recommendationType: string; query: string }>,
-    patterns: DetectedPattern[],
-    currentPreferences: { aiMode?: string; preferredWritingStyle?: string },
-  ): string {
-    const actionSummary = {
-      accepted: interactions.filter((i: any) => i.userAction === 'accepted').length,
-      rejected: interactions.filter((i: any) => i.userAction === 'rejected').length,
-      ignored: interactions.filter((i: any) => i.userAction === 'ignored').length,
-    };
-
-    const typeBreakdown: Record<string, { accepted: number; total: number }> = {};
-    for (const i of interactions) {
-      if (!typeBreakdown[i.recommendationType]) {
-        typeBreakdown[i.recommendationType] = { accepted: 0, total: 0 };
-      }
-      typeBreakdown[i.recommendationType].total++;
-      if (i.userAction === 'accepted') {
-        typeBreakdown[i.recommendationType].accepted++;
-      }
-    }
-
-    return `Current AI Preferences:
-- AI Mode: ${currentPreferences.aiMode ?? 'balanced'}
-- Writing Style: ${currentPreferences.preferredWritingStyle ?? 'default'}
-
-Last 30 Days Activity:
-- Total interactions: ${interactions.length}
-- Accepted: ${actionSummary.accepted}, Rejected: ${actionSummary.rejected}, Ignored: ${actionSummary.ignored}
-
-Recommendation Type Performance:
-${Object.entries(typeBreakdown)
-      .map(([type, stats]) => `- ${type}: ${Math.round((stats.accepted / stats.total) * 100)}% acceptance (${stats.accepted}/${stats.total})`)
-      .join('\n')}
-
-Detected Patterns:
-${patterns.map((p: any) => `- [${p.severity ?? 'medium'}] ${p.description} (${Math.round(p.confidence * 100)}% confidence)`).join('\n')}
-
-Based on this data, what adjustments should be made to KEY's behaviour?`;
   }
 
   /**
