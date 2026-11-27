@@ -1680,6 +1680,11 @@
       "prefix": "v92c_",
       "owner": "apps/server/test/pricing-service.integration.test.ts",
       "packet": "V1-92 (TOF-TIER-PRICING-SCHEMA, P156)"
+    },
+    {
+      "prefix": "v66a_",
+      "owner": "apps/server/test/tier-pricing.integration.test.ts",
+      "packet": "V1-66 (TOF-TIER-PRICING-ROUTES)"
     }
   ],
   "pendingRenames": [],
