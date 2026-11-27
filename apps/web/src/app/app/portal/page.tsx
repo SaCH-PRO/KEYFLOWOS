@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Plus, Trash2, Link2, Eye, EyeOff } from "lucide-react";
 import { listPortalAccess, createPortalAccess, revokePortalAccess } from "@/lib/portal";
@@ -26,16 +26,45 @@ export default function PortalPage() {
   // when the server answered the read-only view (an access without its token, with hasLiveLink). Unknown hides
   // nothing: the server still refuses.
   const levels = useMemberModuleLevels();
-  const [accessList, setAccessList] = useState<PortalAccessItem[]>([]);
+  // P232 round 1: the last answer is kept with the business it was read for, and shown only while that business is
+  // the one selected, so a switch never shows the previous business's accesses (or their links) under the new one.
+  // `error` says why the list could not be read: "refused" for a 403, "failed" for anything else. `readAt` is when it
+  // was read: an access that had expired by then shows as expired (read outside render, which stays pure).
+  const [listed, setListed] = useState<{
+    businessId: string;
+    list: PortalAccessItem[];
+    error: "refused" | "failed" | null;
+    readAt: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+  // The business a Grant form was opened for: it is shown only there.
+  const [formFor, setFormFor] = useState<string | null>(null);
   const [contactId, setContactId] = useState("");
+  const [grantError, setGrantError] = useState<string | null>(null);
+  // The business the page is showing: an answer read for any other (a switch while a read ran) is dropped.
+  const currentBusiness = useRef(businessId);
+  useEffect(() => {
+    currentBusiness.current = businessId;
+  }, [businessId]);
+
+  const current = listed && listed.businessId === businessId ? listed : null;
+  const accessList = current?.list ?? [];
+  const loadError = current?.error ?? null;
+  const showForm = !!businessId && formFor === businessId;
+  const setShowForm = (open: boolean) => setFormFor(open ? businessId ?? null : null);
 
   async function loadData() {
     if (!businessId) return;
+    const askedFor = businessId;
     setLoading(true);
-    const res = await listPortalAccess(businessId);
-    if (res.data) setAccessList(res.data);
+    const res = await listPortalAccess(askedFor);
+    if (currentBusiness.current !== askedFor) return;
+    // A read that fails keeps nothing of an earlier answer: no stale accesses under a refusal or an error.
+    setListed(
+      res.data
+        ? { businessId: askedFor, list: res.data, error: null, readAt: Date.now() }
+        : { businessId: askedFor, list: [], error: res.status === 403 ? "refused" : "failed", readAt: Date.now() },
+    );
     setLoading(false);
   }
 
@@ -55,7 +84,10 @@ export default function PortalPage() {
     if (res.data) {
       setShowForm(false);
       setContactId("");
+      setGrantError(null);
       loadData();
+    } else {
+      setGrantError(res.status === 403 ? "You can't grant portal access." : "Couldn't grant portal access. Try again.");
     }
   }
 
@@ -73,6 +105,10 @@ export default function PortalPage() {
   const belowCrmWrite = crmLevel === "none" || crmLevel === "read";
   const readOnlyView = accessList.some((a) => !a.token && typeof a.hasLiveLink === "boolean");
   const canWrite = !belowCrmWrite && !readOnlyView;
+  const isExpired = (a: PortalAccessItem) => {
+    const at = Date.parse(a.expiresAt);
+    return Number.isFinite(at) && at <= (current?.readAt ?? 0);
+  };
 
   return (
     <div className="space-y-6 pb-12">
@@ -96,6 +132,7 @@ export default function PortalPage() {
         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="rounded-xl border border-border bg-card p-4 space-y-3">
           <h3 className="text-sm font-semibold">Grant Portal Access</h3>
           <input placeholder="Contact ID" value={contactId} onChange={e => setContactId(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm bg-muted/50 border border-border outline-none" />
+          {grantError && <p role="alert" className="text-xs text-red-400">{grantError}</p>}
           <div className="flex gap-2">
             <button onClick={handleCreate} className="px-4 py-2 rounded-lg bg-[hsl(24_95%_53%)] text-white text-sm font-medium">Grant</button>
             <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-lg bg-muted text-sm">Cancel</button>
@@ -106,6 +143,12 @@ export default function PortalPage() {
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Loading...</div>
+        ) : loadError ? (
+          <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
+            {loadError === "refused"
+              ? "You don't have access to the client portal in this business."
+              : "Couldn't load portal access. Try again."}
+          </div>
         ) : accessList.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">No portal access granted yet</div>
         ) : (
@@ -119,13 +162,19 @@ export default function PortalPage() {
                     <span>· {a.accessCount} visits</span>
                     {a.lastAccessedAt && <span>· Last: {new Date(a.lastAccessedAt).toLocaleDateString()}</span>}
                   </div>
-                  {a.enabled && a.token && (
+                  {a.enabled && isExpired(a) && (
+                    <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
+                      <Link2 className="w-3 h-3" />
+                      <span>Link expired</span>
+                    </div>
+                  )}
+                  {a.enabled && !isExpired(a) && a.token && (
                     <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
                       <Link2 className="w-3 h-3" />
                       <span className="truncate">{getPortalUrl(a.token)}</span>
                     </div>
                   )}
-                  {a.enabled && !a.token && a.hasLiveLink === true && (
+                  {a.enabled && !isExpired(a) && !a.token && a.hasLiveLink === true && (
                     <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
                       <Link2 className="w-3 h-3" />
                       <span>Portal link active</span>
