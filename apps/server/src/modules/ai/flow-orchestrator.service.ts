@@ -198,6 +198,12 @@ export interface FlowMessage {
   toolResults?: FlowToolResult[];
   pendingConfirmations?: PendingConfirmation[];
   requiresConfirmation?: boolean;
+  /**
+   * FU-FLOW-SAVE-EXECUTED-TOOL-TURN (D-261): set when tools already ran and
+   * the follow-up model response failed. Saved with empty `content` (never
+   * partial follow-up text) so retries see the executed writes in history.
+   */
+  failed?: boolean;
   timestamp?: Date;
 }
 
@@ -2476,6 +2482,57 @@ export class FlowOrchestratorService {
   }
 
   /**
+   * FU-FLOW-SAVE-EXECUTED-TOOL-TURN (D-261): when tools have already executed
+   * and the follow-up model stream or completion fails, persist the user turn
+   * and the executed tool calls + results (marked `failed: true`, with empty
+   * assistant content — never partial follow-up text) so a retry sees the
+   * writes that already ran and does not repeat them.
+   *
+   * Persistence failures are caught safely so they never mask the stream or
+   * provider error and never leak raw DB error messages/secrets.
+   */
+  private async saveFailedToolTurn(
+    businessId: string,
+    sessionId: string,
+    conversationHistory: FlowMessage[],
+    message: string,
+    enrichedMessage: string,
+    attachments: FlowAttachment[] | undefined,
+    toolCalls: FlowToolCall[],
+    toolResults: FlowToolResult[],
+    userId?: string,
+  ): Promise<void> {
+    const sessionMessages: FlowMessage[] = [...conversationHistory];
+    if (message.trim() || attachments?.length) {
+      sessionMessages.push({
+        role: 'user',
+        content: enrichedMessage,
+        attachments,
+        timestamp: new Date(),
+      });
+    }
+    sessionMessages.push({
+      role: 'assistant',
+      content: '',
+      toolCalls,
+      toolResults,
+      failed: true,
+      timestamp: new Date(),
+    });
+    try {
+      await this.saveConversationHistory(businessId, sessionId, sessionMessages, userId);
+      // Failed tool turns persist empty assistant content (no reply text), so
+      // enforceDoNotSay is a no-op while keeping every save point covered.
+      void this.enforceDoNotSay(businessId, '');
+    } catch (err: unknown) {
+      const errorKind = err instanceof Error ? err.name : 'Error';
+      this.logger.warn(
+        `Failed to persist executed tool turn for session ${sessionId} (business ${businessId}): ${errorKind}`,
+      );
+    }
+  }
+
+  /**
    * The "RELEVANT CONTEXT FROM MEMORY" section of a KEY chat turn: optional
    * enrichment, so any failure of the semantic search leaves it out and the turn
    * goes on.
@@ -2689,7 +2746,7 @@ ${triage.standingContext}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
-                content: JSON.stringify(result.result),
+                content: JSON.stringify(result.success === false ? { error: result.error } : (result.result ?? null)),
               });
             }
           }
@@ -2988,16 +3045,32 @@ ${triage.standingContext}`;
         })),
       ];
 
-      const followUpGateway = await this.aiUsage.trackAndComplete(
-        businessId,
-        undefined,
-        'flow_chat',
-        {
-          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
-          maxTokens: 500,
-          temperature: 0.7,
-        },
-      );
+      let followUpGateway: Awaited<ReturnType<AiUsageService['trackAndComplete']>>;
+      try {
+        followUpGateway = await this.aiUsage.trackAndComplete(
+          businessId,
+          undefined,
+          'flow_chat',
+          {
+            messages: withUntrustedContentRuleWhereFenced(followUpMessages),
+            maxTokens: 500,
+            temperature: 0.7,
+          },
+        );
+      } catch (followUpError: unknown) {
+        await this.saveFailedToolTurn(
+          businessId,
+          effectiveSessionId,
+          conversationHistory,
+          message,
+          enrichedMessage,
+          attachments,
+          announcedCalls,
+          toolResults,
+          userId,
+        );
+        throw followUpError;
+      }
 
       const finalReply = followUpGateway.content
         || 'Done! The action was completed successfully.';
@@ -3196,7 +3269,7 @@ ${triage.standingContext}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
-                content: JSON.stringify(result.result),
+                content: JSON.stringify(result.success === false ? { error: result.error } : (result.result ?? null)),
               });
             }
           }
@@ -3565,30 +3638,62 @@ ${triage.standingContext}`;
         })),
       ];
 
-      const followUpStream = this.aiUsage.trackAndStream(
-        businessId,
-        undefined,
-        'flow_chat_stream',
-        {
-          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
-          maxTokens: 500,
-          temperature: 0.7,
-        },
-      );
+      let followUpCompleted = false;
+      try {
+        const followUpStream = this.aiUsage.trackAndStream(
+          businessId,
+          undefined,
+          'flow_chat_stream',
+          {
+            messages: withUntrustedContentRuleWhereFenced(followUpMessages),
+            maxTokens: 500,
+            temperature: 0.7,
+          },
+        );
 
-      for await (const chunk of followUpStream) {
-        if (chunk.type === 'content_delta' && chunk.content) {
-          followUpContent += chunk.content;
-          // Cumulative, continuing from the pre-tool text so the client
-          // can keep rendering with replace semantics.
-          const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
-          yield { type: 'content_delta', content: shown(combined) };
+        for await (const chunk of followUpStream) {
+          if (chunk.type === 'content_delta' && chunk.content) {
+            followUpContent += chunk.content;
+            // Cumulative, continuing from the pre-tool text so the client
+            // can keep rendering with replace semantics.
+            const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
+            yield { type: 'content_delta', content: shown(combined) };
+          }
+          // RR-STREAM-ERROR-NO-EFFECTS review SEC-B / FU-FLOW-SAVE-EXECUTED-TOOL-TURN (D-261):
+          // A follow-up that ended in an error is NOT finalized as an answer and
+          // never saves partial follow-up text, but DOES persist the executed tool
+          // turn (marked failed) so a retry sees the writes that already ran.
+          if (chunk.type === 'error') {
+            await this.saveFailedToolTurn(
+              businessId,
+              effectiveSessionId,
+              conversationHistory,
+              message,
+              enrichedMessage,
+              attachments,
+              announcedCalls,
+              toolResults,
+              userId,
+            );
+            followUpCompleted = true;
+            yield { type: 'error', error: chunk.error };
+            return;
+          }
         }
-        // RR-STREAM-ERROR-NO-EFFECTS review SEC-B: as the first stream, a
-        // follow-up that ended in an error is shown as one and not saved as the answer.
-        if (chunk.type === 'error') {
-          yield { type: 'error', error: chunk.error };
-          return;
+        followUpCompleted = true;
+      } finally {
+        if (!followUpCompleted) {
+          await this.saveFailedToolTurn(
+            businessId,
+            effectiveSessionId,
+            conversationHistory,
+            message,
+            enrichedMessage,
+            attachments,
+            announcedCalls,
+            toolResults,
+            userId,
+          );
         }
       }
 
