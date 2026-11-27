@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isLostTransactionConflict } from '../../core/prisma/transaction-conflict';
 import { CommerceService } from '../commerce/commerce.service';
 import {
   InvoiceWorkflowService,
@@ -135,6 +136,18 @@ function storefrontPaypalCredentials(businessId: string, meta: unknown): PaypalW
  */
 const TRANSIENT_TX_ABORTS = new Set(['P2028', 'P2034']);
 const PAYPAL_CAPTURE_RECORD_ATTEMPTS = 3;
+
+/**
+ * W11-TRANSIENT-CONFLICT (F-37): whether a PayPal capture recording abort is
+ * transient and worth retrying — either a Prisma transaction abort code
+ * (`P2028`, `P2034`) or a deadlock / serialization failure recognized by
+ * `isLostTransactionConflict` (including no-code `@prisma/adapter-pg` 40P01
+ * deadlocks and `P2010` raw-query wrappers).
+ */
+export function isTransientPaymentAbort(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return (typeof code === 'string' && TRANSIENT_TX_ABORTS.has(code)) || isLostTransactionConflict(err);
+}
 
 /**
  * V1-29c-REFUND-WRITE-DOOR — the payment a provider refund refunds, and the
@@ -4150,8 +4163,7 @@ export class PaymentsService {
             recorded = 'elsewhere';
             break;
           }
-          const code = (e as { code?: string } | null)?.code;
-          if (attempt < PAYPAL_CAPTURE_RECORD_ATTEMPTS && code && TRANSIENT_TX_ABORTS.has(code)) continue;
+          if (attempt < PAYPAL_CAPTURE_RECORD_ATTEMPTS && isTransientPaymentAbort(e)) continue;
           this.logger.error(
             `PayPal captured order ${orderId} (capture ${captureId}, invoice ${invoiceId}) but it could not be recorded after ` +
               `${attempt} attempt(s): ${e instanceof Error ? e.message : e}. PayPal's PAYMENT.CAPTURE.COMPLETED delivery records it.`,

@@ -1,7 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { fromCents, toCents } from '../commerce/money';
-import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from './cash-position.service';
+import {
+  CashPositionService,
+  UNCODED_CURRENCY_LABEL,
+  otherCurrencyCash,
+  sanitizeCurrencyCode,
+  type OtherCurrencyCash,
+} from './cash-position.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 import { normalizeCurrency } from './posting.service';
 
@@ -140,48 +146,73 @@ export class SafeToSpendService {
 
     // V1-34 review CR-34-01: say so when an account opening balance that has
     // not been posted yet is part of a cash figure; V1-37c: under the figure
-    // of its own currency.
+    // of its own currency. FU-CASH-LABEL-SANITISER (D-135, R1-SEC-03): non-code
+    // labels (including a free-text Business.currency) are never echoed in
+    // otherCurrencyCash or prose; valid 3-letter codes remain byte-identical.
+    const safeHomeCurrency = sanitizeCurrencyCode(currency);
+    const fmtHome = (amount: number) => (safeHomeCurrency ? `${safeHomeCurrency} ${amount.toFixed(2)}` : amount.toFixed(2));
+    const homeLabel = safeHomeCurrency ?? 'business currency';
+    const homeNorm = normalizeCurrency(currency);
+
     const unpostedIn = (code: string) => cashPosition.unpostedOpeningBalances
-      .filter((o) => o.currency === code)
-      .map((o) => `  - includes ${o.name} opening balance not yet posted: ${o.currency} ${o.amount.toFixed(2)}`);
+      .filter((o) => normalizeCurrency(o.currency) === normalizeCurrency(code))
+      .map((o) => {
+        const safeCode = sanitizeCurrencyCode(o.currency);
+        return safeCode
+          ? `  - includes ${o.name} opening balance not yet posted: ${safeCode} ${o.amount.toFixed(2)}`
+          : `  - includes ${o.name} opening balance not yet posted (uncoded currency): ${o.amount.toFixed(2)}`;
+      });
+    const unpostedUncoded = () => cashPosition.unpostedOpeningBalances
+      .filter((o) => normalizeCurrency(o.currency) !== homeNorm && !sanitizeCurrencyCode(o.currency))
+      .map((o) => `  - includes ${o.name} opening balance not yet posted (uncoded currency): ${o.amount.toFixed(2)}`);
     const explanation: string[] = [
-      `Cash balance: ${currency} ${cashBalance.toFixed(2)} (ledger)`,
+      `Cash balance: ${fmtHome(cashBalance)} (ledger)`,
       ...unpostedIn(currency),
       // V1-37c (D-13): cash in another currency is said, never added or converted.
-      ...otherCash.flatMap((o) => [
-        `Cash in ${o.currency}, not included (never added to ${currency}): ${o.currency} ${o.amount.toFixed(2)} (ledger)`,
-        ...unpostedIn(o.currency),
-      ]),
-      `Tax reserved: ${currency} ${taxReserved.toFixed(2)}`,
-      `Bills due next 30 days: ${currency} ${billsDueNext30Days.toFixed(2)}`,
-      `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,
+      ...otherCash.flatMap((o) => (
+        o.currency === UNCODED_CURRENCY_LABEL
+          ? [
+              `Cash in ${o.count ?? 1} uncoded ${(o.count ?? 1) === 1 ? 'currency' : 'currencies'}, not included (never added to ${homeLabel}): ${o.amount.toFixed(2)} (ledger)`,
+              ...unpostedUncoded(),
+            ]
+          : [
+              `Cash in ${o.currency}, not included (never added to ${homeLabel}): ${o.currency} ${o.amount.toFixed(2)} (ledger)`,
+              ...unpostedIn(o.currency),
+            ]
+      )),
+      `Tax reserved: ${fmtHome(taxReserved)}`,
+      `Bills due next 30 days: ${fmtHome(billsDueNext30Days)}`,
+      `Operating buffer: ${fmtHome(operatingBuffer)}`,
     ];
 
     explanation.push(
       payrollRuns > 0
-        ? `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (${payrollRuns} committed run${payrollRuns === 1 ? '' : 's'})`
-        : `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (no unpaid runs)`,
+        ? `Payroll reserved: ${fmtHome(payrollReserved)} (${payrollRuns} committed run${payrollRuns === 1 ? '' : 's'})`
+        : `Payroll reserved: ${fmtHome(payrollReserved)} (no unpaid runs)`,
     );
     if (draftRuns > 0) {
       explanation.push(
-        `  - includes ${draftRuns} draft run${draftRuns === 1 ? '' : 's'} not yet approved: ${currency} ${fromCents(draftCents).toFixed(2)}`,
+        `  - includes ${draftRuns} draft run${draftRuns === 1 ? '' : 's'} not yet approved: ${fmtHome(fromCents(draftCents))}`,
       );
     }
     for (const o of otherPayroll) {
       const runs = payrollRunsByCurrency.get(o.currency) ?? 0;
+      const safePayCode = sanitizeCurrencyCode(o.currency);
       explanation.push(
-        `Payroll committed in ${o.currency}, not included (never added to ${currency}): ${o.currency} ${o.amount.toFixed(2)} (${runs} run${runs === 1 ? '' : 's'})`,
+        safePayCode
+          ? `Payroll committed in ${safePayCode}, not included (never added to ${homeLabel}): ${safePayCode} ${o.amount.toFixed(2)} (${runs} run${runs === 1 ? '' : 's'})`
+          : `Payroll committed in uncoded currency, not included (never added to ${homeLabel}): ${o.amount.toFixed(2)} (${runs} run${runs === 1 ? '' : 's'})`,
       );
     }
-    explanation.push(`Debt payments due: ${currency} ${debtPaymentsDue.toFixed(2)} (not yet modeled)`);
-    if (otherReserves > 0) explanation.push(`Other reserves: ${currency} ${otherReserves.toFixed(2)}`);
+    explanation.push(`Debt payments due: ${fmtHome(debtPaymentsDue)} (not yet modeled)`);
+    if (otherReserves > 0) explanation.push(`Other reserves: ${fmtHome(otherReserves)}`);
     if (reserveBuckets.length > 0) {
       for (const rb of reserveBuckets) {
-        explanation.push(`  - ${rb.name}: ${currency} ${Number(rb.currentAmount ?? 0).toFixed(2)}`);
+        explanation.push(`  - ${rb.name}: ${fmtHome(Number(rb.currentAmount ?? 0))}`);
       }
     }
 
-    explanation.push(`Safe to spend: ${currency} ${safeToSpend.toFixed(2)}`);
+    explanation.push(`Safe to spend: ${fmtHome(safeToSpend)}`);
 
     return {
       cashBalance,
