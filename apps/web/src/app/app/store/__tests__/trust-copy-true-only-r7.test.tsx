@@ -527,3 +527,21 @@ describe("R7-9: the write paths", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("R7-10: pins for three mutants the round-7 table left alive", () => {
+  it("liveProducts itself drops a SERVICE product with a bookable service's name (the list the hub is given)", () => {
+    const list = liveProducts([{ id: "p_hair", name: "Haircut", category: "SERVICE" }, { id: "p_oil", name: "Hair oil", category: "PRODUCT" }], new Set(["p_hair", "p_oil"]), { services: [{ id: "s_hair", name: "Haircut" }] });
+    expect(list.map((p) => p.id)).toEqual(["p_oil"]);
+  });
+
+  it("no 'Nothing on Your Store' without the store's view, even when the catalog has nothing /book draws", async () => {
+    const out = await generateStoreSuggestions({ businessId: "biz_1", activeView: "catalog", customData: { storeEnabled: true, hasHeroHeadline: true, hasHeroCta: true, products: [{ id: "x", category: "OTHER" }], services: [] } } as never);
+    expect(out.map((s) => s.title)).not.toContain("Nothing on Your Store Yet");
+  });
+
+  it("the save warning counts a placeholder in the question too", () => {
+    render(<PolicyEditor config={{ faqEntries: [{ id: "q", question: "What is [Product Name]?", answer: "Our sauce.", order: 0 }] } as never} onConfigChange={vi.fn()} onSave={vi.fn(async () => {})} saving={false} />);
+    expect(screen.getByRole("alert").textContent).toMatch(/^1 FAQ entry still has a \[bracketed\] part/);
+  });
+});
+
