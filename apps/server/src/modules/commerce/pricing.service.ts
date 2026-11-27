@@ -70,8 +70,9 @@ export function normalizePricingTier(raw: unknown): PricingTier {
   }
   const normalized = raw.trim().toUpperCase();
   if (!ALLOWED_TIER_SET.has(normalized)) {
+    const preview = raw.length > 64 ? `${raw.slice(0, 64)}...` : raw;
     throw new BadRequestException(
-      `Invalid pricing tier "${raw}". Allowed tiers: ${PRICING_TIERS.join(', ')}`,
+      `Invalid pricing tier "${preview}". Allowed tiers: ${PRICING_TIERS.join(', ')}`,
     );
   }
   return normalized as PricingTier;
@@ -190,6 +191,10 @@ export class PricingService {
     }
 
     return this.prisma.client.$transaction(async (tx) => {
+      if (typeof (tx as { $executeRaw?: unknown }).$executeRaw === 'function') {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('pricing_service'), hashtext(${`${bizId}:${prodId}`}))`;
+      }
+
       const product = await tx.product.findFirst({
         where: { id: prodId, businessId: bizId, deletedAt: null },
         select: { id: true },
@@ -217,7 +222,7 @@ export class PricingService {
         });
         if (existing) {
           await tx.productTierPrice.updateMany({
-            where: { id: existing.id, businessId: bizId },
+            where: { id: existing.id, businessId: bizId, productId: prodId },
             data: { price: item.price },
           });
         } else {
@@ -254,6 +259,10 @@ export class PricingService {
     const validPrice = assertValidTierPrice(price);
 
     return this.prisma.client.$transaction(async (tx) => {
+      if (typeof (tx as { $executeRaw?: unknown }).$executeRaw === 'function') {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('pricing_service'), hashtext(${`${bizId}:${prodId}`}))`;
+      }
+
       const product = await tx.product.findFirst({
         where: { id: prodId, businessId: bizId, deletedAt: null },
         select: { id: true },
@@ -269,11 +278,11 @@ export class PricingService {
 
       if (existing) {
         await tx.productTierPrice.updateMany({
-          where: { id: existing.id, businessId: bizId },
+          where: { id: existing.id, businessId: bizId, productId: prodId },
           data: { price: validPrice },
         });
         const updated = await tx.productTierPrice.findFirst({
-          where: { id: existing.id, businessId: bizId },
+          where: { id: existing.id, businessId: bizId, productId: prodId },
         });
         if (!updated) {
           throw new NotFoundException('Product tier price not found');
@@ -304,18 +313,30 @@ export class PricingService {
     const prodId = assertNonEmptyId(productId, 'Product not found');
     const normalizedTier = normalizePricingTier(tier);
 
-    const product = await this.prisma.client.product.findFirst({
-      where: { id: prodId, businessId: bizId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!product) {
-      throw new NotFoundException('Product not found');
-    }
+    const runDelete = async (client: typeof this.prisma.client) => {
+      if (typeof (client as { $executeRaw?: unknown }).$executeRaw === 'function') {
+        await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('pricing_service'), hashtext(${`${bizId}:${prodId}`}))`;
+      }
+      const product = await client.product.findFirst({
+        where: { id: prodId, businessId: bizId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!product) {
+        throw new NotFoundException('Product not found');
+      }
 
-    const result = await this.prisma.client.productTierPrice.deleteMany({
-      where: { businessId: bizId, productId: prodId, tier: normalizedTier },
-    });
-    return { deleted: result.count > 0 };
+      const result = await client.productTierPrice.deleteMany({
+        where: { businessId: bizId, productId: prodId, tier: normalizedTier },
+      });
+      return { deleted: result.count > 0 };
+    };
+
+    if (typeof this.prisma.client.$transaction === 'function') {
+      return this.prisma.client.$transaction(async (tx) =>
+        runDelete(tx as unknown as typeof this.prisma.client),
+      );
+    }
+    return runDelete(this.prisma.client);
   }
 
   /**

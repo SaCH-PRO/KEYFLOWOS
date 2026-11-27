@@ -393,7 +393,7 @@ describe('PricingService (TOF-TIER-PRICING-SCHEMA)', () => {
         where: { businessId: BIZ_A, productId: PROD_A, tier: { notIn: ['WHOLESALE', 'VIP'] } },
       });
       expect(mockPrisma.client.productTierPrice.updateMany).toHaveBeenCalledWith({
-        where: { id: 'tp_existing', businessId: BIZ_A },
+        where: { id: 'tp_existing', businessId: BIZ_A, productId: PROD_A },
         data: { price: 80 },
       });
       expect(mockPrisma.client.productTierPrice.create).toHaveBeenCalledWith({
@@ -456,7 +456,7 @@ describe('PricingService (TOF-TIER-PRICING-SCHEMA)', () => {
       const second = await service.upsertProductTierPrice(BIZ_A, PROD_A, 'WHOLESALE', 75.5);
       expect(second).toEqual(updated);
       expect(mockPrisma.client.productTierPrice.updateMany).toHaveBeenCalledWith({
-        where: { id: 'tp_1', businessId: BIZ_A },
+        where: { id: 'tp_1', businessId: BIZ_A, productId: PROD_A },
         data: { price: 75.5 },
       });
     });
