@@ -35,6 +35,8 @@ const HEADER = 'x-v92j-user';
 
 const ID = {
   ownerA: `${P}owner_a`,
+  scopedOwnerNoWriteA: `${P}owner_sc_none_a`,
+  scopedOwnerExpOnlyA: `${P}owner_sc_exp_a`,
   staffFrontDeskA: `${P}staff_front_a`,
   staffExpReadOnlyA: `${P}staff_exp_ro_a`,
   staffBookingsOnlyA: `${P}staff_bk_a`,
@@ -194,6 +196,8 @@ beforeAll(async () => {
   await db.user.createMany({
     data: [
       { id: ID.ownerA, email: `${P}owner_a@test.local`, name: 'Owner A' },
+      { id: ID.scopedOwnerNoWriteA, email: `${P}owner_sc_none_a@test.local`, name: 'Scoped Owner None' },
+      { id: ID.scopedOwnerExpOnlyA, email: `${P}owner_sc_exp_a@test.local`, name: 'Scoped Owner Exp' },
       { id: ID.staffFrontDeskA, email: `${P}staff_front_a@test.local`, name: 'Front Desk A' },
       { id: ID.staffExpReadOnlyA, email: `${P}staff_exp_ro_a@test.local`, name: 'Exp ReadOnly A' },
       { id: ID.staffBookingsOnlyA, email: `${P}staff_bk_a@test.local`, name: 'Bookings Only A' },
@@ -212,6 +216,18 @@ beforeAll(async () => {
   await db.membership.createMany({
     data: [
       { userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' },
+      {
+        userId: ID.scopedOwnerNoWriteA,
+        businessId: ID.bizA,
+        role: 'OWNER',
+        permissionScopes: { operations: 'none', expenses: 'none' },
+      },
+      {
+        userId: ID.scopedOwnerExpOnlyA,
+        businessId: ID.bizA,
+        role: 'OWNER',
+        permissionScopes: { expenses: 'write' },
+      },
       {
         userId: ID.staffFrontDeskA,
         businessId: ID.bizA,
@@ -290,16 +306,47 @@ describe('P206 FU-TODAY-APPROVALS-STAFF (D-298, Journey I2)', () => {
       );
       expect(hitsOn).toHaveLength(1);
       expect(hitsOn[0]).toMatchObject({ kind: 'APPROVAL_REQUEST', sourceId: approvalId });
+      // Unassigned STAFF (front-desk requester & bookings-only staff) never see the shadow-migrated approval on Today
+      for (const staffId of [ID.staffFrontDeskA, ID.staffBookingsOnlyA]) {
+        const staffToday = await request(app.getHttpServer())
+          .get(`/business-command-center/businesses/${ID.bizA}/today`)
+          .set(HEADER, staffId)
+          .expect(200);
+        expect(
+          (staffToday.body.needsYou.items as Array<{ sourceId: string; title: string }>).some(
+            (i) => i.sourceId === approvalId || i.title === title,
+          ),
+        ).toBe(false);
+      }
     } finally {
       if (prevKeyDisabled === undefined) delete process.env.KEY_DISABLED;
       else process.env.KEY_DISABLED = prevKeyDisabled;
     }
 
-    // Front-desk STAFF (no operations:write) CANNOT approve or reject their own request
+    // Front-desk STAFF (no operations:write) CANNOT approve, reject, delegate, cancel, or escalate
     await request(app.getHttpServer())
       .post(`/businesses/${ID.bizA}/approvals/${approvalId}/approve`)
       .set(HEADER, ID.staffFrontDeskA)
       .send({ decision: 'approve' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals/${approvalId}/reject`)
+      .set(HEADER, ID.staffFrontDeskA)
+      .send({ decision: 'reject' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals/${approvalId}/delegate`)
+      .set(HEADER, ID.staffFrontDeskA)
+      .send({ delegatedTo: ID.ownerA })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/businesses/${ID.bizA}/approvals/${approvalId}`)
+      .set(HEADER, ID.staffFrontDeskA)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals/${approvalId}/escalate`)
+      .set(HEADER, ID.staffFrontDeskA)
+      .send({ reason: 'Escalation attempt' })
       .expect(403);
 
     // Owner approves the request cleanly -> status transitions to approved
@@ -317,7 +364,7 @@ describe('P206 FU-TODAY-APPROVALS-STAFF (D-298, Journey I2)', () => {
     expect(getRes.body.status).toBe('approved');
   });
 
-  it('[TAS-02] RED-BEFORE (D-71 / D-96): POST approvals enforces per-requestType write scope and fails closed for unknown types', async () => {
+  it('[TAS-02] RED-BEFORE (D-71 / D-96 / D-140): POST approvals enforces per-requestType write scope, binds explicit-scope OWNERs, fails closed, and rejects duplicate stepOrder', async () => {
     // expenses:read (no write) -> 403 on expense
     await request(app.getHttpServer())
       .post(`/businesses/${ID.bizA}/approvals`)
@@ -339,6 +386,45 @@ describe('P206 FU-TODAY-APPROVALS-STAFF (D-298, Journey I2)', () => {
         steps: [{ stepOrder: 1, approverId: ID.ownerA }],
       })
       .expect(403);
+
+    // D-140: OWNER with explicit { operations: 'none', expenses: 'none' } is denied 403
+    await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals`)
+      .set(HEADER, ID.scopedOwnerNoWriteA)
+      .send({
+        requestType: 'expense',
+        title: 'Scoped owner denied',
+        steps: [{ stepOrder: 1, approverId: ID.ownerA }],
+      })
+      .expect(403);
+
+    // D-140: OWNER with explicit { expenses: 'write' } (no operations:write) creates pending & CANNOT self-auto-approve
+    const scopedOwnerReq = await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals`)
+      .set(HEADER, ID.scopedOwnerExpOnlyA)
+      .send({
+        requestType: 'expense',
+        title: 'Scoped owner expense request',
+        payload: { amount: 50 },
+        threshold: 999999,
+        steps: [{ stepOrder: 1, approverId: ID.ownerA }],
+      })
+      .expect(201);
+    expect(scopedOwnerReq.body.status).toBe('pending');
+
+    // Duplicate stepOrder rejected with 400 (no silent step skipping)
+    await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals`)
+      .set(HEADER, ID.ownerA)
+      .send({
+        requestType: 'expense',
+        title: 'Duplicate stepOrder attempt',
+        steps: [
+          { stepOrder: 1, approverId: ID.ownerA },
+          { stepOrder: 1, approverId: ID.staffFrontDeskA },
+        ],
+      })
+      .expect(400);
 
     // expenses:write cannot create refund (needs revenue:write), quote_discount, general, or time_off -> 403
     for (const requestType of ['refund', 'quote_discount', 'general', 'time_off']) {

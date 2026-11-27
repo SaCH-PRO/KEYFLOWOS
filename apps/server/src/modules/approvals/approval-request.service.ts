@@ -94,10 +94,9 @@ export class ApprovalRequestService {
       throw new ForbiddenException('Not a member of this business');
     }
 
-    if (membership.role === 'OWNER') {
-      return { canDecide: true };
-    }
-
+    // D-140: evaluate canonical memberModuleLevel for every role (including
+    // OWNER), so an unscoped OWNER (permissionScopes: null) resolves
+    // operations:admin while an explicitly scoped OWNER is bound by its map.
     const hasWrite = (mod: string) => rankOf(memberModuleLevel(membership, mod)) >= LEVEL_RANK.write;
     const hasOpsWrite = hasWrite('operations');
     if (hasOpsWrite) {
@@ -124,6 +123,13 @@ export class ApprovalRequestService {
     }
 
     const sortedSteps = [...input.steps].sort((a, b) => a.stepOrder - b.stepOrder);
+    const seenOrders = new Set<number>();
+    for (const s of sortedSteps) {
+      if (seenOrders.has(s.stepOrder)) {
+        throw new BadRequestException(`Duplicate stepOrder (${s.stepOrder}) in approval steps`);
+      }
+      seenOrders.add(s.stepOrder);
+    }
     const amount = this.extractAmount(input.payload);
     const canAutoApprove = input.allowAutoApprove !== false;
     if (canAutoApprove && input.threshold !== undefined && amount !== undefined && amount <= input.threshold) {

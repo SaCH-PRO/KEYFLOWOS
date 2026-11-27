@@ -320,4 +320,97 @@ describe('ApprovalRequestService', () => {
 
     await expect(svc.cancelRequest(created.id, 'hacker')).rejects.toThrow('Only the requester can cancel');
   });
+
+  it('initializes currentStep from sortedSteps[0].stepOrder and advances across sparse 1-indexed steps (P206)', async () => {
+    const prisma = createMockPrisma();
+    const emitter = createMockEmitter();
+    const svc = new ApprovalRequestService(prisma as any, emitter as any);
+
+    const created = await svc.createRequest({
+      businessId: 'biz_1',
+      requesterId: 'staff_1',
+      requestType: 'expense',
+      title: 'Sparse steps',
+      steps: [
+        { stepOrder: 3, approverId: 'owner_1' },
+        { stepOrder: 1, approverId: 'manager_1' },
+      ],
+    });
+    expect(created.currentStep).toBe(1);
+
+    const afterStep1 = await svc.decideStep({
+      approvalRequestId: created.id,
+      approverId: 'manager_1',
+      decision: 'approve',
+    });
+    expect(afterStep1?.status).toBe('pending');
+    expect(afterStep1?.currentStep).toBe(3);
+
+    const afterStep3 = await svc.decideStep({
+      approvalRequestId: created.id,
+      approverId: 'owner_1',
+      decision: 'approve',
+    });
+    expect(afterStep3?.status).toBe('approved');
+  });
+
+  it('rejects duplicate stepOrder values and honors allowAutoApprove: false (P206)', async () => {
+    const prisma = createMockPrisma();
+    const emitter = createMockEmitter();
+    const svc = new ApprovalRequestService(prisma as any, emitter as any);
+
+    await expect(
+      svc.createRequest({
+        businessId: 'biz_1',
+        requesterId: 'staff_1',
+        requestType: 'expense',
+        title: 'Duplicate orders',
+        steps: [
+          { stepOrder: 1, approverId: 'a' },
+          { stepOrder: 1, approverId: 'b' },
+        ],
+      }),
+    ).rejects.toThrow('Duplicate stepOrder');
+
+    const pending = await svc.createRequest({
+      businessId: 'biz_1',
+      requesterId: 'staff_1',
+      requestType: 'expense',
+      title: 'No self-auto-approve',
+      payload: { amount: 50 },
+      threshold: 999999,
+      allowAutoApprove: false,
+      steps: [{ stepOrder: 1, approverId: 'owner_1' }],
+    });
+    expect(pending.status).toBe('pending');
+    expect(pending.currentStep).toBe(1);
+  });
+
+  it('assertMayCreateApprovalRequest enforces per-requestType write scope and D-140 explicit-scope OWNERs (P206)', async () => {
+    const memberships = new Map<string, { role: string; permissionScopes: unknown }>();
+    const prisma = {
+      client: {
+        membership: {
+          findUnique: vi.fn(async ({ where }: any) => memberships.get(where.userId_businessId.userId) ?? null),
+        },
+      },
+    };
+    const svc = new ApprovalRequestService(prisma as any, createMockEmitter() as any);
+
+    memberships.set('owner_unscoped', { role: 'OWNER', permissionScopes: null });
+    memberships.set('owner_none', { role: 'OWNER', permissionScopes: { operations: 'none', expenses: 'none' } });
+    memberships.set('owner_exp', { role: 'OWNER', permissionScopes: { expenses: 'write' } });
+    memberships.set('staff_exp', { role: 'STAFF', permissionScopes: { expenses: 'write' } });
+
+    await expect(svc.assertMayCreateApprovalRequest('biz_1', 'owner_unscoped', 'expense')).resolves.toEqual({
+      canDecide: true,
+    });
+    await expect(svc.assertMayCreateApprovalRequest('biz_1', 'owner_none', 'expense')).rejects.toThrow('requires expenses:write');
+    await expect(svc.assertMayCreateApprovalRequest('biz_1', 'owner_exp', 'expense')).resolves.toEqual({
+      canDecide: false,
+    });
+    await expect(svc.assertMayCreateApprovalRequest('biz_1', 'staff_exp', 'unknown_type')).rejects.toThrow(
+      'requires operations:write',
+    );
+  });
 });

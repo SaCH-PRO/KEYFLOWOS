@@ -116,10 +116,10 @@ const PROBES: Probe[] = [
     directPrisma: true,
   },
   {
-    label: 'ApprovalController.create',
+    label: 'ApprovalController.approve',
     method: 'post',
-    path: (b) => `/businesses/${b}/approvals`,
-    body: () => ({ requestType: 'EXPENSE', title: 'Approve equipment' }),
+    path: (b) => `/businesses/${b}/approvals/${P}missing/approve`,
+    body: () => ({ decision: 'approve' }),
     module: 'operations',
     level: 'write',
   },
@@ -201,10 +201,11 @@ const EXPECTED_OPEN_SCOPES: Array<{
   { controller: 'ActionsController', handler: 'remindContact', module: 'crm', level: 'write' },
   { controller: 'ActionsController', handler: 'sendReceipt', module: 'revenue', level: 'write' },
 
-  // ApprovalController (6 -> operations:write)
+  // ApprovalController (5 -> operations:write; create moved to exempt-check
+  // check:assertMayCreateApprovalRequest in P206 / D-298 and is tested in
+  // test/today-approvals-staff.integration.test.ts)
   { controller: 'ApprovalController', handler: 'approve', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'cancel', module: 'operations', level: 'write' },
-  { controller: 'ApprovalController', handler: 'create', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'delegate', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'escalate', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'reject', module: 'operations', level: 'write' },
