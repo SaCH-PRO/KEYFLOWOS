@@ -130,6 +130,7 @@ beforeAll(async () => {
         },
       });
     },
+    logContactEvent: vi.fn(async () => ({})),
   };
 
   const moduleRef = await Test.createTestingModule({
