@@ -11,6 +11,8 @@
  *   CFS-04  an answer for an older date or staff member is never shown
  *   CFS-05  the time chosen travels with the server's exact instant
  *   CFS-06  a day closed under the sunday..saturday spelling shows the closed banner
+ *   CFS-08  a day open under sun..sat and closed under sunday..saturday is open (short key first, as the server
+ *           reads it): no closed banner, and its slots are asked for
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -207,5 +209,12 @@ describe("SWP-BOOKING-SLOTS: the schedule step offers the server's free slots", 
     pick("2026-12-13");
     expect(await screen.findByText(/Closed on/)).toBeInTheDocument();
     expect(timeButton("09:00")).toBeNull();
+  });
+
+  it("CFS-08 the short day key wins over the long one: no closed banner, and the slots are asked for", async () => {
+    const { pick } = renderToSchedule({ hours: { sun: { open: "10:00", close: "14:00" }, sunday: { closed: true } } });
+    pick("2026-12-13");
+    await waitFor(() => expect(slotCalls().some((p) => p.includes("date=2026-12-13"))).toBe(true));
+    expect(screen.queryByText(/Closed on/)).toBeNull();
   });
 });

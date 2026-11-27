@@ -167,6 +167,9 @@ vi.mock("../components/checkout-flow", () => ({
 
 import PublicBookingPage from "../page";
 
+/** These cases mount the whole storefront page (and the real checkout): under CPU load they can pass 5s. */
+const HEAVY_PAGE_TIMEOUT = 20_000;
+
 let savedTz: string | undefined;
 beforeAll(() => {
   savedTz = process.env.TZ;
@@ -210,7 +213,7 @@ describe("SWP-BOOKING-SLOTS: the page reuses kept bookings only for exactly thei
     await waitFor(() => expect(bookingPosts()).toHaveLength(3));
     expect(bookingPosts()[2].body.serviceId).toBe(SERVICE.id);
     expect(bookingPosts()[2].body.startTime).toBe(row.at[SERVICE.id]);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 
   it("BRX-02 control: the same customer with the same lines reuses the kept bookings", async () => {
     await bothBookedThenFailed();
@@ -218,5 +221,5 @@ describe("SWP-BOOKING-SLOTS: the page reuses kept bookings only for exactly thei
     fireEvent.click(await screen.findByRole("button", { name: "Place booking" }));
     await screen.findByRole("heading", { name: "Order Placed!" }, { timeout: 3000 });
     expect(bookingPosts()).toHaveLength(2);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 });

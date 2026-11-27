@@ -8,6 +8,7 @@
  *   COD-01  a day closed under either spelling is closed
  *   COD-02  an open day, a day not set, unclear data and no hours are not closed
  *   COD-03  the weekday is the calendar date's, whatever the visitor's clock
+ *   COD-04  a day saved under both spellings reads the short key first, as the server's slots reader does (P227)
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -65,5 +66,13 @@ describe("SWP-BOOKING-SLOTS: isClosedOnDate", () => {
     const h = hours({ sunday: { closed: true }, monday: { open: "09:00", close: "17:00" } });
     expect(isClosedOnDate(h, SUNDAY)).toBe(true);
     expect(isClosedOnDate(h, MONDAY)).toBe(false);
+  });
+
+  it("COD-04 a day saved under both spellings reads the short key first", () => {
+    const both = hours({ sun: { open: "10:00", close: "14:00" }, sunday: { closed: true } });
+    expect(isClosedOnDate(both, SUNDAY)).toBe(false);
+    expect(isDayClosed(SUNDAY, both)).toBe(false);
+    const reverse = hours({ sun: { closed: true }, sunday: { open: "10:00", close: "14:00" } });
+    expect(isClosedOnDate(reverse, SUNDAY)).toBe(true);
   });
 });

@@ -137,6 +137,9 @@ vi.mock("../components/cart-drawer", () => ({
 
 import PublicBookingPage from "../page";
 
+/** These cases mount the whole storefront page (and the real checkout): under CPU load they can pass 5s. */
+const HEAVY_PAGE_TIMEOUT = 20_000;
+
 const BOOK_PATH = `/bookings/public/businesses/${BUSINESS.id}`;
 const ORDER_PATH = `/site/storefront/public/${SLUG}/checkout`;
 const bookingPosts = () => net.posts.filter((p) => p.path === BOOK_PATH);
@@ -203,7 +206,7 @@ describe("SWP-BOOKING-SLOTS: a kept booking's time stays the customer's after a 
     await screen.findByRole("heading", { name: "Order Placed!" }, { timeout: 3000 });
     expect(orderPosts()).toHaveLength(2);
     expect(bookingPosts(), "the service is booked once, not again at another time").toHaveLength(1);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 
   it("BRH-02 another customer at the same browser is not handed the kept booking's slot", async () => {
     render(<PublicBookingPage />);
@@ -223,5 +226,5 @@ describe("SWP-BOOKING-SLOTS: a kept booking's time stays the customer's after a 
     expect(await screen.findByRole("button", { name: "12:00" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "11:00" }), "the kept booking's time is not offered to them").toBeNull();
     expect(button(/Continue/i)).toBeDisabled();
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 });

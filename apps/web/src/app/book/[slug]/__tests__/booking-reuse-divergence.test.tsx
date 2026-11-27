@@ -154,6 +154,9 @@ vi.mock("../components/cart-drawer", () => ({
 
 import PublicBookingPage from "../page";
 
+/** These cases mount the whole storefront page (and the real checkout): under CPU load they can pass 5s. */
+const HEAVY_PAGE_TIMEOUT = 20_000;
+
 const at = (hhmm: string) => `2026-12-15T${String(Number(hhmm.slice(0, 2)) + 4).padStart(2, "0")}:${hhmm.slice(3)}:00.000Z`;
 const ALL = ["09:00", "11:00", "12:00", "13:00"].map(at);
 /** After the failed payment: the customer's own PENDING bookings are counted as taken. */
@@ -246,10 +249,10 @@ async function moveOneHeldTime(cart: unknown[]) {
 describe("SWP-BOOKING-SLOTS: a held time is never booked once the reuse key no longer matches", () => {
   it("BRD-01 Session first in the cart", async () => {
     await moveOneHeldTime([SERVICE, SERVICE_B, PRODUCT]);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
   it("BRD-02 Follow-up first in the cart", async () => {
     await moveOneHeldTime([SERVICE_B, SERVICE, PRODUCT]);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 
   /** Holds the Session at 11:00 and the Follow-up at 09:00; the payment fails and the customer goes back to the shop. */
   async function holdBothThenFail(cart: unknown[]) {
@@ -287,7 +290,7 @@ describe("SWP-BOOKING-SLOTS: a held time is never booked once the reuse key no l
     expect(rebooked, "the Session is booked afresh; the kept bookings are not reused").toHaveLength(1);
     expect(rebooked[0].body.serviceId).toBe(SERVICE.id);
     expect(FRESH[SERVICE.id]).toContain(rebooked[0].body.startTime);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 
   it("BRD-04 after the hold is released, going back to the shop and opening checkout again restores it", async () => {
     const before = await holdBothThenFail([SERVICE, SERVICE_B, PRODUCT]);
@@ -305,5 +308,5 @@ describe("SWP-BOOKING-SLOTS: a held time is never booked once the reuse key no l
     await placeOrder();
     await screen.findByRole("heading", { name: "Order Placed!" }, { timeout: 3000 });
     expect(net.posts.slice(before).filter((p) => p.path === BOOK_PATH), "the kept bookings are reused").toHaveLength(0);
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 });
