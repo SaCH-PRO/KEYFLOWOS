@@ -91,16 +91,12 @@ function publicServiceNames(services: ServiceLike[]): unknown[] {
 }
 
 /**
- * Counts products already on the store (liveProducts) and bookable services by kind, as /book draws them. A
- * SERVICE-category product with the name of a public service (`dedupeNames`, by default the services given) is not
- * drawn.
+ * Counts products and bookable services by kind, as /book draws them; a SERVICE-category product with a given
+ * service's name is not drawn (for products straight from the catalog, the hub's copy tools without the store's view;
+ * storefrontOffer's products come de-duped by liveProducts, against every public service).
  */
-export function offerOf(
-  products: { category?: unknown; name?: unknown }[],
-  services: { name?: unknown }[],
-  dedupeNames: Iterable<unknown> = services.map((s) => s.name),
-): StorefrontOffer {
-  const names = new Set(dedupeNames);
+export function offerOf(products: { category?: unknown; name?: unknown }[], services: { name?: unknown }[]): StorefrontOffer {
+  const names = new Set(services.map((s) => s.name));
   const offer: StorefrontOffer = { products: 0, packages: 0, services: services.length, orderableServices: 0 };
   for (const p of products) {
     const category = categoryOf(p);
@@ -119,8 +115,8 @@ export function storefrontOffer(
   opts: { stock?: StockByProduct | null; storefrontConfig?: StorefrontConfig | null } = {},
 ): StorefrontOffer {
   const bookable = bookableServices(services, opts.storefrontConfig);
-  // r8: the de-dupe is against every public service, the hidden ones too (book/[slug]/page.tsx storeServiceNames).
-  return offerOf(liveProducts(commerceProducts, liveProductIds, { ...opts, services }), bookable, publicServiceNames(services));
+  // r8: liveProducts de-dupes against every public service, the hidden ones too (book/[slug]/page.tsx storeServiceNames).
+  return offerOf(liveProducts(commerceProducts, liveProductIds, { ...opts, services }), bookable);
 }
 
 const count = (n: unknown) => Math.max(0, Math.floor(Number(n)) || 0);
