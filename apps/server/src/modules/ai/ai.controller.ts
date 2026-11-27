@@ -270,7 +270,8 @@ export class AiController {
    * model's prompt from the business's ten newest Activity titles and every figure for any member. The
    * member who asks is now the chat's viewer (AiAdvisorService.chat): filtered, not refused.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/ai/chat')
   async chat(
@@ -319,7 +320,8 @@ export class AiController {
    * titles) in the model's prompt for any member. The member who asks is now the simulation's viewer
    * (AiAdvisorService.simulateScenario), as the chat's is: filtered, not refused.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/simulate')
   async simulate(
@@ -331,7 +333,8 @@ export class AiController {
     return this.advisor.simulateScenario(businessId, body.scenario, body.variables, viewer);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai/business-model')
   async generateBusinessModel(
@@ -403,7 +406,8 @@ export class AiController {
     return { plans };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/ai/business-plan/:planId')
   async updateBusinessPlan(
     @Param('businessId') businessId: string,
@@ -424,7 +428,8 @@ export class AiController {
     return { plan: updated };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/seo-score')
   async seoScore(
@@ -476,7 +481,8 @@ export class AiController {
     return this.businessGraph.getSharedSnapshotForMember(businessId, req?.user);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/ai/intent')
   async parseIntent(
@@ -486,7 +492,8 @@ export class AiController {
     return this.intentParser.parse(businessId, body.input);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/plan')
   async createPlan(
@@ -594,7 +601,8 @@ export class AiController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/plans/:planId/steps/:stepId/undo')
   async undoPlanStep(
     @Param('businessId') businessId: string,
@@ -643,7 +651,8 @@ export class AiController {
     return this.workflows.getTemplates();
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/workflows/:templateKey/instantiate')
   async instantiateWorkflow(
     @Param('businessId') businessId: string,
@@ -666,14 +675,16 @@ export class AiController {
     return this.suggestions.getPendingSuggestions(businessId, { reader, sight });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/suggestions/refresh')
   async refreshSuggestions(@Param('businessId') businessId: string) {
     const suggestions = await this.suggestions.generateSuggestions(businessId);
     return { suggestions, count: suggestions.length };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/suggestions/:suggestionId/dismiss')
   async dismissSuggestion(
     @Param('businessId') businessId: string,
@@ -683,7 +694,8 @@ export class AiController {
     return { dismissed: true };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/suggestions/:category/block')
   async blockSuggestionCategory(
     @Param('businessId') businessId: string,
@@ -808,7 +820,8 @@ export class AiController {
     return history;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/approvals/:approvalId/resolve')
   async resolveApproval(
     @Param('businessId') businessId: string,
@@ -821,7 +834,8 @@ export class AiController {
     return this.resolveLegacyApproval(businessId, approvalId, body.resolution, userId, req.user?.role);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/approvals/batch-resolve')
   async resolveApprovalsBatch(
     @Param('businessId') businessId: string,
@@ -1009,7 +1023,8 @@ export class AiController {
     return this.governance.getAutonomySettings(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Put('businesses/:businessId/ai/governance')
   async updateGovernanceSettings(
     @Param('businessId') businessId: string,
@@ -1051,7 +1066,8 @@ export class AiController {
     return { memories: sees ? entries : withoutDocumentExtractions(entries) };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/ai/memory')
   async upsertMemory(
     @Param('businessId') businessId: string,
@@ -1068,7 +1084,8 @@ export class AiController {
     return { memory: entry };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/ai/memory/bulk')
   async upsertMemoryBulk(
     @Param('businessId') businessId: string,
@@ -1084,7 +1101,8 @@ export class AiController {
     return { memories: results };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Delete('businesses/:businessId/ai/memory/:category/:key')
   async deleteMemory(
     @Param('businessId') businessId: string,
@@ -1108,7 +1126,8 @@ export class AiController {
     return ctx;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai/memory/summarize-patterns')
   async summarizePatterns(@Param('businessId') businessId: string) {
@@ -1466,7 +1485,8 @@ export class AiController {
     return this.workspaceRecs.getCrossModuleLinks(businessId, entityType, entityId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/ai/profile/chat')
   async profileChat(
@@ -1490,7 +1510,8 @@ export class AiController {
     return this.profileIntelligence.getCompletionSummary(businessId, userId, { documentExtractions });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/profile/confirm')
   async profileConfirm(
     @Param('businessId') businessId: string,
@@ -1502,7 +1523,8 @@ export class AiController {
     return this.profileIntelligence.confirmExtractions(businessId, userId, body.confirmedKeys, { documentExtractions });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/profile/reset')
   async profileReset(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     this.profileIntelligence.resetSession(businessId, profileMember(req));
@@ -1636,7 +1658,8 @@ export class AiController {
     return this.gateway.getRoutingConfig();
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Put('businesses/:businessId/ai/routing-config')
   async updateRoutingConfig(
     @Param('businessId') _businessId: string,
@@ -1651,7 +1674,8 @@ export class AiController {
 
   // ── KEY Command Orchestrator (Phase 6 MD) ───────────────────────────────
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/key/command')
   @CrmRateLimit(30, 60_000)
   async executeKeyCommand(
@@ -1892,7 +1916,8 @@ export class AiController {
     return this.autopilot.getRules(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/autopilot-rules/:ruleId')
   @CrmRateLimit(30, 60_000)
   async updateAutopilotRule(
@@ -2009,7 +2034,8 @@ export class AiController {
     return this.morningBriefingSvc.generateBriefing(businessId, viewer);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/briefing/:planId/execute-all')
   @CrmRateLimit(10, 60_000)
   async executeAllBriefingCards(
@@ -2033,7 +2059,8 @@ export class AiController {
    * Review SEC-W7BR-2 (D-73): it answers how many steps were skipped and the plan's status, and a skip
    * that changed nothing (a repeat, a briefing already finished) writes no audit row.
    */
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/briefing/:planId/skip')
   @CrmRateLimit(10, 60_000)
   async skipBriefing(
@@ -2091,7 +2118,8 @@ export class AiController {
     return this.inbox.getThread(threadId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/inbox/:threadId/reply')
   @CrmRateLimit(30, 60_000)
   async replyToThread(
@@ -2102,7 +2130,8 @@ export class AiController {
     return this.inbox.recordOutboundMessage(threadId, body.body, { role: body.role });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/inbox/:threadId/resolve')
   @CrmRateLimit(30, 60_000)
   async resolveThread(
@@ -2112,7 +2141,8 @@ export class AiController {
     return this.inbox.resolveThread(threadId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/inbox/:threadId/assign-role')
   @CrmRateLimit(30, 60_000)
   async assignThreadRole(
@@ -2137,7 +2167,8 @@ export class AiController {
     return this.goalTracker.getGoals(businessId, { status, category, role });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/goals')
   @CrmRateLimit(30, 60_000)
   async createGoal(
@@ -2170,7 +2201,8 @@ export class AiController {
     return this.goalTracker.getGoal(businessId, goalId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Put('businesses/:businessId/goals/:goalId')
   @CrmRateLimit(30, 60_000)
   async updateGoal(
@@ -2194,7 +2226,8 @@ export class AiController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Delete('businesses/:businessId/goals/:goalId')
   @CrmRateLimit(30, 60_000)
   async deleteGoal(
@@ -2204,7 +2237,8 @@ export class AiController {
     return this.goalTracker.deleteGoal(businessId, goalId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/goals/:goalId/progress')
   @CrmRateLimit(30, 60_000)
   async updateGoalProgress(
@@ -2247,7 +2281,8 @@ export class AiController {
     return this.capacityInsight.scanBusiness(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/ai/rebalance')
   @CrmRateLimit(10, 60_000)
   async rebalance(@Param('businessId') businessId: string) {
@@ -2260,7 +2295,8 @@ export class AiController {
     return this.keyAgentConfig.getOrCreate(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Put('businesses/:businessId/ai/agent-config')
   async updateAgentConfig(@Param('businessId') businessId: string, @Body() body: any) {
     return this.keyAgentConfig.update(businessId, body);

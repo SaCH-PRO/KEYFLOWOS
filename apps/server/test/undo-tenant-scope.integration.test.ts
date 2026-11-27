@@ -409,14 +409,15 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizB, name: 'V42B B', slug: `${P}bizb`, ownerId: ID.ownerB, currency: 'TTD' } });
   const m = (user: string, businessId: string, role: string, permissionScopes?: Record<string, string>) =>
     db.membership.create({ data: { id: `${user}_${businessId}_m`, userId: user, businessId, role, permissionScopes: permissionScopes ?? undefined } });
+  const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
   await m(ID.ownerA, ID.bizA, 'OWNER');
-  await m(ID.staffNone, ID.bizA, 'STAFF', { revenue: 'none', crm: 'write' });
-  await m(ID.staffRead, ID.bizA, 'STAFF');
-  await m(ID.staffWrite, ID.bizA, 'STAFF', { revenue: 'write', crm: 'read' });
-  await m(ID.staffAny, ID.bizA, 'STAFF', { revenue: 'none', crm: 'write', crm_delete: 'any' });
-  await m(ID.staffBook, ID.bizA, 'STAFF', { crm: 'write', crm_view: 'owned', crm_delete: 'any' });
-  await m(ID.staffEditNone, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'none', crm_delete: 'any' });
-  await m(ID.staffEditOwned, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'owned', crm_delete: 'any' });
+  await m(ID.staffNone, ID.bizA, 'STAFF', { revenue: 'none', crm: 'write', ai: 'write' });
+  await m(ID.staffRead, ID.bizA, 'STAFF', { ...defaultScopesForRole('STAFF'), ai: 'write' });
+  await m(ID.staffWrite, ID.bizA, 'STAFF', { revenue: 'write', crm: 'read', ai: 'write' });
+  await m(ID.staffAny, ID.bizA, 'STAFF', { revenue: 'none', crm: 'write', crm_delete: 'any', ai: 'write' });
+  await m(ID.staffBook, ID.bizA, 'STAFF', { crm: 'write', crm_view: 'owned', crm_delete: 'any', ai: 'write' });
+  await m(ID.staffEditNone, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'none', crm_delete: 'any', ai: 'write' });
+  await m(ID.staffEditOwned, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'owned', crm_delete: 'any', ai: 'write' });
   await m(ID.ownerB, ID.bizB, 'OWNER');
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'V42b', lastName: 'Customer', email: `${P}customer@test.local` } });
   for (const [id, visibility, ownerId] of [

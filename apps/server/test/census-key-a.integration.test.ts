@@ -154,6 +154,7 @@ function recordingStub(label: string) {
 async function cleanup() {
   if (!db) return;
   for (const sql of [
+    `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -342,7 +343,7 @@ const AI_WRITE_PROBES: ReadonlyArray<{ label: string; method: 'post' | 'put' | '
   { label: 'AiController.chat', method: 'post', url: `/ai/businesses/${ID.bizA}/ai/chat`, body: { message: 'hello' } },
   { label: 'AiController.executeKeyCommand', method: 'post', url: `/ai/businesses/${ID.bizA}/key/command`, body: { prompt: 'list contacts', mode: 'ask' } },
   { label: 'AiController.createGoal', method: 'post', url: `/ai/businesses/${ID.bizA}/goals`, body: { title: 'Grow revenue', targetValue: 100 } },
-  { label: 'AgentController.createAgentTrigger', method: 'post', url: `/ai/businesses/${ID.bizA}/agent/triggers`, body: { name: 't1', event: 'invoice.paid' } },
+  { label: 'AgentController.createAgentTrigger', method: 'post', url: `/ai/businesses/${ID.bizA}/agent/triggers`, body: { name: `${P}t1`, eventPattern: 'invoice.paid', objective: 'follow up' } },
   { label: 'AgentController.undoAction', method: 'post', url: `/ai/businesses/${ID.bizA}/agent/undo/${P}u1`, body: {} },
   { label: 'GraphActionsController.planAction', method: 'post', url: `/actions/businesses/${ID.bizA}/plan`, body: { input: 'create invoice' } },
 ];
