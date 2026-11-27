@@ -187,7 +187,6 @@ beforeAll(async () => {
   );
   const actionsService = new KeyCortexActionsService(
     prisma,
-    undefined,
     {} as any,
     toolRegistry,
     undefined,

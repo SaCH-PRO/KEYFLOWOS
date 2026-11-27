@@ -52,9 +52,10 @@ export const LEGACY_TOOL_EQUIVALENCE: ReadonlyArray<LegacyToolEquivalenceEntry> 
   },
   {
     legacyKey: 'finance.listOverdueInvoices',
-    disposition: 'SPECIALIZATION',
+    disposition: 'SAME',
+    canonicalTool: 'finance_list_overdue_invoices',
     reason:
-      'Enforces D-260 sent-only overdue statuses (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) with per-currency totalsByCurrency and limit; canonical finance_view_receivables includes PENDING per D-256 and fetch_revenue_risk filters SENT/DRAFT. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Promoted in P160 (RR-LEGACY-FALLBACK-REMOVE): canonical finance_list_overdue_invoices preserves D-260 sent-only overdue statuses (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED), per-currency totalsByCurrency, and limit (1-100) at tier 1 under revenue:read + D-104 membership.',
   },
   {
     legacyKey: 'finance.generateMoneyMoves',
@@ -72,51 +73,56 @@ export const LEGACY_TOOL_EQUIVALENCE: ReadonlyArray<LegacyToolEquivalenceEntry> 
   },
   {
     legacyKey: 'finance.createInvoiceReminderDraft',
-    disposition: 'SPECIALIZATION',
+    disposition: 'SAME',
+    canonicalTool: 'finance_create_invoice_reminder_draft',
     reason:
-      'Deterministic tier-2 template draft enforcing D-260 sent-only overdue checks and credit-aware remaining balance; canonical draft_payment_reminder is tier 1 (aliasing would loosen riskTier 2 -> 1 and drop D-260 guards) and calls an LLM. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Promoted in P160 (RR-LEGACY-FALLBACK-REMOVE): canonical finance_create_invoice_reminder_draft preserves deterministic tier-2 template drafting, D-260 sent-only overdue checks, and credit-aware remaining balance under revenue:write + D-104 membership without loosening riskTier 2.',
   },
   {
     legacyKey: 'contacts.recommendFollowUps',
-    disposition: 'SPECIALIZATION',
+    disposition: 'SAME',
+    canonicalTool: 'crm_recommend_follow_ups',
     reason:
-      'Returns individual stale contacts with daysSinceContact filtered by the caller CRM visibility clause (scopeContacts); canonical fetch_client_health returns aggregate counts only and create_followup_queue is a tier-2 write. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Promoted in P160 (RR-LEGACY-FALLBACK-REMOVE): canonical crm_recommend_follow_ups returns stale non-dormant contacts with daysSinceContact at tier 1 under crm:read and enforces D-37 caller CRM visibility directly in Prisma.',
   },
   {
     legacyKey: 'contacts.createCommandItem',
-    disposition: 'MISSING',
+    disposition: 'SAME',
+    canonicalTool: 'command_create_item',
     reason:
-      'Creates a universal-queue CommandItem via CommandService.create; FLOW_TOOLS only exposes obligation list/discharge tools (command_list_due_obligations, command_discharge_obligation) and has no item-creation tool yet. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Promoted in P160 (RR-LEGACY-FALLBACK-REMOVE): canonical command_create_item creates a universal-queue CommandItem via CommandService.create at tier 1 under operations:write (D-40) with D-37 contact visibility checks when contactId is supplied.',
   },
   {
     legacyKey: 'commerce.summarizeRevenue',
-    disposition: 'SPECIALIZATION',
+    disposition: 'SAME',
+    canonicalTool: 'commerce_summarize_revenue',
     reason:
-      'Returns all-time PAID invoice totalRevenue, paidInvoiceCount, and currency with empty input under revenue:read; canonical finance_profit_and_loss and finance_revenue_breakdown require date ranges, fetch_revenue_risk computes 30d risk metrics, and fetch_business_summary requires expenses:read. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Promoted in P160 (RR-LEGACY-FALLBACK-REMOVE): canonical commerce_summarize_revenue returns all-time PAID invoice totalRevenue, paidInvoiceCount, and currency with empty input at tier 1 under revenue:read + D-104 membership.',
   },
   {
     legacyKey: 'timeline.createReminder',
-    disposition: 'SPECIALIZATION',
+    disposition: 'SAME',
+    canonicalTool: 'crm_create_reminder',
     reason:
-      'Creates a ContactTask reminder with optional contactId; canonical create_task (tier 2) and crm_add_task (tier 1) both require a contactId via CrmService.addTask. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Promoted in P160 (RR-LEGACY-FALLBACK-REMOVE): canonical crm_create_reminder creates a ContactTask reminder at tier 1 under crm:write and validates required contactId ownership and D-37 visibility.',
   },
   {
     legacyKey: 'connect.scanDrive',
-    disposition: 'MISSING',
+    disposition: 'OBSOLETE',
     reason:
-      'Triggers ConnectorIntelligenceService.syncGoogleDrive under D-99 owner-only enforcement; canonical reconcile_sweep_statements only sweeps a single bank account statement source. Note: Google Drive sits under V1_HIDDEN_MODULES key "connectors" (defer-v1plus, D-152) so RR-LEGACY-FALLBACK-REMOVE should retire rather than promote it for v1.',
+      'Retired in P160 (RR-LEGACY-FALLBACK-REMOVE): Google Drive sits under V1_HIDDEN_MODULES key "connectors" (defer-v1plus, D-152) and has no v1 canonical replacement; must fail closed without executing.',
   },
   {
     legacyKey: 'connect.listDriveIntake',
-    disposition: 'MISSING',
+    disposition: 'OBSOLETE',
     reason:
-      'Lists driveIntakeFile rows awaiting review; no canonical Drive intake list tool exists in FLOW_TOOLS yet. Note: Google Drive sits under V1_HIDDEN_MODULES key "connectors" (defer-v1plus, D-152) so RR-LEGACY-FALLBACK-REMOVE should retire rather than promote it for v1.',
+      'Retired in P160 (RR-LEGACY-FALLBACK-REMOVE): Google Drive intake sits under V1_HIDDEN_MODULES key "connectors" (defer-v1plus, D-152) and has no v1 canonical replacement; must fail closed without executing.',
   },
   {
     legacyKey: 'messages.listMessageIntake',
-    disposition: 'MISSING',
+    disposition: 'OBSOLETE',
     reason:
-      'Lists MessageIntake approval-queue rows; deliberately distinct from canonical inbox_list_threads which reads inbox threads (PRS-M29). Note: MessageIntake sits under V1_HIDDEN_MODULES key "inbox" (defer-v1plus, D-152/D-153) so RR-LEGACY-FALLBACK-REMOVE should retire rather than promote it for v1.',
+      'Retired in P160 (RR-LEGACY-FALLBACK-REMOVE): MessageIntake sits under V1_HIDDEN_MODULES key "inbox" (defer-v1plus, D-152/D-153) and is deliberately distinct from inbox_list_threads (PRS-M29); must fail closed without executing.',
   },
   {
     legacyKey: 'social.listRecentEngagement',

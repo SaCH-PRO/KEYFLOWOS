@@ -1662,6 +1662,11 @@
       "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
     },
     {
+      "prefix": "v73a_",
+      "owner": "apps/server/test/forget-cancel-prior-delete.integration.test.ts",
+      "packet": "V1-73 (RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE)"
+    },
+    {
       "prefix": "v72r_",
       "owner": "apps/server/test/authority-shadow-parity.integration.test.ts",
       "packet": "V1-72 (RR-AUTHORITY-SHADOW-PARITY)"

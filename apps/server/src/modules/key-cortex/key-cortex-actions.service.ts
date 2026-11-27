@@ -25,7 +25,6 @@ import {
   projectEpisodicLogRowsForReader,
   type MemoryReaderContext,
 } from './memory-class-read-projection';
-import { KeyToolRegistryService } from '../ai/key-tool-registry.service';
 import { KeyCommandService } from '../ai/key-command.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
@@ -122,9 +121,6 @@ export class KeyCortexActionsService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Optional()
-    @Inject(KeyToolRegistryService)
-    private readonly toolRegistry: KeyToolRegistryService | undefined,
     private readonly commandService: KeyCommandService,
     private readonly keyCortexToolRegistry: KeyCortexToolRegistryService,
     @Optional()
