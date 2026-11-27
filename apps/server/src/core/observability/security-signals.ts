@@ -30,6 +30,7 @@ export const MAX_HOURLY_BUCKETS = 24;
 
 const HOUR_MS = 3_600_000;
 const MAX_LABEL_LENGTH = 64;
+const MAX_DATE_MS = 8_640_000_000_000_000;
 const VALID_SIGNAL_SET: ReadonlySet<string> = new Set(SECURITY_SIGNAL_TYPES);
 const FORBIDDEN_PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -55,9 +56,16 @@ function emptyCounts(): SecuritySignalCounts {
   };
 }
 
+function safeTimestampMs(nowMs: unknown): number {
+  if (typeof nowMs === 'number' && Number.isFinite(nowMs) && Math.abs(nowMs) <= MAX_DATE_MS) {
+    return nowMs;
+  }
+  return Date.now();
+}
+
 function normalizeLabel(raw: unknown): string {
   if (typeof raw !== 'string') return OVERFLOW_LABEL;
-  const trimmed = raw.trim().toLowerCase();
+  const trimmed = raw.trim().slice(0, MAX_LABEL_LENGTH * 2).toLowerCase();
   if (!trimmed) return OVERFLOW_LABEL;
   const cleaned = trimmed
     .replace(/[^a-z0-9_.:-]/g, '_')
@@ -79,8 +87,7 @@ export class SecuritySignals {
   private hourlyBuckets: Map<number, SecuritySignalCounts>;
 
   constructor(nowMs: number = Date.now()) {
-    const safeNow = Number.isFinite(nowMs) ? nowMs : Date.now();
-    this.startedAtIso = new Date(safeNow).toISOString();
+    this.startedAtIso = new Date(safeTimestampMs(nowMs)).toISOString();
     this.totals = emptyCounts();
     this.labelMaps = {
       bearer_verification_failed: new Map<string, number>(),
@@ -97,7 +104,7 @@ export class SecuritySignals {
       }
 
       const safeLabel = normalizeLabel(label);
-      const safeNow = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+      const safeNow = safeTimestampMs(nowMs);
       const hourStart = floorHourMs(safeNow);
 
       this.totals[signal] += 1;
@@ -117,18 +124,14 @@ export class SecuritySignals {
         }
       }
 
-      this.pruneOldBuckets(hourStart);
-      const cutoff = hourStart - (MAX_HOURLY_BUCKETS - 1) * HOUR_MS;
-      if (hourStart >= cutoff) {
-        let bucket = this.hourlyBuckets.get(hourStart);
-        if (!bucket) {
-          bucket = emptyCounts();
-          this.hourlyBuckets.set(hourStart, bucket);
-        }
-        bucket[signal] += 1;
+      let bucket = this.hourlyBuckets.get(hourStart);
+      if (!bucket) {
+        bucket = emptyCounts();
+        this.hourlyBuckets.set(hourStart, bucket);
       }
+      bucket[signal] += 1;
 
-      // Defensive hard cap in case out-of-order timestamps arrived.
+      // Enforce fixed bounded memory on hourly buckets by keeping at most MAX_HOURLY_BUCKETS newest hours.
       if (this.hourlyBuckets.size > MAX_HOURLY_BUCKETS) {
         const sortedHours = [...this.hourlyBuckets.keys()].sort((a, b) => a - b);
         const excess = sortedHours.length - MAX_HOURLY_BUCKETS;
@@ -142,7 +145,7 @@ export class SecuritySignals {
   }
 
   snapshot(nowMs: number = Date.now()): SecuritySignalsSnapshot {
-    const safeNow = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+    const safeNow = safeTimestampMs(nowMs);
     const currentHour = floorHourMs(safeNow);
     const oldestAllowed = currentHour - (MAX_HOURLY_BUCKETS - 1) * HOUR_MS;
 
@@ -192,22 +195,12 @@ export class SecuritySignals {
   }
 
   reset(nowMs: number = Date.now()): void {
-    const safeNow = Number.isFinite(nowMs) ? nowMs : Date.now();
-    this.startedAtIso = new Date(safeNow).toISOString();
+    this.startedAtIso = new Date(safeTimestampMs(nowMs)).toISOString();
     this.totals = emptyCounts();
     for (const signal of SECURITY_SIGNAL_TYPES) {
       this.labelMaps[signal].clear();
     }
     this.hourlyBuckets.clear();
-  }
-
-  private pruneOldBuckets(referenceHourMs: number): void {
-    const oldestAllowed = referenceHourMs - (MAX_HOURLY_BUCKETS - 1) * HOUR_MS;
-    for (const hourKey of this.hourlyBuckets.keys()) {
-      if (hourKey < oldestAllowed) {
-        this.hourlyBuckets.delete(hourKey);
-      }
-    }
   }
 }
 

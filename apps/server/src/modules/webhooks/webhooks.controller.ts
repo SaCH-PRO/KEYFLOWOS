@@ -130,6 +130,7 @@ export class WebhooksController {
     }
 
     if (!signature) {
+      securitySignals.record('webhook_signature_failed', 'stripe');
       this.logger.warn('Stripe webhook received without signature header');
       throw new BadRequestException('Missing stripe-signature header');
     }

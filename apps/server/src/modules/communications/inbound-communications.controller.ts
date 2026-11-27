@@ -88,6 +88,7 @@ export class InboundCommunicationsController {
       | string
       | undefined;
     if (!header || !header.startsWith('sha256=')) {
+      securitySignals.record('webhook_signature_failed', 'inbound_communications');
       throw new ForbiddenException('Missing webhook signature');
     }
     const raw = req.rawBody;
