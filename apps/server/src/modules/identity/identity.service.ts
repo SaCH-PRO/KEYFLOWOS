@@ -132,8 +132,12 @@ const roleRank = (role: string) => ROLE_RANK[role] ?? 0;
  * connectors disconnected, while the read went on answering configured.
  * business-meta-writers.spec.ts ([D12b-R1]) keeps this list a superset of
  * BUSINESS_META_SEO_CONNECTION_KEYS.
+ *
+ * FU-CASE-STUDY-REVENUE (P139, D-100): caseStudies is omitted from every
+ * Business projection (sanitizeBusiness) and written exclusively by
+ * CaseStudyService, so the profile PATCH refuses it as well.
  */
-export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp', 'ga4', 'gsc'] as const;
+export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp', 'ga4', 'gsc', 'caseStudies'] as const;
 
 /** The 400 code updateBusiness answers a metaData bag naming a reserved key with. */
 export const BUSINESS_METADATA_KEY_RESERVED = 'BUSINESS_METADATA_KEY_RESERVED';
