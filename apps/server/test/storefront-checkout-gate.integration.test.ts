@@ -76,6 +76,8 @@ const SLUG = {
 let db: any;
 let app: any;
 let redis: any;
+let siteService: any;
+let legacyModulesService: any;
 const crmContactCalls: Array<{ businessId: string; email?: string }> = [];
 const createStorePaymentCalls: Array<Record<string, unknown>> = [];
 
@@ -261,6 +263,9 @@ beforeAll(async () => {
             createStorePaymentCalls.push(args);
             return { url: 'https://payments.test.local/session' };
           },
+          getStorefrontGateways: async () => [
+            { id: 'cash', name: 'Cash on Delivery', currencies: ['TTD'] },
+          ],
         },
       },
       { provide: AiUsageService, useValue: noop },
@@ -279,6 +284,8 @@ beforeAll(async () => {
     .useValue(allowAll)
     .compile();
 
+  siteService = mod.get(SiteService);
+  legacyModulesService = mod.get(LegacyModulesService);
   app = mod.createNestApplication({ logger: false });
   Logger.overrideLogger(false);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -474,5 +481,102 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
     const res = await agent().get(`/bookings/public/businesses/${encodeURIComponent(ID.bizNone)}/services`);
     expect(res.status, res.text).toBe(200);
     expect(res.body.map((s: any) => s.id)).toEqual([ID.svcNone]);
+  });
+
+  it('[WHS-S08] RED-BEFORE (P248): legacy-modules failure is caught, logged, fails closed to storeCheckout: false, and never 500s GET, /gateways, /validate-promo, or /checkout', async () => {
+    // Baseline snapshot of bizNone when legacy read succeeds (so we assert the rest of the response is unchanged).
+    const baselineNone = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.none)}`);
+    expect(baselineNone.status, baselineNone.text).toBe(200);
+    expect(baselineNone.body.storeCheckout).toBe(false);
+
+    const storeOrdersBefore = await db.marketplaceOrder.count({ where: { businessId: ID.bizStore } });
+    const storeRetryBefore = await db.idempotencyKey.count({ where: { businessId: ID.bizStore } });
+
+    for (const [mode, setupMock] of [
+      ['async rejection', () => vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(new Error('legacy read timeout'))],
+      ['sync throw', () => vi.spyOn(legacyModulesService, 'getLegacyModules').mockImplementation(() => { throw new Error('legacy read sync failure'); })],
+    ] as const) {
+      const legacySpy = setupMock();
+      const warnSpy = vi.spyOn((siteService as any).logger, 'warn').mockImplementation(() => undefined);
+      try {
+        // 1. Booking-only / non-store business: 200 with storeCheckout: false and identical payload.
+        const getNone = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.none)}`);
+        expect(getNone.status, `${mode} GET bizNone: ${getNone.text}`).toBe(200);
+        expect(getNone.body).toEqual(baselineNone.body);
+
+        // 2. Legacy store business: 200 with storeCheckout failed closed to false (products still intact).
+        const getStore = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.store)}`);
+        expect(getStore.status, `${mode} GET bizStore: ${getStore.text}`).toBe(200);
+        expect(getStore.body.storeCheckout, `${mode} storeCheckout failed closed`).toBe(false);
+        expect(getStore.body.business?.id).toBe(ID.bizStore);
+        expect(getStore.body.products.map((p: any) => p.id)).toEqual([ID.prodStore]);
+
+        // 3. /gateways: 200 (never 500).
+        const gatewaysRes = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.none)}/gateways?currency=TTD`);
+        expect(gatewaysRes.status, `${mode} GET /gateways: ${gatewaysRes.text}`).toBe(200);
+        expect(Array.isArray(gatewaysRes.body)).toBe(true);
+        expect(gatewaysRes.body.length).toBeGreaterThan(0);
+
+        // 4. /validate-promo: 200 (never 500).
+        const promoRes = await agent()
+          .post(`/site/storefront/public/${encodeURIComponent(SLUG.none)}/validate-promo`)
+          .send({
+            code: 'LAUNCH10',
+            items: [{ productId: ID.prodNone, quantity: 1 }],
+          });
+        expect(promoRes.status, `${mode} POST /validate-promo: ${promoRes.text}`).toBe(200);
+        expect(promoRes.body.valid).toBe(true);
+
+        // 5. /checkout on legacy store business: fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500, zero writes).
+        const checkoutRes = await agent()
+          .post(`/site/storefront/public/${encodeURIComponent(SLUG.store)}/checkout`)
+          .set('Idempotency-Key', `${P}idem-fail-${mode.replace(/\s+/g, '-')}`)
+          .send({
+            items: [{ productId: ID.prodStore, quantity: 1 }],
+            customer: { name: 'Failsafe Buyer', email: `${P}failsafe@v92g.test.local` },
+            paymentMethod: 'CASH',
+          });
+        expect(checkoutRes.status, `${mode} POST /checkout: ${checkoutRes.text}`).toBe(403);
+        expect(checkoutRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+
+        // Logger recorded the caught failure with the business id (and not silently swallowed).
+        expect(warnSpy).toHaveBeenCalled();
+        expect(
+          warnSpy.mock.calls.some((args) => String(args[0]).includes(ID.bizNone) && String(args[0]).includes('legacy read')),
+          `${mode}: warn log must identify the failed business and error`,
+        ).toBe(true);
+      } finally {
+        legacySpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    }
+
+    expect(await db.marketplaceOrder.count({ where: { businessId: ID.bizStore } })).toBe(storeOrdersBefore);
+    expect(await db.idempotencyKey.count({ where: { businessId: ID.bizStore } })).toBe(storeRetryBefore);
+    expect(crmContactCalls).toEqual([]);
+    expect(createStorePaymentCalls).toEqual([]);
+  });
+
+  it('[WHS-S09] PIN (P248): POST /site/storefront/public/:slug/checkout returns 404 before 400 for unknown or closed slug with an unsupported payment method', async () => {
+    for (const slug of [SLUG.unknown, SLUG.off]) {
+      const res = await agent()
+        .post(`/site/storefront/public/${encodeURIComponent(slug)}/checkout`)
+        .send({
+          items: [{ productId: ID.prodNone, quantity: 1 }],
+          customer: { name: 'Bad Method Visitor', email: `${P}badmethod@v92g.test.local` },
+          paymentMethod: 'BITCOIN_FAKE',
+        });
+      expect(res.status, `${slug} unsupported method must 404 before 400: ${res.text}`).toBe(404);
+    }
+
+    // Control: on a live legacy store slug, the same unsupported method still returns 400.
+    const liveRes = await agent()
+      .post(`/site/storefront/public/${encodeURIComponent(SLUG.store)}/checkout`)
+      .send({
+        items: [{ productId: ID.prodStore, quantity: 1 }],
+        customer: { name: 'Bad Method Legacy Buyer', email: `${P}badmethod-live@v92g.test.local` },
+        paymentMethod: 'BITCOIN_FAKE',
+      });
+    expect(liveRes.status, `live legacy store unsupported method must 400: ${liveRes.text}`).toBe(400);
   });
 });
