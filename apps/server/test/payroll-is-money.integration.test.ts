@@ -178,7 +178,6 @@ beforeAll(async () => {
       orgUnitId: ID.orgUnitA,
       jobRoleId: ID.jobRoleA,
       userId: ID.staffOpsOnlyA,
-      status: 'ACTIVE',
     },
   });
   await db.payRate.create({
