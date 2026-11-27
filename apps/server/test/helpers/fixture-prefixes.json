@@ -1635,6 +1635,11 @@
       "prefix": "v91m_",
       "owner": "apps/server/test/memory-class-read.integration.test.ts",
       "packet": "V1-91 (MEM-CLASS-READ, P137)"
+    },
+    {
+      "prefix": "v91q_",
+      "owner": "apps/server/test/nested-credential-reads.integration.test.ts",
+      "packet": "V1-91 (FU-NESTED-CREDENTIAL-READS, P149)"
     }
   ],
   "pendingRenames": [],
