@@ -5,7 +5,14 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
-import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
+import {
+  ChartOfAccountsSeederService,
+  COA_CODE_LOCK_NAMESPACE,
+  COA_CODE_TX_OPTIONS,
+  COA_CODE_WHITESPACE,
+  isCoaLockTimeout,
+  trimCoaCode,
+} from './chart-of-accounts-seeder.service';
 
 const ALLOWED_TYPES = new Set(['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'COGS', 'EXPENSE']);
 
@@ -19,31 +26,10 @@ export interface CreateCoaInput {
 
 export type UpdateCoaInput = Partial<Omit<CreateCoaInput, 'type'>> & { isActive?: boolean };
 
-/** Namespace of the per-business advisory lock that serializes account-code writes. */
-const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
-
-/**
- * Wait and run limits of the account-code transaction, stated rather than left to Prisma's defaults (maxWait
- * 2 s, timeout 5 s), in line with the repo's other short lock-holding transactions (bookings
- * SLOT_CLAIM_TX_OPTIONS). A writer that still cannot get a connection or the lock in time gets P2028, which
- * withCodeLock answers 503 (try again), not a 500.
- */
-const COA_CODE_TX_OPTIONS = { isolationLevel: 'ReadCommitted', maxWait: 5_000, timeout: 10_000 } as const;
-
-/**
- * The whitespace trimmed off a code, on both sides of the comparison: the SQL check trims the stored code
- * with this same set (rows written before this rule were stored verbatim), so the service and the database
- * agree on what a code is. ASCII whitespace only: a no-break or other Unicode space, a zero-width
- * character or full-width digits make a different code here, though it may look the same on screen.
- */
-const COA_CODE_WHITESPACE = ' \t\n\r\f\v';
-
-function trimCoaCode(code: string): string {
-  let start = 0;
-  let end = code.length;
-  while (start < end && COA_CODE_WHITESPACE.includes(code[start])) start++;
-  while (end > start && COA_CODE_WHITESPACE.includes(code[end - 1])) end--;
-  return code.slice(start, end);
+function assertPlainObject(raw: unknown): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new BadRequestException('Invalid account payload');
+  }
 }
 
 /**
@@ -57,6 +43,28 @@ function normalizeCoaCode(raw: unknown): string | null {
   if (typeof raw !== 'string') throw new BadRequestException('Account code must be text');
   const code = trimCoaCode(raw);
   return code === '' ? null : code;
+}
+
+function normalizeCoaName(raw: unknown, emptyMessage: string): string {
+  if (typeof raw !== 'string') throw new BadRequestException('Account name must be text');
+  const name = raw.trim();
+  if (!name) throw new BadRequestException(emptyMessage);
+  return name;
+}
+
+function normalizeCoaSubtype(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') throw new BadRequestException('Account subtype must be text');
+  const trimmed = raw.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function normalizeCoaParentId(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') throw new BadRequestException('Parent account ID must be text');
+  const trimmed = raw.trim();
+  if (!trimmed) throw new BadRequestException('Parent account ID cannot be empty');
+  return trimmed;
 }
 
 /** A stored code as it is compared: trimmed (a row written before this rule may not be); blank is no code. */
@@ -83,11 +91,10 @@ function storedCoaCode(code: string | null): string | null {
  *   - accounts without a code never collide, an archived account frees its code, and an account saved with
  *     the code it already has is not checked (unless the same request brings it back from the archive), so
  *     rows that shared a code before this rule can still be renamed and archived (nothing rewrites them);
- *   - a code that is neither text nor null, or an isActive that is neither true, false nor null (null
- *     leaves the flag alone), is refused 400: the body is not validated before it reaches here, and a
- *     Prisma operator object ({ set: true }, { set: '6100' }) would otherwise be written without the check;
- *   - check and write run in one transaction under a per-business advisory lock: with no unique index, two
- *     concurrent writers would otherwise both pass the check.
+ *   - input fields (name, subtype, parentId, code, isActive) are validated defensively to reject non-text /
+ *     operator-object payloads with 400 rather than letting them reach Prisma as 500s or operator objects;
+ *   - check and write run in one transaction under a per-business advisory lock shared with
+ *     ChartOfAccountsSeederService: with no unique index, concurrent writers would otherwise both pass.
  */
 @Injectable()
 export class FinanceCoaService {
@@ -105,14 +112,22 @@ export class FinanceCoaService {
   }
 
   async create(businessId: string, input: CreateCoaInput) {
-    const name = (input.name ?? '').trim();
-    if (!name) throw new BadRequestException('Name is required');
-    if (!ALLOWED_TYPES.has(input.type)) {
-      throw new BadRequestException(`Unknown account type: ${input.type}`);
+    assertPlainObject(input);
+    if (input.name === undefined || input.name === null) {
+      throw new BadRequestException('Name is required');
     }
-    if (input.parentId) {
+    const name = normalizeCoaName(input.name, 'Name is required');
+    if (typeof input.type !== 'string' || !ALLOWED_TYPES.has(input.type)) {
+      throw new BadRequestException(
+        typeof input.type === 'string' ? `Unknown account type: ${input.type}` : 'Account type must be text',
+      );
+    }
+    const subtype = normalizeCoaSubtype(input.subtype);
+    const parentId = input.parentId === undefined ? null : normalizeCoaParentId(input.parentId);
+    if (parentId !== null) {
       const parent = await this.prisma.client.chartOfAccount.findFirst({
-        where: { id: input.parentId, businessId },
+        where: { id: parentId, businessId },
+        select: { id: true },
       });
       if (!parent) throw new BadRequestException('Parent account not found in this business');
     }
@@ -121,9 +136,9 @@ export class FinanceCoaService {
       businessId,
       name,
       type: input.type,
-      subtype: input.subtype ?? null,
+      subtype,
       code,
-      parentId: input.parentId ?? null,
+      parentId,
       isSystem: false,
       isActive: true,
     };
@@ -137,6 +152,7 @@ export class FinanceCoaService {
   }
 
   async update(businessId: string, id: string, input: UpdateCoaInput) {
+    assertPlainObject(input);
     const existing = await this.prisma.client.chartOfAccount.findFirst({
       where: { id, businessId },
     });
@@ -145,26 +161,37 @@ export class FinanceCoaService {
       throw new ForbiddenException('System accounts are read-only');
     }
 
-    // PR195-KEY-GATES review repair (review finding SEC-P195KG-4; as SEC-P195BW-6 did for financial accounts): a
-    // parent is this business's own chart row, as create() requires. Before, update() wrote any parentId: a row of
-    // another business linked under this one, and an id that exists nowhere answered a raw P2003 (a 500), so the
-    // two answers told a member which ids exist in other businesses. Both now answer create()'s words.
-    if (input.parentId) {
-      const parent = await this.prisma.client.chartOfAccount.findFirst({
-        where: { id: input.parentId, businessId },
-        select: { id: true },
-      });
-      if (!parent) throw new BadRequestException('Parent account not found in this business');
-    }
-
     const data: Record<string, unknown> = {};
-    if (input.name != null) data.name = input.name.trim();
-    if (input.subtype !== undefined) data.subtype = input.subtype;
-    if (input.code !== undefined) data.code = normalizeCoaCode(input.code);
-    if (input.parentId !== undefined) data.parentId = input.parentId;
+    if (input.name !== undefined) {
+      data.name = normalizeCoaName(input.name, 'Account name cannot be empty');
+    }
+    if (input.subtype !== undefined) {
+      data.subtype = normalizeCoaSubtype(input.subtype);
+    }
+    if (input.code !== undefined) {
+      data.code = normalizeCoaCode(input.code);
+    }
     if (input.isActive != null) {
       if (typeof input.isActive !== 'boolean') throw new BadRequestException('isActive must be true or false');
       data.isActive = input.isActive;
+    }
+
+    // PR195-KEY-GATES review repair (SEC-P195KG-4) + FU-COA-SEEDER-AND-INPUT (P146): validate parentId type
+    // before touching Prisma (operator objects like { not: null } must answer 400, never 500), refuse
+    // self-parenting, and ensure the parent belongs to this business.
+    if (input.parentId !== undefined) {
+      const parentId = normalizeCoaParentId(input.parentId);
+      if (parentId !== null) {
+        if (parentId === id) {
+          throw new BadRequestException('An account cannot be its own parent');
+        }
+        const parent = await this.prisma.client.chartOfAccount.findFirst({
+          where: { id: parentId, businessId },
+          select: { id: true },
+        });
+        if (!parent) throw new BadRequestException('Parent account not found in this business');
+      }
+      data.parentId = parentId;
     }
 
     // Only a write of the code, or one that brings the account back, can make a second active account on
@@ -198,17 +225,9 @@ export class FinanceCoaService {
   /**
    * Run `fn` in a transaction holding this business's account-code lock, so a check and the write it
    * allows are one step against every other write that takes this lock: every create() and update() that
-   * can put an active account on a code. (A create without a code, an update that neither carries a code
-   * nor sets isActive true, and archive() do not take it: none of them can put an active account on a
-   * code.) The other writer of chart codes, the system-chart seeder (ChartOfAccountsSeederService
-   * ensureDefaults, an upsert by systemKey), takes neither the lock nor the check. That is safe today because
-   * every create() and update() that takes the lock runs ensureDefaults first, so the seed has landed before
-   * the check runs and the check counts the system accounts; and the SYSTEM_COA codes are fixed, so the seeder
-   * only ever writes the codes it wrote before. Two cases are left (recorded follow-ups): a code added to
-   * SYSTEM_COA later could be seeded next to a custom account that already holds it; and a business that got
-   * a custom coded account before this rule without its chart ever being seeded (create() did not seed first
-   * then) gets the system account seeded beside it on its first seed, as other rows from before this rule
-   * may already share a code.
+   * can put an active account on a code, plus ChartOfAccountsSeederService.ensureDefaults() when seeding
+   * missing system accounts. (A create without a code, an update that neither carries a code nor sets
+   * isActive true, and archive() do not take it: none of them can put an active account on a code.)
    * READ COMMITTED is set on purpose: the check must see what the previous holder of the lock
    * committed, and under a snapshot isolation level it would read a snapshot taken before that commit.
    * A transaction that cannot start or expires waiting (P2028) answers 503 with a generic message: the
@@ -228,7 +247,7 @@ export class FinanceCoaService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
       return fn(tx, tenant);
     }, COA_CODE_TX_OPTIONS).catch((err: unknown) => {
-      if ((err as { code?: unknown } | null)?.code === 'P2028') {
+      if (isCoaLockTimeout(err)) {
         throw new ServiceUnavailableException(
           { code: 'COA_CODE_BUSY', message: 'The chart of accounts is busy. Please try again.' },
           { cause: err },

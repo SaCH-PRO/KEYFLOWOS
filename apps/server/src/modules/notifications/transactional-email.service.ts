@@ -144,6 +144,15 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   owner_alert_claims: true,
 };
 
+/** Internal business-owner/seller notifications that are never customer-contact sends. */
+const OWNER_NOTIFICATION_TYPES = new Set<NotificationType>([
+  'seller_new_order',
+  'seller_low_stock',
+  'quote_viewed_owner',
+  'quote_accepted_owner',
+  'quote_rejected_owner',
+]);
+
 /**
  * Log lines name no recipient address and no message content (SEC-C2-1,
  * W3-C2b-EMAIL-LOG-LEAK; IA-044, CF-029). main.ts creates the app with no
@@ -415,34 +424,74 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       return { status: 'FAILED' };
     }
 
-    // "Do not contact" is enforced HERE, once, rather than by each caller.
+    // "Do not contact" and deleted-contact suppression (R53, D-25) are enforced
+    // HERE, once, rather than by each caller.
     //
-    // It was enforced by convention: DelegationLoopService checks
-    // `contact.doNotContact` before payment recovery, and the campaign sender
-    // filters on doNotContact and marketingOptIn. Every other caller was on its
-    // honour — and the invoice-send path added to this codebase on 2026-08-05
-    // promptly forgot, which is the argument for putting it in the pathway
-    // instead of in a checklist.
-    //
-    // Scoped to the tenant on purpose: a contactId from another business must
-    // not silently resolve. If the id does not belong here, refuse rather than
-    // send blind.
+    // Scoped to the tenant on purpose: a contactId or email from another
+    // business must not silently resolve. If the id does not belong here,
+    // is soft-deleted/forget-pending, or is marked do-not-contact, refuse
+    // rather than send blind.
     if (params.contactId) {
       const contact = await this.prisma.client.contact.findFirst({
-        where: { id: params.contactId, businessId: params.businessId },
-        select: { doNotContact: true },
+        where: { id: params.contactId, businessId: params.businessId, deletedAt: null },
+        select: { doNotContact: true, deletedAt: true },
       });
 
       if (!contact) {
+        if (typeof this.prisma.client.$queryRaw === 'function') {
+          const deletedRows = await this.prisma.client.$queryRaw<Array<{ id: string }>>`
+            SELECT id
+              FROM contacts
+             WHERE id = ${params.contactId}
+               AND business_id = ${params.businessId}
+               AND deleted_at IS NOT NULL
+             LIMIT 1`;
+          if (deletedRows.length > 0) {
+            this.logger.warn(`[notify] refusing ${params.type}: contact ${params.contactId} is deleted`);
+            return { status: 'FAILED' };
+          }
+        }
         this.logger.warn(
           `[notify] refusing ${params.type}: contact ${params.contactId} is not in business ${params.businessId}`,
         );
         return { status: 'FAILED' };
       }
 
+      if (contact.deletedAt) {
+        this.logger.warn(`[notify] refusing ${params.type}: contact ${params.contactId} is deleted`);
+        return { status: 'FAILED' };
+      }
+
       if (contact.doNotContact) {
         this.logger.warn(`[notify] refusing ${params.type}: contact ${params.contactId} is marked do-not-contact`);
         return { status: 'FAILED' };
+      }
+    } else if (
+      params.recipientEmail &&
+      !OWNER_NOTIFICATION_TYPES.has(params.type) &&
+      typeof this.prisma.client.$queryRaw === 'function'
+    ) {
+      const normalizedEmail = params.recipientEmail.trim().toLowerCase();
+      if (normalizedEmail) {
+        const matches = await this.prisma.client.$queryRaw<
+          Array<{ id: string; doNotContact: boolean | null; deletedAt: Date | null }>
+        >`
+          SELECT id, do_not_contact AS "doNotContact", deleted_at AS "deletedAt"
+            FROM contacts
+           WHERE business_id = ${params.businessId}
+             AND (email_normalized = ${normalizedEmail} OR lower(email) = ${normalizedEmail})`;
+        if (matches.length > 0) {
+          const liveMatches = matches.filter((m) => m.deletedAt === null);
+          if (liveMatches.length === 0) {
+            this.logger.warn(`[notify] refusing ${params.type}: contact ${matches[0].id} is deleted`);
+            return { status: 'FAILED' };
+          }
+          const dncMatch = liveMatches.find((m) => m.doNotContact);
+          if (dncMatch) {
+            this.logger.warn(`[notify] refusing ${params.type}: contact ${dncMatch.id} is marked do-not-contact`);
+            return { status: 'FAILED' };
+          }
+        }
       }
     }
 
