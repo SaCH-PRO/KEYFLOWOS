@@ -9,6 +9,8 @@
  * apps/web/src/app/book/[slug]/components/store-hours.ts).
  */
 
+import { isISO8601 } from 'class-validator';
+
 export const SHORT_DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 export const LONG_DAY_KEYS = [
   'sunday',
@@ -188,4 +190,25 @@ export function isOnSlotGrid(
   const remainder = (((startMinsOfDay - anchor) % intervalMins) + intervalMins) % intervalMins;
   return remainder === 0;
 }
+
+/**
+ * V1-91 / P226 [R1-SEC-01]: strict RFC 3339 / ISO 8601 date-time with explicit
+ * timezone offset (`Z` or `±HH:MM`, `T` separator, hours `00`–`23`, no trailing
+ * whitespace, no date-only / ordinal / timezone-less / `24:00` rollover forms).
+ */
+export const STRICT_ISO_DATETIME_WITH_TZ_RE =
+  /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i;
+
+/**
+ * True iff `raw` is a strict RFC 3339 / ISO 8601 date-time string with an
+ * explicit timezone designator, a valid calendar date (no Feb 30 rollover),
+ * and parses to a non-NaN Date.
+ */
+export function isStrictIsoDateTimeWithTz(raw: unknown): raw is string {
+  if (typeof raw !== 'string') return false;
+  if (!STRICT_ISO_DATETIME_WITH_TZ_RE.test(raw)) return false;
+  if (!isISO8601(raw, { strict: true, strictSeparator: true })) return false;
+  return !Number.isNaN(new Date(raw).getTime());
+}
+
 

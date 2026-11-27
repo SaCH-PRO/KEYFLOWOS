@@ -1,8 +1,8 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
-import { isISO8601 } from 'class-validator';
 import { Response } from 'express';
 import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
+import { isStrictIsoDateTimeWithTz } from './business-hours.util';
 import { BookingWaitlistService } from './booking-waitlist.service';
 import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
@@ -330,12 +330,14 @@ export class BookingsController {
       throw new BadRequestException(storefrontMethodUnsupported(rawMethod as string));
     }
 
-    // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): validate startTime
-    // explicitly here as well as in PublicCreateBookingDto so invalid, blank,
-    // non-string, or impossible calendar dates always answer 400 and never
-    // reach BookingsService as Invalid Date (NaN).
+    // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1, R1-SEC-01): validate
+    // startTime as a strict RFC 3339 / ISO 8601 date-time with explicit
+    // timezone here as well as in PublicCreateBookingDto so invalid, blank,
+    // non-string, date-only, ordinal, timezone-less, 24:00 rollover, or
+    // impossible calendar dates always answer 400 and never reach
+    // BookingsService as Invalid Date (NaN) or server-TZ-dependent instants.
     const rawStartTime: unknown = body?.startTime;
-    if (typeof rawStartTime !== 'string' || !isISO8601(rawStartTime, { strict: true })) {
+    if (!isStrictIsoDateTimeWithTz(rawStartTime)) {
       throw new BadRequestException('startTime must be a valid ISO 8601 date string');
     }
     const startTime = new Date(rawStartTime);

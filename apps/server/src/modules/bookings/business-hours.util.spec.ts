@@ -3,7 +3,9 @@ import {
   DEFAULT_BUSINESS_CLOSE_MIN,
   DEFAULT_BUSINESS_OPEN_MIN,
   PUBLIC_SLOT_INTERVAL_MINS,
+  STRICT_ISO_DATETIME_WITH_TZ_RE,
   isOnSlotGrid,
+  isStrictIsoDateTimeWithTz,
   parseTimeToMinutes,
   readBusinessDayHours,
 } from './business-hours.util';
@@ -226,4 +228,44 @@ describe('isOnSlotGrid', () => {
     expect(isOnSlotGrid(new Date('2030-01-07T00:15:00.000Z'), 15, DEFAULT_BUSINESS_OPEN_MIN)).toBe(false);
   });
 });
+
+describe('isStrictIsoDateTimeWithTz [R1-SEC-01]', () => {
+  it('accepts strict RFC 3339 / ISO 8601 date-times with explicit timezone offsets', () => {
+    for (const valid of [
+      '2030-01-07T10:00:00Z',
+      '2030-01-07T10:00:00.000Z',
+      '2030-01-07T10:00:00-04:00',
+      '2030-01-07T10:00+05:30',
+      '2028-02-29T10:00:00Z',
+    ]) {
+      expect(STRICT_ISO_DATETIME_WITH_TZ_RE.test(valid), valid).toBe(true);
+      expect(isStrictIsoDateTimeWithTz(valid), valid).toBe(true);
+    }
+  });
+
+  it('rejects partial/date-only/ordinal, whitespace/space-separated, timezone-less, 24:00 rollover, and impossible calendar dates', () => {
+    for (const invalid of [
+      '2030',
+      '2030-01',
+      '2030-01-07',
+      '2030-007',
+      '2030-01-07 ',
+      ' 2030-01-07T10:00:00Z',
+      '2030-01-07 10:00:00Z',
+      '2030-01-07 10:00:00',
+      '2030-01-07T10:00:00',
+      '2030-01-07T24:00Z',
+      '2026-02-30T10:00:00Z',
+      '2026-02-29T10:00:00Z',
+      '',
+      'not-a-date',
+      null,
+      undefined,
+      12345,
+    ]) {
+      expect(isStrictIsoDateTimeWithTz(invalid), String(invalid)).toBe(false);
+    }
+  });
+});
+
 
