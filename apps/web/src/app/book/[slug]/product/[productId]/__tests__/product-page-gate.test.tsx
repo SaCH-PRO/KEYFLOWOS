@@ -83,9 +83,11 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
       window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
       render(<ProductDetailPage />);
       await screen.findAllByText(PRODUCT.name);
-      await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE_LINE.id]));
-      expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
-      expect(screen.queryAllByRole("button", { name: /in cart|sold out/i })).toHaveLength(0);
+      await waitFor(() => {
+        expect(storedCart().map((c) => c.id)).toEqual([SERVICE_LINE.id]);
+        expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+        expect(screen.queryAllByRole("button", { name: /in cart|sold out/i })).toHaveLength(0);
+      });
       // The cart on this page counts the booking line only.
       expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
     });
@@ -131,9 +133,11 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
 
     storefront = { storefront: {}, storeCheckout: false };
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE_LINE.id]));
-    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
-    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    await waitFor(() => {
+      expect(storedCart().map((c) => c.id)).toEqual([SERVICE_LINE.id]);
+      expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+      expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    });
   });
 
   it("WHS2-23e the storefront read failed: no quantity stepper, no checkout badges, no empty buy bar", async () => {
@@ -152,12 +156,14 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
     render(<ProductDetailPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`)).toHaveLength(2));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
-    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
+    // The second read was made and has answered (Try again is enabled again): then everything is still there.
+    await waitFor(() => {
+      expect(api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`)).toHaveLength(2);
+      expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+      expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+      expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
+    });
   });
 
   it("WHS2-41 Try again is disabled while its read is out", async () => {

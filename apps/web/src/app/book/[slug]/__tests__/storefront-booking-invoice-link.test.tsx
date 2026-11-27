@@ -394,6 +394,8 @@ describe("SEC-W9WCN-1: a checkout's booking token link never reaches the next cu
  */
 describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it did not check out", () => {
   const storedIds = () => (JSON.parse(window.localStorage.getItem(`kf_cart_${SLUG}`) ?? "[]") as Array<{ id: string }>).map((c) => c.id);
+  /** The stored cart as written: "[]" when the page wrote an empty cart (null would mean it never wrote one). */
+  const storedRaw = () => window.localStorage.getItem(`kf_cart_${SLUG}`);
 
   it("WHS2-32 the storefront read failed: the service is booked, the hidden product line is kept, and a retry that answers true still has it", async () => {
     net.storeCheckout = "fails";
@@ -416,7 +418,7 @@ describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it d
     net.bookingAnswer = { success: true, bookingId: "v95q_bk_w33" };
     window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
     await bookTheService();
-    await waitFor(() => expect(storedIds()).toEqual([]));
+    await waitFor(() => expect(storedRaw()).toBe("[]"));
     expect(orderPosts()).toHaveLength(0);
   });
 
@@ -433,8 +435,10 @@ describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it d
       render(<PublicBookingPage />);
       await checkOut();
       await waitFor(() => expect(orderPosts()).toHaveLength(1));
-      await waitFor(() => expect(storedIds()).toEqual([]));
-      expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+      await waitFor(() => {
+        expect(storedRaw()).toBe("[]");
+        expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+      });
     });
   }
 
@@ -443,7 +447,9 @@ describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it d
     net.bookingAnswer = { success: true, bookingId: "v95q_bk_w44" };
     window.localStorage.setItem(`kf_promo_${SLUG}`, JSON.stringify({ code: "TEN", discountType: "percentage", discountValue: 10 }));
     await bookTheService();
-    await waitFor(() => expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull());
-    expect(storedIds()).toEqual([]);
+    await waitFor(() => {
+      expect(window.localStorage.getItem(`kf_promo_${SLUG}`)).toBeNull();
+      expect(storedRaw()).toBe("[]");
+    });
   });
 });
