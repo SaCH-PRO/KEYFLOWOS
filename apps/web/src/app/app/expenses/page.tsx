@@ -23,8 +23,6 @@ import {
   Loader2,
 } from "lucide-react";
 import {
-  deleteExpense,
-  updateExpense,
   getExpenseExportUrl,
   Expense,
   ExpenseBudget,
@@ -37,7 +35,6 @@ import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./compone
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
 import { PERIODS, formatCurrency, formatDate } from "./components/expense-utils";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { NoAccessState } from "@/components/ui/no-access-state";
 
 /* ───────────────────────────────────────────
@@ -214,8 +211,6 @@ export default function ExpensesInboxPage() {
   const [prefill, setPrefill] = useState<ExpensePrefill | null>(null);
   const [_detailExpense, _setDetailExpense] = useState<Expense | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [_actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const [view, setView] = useState<ExpensesView>("expenses");
   const [showFilters, setShowFilters] = useState(false);
   const [recurringTrigger, setRecurringTrigger] = useState(0);
@@ -331,40 +326,6 @@ export default function ExpensesInboxPage() {
 
     return items.slice(0, 4);
   }, [d.expenses, d.period, stats.missingReceipts, summaryOk]);
-
-  const handleDelete = async (id: string) => {
-    if (!d.businessId) return;
-    const forBusiness = d.businessId;
-    setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: true }));
-    try {
-      await deleteExpense(forBusiness, id);
-      // R12: answered after a switch to another business: nothing is said there (loadData is guarded itself).
-      if (d.isCurrentBusiness(forBusiness)) {
-        toast.success("Expense deleted");
-        void d.loadData();
-      }
-    } catch {
-      if (d.isCurrentBusiness(forBusiness)) toast.error("Failed to delete expense");
-    }
-    setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: false }));
-    setConfirmDelete(null);
-  };
-
-  const _handleMarkPaid = async (expense: Expense) => {
-    if (!d.businessId) return;
-    const forBusiness = d.businessId;
-    setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
-    try {
-      await updateExpense(forBusiness, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
-      if (d.isCurrentBusiness(forBusiness)) {
-        toast.success("Marked as paid");
-        void d.loadData();
-      }
-    } catch {
-      if (d.isCurrentBusiness(forBusiness)) toast.error("Failed to mark as paid");
-    }
-    setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
-  };
 
   const handleExport = () => {
     if (!d.businessId) return;
@@ -933,16 +894,6 @@ export default function ExpensesInboxPage() {
         />
       )}
 
-      {/* Confirm delete */}
-      <ConfirmDialog
-        open={!!confirmDelete}
-        title="Delete expense?"
-        message="This action cannot be undone. The expense will be permanently removed."
-        confirmLabel="Delete"
-        variant="danger"
-        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
-        onCancel={() => setConfirmDelete(null)}
-      />
     </div>
   );
 }

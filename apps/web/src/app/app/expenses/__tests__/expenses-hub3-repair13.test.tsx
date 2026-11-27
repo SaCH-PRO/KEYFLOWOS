@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Expense, ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
+import type { Expense, ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ws = vi.hoisted(() => ({ bid: "biz_A" as string | null }));
 const client = vi.hoisted(() => ({
@@ -93,7 +93,6 @@ const SCHEDULE = {
   id: "rec_A1", name: "Rent", frequency: "MONTHLY", nextRunDate: "2026-12-01T00:00:00.000Z", isActive: true, runCount: 0,
   failureCount: 0, description: "Rent", amount: 1000, currency: "TTD", createsBill: false,
 } as RecurringExpense;
-const BUDGET = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
 
 beforeEach(() => {
   ws.bid = "biz_A";
@@ -119,10 +118,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function switchTo(bid: string) {
-  ws.bid = bid;
-  act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: bid } })); });
-}
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 const noToast = () => {
   expect(toast.success).not.toHaveBeenCalled();

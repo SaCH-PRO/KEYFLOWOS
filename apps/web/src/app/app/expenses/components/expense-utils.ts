@@ -240,6 +240,10 @@ export function recurringScheduleBody(src: ScheduleSource, businessId?: string |
  * EXPENSES-HUB-3 R12: a check that the business an action was started for is still the one this component shows (its
  * latest `businessId` prop). A reply to an action started on A that lands after the switch to B says and reloads
  * nothing. The default for components rendered without the data hook's `isCurrentBusiness`.
+ *
+ * R13: a fallback only. Its ref follows the prop at commit, so a reply that lands after the switch is announced but
+ * before React commits it still reads the old business. A parent that has the data hook should pass its ref-based
+ * `isCurrentBusiness` (adopted at the switch itself), as the page does for the recurring panel.
  */
 export function useShownBusiness(businessId: string | null | undefined): (forBusiness: string) => boolean {
   const shown = useRef(businessId);
