@@ -1615,6 +1615,11 @@
       "prefix": "v91g_",
       "owner": "apps/server/test/store-add-idempotent.integration.test.ts",
       "packet": "V1-91 (FU-STORE-ADD-IDEMPOTENT, P204)"
+    },
+    {
+      "prefix": "v91j_",
+      "owner": "apps/server/test/cash-label-sanitiser.integration.test.ts",
+      "packet": "V1-91 (FU-CASH-LABEL-SANITISER, P138)"
     }
   ],
   "pendingRenames": [],
