@@ -14,6 +14,11 @@ import { readerSearchOptions } from './semantic-memory-sight';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
 import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
+import {
+  buildDbMemoryClassPreFilter,
+  getMemoryClassReadMode,
+  projectAiMemoryRowsForReader,
+} from '../key-cortex/memory-class-read-projection';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -143,15 +148,33 @@ export class AgentController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/patterns')
-  async getDetectedPatterns(@Param('businessId') businessId: string) {
+  async getDetectedPatterns(
+    @Param('businessId') businessId: string,
+    @Req() req?: AuthenticatedRequest,
+  ) {
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'agentPatterns');
+    const readerCtx = { reader, sight };
+    const preFilter =
+      getMemoryClassReadMode() === 'ACTIVE'
+        ? buildDbMemoryClassPreFilter(readerCtx)
+        : undefined;
     const memories = await this.prisma.client.aiMemory.findMany({
-      where: { businessId, category: 'patterns' },
+      where: {
+        businessId,
+        category: 'patterns',
+        ...(preFilter ? { AND: [preFilter] } : {}),
+      },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 100,
     });
+    const visible = projectAiMemoryRowsForReader(memories, readerCtx, {
+      businessId,
+      path: 'AgentController.getDetectedPatterns',
+    }).slice(0, 50);
 
     return {
-      patterns: memories.map((m) => ({
+      patterns: visible.map((m) => ({
         id: m.id,
         ...JSON.parse(m.value),
         detectedAt: m.createdAt,

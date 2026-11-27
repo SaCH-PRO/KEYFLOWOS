@@ -16,6 +16,12 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  classifyKeyCortexMemoryForRead,
+  evaluateMemoryClassAccess,
+  getMemoryClassReadMode,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
@@ -96,9 +102,17 @@ export class KeyCortexAwarenessService {
     businessId: string,
     // D-235: readsRevenue false (or left out: fails closed) withholds every item whose content states money (an idea or
     // a hypothesis made from finance DNA, a concern about receivables); the counts are of what is served.
-    opts: { kinds?: Array<keyof typeof AWARENESS_TYPES>; sinceDays?: number; readsRevenue?: boolean } = {},
+    opts: {
+      kinds?: Array<keyof typeof AWARENESS_TYPES>;
+      sinceDays?: number;
+      readsRevenue?: boolean;
+      readerContext?: MemoryReaderContext;
+    } = {},
   ): Promise<AwarenessSummary> {
-    const readsRevenue = opts.readsRevenue === true;
+    const readerCtx = opts.readerContext;
+    const readsRevenue =
+      opts.readsRevenue === true ||
+      (opts.readsRevenue === undefined && Boolean(readerCtx?.reader && readerCtx.sight('revenue')));
     // Round 2 (security MAJOR-1/2, D-234 provenance): ideas, hypotheses and reflections are made from the unprojected
     // business context and integration rows are the finance module's statement sweep, so a reader without revenue read
     // is served none of them; the other kinds are judged by their values (not their key names: correctness minor 4).
@@ -125,10 +139,11 @@ export class KeyCortexAwarenessService {
     ) as Record<keyof typeof AWARENESS_TYPES, number>;
 
     const items: AwarenessItem[] = [];
+    const activeClassMode = Boolean(readerCtx) && getMemoryClassReadMode() === 'ACTIVE';
 
     for (const kind of kinds) {
       if (!readsRevenue && revenueOnly.has(kind)) continue;
-      let rows: Array<{ key: string; value: string; confidence: number; createdAt: Date }>;
+      let rows: Array<{ key: string; userId?: string | null; value: string; confidence: number; createdAt: Date }>;
       try {
         rows = await this.prisma.client.keyCortexMemory.findMany({
           where: {
@@ -136,11 +151,11 @@ export class KeyCortexAwarenessService {
             type: AWARENESS_TYPES[kind],
             ...(since ? { createdAt: { gte: since } } : {}),
           },
-          select: { key: true, value: true, confidence: true, createdAt: true },
+          select: { key: true, userId: true, value: true, confidence: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
           // Round 6 (security MINOR-2): a reader without revenue read is read with headroom, so what is served (and
           // counted) is not what is left of the newest rows.
-          take: readsRevenue ? PER_KIND_LIMIT : PER_KIND_HEADROOM,
+          take: readsRevenue && !activeClassMode ? PER_KIND_LIMIT : PER_KIND_HEADROOM,
         });
       } catch (error: unknown) {
         this.logger.warn(
@@ -156,7 +171,27 @@ export class KeyCortexAwarenessService {
         // One malformed row must not lose the rest of the feed.
         try {
           const parsed = JSON.parse(row.value) as Record<string, unknown>;
-          if (!readsRevenue && valuesOf(parsed).some((t) => proposalTextStatesMoney(t) || isMoneyLabel(t))) continue;
+          const parsedValues = valuesOf(parsed);
+          if (activeClassMode && readerCtx) {
+            const accessInput = classifyKeyCortexMemoryForRead(
+              {
+                key: row.key,
+                type: kind,
+                userId: row.userId ?? null,
+                value: row.value,
+              },
+              { revenueOnlyTypes: revenueOnly },
+            );
+            const decision = evaluateMemoryClassAccess(
+              {
+                ...accessInput,
+                backstopTexts: parsedValues,
+              },
+              readerCtx,
+            );
+            if (!decision.allowed) continue;
+          }
+          if (!readsRevenue && parsedValues.some((t) => proposalTextStatesMoney(t) || isMoneyLabel(t))) continue;
           served += 1;
           items.push({
             id: row.key,
@@ -171,8 +206,8 @@ export class KeyCortexAwarenessService {
           this.logger.debug(`[Awareness] Skipping unparseable ${kind} ${row.key}`);
         }
       }
-      // A revenue reader's counts are as before (every row read); anyone else's are of what is served (D-235).
-      counts[kind] = readsRevenue ? rows.length : served;
+      // A revenue reader's counts are as before (every row read); anyone else's (or active class projection) are of what is served (D-235, design 6.1).
+      counts[kind] = readsRevenue && !activeClassMode ? rows.length : served;
     }
 
     items.sort((a, b) => b.noticedAt.getTime() - a.noticedAt.getTime());
