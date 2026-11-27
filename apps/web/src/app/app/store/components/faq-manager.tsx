@@ -1,5 +1,7 @@
 "use client";
 
+import { HAS_PLACEHOLDER } from "../storefront-counts";
+import { FaqPlaceholderWarning } from "./faq-placeholder-warning";
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -17,8 +19,7 @@ import {
 } from "lucide-react";
 import type { StorefrontConfig, FaqEntry } from "@/lib/client";
 
-/** P231 r6 (D-303): text still holding a [bracketed] part (an AI suggestion's placeholder) for the merchant to fill in. */
-const HAS_PLACEHOLDER = /\[[^\]]+\]/;
+/** P231 r6-r7 (D-303): an entry still holding a [bracketed] part (a suggestion's placeholder) for the merchant to fill in. */
 const needsFilling = (e: FaqEntry) => HAS_PLACEHOLDER.test(e.question) || HAS_PLACEHOLDER.test(e.answer);
 
 type Props = {
@@ -36,7 +37,6 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuestion, setEditQuestion] = useState("");
   const [editAnswer, setEditAnswer] = useState("");
-  const unfilled = faqEntries.filter(needsFilling).length;
 
   const updateEntries = useCallback(
     (entries: FaqEntry[]) => {
@@ -137,11 +137,7 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
       </div>
 
       <div className="p-5 space-y-3">
-        {unfilled > 0 && (
-          <p role="alert" className="text-xs font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
-            {unfilled === 1 ? "1 entry still has" : `${unfilled} entries still have`} a [bracketed] part: fill it in with your own policy before you save, or your customers will see it.
-          </p>
-        )}
+        {faqEntries.length > 0 && <FaqPlaceholderWarning entries={faqEntries} where="faq-manager" />}
         {faqEntries.length === 0 && !showForm && (
           <div
             className="text-center py-8 rounded-xl"

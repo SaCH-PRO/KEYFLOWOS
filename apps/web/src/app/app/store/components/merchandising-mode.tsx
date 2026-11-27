@@ -28,7 +28,7 @@ import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/work
 import { formatPrice } from "@/lib/format";
 import type { Service, Product, StorefrontConfig, FaqEntry } from "@/lib/client";
 import Image from "next/image";
-import { liveProducts, bookableServices } from "../storefront-counts";
+import { storefrontOffer, type StockByProduct } from "../storefront-counts";
 
 type SeoProps = {
   storefrontConfig: StorefrontConfig;
@@ -149,6 +149,8 @@ type Props = {
   services: Service[];
   commerceProducts: Product[];
   liveProductIds: Set<string>;
+  /** P231 r7: the store's stock (useStoreData), so the AI panel leaves out what the stock hides on /book. */
+  stockByProduct?: StockByProduct | null;
   storefrontConfig: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
@@ -359,6 +361,7 @@ export function MerchandisingMode({
   services,
   commerceProducts,
   liveProductIds,
+  stockByProduct,
   storefrontConfig,
   onConfigChange,
   onSaveConfig,
@@ -375,6 +378,8 @@ export function MerchandisingMode({
   const faqEntries = storefrontConfig.faqEntries ?? [];
   const seo = storefrontConfig.seo as { metaTitle?: string; metaDescription?: string } | undefined;
   const liveItems = commerceProducts.filter((p) => liveProductIds.has(p.id));
+  // P231 r7 (D-303): what the storefront shows, by the kind /book names it, for the AI panel's copy.
+  const storeOffer = storefrontOffer(services, commerceProducts, liveProductIds, { stock: stockByProduct, storefrontConfig });
 
   const metrics: MetricStripItem[] = [
     {
@@ -488,8 +493,10 @@ export function MerchandisingMode({
               businessTagline={businessData?.tagline ?? undefined}
               // P231 r6 (D-303): only what is on the storefront: products live on the store, and bookable services (a
               // service with a sourceProductId is a product's store listing, not a service to book).
-              productsCount={liveProducts(commerceProducts, liveProductIds).length}
-              servicesCount={bookableServices(services).length}
+              productsCount={storeOffer.products}
+              servicesCount={storeOffer.services}
+              packagesCount={storeOffer.packages}
+              orderableServicesCount={storeOffer.orderableServices}
               hasDelivery={activeDeliveryMethodsCount > 0}
               testimonialCount={testimonials.length}
               onApplyFaq={handleApplyFaq}

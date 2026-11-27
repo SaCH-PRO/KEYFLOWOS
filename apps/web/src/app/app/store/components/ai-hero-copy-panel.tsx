@@ -1,5 +1,6 @@
 "use client";
 
+import { offerWords } from "../storefront-counts";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -34,32 +35,15 @@ type Props = {
   currentHeadline?: string;
   currentSubheadline?: string;
   currentCta?: string;
+  /** P231 r6-r7 (D-303): what the storefront shows, by the kind /book names it (storefront-counts.ts). */
   productsCount?: number;
+  /** Bookable services. */
   servicesCount?: number;
+  packagesCount?: number;
+  /** SERVICE-category products: services /book sells (bought, not booked). */
+  orderableServicesCount?: number;
   onApply?: (fields: { headline?: string; subheadline?: string; ctaText?: string; ribbonText?: string }) => void;
 };
-
-/**
- * P231 r6 (D-303): the words for what the store offers, from its real counts of products live on the storefront and
- * bookable services (the same rules as the AI Content panel and the store AI hub): no "buy" without products, no
- * "book" without services, each count with the noun it counts, in the singular for one.
- */
-function offerWords(productCount: number, serviceCount: number) {
-  const products = Math.max(0, Math.floor(productCount) || 0);
-  const services = Math.max(0, Math.floor(serviceCount) || 0);
-  const sells = products > 0;
-  const books = services > 0;
-  const total = products + services;
-  const word = (n: number, w: string) => `${w}${n === 1 ? "" : "s"}`;
-  return {
-    sells,
-    books,
-    total,
-    counted: [sells ? `${products} ${word(products, "product")}` : "", books ? `${services} ${word(services, "service")}` : ""].filter(Boolean).join(" and "),
-    action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
-    items: `${total} ${word(total, "item")}`,
-  };
-}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -157,6 +141,8 @@ export function AiHeroCopyPanel({
   currentCta: _currentCta,
   productsCount = 0,
   servicesCount = 0,
+  packagesCount = 0,
+  orderableServicesCount = 0,
   onApply,
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -175,7 +161,7 @@ export function AiHeroCopyPanel({
     const name = storeName || "Your Store";
     const tagline = businessTagline || "";
     const description = businessDescription || "";
-    const offer = offerWords(productsCount, servicesCount);
+    const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount });
 
     // P231 r6 (D-303): no quality ("Quality You Can Trust", "Premium"), speed ("in seconds"), delivery ("delivered to
     // you"), "curated", "N+ Items", "all in one place", "New Arrivals Just Added" or "First-Time Customer Special" the
@@ -191,12 +177,13 @@ export function AiHeroCopyPanel({
     ];
     if (subheadlines.length === 0) subheadlines.push(`${name}, now online.`);
     const offerRibbons = [
-      offer.sells ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
+      offer.shops ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
       "✨ [your latest news]",
       "🔥 [your offer]",
     ];
     const ctas = [
-      ...(offer.sells ? ["Shop Now", "Explore Collection"] : []),
+      // r7: "Shop Now" and "Explore Collection" only with products or packages to shop, never for services only.
+      ...(offer.shops ? ["Shop Now", "Explore Collection"] : []),
       ...(offer.books ? ["Book Today"] : []),
       "Get Started",
     ];

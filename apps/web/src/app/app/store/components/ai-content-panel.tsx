@@ -1,5 +1,6 @@
 "use client";
 
+import { HAS_PLACEHOLDER, offerWords } from "../storefront-counts";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -33,8 +34,13 @@ type Props = {
   storeName?: string;
   businessDescription?: string;
   businessTagline?: string;
+  /** P231 r7 (D-303): what the storefront shows, by the kind /book names it (storefront-counts.ts). */
   productsCount?: number;
+  /** Bookable services. */
   servicesCount?: number;
+  packagesCount?: number;
+  /** SERVICE-category products: services /book sells (bought, not booked). */
+  orderableServicesCount?: number;
   hasDelivery?: boolean;
   testimonialCount?: number;
   onApplyFaq?: (faqs: GeneratedFaq[]) => void;
@@ -77,33 +83,8 @@ function trustCopyFor(testimonialCount: number): { trustBadges: string[]; social
   };
 }
 
-/**
- * P231 r5-r6 (D-303): the words for what the store offers, from its real counts of products live on the storefront and
- * bookable services, so no copy says customers can buy what is not sold or book what is not offered; with neither,
- * none of it. r6: a count is only ever paired with the noun it counts ("2 products and 1 service"), in the singular for
- * one.
- */
-function offerWords(productCount: number, serviceCount: number) {
-  const products = Math.max(0, Math.floor(productCount) || 0);
-  const services = Math.max(0, Math.floor(serviceCount) || 0);
-  const sells = products > 0;
-  const books = services > 0;
-  const total = products + services;
-  const word = (n: number, w: string) => `${w}${n === 1 ? "" : "s"}`;
-  return {
-    sells,
-    books,
-    total,
-    noun: [sells ? word(products, "product") : "", books ? word(services, "service") : ""].filter(Boolean).join(" and "),
-    counted: [sells ? `${products} ${word(products, "product")}` : "", books ? `${services} ${word(services, "service")}` : ""].filter(Boolean).join(" and "),
-    action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
-    items: `${total} ${word(total, "item")}`,
-    Items: `${total} ${word(total, "Item")}`,
-  };
-}
-
-/** P231 r5-r6: text still holding a [bracketed] part for the merchant to fill in (any bracketed part). */
-export const HAS_PLACEHOLDER = /\[[^\]]+\]/;
+/** P231 r5-r7: the placeholder detector the FAQ Manager and the save paths share (any [bracketed] part). */
+export { HAS_PLACEHOLDER };
 
 export function AiContentPanel({
   storeName,
@@ -111,6 +92,8 @@ export function AiContentPanel({
   businessTagline,
   productsCount = 0,
   servicesCount = 0,
+  packagesCount = 0,
+  orderableServicesCount = 0,
   hasDelivery = false,
   testimonialCount = 0,
   onApplyFaq,
@@ -132,7 +115,7 @@ export function AiContentPanel({
   const [selectedSeoDesc, setSelectedSeoDesc] = useState("");
 
   const name = storeName || "Your Store";
-  const offer = offerWords(productsCount, servicesCount);
+  const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount });
   const totalItems = offer.total;
   const trustResult = trustRequested ? trustCopyFor(testimonialCount) : null;
 
@@ -144,14 +127,16 @@ export function AiContentPanel({
 
     if (action === "faq") {
       const faqs: GeneratedFaq[] = [];
-      if (servicesCount > 0) {
-        faqs.push({ question: "How do I book a service?", answer: `Simply browse our services and click "Book Now" on the one you want. You'll choose your preferred time and complete your booking in just a few steps.`, category: "Bookings" });
+      if (offer.books) {
+        // r7: /book has no "Book Now" control: a service is added, and its time chosen at checkout.
+        faqs.push({ question: "How do I book a service?", answer: "Add the service you want, then choose a date and time at checkout to complete your booking.", category: "Bookings" });
         // P231 r4 (D-303): the merchant's own policies are left as marked placeholders, never invented.
         // r6: the policy itself is the merchant's, so the whole answer is theirs to fill in.
         faqs.push({ question: "Can I reschedule or cancel?", answer: "[your reschedule and cancellation policy]", category: "Bookings" });
       }
-      if (productsCount > 0) {
-        faqs.push({ question: "What payment methods do you accept?", answer: "We accept [your payment methods]. All payments are processed at checkout.", category: "Payments" });
+      if (offer.buys) {
+        // r7: not "All payments are processed at checkout": cash or manual payment is always offered.
+        faqs.push({ question: "What payment methods do you accept?", answer: "We accept [your payment methods].", category: "Payments" });
       }
       if (hasDelivery) {
         // P231 r4b: no "Express options" or "local pickup" the product does not know the merchant offers.
@@ -170,7 +155,7 @@ export function AiContentPanel({
       // P231 r4b-r5: no "fast delivery", "instantly", "quality" or "curated" the product does not check, and only what
       // the store really offers (from its counts): no "buy" without products, no "book" without services.
       const metaTitleOptions = [
-        `${name} — ${offer.sells ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`.slice(0, 60),
+        `${name} — ${offer.shops ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`.slice(0, 60),
         tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? offer.Items : "Online"}`.slice(0, 60),
         `${name} Online`.slice(0, 60),
       ];
@@ -184,7 +169,7 @@ export function AiContentPanel({
         metaTitleOptions,
         metaDescOptions,
         recommendation: { metaTitle: metaTitleOptions[0], metaDescription: metaDescOptions[0] },
-        keywords: [name.toLowerCase(), ...(offer.sells ? ["buy online"] : []), ...(offer.books ? ["book online"] : [])],
+        keywords: [name.toLowerCase(), ...(offer.buys ? ["buy online"] : []), ...(offer.books ? ["book online"] : [])],
         instruction: "Select the title and description that best represents your store, then click Apply.",
       });
       setSelectedSeoTitle(metaTitleOptions[0]);

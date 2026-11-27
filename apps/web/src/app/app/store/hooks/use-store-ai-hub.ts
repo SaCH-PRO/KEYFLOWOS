@@ -2,12 +2,16 @@
 
 import { useCallback, useMemo } from "react";
 import { useModuleAi, type ModuleContext, type AiSuggestion, type AiTool } from "@/hooks/use-module-ai";
-// P231 r6: the copy tools count the storefront the way the panels do (a product listing is not a bookable service).
-import { bookableServices } from "../storefront-counts";
+// P231 r6-r7: the copy tools count and name the storefront the way the panels and /book do.
+import { bookableServices, counted, offerOf, offerWords } from "../storefront-counts";
 
 type StoreCustomData = {
+  /** The whole catalog (the analysis tools). */
   products?: unknown[];
   services?: unknown[];
+  /** P231 r7: what the storefront shows (the copy tools): the products on the store, and the bookable services. */
+  storeProducts?: unknown[];
+  storeServices?: unknown[];
   testimonials?: unknown[];
   storeEnabled?: boolean;
   hasHeroImage?: boolean;
@@ -31,7 +35,7 @@ type StoreCustomData = {
   graphStats?: { liveCount: number; draftCount: number; driftCount: number; totalProducts: number };
 };
 
-async function generateStoreSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
+export async function generateStoreSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
   const { businessId, activeView, customData } = context;
   if (!businessId) return [];
 
@@ -143,6 +147,18 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       explanation: "An empty catalog means visitors have nothing to buy — this is your store's core content.",
       priority: "high",
       actionLabel: "Add items",
+      actionKey: "switch_tab:catalog",
+    });
+  } else if (data.storeProducts !== undefined && storeOffer(data).total === 0) {
+    // P231 r7: the catalog has items, but none is on the store: the store is empty, the catalog is not.
+    suggestions.push({
+      id: `nothing-on-store-${Date.now()}`,
+      type: "risk",
+      title: "Nothing on Your Store Yet",
+      description: `Your catalog has ${counted(products.length + services.length, "item")}, but none is on your store yet. Add them to your store so visitors have something to browse and buy.`,
+      explanation: "Visitors only see what is on your store.",
+      priority: "high",
+      actionLabel: "Add them to your store",
       actionKey: "switch_tab:catalog",
     });
   }
@@ -337,7 +353,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       suggestions.push({
         id: `catalog-images-${Date.now()}`,
         type: "insight",
-        title: `${productsWithoutImages} Items Missing Images`,
+        title: `${counted(productsWithoutImages, "Item")} Missing Images`,
         description: "Products with images convert 2× better. Add images to improve click-through and conversions.",
         explanation: "Visual products significantly outperform text-only listings in both clicks and sales.",
         priority: "medium",
@@ -422,32 +438,15 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
 }
 
 /**
- * P231 r5-r6 (D-303): the words for what the store offers, from its real counts of products live on the storefront and
- * bookable services, so no generated copy says customers can buy what is not sold or book what is not offered; with
- * neither, none of it. r6: a count is only ever paired with the noun it counts ("2 products and 1 service"), in the
- * singular for one; no category name is attached to a count.
+ * P231 r7 (D-303): the lists the copy tools write from: what the storefront shows (storeProducts, storeServices, from
+ * the store page), or, given only products and services (a caller without the store's live view), those, drawn and
+ * counted the way /book draws them (storefront-counts.ts). The analysis tools keep reading the whole catalog.
  */
-function offerWords(productCount: number, serviceCount: number) {
-  const products = Math.max(0, Math.floor(productCount) || 0);
-  const services = Math.max(0, Math.floor(serviceCount) || 0);
-  const sells = products > 0;
-  const books = services > 0;
-  const total = products + services;
-  const word = (n: number, w: string) => `${w}${n === 1 ? "" : "s"}`;
-  const noun = [sells ? word(products, "product") : "", books ? word(services, "service") : ""].filter(Boolean).join(" and ");
-  return {
-    sells,
-    books,
-    total,
-    noun,
-    Noun: noun.replace(/\b(product|service)/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)),
-    counted: [sells ? `${products} ${word(products, "product")}` : "", books ? `${services} ${word(services, "service")}` : ""].filter(Boolean).join(" and "),
-    action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
-    items: `${total} ${word(total, "item")}`,
-    Items: `${total} ${word(total, "Item")}`,
-  };
+function storeOffer(d: StoreCustomData) {
+  const products = (d.storeProducts ?? d.products ?? []) as Record<string, unknown>[];
+  const services = bookableServices((d.storeServices ?? d.services ?? []) as Record<string, unknown>[]);
+  return offerWords(offerOf(products, services));
 }
-
 
 function buildStoreTools(): AiTool[] {
   return [
@@ -463,13 +462,10 @@ function buildStoreTools(): AiTool[] {
         const d = (ctx.customData ?? {}) as StoreCustomData;
         const storeName = d.storeName || "Your Store";
 
-        const products = (d.products ?? []) as Record<string, unknown>[];
-
-        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
         const tagline = d.businessTagline || "";
         const description = d.businessDescription || "";
 
-        const offer = offerWords(products.length, services.length);
+        const offer = storeOffer(d);
         const totalItems = offer.total;
 
         // P231 r4b-r6 (D-303): no quality, speed, delivery, popularity ("Your go-to for") or offer the product does not
@@ -486,18 +482,18 @@ function buildStoreTools(): AiTool[] {
         // A store with no description and nothing yet still gets one true subheadline.
         if (subheadlines.length === 0) subheadlines.push(`${storeName}, now online.`);
         const offerRibbons = [
-          offer.sells ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
+          offer.shops ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
           "✨ [your latest news]",
           "🔥 [your offer]",
         ];
         const ctas = [
-          ...(offer.sells ? ["Shop Now", "Explore Collection"] : []),
+          ...(offer.shops ? ["Shop Now", "Explore Collection"] : []),
           ...(offer.books ? ["Book Today"] : []),
           "Get Started",
         ];
 
         return {
-          summary: `Generated ${headlines.length} headline options, ${subheadlines.length} subheadlines, ${offerRibbons.length} ribbon options, and ${ctas.length} CTAs for ${storeName}.`,
+          summary: `Generated ${counted(headlines.length, "headline option")}, ${counted(subheadlines.length, "subheadline")}, ${counted(offerRibbons.length, "ribbon option")}, and ${counted(ctas.length, "CTA")} for ${storeName}.`,
           headlines,
           subheadlines,
           offerRibbons,
@@ -706,18 +702,17 @@ function buildStoreTools(): AiTool[] {
       execute: async (ctx) => {
         const d = (ctx.customData ?? {}) as StoreCustomData;
 
-        const products = (d.products ?? []) as Record<string, unknown>[];
-
-        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
+        const offer = storeOffer(d);
         const storeName = d.storeName || "Your Store";
         const activeDelivery = d.activeDeliveryCount ?? 0;
 
         const faqs: { question: string; answer: string; category: string }[] = [];
 
-        if (services.length > 0) {
+        if (offer.books) {
           faqs.push({
             question: "How do I book a service?",
-            answer: `Booking is easy — browse our services on the storefront, select the one you want, and click "Book Now". You'll be guided through selecting your preferred time and completing the booking.`,
+            // r7: /book has no "Book Now" control: a service is added, and its time chosen at checkout.
+            answer: "Add the service you want, then choose a date and time at checkout to complete your booking.",
             category: "Bookings",
           });
           faqs.push({
@@ -728,10 +723,11 @@ function buildStoreTools(): AiTool[] {
           });
         }
 
-        if (products.length > 0) {
+        if (offer.buys) {
           faqs.push({
             question: "What payment methods do you accept?",
-            answer: "We accept [your payment methods]. Payment is processed at checkout.",
+            // r7: not "Payment is processed at checkout": cash or manual payment is always offered.
+            answer: "We accept [your payment methods].",
             category: "Payments",
           });
         }
@@ -767,7 +763,7 @@ function buildStoreTools(): AiTool[] {
 
         return {
           // r5: the topics the entries really cover.
-          summary: `Generated ${faqs.length} FAQ entries for "${storeName}" covering ${[...new Set(faqs.map((f) => f.category.toLowerCase()))].join(", ")}.`,
+          summary: `Generated ${counted(faqs.length, "FAQ entry", "FAQ entries")} for "${storeName}" covering ${[...new Set(faqs.map((f) => f.category.toLowerCase()))].join(", ")}.`,
           faqs,
           instruction: "Copy these FAQs into your FAQ Manager in the Merchandising tab, then fill in the [bracketed] parts with your own policies there before you save.",
         };
@@ -785,12 +781,10 @@ function buildStoreTools(): AiTool[] {
         const d = (ctx.customData ?? {}) as StoreCustomData;
 
         const products = (d.products ?? []) as Record<string, unknown>[];
-
-        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
         const storeName = d.storeName || "Your Store";
         const tagline = d.businessTagline || "";
 
-        const offer = offerWords(products.length, services.length);
+        const offer = storeOffer(d);
         const totalItems = offer.total;
 
         // P231 r4b-r6: no "instantly", "delivered to you" or "quality" the product does not check, only what the store
@@ -799,7 +793,7 @@ function buildStoreTools(): AiTool[] {
         // PRODUCT, SERVICE or PACKAGE, not a category name, so none is put in the copy.)
         const metaTitleOptions = [
           offer.Noun ? `${storeName} — ${offer.Noun} Online` : `${storeName} — Now Online`,
-          offer.sells && offer.books ? `${storeName} | Shop & Book Online` : offer.sells ? `${storeName} | Shop Online` : offer.books ? `${storeName} | Book Online` : `${storeName} Online`,
+          offer.shops && offer.books ? `${storeName} | Shop & Book Online` : offer.shops ? `${storeName} | Shop Online` : offer.books ? `${storeName} | Book Online` : `${storeName} Online`,
           tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? offer.Items : "Online"}`,
         ].map((t) => t.slice(0, 60));
 
@@ -811,7 +805,7 @@ function buildStoreTools(): AiTool[] {
 
         const keywords = [
           storeName.toLowerCase(),
-          ...(offer.sells ? ["buy online"] : []),
+          ...(offer.buys ? ["buy online"] : []),
           ...(offer.books ? ["book online"] : []),
         ];
 
@@ -885,10 +879,7 @@ function buildStoreTools(): AiTool[] {
         const d = (ctx.customData ?? {}) as StoreCustomData;
         const storeName = d.storeName || "Your Store";
 
-        const products = (d.products ?? []) as Record<string, unknown>[];
-
-        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
-        const offer = offerWords(products.length, services.length);
+        const offer = storeOffer(d);
         const totalItems = offer.total;
 
         // P231 r4b-r5: the store's own item count (not "N+"), no "fast response" or "more coming soon", only what the
@@ -917,7 +908,7 @@ function buildStoreTools(): AiTool[] {
 
 We're thrilled to announce that ${storeName} is now live online!
 
-${offer.sells && offer.books ? "You can now buy and book directly from our store." : offer.sells ? "You can now order directly from our store." : offer.books ? "You can now book directly from our store." : "Take a look at our store."}
+${offer.buys && offer.books ? "You can now buy and book directly from our store." : offer.buys ? "You can now order directly from our store." : offer.books ? "You can now book directly from our store." : "Take a look at our store."}
 
 ${totalItems > 0 ? `We have ${offer.items} available.` : "We're just getting started."}
 
@@ -1162,6 +1153,8 @@ export function useStoreAiHub() {
     itemCount?: number;
     products?: unknown[];
     services?: unknown[];
+    storeProducts?: unknown[];
+    storeServices?: unknown[];
     testimonials?: unknown[];
     storeEnabled?: boolean;
     hasHeroImage?: boolean;
@@ -1190,6 +1183,8 @@ export function useStoreAiHub() {
       customData: {
         products: params.products,
         services: params.services,
+        storeProducts: params.storeProducts,
+        storeServices: params.storeServices,
         testimonials: params.testimonials,
         storeEnabled: params.storeEnabled,
         hasHeroImage: params.hasHeroImage,

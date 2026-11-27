@@ -1,5 +1,6 @@
 "use client";
 
+import { FaqPlaceholderWarning } from "./faq-placeholder-warning";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -254,6 +255,8 @@ export function PolicyEditor({ config, onConfigChange, onSave, saving }: Props) 
       </div>
 
       <div className="p-5 space-y-3">
+        {/* P231 r7: Save Policies saves the whole storefront config, the FAQ entries included. */}
+        <FaqPlaceholderWarning entries={config.faqEntries} where="elsewhere" />
         {POLICY_META.map((meta) => (
           <PolicySection
             key={meta.key}

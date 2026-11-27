@@ -79,6 +79,11 @@ export default function StorePage() {
   const productCount = s.commerceProducts.length;
   const serviceCount = s.services.length;
   const deliveryCount = s.activeDeliveryMethodsCount ?? 0;
+  // P231 r7 (D-303): what the storefront shows, for the hub's copy tools (its analysis tools read the whole catalog),
+  // and a key of it, so the context follows a product added, removed, switched off or hidden.
+  const storeServices = bookableServices(s.services, s.storefrontConfig);
+  const storeProducts = liveProducts(s.commerceProducts, s.liveProductIds, { services: s.services, stock: s.stockByProduct, storefrontConfig: s.storefrontConfig });
+  const storeKey = `${storeProducts.map((p) => p.id).join(",")}|${storeServices.map((sv) => sv.id).join(",")}`;
 
   useEffect(() => {
     if (!s.businessId) return;
@@ -90,9 +95,12 @@ export default function StorePage() {
       businessId: s.businessId,
       activeView: activeTab,
       itemCount: productCount,
-      // P231 r6 (D-303): the AI hub writes customer-facing copy from these, so only the products live on the storefront.
-      products: liveProducts(s.commerceProducts, s.liveProductIds),
-      services: bookableServices(s.services),
+      // P231 r7: the whole catalog for the analysis tools (pricing, images, empty catalog), and what the storefront
+      // shows for the copy tools (D-303).
+      products: s.commerceProducts,
+      services: s.services,
+      storeProducts,
+      storeServices,
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
       storeEnabled: s.storeEnabled,
       hasHeroImage: !!(_hero?.imageUrl || _hero?.coverImageUrl),
@@ -114,7 +122,7 @@ export default function StorePage() {
       graphStats: s.storeGraph ? { liveCount: s.storeGraph.liveCount, draftCount: s.storeGraph.draftCount, driftCount: s.storeGraph.driftCount, totalProducts: s.storeGraph.totalProducts } : undefined,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrowed deps to context-shaping fields; `ai.updateStoreContext`, `s.commerceProducts`, and `s.services` are summarized via `productCount`/`serviceCount` and an unstable `ai` bag identity would re-fire this on every render of the AI hub.
-  }, [s.businessId, activeTab, productCount, serviceCount, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
+  }, [s.businessId, activeTab, productCount, serviceCount, storeKey, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours, deliveryCount, s.readiness, s.storeGraph]);
 
   const emitEvent = s.emitEvent;
   const handleTabChange = useCallback((key: string) => {
@@ -305,6 +313,7 @@ export default function StorePage() {
                 services={s.services}
                 commerceProducts={s.commerceProducts}
                 liveProductIds={s.liveProductIds}
+                stockByProduct={s.stockByProduct}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
@@ -318,6 +327,7 @@ export default function StorePage() {
                 services={s.services}
                 commerceProducts={s.commerceProducts}
                 liveProductIds={s.liveProductIds}
+                stockByProduct={s.stockByProduct}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
