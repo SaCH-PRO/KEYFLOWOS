@@ -43,13 +43,16 @@ import { describe, it, expect } from 'vitest';
 import * as registry from './flow-tool-registry';
 import type { FlowTool } from './flow-tool-registry';
 
-const { FLOW_TOOLS, getToolByName } = registry;
+const { FLOW_TOOLS, getToolByName, REVIEWED_NON_READ_FAMILY_READ_TOOLS } = registry;
 const isReadOnlyTool: (name: string) => boolean =
   (registry as unknown as { isReadOnlyTool?: (name: string) => boolean }).isReadOnlyTool ?? (() => {
     throw new Error('isReadOnlyTool is not exported from flow-tool-registry');
   });
 
-type Classified = FlowTool & { effectClass?: unknown };
+const VALID_EFFECT_CLASSES = new Set(['READ', 'INTERNAL_WRITE', 'EXTERNAL_EFFECT', 'MONEY', 'DESTRUCTIVE']);
+const REVIEWED_READ_NAMES = new Set(REVIEWED_NON_READ_FAMILY_READ_TOOLS.map((entry) => entry.tool));
+
+type Classified = Omit<FlowTool, 'effectClass'> & { effectClass?: unknown };
 
 /**
  * Read-family tools whose handler sends something or calls a provider, so
@@ -68,15 +71,21 @@ export const KNOWN_SENDERS: readonly string[] = [
 ];
 
 /** R1 to R3 over a list of tools, as `name: problem` strings; empty means the census passes. */
-export function effectClassProblems(tools: readonly Classified[], knownSenders: readonly string[] = KNOWN_SENDERS): string[] {
+export function effectClassProblems(
+  tools: readonly Classified[],
+  knownSenders: readonly string[] = KNOWN_SENDERS,
+  reviewedNonReadFamilyReads: ReadonlySet<string> = REVIEWED_READ_NAMES,
+): string[] {
   const problems: string[] = [];
   for (const tool of tools) {
-    if (tool.effectClass !== 'READ' && tool.effectClass !== 'WRITE') {
-      problems.push(`${tool.name}: effectClass must be 'READ' or 'WRITE' (got ${JSON.stringify(tool.effectClass)})`);
+    if (typeof tool.effectClass !== 'string' || !VALID_EFFECT_CLASSES.has(tool.effectClass)) {
+      problems.push(`${tool.name}: effectClass must be one of READ | INTERNAL_WRITE | EXTERNAL_EFFECT | MONEY | DESTRUCTIVE (got ${JSON.stringify(tool.effectClass)})`);
       continue;
     }
     if (tool.effectClass === 'READ') {
-      if (tool.family !== 'read') problems.push(`${tool.name}: READ but family is '${tool.family}'`);
+      if (tool.family !== 'read' && !reviewedNonReadFamilyReads.has(tool.name)) {
+        problems.push(`${tool.name}: READ but family is '${tool.family}'`);
+      }
       if (tool.changedEntities && tool.changedEntities.length > 0) {
         problems.push(`${tool.name}: READ but declares changedEntities ${JSON.stringify(tool.changedEntities)}`);
       }
@@ -96,6 +105,9 @@ const fixture = (over: Partial<Classified>): Classified => ({
   outputSchema: { type: 'object', description: 'fixture', fields: {} },
   manualEquivalentRoute: '/app/keyflow-command',
   effectClass: 'READ',
+  idempotency: 'NATURAL',
+  reversibility: 'REVERSIBLE',
+  contractVersion: 1,
   ...over,
 });
 
@@ -113,10 +125,12 @@ describe('RR-TOOL-EFFECT-CLASS: every FLOW_TOOLS entry declares an effect class'
     expect(isReadOnlyTool('cortex.create_task')).toBe(false);
   });
 
-  it('isReadOnlyTool agrees with the registry for every tool, and every non-read family is WRITE', () => {
+  it('isReadOnlyTool agrees with the registry for every tool, and every non-read family is non-READ unless explicitly reviewed', () => {
     for (const tool of FLOW_TOOLS as Classified[]) {
       expect(isReadOnlyTool(tool.name), tool.name).toBe(tool.effectClass === 'READ');
-      if (tool.family !== 'read') expect(tool.effectClass, tool.name).toBe('WRITE');
+      if (tool.family !== 'read' && !REVIEWED_READ_NAMES.has(tool.name)) {
+        expect(tool.effectClass, tool.name).not.toBe('READ');
+      }
     }
   });
 
@@ -127,11 +141,12 @@ describe('RR-TOOL-EFFECT-CLASS: every FLOW_TOOLS entry declares an effect class'
     expect(effectClassProblems([fixture({ family: 'crud' })])).toEqual(["fixture_tool: READ but family is 'crud'"]);
     expect(effectClassProblems([fixture({ effectClass: undefined })])).toHaveLength(1);
     expect(effectClassProblems([fixture({ effectClass: 'read' })])).toHaveLength(1);
+    expect(effectClassProblems([fixture({ effectClass: 'WRITE' })])).toHaveLength(1);
     expect(effectClassProblems([fixture({ name: 'sender_tool' })], ['sender_tool'])).toEqual([
       'sender_tool: READ but its handler sends or calls a provider',
     ]);
-    // and accepts the two valid shapes
-    expect(effectClassProblems([fixture({}), fixture({ name: 'w', family: 'crud', effectClass: 'WRITE', changedEntities: ['contact'] })])).toEqual([]);
+    // and accepts the valid shapes
+    expect(effectClassProblems([fixture({}), fixture({ name: 'w', family: 'crud', effectClass: 'INTERNAL_WRITE', changedEntities: ['contact'] })])).toEqual([]);
   });
 
   it('R0 KEEP: no tool changed name, family, riskTier or route; getToolByName still resolves every tool; the count is unchanged', () => {
