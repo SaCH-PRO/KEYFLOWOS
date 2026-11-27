@@ -15,13 +15,18 @@
  *           none for a revoked one, Grant Access and Revoke
  *   POT-04  my-access alone decides when the list says nothing: a member with crm read or none and no accesses yet
  *           is not offered Grant Access
+ *   POT-05  a Grant form already open closes once the member turns out to be below crm write
+ *   POT-06  a business switch, or a read that fails, never leaves the previous business's accesses (and their URLs) on
+ *           screen; a refusal and a failure each say so
+ *   POT-07  a refused Grant says so, instead of leaving the form open in silence
+ *   POT-08  an enabled access past its expiry shows as expired, with no URL, to an editor too
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const portal = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), revoke: vi.fn() }));
-const member = vi.hoisted(() => ({ levels: null as Record<string, string> | null }));
+const member = vi.hoisted(() => ({ levels: null as Record<string, string> | null, businessId: "biz_pot" }));
 
 vi.mock("@/lib/portal", () => ({
   listPortalAccess: (...a: unknown[]) => portal.list(...a),
@@ -29,7 +34,7 @@ vi.mock("@/lib/portal", () => ({
   revokePortalAccess: (...a: unknown[]) => portal.revoke(...a),
 }));
 vi.mock("../../control-tower/components/use-control-tower-data", () => ({
-  useControlTowerData: () => ({ businessId: "biz_pot" }),
+  useControlTowerData: () => ({ businessId: member.businessId }),
 }));
 vi.mock("@/hooks/use-app-layout", () => ({
   useMemberModuleLevels: () => member.levels,
@@ -42,7 +47,9 @@ const revokeButtons = (container: HTMLElement) => container.querySelectorAll('bu
 
 beforeEach(() => {
   portal.list.mockReset();
+  portal.create.mockReset();
   member.levels = null;
+  member.businessId = "biz_pot";
 });
 afterEach(cleanup);
 
@@ -124,5 +131,77 @@ describe("P232: the Client Portal page without the portal token", () => {
     render(<PortalPage />);
     await screen.findByText("No portal access granted yet");
     expect(screen.getByRole("button", { name: /Grant Access/ })).toBeInTheDocument();
+  });
+
+  it("POT-05 a Grant form already open closes once the member turns out to be below crm write", async () => {
+    portal.list.mockResolvedValue({ data: [], error: null });
+    const view = render(<PortalPage />);
+    await screen.findByText("No portal access granted yet");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    expect(screen.getByText("Grant Portal Access")).toBeInTheDocument();
+
+    member.levels = { crm: "read" };
+    view.rerender(<PortalPage />);
+    expect(screen.queryByText("Grant Portal Access")).toBeNull();
+    expect(screen.queryByPlaceholderText("Contact ID")).toBeNull();
+  });
+
+  it("POT-06 a business switch or a failed read never leaves the previous business's accesses on screen", async () => {
+    member.levels = { crm: "write" };
+    portal.list.mockImplementation(async (businessId: string) =>
+      businessId === "biz_a"
+        ? { data: [{ ...base, id: "pa_a", contactId: "contact_of_a", token: "tok_of_a", enabled: true }], error: null }
+        : { data: null, error: "Insufficient permissions: crm requires read access (you have none)", status: 403 },
+    );
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_a");
+
+    member.businessId = "biz_b";
+    member.levels = { crm: "none" };
+    view.rerender(<PortalPage />);
+    expect(await screen.findByText("You don't have access to the client portal in this business.")).toBeInTheDocument();
+    expect(screen.queryByText("contact_of_a")).toBeNull();
+    expect(view.container.textContent).not.toContain("tok_of_a");
+    cleanup();
+
+    // A read that fails for another reason (offline, 5xx) says so and shows nothing old either.
+    member.businessId = "biz_a";
+    member.levels = { crm: "write" };
+    portal.list.mockResolvedValueOnce({ data: [{ ...base, id: "pa_a", contactId: "contact_of_a", token: "tok_of_a", enabled: true }], error: null });
+    const again = render(<PortalPage />);
+    await screen.findByText("contact_of_a");
+    portal.list.mockResolvedValueOnce({ data: null, error: "Service unavailable", status: 503 });
+    member.businessId = "biz_c";
+    again.rerender(<PortalPage />);
+    expect(await screen.findByText("Couldn't load portal access. Try again.")).toBeInTheDocument();
+    expect(screen.queryByText("contact_of_a")).toBeNull();
+  });
+
+  it("POT-07 a refused Grant says so", async () => {
+    portal.list.mockResolvedValue({ data: [], error: null });
+    portal.create.mockResolvedValue({ data: null, error: "Insufficient permissions: crm requires write access (you have read)", status: 403 });
+    render(<PortalPage />);
+    await screen.findByText("No portal access granted yet");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    fireEvent.change(screen.getByPlaceholderText("Contact ID"), { target: { value: "contact_x" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Grant$/ })));
+    expect(await screen.findByText("You can't grant portal access.")).toBeInTheDocument();
+  });
+
+  it("POT-08 an enabled access past its expiry shows as expired with no URL, to an editor too", async () => {
+    member.levels = { crm: "admin" };
+    portal.list.mockResolvedValue({
+      data: [
+        { ...base, id: "pa_old", contactId: "contact_expired", token: "tok_expired_xyz", enabled: true, expiresAt: "2020-01-01T00:00:00.000Z" },
+        { ...base, id: "pa_new", contactId: "contact_live", token: "tok_live_abc", enabled: true },
+      ],
+      error: null,
+    });
+    const { container } = render(<PortalPage />);
+    await screen.findByText("contact_expired");
+    expect(container.textContent).not.toContain("tok_expired_xyz");
+    expect(screen.getByText("Link expired")).toBeInTheDocument();
+    expect(screen.getByText(`${window.location.origin}/portal/tok_live_abc`)).toBeInTheDocument();
   });
 });
