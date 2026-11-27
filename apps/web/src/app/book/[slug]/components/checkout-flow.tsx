@@ -80,7 +80,7 @@ type Props = {
 
 const paymentMethods: { id: PaymentMethod; name: string; description: string; icon: typeof CreditCard }[] = [
   { id: "wipay", name: "WiPay", description: "Pay with credit/debit card via WiPay", icon: CreditCard },
-  { id: "paypal", name: "PayPal", description: "Pay securely with your PayPal account", icon: CreditCard },
+  { id: "paypal", name: "PayPal", description: "Pay with your PayPal account", icon: CreditCard },
   { id: "cash", name: "Cash / Manual Payment", description: "Pay in person or arrange payment with the business", icon: CreditCard },
 ];
 

@@ -703,7 +703,7 @@ function buildStoreTools(): AiTool[] {
         if (products.length > 0) {
           faqs.push({
             question: "What payment methods do you accept?",
-            answer: "We accept all major credit and debit cards, as well as online payment methods. Payment is processed securely at checkout.",
+            answer: "We accept all major credit and debit cards, as well as online payment methods. Payment is processed at checkout.",
             category: "Payments",
           });
         }
@@ -833,16 +833,19 @@ function buildStoreTools(): AiTool[] {
           "💬 Real Human Support",
         ];
 
-        const trustBadges = [
-          `${testimonials.length > 0 ? `${testimonials.length}+ Happy Customers` : "Trusted by Customers"}`,
-        ];
+        // P231 r2: praise only with testimonials to point to; none is suggested for a store without them.
+        const trustBadges = testimonials.length > 0 ? [`${testimonials.length}+ Happy Customers`] : [];
 
         const socialProofCopy = [
           testimonials.length > 0
             ? `Join ${testimonials.length}+ satisfied customers who trust ${storeName}.`
             : `Join our growing community of satisfied customers.`,
-          `Trusted by customers across the region. See what they're saying below.`,
-          `Real results, real reviews — see why customers keep coming back.`,
+          ...(testimonials.length > 0
+            ? [
+                `Trusted by customers across the region. See what they're saying below.`,
+                `Real results, real reviews — see why customers keep coming back.`,
+              ]
+            : []),
         ];
 
         const aboutCopy = `${storeName} is committed to delivering quality ${d.businessDescription ? "— " + d.businessDescription : "products and services"}.`;

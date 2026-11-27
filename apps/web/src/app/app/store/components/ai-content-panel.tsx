@@ -98,7 +98,7 @@ export function AiContentPanel({
         faqs.push({ question: "Can I reschedule or cancel?", answer: "Yes — you can reschedule or cancel up to 24 hours before your appointment. Contact us directly for any last-minute changes.", category: "Bookings" });
       }
       if (productsCount > 0) {
-        faqs.push({ question: "What payment methods do you accept?", answer: "We accept all major credit and debit cards. All payments are processed securely at checkout.", category: "Payments" });
+        faqs.push({ question: "What payment methods do you accept?", answer: "We accept all major credit and debit cards. All payments are processed at checkout.", category: "Payments" });
       }
       if (hasDelivery) {
         faqs.push({ question: "How long does delivery take?", answer: "Standard delivery is 3–5 business days. Express options may be available at checkout depending on your location.", category: "Delivery" });
@@ -141,15 +141,18 @@ export function AiContentPanel({
           "⚡ Fast, Reliable Service",
           "💬 Real Human Support",
         ],
-        trustBadges: [
-          testimonialCount > 0 ? `${testimonialCount}+ Happy Customers` : "Trusted by Customers",
-        ],
+        // P231 r2: praise only with testimonials to point to; none is suggested for a store without them.
+        trustBadges: testimonialCount > 0 ? [`${testimonialCount}+ Happy Customers`] : [],
         socialProofCopy: [
           testimonialCount > 0
             ? `Join ${testimonialCount}+ satisfied customers who trust ${name}.`
             : "Join our growing community of satisfied customers.",
-          "Real results, real reviews — see why customers keep coming back.",
-          `Trusted by customers across the region. See what they're saying below.`,
+          ...(testimonialCount > 0
+            ? [
+                "Real results, real reviews — see why customers keep coming back.",
+                `Trusted by customers across the region. See what they're saying below.`,
+              ]
+            : []),
         ],
       });
     }
@@ -326,6 +329,7 @@ export function AiContentPanel({
                   ))}
                 </div>
               </div>
+              {trustResult.trustBadges.length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Trust Badges</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -337,6 +341,7 @@ export function AiContentPanel({
                   ))}
                 </div>
               </div>
+              )}
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Social Proof Copy</p>
                 {trustResult.socialProofCopy.map((c, i) => (
