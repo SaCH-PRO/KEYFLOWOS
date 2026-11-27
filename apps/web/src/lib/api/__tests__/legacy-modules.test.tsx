@@ -282,6 +282,8 @@ describe("WEDGE-HIDE-STORE repair round 2 (confirmation reviews at 1899e532)", (
       expect(seen).not.toContain("legacy");
       api.release(BIZ);
       await waitFor(() => expect(container.textContent).toBe("legacy"));
+      // The hydrating selection starts no read of its own: the one request is the selected business's.
+      expect(api.paths).toEqual([`/identity/businesses/${BIZ}/legacy-modules`]);
     } finally {
       api.releaseAll();
       act(() => root?.unmount());
