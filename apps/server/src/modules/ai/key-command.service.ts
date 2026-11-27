@@ -639,12 +639,21 @@ export class KeyCommandService {
         const blocked = await this.businessBlock(businessId, step.tool, name, read);
         if (blocked) return refuse(name, blocked);
       } else if (capability.aliasedFrom) {
-        // Preserve any business block targeting the legacy tool name so aliasing never loosens blocks.
+        // Preserve business tool and module blocks across canonical aliasing: AiOversightService.inferModule
+        // returns null for `finance_*` tools, so check both the legacy module (e.g. 'finance') and the
+        // canonical tool's authority modules (e.g. 'revenue'), plus canonical & legacy blockedTools.
         const settings = await this.oversight.getAutonomySettings(businessId);
         if (settings.degraded) return refuse(name, "KEY oversight could not read this business's AI policy; nothing was run");
         const tools = settings.blockedTools ?? [];
-        const legacyBlock = [capability.aliasedFrom, step.tool].find((t) => tools.includes(t));
-        if (legacyBlock) return refuse(name, `Tool "${legacyBlock}" is blocked by business settings`);
+        const toolBlock = [name, capability.aliasedFrom, step.tool].find((t) => tools.includes(t));
+        if (toolBlock) return refuse(name, `Tool "${toolBlock}" is blocked by business settings`);
+        const modules = settings.blockedModules ?? [];
+        const { keyMemberToolScopes } = await import('./plan-step-authority');
+        const scopeModules = keyMemberToolScopes(name, step.input).map((s) => s.module);
+        const candidateModules = Array.from(new Set([step.module, ...scopeModules]));
+        const blockedModulesLower = new Set(modules.map((m) => m.toLowerCase()));
+        const moduleBlock = candidateModules.find((m) => blockedModulesLower.has(m.toLowerCase()));
+        if (moduleBlock) return refuse(name, `Module "${moduleBlock}" is blocked by business settings`);
       }
     } catch (err) {
       this.logger.error(`[ask] oversight check failed for ${businessId}: ${(err as Error).message}`);

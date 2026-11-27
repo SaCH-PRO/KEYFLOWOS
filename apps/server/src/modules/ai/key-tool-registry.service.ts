@@ -755,7 +755,7 @@ export class KeyToolRegistryService {
 
     const tool = this.getTool(module, name);
     if (!tool) {
-      return { success: false, error: `Tool ${module}.${name} not found in registry` };
+      return { success: false, notExecuted: true, error: `Tool ${module}.${name} not found in registry` };
     }
 
     // Validate input

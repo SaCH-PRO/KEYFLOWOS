@@ -104,19 +104,19 @@ export const LEGACY_TOOL_EQUIVALENCE: ReadonlyArray<LegacyToolEquivalenceEntry> 
     legacyKey: 'connect.scanDrive',
     disposition: 'MISSING',
     reason:
-      'Triggers ConnectorIntelligenceService.syncGoogleDrive under D-99 owner-only enforcement; canonical reconcile_sweep_statements only sweeps a single bank account statement source. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Triggers ConnectorIntelligenceService.syncGoogleDrive under D-99 owner-only enforcement; canonical reconcile_sweep_statements only sweeps a single bank account statement source. Note: Google Drive sits under V1_HIDDEN_MODULES key "connectors" (defer-v1plus, D-152) so RR-LEGACY-FALLBACK-REMOVE should retire rather than promote it for v1.',
   },
   {
     legacyKey: 'connect.listDriveIntake',
     disposition: 'MISSING',
     reason:
-      'Lists driveIntakeFile rows awaiting review; no canonical Drive intake list tool exists in FLOW_TOOLS yet. Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Lists driveIntakeFile rows awaiting review; no canonical Drive intake list tool exists in FLOW_TOOLS yet. Note: Google Drive sits under V1_HIDDEN_MODULES key "connectors" (defer-v1plus, D-152) so RR-LEGACY-FALLBACK-REMOVE should retire rather than promote it for v1.',
   },
   {
     legacyKey: 'messages.listMessageIntake',
     disposition: 'MISSING',
     reason:
-      'Lists MessageIntake approval-queue rows; deliberately distinct from canonical inbox_list_threads which reads inbox threads (PRS-M29). Kept legacy until RR-LEGACY-FALLBACK-REMOVE.',
+      'Lists MessageIntake approval-queue rows; deliberately distinct from canonical inbox_list_threads which reads inbox threads (PRS-M29). Note: MessageIntake sits under V1_HIDDEN_MODULES key "inbox" (defer-v1plus, D-152/D-153) so RR-LEGACY-FALLBACK-REMOVE should retire rather than promote it for v1.',
   },
   {
     legacyKey: 'social.listRecentEngagement',
