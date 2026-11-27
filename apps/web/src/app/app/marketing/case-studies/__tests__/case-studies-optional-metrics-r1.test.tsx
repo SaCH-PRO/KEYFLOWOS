@@ -75,6 +75,10 @@ describe("partial presence", () => {
     await mount({ recentOrders: 5, priorOrders: 4, recentRevenue: 800, priorRevenue: 700 });
     expect(text()).not.toMatch(/undefined|NaN/);
     expect(tile(/^Orders \(60d\)$/)).toMatch(/4 prior 60d/);
+    // No delta line at all: an undefined {delta} renders empty, so a stray "% vs prior 60d" would leave no NaN behind.
+    expect(tile(/^Orders \(60d\)$/)).not.toMatch(/vs prior 60d/);
+    expect(tile(/^Revenue \(60d\)$/)).not.toMatch(/vs prior 60d/);
+    expect(tile(/^Bookings \(60d\)$/)).toMatch(/vs prior 60d/); // the control: Bookings has its growth
   });
 });
 
