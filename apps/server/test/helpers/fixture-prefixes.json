@@ -608,6 +608,11 @@
       "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
     },
     {
+      "prefix": "v72p_",
+      "owner": "apps/server/test/job-tenant-context.integration.test.ts",
+      "packet": "V1-72 (RR-JOB-TENANT-CONTEXT)"
+    },
+    {
       "prefix": "v80m_",
       "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
       "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
