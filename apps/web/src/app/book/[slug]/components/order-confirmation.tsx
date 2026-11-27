@@ -56,6 +56,8 @@ type Props = {
   customerEmail?: string | null;
   onContinueShopping: () => void;
   onRetryPayment?: () => void;
+  /** Why the payment cannot be tried again here (shown in place of the retry button). */
+  retryUnavailableMessage?: string;
   formatDate: (d: string) => string;
   formatTime: (t: string) => string;
 };
@@ -137,6 +139,7 @@ export function OrderConfirmation({
   customerEmail,
   onContinueShopping,
   onRetryPayment,
+  retryUnavailableMessage,
   formatDate,
   formatTime,
 }: Props) {
@@ -177,6 +180,7 @@ export function OrderConfirmation({
         )}
 
         <div className="flex flex-col gap-3 pt-2">
+          {retryUnavailableMessage && <p className="text-sm text-gray-600" role="status">{retryUnavailableMessage}</p>}
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}
@@ -224,6 +228,7 @@ export function OrderConfirmation({
         </div>
 
         <div className="flex flex-col gap-3 pt-2">
+          {retryUnavailableMessage && <p className="text-sm text-gray-600" role="status">{retryUnavailableMessage}</p>}
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}

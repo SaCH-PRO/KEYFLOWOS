@@ -411,16 +411,14 @@ function PublicBookingPageInner() {
     }
   }, [slug]);
 
-  // WEDGE-HIDE-STORE part 2: once the answer is "not offered", the restored cart's product lines are dropped for
-  // good. While the answer is out they are only not shown, so a late answer costs a selling business no cart.
+  // WEDGE-HIDE-STORE part 2: `cart` above is what the page shows and checks out; it never holds a product line
+  // unless the store checkout is offered. Once the answer is "not offered", the product lines are also dropped from
+  // the stored cart. While the answer is out the stored cart is left alone, so a late answer costs a selling
+  // business no cart.
   useEffect(() => {
     if (storeOffered !== false) return;
-    setCart((prev) => {
-      const next = withoutStoreLines(prev);
-      if (next.length === prev.length) return prev;
-      saveCart(slug, next);
-      return next;
-    });
+    const kept = withoutStoreLines(storedCart);
+    if (kept.length !== storedCart.length) saveCart(slug, kept);
   }, [storeOffered, slug, storedCart]);
 
   useEffect(() => {
@@ -723,7 +721,9 @@ function PublicBookingPageInner() {
     returnUrl?: string;
   }, opts?: { newAttempt?: boolean }): Promise<StoreOrderResponse | null> => {
     // An explicit payment retry after the provider failed is a new checkout attempt (a new order), as before.
-    // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered.
+    // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered. Nothing
+    // on the page reaches this when it is not (the cart holds no product line and Retry is not drawn); it is kept so
+    // a later caller cannot send one by mistake. The server refuses the order itself (P233).
     if (storeOffered !== true) throw new Error(STORE_CHECKOUT_NOT_OFFERED);
     if (opts?.newAttempt) checkoutKeyring.reset();
     return postStorefrontCheckout(slug, payload, checkoutKeyring.keyFor(payload));
@@ -1019,6 +1019,10 @@ function PublicBookingPageInner() {
     }
   }, [failedOrderPayload, completedBookingResults, completedBookingKey, confirmedPaymentMethod, confirmedDetails, handleStoreOrderResult, submitStoreOrder]);
 
+  // WEDGE-HIDE-STORE part 2: a kept store order (back from a payment provider) cannot be paid again when the store
+  // checkout is not offered. The confirmation says so and draws no Retry; Back to Shop leaves it behind.
+  const storeRetryBlocked = storeOffered === false && (paymentFailed || paymentPending);
+
   if (loading) {
     return (
       <main className="min-h-screen text-gray-900 flex items-center justify-center" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
@@ -1168,7 +1172,8 @@ function PublicBookingPageInner() {
             // method, is not booked twice; nobody else's checkout reuses them.
             setFailedOrderPayload(null);
           }}
-          onRetryPayment={handleRetryPayment}
+          onRetryPayment={storeRetryBlocked ? undefined : handleRetryPayment}
+          retryUnavailableMessage={storeRetryBlocked ? STORE_CHECKOUT_NOT_OFFERED : undefined}
           formatDate={formatDate}
           formatTime={formatTime}
         />
@@ -1455,7 +1460,7 @@ function PublicBookingPageInner() {
           </div>
         )}
 
-        {showGuidedSelector && !guidedIntake && (
+        {storeOffered === true && showGuidedSelector && !guidedIntake && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
             <GuidedSelector
               slug={slug}
@@ -1476,7 +1481,7 @@ function PublicBookingPageInner() {
           </div>
         )}
 
-        {guidedIntake && (
+        {storeOffered === true && guidedIntake && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
             <AssetIntake
               journeyId={guidedIntake.journeyId}
@@ -1618,7 +1623,9 @@ function PublicBookingPageInner() {
       </div>
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-2">
-        {!showGuidedSelector && !guidedIntake && !checkoutMode && !success && (
+        {/* WEDGE-HIDE-STORE part 2: Find Your Match recommends packages to buy, so it is drawn only when the store
+            checkout is offered. */}
+        {storeOffered === true && !showGuidedSelector && !guidedIntake && !checkoutMode && !success && (
           <button
             onClick={() => setShowGuidedSelector(true)}
             className="pointer-events-auto inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] font-medium text-white backdrop-blur-xl shadow-lg transition-all hover:shadow-xl hover:scale-105 active:scale-95"

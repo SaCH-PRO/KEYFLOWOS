@@ -20,7 +20,10 @@ export function storeCheckoutOffered(storefrontAnswer: unknown): boolean {
 /** What the page says when a store order is asked for and the store checkout is not offered. */
 export const STORE_CHECKOUT_NOT_OFFERED = "Online orders are not available from this business.";
 
-/** The lines of a cart the store checkout would sell: every line that is not a booking. */
+/**
+ * A cart without the lines the store checkout would sell: only its booking lines (`requiresBooking: true`) are kept.
+ * A line that does not say it is a booking (an older stored cart) is a store line, and is left out.
+ */
 export function withoutStoreLines<T extends { requiresBooking?: boolean }>(cart: T[]): T[] {
   return cart.filter((line) => line.requiresBooking === true);
 }

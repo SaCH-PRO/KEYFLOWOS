@@ -68,7 +68,6 @@ export default function ProductDetailPage() {
 
   const addToCart = useCallback(
     (ci: CatalogItem, qty = 1) => {
-      if (!ci.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === ci.id && c.itemType === ci.itemType);
         let next: CartItem[];
@@ -85,7 +84,7 @@ export default function ProductDetailPage() {
       });
       if (business?.id) trackStoreEvent(business.id, "add_to_cart", ci.id);
     },
-    [slug, business, storeOffered]
+    [slug, business]
   );
 
   const removeFromCart = useCallback(
@@ -209,16 +208,12 @@ export default function ProductDetailPage() {
     if (slug) setCart(loadCart(slug));
   }, [slug]);
 
-  // WEDGE-HIDE-STORE part 2: on a "not offered" answer the restored cart's product lines are dropped for good.
+  // WEDGE-HIDE-STORE part 2: `cart` above never holds a product line unless the store checkout is offered. On a
+  // "not offered" answer the product lines are also dropped from the stored cart.
   useEffect(() => {
     if (storeOffered !== false) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
-    setCart((prev) => {
-      const next = withoutStoreLines(prev);
-      if (next.length === prev.length) return prev;
-      saveCart(slug, next);
-      return next;
-    });
+    const kept = withoutStoreLines(storedCart);
+    if (kept.length !== storedCart.length) saveCart(slug, kept);
   }, [storeOffered, slug, storedCart]);
 
   useEffect(() => {
@@ -407,7 +402,9 @@ export default function ProductDetailPage() {
               );
             })()}
 
-            <div className="flex flex-wrap gap-3 py-1">
+            {/* WEDGE-HIDE-STORE part 2: nothing about a checkout is drawn for an item that cannot be bought here. Its
+                two buy buttons below are this page's only doors to the cart. */}
+            {!item.notForSale && <div className="flex flex-wrap gap-3 py-1">
               <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Secure Checkout
@@ -416,9 +413,9 @@ export default function ProductDetailPage() {
                 <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Instant Confirmation
               </div>
-            </div>
+            </div>}
 
-            {item.itemType !== "service" && (
+            {item.itemType !== "service" && !item.notForSale && (
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400">Qty:</span>
                 <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-gray-50">
@@ -543,7 +540,7 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 md:hidden z-30 p-4 backdrop-blur-xl border-t border-gray-200" style={{ backgroundColor: `${ts.pageBg}ee` }}>
+      {(isInCart || !item.notForSale) && <div data-buy-bar className="fixed bottom-0 left-0 right-0 md:hidden z-30 p-4 backdrop-blur-xl border-t border-gray-200" style={{ backgroundColor: `${ts.pageBg}ee` }}>
         {isInCart ? (
           <button
             onClick={() => removeFromCart(item.id, item.itemType)}
@@ -570,7 +567,7 @@ export default function ProductDetailPage() {
             {item.stockStatus === "backorder" ? "Pre-order" : "Add to Cart"} — {formatPrice(item.price * quantity, item.currency)}
           </button>
         )}
-      </div>
+      </div>}
 
       <CartDrawer
         cart={cart}

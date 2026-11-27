@@ -177,6 +177,7 @@ export function FeaturedSection({
                       {formatPrice(item.price, item.currency)}
                     </span>
                     {!item.notForSale && <button
+                      aria-label={inCart ? `${item.name} is in the cart` : `Add ${item.name} to cart`}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!inCart) addToCart(item);
