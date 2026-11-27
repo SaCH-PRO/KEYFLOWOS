@@ -592,14 +592,25 @@ export async function fetchProjectedBatch<T>(opts: {
   fetchPage: (skip: number, take: number) => Promise<T[]>;
   projectPage: (rows: T[]) => Promise<T[]> | T[];
 }): Promise<T[]> {
-  const target = Math.max(opts.targetCount, 0);
-  if (target === 0) return [];
-  const finiteTarget = Number.isFinite(target);
-  const batchSize = Math.max(
-    opts.batchSize ?? (finiteTarget ? Math.max(target, 50) : 100),
-    1,
-  );
-  const maxScanRows = opts.maxScanRows ?? (finiteTarget ? Math.max(target * 20, 2000) : 5000);
+  if (typeof opts.targetCount !== 'number' || Number.isNaN(opts.targetCount) || opts.targetCount <= 0) {
+    return [];
+  }
+  const finiteTarget = Number.isFinite(opts.targetCount);
+  const target = finiteTarget ? Math.floor(opts.targetCount) : Number.POSITIVE_INFINITY;
+  if (target <= 0) return [];
+
+  const batchSize =
+    typeof opts.batchSize === 'number' && Number.isFinite(opts.batchSize) && opts.batchSize >= 1
+      ? Math.floor(opts.batchSize)
+      : finiteTarget
+        ? Math.min(Math.max(target, 50), 500)
+        : 100;
+  const maxScanRows =
+    typeof opts.maxScanRows === 'number' && Number.isFinite(opts.maxScanRows) && opts.maxScanRows >= 1
+      ? Math.floor(opts.maxScanRows)
+      : finiteTarget
+        ? Math.max(target * 20, 2000)
+        : 5000;
   const idOf = opts.idOf ?? ((r: T) => (r as { id?: string } | null)?.id);
 
   const accepted: T[] = [];
@@ -607,7 +618,8 @@ export async function fetchProjectedBatch<T>(opts: {
   let skip = 0;
 
   while (skip < maxScanRows) {
-    const page = await opts.fetchPage(skip, batchSize);
+    const pageTake = Math.min(batchSize, maxScanRows - skip);
+    const page = await opts.fetchPage(skip, pageTake);
     if (!Array.isArray(page) || page.length === 0) break;
 
     const unseen: T[] = [];
@@ -631,7 +643,7 @@ export async function fetchProjectedBatch<T>(opts: {
     }
 
     skip += page.length;
-    if (page.length < batchSize) break;
+    if (page.length < pageTake) break;
   }
 
   return finiteTarget ? accepted.slice(0, target) : accepted;

@@ -29,6 +29,7 @@ import {
   classifyTemporalMemoryForRead,
   evaluateMemoryClassAccess,
   evaluateSightOnlyAggregateAccess,
+  fetchProjectedBatch,
   projectAiMemoryRowsForReader,
   runCrashIsolatedShadow,
   validateRawModuleScope,
@@ -39,6 +40,7 @@ import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.servic
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexAwarenessService } from './key-cortex-awareness.service';
+import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory.service';
 
 const OWNER_SIGHT: ModuleSight = () => true;
 const CRM_ONLY_SIGHT: ModuleSight = (m: CanonicalModule) => m === 'crm';
@@ -592,4 +594,96 @@ describe('MEM-CLASS-READ R1 Hardening Suite', () => {
       expect(revLessons.join(' ')).not.toContain('sk_live_');
     });
   });
+
+  describe('COR-R2-1: fetchProjectedBatch & TemporalFlowMemoryService.getStats always pass finite integer take and respect maxScanRows', () => {
+    it('fetchProjectedBatch sanitizes non-finite/NaN targetCount, batchSize, and maxScanRows and never exceeds maxScanRows', async () => {
+      const nanFetch = vi.fn(async () => [{ id: 'x' }]);
+      expect(
+        await fetchProjectedBatch({
+          targetCount: Number.NaN,
+          fetchPage: nanFetch,
+          projectPage: (rows) => rows,
+        }),
+      ).toEqual([]);
+      expect(
+        await fetchProjectedBatch({
+          targetCount: 0,
+          fetchPage: nanFetch,
+          projectPage: (rows) => rows,
+        }),
+      ).toEqual([]);
+      expect(nanFetch).not.toHaveBeenCalled();
+
+      const allRows = Array.from({ length: 250 }, (_, i) => ({ id: `row_${i}` }));
+      const calls: Array<{ skip: number; take: number }> = [];
+      const scanned = await fetchProjectedBatch({
+        targetCount: Number.POSITIVE_INFINITY,
+        batchSize: Number.POSITIVE_INFINITY,
+        maxScanRows: 120,
+        fetchPage: async (skip, take) => {
+          calls.push({ skip, take });
+          return allRows.slice(skip, skip + take);
+        },
+        projectPage: (rows) => rows,
+      });
+
+      // Fallback finite batchSize (100) then remaining budget (20); never Infinity, never > 120 rows scanned
+      expect(calls).toEqual([
+        { skip: 0, take: 100 },
+        { skip: 100, take: 20 },
+      ]);
+      for (const c of calls) {
+        expect(Number.isInteger(c.take)).toBe(true);
+        expect(Number.isFinite(c.take)).toBe(true);
+        expect(c.take).toBeGreaterThanOrEqual(1);
+      }
+      expect(scanned).toHaveLength(120);
+    });
+
+    it('TemporalFlowMemoryService.getStats passes finite integer take (never Infinity) to Prisma findMany and respects bounded pagination', async () => {
+      const now = new Date();
+      const rows = Array.from({ length: 260 }, (_, i) => ({
+        id: `tf_${i}`,
+        businessId: 'biz_1',
+        entityType: 'contact',
+        entityId: `c_${i}`,
+        type: i % 2 === 0 ? 'summary' : 'insight',
+        content: `CRM note ${i}`,
+        sourceModule: 'crm',
+        sourceEventIds: [],
+        metadata: {},
+        confidence: 0.9,
+        dataClass: 'GENERAL',
+        moduleScope: ['crm'],
+        createdAt: now,
+        updatedAt: now,
+      }));
+      const findManyCalls: Array<{ skip?: number; take?: number }> = [];
+      const prisma = {
+        client: {
+          temporalFlowMemory: {
+            findMany: vi.fn(async (args: { skip?: number; take?: number }) => {
+              findManyCalls.push({ skip: args.skip, take: args.take });
+              const start = args.skip ?? 0;
+              return args.take !== undefined ? rows.slice(start, start + args.take) : rows.slice(start);
+            }),
+          },
+          temporalFlowEvent: { findMany: vi.fn(async () => []) },
+        },
+      };
+      const svc = new TemporalFlowMemoryService(prisma as any, {} as any);
+      const stats = await svc.getStats('biz_1', CRM_CTX);
+
+      expect(stats).toEqual({ total: 260, byType: { summary: 130, insight: 130 } });
+      expect(findManyCalls).toEqual([
+        { skip: undefined, take: 200 },
+        { skip: 200, take: 200 },
+      ]);
+      for (const call of findManyCalls) {
+        expect(Number.isFinite(call.take)).toBe(true);
+        expect(Number.isInteger(call.take)).toBe(true);
+      }
+    });
+  });
 });
+
