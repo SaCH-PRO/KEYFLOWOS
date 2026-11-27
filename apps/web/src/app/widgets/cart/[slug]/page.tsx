@@ -103,7 +103,7 @@ export default function CartWidgetPage() {
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     // WEDGE-HIDE-STORE part 2. Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-12,
-    // WHS2-24); kept until the server refusal (P233) is on main.
+    // WHS2-24). The server refuses the order itself (P233: 403 STORE_CHECKOUT_NOT_OFFERED); this guard stays as well.
     if (cart.length === 0 || step === 'unavailable' || !loaded) return;
     setStep('loading');
     const { data, error } = await apiPost<{

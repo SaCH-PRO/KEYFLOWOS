@@ -73,7 +73,7 @@ export default function ProductDetailPage() {
   const addToCart = useCallback(
     (ci: CatalogItem, qty = 1) => {
       // WEDGE-HIDE-STORE part 2. Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-14,
-      // WHS2-23); kept until the server refusal (P233) is on main.
+      // WHS2-23). The server refuses the order itself (P233: 403 STORE_CHECKOUT_NOT_OFFERED); this guard stays as well.
       if (!ci.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === ci.id && c.itemType === ci.itemType);
