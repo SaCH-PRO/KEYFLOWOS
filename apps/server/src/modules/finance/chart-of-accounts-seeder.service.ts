@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
 
@@ -9,6 +10,45 @@ export interface CoaSeed {
   subtype?: string;
   code?: string;
   parentSystemKey?: string;
+}
+
+export interface CoaSeedCodeCollision {
+  systemKey: string;
+  code: string;
+  holderId: string;
+  holderName: string;
+}
+
+export interface CoaSeedResult {
+  seeded: number;
+  skippedCodes: CoaSeedCodeCollision[];
+}
+
+/** Namespace of the per-business advisory lock that serializes account-code writes and seeding. */
+export const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
+
+/**
+ * Wait and run limits of the account-code transaction, stated rather than left to Prisma's defaults (maxWait
+ * 2 s, timeout 5 s), in line with the repo's other short lock-holding transactions (bookings
+ * SLOT_CLAIM_TX_OPTIONS). A writer that still cannot get a connection or the lock in time gets P2028, which
+ * answers 503 (try again), not a 500.
+ */
+export const COA_CODE_TX_OPTIONS = { isolationLevel: 'ReadCommitted', maxWait: 5_000, timeout: 10_000 } as const;
+
+/**
+ * The whitespace trimmed off a code, on both sides of the comparison: the SQL check trims the stored code
+ * with this same set (rows written before this rule were stored verbatim), so the service and the database
+ * agree on what a code is. ASCII whitespace only: a no-break or other Unicode space, a zero-width
+ * character or full-width digits make a different code here, though it may look the same on screen.
+ */
+export const COA_CODE_WHITESPACE = ' \t\n\r\f\v';
+
+export function trimCoaCode(code: string): string {
+  let start = 0;
+  let end = code.length;
+  while (start < end && COA_CODE_WHITESPACE.includes(code[start])) start++;
+  while (end > start && COA_CODE_WHITESPACE.includes(code[end - 1])) end--;
+  return code.slice(start, end);
 }
 
 /**
@@ -89,6 +129,8 @@ function isUniqueViolation(err: unknown): boolean {
 
 @Injectable()
 export class ChartOfAccountsSeederService {
+  private readonly logger = new Logger(ChartOfAccountsSeederService.name);
+
   /**
    * System-account seeding in flight, keyed by the tenant the run's queries
    * execute under: the active AsyncLocalStorage tenant when there is one (the
@@ -104,7 +146,7 @@ export class ChartOfAccountsSeederService {
    * removed when its run settles, so a failed run is retried by the next
    * caller, not pinned.
    */
-  private readonly inFlight = new Map<string, Promise<void>>();
+  private readonly inFlight = new Map<string, Promise<CoaSeedResult>>();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -112,8 +154,10 @@ export class ChartOfAccountsSeederService {
    * Idempotently ensure the system Chart of Accounts exists for the given
    * business and every ExpenseCategory is linked to its bucket. Safe to call
    * on every read of `/finance/accounts` — uses the (businessId, systemKey)
-   * unique index so re-runs are no-ops, and serializes concurrent seeding per
-   * tenant so a first run is never raced by a second one.
+   * unique index so re-runs are no-ops, serializes concurrent seeding per
+   * tenant, and acquires the shared `coa-code:` advisory lock when writing so
+   * a system code already held by an active custom account is skipped and
+   * reported rather than creating a duplicate active holder.
    *
    * Only the seed is shared between concurrent callers. The link pass runs
    * for every caller after it, so a category committed after a shared run
@@ -121,70 +165,175 @@ export class ChartOfAccountsSeederService {
    * ExpensePostingService re-read `chartOfAccountId` right after this.
    */
   async ensureDefaults(businessId: string): Promise<void> {
-    await this.seedSystemAccountsOnce(businessId);
+    await this.ensureDefaultsWithReport(businessId);
+  }
+
+  /**
+   * Same as `ensureDefaults`, returning the number of newly seeded system rows
+   * and any system codes skipped because an active account already held them.
+   */
+  async ensureDefaultsWithReport(businessId: string): Promise<CoaSeedResult> {
+    const result = await this.seedSystemAccountsOnce(businessId);
     await this.linkExpenseCategories(businessId);
+    return result;
   }
 
   /** One seed run per tenant at a time; concurrent callers await the same run. */
-  private seedSystemAccountsOnce(businessId: string): Promise<void> {
+  private seedSystemAccountsOnce(businessId: string): Promise<CoaSeedResult> {
     const tenant = getCurrentBusinessId() ?? businessId;
     const running = this.inFlight.get(tenant);
     if (running) return running;
-    const run = this.seedSystemAccounts(businessId).finally(() => {
+    const run = this.seedSystemAccounts(businessId, tenant).finally(() => {
       if (this.inFlight.get(tenant) === run) this.inFlight.delete(tenant);
     });
     this.inFlight.set(tenant, run);
     return run;
   }
 
-  private async seedSystemAccounts(businessId: string): Promise<void> {
-    const existing = await this.prisma.client.chartOfAccount.findMany({
+  private isSeedComplete(
+    rows: Array<{ id: string; systemKey: string | null; parentId: string | null }>,
+  ): boolean {
+    const byKey = new Map(rows.map((r) => [r.systemKey, r] as const));
+    for (const seed of SYSTEM_COA) {
+      const row = byKey.get(seed.systemKey);
+      if (!row) return false;
+      if (seed.parentSystemKey) {
+        const parent = byKey.get(seed.parentSystemKey);
+        if (!parent || row.parentId !== parent.id) return false;
+      }
+    }
+    return true;
+  }
+
+  private async seedSystemAccounts(businessId: string, tenant: string): Promise<CoaSeedResult> {
+    // Fast path: if all system accounts and parent links are already present,
+    // avoid taking the advisory lock transaction on steady-state reads.
+    const preCheck = await this.prisma.client.chartOfAccount.findMany({
       where: { businessId, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
-      select: { id: true, systemKey: true },
+      select: { id: true, systemKey: true, parentId: true },
     });
-    const haveBySystemKey = new Map(existing.map((r) => [r.systemKey, r.id] as const));
-
-    // First pass — upsert rows without parents. In-process concurrency is
-    // serialized by `ensureDefaults`; a concurrent run in ANOTHER process
-    // (a second server replica) can still land a key first, and that case
-    // is absorbed by `upsertSystemAccount` rather than thrown.
-    for (const seed of SYSTEM_COA) {
-      if (haveBySystemKey.has(seed.systemKey)) continue;
-      const row = await this.upsertSystemAccount(businessId, seed);
-      if (row) haveBySystemKey.set(row.systemKey ?? seed.systemKey, row.id);
+    if (this.isSeedComplete(preCheck)) {
+      return { seeded: 0, skippedCodes: [] };
     }
 
-    // Second pass — apply parent links for newly created rows.
-    for (const seed of SYSTEM_COA) {
-      if (!seed.parentSystemKey) continue;
-      const id = haveBySystemKey.get(seed.systemKey);
-      const parentId = haveBySystemKey.get(seed.parentSystemKey);
-      if (!id || !parentId) continue;
-      const row = await this.prisma.client.chartOfAccount.findUnique({
-        where: { id },
-        select: { parentId: true },
+    // Acquire the exact same per-business advisory lock as FinanceCoaService
+    // inside a READ COMMITTED transaction so active-code checks and writes are
+    // serialized against concurrent custom account creates/updates and replicas.
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
+
+      const existing = await tx.chartOfAccount.findMany({
+        where: { businessId, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
+        select: { id: true, systemKey: true, parentId: true },
       });
-      if (!row || row.parentId === parentId) continue;
-      await this.prisma.client.chartOfAccount.update({
-        where: { id },
-        data: { parentId },
-      });
-    }
+      const haveBySystemKey = new Map<string, { id: string; parentId: string | null }>();
+      for (const r of existing) {
+        if (r.systemKey) haveBySystemKey.set(r.systemKey, { id: r.id, parentId: r.parentId ?? null });
+      }
+
+      const missing = SYSTEM_COA.filter((seed) => !haveBySystemKey.has(seed.systemKey));
+      const skippedCodes: CoaSeedCodeCollision[] = [];
+      let seeded = 0;
+
+      if (missing.length > 0) {
+        // Load active coded accounts for the effective tenant under the lock,
+        // matching FinanceCoaService.assertCodeFree's trim and case-folding rules.
+        const activeHolders = await tx.$queryRaw<
+          Array<{ id: string; name: string; norm_code: string }>
+        >`
+          SELECT id, name, lower(btrim(code, ${COA_CODE_WHITESPACE})) AS norm_code
+          FROM chart_of_accounts
+          WHERE business_id = ${tenant}
+            AND is_active = true
+            AND code IS NOT NULL
+            AND btrim(code, ${COA_CODE_WHITESPACE}) <> ''
+          ORDER BY created_at ASC, id ASC`;
+
+        const holderByCode = new Map<string, { id: string; name: string }>();
+        for (const h of activeHolders) {
+          if (!holderByCode.has(h.norm_code)) {
+            holderByCode.set(h.norm_code, { id: h.id, name: h.name });
+          }
+        }
+
+        // First pass — upsert missing rows without parents. If an active account
+        // already holds a seed's normalized code, create the system row with
+        // code: null (so postings/systemKey lookups remain intact with zero
+        // duplicate active code holders) and report the collision.
+        for (const seed of missing) {
+          const trimmedCode = seed.code ? trimCoaCode(seed.code) : '';
+          const normCode = trimmedCode === '' ? null : trimmedCode.toLowerCase();
+          let codeToAssign: string | null = trimmedCode === '' ? null : trimmedCode;
+
+          if (normCode !== null) {
+            const holder = holderByCode.get(normCode);
+            if (holder) {
+              codeToAssign = null;
+              skippedCodes.push({
+                systemKey: seed.systemKey,
+                code: trimmedCode,
+                holderId: holder.id,
+                holderName: holder.name,
+              });
+              this.logger.warn(
+                `Skipping system COA code ${trimmedCode} for ${seed.systemKey} (businessId=${tenant}): active account ${holder.id} already holds this code`,
+              );
+            }
+          }
+
+          const row = await this.upsertSystemAccount(tx, businessId, seed, codeToAssign);
+          if (row) {
+            seeded += 1;
+            haveBySystemKey.set(row.systemKey ?? seed.systemKey, {
+              id: row.id,
+              parentId: row.parentId ?? null,
+            });
+            if (normCode !== null && codeToAssign !== null) {
+              holderByCode.set(normCode, { id: row.id, name: seed.name });
+            }
+          }
+        }
+      }
+
+      // Second pass — apply parent links for newly created (or unlinked) rows.
+      for (const seed of SYSTEM_COA) {
+        if (!seed.parentSystemKey) continue;
+        const entry = haveBySystemKey.get(seed.systemKey);
+        const parent = haveBySystemKey.get(seed.parentSystemKey);
+        if (!entry || !parent) continue;
+        if (entry.parentId === parent.id) continue;
+        await tx.chartOfAccount.update({
+          where: { id: entry.id },
+          data: { parentId: parent.id },
+        });
+        entry.parentId = parent.id;
+      }
+
+      return { seeded, skippedCodes };
+    }, COA_CODE_TX_OPTIONS).catch((err: unknown) => {
+      if ((err as { code?: unknown } | null)?.code === 'P2028') {
+        throw new ServiceUnavailableException(
+          { code: 'COA_CODE_BUSY', message: 'The chart of accounts is busy. Please try again.' },
+          { cause: err },
+        );
+      }
+      throw err;
+    });
   }
 
   /**
-   * Upsert one system account. Prisma emulates this upsert as SELECT then
-   * INSERT, so a seed run in another process can land the same key between
-   * the two and the INSERT raises P2002. That only means the account already
-   * exists: re-read it instead of throwing, so a payment posting that
-   * triggered the seed is never failed by someone else finishing it first.
+   * Upsert one system account inside the locked transaction. Keeps the P2002
+   * re-read fallback for defense-in-depth (e.g. if a row landed outside the lock).
    */
   private async upsertSystemAccount(
+    tx: Prisma.TransactionClient,
     businessId: string,
     seed: CoaSeed,
-  ): Promise<{ id: string; systemKey: string | null } | null> {
+    code: string | null,
+  ): Promise<{ id: string; systemKey: string | null; parentId: string | null } | null> {
     try {
-      return await this.prisma.client.chartOfAccount.upsert({
+      return await tx.chartOfAccount.upsert({
         where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
         create: {
           businessId,
@@ -192,18 +341,18 @@ export class ChartOfAccountsSeederService {
           name: seed.name,
           type: seed.type,
           subtype: seed.subtype ?? null,
-          code: seed.code ?? null,
+          code,
           isSystem: true,
           isActive: true,
         },
         update: {},
-        select: { id: true, systemKey: true },
+        select: { id: true, systemKey: true, parentId: true },
       });
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
-      return this.prisma.client.chartOfAccount.findUnique({
+      return tx.chartOfAccount.findUnique({
         where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
-        select: { id: true, systemKey: true },
+        select: { id: true, systemKey: true, parentId: true },
       });
     }
   }
