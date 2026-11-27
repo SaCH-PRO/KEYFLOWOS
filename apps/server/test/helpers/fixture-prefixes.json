@@ -608,6 +608,11 @@
       "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
     },
     {
+      "prefix": "v72p_",
+      "owner": "apps/server/test/job-tenant-context.integration.test.ts",
+      "packet": "V1-72 (RR-JOB-TENANT-CONTEXT)"
+    },
+    {
       "prefix": "v80m_",
       "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
       "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
@@ -816,6 +821,11 @@
       "prefix": "v91b_",
       "owner": "apps/server/test/recurring-expense-server.integration.test.ts",
       "packet": "V1-91 (FU-RECURRING-EXPENSE-SERVER)"
+    },
+    {
+      "prefix": "v92a_",
+      "owner": "apps/server/test/memory-eval-leak.integration.test.ts",
+      "packet": "V1-92 (MEM-EVAL-SUITE, P150)"
     },
     {
       "prefix": "v92d_",
@@ -1650,6 +1660,16 @@
       "prefix": "v91p_",
       "owner": "apps/server/test/coa-seeder-input.integration.test.ts",
       "packet": "V1-91 (FU-COA-SEEDER-AND-INPUT, P146)"
+    },
+    {
+      "prefix": "v91q_",
+      "owner": "apps/server/test/nested-credential-reads.integration.test.ts",
+      "packet": "V1-91 (FU-NESTED-CREDENTIAL-READS, P149)"
+    },
+    {
+      "prefix": "v92b_",
+      "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
+      "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
     }
   ],
   "pendingRenames": [],

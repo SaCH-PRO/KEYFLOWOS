@@ -81,6 +81,10 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
+// W11-LOAD-SENSITIVE-TESTS: give real-DB cases and afterEach ledger checks a
+// deterministic timeout budget matching EE-08/EE-12 (60 s) under load.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v82g_';
@@ -231,7 +235,7 @@ async function untilOne(what: string, find: () => Promise<number[]>): Promise<nu
       if (found.length === 0) throw new Error(`nothing is ${what} yet`);
       return found;
     },
-    { timeout: 8000, interval: 25 },
+    { timeout: 20_000, interval: 25 },
   );
   expect(pids, `exactly one backend is ${what}`).toHaveLength(1);
   return pids[0];
@@ -386,7 +390,7 @@ async function auditRow(action: string, entityId: string) {
       if (!row) throw new Error(`no ${action} audit row yet`);
       return row;
     },
-    { timeout: 5000, interval: 50 },
+    { timeout: 15_000, interval: 50 },
   );
 }
 

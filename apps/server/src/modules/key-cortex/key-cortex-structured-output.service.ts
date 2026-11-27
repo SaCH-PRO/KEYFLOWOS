@@ -117,121 +117,149 @@ If you don't know something, state it explicitly and recommend a human expert.
   /**
    * Parse a structured response into the KEY 10/10 output shape.
    */
-  parseStructuredResponse(content: string): {
-    role?: string;
-    analysis?: string;
-    hiddenSignals: string[];
-    recommendation?: string;
-    risks: string[];
-    successMetrics: string[];
-    nextStep?: string;
-    confidence: number;
-    frameworks: string[];
-  } {
-    const empty = {
-      role: undefined,
-      analysis: undefined,
-      hiddenSignals: [] as string[],
-      recommendation: content || '',
-      risks: [] as string[],
-      successMetrics: [] as string[],
-      nextStep: undefined,
-      confidence: 70,
-      frameworks: [] as string[],
-    };
+  parseStructuredResponse(content: string): ParsedStructuredCortexResponse {
+    return parseStructuredCortexResponse(content);
+  }
 
-    if (!content || !content.includes('**')) {
-      return empty;
-    }
+  parseConfidence(raw: string): number | null {
+    return parseStructuredConfidence(raw);
+  }
+}
 
-    const sectionLabels = [
-      'Role Mode',
-      'Analysis',
-      'Hidden Signals',
-      'Recommendation',
-      'Risk Check',
-      'Success Metrics',
-      'Next Step',
-      'Confidence',
+export type StructuredParseState = 'sections' | 'unstructured';
+
+export interface ParsedStructuredCortexResponse {
+  state: StructuredParseState;
+  role?: string;
+  analysis?: string;
+  hiddenSignals: string[];
+  recommendation?: string;
+  risks: string[];
+  successMetrics: string[];
+  nextStep?: string;
+  confidence: number | null;
+  frameworks: string[];
+}
+
+export function parseStructuredConfidence(raw?: string): number | null {
+  if (!raw) return null;
+  const match = raw.match(/(?:^|[^\d.])(-?\d+(?:\.\d+)?)\s*(%?)/);
+  if (!match) return null;
+  const rawValue = Number(match[1]);
+  if (!Number.isFinite(rawValue) || rawValue < 0 || rawValue > 100) {
+    return null;
+  }
+  const hasPercent = match[2] === '%';
+  if (!hasPercent && rawValue > 0 && rawValue < 1) {
+    return Math.round(rawValue * 10000) / 100;
+  }
+  return rawValue;
+}
+
+export function parseStructuredCortexResponse(
+  content: string,
+): ParsedStructuredCortexResponse {
+  const empty: ParsedStructuredCortexResponse = {
+    state: 'unstructured',
+    role: undefined,
+    analysis: undefined,
+    hiddenSignals: [],
+    recommendation: content || '',
+    risks: [],
+    successMetrics: [],
+    nextStep: undefined,
+    confidence: null,
+    frameworks: [],
+  };
+
+  if (!content) {
+    return empty;
+  }
+
+  const sectionLabels = [
+    'Role Mode',
+    'Analysis',
+    'Hidden Signals',
+    'Recommendation',
+    'Risk Check',
+    'Success Metrics',
+    'Next Step',
+    'Confidence',
+  ];
+
+  const normalized = content.replace(/\r\n/g, '\n');
+
+  const findSection = (
+    label: string,
+  ): { labelStart: number; contentStart: number } | undefined => {
+    const patterns = [
+      new RegExp(`\\*\\*${label}:?\\*\\*[\\s:]*`, 'i'),
+      new RegExp(`(?:^|\\n)[ \\t]*(?:\\d{1,3}\\.\\s*|[-*•]\\s*)?${label}:[\\s]*`, 'i'),
     ];
-
-    const normalized = content.replace(/\r\n/g, '\n');
-
-    const findSection = (
-      label: string,
-    ): { labelStart: number; contentStart: number } | undefined => {
-      const patterns = [
-        new RegExp(`\\*\\*${label}\\*\\*[\\s:]*`, 'i'),
-        new RegExp(`${label}:[\\s]*`, 'i'),
-      ];
-      for (const pattern of patterns) {
-        const match = normalized.match(pattern);
-        if (match?.index !== undefined) {
-          return {
-            labelStart: match.index,
-            contentStart: match.index + match[0].length,
-          };
-        }
-      }
-      return undefined;
-    };
-
-    const sections: Record<string, string> = {};
-    const positions: Array<{
-      label: string;
-      labelStart: number;
-      contentStart: number;
-    }> = [];
-
-    for (const label of sectionLabels) {
-      const pos = findSection(label);
-      if (pos) {
-        positions.push({ label, ...pos });
+    for (const pattern of patterns) {
+      const match = normalized.match(pattern);
+      if (match?.index !== undefined) {
+        return {
+          labelStart: match.index,
+          contentStart: match.index + match[0].length,
+        };
       }
     }
+    return undefined;
+  };
 
-    positions.sort((a, b) => a.contentStart - b.contentStart);
+  const sections: Record<string, string> = {};
+  const positions: Array<{
+    label: string;
+    labelStart: number;
+    contentStart: number;
+  }> = [];
 
-    for (let i = 0; i < positions.length; i++) {
-      const current = positions[i];
-      const next = positions[i + 1];
-      const end = next ? next.labelStart : normalized.length;
-      sections[current.label] = normalized
-        .slice(current.contentStart, end)
-        .replace(/\n\s*\n/g, '\n')
-        .trim();
+  for (const label of sectionLabels) {
+    const pos = findSection(label);
+    if (pos) {
+      positions.push({ label, ...pos });
     }
-
-    const parseList = (raw?: string): string[] => {
-      if (!raw) return [];
-      return raw
-        .split(/\n|•|-\s*|\d+\.\s*/)
-        .map((s) => s.replace(/^[-•]\s*/, '').trim())
-        .filter((s) => s.length > 0);
-    };
-
-    const role = sections['Role Mode'];
-    const frameworks: string[] = [];
-    if (role) frameworks.push(`Role: ${role}`);
-
-    return {
-      role,
-      analysis: sections['Analysis'],
-      hiddenSignals: parseList(sections['Hidden Signals']),
-      recommendation: sections['Recommendation'] || content,
-      risks: parseList(sections['Risk Check']),
-      successMetrics: parseList(sections['Success Metrics']),
-      nextStep: sections['Next Step'],
-      confidence: this.parseConfidence(sections['Confidence'] ?? ''),
-      frameworks,
-    };
   }
 
-  parseConfidence(raw: string): number {
-    if (!raw) return 70;
-    const match = raw.match(/(\d{1,3})/);
-    if (!match) return 70;
-    const value = parseInt(match[1], 10);
-    return Math.min(Math.max(value, 0), 100);
+  if (positions.length === 0) {
+    return empty;
   }
+
+  positions.sort((a, b) => a.contentStart - b.contentStart);
+
+  for (let i = 0; i < positions.length; i++) {
+    const current = positions[i];
+    const next = positions[i + 1];
+    const end = next ? next.labelStart : normalized.length;
+    sections[current.label] = normalized
+      .slice(current.contentStart, end)
+      .replace(/\n\s*\n/g, '\n')
+      .trim();
+  }
+
+  const parseList = (raw?: string): string[] => {
+    if (!raw) return [];
+    return raw
+      .split(/\n|•|-\s*|\d{1,3}\.\s*/)
+      .map((s) => s.replace(/^[-•]\s*/, '').trim())
+      .filter((s) => s.length > 0);
+  };
+
+  const role = sections['Role Mode'];
+  const frameworks: string[] = [];
+  if (role) frameworks.push(`Role: ${role}`);
+
+  return {
+    state: 'sections',
+    role,
+    analysis: sections['Analysis'],
+    hiddenSignals: parseList(sections['Hidden Signals']),
+    recommendation: sections['Recommendation'] || content,
+    risks: parseList(sections['Risk Check']),
+    successMetrics: parseList(sections['Success Metrics']),
+    nextStep: sections['Next Step'],
+    confidence: parseStructuredConfidence(sections['Confidence']),
+    frameworks,
+  };
 }

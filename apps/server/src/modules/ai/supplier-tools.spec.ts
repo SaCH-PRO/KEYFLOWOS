@@ -94,19 +94,21 @@ describe('no tool can reach supplier credentials', () => {
     }
   });
 
-  it('the service still strips credentials on both read paths', () => {
+  it('the service still strips credentials on both read paths', async () => {
     // The tools rely on this rather than redacting themselves. If it ever stops
     // being true, a handler that faithfully returns what it was given begins
     // leaking, and nothing in the handler would change.
+    const { SUPPLIER_CONNECTION_PUBLIC_SELECT } = await import('../supplier/supplier.service');
+    expect('credentials' in SUPPLIER_CONNECTION_PUBLIC_SELECT).toBe(false);
     const service = readFileSync(
       join(__dirname, '..', 'supplier', 'supplier.service.ts'),
       'utf8',
     );
     const list = service.slice(service.indexOf('async getSupplierConnections'), service.indexOf('async updateSupplierConnection'));
-    expect(list, 'getSupplierConnection(s) no longer strips credentials').toMatch(
-      /credentials: undefined/,
+    expect(list, 'getSupplierConnection(s) no longer projects via SUPPLIER_CONNECTION_PUBLIC_SELECT').toMatch(
+      /SUPPLIER_CONNECTION_PUBLIC_SELECT/,
     );
-    expect((list.match(/credentials: undefined/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect((list.match(/SUPPLIER_CONNECTION_PUBLIC_SELECT/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
   it('registry has no tool for establishing a connection, which would take credentials', () => {

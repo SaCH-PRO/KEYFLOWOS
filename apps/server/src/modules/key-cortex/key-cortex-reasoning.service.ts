@@ -40,7 +40,11 @@ import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
 import { KeyCortexLegacyInsightService } from './key-cortex-legacy-insight.service';
 import { KeyCortexProviderSelectionService } from './key-cortex-provider-selection.service';
-import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
+import {
+  KeyCortexStructuredOutputService,
+  ParsedStructuredCortexResponse,
+  parseStructuredCortexResponse,
+} from './key-cortex-structured-output.service';
 import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
 import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
@@ -412,113 +416,11 @@ export class KeyCortexReasoningService {
   /**
    * Parse a structured response into the KEY 10/10 output shape.
    */
-  parseStructuredResponse(content: string): {
-    role?: string;
-    analysis?: string;
-    hiddenSignals: string[];
-    recommendation?: string;
-    risks: string[];
-    successMetrics: string[];
-    nextStep?: string;
-    confidence: number;
-    frameworks: string[];
-  } {
-    const empty = {
-      role: undefined,
-      analysis: undefined,
-      hiddenSignals: [] as string[],
-      recommendation: content || '',
-      risks: [] as string[],
-      successMetrics: [] as string[],
-      nextStep: undefined,
-      confidence: 70,
-      frameworks: [] as string[],
-    };
-
-    if (!content || !content.includes('**')) {
-      return empty;
+  parseStructuredResponse(content: string): ParsedStructuredCortexResponse {
+    if (this.structuredOutputService?.parseStructuredResponse) {
+      return this.structuredOutputService.parseStructuredResponse(content);
     }
-
-    const sectionLabels = [
-      'Role Mode',
-      'Analysis',
-      'Hidden Signals',
-      'Recommendation',
-      'Risk Check',
-      'Success Metrics',
-      'Next Step',
-      'Confidence',
-    ];
-
-    const normalized = content.replace(/\r\n/g, '\n');
-
-    const findSection = (label: string): { labelStart: number; contentStart: number } | undefined => {
-      const patterns = [
-        new RegExp(`\\*\\*${label}\\*\\*[\\s:]*`, 'i'),
-        new RegExp(`${label}:[\\s]*`, 'i'),
-      ];
-      for (const pattern of patterns) {
-        const match = normalized.match(pattern);
-        if (match?.index !== undefined) {
-          return { labelStart: match.index, contentStart: match.index + match[0].length };
-        }
-      }
-      return undefined;
-    };
-
-    const sections: Record<string, string> = {};
-    const positions: Array<{ label: string; labelStart: number; contentStart: number }> = [];
-
-    for (const label of sectionLabels) {
-      const pos = findSection(label);
-      if (pos) {
-        positions.push({ label, ...pos });
-      }
-    }
-
-    positions.sort((a, b) => a.contentStart - b.contentStart);
-
-    for (let i = 0; i < positions.length; i++) {
-      const current = positions[i];
-      const next = positions[i + 1];
-      const end = next ? next.labelStart : normalized.length;
-      sections[current.label] = normalized
-        .slice(current.contentStart, end)
-        .replace(/\n\s*\n/g, '\n')
-        .trim();
-    }
-
-    const parseList = (raw?: string): string[] => {
-      if (!raw) return [];
-      return raw
-        .split(/\n|•|-\s*|\d+\.\s*/)
-        .map(s => s.replace(/^[-•]\s*/, '').trim())
-        .filter(s => s.length > 0);
-    };
-
-    const role = sections['Role Mode'];
-    const frameworks: string[] = [];
-    if (role) frameworks.push(`Role: ${role}`);
-
-    return {
-      role,
-      analysis: sections['Analysis'],
-      hiddenSignals: parseList(sections['Hidden Signals']),
-      recommendation: sections['Recommendation'] || content,
-      risks: parseList(sections['Risk Check']),
-      successMetrics: parseList(sections['Success Metrics']),
-      nextStep: sections['Next Step'],
-      confidence: this.parseConfidence(sections['Confidence'] ?? ''),
-      frameworks,
-    };
-  }
-
-  private parseConfidence(raw: string): number {
-    if (!raw) return 70;
-    const match = raw.match(/(\d{1,3})/);
-    if (!match) return 70;
-    const value = parseInt(match[1], 10);
-    return Math.min(Math.max(value, 0), 100);
+    return parseStructuredCortexResponse(content);
   }
 
 

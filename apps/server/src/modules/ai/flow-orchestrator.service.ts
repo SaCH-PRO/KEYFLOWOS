@@ -8293,8 +8293,8 @@ ${triage.standingContext}`;
       }
       case 'commerce_send_invoice': {
         const found = await this.prisma.client.invoice.findFirst({
-          where: { id: args.invoiceId, businessId },
-          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
+          where: { id: args.invoiceId, businessId, deletedAt: null },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true, deletedAt: true } } },
         });
         if (!found) throw new NotFoundException('Invoice not found');
         // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) is emailed
@@ -8304,15 +8304,15 @@ ${triage.standingContext}`;
         // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
         // VOID -> SENT transition. Refused before any mail.
         if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
-        // FU-PAY-LINK-STATUS-GATE & FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): KEY does not email an
-        // invoice no pay link may be issued for. (When every link is revoked or expired,
+        // FU-PAY-LINK-STATUS-GATE, FU-KEY-INVOICE-EMAIL-PAY-LINK & FU-KEY-SEND-INVOICE-PAID-REFUSE
+        // (D-248): KEY does not email an invoice no pay link may be issued for (PAID, PENDING,
+        // FAILED, FULLY_CREDITED, any status added later). (When every link is revoked or expired,
         // automatedInvoiceUrl answers null and the email goes without a button by design, V1-46b
         // SEC-V46B-1/2; on a transient pay-link conflict, customerInvoiceUrl rethrows
         // RetryableConflictException before any mail or status flip so the plan queue retries.)
-        // An invoice no pay link may be issued for (PENDING, FAILED, FULLY_CREDITED, any status
-        // added later) is refused here, before any mail, link or status change, as the operator's
-        // send-email refuses it. A DRAFT is admitted: this send issues it. PAID is left as it was.
-        if (invoice.status !== 'PAID') CommerceService.assertPayLinkStatus(invoice.status, true);
+        // A DRAFT is admitted: this send issues it.
+        CommerceService.assertPayLinkStatus(invoice.status, true);
+        if (invoice.contact?.deletedAt) throw new ConflictException('Cannot email a deleted contact');
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
         // ACTUALLY SEND IT.
         //
