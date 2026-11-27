@@ -1040,7 +1040,94 @@ describe('W11-PAGING-TOTAL-ORDER-C: CrmService.listContacts deterministic id tie
       expect(cur2.body.hasMore).toBe(false);
       expect([...cur1Ids, ...cur2Ids]).toEqual(expectedDesc);
     } finally {
-      await db.contact.deleteMany({ where: { id: { in: tieIds } } });
+      await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(`${P}tie_`)}`);
+    }
+  });
+
+  it('[PAGING-C02] R1 MAJOR-1 / MINOR-1: cursor pagination honors sortOrder overrides (newest+asc, oldest+desc) over tied createdAt + MVCC update, and name sort returns nextCursor=null for offset pagination', async () => {
+    const tieAt = new Date('2026-06-15T12:00:00.000Z');
+    const tieTag = `${P}tie2_tag`;
+    const tieIds = [`${P}tie2_a`, `${P}tie2_b`, `${P}tie2_c`, `${P}tie2_d`];
+    const expectedAsc = [...tieIds];
+    const expectedDesc = [...tieIds].reverse();
+
+    await db.contact.createMany({
+      data: tieIds.map((id, idx) => ({
+        id,
+        businessId: ID.bizA,
+        ownerId: ID.owner,
+        visibility: 'TEAM',
+        firstName: 'Same',
+        lastName: `Tie${idx}`,
+        email: `${id}@test.local`,
+        tags: [tieTag],
+        createdAt: tieAt,
+        updatedAt: tieAt,
+      })),
+    });
+
+    try {
+      // 1) sortBy=newest&sortOrder=asc must page ascending with cursorOp='gt' (not inverted 'lt')
+      const asc1 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&sortBy=newest&sortOrder=asc&take=2`)
+        .set('x-test-user', ID.owner);
+      expect(asc1.status, asc1.text).toBe(200);
+      const asc1Ids = (asc1.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(asc1Ids).toEqual(expectedAsc.slice(0, 2));
+      expect(asc1.body.hasMore).toBe(true);
+      expect(asc1.body.nextCursor).toBe(expectedAsc[1]);
+
+      await db.contact.update({ where: { id: asc1Ids[0] }, data: { lastName: 'MVCCAsc' } });
+
+      const asc2 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&sortBy=newest&sortOrder=asc&take=2&cursor=${encodeURIComponent(asc1.body.nextCursor)}`)
+        .set('x-test-user', ID.owner);
+      expect(asc2.status, asc2.text).toBe(200);
+      const asc2Ids = (asc2.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(asc2Ids).toEqual(expectedAsc.slice(2, 4));
+      expect(asc2.body.hasMore).toBe(false);
+      expect([...asc1Ids, ...asc2Ids]).toEqual(expectedAsc);
+
+      // 2) sortBy=oldest&sortOrder=desc must page descending with cursorOp='lt' (not inverted 'gt')
+      const desc1 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&sortBy=oldest&sortOrder=desc&take=2`)
+        .set('x-test-user', ID.owner);
+      expect(desc1.status, desc1.text).toBe(200);
+      const desc1Ids = (desc1.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(desc1Ids).toEqual(expectedDesc.slice(0, 2));
+      expect(desc1.body.hasMore).toBe(true);
+      expect(desc1.body.nextCursor).toBe(expectedDesc[1]);
+
+      const desc2 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&sortBy=oldest&sortOrder=desc&take=2&cursor=${encodeURIComponent(desc1.body.nextCursor)}`)
+        .set('x-test-user', ID.owner);
+      expect(desc2.status, desc2.text).toBe(200);
+      const desc2Ids = (desc2.body.contacts as Array<{ id: string }>).map((c) => c.id);
+      expect(desc2Ids).toEqual(expectedDesc.slice(2, 4));
+      expect(desc2.body.hasMore).toBe(false);
+      expect([...desc1Ids, ...desc2Ids]).toEqual(expectedDesc);
+
+      // 3) sortBy=name returns nextCursor=null so callers use deterministic offset pagination instead of an incompatible createdAt cursor
+      const name1 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&sortBy=name&sortOrder=asc&take=2&skip=0`)
+        .set('x-test-user', ID.owner);
+      expect(name1.status, name1.text).toBe(200);
+      expect(name1.body.hasMore).toBe(true);
+      expect(name1.body.nextCursor).toBeNull();
+      const name2 = await request(app.getHttpServer())
+        .get(`/crm/businesses/${ID.bizA}/contacts?tags=${tieTag}&sortBy=name&sortOrder=asc&take=2&skip=2`)
+        .set('x-test-user', ID.owner);
+      expect(name2.status, name2.text).toBe(200);
+      expect(name2.body.hasMore).toBe(false);
+      expect(name2.body.nextCursor).toBeNull();
+      const allNameIds = [
+        ...(name1.body.contacts as Array<{ id: string }>).map((c) => c.id),
+        ...(name2.body.contacts as Array<{ id: string }>).map((c) => c.id),
+      ];
+      expect(new Set(allNameIds).size).toBe(4);
+      expect(allNameIds.sort()).toEqual([...tieIds].sort());
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(`${P}tie2_`)}`);
     }
   });
 });

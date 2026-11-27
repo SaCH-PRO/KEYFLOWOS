@@ -586,13 +586,21 @@ export class CrmService {
       return { contacts: sliced, nextCursor: null, hasMore: skip + take < withStats.length };
     }
 
-    if (input.cursor) {
+    const supportsCursor =
+      !sortBy || sortBy === 'newest' || sortBy === 'oldest' || sortBy === 'lastInteraction';
+
+    if (supportsCursor && input.cursor) {
       const cursorContact = await this.prisma.client.contact.findUnique({
         where: { id: input.cursor },
         select: { createdAt: true, updatedAt: true, id: true },
       });
       if (cursorContact) {
-        const isDescending = !sortBy || sortBy === 'newest' || sortBy === 'lastInteraction';
+        const isDescending =
+          sortBy === 'oldest'
+            ? sortDir === 'desc'
+            : sortBy === 'newest' || sortBy === 'lastInteraction'
+              ? sortDir !== 'asc'
+              : true;
         const cursorOp = isDescending ? 'lt' : 'gt';
         const cursorField = sortBy === 'lastInteraction' ? 'updatedAt' : 'createdAt';
         const cursorValue = cursorField === 'updatedAt' ? cursorContact.updatedAt : cursorContact.createdAt;
@@ -606,7 +614,7 @@ export class CrmService {
       }
     }
 
-    const skip = input.cursor ? 0 : (input.skip ?? 0);
+    const skip = supportsCursor && input.cursor ? 0 : (input.skip ?? 0);
 
     const contacts = await this.prisma.client.contact.findMany({
       where,
@@ -617,7 +625,7 @@ export class CrmService {
 
     const hasMore = contacts.length > take;
     const sliced = hasMore ? contacts.slice(0, take) : contacts;
-    const nextCursor = hasMore && sliced.length > 0 ? sliced[sliced.length - 1].id : null;
+    const nextCursor = supportsCursor && hasMore && sliced.length > 0 ? sliced[sliced.length - 1].id : null;
 
     if (!input.includeStats || sliced.length === 0) {
       return { contacts: sliced, nextCursor, hasMore };
