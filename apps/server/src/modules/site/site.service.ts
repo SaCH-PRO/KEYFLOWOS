@@ -205,10 +205,21 @@ export class SiteService {
           carrier: true,
         },
       }),
-      this.resolveLegacyModules().getLegacyModules(business.id),
+      // P248 (WEDGE-HIDE-STORE-SERVER-FAILSAFE): keep legacy-read failures local so
+      // a timeout or error on the all-modules probe fails closed to storeCheckout=false
+      // instead of 500-ing public storefront GET, /gateways, /validate-promo, or /checkout.
+      Promise.resolve()
+        .then(() => this.resolveLegacyModules().getLegacyModules(business.id))
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Legacy modules read failed for public storefront business=${business.id}; failing closed to storeCheckout=false: ${message}`,
+          );
+          return [] as string[];
+        }),
     ]);
 
-    const storeCheckout = legacyModules.includes('store');
+    const storeCheckout = Array.isArray(legacyModules) && legacyModules.includes('store');
 
     const listedProductIds = listings
       .map((l) => l.sourceProductId)

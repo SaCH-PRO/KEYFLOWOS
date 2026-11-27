@@ -517,15 +517,16 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
         expect(Array.isArray(gatewaysRes.body)).toBe(true);
         expect(gatewaysRes.body.length).toBeGreaterThan(0);
 
-        // 4. /validate-promo: 200 (never 500).
+        // 4. /validate-promo: 201 (NestJS @Post default, never 500).
         const promoRes = await agent()
           .post(`/site/storefront/public/${encodeURIComponent(SLUG.none)}/validate-promo`)
           .send({
             code: 'LAUNCH10',
             items: [{ productId: ID.prodNone, quantity: 1 }],
           });
-        expect(promoRes.status, `${mode} POST /validate-promo: ${promoRes.text}`).toBe(200);
+        expect(promoRes.status, `${mode} POST /validate-promo: ${promoRes.text}`).toBe(201);
         expect(promoRes.body.valid).toBe(true);
+        expect(promoRes.body.total).toBe(90);
 
         // 5. /checkout on legacy store business: fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500, zero writes).
         const checkoutRes = await agent()
