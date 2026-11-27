@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { securitySignals } from '../../core/observability/security-signals';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { PaymentsService, STRIPE_LEGACY_REFUSED_PROVIDER } from '../payments/payments.service';
@@ -129,6 +130,7 @@ export class WebhooksController {
     }
 
     if (!signature) {
+      securitySignals.record('webhook_signature_failed', 'stripe');
       this.logger.warn('Stripe webhook received without signature header');
       throw new BadRequestException('Missing stripe-signature header');
     }
@@ -143,6 +145,7 @@ export class WebhooksController {
     try {
       event = this.stripe!.webhooks.constructEvent(rawBody, signature, webhookSecret);
     } catch (err: unknown) {
+      securitySignals.record('webhook_signature_failed', 'stripe');
       this.logger.warn(`Stripe webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`);
       throw new BadRequestException(`Webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`);
     }
