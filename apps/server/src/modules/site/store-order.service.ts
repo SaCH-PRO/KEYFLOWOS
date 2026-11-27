@@ -351,29 +351,49 @@ const FULFILMENT_ORDER_SELECT = {
   },
 } satisfies Prisma.MarketplaceOrderSelect;
 
-const PAYMENT_TIMELINE_STATUSES: ReadonlySet<string> = new Set([
-  'paid',
-  'refunded',
-  'partially_refunded',
-  'payment_failed',
-  'payment_pending',
-  'payment_recorded',
+const FULFILMENT_TIMELINE_STATUSES: ReadonlySet<string> = new Set([
+  'placed',
+  'pending',
+  'confirmed',
+  'processing',
+  'awaiting_fulfillment',
+  'routes_created',
+  'routed',
+  'supplier_ordered',
+  'picking_packing',
+  'shipped',
+  'delivered',
+  'completed',
+  'cancelled',
+  'on_hold',
+  'tracking_updated',
 ]);
 
+const hasOwn = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 /**
- * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): fail-closed
- * allowlist for `MarketplaceOrder.metadata` when served to a reader below
- * `revenue: read`. Keeps only fulfilment/storefront keys (`source`,
- * `storefrontSlug`, `referralCode`, `visitorId`, `deliveryNotes`,
- * `deliveryInstructions`, `stockNotDecrementedProductIds`, non-fee `shipping`
- * fields, and non-payment `statusTimeline` entries). Strips `taxRate`,
- * `promoCode`, `refundedTotal`, `shippingExpense`, `links` (carries
- * `invoiceId`), `publicToken`, `shipping.fee`, payment/refund timeline steps,
- * and any unrecognized keys.
+ * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234; R1-SEC-01/02):
+ * fail-closed allowlist for `MarketplaceOrder.metadata` when served to a
+ * reader below `revenue: read`. Keeps only own properties on plain objects:
+ * scalar fulfilment/storefront keys (`source`, `storefrontSlug`,
+ * `referralCode`, `visitorId`, `deliveryNotes`, `deliveryInstructions`),
+ * `stockNotDecrementedProductIds` (strings only), scalar non-fee `shipping`
+ * fields (`zoneId`, `zoneName`, `carrier`, finite/string `estimatedDays`),
+ * and `statusTimeline` entries whose own `status` is in
+ * `FULFILMENT_TIMELINE_STATUSES`. Strips `taxRate`, `promoCode`,
+ * `refundedTotal`, `shippingExpense`, `links` (carries `invoiceId`),
+ * `publicToken`, `shipping.fee`, `awaiting_payment`/payment/refund/unknown
+ * timeline entries, non-plain objects, inherited keys, and nested objects.
  */
 export function redactOrderMetadataForFulfilment(metadata: unknown): Record<string, unknown> | null {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
-  const src = metadata as Record<string, unknown>;
+  if (!isPlainObject(metadata)) return null;
+  const src = metadata;
   const out: Record<string, unknown> = {};
 
   for (const key of [
@@ -384,37 +404,45 @@ export function redactOrderMetadataForFulfilment(metadata: unknown): Record<stri
     'deliveryNotes',
     'deliveryInstructions',
   ] as const) {
+    if (!hasOwn(src, key)) continue;
     const val = src[key];
     if (typeof val === 'string' || val === null) out[key] = val;
   }
 
-  if (Array.isArray(src.stockNotDecrementedProductIds)) {
+  if (hasOwn(src, 'stockNotDecrementedProductIds') && Array.isArray(src.stockNotDecrementedProductIds)) {
     out.stockNotDecrementedProductIds = src.stockNotDecrementedProductIds.filter(
       (id): id is string => typeof id === 'string',
     );
   }
 
-  if (src.shipping && typeof src.shipping === 'object' && !Array.isArray(src.shipping)) {
-    const ship = src.shipping as Record<string, unknown>;
+  if (hasOwn(src, 'shipping') && isPlainObject(src.shipping)) {
+    const ship = src.shipping;
     const cleanShip: Record<string, unknown> = {};
-    for (const key of ['zoneId', 'zoneName', 'estimatedDays', 'carrier'] as const) {
-      if (ship[key] !== undefined) cleanShip[key] = ship[key];
+    for (const key of ['zoneId', 'zoneName', 'carrier'] as const) {
+      if (!hasOwn(ship, key)) continue;
+      const val = ship[key];
+      if (typeof val === 'string' || val === null) cleanShip[key] = val;
+    }
+    if (hasOwn(ship, 'estimatedDays')) {
+      const val = ship.estimatedDays;
+      if (typeof val === 'string' || (typeof val === 'number' && Number.isFinite(val)) || val === null) {
+        cleanShip.estimatedDays = val;
+      }
     }
     out.shipping = cleanShip;
   }
 
-  if (Array.isArray(src.statusTimeline)) {
+  if (hasOwn(src, 'statusTimeline') && Array.isArray(src.statusTimeline)) {
     out.statusTimeline = src.statusTimeline
       .filter((entry): entry is Record<string, unknown> => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-        const st = typeof entry.status === 'string' ? entry.status.trim().toLowerCase() : '';
-        return !PAYMENT_TIMELINE_STATUSES.has(st);
+        if (!isPlainObject(entry)) return false;
+        if (!hasOwn(entry, 'status') || typeof entry.status !== 'string') return false;
+        return FULFILMENT_TIMELINE_STATUSES.has(entry.status.trim().toLowerCase());
       })
       .map((entry) => {
-        const clean: Record<string, unknown> = {};
-        if (typeof entry.status === 'string') clean.status = entry.status;
-        if (typeof entry.timestamp === 'string') clean.timestamp = entry.timestamp;
-        if (typeof entry.note === 'string') clean.note = entry.note;
+        const clean: Record<string, unknown> = { status: entry.status };
+        if (hasOwn(entry, 'timestamp') && typeof entry.timestamp === 'string') clean.timestamp = entry.timestamp;
+        if (hasOwn(entry, 'note') && typeof entry.note === 'string') clean.note = entry.note;
         return clean;
       });
   }
