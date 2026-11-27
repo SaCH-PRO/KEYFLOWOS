@@ -1635,6 +1635,11 @@
       "prefix": "v91m_",
       "owner": "apps/server/test/memory-class-read.integration.test.ts",
       "packet": "V1-91 (MEM-CLASS-READ, P137)"
+    },
+    {
+      "prefix": "v72z_",
+      "owner": "apps/server/test/privacy-deleted-contact.integration.test.ts",
+      "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
     }
   ],
   "pendingRenames": [],
