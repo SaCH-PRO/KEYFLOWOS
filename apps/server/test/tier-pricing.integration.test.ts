@@ -118,10 +118,13 @@ beforeAll(async () => {
       ModuleScopeGuard,
       TeamAuditInterceptor,
       TenantInterceptor,
-      { provide: PlanLimitGuard, useValue: { canActivate: () => true } },
-      { provide: PublicRateLimitGuard, useValue: { canActivate: () => true } },
     ],
-  }).compile();
+  })
+    .overrideGuard(PlanLimitGuard)
+    .useValue({ canActivate: () => true })
+    .overrideGuard(PublicRateLimitGuard)
+    .useValue({ canActivate: () => true })
+    .compile();
 
   app = moduleRef.createNestApplication();
   app.use((req: any, _res: any, next: () => void) => {
