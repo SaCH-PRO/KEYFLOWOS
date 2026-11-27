@@ -115,11 +115,6 @@ beforeAll(async () => {
     controllers: [ExpensesController],
     providers: [
       { provide: PrismaService, useValue: { client: prismaClientMock } },
-      { provide: AuthGuard, useValue: allowGuard },
-      { provide: BusinessGuard, useValue: allowGuard },
-      { provide: ModuleScopeGuard, useValue: allowGuard },
-      { provide: BusinessMemberGuard, useValue: allowGuard },
-      { provide: TeamAuditInterceptor, useValue: { intercept: (_ctx: any, next: any) => next.handle() } },
       ExpensesService,
       { provide: ExpensePostingService, useValue: { onExpensePaid: vi.fn(), onBillCreated: vi.fn(), onExpenseVoided: vi.fn(), onExpenseEdited: vi.fn() } },
       { provide: PostingService, useValue: {} },
@@ -127,7 +122,13 @@ beforeAll(async () => {
       { provide: TimelineService, useValue: { recordEvent: vi.fn() } },
       { provide: DocumentIntelligenceService, useValue: {} },
     ],
-  }).compile();
+  })
+    .overrideGuard(AuthGuard).useValue(allowGuard)
+    .overrideGuard(BusinessGuard).useValue(allowGuard)
+    .overrideGuard(ModuleScopeGuard).useValue(allowGuard)
+    .overrideGuard(BusinessMemberGuard).useValue(allowGuard)
+    .overrideInterceptor(TeamAuditInterceptor).useValue({ intercept: (_ctx: any, next: any) => next.handle() })
+    .compile();
 
   app = moduleRef.createNestApplication();
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
