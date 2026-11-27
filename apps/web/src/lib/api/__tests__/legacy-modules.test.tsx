@@ -10,6 +10,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
+import { hydrateRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { clearStoredBusinessId, selectBusiness } from "@/lib/workspace";
 
 const BIZ = "biz_whs_x";
@@ -212,8 +214,12 @@ describe("WEDGE-HIDE-STORE repair round 1 (acceptance reviews at d781c4e9): the 
     let refuse = false;
     const api = serve({ [BIZ]: { status: 200, body: ["store"] } });
     const answering = globalThis.fetch;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-      refuse ? jsonResponse(403, { statusCode: 403, message: "No access to this business" }) : answering(input, init)));
+    const sent: Array<{ path: string; authorization: string | null }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      sent.push({ path: new URL(url, "http://localhost").pathname, authorization: new Headers(init?.headers).get("authorization") });
+      return refuse ? jsonResponse(403, { statusCode: 403, message: "No access to this business" }) : answering(input, init);
+    }));
     const view = await mountRerenderable();
     await waitFor(() => expect(probe()).toBe("legacy"));
     // Sign-out, then user B signs in on this tab and lands on the same business id.
@@ -224,7 +230,11 @@ describe("WEDGE-HIDE-STORE repair round 1 (acceptance reviews at d781c4e9): the 
     view.again();
     expect(probe()).not.toBe("legacy");
     await waitFor(() => expect(probe()).toBe("not-legacy"));
-    expect(api.paths.length).toBeGreaterThan(0);
+    // Repair round 2: the second member's own request, under their own token, and exactly one of it.
+    expect(api.paths).toEqual([`/identity/businesses/${BIZ}/legacy-modules`]);
+    expect(sent.map((r) => r.path)).toEqual([`/identity/businesses/${BIZ}/legacy-modules`, `/identity/businesses/${BIZ}/legacy-modules`]);
+    expect(sent[0].authorization).toBe(`Bearer ${tokenFor("user_a")}`);
+    expect(sent[1].authorization).toBe(`Bearer ${tokenFor("user_b")}`);
   });
 
   it("[WHS-W11] RED-BEFORE (MINOR 1): a business that appears after mount (none stored at first) is read, and its 'store' is honoured", async () => {
@@ -237,5 +247,85 @@ describe("WEDGE-HIDE-STORE repair round 1 (acceptance reviews at d781c4e9): the 
     window.localStorage.setItem("kf_business_id", BIZ);
     view.again();
     await waitFor(() => expect(probe()).toBe("legacy"));
+  });
+});
+
+describe("WEDGE-HIDE-STORE repair round 2 (confirmation reviews at 1899e532)", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("kf_token", tokenFor("user_a"));
+  });
+
+  it("[WHS-W12] RED-BEFORE: while hydrating, the hook never reports a known 'not legacy': a consumer acting on `known && !has` must not act on a hard load", async () => {
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] } }, [BIZ]);
+    const { useLegacyModule } = await import("@/lib/api/legacy-modules");
+    const seen: string[] = [];
+    function Probe() {
+      const { has, known } = useLegacyModule("store");
+      const state = known ? (has ? "legacy" : "not-legacy") : "unknown";
+      seen.push(state);
+      return <p data-testid="probe">{state}</p>;
+    }
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.innerHTML = renderToString(<Probe />);
+    const serverRendered = [...seen];
+    seen.length = 0;
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, <Probe />);
+      });
+      // The server render and every render of the hydrating commit: unknown, never a known answer.
+      expect(serverRendered).toEqual(["unknown"]);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen).not.toContain("not-legacy");
+      expect(seen).not.toContain("legacy");
+      api.release(BIZ);
+      await waitFor(() => expect(container.textContent).toBe("legacy"));
+    } finally {
+      api.releaseAll();
+      act(() => root?.unmount());
+      container.remove();
+    }
+  });
+
+  it("[WHS-W13] a failed read is not kept: after a 500, the next mount reads again and the answer then decides", async () => {
+    let fail = true;
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] } });
+    const answering = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      fail ? jsonResponse(500, { statusCode: 500, message: "Internal server error" }) : answering(input, init)));
+    await mountProbe();
+    await waitFor(() => expect(probe()).toBe("not-legacy"));
+    expect(api.paths).toEqual([]);
+    cleanup();
+    fail = false;
+    await mountProbe();
+    await waitFor(() => expect(probe()).toBe("legacy"));
+    expect(api.paths).toEqual([`/identity/businesses/${BIZ}/legacy-modules`]);
+  });
+
+  it("[WHS-W14] two readers of the same business make one request", async () => {
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] } });
+    const { useLegacyModule } = await import("@/lib/api/legacy-modules");
+    function Two() {
+      const a = useLegacyModule("store");
+      const b = useLegacyModule("payroll");
+      return <p data-testid="two">{`${a.known}:${a.has}|${b.known}:${b.has}`}</p>;
+    }
+    render(<Two />);
+    await waitFor(() => expect(screen.getByTestId("two").textContent).toBe("true:true|true:false"));
+    expect(api.paths).toEqual([`/identity/businesses/${BIZ}/legacy-modules`]);
+  });
+
+  it("[WHS-W15] an answer already read in this tab is not fetched again, and is known at once on the next mount", async () => {
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] } });
+    await mountProbe();
+    await waitFor(() => expect(probe()).toBe("legacy"));
+    cleanup();
+    await mountProbe();
+    expect(probe()).toBe("legacy");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.paths).toEqual([`/identity/businesses/${BIZ}/legacy-modules`]);
   });
 });
