@@ -20,13 +20,20 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
    (unlike `KeyConnectorController.getConnections`, which applies `connectionView`).
    **Recommended P0 fix:** project `IntegrationConnection` rows through a strict allowlist that strips `authData` and `authDataRef`.
 
+3. **`SupplierController.getSupplierProduct` (`GET /supplier/businesses/:businessId/supplier-products/:supplierProductId`) & `SupplierController.getProductSourceLinks` (`GET /supplier/businesses/:businessId/products/:productId/source-links`)** — **UNSTRIPPED NESTED `SupplierConnection.credentials` RETURN.**
+   Both routes run only `AuthGuard`, `BusinessGuard`, `CrmRateLimitGuard` (no `@RequireModuleScope`, no `ModuleScopeGuard`).
+   `SupplierService.getSupplierProduct` (`include: { supplierConnection: true }`) and `SupplierService.getProductSourceLinks`
+   (`include: { supplierProduct: { include: { supplierConnection: true } } }`) serialize the raw `SupplierConnection.credentials`
+   column (`enc:v1:...`) to any business member without projection/stripping.
+   **Tracked follow-up:** `FU-SUPPLIER-CREDENTIALS-NESTED-INCLUDE` (replace `supplierConnection: true` with an explicit non-secret `select:` and gate on `storefront:read`).
+
 ## High-Priority Non-Secret Findings
 
 - **`AiIntelligenceController.getCrossBusinessIntelligence` (`GET /ai/intelligence/cross-business`)** — queries `membership.findMany` across ALL businesses where the caller holds any membership and returns `totalRevenue`, `totalOverdueAmount`, `dealValue`, invoice/contact/booking counts, and dollar-amount insights with **zero per-business module-scope check** (recommended: enforce per-business `revenue:read` / `ai:read` filtering).
 - **`SeoController` (all 12 GET routes)** — `SeoAdminGuard` (`modules/seo/seo-admin.guard.ts`) is only a `comingSoon` feature-flag rollout gate (`if (!status.exists || !status.comingSoon) return true;`), NOT a role or module-authority guard; once live, all 12 routes — including `getRevenueAttribution` (`revenue:read`) — are membership-only.
 - **`KeyCortexAuditController` (`auditDecisions`, `auditValues`, `auditAssessment`, `auditAcceptance`)** — BUG-065 class: all 4 audit GET routes run only `AuthGuard` + `BusinessGuard` (recommended: `settings:admin`).
 - **`KeystoreAdminController` (`getStats`, `getAllOrders`, `getOrder`)** — admin-prefixed controller mounted at `/keystore/admin/*` with only `AuthGuard` + `BusinessGuard` (no `AdminGuard`, no `ModuleScopeGuard`; recommended: `settings:admin`).
-- **`FlowController.universalSearch` (`GET /flow/businesses/:businessId/search`)** — enforces `revenue:read` on invoices via `memberModuleLevel`, but still queries contacts, bookings, and projects without checking `crm:read`, `bookings:read`, or `projects:read`.
+- **`FlowController.universalSearch` (`GET /api/flows/businesses/:businessId/search`)** — enforces `revenue:read` on invoices via `memberModuleLevel`, but still queries contacts, bookings, and projects without checking `crm:read`, `bookings:read`, or `projects:read`.
 - **`PresenceController.getDraft` (`GET /site/presence/businesses/:businessId/draft`)** — returns `SitePageDraft.previewToken` to any business member without `content:read`.
 - **`TrashController.listTrashed`** — carries an inert `@RequireModuleScope('settings')` (no `ModuleScopeGuard`), though its handler honestly enforces per-model module scope via `readAccess` + `readRefusal` (D-95).
 
@@ -49,8 +56,8 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | exempt-owner | 1 |
 | exempt-public | 4 |
 | exempt-system | 10 |
-| open | 443 |
-| secret-read | 27 |
+| open | 441 |
+| secret-read | 29 |
 
 ## Expected V1 Plan Rows & Pinned Applied Reads
 
@@ -87,6 +94,8 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `SocialController.recentPosts` | GET | `/social/businesses/:businessId/recent-posts` | secret-read | reads `socialConnection.findMany` internally (`service-check:fetchRecentExternalPosts`) to fetch recent external posts and returns only external post summaries; no OAuth token leaves the handler; follow-up should gate on `content:read` |
 | `SupplierController.getConnection` | GET | `/supplier/businesses/:businessId/connections/:connectionId` | secret-read | credentials stripped (`service-check:getSupplierConnection`; SWEEP-P0 reviewed); follow-up should gate on `storefront:read` |
 | `SupplierController.getConnections` | GET | `/supplier/businesses/:businessId/connections` | secret-read | credentials stripped from every row (`service-check:getSupplierConnections`; SWEEP-P0 reviewed); follow-up should gate on `storefront:read` |
+| `SupplierController.getProductSourceLinks` | GET | `/supplier/businesses/:businessId/products/:productId/source-links` | secret-read | STOP-THE-LINE FINDING (unstripped nested include): `SupplierService.getProductSourceLinks` uses nested `include: { supplierProduct: { include: { supplierConnection: true } } }`, serializing raw `SupplierConnection.credentials` (`enc:v1:...`) to any business member without scope; tracked in `FU-SUPPLIER-CREDENTIALS-NESTED-INCLUDE` (`storefront:read` + explicit non-secret `select:`) |
+| `SupplierController.getSupplierProduct` | GET | `/supplier/businesses/:businessId/supplier-products/:supplierProductId` | secret-read | STOP-THE-LINE FINDING (unstripped nested include): `SupplierService.getSupplierProduct` uses `include: { supplierConnection: true }`, serializing raw `SupplierConnection.credentials` (`enc:v1:...`) to any business member without scope; tracked in `FU-SUPPLIER-CREDENTIALS-NESTED-INCLUDE` (`storefront:read` + explicit non-secret `select:`) |
 | `SupplierController.getSupplierProducts` | GET | `/supplier/businesses/:businessId/connections/:connectionId/products` | secret-read | reads `supplierConnection.findFirst` solely to verify tenant ownership (`service-check:getSupplierProducts`) before querying `supplierProduct`; no supplier credentials leave the handler; follow-up should gate on `storefront:read` |
 | `WebhooksController.deliveries` | GET | `/webhooks/businesses/:businessId/webhooks/:webhookId/deliveries` | secret-read | `settings:read` — receiver URL origin-only below `settings:write` (SEC-3) or for readers who may not receive the webhook's events (SV-5) |
 | `WebhooksController.list` | GET | `/webhooks/businesses/:businessId/webhooks` | secret-read | `settings:read` — signing secret selected for settings admin only (CR-5) and per-webhook event-read check (SV-5); receiver URL origin-only below `settings:write` (SEC-3) |
@@ -1117,15 +1126,13 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `SubscriptionsController.getHistory` | GET | `/subscriptions/businesses/:businessId/history` | open | follow-up: `revenue:read` (membership-only read; no enforced module scope) |
 | `SubscriptionsController.getPaymentHistory` | GET | `/subscriptions/businesses/:businessId/payments` | open | follow-up: `revenue:read` (membership-only read; no enforced module scope) |
 
-### `modules/supplier/supplier.controller.ts` (5)
+### `modules/supplier/supplier.controller.ts` (3)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `SupplierController.getMarginSnapshots` | GET | `/supplier/businesses/:businessId/products/:productId/margin-snapshots` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 | `SupplierController.getProductCostProfile` | GET | `/supplier/businesses/:businessId/products/:productId/cost-profile` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
-| `SupplierController.getProductSourceLinks` | GET | `/supplier/businesses/:businessId/products/:productId/source-links` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 | `SupplierController.getProductVariants` | GET | `/supplier/businesses/:businessId/products/:productId/variants` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
-| `SupplierController.getSupplierProduct` | GET | `/supplier/businesses/:businessId/supplier-products/:supplierProductId` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 
 ### `modules/task-assignments/task-assignment.controller.ts` (3)
 
