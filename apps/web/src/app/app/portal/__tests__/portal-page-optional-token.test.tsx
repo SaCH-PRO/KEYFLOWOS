@@ -37,6 +37,7 @@
  *   POT-21  a Grant that succeeds in A after a switch never closes the form open in B
  *   POT-22  a Grant still running when its form is cancelled and reopened never reaches the new form: its refusal
  *           shows no error there, and its success does not close it
+ *   POT-23  a Grant that succeeds closes the form it was sent from
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -526,5 +527,16 @@ describe("P232: the Client Portal page without the portal token", () => {
       expect(screen.queryByText("You can't grant portal access.")).toBeNull();
       cleanup();
     }
+  });
+
+  it("POT-23 a Grant that succeeds closes the form it was sent from", async () => {
+    portal.list.mockResolvedValue({ data: [], error: null });
+    portal.create.mockResolvedValue({ data: { id: "pa_new" }, error: null });
+    render(<PortalPage />);
+    await screen.findByText("No portal access granted yet");
+    await openAndType("contact_granted");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Grant$/ })));
+    await waitFor(() => expect(screen.queryByPlaceholderText("Contact ID")).toBeNull());
+    expect(screen.queryByText("Grant Portal Access")).toBeNull();
   });
 });
