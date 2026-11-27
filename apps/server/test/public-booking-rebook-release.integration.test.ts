@@ -86,17 +86,18 @@ beforeAll(async () => {
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { BookingsController } = await import('../src/modules/bookings/bookings.controller');
   const { BookingsService } = await import('../src/modules/bookings/bookings.service');
-  const { BookingCatalogService } = await import('../src/modules/bookings/booking-catalog.service');
-  const { BookingCalendarService } = await import('../src/modules/bookings/booking-calendar.service');
+  const { CatalogService } = await import('../src/modules/catalog/catalog.service');
+  const { CalendarService } = await import('../src/modules/bookings/calendar.service');
+  const { BookingOptimizerService } = await import('../src/modules/bookings/booking-optimizer.service');
   const { BookingWaitlistService } = await import('../src/modules/bookings/booking-waitlist.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
   const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+  const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
   const { PublicEventsService } = await import('../src/modules/site/public-events.service');
   const { RevenueAttributionService } = await import('../src/modules/analytics/revenue-attribution.service');
-  const { BookingPaymentStatusListener } = await import(
-    '../src/modules/bookings/booking-payment-status.listener'
-  );
+  const { TransactionalEmailService } = await import('../src/core/email/transactional-email.service');
+  const { TimelineService } = await import('../src/modules/timeline/timeline.service');
 
   const prismaStub = { client: db };
 
@@ -147,8 +148,9 @@ beforeAll(async () => {
       { provide: PrismaService, useValue: prismaStub },
       { provide: EventEmitter2, useValue: new EventEmitter2() },
       BookingsService,
-      BookingCatalogService,
-      { provide: BookingCalendarService, useValue: {} },
+      { provide: CatalogService, useValue: { assertPublicStore: async () => undefined } },
+      { provide: CalendarService, useValue: {} },
+      { provide: BookingOptimizerService, useValue: {} },
       { provide: BookingWaitlistService, useValue: {} },
       { provide: CrmService, useValue: crmStub },
       { provide: CommerceService, useValue: commerceStub },
@@ -164,7 +166,8 @@ beforeAll(async () => {
         },
       },
       { provide: RevenueAttributionService, useValue: { record: async () => undefined } },
-      { provide: BookingPaymentStatusListener, useValue: {} },
+      { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
+      { provide: TimelineService, useValue: { logEvent: async () => undefined } },
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
@@ -174,6 +177,8 @@ beforeAll(async () => {
     .overrideGuard(PublicRateLimitGuard)
     .useValue({ canActivate: () => true })
     .overrideGuard(HoneypotGuard)
+    .useValue({ canActivate: () => true })
+    .overrideGuard(PlanLimitGuard)
     .useValue({ canActivate: () => true })
     .compile();
 
