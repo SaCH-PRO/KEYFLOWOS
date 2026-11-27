@@ -11,6 +11,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { timingSafeStringEqual } from '../security/timing-safe-equal';
+import { securitySignals } from '../observability/security-signals';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorCredentialsService } from './connector-credentials.service';
 import { WebhookIngressLoggerService } from './webhook-ingress-logger.service';
@@ -84,6 +85,7 @@ export class FormWebhookController {
       throw new ForbiddenException('Webhook secret not configured. Visit Settings → Connectors to set up.');
     }
     if (!signature || !timingSafeStringEqual(signature, expected)) {
+      securitySignals.record('webhook_signature_failed', type);
       await this.webhookLogger.log({
         businessId,
         connectorType: type,

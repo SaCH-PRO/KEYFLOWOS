@@ -3,6 +3,7 @@ import { NextFunction, Request, Response } from 'express';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { verifyAdminToken } from './admin-token.util';
+import { securitySignals } from '../observability/security-signals';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import {
@@ -626,6 +627,7 @@ export class AuthMiddleware implements NestMiddleware {
             'Attached user from admin token',
           );
         } else {
+          securitySignals.record('bearer_verification_failed', 'auth_middleware');
           this.logger.warn('Bearer token provided but verification failed');
         }
       }

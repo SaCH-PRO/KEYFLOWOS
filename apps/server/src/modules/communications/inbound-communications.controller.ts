@@ -2,6 +2,7 @@ import { Body, Controller, ForbiddenException, Inject, Post, Req } from '@nestjs
 import { Request } from 'express';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { InboundCommunicationsService } from './inbound-communications.service';
+import { securitySignals } from '../../core/observability/security-signals';
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -98,6 +99,7 @@ export class InboundCommunicationsController {
     const expectedBuf = Buffer.from(expected, 'hex');
     const providedBuf = Buffer.from(provided, 'hex');
     if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
+      securitySignals.record('webhook_signature_failed', 'inbound_communications');
       throw new ForbiddenException('Invalid webhook signature');
     }
   }
