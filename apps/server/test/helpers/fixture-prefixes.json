@@ -1660,6 +1660,11 @@
       "prefix": "v91q_",
       "owner": "apps/server/test/nested-credential-reads.integration.test.ts",
       "packet": "V1-91 (FU-NESTED-CREDENTIAL-READS, P149)"
+    },
+    {
+      "prefix": "v92c_",
+      "owner": "apps/server/test/pricing-service.integration.test.ts",
+      "packet": "V1-92 (TOF-TIER-PRICING-SCHEMA, P156)"
     }
   ],
   "pendingRenames": [],
