@@ -44,7 +44,10 @@ export default function PortalPage() {
   // while that business is selected (another business opens its own, empty form; back to this one, it is as it was).
   // Opening it starts it afresh, unless it is already open here (Grant Access pressed again keeps what was typed and
   // its error); Cancel and a successful Grant close it.
-  const [form, setForm] = useState<{ businessId: string; contactId: string; error: string | null } | null>(null);
+  // Each opened form has its own id, so a Grant's result reaches only the form that sent it (not one cancelled and
+  // opened again while the Grant ran).
+  const [form, setForm] = useState<{ id: number; businessId: string; contactId: string; error: string | null } | null>(null);
+  const formsOpened = useRef(0);
   // The business the page is showing: a read for any other (a switch while it ran) is neither started nor applied.
   const currentBusiness = useRef(businessId);
   useEffect(() => {
@@ -62,7 +65,7 @@ export default function PortalPage() {
   const setShowForm = (open: boolean) =>
     setForm((f) => {
       if (!open || !businessId) return null;
-      return f && f.businessId === businessId ? f : { businessId, contactId: "", error: null };
+      return f && f.businessId === businessId ? f : { id: ++formsOpened.current, businessId, contactId: "", error: null };
     });
   const setContactId = (value: string) => setForm((f) => (f ? { ...f, contactId: value } : f));
 
@@ -88,8 +91,9 @@ export default function PortalPage() {
   }, [businessId]);
 
   async function handleCreate() {
-    if (!businessId || !contactId) return;
+    if (!businessId || !contactId || !openForm) return;
     const askedFor = businessId;
+    const sentBy = openForm.id;
     const res = await createPortalAccess(askedFor, contactId, {
       invoices: true,
       projects: true,
@@ -97,11 +101,11 @@ export default function PortalPage() {
       bookings: true,
     });
     if (res.data) {
-      setForm((f) => (f?.businessId === askedFor ? null : f));
+      setForm((f) => (f?.id === sentBy && f.businessId === askedFor ? null : f));
       loadData();
     } else {
       const error = res.status === 403 ? "You can't grant portal access." : "Couldn't grant portal access. Try again.";
-      setForm((f) => (f?.businessId === askedFor ? { ...f, error } : f));
+      setForm((f) => (f?.id === sentBy && f.businessId === askedFor ? { ...f, error } : f));
     }
   }
 
