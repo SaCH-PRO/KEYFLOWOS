@@ -116,7 +116,7 @@ beforeAll(async () => {
       },
       {
         provide: CommerceService,
-        useValue: { listPaymentClaims: async () => ({ items: [] }) },
+        useValue: { listPaymentClaims: async () => [] },
       },
       AuthGuard,
       BusinessGuard,
