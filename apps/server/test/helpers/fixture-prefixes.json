@@ -1620,6 +1620,11 @@
       "prefix": "v91h_",
       "owner": "apps/server/test/public-booking-grid.integration.test.ts",
       "packet": "V1-91 (FU-PUBLIC-BOOKING-GRID, P226)"
+    },
+    {
+      "prefix": "v72z_",
+      "owner": "apps/server/test/privacy-deleted-contact.integration.test.ts",
+      "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
     }
   ],
   "pendingRenames": [],
