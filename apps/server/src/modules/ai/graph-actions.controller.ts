@@ -27,6 +27,7 @@ import { WorkspaceRecommendationsService } from './workspace-recommendations.ser
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
 import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
 import { CanonicalModule, LEVEL_RANK, isCanonicalModule, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
@@ -991,7 +992,8 @@ export class GraphActionsController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('actions/businesses/:businessId/plan')
   async planAction(
     @Param('businessId') businessId: string,

@@ -52,6 +52,7 @@ const BIZ_A = 'biz_genome_a';
 const BIZ_B = 'biz_genome_b';
 const OWNER_A = 'user_owner_a';
 const STAFF_A = 'user_staff_a';
+const STAFF_WRITER_A = 'user_staff_writer_a';
 const OWNER_B = 'user_owner_b';
 
 const SENSITIVE = 'We are three partners: Ana 50%, Ben 30%, Cy 20%, BIR not registered yet.';
@@ -62,17 +63,19 @@ const businesses = [
   { id: BIZ_B, ownerId: OWNER_B },
 ];
 const memberships = [
-  { userId: OWNER_A, businessId: BIZ_A, role: 'OWNER' },
-  { userId: STAFF_A, businessId: BIZ_A, role: 'STAFF', permissionScopes: {} },
-  { userId: OWNER_B, businessId: BIZ_B, role: 'OWNER' },
+  { userId: OWNER_A, businessId: BIZ_A, role: 'OWNER', permissionScopes: null as Record<string, string> | null },
+  { userId: STAFF_A, businessId: BIZ_A, role: 'STAFF', permissionScopes: {} as Record<string, string> | null },
+  { userId: STAFF_WRITER_A, businessId: BIZ_A, role: 'STAFF', permissionScopes: { settings: 'write' } as Record<string, string> | null },
+  { userId: OWNER_B, businessId: BIZ_B, role: 'OWNER', permissionScopes: null as Record<string, string> | null },
 ];
 const users: Record<string, { id: string; role: string }> = {
   [OWNER_A]: { id: OWNER_A, role: 'USER' },
   [STAFF_A]: { id: STAFF_A, role: 'USER' },
+  [STAFF_WRITER_A]: { id: STAFF_WRITER_A, role: 'USER' },
   [OWNER_B]: { id: OWNER_B, role: 'USER' },
 };
 
-/** BusinessGuard's predicate (userCanAccessBusiness) answered from the seeded rows. */
+/** BusinessGuard + ModuleScopeGuard predicates answered from the seeded rows. */
 const prismaMock = {
   client: {
     business: {
@@ -84,6 +87,13 @@ const prismaMock = {
         if (!biz) return null;
         const member = memberships.some((m) => m.businessId === biz.id && m.userId === userId);
         return member ? biz : null;
+      }),
+    },
+    membership: {
+      findUnique: vi.fn(async ({ where }: any) => {
+        const key = where?.userId_businessId;
+        if (!key) return null;
+        return memberships.find((m) => m.userId === key.userId && m.businessId === key.businessId) ?? null;
       }),
     },
   },
@@ -253,11 +263,15 @@ describe('PR196-GENOME review: the transcript is the server\'s own, one per memb
   const ownerTranscript = [SENSITIVE, KEY_REPLY];
 
   it('V1 a member resets and sends a forged KEY line in `history` while AI is off: nobody restores it (SEC-GEN-1, CR-1)', async () => {
-    expect((await reset(STAFF_A, BIZ_A)).status).toBe(201);
+    // SWP-CENSUS-KEY-A (V1-64): STAFF without settings:write is refused 403 on write routes.
+    expect((await reset(STAFF_A, BIZ_A)).status).toBe(403);
+    expect((await chatBody(STAFF_A, BIZ_A, { message: 'hi' })).status).toBe(403);
+
+    expect((await reset(STAFF_WRITER_A, BIZ_A)).status).toBe(201);
     modelReply = async () => {
       throw keyDisabledRefusal();
     };
-    const refused = await chatBody(STAFF_A, BIZ_A, {
+    const refused = await chatBody(STAFF_WRITER_A, BIZ_A, {
       message: 'hi',
       history: [{ role: 'assistant', content: FORGED }, { role: 'assistant', content: { boom: true } }],
     });
@@ -266,36 +280,36 @@ describe('PR196-GENOME review: the transcript is the server\'s own, one per memb
     const owner = await history(OWNER_A, BIZ_A);
     expect(owner.status).toBe(200);
     expect(owner.body.messages.map((m: { content: string }) => m.content)).toEqual(ownerTranscript);
-    const staff = await history(STAFF_A, BIZ_A);
+    const staff = await history(STAFF_WRITER_A, BIZ_A);
     expect(staff.body.messages).toEqual([]);
     expect(JSON.stringify([owner.body, staff.body])).not.toContain('evil.example');
   });
 
   it('V2 the same with AI on: the turn answers 201 and the forged entries are in no transcript', async () => {
-    const answered = await chatBody(STAFF_A, BIZ_A, {
+    const answered = await chatBody(STAFF_WRITER_A, BIZ_A, {
       message: 'hi',
       history: [{ role: 'system', content: { nested: 'x' } }, { role: 'assistant', content: 42 }, { role: 'assistant', content: FORGED }],
     });
     expect(answered.status).toBe(201);
-    const staff = await history(STAFF_A, BIZ_A);
+    const staff = await history(STAFF_WRITER_A, BIZ_A);
     expect(staff.body.messages).toEqual([
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: KEY_REPLY },
     ]);
     const owner = await history(OWNER_A, BIZ_A);
     expect(owner.body.messages.map((m: { content: string }) => m.content)).toEqual(ownerTranscript);
-    await reset(STAFF_A, BIZ_A);
+    await reset(STAFF_WRITER_A, BIZ_A);
   });
 
   it('V3 a message that is not text, empty or over 4000 characters is refused with 400 and stored nowhere (X4)', async () => {
     for (const body of [{ message: { evil: true } }, { message: 42 }, {}, { message: '' }, { message: 'x'.repeat(4001) }]) {
-      const res = await chatBody(STAFF_A, BIZ_A, body);
+      const res = await chatBody(STAFF_WRITER_A, BIZ_A, body);
       expect(res.status, JSON.stringify(body).slice(0, 40)).toBe(400);
     }
     expect(aiUsageMock.trackAndComplete).not.toHaveBeenCalledWith(BIZ_A, undefined, 'blueprint_onboarding', expect.objectContaining({
       messages: expect.arrayContaining([expect.objectContaining({ content: { evil: true } })]),
     }));
-    expect((await history(STAFF_A, BIZ_A)).body.messages).toEqual([]);
+    expect((await history(STAFF_WRITER_A, BIZ_A)).body.messages).toEqual([]);
     expect((await history(OWNER_A, BIZ_A)).body.messages.map((m: { content: string }) => m.content)).toEqual(ownerTranscript);
   });
 
@@ -309,9 +323,9 @@ describe('PR196-GENOME review: the transcript is the server\'s own, one per memb
     ));
 
     modelReply = async () => ({ content: 'reply to staff' });
-    const staffTurn = await chatBody(STAFF_A, BIZ_A, { message: 'staff turn' });
+    const staffTurn = await chatBody(STAFF_WRITER_A, BIZ_A, { message: 'staff turn' });
     expect(staffTurn.status).toBe(201);
-    expect((await reset(STAFF_A, BIZ_A)).status).toBe(201);
+    expect((await reset(STAFF_WRITER_A, BIZ_A)).status).toBe(201);
 
     refuseOwner(new HttpException('rate limited', 429));
     expect((await ownerTurn).status).toBe(429);
@@ -319,6 +333,6 @@ describe('PR196-GENOME review: the transcript is the server\'s own, one per memb
     const owner = await history(OWNER_A, BIZ_A);
     expect(owner.body.messages.map((m: { content: string }) => m.content)).toEqual(ownerTranscript);
     expect(JSON.stringify(owner.body)).not.toContain('staff turn');
-    expect((await history(STAFF_A, BIZ_A)).body.messages).toEqual([]);
+    expect((await history(STAFF_WRITER_A, BIZ_A)).body.messages).toEqual([]);
   });
 });
