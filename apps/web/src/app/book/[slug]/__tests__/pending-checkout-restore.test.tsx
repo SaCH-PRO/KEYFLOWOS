@@ -209,14 +209,22 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
   });
 
   it("RST-05 hand-edited fields never crash the confirmation; the order id is encoded in its URL", async () => {
-    const shapes: Array<Record<string, unknown>> = [
-      { orderNumber: 123 },
-      { orderNumber: {}, orderId: 5, customerEmail: { at: "x" } },
-      { bookingResults: [{ bookingId: 7 }, "x", null, { bookingId: "rst_bk_ok" }] },
-      { items: [{ ...ITEMS[0], currency: 5, imageUrl: {} }, { ...ITEMS[1], name: 9 }] },
+    // Without an order number that is a string the record is not a store order: the booking confirmation shows.
+    const shapes: Array<[Record<string, unknown>, string]> = [
+      [{ orderNumber: 123 }, "Booking Confirmed!"],
+      [{ orderNumber: {}, orderId: 5, customerEmail: { at: "x" } }, "Booking Confirmed!"],
+      [{ bookingResults: [{ bookingId: 7 }, "x", null, { bookingId: "rst_bk_ok" }] }, "Order Placed!"],
+      [{ items: [{ ...ITEMS[0], currency: 5, imageUrl: {} }, { ...ITEMS[1], name: 9 }] }, "Order Placed!"],
     ];
-    for (const extra of shapes) {
-      await restored(extra);
+    for (const [extra, heading] of shapes) {
+      window.localStorage.setItem(KEY, record(extra));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: heading }, { timeout: 3000 }), JSON.stringify(extra)).toBeInTheDocument();
+      if ("items" in extra) {
+        expect(screen.getByText("RST Candle"), "a line with a bad currency or image keeps its name and amount").toBeInTheDocument();
+        expect(screen.getByText(formatPrice(49.5, "TTD"))).toBeInTheDocument();
+        expect(screen.queryByText("9"), "a line whose name is not text is dropped").toBeNull();
+      }
       cleanup();
     }
     net.gets = [];

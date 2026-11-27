@@ -97,10 +97,19 @@ function confirmedDetailsOf(raw: unknown): ConfirmedDetails | null {
 /** SWP-BOOKING-SLOTS (round 5): a restored record's order lines, only those shaped as cart lines. */
 function orderItemsOf(raw: unknown): CartItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item): item is CartItem => {
+  return raw.flatMap((item): CartItem[] => {
     const o = item as Record<string, unknown> | null;
-    return !!o && typeof o === "object" && typeof o.id === "string" && typeof o.name === "string"
-      && typeof o.price === "number" && Number.isFinite(o.price) && typeof o.quantity === "number" && Number.isFinite(o.quantity);
+    if (!o || typeof o !== "object" || typeof o.id !== "string" || typeof o.name !== "string") return [];
+    // A positive whole quantity and a finite, non-negative price and line total; anything else is no order line.
+    const { price, quantity } = o;
+    if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1) return [];
+    if (typeof price !== "number" || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * quantity)) return [];
+    // The shown strings are kept only when they are strings.
+    const line = { ...o } as Record<string, unknown>;
+    for (const field of ["currency", "imageUrl"]) {
+      if (line[field] !== undefined && line[field] !== null && typeof line[field] !== "string") delete line[field];
+    }
+    return [line as unknown as CartItem];
   });
 }
 
@@ -403,16 +412,21 @@ function PublicBookingPageInner() {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
       // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
       const pending = parsed as ReturnType<typeof JSON.parse>;
+      // SWP-BOOKING-SLOTS (round 6): the strings the confirmation shows or puts into a URL, only when they are strings.
+      const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+      const orderNumber = text(pending.orderNumber);
+      const orderId = text(pending.orderId);
+      const customerEmail = text(pending.customerEmail);
 
       type PaymentOutcome = "success" | "failed" | "pending";
       let outcome: PaymentOutcome = "pending";
 
-      if (pending.orderId && pending.customerEmail) {
+      if (orderId && customerEmail) {
         try {
           const { data: orderStatus } = await apiGet<{
             paymentStatus: string;
             status: string;
-          }>(`/site/storefront/public/order/${pending.orderId}?email=${encodeURIComponent(pending.customerEmail)}`);
+          }>(`/site/storefront/public/order/${encodeURIComponent(orderId)}?email=${encodeURIComponent(customerEmail)}`);
           if (orderStatus) {
             const ps = orderStatus.paymentStatus?.toUpperCase();
             if (ps === "PAID" || ps === "COMPLETED" || ps === "CAPTURED") {
@@ -431,9 +445,9 @@ function PublicBookingPageInner() {
       setConfirmedOrderItems(orderItemsOf(pending.items));
       setConfirmedOrderTotal(typeof pending.orderTotal === "number" && Number.isFinite(pending.orderTotal) ? pending.orderTotal : 0);
       setConfirmedPaymentMethod(paymentMethodOf(pending.paymentMethod));
-      setConfirmedOrderNumber(pending.orderNumber ?? null);
-      setConfirmedOrderId(pending.orderId ?? null);
-      setConfirmedCustomerEmail(pending.customerEmail ?? null);
+      setConfirmedOrderNumber(orderNumber);
+      setConfirmedOrderId(orderId);
+      setConfirmedCustomerEmail(customerEmail);
       // SEC-W9WCN-1: the record holds no token link; the bookings it names are
       // kept for the customer it names (its reuse key) only while the payment
       // is not through, and a record without a key is reused by nobody.
@@ -444,8 +458,8 @@ function PublicBookingPageInner() {
       setConfirmedDetails(confirmedDetailsOf(pending.confirmedDetails));
 
       const allResults: BookingRef[] = [...pendingRefs];
-      if (pending.orderNumber) {
-        allResults.push({ bookingId: pending.orderNumber });
+      if (orderNumber) {
+        allResults.push({ bookingId: orderNumber });
       }
       setBookingResults(allResults);
 
