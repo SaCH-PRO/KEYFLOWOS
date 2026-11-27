@@ -248,7 +248,7 @@ Main is at `b25d3655`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
-| **Owner** | - | - | Section 4 questions 40 to 50, 54 and 64 to 70; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| **Owner** | - | - | Section 4 questions 40, 41, 43 to 50, 64, 66 and 68 to 70; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
 | `wave/v1-docs-p19` | main `b25d3655` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -367,7 +367,6 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     new token even if the user signed out while the refresh was in flight, which can leave a token on the device.
     Proposed follow-up FU-REFRESH-AFTER-SIGNOUT (web, S). (Default: follow-on unless you put it on launch.)
 
-42. **Customer-referral privacy (server; found by FU-STUDIO-PAGE-SCOPE's security review).** `POST /site/storefront/public/:slug/customer-referral` is unauthenticated (10/min/IP). For any email it answers 404 or 200, which tells the caller whether this person is a customer. A 200 returns `stats.completedBookings` and `paidOrders`, and stamps a code on the contact. Verify the email (e.g. a magic link) before minting, and never return stats? Antigravity holds until you rule. (Default: hold.)
 43. **Who may edit services, prices and deposits.** The service routes have only AuthGuard and BusinessGuard, so any member, STAFF included, can change prices and deposits. Require bookings or storefront write? (Default: as today until ruled.)
 44. **Push after sign-out.** Signing out leaves the device's push on. Once owner alerts are live, a shared tablet keeps getting the previous owner's payment alerts. Unsubscribe the device on sign-out? (Default: follow-up web packet in handleLogout.)
 45. **Owners of several businesses.** A device's push row holds one business, so an owner of X and Y gets Y's owner alerts by email, not push. One device for all the member's businesses? (Default: email fallback as today.)
@@ -378,16 +377,15 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
 
-54. **Journey B1 asks for Tax and Stock fields when creating a product.** The product model has neither: stock lives in InventoryStock, and there is no tax field. Add them (a server packet), or change B1? (Default: B1 stays red on those two fields until you rule.)
 
 
-65. **EXPENSES-HUB-3's "another session sees the receipt" (board P222).** Nothing on the server serves the stored receiptUrl, and object storage is S3-only. Move that leg to server row P222 (recommended), hold EXPENSES-HUB-3 until P222 lands, or hide receipt upload until then? (Default meanwhile: the leg is a pending test naming P222; EXPENSES-HUB-3 is not put in a wave until you rule.)
 64. **Session-storage census approach** (asked; the orchestrator took the stricter default: the resolver proves only a small grammar and everything else fails closed). Overrule if you prefer patching shape by shape or accepting documented gaps.
-67. **Plan dependency for SALES-ORDERS-TAB and QUICK-SALE-WEB** (asked in this session; recorded here because the question tool was interrupted). Confirm the dependency order the plan should carry for these two web packets. (Default: as in the plan.)
 68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
 70. **Overnight opening hours.** The web pins hours past midnight (18:00-02:00) as real (store-hours MIN-3, CUSTOMER-PAGE-HONESTY); the server's P227 reader rejects close-before-open and falls back to 09:00-17:00, so such a business is shown its hours but offered 09:00-17:00 slots. Support overnight hours (server row P229 teaches the reader), or rule them unsupported (a follow-up then changes the web and MIN-3)? (Default: a recorded divergence until you rule; P229 proposed.)
 69. **Control room successor.** #80 is full (2,500 comments); lanes now post on #273. Update CLAUDE.md, AGENTS.md and the agent-memory docs to name #273 (and a rule for the next rollover), in a docs packet? (Default: yes, in the next Claude docs squash; until then this file says so.)
 66. **Trust wording on customer pages** (from CUSTOMER-PAGE-HONESTY): keep or drop "Trusted Platform", the owner-picked "Verified Business"/"Instant Booking" rails, "Instant Confirmation", "Secure Booking", "Secured by KeyFlowOS"; and published case studies have no public page now that /site redirects.
+
+**Ruled 2026-11-27 (D-299 to D-302, #273 7208594106):** 65 = D-299, 67 (store gate) = D-300, 42 = D-301, 54 = D-302.
 
 **Ruled 2026-11-26 (D-298, #80 7189605548):** 63 = D-298.
 
