@@ -214,7 +214,7 @@ Main is at `c1ea190d`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
-| **Owner** | - | - | Section 4 questions 40, 41, 43 to 50, 64, 66 (second half) and 68 to 72; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| **Owner** | - | - | Section 4 questions 40, 41, 43 to 50, 64, 66 (second half) and 68 to 70; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
 | `wave/v1-docs-p19` | main `c1ea190d` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -347,11 +347,11 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 
 64. **Session-storage census approach** (asked; the orchestrator took the stricter default: the resolver proves only a small grammar and everything else fails closed). Overrule if you prefer patching shape by shape or accepting documented gaps.
 68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
-71. **Journey G and the store gate (WEDGE-HIDE-STORE part 2).** G's test tenants are new businesses, so hiding online selling from businesses that never sold online turns G1-G5 and G7 red by design. Seed a past store order in G's fixture (recommended), move G to follow-on, or rethink the gate? (Asked in session; the question tool was interrupted three times.)
-72. **Gate the checkout or the listing (WEDGE-HIDE-STORE part 2 CONTRADICTION, #273 7214026975).** Launch journeys B4/B5 need a new business's "Add to store" product to appear on /book/<slug> (D-185). Recommended: gate only the checkout (products still listed for a new business but not buyable: no Add to cart, server refuses the order). Alternatives: hide the listing and seed past orders in B4/B5's fixtures, or hide it and move B4/B5's store half off the launch gate.
 70. **Overnight opening hours.** The web pins hours past midnight (18:00-02:00) as real (store-hours MIN-3, CUSTOMER-PAGE-HONESTY); the server's P227 reader rejects close-before-open and falls back to 09:00-17:00, so such a business is shown its hours but offered 09:00-17:00 slots. Support overnight hours (server row P229 teaches the reader), or rule them unsupported (a follow-up then changes the web and MIN-3)? (Default: a recorded divergence until you rule; P229 proposed.)
 69. **Control room successor.** #80 is full (2,500 comments); lanes now post on #273. Update CLAUDE.md, AGENTS.md and the agent-memory docs to name #273 (and a rule for the next rollover), in a docs packet? (Default: yes, in the next Claude docs squash; until then this file says so.)
 66. **Published case studies have no public page** now that /site redirects to /book (second half of the old trust-wording question; the first half is D-303). Add a case-study section to /book, or leave them unpublished at launch? (Default: unpublished.)
+
+**Ruled 2026-11-27 (D-304, D-305, #273 7215057644):** 72 = D-304 (gate the checkout, not the listing), 71 = D-305 (seed a past order in journey G).
 
 **Ruled 2026-11-27 (D-299 to D-303, #273 7208594106 and 7209041016):** 65 = D-299, 67 (store gate) = D-300, 42 = D-301, 54 = D-302, 66 first half = D-303.
 
