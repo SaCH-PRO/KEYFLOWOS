@@ -5,11 +5,14 @@ import { motion } from "framer-motion";
 import { Plus, Trash2, Link2, Eye, EyeOff } from "lucide-react";
 import { listPortalAccess, createPortalAccess, revokePortalAccess } from "@/lib/portal";
 import { useControlTowerData } from "../control-tower/components/use-control-tower-data";
+import { useMemberModuleLevels } from "@/hooks/use-app-layout";
 
 interface PortalAccessItem {
   id: string;
   contactId: string;
-  token: string;
+  /** Left out by the server (P145) for a member below crm write, who gets hasLiveLink instead. */
+  token?: string;
+  hasLiveLink?: boolean;
   expiresAt: string;
   enabled: boolean;
   settings: Record<string, boolean>;
@@ -19,6 +22,10 @@ interface PortalAccessItem {
 
 export default function PortalPage() {
   const { businessId } = useControlTowerData();
+  // P232: Grant Access and Revoke need crm write. They are not offered when my-access says the member holds less, or
+  // when the server answered the read-only view (an access without its token, with hasLiveLink). Unknown hides
+  // nothing: the server still refuses.
+  const levels = useMemberModuleLevels();
   const [accessList, setAccessList] = useState<PortalAccessItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -62,6 +69,11 @@ export default function PortalPage() {
     return `${window.location.origin}/portal/${token}`;
   }
 
+  const crmLevel = levels?.crm;
+  const belowCrmWrite = crmLevel === "none" || crmLevel === "read";
+  const readOnlyView = accessList.some((a) => !a.token && typeof a.hasLiveLink === "boolean");
+  const canWrite = !belowCrmWrite && !readOnlyView;
+
   return (
     <div className="space-y-6 pb-12">
       <div className="flex items-center justify-between">
@@ -69,16 +81,18 @@ export default function PortalPage() {
           <h1 className="text-xl font-bold text-foreground">Client Portal</h1>
           <p className="text-sm text-muted-foreground">Manage client access to invoices, projects, and bookings</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[hsl(24_95%_53%)] text-white hover:brightness-110 text-sm font-medium transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Grant Access
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[hsl(24_95%_53%)] text-white hover:brightness-110 text-sm font-medium transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Grant Access
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {canWrite && showForm && (
         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="rounded-xl border border-border bg-card p-4 space-y-3">
           <h3 className="text-sm font-semibold">Grant Portal Access</h3>
           <input placeholder="Contact ID" value={contactId} onChange={e => setContactId(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm bg-muted/50 border border-border outline-none" />
@@ -105,16 +119,24 @@ export default function PortalPage() {
                     <span>· {a.accessCount} visits</span>
                     {a.lastAccessedAt && <span>· Last: {new Date(a.lastAccessedAt).toLocaleDateString()}</span>}
                   </div>
-                  {a.enabled && (
+                  {a.enabled && a.token && (
                     <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
                       <Link2 className="w-3 h-3" />
                       <span className="truncate">{getPortalUrl(a.token)}</span>
                     </div>
                   )}
+                  {a.enabled && !a.token && a.hasLiveLink === true && (
+                    <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
+                      <Link2 className="w-3 h-3" />
+                      <span>Portal link active</span>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => handleRevoke(a.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {canWrite && (
+                  <button onClick={() => handleRevoke(a.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
