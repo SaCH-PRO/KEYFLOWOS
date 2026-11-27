@@ -375,3 +375,40 @@ describe("R24-1: writeFailure, the one reading of a write's answer", () => {
     expect(writeFailure({ data: { id: "x" }, error: null }, "save this", true)).toBeNull();
   });
 });
+
+describe("R24-1: the list's bulk categorize, partly refused", () => {
+  it("says how many were not categorized, in the server's words", async () => {
+    client.updateExpense.mockImplementation(async (_b: string, id: string) => (id === "exp_A2" ? refusedAnswer() : ok(expense({ id }))));
+    render(
+      <ExpenseList
+        businessId="biz_A" expenses={[expense({ id: "exp_A1", status: "PAID" }), expense({ id: "exp_A2", status: "PAID", description: "Second" })]} totalExpenses={2}
+        categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
+        filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
+        page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
+        onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={onReload} isCurrentBusiness={always}
+      />,
+    );
+    fireEvent.click((await screen.findByRole("table", { name: "Expenses list" })).querySelector("button")!);
+    fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!, { target: { value: "cat_A_tolls" } });
+    fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`1 of 2 expenses were not categorized: ${WORDS}`));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onReload, "the list is read again to show which went through").toHaveBeenCalled();
+  });
+});
+
+describe("R24-1: the sheet's create answering no row under a silent switch", () => {
+  it("says nothing", async () => {
+    const pending = deferred<unknown>();
+    client.createExpense.mockReturnValue(pending.promise);
+    const { onSaved } = sheet();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
+    await waitFor(() => expect(client.createExpense).toHaveBeenCalled());
+    ws.bid = "biz_B";
+    await act(async () => { pending.resolve(noRow()); });
+    await settle();
+    noToast2();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});
