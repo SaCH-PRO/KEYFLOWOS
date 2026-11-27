@@ -38,7 +38,18 @@ antigravity board rows (P202 to P207), announced on #80 (7188549076).
 
 ### 0.1 Waves this session
 
-**Checkpoint 2026-11-27 13:50 UTC (no merge since M38/M65; main `178ef400`).**
+**Checkpoint 2026-11-27 15:55 UTC. Antigravity merged M67 (#283), so main is now `f9c8966b`. V1-STATUS: 242/396 (63.9%).**
+- The Antigravity lane is back (it was silent from 06:59 to about 14:56 UTC). It has RETURNed P156, P157, P158 and P233. P233 (WEDGE-HIDE-STORE-SERVER) is at `pkt/V1-WEDGE-HIDE-STORE-SERVER` @ `f52537fa`, based on part 1 `207a2513`, and was CONFIRMED twice by that lane's reviewers (#273 7222088726).
+- **Orchestrator decision: re-cut waves.** M40 is held on EXPENSES-HUB-3, which is still in repair rounds and not a launch-track item. So the store gate ships without it, in **wave M42**:
+  - WEDGE-HIDE-STORE part 1 (`207a2513`)
+  - part 2 (`9b2e876c`)
+  - P233 (`f52537fa`)
+  - P232 (`b5bbba5`)
+  - docs
+
+  M40 shrinks to EXPENSES-HUB-3 plus docs, and is rebuilt once EH3 is confirmed twice. Live G (G5 on phone and desktop) is required in the M42 proof.
+
+**Earlier checkpoint, 13:50 UTC (no merge since M38/M65; main `178ef400`).**
 - M40 (#284) is held. EXPENSES-HUB-3 is at R17 `1eee70b` under two reviews; R16 was CONFIRMED by both. When R17 is confirmed: rebuild M40 with EH3 `1eee70b`, WEDGE part 1 `207a2513` and docs; re-run the proof; correct the #284 body; run two wave confirmations; enqueue.
 - WEDGE-HIDE-STORE part 2 (P225) is at R8 `defc5191` (tests only) under two reviews. It is admitted only with or after P233 and M40.
 - P231 TRUST-BADGES-TRUE-ONLY is at R6 `cc16d7a`. R7 is with worker `session_017o9EBgz5HFUDMDrWzuesH1`: category nouns, mirroring the /book hiding, the full catalog for analysis tools, and two false FAQ answers.

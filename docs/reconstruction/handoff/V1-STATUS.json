@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "c1ea190db3228483455b95eed1356b3c8f10b965",
-  "main_commit_date": "2026-11-27T05:35:26+00:00",
+  "main_sha": "f9c8966b73c523eb2c16ca76f04c21c00ad8ddd3",
+  "main_commit_date": "2026-11-27T15:17:01+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 238,
-    "points": 357.5,
-    "pct_by_points": 62.7
+    "packets": 242,
+    "points": 364.5,
+    "pct_by_points": 63.9
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 158,
-    "points": 213,
-    "pct_by_points": 37.3
+    "packets": 154,
+    "points": 206,
+    "pct_by_points": 36.1
    }
   },
   "by_step": {
@@ -66,15 +66,15 @@
     "total": 7
    },
    "3": {
-    "done": 94,
+    "done": 95,
     "in-progress": 0,
-    "todo": 55,
+    "todo": 54,
     "total": 149
    },
    "4": {
-    "done": 35,
+    "done": 36,
     "in-progress": 0,
-    "todo": 18,
+    "todo": 17,
     "total": 53
    },
    "5": {
@@ -84,15 +84,15 @@
     "total": 92
    },
    "6": {
-    "done": 26,
+    "done": 27,
     "in-progress": 0,
-    "todo": 14,
+    "todo": 13,
     "total": 40
    },
    "7": {
-    "done": 5,
+    "done": 6,
     "in-progress": 0,
-    "todo": 29,
+    "todo": 28,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 148,
+    "done": 152,
     "in-progress": 0,
-    "todo": 107,
+    "todo": 103,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 79,
+   "prior-status-file": 77,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 101,
+   "code-commit-subject": 105,
    "compacted-commit": 88,
-   "no-evidence": 98,
+   "no-evidence": 96,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -166,10 +166,12 @@
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
    "SWP-QUERY-CORS-HEADERS",
+   "SWP-READ-SCOPE-CENSUS",
    "SWP-CENSUS-V1-A",
    "SWP-CENSUS-V1-B",
    "NAV-B-LEGACY-SERVER",
    "W11-TRANSIENT-CONFLICT",
+   "W11-LOAD-SENSITIVE-TESTS",
    "W1F-ORDER-TRANSITIONS",
    "W1F-SETTLE-NO-STOCK",
    "W1F-STORE-STRIPE-R0",
@@ -194,12 +196,14 @@
    "MEM-CLASS-COLUMNS",
    "MEM-CLASS-BACKFILL",
    "MEM-CLASS-READ",
+   "MEM-EVAL-SUITE",
    "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
    "FU-CASE-STUDY-REVENUE",
    "RR-MODEL-LIFECYCLE-GUARD",
    "RR-UNKNOWN-COST-NOT-ZERO",
+   "RR-CORTEX-TYPED-RESULT",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
    "RR-TOOL-EFFECT-CLASS",
@@ -233,8 +237,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 93,
-  "todo_with_dependencies_met_launch": 59
+  "todo_with_dependencies_met": 90,
+  "todo_with_dependencies_met_launch": 56
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -285,7 +289,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 43
+   "unblocks": 41
   },
   {
    "id": "SWP-UI-COPY",
@@ -318,21 +322,21 @@
    "unblocks": 10
   },
   {
-   "id": "W11-LOAD-SENSITIVE-TESTS",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "W11-PAGING-TOTAL-ORDER-A",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 9
@@ -363,16 +367,6 @@
    "priority": "P2",
    "size": "XS",
    "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
-   "id": "SWP-READ-SCOPE-CENSUS",
-   "step": 6,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
@@ -523,16 +517,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "MEM-EVAL-SUITE",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -723,16 +707,6 @@
    "priority": "P2",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-CORTEX-TYPED-RESULT",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1217,7 +1191,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 43
+   "unblocks": 41
   },
   {
    "id": "SWP-UI-COPY",
@@ -1250,21 +1224,21 @@
    "unblocks": 10
   },
   {
-   "id": "W11-LOAD-SENSITIVE-TESTS",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
    "size": "S",
    "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "W11-PAGING-TOTAL-ORDER-A",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 9
@@ -1295,16 +1269,6 @@
    "priority": "P2",
    "size": "XS",
    "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
-   "id": "SWP-READ-SCOPE-CENSUS",
-   "step": 6,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 7
@@ -1435,16 +1399,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "MEM-EVAL-SUITE",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1585,16 +1539,6 @@
    "priority": "P2",
    "size": "M",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-CORTEX-TYPED-RESULT",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -4490,17 +4434,21 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "938fba41",
+    "322b8f82",
+    "147d0e16"
+   ],
    "depends_on": [
     "TODAY-AGGREGATE",
     "READY-TO-SEND",
     "CLAIM-LOOP"
    ],
    "title": "A read-side REST scope census: membership-only GET routes that answer module data or secrets",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-V1-A",
@@ -4806,15 +4754,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "a1c4c83a"
+   ],
    "depends_on": [
     "W11-TRANSIENT-CONFLICT"
    ],
    "title": "Three suites that fail only under machine load get deterministic budgets (MW-06 pool, ST-2 5s, EE-08/MR-02 waits)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-PAGING-TOTAL-ORDER-A",
@@ -4838,7 +4788,7 @@
     "QUICK-SALE-SERVER"
    ],
    "title": "Paged lists get a total order (money and customer-facing lists) plus a paged-order census with a shrinking allow-list",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-PAGING-TOTAL-ORDER-B",
@@ -5944,6 +5894,7 @@
    "derived_from": "code-commit-subject",
    "uncertain": true,
    "evidence": [
+    "8b44d3bb",
     "a1d0e984",
     "695c86e7"
    ],
@@ -6160,15 +6111,17 @@
    "size": "M",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "c3f95dbe"
+   ],
    "depends_on": [
     "MEM-CENSUS"
    ],
    "title": "The memory leak suite and the KEY memory task suite, with recorded baselines",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-FINANCE-INTEL-DOORS",
@@ -6717,13 +6670,16 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "33ff88c5",
+    "9e033bca"
+   ],
    "depends_on": [],
    "title": "KEY cortex stops inventing a 70% confidence when its markdown answer has no Confidence section, and records whether the answer was parsed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
