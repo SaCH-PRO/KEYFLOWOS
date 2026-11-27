@@ -13,6 +13,8 @@
  *           offered Grant Access or Revoke
  *   POT-03  with the token present (a crm write member) the page is unchanged: the URL of each enabled access,
  *           none for a revoked one, Grant Access and Revoke
+ *   POT-04  my-access alone decides when the list says nothing: a member with crm read or none and no accesses yet
+ *           is not offered Grant Access
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -106,5 +108,21 @@ describe("P232: the Client Portal page without the portal token", () => {
     await screen.findByText("contact_live");
     expect(screen.getByRole("button", { name: /Grant Access/ })).toBeInTheDocument();
     expect(revokeButtons(again.container)).toHaveLength(2);
+  });
+
+  it("POT-04 my-access alone hides Grant Access from a member below crm write when the list is empty", async () => {
+    for (const crm of ["read", "none"]) {
+      member.levels = { crm };
+      portal.list.mockResolvedValue({ data: [], error: null });
+      render(<PortalPage />);
+      await screen.findByText("No portal access granted yet");
+      expect(screen.queryByRole("button", { name: /Grant Access/ }), crm).toBeNull();
+      cleanup();
+    }
+    member.levels = { crm: "admin" };
+    portal.list.mockResolvedValue({ data: [], error: null });
+    render(<PortalPage />);
+    await screen.findByText("No portal access granted yet");
+    expect(screen.getByRole("button", { name: /Grant Access/ })).toBeInTheDocument();
   });
 });
