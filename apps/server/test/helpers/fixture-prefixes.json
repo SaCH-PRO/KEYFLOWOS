@@ -1550,6 +1550,11 @@
       "prefix": "v86r_",
       "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
       "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
+    },
+    {
+      "prefix": "v67s_",
+      "owner": "apps/server/test/legacy-modules-store.integration.test.ts",
+      "packet": "V1-67 (WEDGE-HIDE-STORE, P225, D-263: the store on NAV-B-LEGACY-SERVER's legacy answer)"
     }
   ],
   "pendingRenames": [],
