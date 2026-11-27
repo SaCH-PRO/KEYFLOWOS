@@ -33,7 +33,7 @@ import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
-import { PERIODS, formatCurrency, formatDate, expenseExportFileName, canStartFor } from "./components/expense-utils";
+import { PERIODS, formatCurrency, formatDate, expenseExportFileName, startRefusal, BUSINESS_CHANGED_ELSEWHERE } from "./components/expense-utils";
 import { NoAccessState } from "@/components/ui/no-access-state";
 
 /* ───────────────────────────────────────────
@@ -372,8 +372,9 @@ export default function ExpensesInboxPage() {
     e.target.value = "";
     if (!file) return;
     const bid = d.businessId;
-    if (!canStartFor(bid, d.isCurrentBusiness)) {
-      toast.error("The business changed in another tab. Reload this page, then upload the receipt.");
+    const refusal = startRefusal(bid, d.isCurrentBusiness);
+    if (refusal || !bid) {
+      toast.error(refusal === BUSINESS_CHANGED_ELSEWHERE || !refusal ? "The business changed in another tab. Reload this page, then upload the receipt." : refusal);
       return;
     }
     const uploaded = await uploadFile(file);

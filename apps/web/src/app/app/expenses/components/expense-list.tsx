@@ -24,7 +24,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense, RecurringCandidate } from "@/lib/client";
-import { formatCurrency, formatDate, useShownBusiness, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
+import { formatCurrency, formatDate, useShownBusiness, refusedStart } from "./expense-utils";
 import { toast } from "sonner";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
@@ -124,7 +124,7 @@ export function ExpenseList({
 
   const handleBulkCategorize = async () => {
     if (!businessId || !bulkCategoryId || selectedIds.size === 0) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await Promise.all(
         Array.from(selectedIds).map(id =>
@@ -144,7 +144,7 @@ export function ExpenseList({
 
   const handleInlineCategory = async (expenseId: string, categoryId: string) => {
     if (!businessId) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await updateExpense(businessId, expenseId, { categoryId: categoryId || null });
       if (!isCurrentBusiness(businessId)) return;

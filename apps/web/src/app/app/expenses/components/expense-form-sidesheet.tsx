@@ -26,7 +26,7 @@ import {
 } from "@/lib/client";
 import { createBill, type CreateBillBody } from "@/lib/api/finance";
 import { formatCurrency as formatMoney } from "@/lib/currency";
-import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
+import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, refusedStart, startRefusal, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
@@ -220,7 +220,9 @@ export function ExpenseFormSideSheet({
   const isCurrentBusiness = hookCheck ?? shownCheck;
   // R14 MAJOR: a reply for the business this sheet was opened for, landing after the switch to another, says
   // nothing and neither saves nor closes: the sheet now open may be the other business's.
-  const live = () => isCurrentBusiness(businessId);
+  // R18-2: the same test as the start checks (the hook's or the sheet's own check, and the stored id another tab may
+  // already have changed): nothing is said, closed or reloaded for a business no longer chosen.
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
   const [currency] = useState(() => businessCurrency(businessId));
   const dueDateId = useId();
@@ -292,7 +294,7 @@ export function ExpenseFormSideSheet({
    * saved now is this period's, so the schedule is next due one period later.
    * Answers the refusal, if any.
    */
-  const createSchedule = async (bill: boolean): Promise<string | null> => {
+  const createSchedule = async (bill: boolean, zone?: string): Promise<string | null> => {
     const body = recurringScheduleBody({
       description: formData.description.trim(),
       amount: parseFloat(formData.amount),
@@ -306,7 +308,7 @@ export function ExpenseFormSideSheet({
       contactId: formData.contactId || null,
       serviceId: formData.serviceId || null,
       bill: bill ? { dueDate: formData.dueDate || null } : null,
-    }, businessId);
+    }, businessId, zone);
     try {
       const res = await createRecurringExpense(businessId, body);
       return res?.error ? res.error : null;
@@ -319,10 +321,9 @@ export function ExpenseFormSideSheet({
     if (!formData.description.trim() || !formData.amount) return;
     // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
     // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
-    if (!canStartFor(businessId, isCurrentBusiness)) {
-      toast.error(BUSINESS_CHANGED_ELSEWHERE);
-      return;
-    }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
+    // R18-8: this business's zone, taken now: a later step must not date itself in another business's zone.
+    const zone = businessTimeZone(businessId);
     const tags = formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
@@ -394,7 +395,7 @@ export function ExpenseFormSideSheet({
       }
 
       if (makesSchedule) {
-        const refused = await createSchedule(isBill);
+        const refused = await createSchedule(isBill, zone);
         if (refused) notices.push(`its recurring schedule was not created: ${refused}`);
       }
 
@@ -413,7 +414,7 @@ export function ExpenseFormSideSheet({
           businessId,
           entityType: "expense",
           entityId: expenseId,
-          fileName: `Receipt-${formData.description || "Expense"}-${todayInBusinessZone(new Date(), businessId)}.${file.name.split(".").pop()}`,
+          fileName: `Receipt-${formData.description || "Expense"}-${dayInZone(new Date(), zone)}.${file.name.split(".").pop()}`,
           mimeType: file.type || "application/octet-stream",
           content: arr,
           contentFormat: "binary",
@@ -456,9 +457,12 @@ export function ExpenseFormSideSheet({
     if (!file) return;
     // S-m3 / R17-2: the presign is sent for the stored business (hooks/use-upload.ts); a sheet for another one, or one
     // no longer shown, refuses first.
-    if (!canStartFor(businessId, isCurrentBusiness)) {
-      toast.error("The business changed in another tab. Close this sheet and reload, then add the receipt.");
-      return;
+    {
+      const refusal = startRefusal(businessId, isCurrentBusiness);
+      if (refusal) {
+        toast.error(refusal === BUSINESS_CHANGED_ELSEWHERE ? "The business changed in another tab. Close this sheet and reload, then add the receipt." : refusal);
+        return;
+      }
     }
     selectedFileRef.current = file;
     try {
@@ -491,7 +495,7 @@ export function ExpenseFormSideSheet({
 
   const handleExtractReceipt = async () => {
     if (!formData.receiptUrl) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setExtracting(true);
     setScanError(null);
     try {

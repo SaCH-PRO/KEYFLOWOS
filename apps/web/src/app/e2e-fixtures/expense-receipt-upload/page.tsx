@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { setStoredBusinessId } from "@/lib/workspace";
 import { notFound } from "next/navigation";
 import { ExpenseFormModal } from "@/app/app/expenses/components/expense-form-modal";
 
@@ -23,6 +24,11 @@ export default function E2EExpenseReceiptUploadFixturePage() {
     notFound();
   }
 
+  // EXPENSES-HUB-3 R18-3: the modal writes and uploads only for the business the workspace has chosen: this one.
+  useState(() => {
+    setStoredBusinessId(TEST_BUSINESS_ID);
+    return true;
+  });
   const [closed, setClosed] = useState(false);
   const [saved, setSaved] = useState(false);
 

@@ -19,7 +19,7 @@ import { fetchFinanceAccounts, PAYMENT_METHODS, type Expense, type FinancialAcco
 import { payBill } from "@/lib/api/finance";
 import { toast } from "sonner";
 import { readState, refusalMessage } from "@/lib/failure-kit";
-import { formatCurrency, useShownBusiness } from "./expense-utils";
+import { canStartFor, formatCurrency, useShownBusiness } from "./expense-utils";
 
 const FOCUSABLE = "select:not([disabled]), button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
 
@@ -161,9 +161,10 @@ export function BillPayDialog({
   // loading or failed, not only the disabled button.
   const pay = async () => {
     if (inFlight.current || !canPay) return;
-    // R15-1: checked before sending too. Another tab's switch can reach the stored id before its storage event
-    // reaches this tab: nothing is paid for the business no longer shown, and the dialog for it closes.
-    if (!isCurrentBusiness(businessId)) {
+    // R15-1 / R18-6: the shared start check (the stored id, and the given check). Another tab's switch can reach the
+    // stored id before its storage event reaches this tab: nothing is paid for the business no longer chosen, and the
+    // dialog for it closes without a word (there is nothing to retry for it here).
+    if (!canStartFor(businessId, isCurrentBusiness)) {
       onClose();
       return;
     }

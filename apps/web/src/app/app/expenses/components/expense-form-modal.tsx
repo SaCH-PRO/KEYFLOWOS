@@ -13,7 +13,7 @@ import {
   extractReceipt,
   createRecurringExpense,
 } from "@/lib/client";
-import { businessCurrency, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
+import { businessCurrency, businessTimeZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, refusedStart } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { API_BASE } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -38,7 +38,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
   // R14: a reply for a business no longer shown says nothing and neither saves nor closes.
-  const live = () => isCurrentBusiness(businessId);
+  // R18-3: the start checks' test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const { uploadFile, isUploading: uploading } = useUpload();
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
   const [currency] = useState(() => businessCurrency(businessId));
@@ -63,7 +64,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
+    const zone = businessTimeZone(businessId); // R18-8
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
       description: formData.description.trim(), amount: parseFloat(formData.amount),
@@ -81,12 +83,13 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       const res = editingExpense
         ? await updateExpense(businessId, editingExpense.id, payload)
         : await createExpense(businessId, payload);
-      if (!live()) return;
       // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
       if (res?.error) {
-        toast.error(res.error);
+        if (live()) toast.error(res.error);
         return;
       }
+      // R18-3: the first write has landed: its schedule below still completes for this business (in its zone, taken
+      // when the save started), silently once the business is no longer chosen.
       // EXPENSES-HUB-2 (BUG-061): a recurring expense (new, or an edit that makes it recurring) creates its
       // schedule through the existing route, next due one period after this expense's date.
       if (formData.isRecurring && !(editingExpense && editingExpense.isRecurring)) {
@@ -98,7 +101,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
             paymentMethod: formData.paymentMethod || null, categoryId: formData.categoryId || null,
             notes: formData.notes.trim() || null, projectId: formData.projectId || null,
             contactId: formData.contactId || null, serviceId: formData.serviceId || null,
-          }, businessId));
+          }, businessId, zone));
           refused = scheduled?.error ? scheduled.error : null;
         } catch (err) {
           refused = err instanceof Error ? err.message : "the request failed";
@@ -107,6 +110,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         if (refused) toast.error(`Expense saved, but its recurring schedule was not created: ${refused}`);
         else toast.success("Expense saved");
       } else {
+        if (!live()) return;
         toast.success("Expense saved");
       }
       onSaved();
@@ -134,7 +138,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       const uploaded = await uploadFile(file);
       if (!live()) return;
@@ -157,7 +161,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
   const handleExtractReceipt = async () => {
     if (!formData.receiptUrl) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setExtracting(true);
     try {
       const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });

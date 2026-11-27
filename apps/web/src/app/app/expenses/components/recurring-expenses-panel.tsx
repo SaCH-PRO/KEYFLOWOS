@@ -21,7 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, refusedStart } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -86,7 +86,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   const [saving, setSaving] = useState(false);
   const handleSave = async (form: RecurringFormData) => {
     if (!businessId || savingRef.current) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -131,8 +131,10 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
 
   const handleCancel = async (id: string) => {
     if (!businessId) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     if (!window.confirm("Cancel this recurring expense?")) return;
+    // R18-1: the confirm blocked this tab: a switch made while it was open is seen only now.
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await cancelRecurringExpense(businessId, id);
       if (!isCurrentBusiness(businessId)) return;
@@ -145,7 +147,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
 
   const handleRunNow = async (id: string) => {
     if (!businessId) return;
-    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
       await runRecurringExpenseNow(businessId, id);
       if (!isCurrentBusiness(businessId)) return;

@@ -8,6 +8,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef } from "react";
+import { toast } from "sonner";
 import { formatCurrency as formatMoney } from "@/lib/currency";
 import { getCachedBusiness, getStoredBusinessId } from "@/lib/workspace";
 import type { RecurringExpense } from "@/lib/client";
@@ -211,8 +212,9 @@ export interface ScheduleSource {
  * saved expense marked recurring. No currency: the server writes the business
  * currency (FOLLOW3-B4, D-13).
  */
-export function recurringScheduleBody(src: ScheduleSource, businessId?: string | null): Partial<RecurringExpense> {
-  const today = todayInBusinessZone(new Date(), businessId);
+export function recurringScheduleBody(src: ScheduleSource, businessId?: string | null, timeZone?: string): Partial<RecurringExpense> {
+  // R18-8: the zone the save started in, when given (the cache may hold another business by now).
+  const today = timeZone ? dayInZone(new Date(), timeZone) : todayInBusinessZone(new Date(), businessId);
   const date = parseDay(src.date) ? src.date.slice(0, 10) : today;
   const body: Partial<RecurringExpense> = {
     name: src.description,
@@ -281,6 +283,8 @@ export function expenseExportFileName(businessId: string, now: Date = new Date()
 const EXPORT_SLUG_MAX = 60;
 function exportSlug(text: string): string {
   const kept = text
+    // R18-7: emoji variation selectors and the keycap mark carry no letter of their own.
+    .replace(/[\uFE00-\uFE0F\u20E3]/g, "")
     .normalize("NFKD")
     // R17-4: combining marks are dropped only after a Latin letter (accents: "Café Ñandú" is cafe-nandu). In other
     // scripts they are part of the word (Devanagari vowel signs, Japanese voicing, Thai tone marks, Arabic harakat).
@@ -288,31 +292,65 @@ function exportSlug(text: string): string {
     .normalize("NFC")
     .toLowerCase()
     .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
+    // R18-7: a mark with no letter before it (at the start, or after a dash) is not part of any word.
+    .replace(/(^|-)\p{M}+/gu, "$1")
+    .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  // R17-3: the cap counts code points, so a name is never cut inside a surrogate pair.
-  return Array.from(kept).slice(0, EXPORT_SLUG_MAX).join("").replace(/-+$/g, "");
+  return capGraphemes(kept, EXPORT_SLUG_MAX).replace(/-+$/g, "");
 }
 
-/** EXPENSES-HUB-3 R17: what a write that will not start says. */
+/** R18-7: the first `max` user-perceived characters (graphemes): a cluster is kept whole or not at all. */
+function capGraphemes(text: string, max: number): string {
+  const Segmenter = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter;
+  if (!Segmenter) return Array.from(text).slice(0, max).join("");
+  let out = "";
+  let n = 0;
+  for (const { segment } of new Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
+    if (n >= max) break;
+    out += segment;
+    n += 1;
+  }
+  return out;
+}
+
+/** EXPENSES-HUB-3 R17: what a write that will not start says when another business is chosen. */
 export const BUSINESS_CHANGED_ELSEWHERE = "The business changed in another tab. Reload this page, then try again.";
+/** EXPENSES-HUB-3 R18-4: what it says when the chosen business cannot be read (storage blocked). */
+export const BUSINESS_UNREADABLE = "Couldn't check which business is open. Reload the page.";
 
 /**
- * EXPENSES-HUB-3 R17: the one start check of every write in this folder. A write starts only for the business the
- * workspace has chosen (the stored id, which another tab can change before its storage event reaches this tab), and,
- * when a check is given (the data hook's, or the component's own), only while that check still shows it.
+ * EXPENSES-HUB-3 R17/R18: the one start check of every write in this folder, and what a refused start says (null when
+ * the write may start). A write starts only for the business the workspace has chosen (the stored id, which another
+ * tab can change before its storage event reaches this tab), and, when a check is given (the data hook's, or the
+ * component's own), only while that check still shows it. Storage that cannot be read refuses (R18-4). A write that
+ * asks first (window.confirm) runs the check again once the answer is in: the tab saw no event while the dialog was
+ * open (R18-1).
  *
  * Two exceptions, both deliberate: an export that arrives after a switch still downloads (the owner asked for it,
  * and its file names the business it is for: expenseExportFileName); and a save whose first write has landed
- * completes its remaining steps (extra fields, schedule, Drive copy) for the same business, silently
- * (expense-form-sidesheet.tsx), so a bill is never left without its schedule or a schedule without its receipt.
+ * completes its remaining steps (extra fields, schedule, Drive copy) for the same business, in that business's zone
+ * taken when the save started, silently (expense-form-sidesheet.tsx, expense-form-modal.tsx), so a bill is never
+ * left without its schedule or a schedule without its receipt.
  */
-export function canStartFor(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): boolean {
-  if (!businessId) return false;
+export function startRefusal(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): string | null {
+  if (!businessId) return BUSINESS_CHANGED_ELSEWHERE;
   let stored: string | null = null;
   try {
     stored = getStoredBusinessId();
   } catch {
-    return false;
+    return BUSINESS_UNREADABLE;
   }
-  return stored === businessId && (isCurrent ? isCurrent(businessId) : true);
+  return stored === businessId && (isCurrent ? isCurrent(businessId) : true) ? null : BUSINESS_CHANGED_ELSEWHERE;
+}
+
+/** Whether a write for `businessId` may start (startRefusal says nothing against it). */
+export function canStartFor(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): boolean {
+  return startRefusal(businessId, isCurrent) === null;
+}
+
+/** The start check, saying why when it refuses: true when the write must not start. */
+export function refusedStart(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): boolean {
+  const refusal = startRefusal(businessId, isCurrent);
+  if (refusal) toast.error(refusal);
+  return refusal !== null;
 }

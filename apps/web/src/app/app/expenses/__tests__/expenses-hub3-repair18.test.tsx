@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Expense, ExpenseCategory, RecurringExpense } from "@/lib/client";
+import type { Expense, ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ZONES: Record<string, string> = vi.hoisted(() => ({ biz_A: "America/Port_of_Spain", biz_B: "America/Port_of_Spain" } as Record<string, string>));
 const ws = vi.hoisted(() => ({ bid: "biz_A" as string | null }));
@@ -133,7 +133,6 @@ function expense(over: Partial<Expense> = {}): Expense {
     createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
   } as Expense;
 }
-const silentSwitch = (bid: string) => { ws.bid = bid; };
 const sheet = (b: string, extra: Partial<React.ComponentProps<typeof ExpenseFormSideSheet>> = {}) => (
   <ExpenseFormSideSheet businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} {...extra} />
 );
@@ -278,5 +277,27 @@ describe("R18-8: A's zone, taken when the save starts", () => {
     expect(body?.nextRunDate, "the schedule was dated in Trinidad's day, not A's (Tokyo)").toBe("2026-12-21");
     const upload = drive.uploadToDrive.mock.calls[0]?.[0] as { fileName?: string };
     expect(upload?.fileName).toMatch(/-2026-11-21\.jpg$/);
+  });
+
+  it("the modal's schedule is dated in A's zone after the cache holds B", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-20T20:00:00.000Z"));
+    ZONES.biz_A = "Asia/Tokyo";
+    const create = deferred<unknown>();
+    client.createExpense.mockReturnValue(create.promise);
+    client.createRecurringExpense.mockResolvedValue(ok({ id: "rec_A_new" }));
+    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />;
+    const view = render(el("biz_A"));
+    fill();
+    fireEvent.change(document.querySelector('input[type="date"]')!, { target: { value: "2026-10-21" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
+    await waitFor(() => expect(client.createExpense).toHaveBeenCalled());
+    ws.bid = "biz_B";
+    view.rerender(el("biz_B"));
+    await act(async () => { create.resolve(ok({ id: "exp_A_new" })); });
+    await settle();
+    const body = client.createRecurringExpense.mock.calls[0]?.[1] as { nextRunDate?: string };
+    expect(body?.nextRunDate).toBe("2026-12-21");
   });
 });

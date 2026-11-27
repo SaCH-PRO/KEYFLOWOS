@@ -71,7 +71,6 @@ afterEach(() => cleanup());
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 
 
-/** Another tab has switched: the stored id says B, but no storage event has reached this tab yet. */
 
 
 
