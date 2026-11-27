@@ -25,7 +25,7 @@
  *   WHS-S06  CONTROL: storeEnabled=false (even with prior order) and unknown slug return 404 on GET & POST
  *   WHS-S07  CONTROL: GET /bookings/public/businesses/:id/services for bizNone is untouched
  *
- * FIXTURES: prefix `v92c_` (test/helpers/fixture-prefixes.json), cleaned by raw SQL in beforeAll and afterAll.
+ * FIXTURES: prefix `v92g_` (test/helpers/fixture-prefixes.json), cleaned by raw SQL in beforeAll and afterAll.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -38,7 +38,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'v92c_';
+const P = 'v92g_';
 const RATE_LIMIT_NS = `${P}rl`;
 
 const ID = {
@@ -288,7 +288,7 @@ beforeAll(async () => {
 
   for (const id of [ID.owner, ID.ownerOther]) {
     await db.user.create({
-      data: { id, email: `${P}${id.slice(P.length)}@v92c.test.local`, name: `${id} Name`, role: 'USER' },
+      data: { id, email: `${P}${id.slice(P.length)}@v92g.test.local`, name: `${id} Name`, role: 'USER' },
     });
   }
 
@@ -386,7 +386,7 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
   it('[WHS-S04] RED-BEFORE: POST /site/storefront/public/:slug/checkout refuses 403 STORE_CHECKOUT_NOT_OFFERED before any write when storeCheckout is false', async () => {
     const basePayload = {
       items: [{ productId: ID.prodNone, quantity: 1 }],
-      customer: { name: 'Blocked Buyer', email: `${P}blocked@v92c.test.local` },
+      customer: { name: 'Blocked Buyer', email: `${P}blocked@v92g.test.local` },
       promoCode: 'LAUNCH10',
     };
 
@@ -439,7 +439,7 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
         .post(`/site/storefront/public/${encodeURIComponent(slug)}/checkout`)
         .send({
           items: [{ productId, quantity: 1 }],
-          customer: { name: 'Legacy Buyer', email: `${P}${label.replace(/[^a-z]/g, '')}@v92c.test.local` },
+          customer: { name: 'Legacy Buyer', email: `${P}${label.replace(/[^a-z]/g, '')}@v92g.test.local` },
           paymentMethod: 'CASH',
         });
       expect(res.status, `${label}: ${res.text}`).toBe(201);
@@ -456,7 +456,7 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
         .post(`/site/storefront/public/${encodeURIComponent(slug)}/checkout`)
         .send({
           items: [{ productId: ID.prodNone, quantity: 1 }],
-          customer: { name: 'Visitor', email: `${P}v@v92c.test.local` },
+          customer: { name: 'Visitor', email: `${P}v@v92g.test.local` },
           paymentMethod: 'CASH',
         });
       expect(postRes.status, `${slug} POST`).toBe(404);
