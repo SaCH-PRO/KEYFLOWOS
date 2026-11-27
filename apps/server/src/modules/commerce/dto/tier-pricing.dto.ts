@@ -1,26 +1,32 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsNotEmpty,
   IsNumber,
   IsString,
+  Max,
   Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { MAX_DOCUMENT_AMOUNT } from '../money';
+import { PRICING_TIERS } from '../pricing.service';
 
 export class TierPriceEntryDto {
   @IsString()
   @IsNotEmpty()
   tier!: string;
 
-  @IsNumber()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)
+  @Max(MAX_DOCUMENT_AMOUNT)
   price!: number;
 }
 
 export class SetProductTierPricesDto {
   @IsArray()
+  @ArrayMaxSize(PRICING_TIERS.length)
   @ValidateNested({ each: true })
   @Type(() => TierPriceEntryDto)
   tierPrices!: TierPriceEntryDto[];

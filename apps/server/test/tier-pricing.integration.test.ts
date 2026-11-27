@@ -51,7 +51,7 @@ let pricingService: import('../src/modules/commerce/pricing.service').PricingSer
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM team_audit_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM product_tier_prices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -356,8 +356,15 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     // TeamAuditInterceptor records product tier price update (fire-and-forget async write, poll briefly)
     let auditCount = 0;
     for (let i = 0; i < 15; i++) {
-      auditCount = await db.teamAuditLog.count({
-        where: { businessId: ID.bizA, userId: ID.ownerA, module: 'revenue', action: 'product_tier_prices_updated' },
+      auditCount = await db.teamActivityLog.count({
+        where: {
+          businessId: ID.bizA,
+          userId: ID.ownerA,
+          module: 'revenue',
+          action: 'product_tier_prices_updated',
+          entityType: 'product',
+          entityId: ID.prodA,
+        },
       });
       if (auditCount > 0) break;
       await new Promise((r) => setTimeout(r, 30));
@@ -365,13 +372,30 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     expect(auditCount).toBeGreaterThanOrEqual(1);
   });
 
-  it('[TP-02] RED-BEFORE: PUT contacts/:id/pricing-tier updates tier (including 0-price VIP and clearing to null) and affects GET price', async () => {
+  it('[TP-02] RED-BEFORE: PUT contacts/:id/pricing-tier updates tier (including 0-price VIP and clearing to null), records audit, and affects GET price', async () => {
     const setVip = await request(app.getHttpServer())
       .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactNullA}/pricing-tier`)
       .set(HEADER, ID.ownerA)
-      .send({ pricingTier: 'vip' });
+      .send({ pricingTier: 'vip', extraIgnoredField: 'should-be-stripped' });
     expect(setVip.status).toBe(200);
     expect(setVip.body).toEqual({ id: ID.contactNullA, pricingTier: 'VIP' });
+
+    let contactAuditCount = 0;
+    for (let i = 0; i < 15; i++) {
+      contactAuditCount = await db.teamActivityLog.count({
+        where: {
+          businessId: ID.bizA,
+          userId: ID.ownerA,
+          module: 'revenue',
+          action: 'contact_pricing_tier_updated',
+          entityType: 'contact',
+          entityId: ID.contactNullA,
+        },
+      });
+      if (contactAuditCount > 0) break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    expect(contactAuditCount).toBeGreaterThanOrEqual(1);
 
     const vipPrice = await request(app.getHttpServer())
       .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
@@ -396,38 +420,46 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
   });
 
   it('[TP-03] RED-BEFORE: AuthGuard and ModuleScopeGuard enforce 401 unauth, 403 for revenue:none, and 403 on PUT for revenue:read', async () => {
-    // Unauthenticated -> 401 on all 4 routes
-    for (const req of [
-      request(app.getHttpServer()).get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`),
-      request(app.getHttpServer())
-        .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-        .send({ tierPrices: [{ tier: 'WHOLESALE', price: 50 }] }),
-      request(app.getHttpServer()).get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`),
-      request(app.getHttpServer())
-        .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactRetailA}/pricing-tier`)
-        .send({ pricingTier: 'WHOLESALE' }),
-    ]) {
-      expect((await req).status).toBe(401);
+    // Unauthenticated -> 401 on all 4 routes (run sequentially via thunks)
+    const unauthCalls = [
+      () => request(app.getHttpServer()).get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`),
+      () =>
+        request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+          .send({ tierPrices: [{ tier: 'WHOLESALE', price: 50 }] }),
+      () => request(app.getHttpServer()).get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`),
+      () =>
+        request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactRetailA}/pricing-tier`)
+          .send({ pricingTier: 'WHOLESALE' }),
+    ];
+    for (const call of unauthCalls) {
+      expect((await call()).status).toBe(401);
     }
 
     // revenue:none -> 403 on all 4 routes
-    for (const req of [
-      request(app.getHttpServer())
-        .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-        .set(HEADER, ID.noRevA),
-      request(app.getHttpServer())
-        .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-        .set(HEADER, ID.noRevA)
-        .send({ tierPrices: [{ tier: 'WHOLESALE', price: 50 }] }),
-      request(app.getHttpServer())
-        .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
-        .set(HEADER, ID.noRevA),
-      request(app.getHttpServer())
-        .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactRetailA}/pricing-tier`)
-        .set(HEADER, ID.noRevA)
-        .send({ pricingTier: 'WHOLESALE' }),
-    ]) {
-      expect((await req).status).toBe(403);
+    const noRevCalls = [
+      () =>
+        request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+          .set(HEADER, ID.noRevA),
+      () =>
+        request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+          .set(HEADER, ID.noRevA)
+          .send({ tierPrices: [{ tier: 'WHOLESALE', price: 50 }] }),
+      () =>
+        request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
+          .set(HEADER, ID.noRevA),
+      () =>
+        request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactRetailA}/pricing-tier`)
+          .set(HEADER, ID.noRevA)
+          .send({ pricingTier: 'WHOLESALE' }),
+    ];
+    for (const call of noRevCalls) {
+      expect((await call()).status).toBe(403);
     }
 
     // revenue:read -> 403 on both PUT routes, leaving stored rows unchanged
@@ -553,22 +585,56 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     expect(afterContactB).toEqual(beforeContactB);
   });
 
-  it('[TP-05] RED-BEFORE (D-133): member with crm_view=owned receives 404 for hidden contact on GET price and PUT pricing-tier, but succeeds on own contact', async () => {
-    const hiddenPrice = await request(app.getHttpServer())
-      .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
-      .query({ contactId: ID.contactPrivateOwnerA })
-      .set(HEADER, ID.revWriteOwnedCrmA);
-    expect(hiddenPrice.status).toBe(404);
+  it('[TP-05] RED-BEFORE (D-133): enforces crm_view=owned (hides SHARED non-owned) and PRIVATE hiding separately, while allowing own contacts', async () => {
+    // crm_view=owned member -> 404 on owner's PRIVATE contact
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
+          .query({ contactId: ID.contactPrivateOwnerA })
+          .set(HEADER, ID.revWriteOwnedCrmA)
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactPrivateOwnerA}/pricing-tier`)
+          .set(HEADER, ID.revWriteOwnedCrmA)
+          .send({ pricingTier: 'RETAIL' })
+      ).status,
+    ).toBe(404);
 
-    const hiddenPut = await request(app.getHttpServer())
-      .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactPrivateOwnerA}/pricing-tier`)
-      .set(HEADER, ID.revWriteOwnedCrmA)
-      .send({ pricingTier: 'RETAIL' });
-    expect(hiddenPut.status).toBe(404);
+    // crm_view=owned member -> 404 on owner's SHARED non-owned contact (isolates crm_view=owned)
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
+          .query({ contactId: ID.contactWholesaleA })
+          .set(HEADER, ID.revWriteOwnedCrmA)
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactWholesaleA}/pricing-tier`)
+          .set(HEADER, ID.revWriteOwnedCrmA)
+          .send({ pricingTier: 'RETAIL' })
+      ).status,
+    ).toBe(404);
 
-    // Owner's private contact remains unchanged
-    const privateAfter = await db.contact.findUnique({ where: { id: ID.contactPrivateOwnerA } });
-    expect(privateAfter?.pricingTier).toBe('WHOLESALE');
+    // viewAll member (revReadA) -> 404 on owner's PRIVATE contact (isolates PRIVATE hiding)
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
+          .query({ contactId: ID.contactPrivateOwnerA })
+          .set(HEADER, ID.revReadA)
+      ).status,
+    ).toBe(404);
+
+    // Owner's private & shared contacts remain unchanged
+    expect((await db.contact.findUnique({ where: { id: ID.contactPrivateOwnerA } }))?.pricingTier).toBe('WHOLESALE');
+    expect((await db.contact.findUnique({ where: { id: ID.contactWholesaleA } }))?.pricingTier).toBe('WHOLESALE');
 
     // Own contact succeeds
     const ownPut = await request(app.getHttpServer())
@@ -586,7 +652,8 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     expect(ownPrice.body).toMatchObject({ effectivePrice: 80, appliedTier: 'WHOLESALE', source: 'TIER' });
   });
 
-  it('[TP-06] RED-BEFORE: soft-deleted entities return 404 and invalid payloads / query shapes return 400', async () => {
+  it('[TP-06] RED-BEFORE: soft-deleted entities return 404, empty tierPrices clears rows, empty ?contactId= returns BASE, and invalid payloads/query shapes return 400', async () => {
+    // Soft-deleted product across all 3 product routes -> 404
     expect(
       (
         await request(app.getHttpServer())
@@ -594,6 +661,23 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
           .set(HEADER, ID.ownerA)
       ).status,
     ).toBe(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodADeleted}/tier-prices`)
+          .set(HEADER, ID.ownerA)
+          .send({ tierPrices: [{ tier: 'WHOLESALE', price: 80 }] })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodADeleted}/price`)
+          .set(HEADER, ID.ownerA)
+      ).status,
+    ).toBe(404);
+
+    // Soft-deleted contact -> 404
     expect(
       (
         await request(app.getHttpServer())
@@ -611,52 +695,58 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
       ).status,
     ).toBe(404);
 
-    // Invalid tier / negative price / duplicate tier / missing array / repeated contactId -> 400
-    expect(
-      (
-        await request(app.getHttpServer())
-          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-          .set(HEADER, ID.ownerA)
-          .send({ tierPrices: [{ tier: 'SUPER_SECRET', price: 10 }] })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request(app.getHttpServer())
-          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-          .set(HEADER, ID.ownerA)
-          .send({ tierPrices: [{ tier: 'WHOLESALE', price: -5 }] })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request(app.getHttpServer())
-          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-          .set(HEADER, ID.ownerA)
-          .send({
-            tierPrices: [
-              { tier: 'WHOLESALE', price: 80 },
-              { tier: 'wholesale', price: 75 },
-            ],
-          })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request(app.getHttpServer())
-          .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
-          .set(HEADER, ID.ownerA)
-          .send({ tierPrices: 'not-an-array' })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request(app.getHttpServer())
-          .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactRetailA}/pricing-tier`)
-          .set(HEADER, ID.ownerA)
-          .send({ pricingTier: 'BOGUS' })
-      ).status,
-    ).toBe(400);
+    // Empty ?contactId= returns BASE price
+    const blankContactPrice = await request(app.getHttpServer())
+      .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price?contactId=`)
+      .set(HEADER, ID.ownerA);
+    expect(blankContactPrice.status).toBe(200);
+    expect(blankContactPrice.body).toMatchObject({ effectivePrice: 100, contactId: null, source: 'BASE' });
+
+    // Invalid tier / negative price / duplicate tier / missing array / non-object entries / oversized array -> 400
+    for (const badBody of [
+      { tierPrices: [{ tier: 'SUPER_SECRET', price: 10 }] },
+      { tierPrices: [{ tier: 'WHOLESALE', price: -5 }] },
+      {
+        tierPrices: [
+          { tier: 'WHOLESALE', price: 80 },
+          { tier: 'wholesale', price: 75 },
+        ],
+      },
+      { tierPrices: 'not-an-array' },
+      { tierPrices: [null] },
+      { tierPrices: [123] },
+    ]) {
+      expect(
+        (
+          await request(app.getHttpServer())
+            .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+            .set(HEADER, ID.ownerA)
+            .send(badBody)
+        ).status,
+      ).toBe(400);
+    }
+
+    // Invalid pricingTier bodies (omitted, non-string, blank, invalid tier) -> 400
+    for (const badTierBody of [
+      {},
+      { pricingTier: 'BOGUS' },
+      { pricingTier: 123 },
+      { pricingTier: '' },
+      { pricingTier: '   ' },
+      { pricingTier: ['WHOLESALE'] },
+      { pricingTier: { tier: 'WHOLESALE' } },
+    ]) {
+      expect(
+        (
+          await request(app.getHttpServer())
+            .put(`/commerce/businesses/${ID.bizA}/contacts/${ID.contactRetailA}/pricing-tier`)
+            .set(HEADER, ID.ownerA)
+            .send(badTierBody)
+        ).status,
+      ).toBe(400);
+    }
+
+    // Repeated or bracket-object contactId query -> 400
     expect(
       (
         await request(app.getHttpServer())
@@ -666,5 +756,27 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
           .set(HEADER, ID.ownerA)
       ).status,
     ).toBe(400);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price?contactId[not]=x`)
+          .set(HEADER, ID.ownerA)
+      ).status,
+    ).toBe(400);
+
+    // PUT { tierPrices: [] } clears all tier prices and reverts GET price to BASE
+    const clearAll = await request(app.getHttpServer())
+      .put(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/tier-prices`)
+      .set(HEADER, ID.ownerA)
+      .send({ tierPrices: [] });
+    expect(clearAll.status).toBe(200);
+    expect(clearAll.body).toEqual([]);
+
+    const reverted = await request(app.getHttpServer())
+      .get(`/commerce/businesses/${ID.bizA}/products/${ID.prodA}/price`)
+      .query({ contactId: ID.contactWholesaleA })
+      .set(HEADER, ID.ownerA);
+    expect(reverted.status).toBe(200);
+    expect(reverted.body).toMatchObject({ effectivePrice: 100, appliedTier: null, source: 'BASE' });
   });
 });
