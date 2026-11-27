@@ -478,8 +478,9 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
 function storeOffer(d: StoreCustomData) {
   const productsKnown = Array.isArray(d.storeProducts);
   const servicesKnown = Array.isArray(d.storeServices);
-  const products = (productsKnown ? d.storeProducts : []) as Record<string, unknown>[];
-  const services = bookableServices((servicesKnown ? d.storeServices : []) as Record<string, unknown>[]);
+  // What is not known is not counted by offerWords (its known gate), whatever list stands in for it here.
+  const products = (d.storeProducts ?? []) as Record<string, unknown>[];
+  const services = bookableServices((d.storeServices ?? []) as Record<string, unknown>[]);
   return offerWords({ ...offerOf(products, services), productsKnown, servicesKnown });
 }
 
