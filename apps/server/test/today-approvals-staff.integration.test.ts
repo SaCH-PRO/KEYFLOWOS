@@ -169,10 +169,12 @@ beforeAll(async () => {
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
-      { provide: RateLimitGuard, useValue: { canActivate: () => true } },
       TenantInterceptor,
     ],
-  }).compile();
+  })
+    .overrideGuard(RateLimitGuard)
+    .useValue({ canActivate: () => true })
+    .compile();
 
   app = moduleRef.createNestApplication();
   app.use((req: any, _res: any, next: () => void) => {
