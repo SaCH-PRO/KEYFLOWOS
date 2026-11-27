@@ -826,18 +826,15 @@ function buildStoreTools(): AiTool[] {
         const storeName = d.storeName || "Your Store";
         const testimonials = (d.testimonials ?? []) as unknown[];
 
+        // P231 r1 (D-303): no paste-in guarantee or unverified badge ("100% Satisfaction Guarantee", "Secure,
+        // Encrypted Checkout", "Verified Business", "5-Star Rated", "Secure Payments").
         const guarantees = [
-          "✅ 100% Satisfaction Guarantee",
-          "🔒 Secure, Encrypted Checkout",
           "⚡ Fast, Reliable Service",
           "💬 Real Human Support",
         ];
 
         const trustBadges = [
-          "Verified Business",
-          "5-Star Rated",
           `${testimonials.length > 0 ? `${testimonials.length}+ Happy Customers` : "Trusted by Customers"}`,
-          "Secure Payments",
         ];
 
         const socialProofCopy = [
@@ -848,7 +845,7 @@ function buildStoreTools(): AiTool[] {
           `Real results, real reviews — see why customers keep coming back.`,
         ];
 
-        const aboutCopy = `${storeName} is committed to delivering quality ${d.businessDescription ? "— " + d.businessDescription : "products and services"}. Every order is backed by our satisfaction guarantee.`;
+        const aboutCopy = `${storeName} is committed to delivering quality ${d.businessDescription ? "— " + d.businessDescription : "products and services"}.`;
 
         return {
           summary: `Generated trust copy, guarantee statements, and social proof language for "${storeName}".`,

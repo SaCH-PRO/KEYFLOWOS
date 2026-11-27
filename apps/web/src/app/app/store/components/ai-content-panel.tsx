@@ -135,17 +135,14 @@ export function AiContentPanel({
 
     if (action === "trust") {
       setTrustResult({
+        // P231 r1 (D-303): no paste-in guarantee or unverified badge ("100% Satisfaction Guarantee", "Secure,
+        // Encrypted Checkout", "Verified Business", "Secure Payments", "Quality Guaranteed").
         guarantees: [
-          "✅ 100% Satisfaction Guarantee",
-          "🔒 Secure, Encrypted Checkout",
           "⚡ Fast, Reliable Service",
           "💬 Real Human Support",
         ],
         trustBadges: [
-          "Verified Business",
           testimonialCount > 0 ? `${testimonialCount}+ Happy Customers` : "Trusted by Customers",
-          "Secure Payments",
-          "Quality Guaranteed",
         ],
         socialProofCopy: [
           testimonialCount > 0

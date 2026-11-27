@@ -45,16 +45,6 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
   const gateways = useStorefrontGateways(slug ?? "", currency ?? "");
   const paymentsBy = slug ? connectedGatewaysLabel(gateways) : null;
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) { setVisible(true); obs.disconnect(); }
-    }, { threshold: 0.3 });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
   // TRUST-BADGES-TRUE-ONLY (D-303): only statements the product can stand behind. No 'Secure Checkout', no 'Instant
   // Confirmation' (a booking can wait for the owner), no 'Secure Payments' whatever is connected.
   const visibleItems: { icon: React.ElementType; label: string; key: string }[] = [
@@ -65,7 +55,21 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
     // CUSTOMER-PAGE-HONESTY: no 'Guaranteed by KeyFlowOS' fallback; KeyFlowOS guarantees nothing.
     ...(businessHoursToday ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }] : []),
   ];
-  if (visibleItems.length === 0) return null;
+  const hasItems = visibleItems.length > 0;
+
+  // P231 r1 (MAJOR-2): the bar renders nothing until it has a line, and a line can arrive late (the gateway list, the
+  // order count), so the fade-in observer attaches when the bar first has a line, not only on mount.
+  useEffect(() => {
+    const el = ref.current;
+    if (!hasItems || !el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setVisible(true); obs.disconnect(); }
+    }, { threshold: 0.3 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasItems]);
+
+  if (!hasItems) return null;
 
   if (variant === "banner") {
     return (

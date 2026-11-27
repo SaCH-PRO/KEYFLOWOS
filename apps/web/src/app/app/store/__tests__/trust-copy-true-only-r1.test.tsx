@@ -28,7 +28,7 @@ const UNVERIFIED = /100% Satisfaction Guarantee|Secure, Encrypted Checkout|Verif
 
 describe("MINOR-2: the storefront preview", () => {
   it("previews no 'Secure', 'Instant' or 'Safe Pay' trust placeholders", () => {
-    render(<StorefrontPreview businessData={{ name: "Pepper Co" }} services={[]} commerceProducts={[]} config={{}} slug="pepper-co" previewMode="desktop" />);
+    render(<StorefrontPreview businessData={{ name: "Pepper Co" }} services={[]} commerceProducts={[]} config={{} as never} slug="pepper-co" previewMode="desktop" />);
     expect(text()).toContain("Pepper Co");
     for (const label of ["Secure", "Instant", "Safe Pay"]) {
       expect(screen.queryAllByText(new RegExp(`^${label}$`)), `the preview shows '${label}'`).toEqual([]);
