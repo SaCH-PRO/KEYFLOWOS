@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { contactWhereWithId } from '../crm/crm.helpers';
+import { contactPhoneForStorage, phoneKeyReadsAs } from '../crm/crm-data-quality.util';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { CommerceService } from '../commerce/commerce.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
@@ -118,8 +119,8 @@ type SlotParams = {
   excludeBookingIds?: string[];
 };
 
-const SETTLED_PAYMENT_STATUSES: string[] = ['SUCCESSFUL', 'COMPLETED', 'PAID'];
-const PAID_INVOICE_STATUSES: string[] = ['PAID', 'PARTIALLY_PAID'];
+const RELEASABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['DRAFT', 'VOID']);
+const BLOCKING_PAYMENT_STATUSES: ReadonlySet<string> = new Set(['SUCCESSFUL', 'COMPLETED', 'PAID', 'PENDING']);
 
 /** Minutes in a day on the business's clock: the picker's candidate starts stay below it. */
 const MINUTES_PER_DAY = 1440;
@@ -2075,7 +2076,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const push = (raw: string | null | undefined) => {
       if (typeof raw !== 'string') return;
       const trimmed = raw.trim();
-      if (!trimmed || seen.has(trimmed) || out.length >= MAX_PUBLIC_RELEASE_BOOKING_IDS) return;
+      if (!trimmed || trimmed.length > 200 || seen.has(trimmed) || out.length >= MAX_PUBLIC_RELEASE_BOOKING_IDS) return;
       seen.add(trimmed);
       out.push(trimmed);
     };
@@ -2086,41 +2087,73 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     return out;
   }
 
+  /**
+   * Fail-closed payment/settlement guard (R1-SEC-02, CR-P228-4): only an
+   * unpaid PENDING booking whose attached invoices (if any) are DRAFT or VOID,
+   * carry zero settled or pending own-tenant payments, and carry zero APPLIED
+   * credit notes may be released on rebook.
+   */
   private isBookingUnpaidAndReleasable(row: {
     status: BookingStatus;
     paymentStatus: string | null;
     deletedAt: Date | null;
-    invoice: { id: string; status: string; payments: Array<{ id: string }> } | null;
-    depositInvoice: { id: string; status: string; payments: Array<{ id: string }> } | null;
+    invoice: { id: string; status: string; payments: Array<{ status: string }>; creditNotes: Array<{ amount: unknown }> } | null;
+    depositInvoice: { id: string; status: string; payments: Array<{ status: string }>; creditNotes: Array<{ amount: unknown }> } | null;
   }): boolean {
     if (row.deletedAt !== null) return false;
     if (row.status !== 'PENDING') return false;
     if (row.paymentStatus !== 'UNPAID') return false;
     for (const inv of [row.invoice, row.depositInvoice]) {
       if (!inv) continue;
-      if (PAID_INVOICE_STATUSES.includes(inv.status)) return false;
-      if (inv.payments.length > 0) return false;
+      if (!RELEASABLE_INVOICE_STATUSES.has(inv.status)) return false;
+      if (inv.payments.some((p) => BLOCKING_PAYMENT_STATUSES.has(p.status))) return false;
+      if (inv.creditNotes.length > 0) return false;
     }
     return true;
   }
 
   /**
-   * Read-only pre-check for the early `assertSlotFree` call (before contact
-   * creation or invoice writes) so a customer retrying their own slot is not
-   * blocked by their own unpaid PENDING hold. The authoritative check and
-   * cancellation still happen atomically inside `claimSlot`'s transaction
-   * keyed on `contact.id`.
+   * Unified customer-identity verification shared by pre-check and `beforeCheck(tx)`
+   * (R1-SEC-03, CR-P228-1):
+   * - Never allows phone-fallback to cancel a booking whose stored email
+   *   contradicts the caller's normalized email.
+   * - Matches case-insensitive email, or falls back to E.164 phone comparison
+   *   (under `businessCountry`) when either side has no email.
+   */
+  private contactMatchesRebookCaller(
+    stored: { email?: string | null; phone?: string | null; phoneNormalized?: string | null } | null,
+    caller: { email?: string | null; phone?: string | null },
+    businessCountry?: string | null,
+  ): boolean {
+    if (!stored) return false;
+    const callerEmail = caller.email?.trim().toLowerCase() || null;
+    const storedEmail = stored.email?.trim().toLowerCase() || null;
+    if (storedEmail && callerEmail && storedEmail !== callerEmail) return false;
+    if (storedEmail && callerEmail && storedEmail === callerEmail) return true;
+    const callerPhone = caller.phone?.trim() || null;
+    if (!callerPhone) return false;
+    const parsedCaller = contactPhoneForStorage(callerPhone, businessCountry);
+    const storedKeys = [stored.phoneNormalized, stored.phone].filter((v): v is string => !!v?.trim());
+    if (parsedCaller.e164) {
+      return storedKeys.some((k) => phoneKeyReadsAs(k, parsedCaller.e164!, businessCountry));
+    }
+    return storedKeys.some((k) => k.trim() === callerPhone);
+  }
+
+  /**
+   * Read-only pre-check for early `assertSlotFree` so a customer retrying their
+   * own slot is not blocked by their own unpaid PENDING hold. Authoritative
+   * locking, re-verification, cancellation, and DRAFT invoice withdrawal run
+   * atomically inside `claimSlot`.
    */
   private async findPreCheckReleasableBookingIds(
     businessId: string,
     candidateIds: string[],
     contactInput: { email?: string | null; phone?: string | null },
+    businessCountry?: string | null,
   ): Promise<string[]> {
     if (candidateIds.length === 0) return [];
-    const normalizedEmail = contactInput.email?.trim().toLowerCase() || null;
-    const normalizedPhone = contactInput.phone?.trim() || null;
-    if (!normalizedEmail && !normalizedPhone) return [];
-
+    const invSelect = settlementInvoiceSelect(businessId);
     const rows = await this.prisma.client.booking.findMany({
       where: {
         id: { in: candidateIds },
@@ -2129,38 +2162,142 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         paymentStatus: 'UNPAID',
         deletedAt: null,
       },
+      orderBy: { id: 'asc' },
       select: {
         id: true,
         status: true,
         paymentStatus: true,
         deletedAt: true,
-        contact: { select: { email: true, phone: true } },
-        invoice: {
-          select: {
-            id: true,
-            status: true,
-            payments: { where: { status: { in: SETTLED_PAYMENT_STATUSES } }, select: { id: true }, take: 1 },
-          },
-        },
-        depositInvoice: {
-          select: {
-            id: true,
-            status: true,
-            payments: { where: { status: { in: SETTLED_PAYMENT_STATUSES } }, select: { id: true }, take: 1 },
-          },
-        },
+        contact: { select: { email: true, phone: true, phoneNormalized: true } },
+        invoice: { select: invSelect },
+        depositInvoice: { select: invSelect },
+      },
+    });
+    return rows
+      .filter(
+        (row) =>
+          this.isBookingUnpaidAndReleasable(row) &&
+          this.contactMatchesRebookCaller(row.contact, contactInput, businessCountry),
+      )
+      .map((row) => row.id);
+  }
+
+  /**
+   * Authoritative in-transaction P228 hold release (R1-SEC-01, CR-P228-2):
+   * locks linked invoices `FOR UPDATE` first (canonical `invoices -> bookings`
+   * order matching `bookings.service.ts:1004`), locks candidate bookings
+   * `FOR NO KEY UPDATE`, re-reads status/payments/creditNotes/contact under
+   * those locks, cancels verified unpaid PENDING holds, and soft-deletes their
+   * DRAFT invoices inside the same `claimSlot` transaction so any slot conflict
+   * rolls back both booking cancellation and invoice withdrawal atomically.
+   */
+  private async releaseRebookHoldsInTx(
+    tx: PrismaTx,
+    params: {
+      businessId: string;
+      contactId: string;
+      candidateIds: string[];
+      callerContact: { email?: string | null; phone?: string | null };
+      businessCountry?: string | null;
+    },
+  ): Promise<void> {
+    if (params.candidateIds.length === 0) return;
+
+    const initial = await tx.booking.findMany({
+      where: {
+        id: { in: params.candidateIds },
+        businessId: params.businessId,
+        contactId: params.contactId,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        deletedAt: null,
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true, invoiceId: true, depositInvoiceId: true },
+    });
+    if (initial.length === 0) return;
+
+    const sortedBookingIds = initial.map((r) => r.id).sort();
+    const sortedInvoiceIds = [
+      ...new Set(
+        initial
+          .flatMap((r) => [r.invoiceId, r.depositInvoiceId])
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ].sort();
+
+    if (sortedInvoiceIds.length > 0) {
+      await tx.$queryRaw`
+        SELECT id FROM invoices
+        WHERE business_id = ${params.businessId} AND id IN (${Prisma.join(sortedInvoiceIds)})
+        ORDER BY id ASC
+        FOR UPDATE
+      `;
+    }
+    await tx.$queryRaw`
+      SELECT id FROM bookings
+      WHERE business_id = ${params.businessId} AND id IN (${Prisma.join(sortedBookingIds)})
+      ORDER BY id ASC
+      FOR NO KEY UPDATE
+    `;
+
+    const invSelect = settlementInvoiceSelect(params.businessId);
+    const locked = await tx.booking.findMany({
+      where: {
+        id: { in: sortedBookingIds },
+        businessId: params.businessId,
+        contactId: params.contactId,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        deletedAt: null,
+      },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        deletedAt: true,
+        contact: { select: { email: true, phone: true, phoneNormalized: true } },
+        invoice: { select: invSelect },
+        depositInvoice: { select: invSelect },
       },
     });
 
-    return rows
-      .filter((row) => {
-        if (!this.isBookingUnpaidAndReleasable(row)) return false;
-        if (normalizedEmail) {
-          return row.contact?.email?.trim().toLowerCase() === normalizedEmail;
+    for (const row of locked) {
+      if (
+        !this.isBookingUnpaidAndReleasable(row) ||
+        !this.contactMatchesRebookCaller(row.contact, params.callerContact, params.businessCountry)
+      ) {
+        continue;
+      }
+      const cancelled = await tx.booking.updateMany({
+        where: {
+          id: row.id,
+          businessId: params.businessId,
+          contactId: params.contactId,
+          status: 'PENDING',
+          paymentStatus: 'UNPAID',
+          deletedAt: null,
+        },
+        data: { status: 'CANCELLED' },
+      });
+      if (cancelled.count === 1) {
+        const draftInvoiceIds = [row.invoice, row.depositInvoice]
+          .filter((inv): inv is NonNullable<typeof inv> => !!inv && inv.status === 'DRAFT')
+          .map((inv) => inv.id);
+        if (draftInvoiceIds.length > 0) {
+          await tx.invoice.updateMany({
+            where: {
+              id: { in: draftInvoiceIds },
+              businessId: params.businessId,
+              status: 'DRAFT',
+              deletedAt: null,
+            },
+            data: { deletedAt: new Date() },
+          });
         }
-        return row.contact?.phone?.trim() === normalizedPhone;
-      })
-      .map((row) => row.id);
+      }
+    }
   }
 
   async publicCreateBooking(input: {
@@ -2184,11 +2321,6 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
      * gate; null is "none sent". A caller that leaves it undefined is compared on storefrontSlug.
      */
     storefrontSlugAsSent?: string | null;
-    /**
-     * V1-92 / P228 (FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK): optional prior unpaid
-     * PENDING booking ID(s) held by the same customer to cancel atomically when
-     * this rebook commits.
-     */
     replaceBookingId?: string | null;
     releaseBookingIds?: string[] | null;
   }) {
@@ -2238,14 +2370,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     this.assertLeadTime(service.leadTimeMins, start);
 
-    const candidateReleaseIds = this.collectReleaseBookingIds(
-      input.replaceBookingId,
-      input.releaseBookingIds,
-    );
+    const candidateReleaseIds = this.collectReleaseBookingIds(input.replaceBookingId, input.releaseBookingIds);
     const preCheckExcludeIds = await this.findPreCheckReleasableBookingIds(
       input.businessId,
       candidateReleaseIds,
       input.contact,
+      business.country,
     );
 
     const slot: SlotParams = {
@@ -2256,9 +2386,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       end,
       bufferMins: service.bufferMins,
     };
-    await this.assertSlotFree(
-      preCheckExcludeIds.length > 0 ? { ...slot, excludeBookingIds: preCheckExcludeIds } : slot,
-    );
+    await this.assertSlotFree(preCheckExcludeIds.length > 0 ? { ...slot, excludeBookingIds: preCheckExcludeIds } : slot);
 
     await this.assertWithinSchedule({
       businessId: input.businessId,
@@ -2357,85 +2485,23 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // The early read above refused a taken slot before the contact and invoices
     // were touched; the claim settles the race with requests in flight. Losing
     // it leaves the invoices drawn up above for a booking that was not written.
-    // P228: when candidateReleaseIds are supplied, verify and cancel only the
-    // same contact's unpaid PENDING holds inside the claim transaction BEFORE
-    // assertSlotFree(slot, tx) so retrying the same slot never self-collides,
-    // a concurrently confirmed/paid booking is never cancelled or double-booked,
-    // and any slot conflict automatically rolls back the cancellation.
-    const releasedInvoiceIds: string[] = [];
     const booking = await this.claimSlot(
       slot,
       (tx) => tx.booking.create({ data: bookingData }),
       candidateReleaseIds.length > 0
-        ? async (tx) => {
-            releasedInvoiceIds.length = 0;
-            const candidates = await tx.booking.findMany({
-              where: {
-                id: { in: candidateReleaseIds },
-                businessId: input.businessId,
-                contactId: contact.id,
-                status: 'PENDING',
-                paymentStatus: 'UNPAID',
-                deletedAt: null,
-              },
-              select: {
-                id: true,
-                status: true,
-                paymentStatus: true,
-                deletedAt: true,
-                invoice: {
-                  select: {
-                    id: true,
-                    status: true,
-                    payments: {
-                      where: { status: { in: SETTLED_PAYMENT_STATUSES } },
-                      select: { id: true },
-                      take: 1,
-                    },
-                  },
-                },
-                depositInvoice: {
-                  select: {
-                    id: true,
-                    status: true,
-                    payments: {
-                      where: { status: { in: SETTLED_PAYMENT_STATUSES } },
-                      select: { id: true },
-                      take: 1,
-                    },
-                  },
-                },
-              },
-            });
-
-            for (const row of candidates) {
-              if (!this.isBookingUnpaidAndReleasable(row)) continue;
-              const cancelled = await tx.booking.updateMany({
-                where: {
-                  id: row.id,
-                  businessId: input.businessId,
-                  contactId: contact.id,
-                  status: 'PENDING',
-                  paymentStatus: 'UNPAID',
-                  deletedAt: null,
-                },
-                data: { status: 'CANCELLED' },
-              });
-              if (cancelled.count === 1) {
-                if (row.invoice?.status === 'DRAFT') releasedInvoiceIds.push(row.invoice.id);
-                if (row.depositInvoice?.status === 'DRAFT') releasedInvoiceIds.push(row.depositInvoice.id);
-              }
-            }
-          }
+        ? (tx) =>
+            this.releaseRebookHoldsInTx(tx, {
+              businessId: input.businessId,
+              contactId: contact.id,
+              candidateIds: candidateReleaseIds,
+              callerContact: input.contact,
+              businessCountry: business.country,
+            })
         : undefined,
     ).catch(async (err: unknown) => {
       await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
       throw err;
     });
-
-    if (releasedInvoiceIds.length > 0) {
-      await this.withdrawDraftInvoices(input.businessId, releasedInvoiceIds);
-    }
 
     const payload: BookingCreatedPayload = {
       booking,

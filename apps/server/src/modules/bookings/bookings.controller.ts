@@ -353,6 +353,11 @@ export class BookingsController {
     ) {
       throw new BadRequestException('replaceBookingId must be a string up to 200 characters');
     }
+    const replaceBookingId =
+      typeof rawReplaceBookingId === 'string' && rawReplaceBookingId.trim()
+        ? rawReplaceBookingId.trim()
+        : undefined;
+
     const rawReleaseBookingIds: unknown = body?.releaseBookingIds;
     let releaseBookingIds: string[] | undefined;
     if (rawReleaseBookingIds !== undefined && rawReleaseBookingIds !== null) {
@@ -366,8 +371,18 @@ export class BookingsController {
         );
       }
       releaseBookingIds = rawReleaseBookingIds
-        .map((id) => sanitizeString(id, 200))
-        .filter((id): id is string => !!id);
+        .map((id) => id.trim())
+        .filter((id): id is string => id.length > 0);
+    }
+
+    const combinedDistinct = new Set<string>([
+      ...(replaceBookingId ? [replaceBookingId] : []),
+      ...(releaseBookingIds ?? []),
+    ]);
+    if (combinedDistinct.size > MAX_PUBLIC_RELEASE_BOOKING_IDS) {
+      throw new BadRequestException(
+        `At most ${MAX_PUBLIC_RELEASE_BOOKING_IDS} prior booking IDs may be released per request`,
+      );
     }
 
     const limitCheck = await this.subscriptions.checkLimit(businessId, 'bookings');
@@ -407,7 +422,7 @@ export class BookingsController {
       referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
       orgUnitId: body.orgUnitId ? sanitizeString(body.orgUnitId, 200) : undefined,
       paymentMethod,
-      replaceBookingId: rawReplaceBookingId ? sanitizeString(rawReplaceBookingId, 200) : undefined,
+      replaceBookingId,
       releaseBookingIds,
     });
   }
