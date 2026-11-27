@@ -13,9 +13,7 @@ import {
   Plus,
   Minus,
   CheckCircle2,
-  Star,
   Shield,
-  Zap,
   ShoppingBag,
   MessageCircle,
   Truck,
@@ -35,12 +33,14 @@ import { CartDrawer } from "../../components/cart-drawer";
 import { Breadcrumbs } from "../../components/category-nav";
 import { ProductSchema, BreadcrumbListSchema } from "../../components/structured-data";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { useServedOverHttps } from "../../components/trust-bar";
 
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const slug = params.slug as string;
   const productId = params.productId as string;
+  const servedOverHttps = useServedOverHttps();
 
   const [business, setBusiness] = useState<Business | null>(null);
   const [item, setItem] = useState<CatalogItem | null>(null);
@@ -386,16 +386,7 @@ export default function ProductDetailPage() {
               );
             })()}
 
-            <div className="flex flex-wrap gap-3 py-1">
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-                Secure Checkout
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-                Instant Confirmation
-              </div>
-            </div>
+            {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Secure Checkout' and no 'Instant Confirmation'. */}
 
             {item.itemType !== "service" && (
               <div className="flex items-center gap-3">
@@ -508,14 +499,14 @@ export default function ProductDetailPage() {
         )}
 
         <div className="border-t border-gray-200 pt-8 pb-6 space-y-3">
-          <div className="flex items-center justify-center gap-6 flex-wrap">
-            <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
-              <Shield className="w-3 h-3" /> SSL Encrypted
+          {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Trusted Platform'; 'SSL Encrypted' only when served over https. */}
+          {servedOverHttps && (
+            <div className="flex items-center justify-center gap-6 flex-wrap">
+              <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
+                <Shield className="w-3 h-3" /> SSL Encrypted
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
-              <Star className="w-3 h-3" /> Trusted Platform
-            </div>
-          </div>
+          )}
           <p className="text-center text-[10px] text-gray-900/15">
             &copy; {new Date().getFullYear()} {business.name}. All rights reserved.
           </p>

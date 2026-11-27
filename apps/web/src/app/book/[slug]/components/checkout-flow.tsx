@@ -102,13 +102,13 @@ function paymentMethodsFor(currency: string, gateways: StorefrontGateways | null
 }
 
 /** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
-type StorefrontGateways = { wipay: boolean; paypal: boolean };
+export type StorefrontGateways = { wipay: boolean; paypal: boolean };
 
 /**
  * The storefront's gateway list for this currency, as the server answers it:
  * null until it does, or when it cannot (a failed read, or no list).
  */
-function useStorefrontGateways(slug: string, currency: string): StorefrontGateways | null {
+export function useStorefrontGateways(slug: string, currency: string): StorefrontGateways | null {
   const code = (currency ?? "").trim().toUpperCase();
   const key = `${slug}|${code}`;
   const [answer, setAnswer] = useState<{ key: string; gateways: StorefrontGateways | null } | null>(null);

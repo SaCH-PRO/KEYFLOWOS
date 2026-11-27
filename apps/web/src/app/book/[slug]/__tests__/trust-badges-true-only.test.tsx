@@ -168,7 +168,9 @@ describe("item details, order confirmation, product page, public booking form", 
         orderItems={[{ id: "p1", name: "Pepper sauce", price: 35, currency: "TTD", quantity: 1, itemType: "product", requiresBooking: false } as never]}
         orderTotal={35}
         orderCurrency="TTD"
-        {...({} as Record<string, never>)}
+        onContinueShopping={() => {}}
+        formatDate={(d) => d}
+        formatTime={(t) => t}
       />,
     );
     expect(text()).toContain("Pepper Co");

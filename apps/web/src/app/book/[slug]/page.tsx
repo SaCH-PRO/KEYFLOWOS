@@ -1119,6 +1119,8 @@ function PublicBookingPageInner() {
               completedOrdersCount={completedOrdersCount}
               configuredRails={storefrontConfig?.merchandising?.trustRails}
               showPaymentBadge={showPaymentBadge}
+              slug={slug}
+              currency={cartCurrency}
               businessHoursToday={todaysHoursLabel(business?.businessHours, business?.timezone)}
             />
             <div className="flex items-center gap-2 flex-shrink-0">
