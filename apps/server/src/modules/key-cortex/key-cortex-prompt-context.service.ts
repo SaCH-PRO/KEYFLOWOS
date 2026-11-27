@@ -5,9 +5,9 @@ import { LEVEL_RANK, memberModuleLevel, rankOf, type CanonicalModule } from '../
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
-import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
+import { GENOME_ROW_METADATA_KEY, MEMORY_CLASS_METADATA_KEY } from './unified-memory.types';
 import { DOCUMENT_EXTRACTION_CATEGORY } from '../ai/ai-memory.service';
-import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
+import type { MemoryClassFragmentMeta, MemoryFragment, MemorySourceType } from './unified-memory.types';
 import { financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import {
   CortexQuery,
@@ -16,6 +16,19 @@ import {
 } from './key-cortex.types';
 import { GatewayMessage } from '../ai/model-gateway.service';
 import { readerSearchOptions } from '../ai/semantic-memory-sight';
+import {
+  backstopTextStatesExpense,
+  backstopTextStatesMoney,
+  classifyAiMemoryForRead,
+  classifyEmbeddingForRead,
+  classifyTemporalMemoryForRead,
+  evaluateMemoryClassAccess,
+  getMemoryClassReadMode,
+  logMemoryClassShadowDiff,
+  type MemoryAccessDecision,
+  type MemoryClassShadowDiffEntry,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 
 /** How many memory fragments a cortex chat prompt carries. */
 const PROMPT_MEMORY_FRAGMENTS = 15;
@@ -744,6 +757,166 @@ export async function promptMemoryReader(
  * /cortex/chat and its stream) and of FlowOrchestratorService.buildPerceptionSection (POST
  * /ai/businesses/:id/flow/chat and its stream, the staff bridge).
  */
+function fragmentClassMetaOf(fragment: RecordFragment): MemoryClassFragmentMeta | undefined {
+  const raw = fragment.metadata?.[MEMORY_CLASS_METADATA_KEY];
+  return isPlainObject(raw) ? (raw as unknown as MemoryClassFragmentMeta) : undefined;
+}
+
+function classifyPromptMemoryFragment(fragment: RecordFragment): {
+  needsEvaluation: boolean;
+  requiresSightLookup: boolean;
+  evaluate: (ctx: MemoryReaderContext) => MemoryAccessDecision;
+} {
+  const classMeta = fragmentClassMetaOf(fragment);
+
+  if (fragment.sourceType === 'ai_memory') {
+    const category = typeof classMeta?.category === 'string'
+      ? classMeta.category
+      : typeof fragment.title === 'string'
+        ? fragment.title
+        : '';
+    const key = typeof classMeta?.key === 'string' ? classMeta.key : '';
+    const classified = classifyAiMemoryForRead({
+      category,
+      key,
+      value: fragment.content ?? null,
+      source: classMeta?.source ?? null,
+      dataClass: classMeta?.dataClass ?? null,
+      moduleScope: classMeta?.moduleScope ?? [],
+    });
+    const isDocExtraction = category === DOCUMENT_EXTRACTION_CATEGORY || isDocumentExtractionFragment(fragment);
+    const texts = [category, key, fragment.content];
+    const hasBackstop =
+      texts.some((t) => backstopTextStatesMoney(t)) ||
+      (!isDocExtraction && texts.some((t) => backstopTextStatesExpense(t)));
+    return {
+      needsEvaluation: true,
+      requiresSightLookup:
+        classified.dataClass !== 'GENERAL' || classified.moduleScope.length > 0 || hasBackstop,
+      evaluate: (ctx) =>
+        evaluateMemoryClassAccess(
+          {
+            dataClass: classified.dataClass,
+            moduleScope: classified.moduleScope,
+            hasOwnerColumn: false,
+            backstopTexts: texts,
+            skipExpenseBackstop: isDocExtraction,
+          },
+          ctx,
+        ),
+    };
+  }
+
+  if (fragment.sourceType === 'temporal_flow_memory') {
+    const classified = classifyTemporalMemoryForRead({
+      entityType: classMeta?.entityType ?? fragment.entityType ?? 'business',
+      entityId: classMeta?.entityId ?? null,
+      type: classMeta?.type ?? fragment.title ?? null,
+      sourceModule: classMeta?.sourceModule ?? null,
+      sourceEventIds: classMeta?.sourceEventIds ?? [],
+      metadata: fragment.metadata,
+      content: fragment.content ?? null,
+      dataClass: classMeta?.dataClass ?? null,
+      moduleScope: classMeta?.moduleScope ?? [],
+    });
+    const texts = [classMeta?.entityType ?? fragment.entityType, classMeta?.type ?? fragment.title, classMeta?.sourceModule, fragment.content];
+    const hasBackstop = texts.some((t) => backstopTextStatesMoney(t) || backstopTextStatesExpense(t));
+    return {
+      needsEvaluation: true,
+      requiresSightLookup:
+        classified.dataClass !== 'GENERAL' || classified.moduleScope.length > 0 || hasBackstop,
+      evaluate: (ctx) =>
+        evaluateMemoryClassAccess(
+          {
+            dataClass: classified.dataClass,
+            moduleScope: classified.moduleScope,
+            hasOwnerColumn: false,
+            backstopTexts: texts,
+            unclassifiedRequiresAllModules: true,
+          },
+          ctx,
+        ),
+    };
+  }
+
+  if (fragment.sourceType === 'ai_memory_embedding') {
+    const meta = isPlainObject(fragment.metadata) ? fragment.metadata : {};
+    const semanticSource = isPlainObject(meta.semanticSource)
+      ? (meta.semanticSource as { sourceType?: unknown })
+      : undefined;
+    const embSourceType =
+      typeof classMeta?.source === 'string'
+        ? classMeta.source
+        : typeof semanticSource?.sourceType === 'string'
+          ? semanticSource.sourceType
+          : 'memory';
+    const isMemoryCopy = embSourceType === 'memory';
+    const category = isMemoryCopy
+      ? typeof meta.category === 'string'
+        ? meta.category
+        : typeof meta.type === 'string'
+          ? meta.type
+          : ''
+      : '';
+    const isDocExtraction = isDocumentExtractionFragment(fragment);
+    const classified =
+      classMeta && classMeta.dataClass != null
+        ? classifyEmbeddingForRead({
+            sourceType: embSourceType,
+            content: fragment.content ?? null,
+            metadata: meta,
+            dataClass: classMeta.dataClass,
+            moduleScope: classMeta.moduleScope,
+          })
+        : isMemoryCopy && category
+          ? classifyAiMemoryForRead({
+              category,
+              key: typeof meta.key === 'string' ? meta.key : '',
+              value: fragment.content ?? null,
+            })
+          : isDocExtraction
+            ? { dataClass: 'REVENUE' as const, moduleScope: ['revenue' as CanonicalModule] }
+            : embSourceType === 'temporal_memory'
+              ? classifyEmbeddingForRead({
+                  sourceType: 'temporal_memory',
+                  content: fragment.content ?? null,
+                  metadata: meta,
+                })
+              : { dataClass: 'GENERAL' as const, moduleScope: [] as CanonicalModule[] };
+    const texts = [category, typeof meta.key === 'string' ? meta.key : '', fragment.content];
+    const hasBackstop =
+      texts.some((t) => backstopTextStatesMoney(t)) ||
+      (!isDocExtraction && texts.some((t) => backstopTextStatesExpense(t)));
+    return {
+      needsEvaluation: true,
+      requiresSightLookup:
+        classified.dataClass !== 'GENERAL' || classified.moduleScope.length > 0 || hasBackstop,
+      evaluate: (ctx) =>
+        evaluateMemoryClassAccess(
+          {
+            dataClass: classified.dataClass,
+            moduleScope: classified.moduleScope,
+            hasOwnerColumn: false,
+            backstopTexts: texts,
+            skipExpenseBackstop: isDocExtraction,
+          },
+          ctx,
+        ),
+    };
+  }
+
+  return {
+    needsEvaluation: false,
+    requiresSightLookup: false,
+    evaluate: () => ({
+      allowed: true,
+      reason: 'non_class_store',
+      effectiveDataClass: 'GENERAL',
+      effectiveModuleScope: [],
+    }),
+  };
+}
+
 export async function readersOwnPromptMemory<
   F extends Pick<MemoryFragment, 'id' | 'sourceType' | 'entityType' | 'title' | 'metadata'> & Partial<Pick<MemoryFragment, 'content'>>,
 >(
@@ -756,12 +929,17 @@ export async function readersOwnPromptMemory<
   logTag = 'promptMemory',
   moduleSight?: ModuleSight,
 ): Promise<F[]> {
+  const mode = getMemoryClassReadMode();
   const withoutKeyRecords = fragments.filter((fragment) => !isPersonalKeyRecord(fragment));
   // FU-PROPOSAL-REVENUE-SIGHT (D-238): the proposal records of a financial (or unclassifiable) proposal, classified first,
   // so a turn whose proposals are all non-financial still reads no membership.
   const financialProposals = await financialProposalRecordIds(prisma, businessId, withoutKeyRecords, logger, logTag);
+  const classifications = mode === 'OFF' ? undefined : withoutKeyRecords.map((fragment) => classifyPromptMemoryFragment(fragment));
   // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event names revenue too (recordModulesOf).
-  const namesAModule = financialProposals.size > 0 || withoutKeyRecords.some((fragment) => recordModulesOf(fragment).length > 0);
+  // MEM-CLASS-READ (P137): also check whether any classified memory row requires a module sight lookup.
+  const namesAModule =
+    financialProposals.size > 0 ||
+    withoutKeyRecords.some((fragment, i) => recordModulesOf(fragment).length > 0 || Boolean(classifications?.[i]?.requiresSightLookup));
   // Review SEC-W1FPMS-2 / COR-W1FPMS-2: a staff position's turn hands the sight its position resolved (moduleSight);
   // every other turn's is its reader's membership (readersModuleSight).
   const [sight, own] = await Promise.all([
@@ -775,16 +953,72 @@ export async function readersOwnPromptMemory<
   // D-238: a reader without revenue read is handed a proposal record only when its proposal is non-financial (a memberless
   // turn then sees its action, status and risk level only, D-226).
   const readsRevenue = sight('revenue');
-  // MEM-DOC-EXTRACTION-SIGHT (D-234): a turn with no member reader sees no document extraction, whatever its sight.
-  return withoutKeyRecords
-    .filter((fragment) => reader !== null || !isDocumentExtractionFragment(fragment))
-    .filter((fragment) => readsRevenue || !financialProposals.has(fragment.id))
-    .filter((fragment) => withinModuleSight(fragment, sight))
-    .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
-    .slice(0, limit)
-    // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a turn with no member reader sees a proposal as its action,
-    // status and risk level only (memberlessProposalView); a member sees it whole (business-wide).
-    .map((fragment) => (reader === null && isProposalRecord(fragment) ? memberlessProposalView(fragment) : fragment));
+
+  const legacyAllows = (fragment: F): boolean => {
+    // MEM-DOC-EXTRACTION-SIGHT (D-234): a turn with no member reader sees no document extraction, whatever its sight.
+    if (reader === null && isDocumentExtractionFragment(fragment)) return false;
+    if (!readsRevenue && financialProposals.has(fragment.id)) return false;
+    if (!withinModuleSight(fragment, sight)) return false;
+    if (fragment.sourceType === 'cognition_memory' && !own.has(fragment.id)) return false;
+    return true;
+  };
+
+  const renderResult = (kept: F[]): F[] =>
+    kept
+      .slice(0, limit)
+      // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a turn with no member reader sees a proposal as its action,
+      // status and risk level only (memberlessProposalView); a member sees it whole (business-wide).
+      .map((fragment) => (reader === null && isProposalRecord(fragment) ? memberlessProposalView(fragment) : fragment));
+
+  if (mode === 'OFF') {
+    return renderResult(withoutKeyRecords.filter(legacyAllows));
+  }
+
+  const readerCtx: MemoryReaderContext = { reader, sight };
+
+  if (mode === 'SHADOW') {
+    const legacyOut: F[] = [];
+    let projectedCount = 0;
+    const diffs: MemoryClassShadowDiffEntry[] = [];
+    withoutKeyRecords.forEach((fragment, i) => {
+      const leg = legacyAllows(fragment);
+      const classCheck = classifications![i];
+      const decision = classCheck.needsEvaluation
+        ? classCheck.evaluate(readerCtx)
+        : { allowed: true, reason: 'allowed', effectiveDataClass: 'GENERAL' as const, effectiveModuleScope: [] };
+      const proj = leg && decision.allowed;
+      if (leg) legacyOut.push(fragment);
+      if (proj) projectedCount += 1;
+      if (leg !== proj) {
+        diffs.push({
+          id: fragment.id,
+          store: fragment.sourceType,
+          dataClass: decision.effectiveDataClass,
+          moduleScope: decision.effectiveModuleScope,
+          legacyAllowed: leg,
+          projectedAllowed: proj,
+          reason: decision.reason,
+        });
+      }
+    });
+    logMemoryClassShadowDiff({ warn: (m) => logger.warn(m), log: (m) => logger.warn(m) }, {
+      path: `readersOwnPromptMemory:${logTag}`,
+      businessId,
+      readerPresent: reader !== null,
+      totalCandidates: withoutKeyRecords.length,
+      legacyCount: legacyOut.length,
+      projectedCount,
+      diffs,
+    });
+    return renderResult(legacyOut);
+  }
+
+  const projected = withoutKeyRecords.filter((fragment, i) => {
+    if (!legacyAllows(fragment)) return false;
+    const classCheck = classifications![i];
+    return !classCheck.needsEvaluation || classCheck.evaluate(readerCtx).allowed;
+  });
+  return renderResult(projected);
 }
 
 /**
@@ -959,11 +1193,13 @@ export class KeyCortexPromptContextService {
         // MEM-DOC-EXTRACTION-SIGHT (D-234): the reader's module sight, read first, so the read takes document
         // extractions only for a reader with revenue read (no reader, none); readersOwnPromptMemory keeps that sight.
         const sight = await readersModuleSight(this.prisma, businessId, reader, this.logger, 'buildMemoryContext');
+        const readerContext: MemoryReaderContext = { reader, sight };
         const fragments = await this.unifiedMemory.retrieveContext(businessId, {
           query: currentQuery,
           limit: PROMPT_MEMORY_FRAGMENTS + PROMPT_MEMORY_HEADROOM,
           ...(reader ? { userId: reader } : { includeEpisodic: false }),
           documentExtractions: readsDocumentExtractions(sight, reader),
+          readerContext,
           // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the semantic hits of the turn's query pass MEM-SEMANTIC-SIGHT's reader
           // projection before the read's limit (no database client: no sight, so no semantic hit).
           ...(this.prisma ? { semanticSight: readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger) } : {}),

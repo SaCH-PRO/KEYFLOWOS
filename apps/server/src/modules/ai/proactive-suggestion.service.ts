@@ -6,6 +6,12 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
 import { classifyAiMemoryWrite, modulesFromIdentifiers } from './memory-classification';
 import { SemanticMemoryService } from './semantic-memory.service';
+import {
+  buildDbMemoryClassPreFilter,
+  getMemoryClassReadMode,
+  projectAiMemoryRowsForReader,
+  type MemoryReaderContext,
+} from '../key-cortex/memory-class-read-projection';
 
 export interface ChatSuggestion {
   id: string;
@@ -115,18 +121,33 @@ export class ProactiveSuggestionService {
    * Fetch pending suggestions for the chat interface.
    * Returns suggestions that haven't been dismissed or acted on.
    */
-  async getPendingSuggestions(businessId: string): Promise<ChatSuggestion[]> {
+  async getPendingSuggestions(
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<ChatSuggestion[]> {
+    const preFilter =
+      readerContext && getMemoryClassReadMode() === 'ACTIVE'
+        ? buildDbMemoryClassPreFilter(readerContext)
+        : undefined;
     const memories = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
         category: 'suggestion',
         expiresAt: { gte: new Date() },
+        ...(preFilter ? { AND: [preFilter] } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      take: readerContext ? 50 : 10,
     });
+    const visible = readerContext
+      ? projectAiMemoryRowsForReader(memories, readerContext, {
+          businessId,
+          path: 'ProactiveSuggestionService.getPendingSuggestions',
+          logger: this.logger,
+        }).slice(0, 10)
+      : memories;
 
-    return memories
+    return visible
       .map(m => {
         try {
           return JSON.parse(m.value) as ChatSuggestion;

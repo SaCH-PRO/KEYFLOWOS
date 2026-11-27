@@ -16,6 +16,13 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { InvoiceStatus } from '@prisma/client';
 import { subDays, subWeeks, subMonths, startOfMonth, startOfWeek, startOfDay, endOfDay, format } from 'date-fns';
+import {
+  buildDbMemoryClassPreFilter,
+  getMemoryClassReadMode,
+  projectTemporalMemoryRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
+import type { TemporalEventProvenance } from '../ai/memory-classification';
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -932,7 +939,10 @@ export class KeyCortexContextV2Service {
 
   /* ─────── Temporal/Memory Context ─────── */
 
-  async getTemporalContext(businessId: string): Promise<TemporalContext> {
+  async getTemporalContext(
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<TemporalContext> {
     try {
       // TemporalFlowMemoryService has no getRecentMemories or getDetectedPatterns
       // — those names belong to TemporalAdapterService and to nothing at all
@@ -942,6 +952,101 @@ export class KeyCortexContextV2Service {
       // on `type`, which is what a detected pattern actually is in this schema:
       // a recurring kind of memory, with a count, an average confidence and a
       // first/last sighting.
+      if (readerContext && getMemoryClassReadMode() === 'ACTIVE') {
+        const preFilter = buildDbMemoryClassPreFilter(readerContext);
+        const rows = await this.prisma.client.temporalFlowMemory.findMany({
+          where: { businessId, AND: [preFilter] },
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+          select: {
+            id: true,
+            entityType: true,
+            entityId: true,
+            type: true,
+            content: true,
+            sourceModule: true,
+            sourceEventIds: true,
+            metadata: true,
+            confidence: true,
+            dataClass: true,
+            moduleScope: true,
+            createdAt: true,
+          },
+        });
+        const legacyEventIds = new Set<string>();
+        for (const r of rows) {
+          if (!r.dataClass && r.entityType !== 'business' && r.sourceModule !== 'key_cortex') {
+            for (const id of r.sourceEventIds ?? []) legacyEventIds.add(id);
+          }
+        }
+        const eventMap = new Map<string, TemporalEventProvenance>();
+        if (legacyEventIds.size > 0 && this.prisma.client.temporalFlowEvent?.findMany) {
+          const fetched = await this.prisma.client.temporalFlowEvent.findMany({
+            where: { businessId, id: { in: [...legacyEventIds] } },
+            select: {
+              id: true,
+              source: true,
+              type: true,
+              module: true,
+              entityType: true,
+              title: true,
+              summary: true,
+              description: true,
+            },
+          });
+          for (const ev of fetched) eventMap.set(ev.id, ev);
+        }
+        const visible = projectTemporalMemoryRowsForReader(rows, readerContext, {
+          businessId,
+          path: 'KeyCortexContextV2Service.getTemporalContext',
+          logger: this.logger,
+          events: eventMap,
+        });
+        const grouped = new Map<
+          string,
+          { count: number; confidenceSum: number; firstSeen: Date; lastSeen: Date }
+        >();
+        for (const m of visible) {
+          const key = m.type ?? '';
+          const cur = grouped.get(key);
+          const conf = m.confidence ?? 0;
+          if (!cur) {
+            grouped.set(key, {
+              count: 1,
+              confidenceSum: conf,
+              firstSeen: m.createdAt,
+              lastSeen: m.createdAt,
+            });
+          } else {
+            cur.count += 1;
+            cur.confidenceSum += conf;
+            if (m.createdAt < cur.firstSeen) cur.firstSeen = m.createdAt;
+            if (m.createdAt > cur.lastSeen) cur.lastSeen = m.createdAt;
+          }
+        }
+        const patternsDetected = [...grouped.entries()]
+          .sort((a, b) => b[1].count - a[1].count)
+          .slice(0, 10)
+          .map(([pattern, stats]) => ({
+            pattern,
+            frequency: stats.count,
+            confidence: stats.count > 0 ? stats.confidenceSum / stats.count : 0,
+            firstSeen: stats.firstSeen,
+            lastSeen: stats.lastSeen,
+          }));
+        return {
+          recentMemories: visible.slice(0, 20).map((m) => ({
+            id: m.id,
+            content: m.content ?? '',
+            type: m.type ?? 'memory',
+            importance: m.confidence ?? 0,
+            createdAt: m.createdAt,
+          })),
+          patternsDetected,
+          contextWindow: 20,
+        };
+      }
+
       const [memories, patterns] = await Promise.all([
         this.prisma.client.temporalFlowMemory.findMany({
           where: { businessId },

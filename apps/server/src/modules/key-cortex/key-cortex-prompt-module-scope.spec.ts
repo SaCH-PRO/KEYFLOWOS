@@ -261,6 +261,8 @@ describe('W1F-PERCEPTION-MODULE-SCOPE: readersOwnPromptMemory projects the busin
   it('the stores that are not events (ai_memory, genome, temporal flow, episodic rows) are not projected by module', async () => {
     // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome record that carries no money is not projected; a money one
     // (FINANCE_GENOME, CROSS_DOMAIN, the customer-sales snapshot) needs revenue read (the describe block at the end).
+    // MEM-CLASS-READ (P137, D-257): likewise a GENERAL non-money temporal summary stays visible while a REVENUE or
+    // invoice-tainted temporal summary needs revenue read (pinned in memory-class-read.spec.ts).
     const others: Fragment[] = [
       { id: 'mem', sourceType: 'ai_memory', title: 'fact' },
       {
@@ -269,7 +271,12 @@ describe('W1F-PERCEPTION-MODULE-SCOPE: readersOwnPromptMemory projects the busin
         title: 'Operations snapshot computed',
         metadata: { genomeRow: { sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' } },
       },
-      { id: 'temporal', sourceType: 'temporal_flow_memory', title: 'invoice' },
+      {
+        id: 'temporal',
+        sourceType: 'temporal_flow_memory',
+        title: 'summary',
+        metadata: { __memoryClass: { store: 'temporal_flow_memory', dataClass: 'GENERAL', moduleScope: [] } },
+      },
       { id: 'exec', sourceType: 'ai_execution_log', title: 'invoice.create' },
       { id: 'action', sourceType: 'cortex_action_log', title: 'payment.record' },
     ];

@@ -5,6 +5,10 @@ import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { keyCronsDisabled } from '../../core/config/env';
 import type { CanonicalModule } from '../../core/authority/module-vocabulary';
 import { EVENT_MODULES, type ModuleSight } from './key-cortex-prompt-context.service';
+import {
+  evaluateMemoryClassAccess,
+  getMemoryClassReadMode,
+} from './memory-class-read-projection';
 
 /**
  * The amygdala — what, out of everything KEY noticed, actually matters.
@@ -288,12 +292,25 @@ export class KeyCortexSalienceService {
     if (!entry) return null;
     if (now.getTime() - entry.appraisedAt.getTime() > CONCERN_TTL_MS) return null;
 
-    // MEM-SALIENCE-SIGHT (D-234, D-100): a reader is told only the signals whose modules it may read (signalModulesOf),
-    // and the top threats and momentum are chosen AFTER that filter, so a withheld signal does not change which others
-    // appear. `sight` undefined: the unprojected feed (every signal), for a caller that renders to no reader; the chat's
-    // standing context always passes its viewer's sight (CognitiveTriageService.triage, which fails closed).
+    // MEM-SALIENCE-SIGHT / MEM-CLASS-READ (D-234, D-100, D-257): a reader is told only the signals whose
+    // data class, module scope (signalModulesOf), and fail-closed text backstop their sight admits,
+    // filtered BEFORE top-3 threats / top-1 momentum are chosen so a withheld signal changes nothing shown.
     const visible = sight
-      ? entry.concerns.filter((c) => signalModulesOf(c.signal).every((module) => sight(module)))
+      ? entry.concerns.filter((c) => {
+          const modules = signalModulesOf(c.signal);
+          if (getMemoryClassReadMode() !== 'ACTIVE') {
+            return modules.every((module) => sight(module));
+          }
+          return evaluateMemoryClassAccess(
+            {
+              dataClass: modules.includes('revenue') ? 'REVENUE' : 'GENERAL',
+              moduleScope: modules,
+              hasOwnerColumn: false,
+              backstopTexts: [c.summary],
+            },
+            { reader: null, sight, sightOnly: true },
+          ).allowed;
+        })
       : entry.concerns;
     const threats = visible.filter((c) => c.valence === 'threat').slice(0, 3);
     const momentum = visible.filter((c) => c.valence === 'opportunity').slice(0, 1);

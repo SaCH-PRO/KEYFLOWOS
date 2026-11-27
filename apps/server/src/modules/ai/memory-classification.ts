@@ -306,6 +306,8 @@ const KNOWN_GENERAL_AI_MEMORY_CATEGORIES = new Set<string>([
   'preferences',
   'execution_patterns',
   'role_activity',
+  'fact',
+  'facts',
   'business_fact',
   'past_decision',
   'failed_attempt',
@@ -612,9 +614,12 @@ export function classifyEmbeddingWrite(
     input.explicitDataClass,
   ];
   const meta = input.metadata ?? {};
+  const isDocExtractionCopy =
+    input.sourceType === 'memory' &&
+    (meta.category === 'document_extraction' || meta.type === 'document_extraction');
 
   const moneyTaint = textStatesMoney(input.content);
-  const expenseTaint = textStatesExpense(input.content);
+  const expenseTaint = !isDocExtractionCopy && textStatesExpense(input.content);
   if (moneyTaint) {
     scopes.add('revenue');
     classes.push('REVENUE');

@@ -2165,6 +2165,7 @@ export class KeyCortexQueryPipelineService {
       limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
       ...(reader ? { userId: reader } : { includeEpisodic: false }),
       documentExtractions: readsDocumentExtractions(sight, reader),
+      readerContext: { reader, sight },
       // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the semantic hits of the turn's text pass MEM-SEMANTIC-SIGHT's reader
       // projection before the read's limit.
       semanticSight: readerSearchOptions(this.prisma, query.businessId, { reader, sight }, this.logger),
