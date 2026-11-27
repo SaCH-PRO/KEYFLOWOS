@@ -30,11 +30,15 @@ const ID = {
   bizA: `${P}biz_a`,
   bizB: `${P}biz_b`,
   orderUnpaidOpenA: `${P}ord_unpaid_open`,
+  orderPendingOpenA: `${P}ord_pending_open`,
   orderPaidOpenA: `${P}ord_paid_open`,
   orderShippedA: `${P}ord_shipped`,
+  orderMixedCaseClosedA: `${P}ord_mixed_closed`,
   orderCancelledA: `${P}ord_cancelled`,
   orderRefundedPayA: `${P}ord_ref_pay`,
   orderFailedPayA: `${P}ord_fail_pay`,
+  orderVoidPayA: `${P}ord_void_pay`,
+  orderCancelledPayA: `${P}ord_cancel_pay`,
   orderUnpaidOpenB: `${P}ord_unpaid_b`,
 };
 
@@ -128,7 +132,7 @@ beforeAll(async () => {
   app.use((req: any, _res: any, next: () => void) => {
     const uid = req.headers[HEADER];
     if (typeof uid === 'string' && uid.trim().length > 0) {
-      req.user = { id: uid.trim(), role: 'USER', email: `${uid.trim()}@v92i.test.local` };
+      req.user = { id: uid.trim(), role: 'USER', email: `${P}${uid.trim()}@test.local` };
     }
     next();
   });
@@ -140,10 +144,10 @@ beforeAll(async () => {
 
   await db.user.createMany({
     data: [
-      { id: ID.ownerA, email: `${ID.ownerA}@v92i.test.local`, name: 'Owner A' },
-      { id: ID.staffStoreOnlyA, email: `${ID.staffStoreOnlyA}@v92i.test.local`, name: 'Store Staff A' },
-      { id: ID.staffNoStoreA, email: `${ID.staffNoStoreA}@v92i.test.local`, name: 'Bookings Staff A' },
-      { id: ID.ownerB, email: `${ID.ownerB}@v92i.test.local`, name: 'Owner B' },
+      { id: ID.ownerA, email: `${P}owner_a@test.local`, name: 'Owner A' },
+      { id: ID.staffStoreOnlyA, email: `${P}staff_store_a@test.local`, name: 'Store Staff A' },
+      { id: ID.staffNoStoreA, email: `${P}staff_nostore_a@test.local`, name: 'Bookings Staff A' },
+      { id: ID.ownerB, email: `${P}owner_b@test.local`, name: 'Owner B' },
     ],
   });
 
@@ -187,6 +191,17 @@ beforeAll(async () => {
         currency: 'TTD',
       },
       {
+        id: ID.orderPendingOpenA,
+        businessId: ID.bizA,
+        orderNumber: `${P}ORD-PENDING-1B`,
+        status: 'PENDING',
+        paymentStatus: 'PENDING',
+        customerName: 'Tasha Pending',
+        subtotal: 180,
+        total: 180,
+        currency: 'TTD',
+      },
+      {
         id: ID.orderPaidOpenA,
         businessId: ID.bizA,
         orderNumber: `${P}ORD-PAID-2`,
@@ -206,6 +221,17 @@ beforeAll(async () => {
         customerName: 'Shipped Customer',
         subtotal: 90,
         total: 90,
+        currency: 'TTD',
+      },
+      {
+        id: ID.orderMixedCaseClosedA,
+        businessId: ID.bizA,
+        orderNumber: `${P}ORD-MIXED-3B`,
+        status: 'Shipped',
+        paymentStatus: 'Paid',
+        customerName: 'Mixed Case Shipped',
+        subtotal: 95,
+        total: 95,
         currency: 'TTD',
       },
       {
@@ -242,6 +268,28 @@ beforeAll(async () => {
         currency: 'TTD',
       },
       {
+        id: ID.orderVoidPayA,
+        businessId: ID.bizA,
+        orderNumber: `${P}ORD-VOID-7`,
+        status: 'placed',
+        paymentStatus: 'Void',
+        customerName: 'Void Payment Customer',
+        subtotal: 50,
+        total: 50,
+        currency: 'TTD',
+      },
+      {
+        id: ID.orderCancelledPayA,
+        businessId: ID.bizA,
+        orderNumber: `${P}ORD-PAYCANCEL-8`,
+        status: 'placed',
+        paymentStatus: 'CANCELLED',
+        customerName: 'Cancelled Payment Customer',
+        subtotal: 40,
+        total: 40,
+        currency: 'TTD',
+      },
+      {
         id: ID.orderUnpaidOpenB,
         businessId: ID.bizB,
         orderNumber: `${P}ORD-FOREIGN-B`,
@@ -262,7 +310,7 @@ afterAll(async () => {
 });
 
 describe('P205 FU-TODAY-ORDERS-PREMISE (D-298, Journey I3)', () => {
-  it('[TOP-01] RED-BEFORE: Today lists open unpaid orders alongside open paid orders, and excludes closed/cancelled/refunded/failed orders', async () => {
+  it('[TOP-01] RED-BEFORE: Today lists open unpaid & pending orders alongside open paid orders, and excludes closed/mixed-case/cancelled/refunded/failed/void orders', async () => {
     const res = await request(app.getHttpServer())
       .get(`/business-command-center/businesses/${ID.bizA}/today`)
       .set(HEADER, ID.ownerA)
@@ -270,13 +318,17 @@ describe('P205 FU-TODAY-ORDERS-PREMISE (D-298, Journey I3)', () => {
 
     const orderIds = (res.body.today.orders as Array<{ id: string }>).map((o) => o.id);
     expect(orderIds).toContain(ID.orderUnpaidOpenA);
+    expect(orderIds).toContain(ID.orderPendingOpenA);
     expect(orderIds).toContain(ID.orderPaidOpenA);
     expect(orderIds).not.toContain(ID.orderShippedA);
+    expect(orderIds).not.toContain(ID.orderMixedCaseClosedA);
     expect(orderIds).not.toContain(ID.orderCancelledA);
     expect(orderIds).not.toContain(ID.orderRefundedPayA);
     expect(orderIds).not.toContain(ID.orderFailedPayA);
+    expect(orderIds).not.toContain(ID.orderVoidPayA);
+    expect(orderIds).not.toContain(ID.orderCancelledPayA);
     expect(orderIds).not.toContain(ID.orderUnpaidOpenB);
-    expect(res.body.today.counts.orders).toBe(2);
+    expect(res.body.today.counts.orders).toBe(3);
 
     const unpaid = res.body.today.orders.find((o: any) => o.id === ID.orderUnpaidOpenA);
     expect(unpaid).toMatchObject({
@@ -286,9 +338,10 @@ describe('P205 FU-TODAY-ORDERS-PREMISE (D-298, Journey I3)', () => {
       currency: 'TTD',
       customerName: 'Simone Unpaid',
     });
+    expect(unpaid).not.toHaveProperty('paymentStatus');
   });
 
-  it('[TOP-02] RED-BEFORE (D-57/D-100/D-234): storefront-only STAFF sees open unpaid & paid orders with total: null (no revenue leak)', async () => {
+  it('[TOP-02] RED-BEFORE (D-57/D-100/D-234): storefront-only STAFF sees open unpaid & paid orders with total: null and no paymentStatus leak', async () => {
     const res = await request(app.getHttpServer())
       .get(`/business-command-center/businesses/${ID.bizA}/today`)
       .set(HEADER, ID.staffStoreOnlyA)
@@ -300,6 +353,8 @@ describe('P205 FU-TODAY-ORDERS-PREMISE (D-298, Journey I3)', () => {
     expect(paid).toBeDefined();
     expect(unpaid.total).toBeNull();
     expect(paid.total).toBeNull();
+    expect(unpaid).not.toHaveProperty('paymentStatus');
+    expect(paid).not.toHaveProperty('paymentStatus');
     expect(res.body.pulse).toBeNull();
     expect(res.body.pulseStatus).toBe('RESTRICTED');
   });

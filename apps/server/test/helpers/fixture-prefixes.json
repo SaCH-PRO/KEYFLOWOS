@@ -1679,7 +1679,7 @@
     {
       "prefix": "v92i_",
       "owner": "apps/server/test/today-orders-premise.integration.test.ts",
-      "packet": "P205 (FU-TODAY-ORDERS-PREMISE)"
+      "packet": "V1-92 (FU-TODAY-ORDERS-PREMISE, P205)"
     }
   ],
   "pendingRenames": [],

@@ -95,19 +95,6 @@ const APPROVAL_TYPE_SCOPE: Readonly<Record<string, 'revenueRead' | 'expensesRead
     general: 'operationsRead',
   };
 
-const CLOSED_ORDER_STATUSES = [
-  'shipped',
-  'delivered',
-  'completed',
-  'cancelled',
-  'refunded',
-  'SHIPPED',
-  'DELIVERED',
-  'COMPLETED',
-  'CANCELLED',
-  'REFUNDED',
-];
-
 const CLOSED_ORDER_STATUS_LOWER = new Set(['shipped', 'delivered', 'completed', 'cancelled', 'refunded']);
 
 /**
@@ -116,17 +103,6 @@ const CLOSED_ORDER_STATUS_LOWER = new Set(['shipped', 'delivered', 'completed', 
  * orders stay visible to fulfil; refunded, failed, cancelled, and voided
  * payment states are excluded.
  */
-const CLOSED_ORDER_PAYMENT_STATUSES = [
-  'refunded',
-  'failed',
-  'cancelled',
-  'void',
-  'REFUNDED',
-  'FAILED',
-  'CANCELLED',
-  'VOID',
-];
-
 const CLOSED_ORDER_PAYMENT_STATUS_LOWER = new Set(['refunded', 'failed', 'cancelled', 'void']);
 
 const NEEDS_YOU_PRIORITY: Record<TodayNeedsYouKind, number> = {
@@ -984,8 +960,14 @@ export class TodayService {
     const rows = await this.prisma.client.marketplaceOrder.findMany({
       where: {
         businessId,
-        paymentStatus: { notIn: CLOSED_ORDER_PAYMENT_STATUSES },
-        status: { notIn: CLOSED_ORDER_STATUSES },
+        NOT: [
+          ...[...CLOSED_ORDER_STATUS_LOWER].map((s) => ({
+            status: { equals: s, mode: 'insensitive' as const },
+          })),
+          ...[...CLOSED_ORDER_PAYMENT_STATUS_LOWER].map((s) => ({
+            paymentStatus: { equals: s, mode: 'insensitive' as const },
+          })),
+        ],
       },
       select: {
         id: true,
