@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { skipTenantIsolation } from '@keyflow/db';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isLostTransactionConflict } from '../../core/prisma/transaction-conflict';
 import {
   BUSINESS_SETTING_INVALID,
   advancedSettingsChanges,
@@ -2215,8 +2216,7 @@ export class IdentityService {
    * shapes are matched rather than trusting one.
    */
   private static isWriteConflict(err: unknown): boolean {
-    const code = (err as { code?: unknown })?.code;
-    return code === 'P2034' || code === '40001' || code === '40P01';
+    return isLostTransactionConflict(err);
   }
 
   /**
