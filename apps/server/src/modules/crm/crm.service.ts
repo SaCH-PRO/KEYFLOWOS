@@ -547,23 +547,25 @@ export class CrmService {
     const sortBy = input.sortBy;
     const needsPostSort = sortBy === 'revenue';
 
-    let orderBy: any;
-    if (!sortBy || needsPostSort) {
-      orderBy = { createdAt: 'desc' };
-    } else if (sortBy === 'score') {
-      orderBy = { leadScore: input.sortOrder ?? 'desc' };
-    } else if (sortBy === 'name') {
-      const dir = input.sortOrder ?? 'asc';
-      orderBy = [{ firstName: dir }, { lastName: dir }];
-    } else if (sortBy === 'newest') {
-      orderBy = { createdAt: input.sortOrder ?? 'desc' };
-    } else if (sortBy === 'oldest') {
-      orderBy = { createdAt: input.sortOrder ?? 'asc' };
-    } else if (sortBy === 'lastInteraction') {
-      orderBy = { updatedAt: input.sortOrder ?? 'desc' };
-    } else {
-      orderBy = { createdAt: 'desc' };
-    }
+    const sortDir = input.sortOrder;
+    const orderBy =
+      !sortBy || needsPostSort
+        ? [{ createdAt: 'desc' as const }, { id: 'desc' as const }]
+        : sortBy === 'score'
+          ? [{ leadScore: sortDir ?? ('desc' as const) }, { id: sortDir ?? ('desc' as const) }]
+          : sortBy === 'name'
+            ? [
+                { firstName: sortDir ?? ('asc' as const) },
+                { lastName: sortDir ?? ('asc' as const) },
+                { id: sortDir ?? ('asc' as const) },
+              ]
+            : sortBy === 'newest'
+              ? [{ createdAt: sortDir ?? ('desc' as const) }, { id: sortDir ?? ('desc' as const) }]
+              : sortBy === 'oldest'
+                ? [{ createdAt: sortDir ?? ('asc' as const) }, { id: sortDir ?? ('asc' as const) }]
+                : sortBy === 'lastInteraction'
+                  ? [{ updatedAt: sortDir ?? ('desc' as const) }, { id: sortDir ?? ('desc' as const) }]
+                  : [{ createdAt: 'desc' as const }, { id: 'desc' as const }];
 
     if (needsPostSort) {
       const skip = input.skip ?? 0;
@@ -584,13 +586,21 @@ export class CrmService {
       return { contacts: sliced, nextCursor: null, hasMore: skip + take < withStats.length };
     }
 
-    if (input.cursor) {
+    const supportsCursor =
+      !sortBy || sortBy === 'newest' || sortBy === 'oldest' || sortBy === 'lastInteraction';
+
+    if (supportsCursor && input.cursor) {
       const cursorContact = await this.prisma.client.contact.findUnique({
         where: { id: input.cursor },
         select: { createdAt: true, updatedAt: true, id: true },
       });
       if (cursorContact) {
-        const isDescending = !sortBy || sortBy === 'newest' || sortBy === 'lastInteraction';
+        const isDescending =
+          sortBy === 'oldest'
+            ? sortDir === 'desc'
+            : sortBy === 'newest' || sortBy === 'lastInteraction'
+              ? sortDir !== 'asc'
+              : true;
         const cursorOp = isDescending ? 'lt' : 'gt';
         const cursorField = sortBy === 'lastInteraction' ? 'updatedAt' : 'createdAt';
         const cursorValue = cursorField === 'updatedAt' ? cursorContact.updatedAt : cursorContact.createdAt;
@@ -604,7 +614,7 @@ export class CrmService {
       }
     }
 
-    const skip = input.cursor ? 0 : (input.skip ?? 0);
+    const skip = supportsCursor && input.cursor ? 0 : (input.skip ?? 0);
 
     const contacts = await this.prisma.client.contact.findMany({
       where,
@@ -615,7 +625,7 @@ export class CrmService {
 
     const hasMore = contacts.length > take;
     const sliced = hasMore ? contacts.slice(0, take) : contacts;
-    const nextCursor = hasMore && sliced.length > 0 ? sliced[sliced.length - 1].id : null;
+    const nextCursor = supportsCursor && hasMore && sliced.length > 0 ? sliced[sliced.length - 1].id : null;
 
     if (!input.includeStats || sliced.length === 0) {
       return { contacts: sliced, nextCursor, hasMore };

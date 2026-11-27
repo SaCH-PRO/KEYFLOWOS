@@ -91,7 +91,7 @@ export class OpportunityService {
     const [data, total] = await Promise.all([
       this.prisma.client.opportunity.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }],
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           poster: { select: businessSelect },
           _count: { select: { applications: true } },
