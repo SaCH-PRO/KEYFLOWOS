@@ -9,6 +9,7 @@ import { FontBrandingPanel } from "./font-branding-panel";
 import { SectionLayoutManager } from "./section-layout-manager";
 import { AiHeroCopyPanel } from "./ai-hero-copy-panel";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
+import { liveProducts, bookableServices } from "../storefront-counts";
 
 type Props = {
   businessData: {
@@ -22,6 +23,8 @@ type Props = {
   } | null;
   services: Service[];
   commerceProducts: Product[];
+  /** P231 r6: the products live on the store, so the AI Hero Copy panel counts what the storefront shows. */
+  liveProductIds?: ReadonlySet<string>;
   storefrontConfig: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
@@ -33,6 +36,7 @@ export function DesignMode({
   businessData,
   services,
   commerceProducts,
+  liveProductIds,
   storefrontConfig,
   onConfigChange,
   onSaveConfig,
@@ -121,8 +125,8 @@ export function DesignMode({
             currentHeadline={(storefrontConfig.hero as { headline?: string } | undefined)?.headline}
             currentSubheadline={(storefrontConfig.hero as { subheadline?: string } | undefined)?.subheadline}
             currentCta={(storefrontConfig.hero as { ctaLabel?: string } | undefined)?.ctaLabel}
-            productsCount={commerceProducts.length}
-            servicesCount={services.length}
+            productsCount={liveProducts(commerceProducts, liveProductIds).length}
+            servicesCount={bookableServices(services).length}
             onApply={handleApplyHeroCopy}
           />
         </AccordionSection>

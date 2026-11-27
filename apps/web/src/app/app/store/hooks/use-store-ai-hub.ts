@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo } from "react";
 import { useModuleAi, type ModuleContext, type AiSuggestion, type AiTool } from "@/hooks/use-module-ai";
+// P231 r6: the copy tools count the storefront the way the panels do (a product listing is not a bookable service).
+import { bookableServices } from "../storefront-counts";
 
 type StoreCustomData = {
   products?: unknown[];
@@ -446,13 +448,6 @@ function offerWords(productCount: number, serviceCount: number) {
   };
 }
 
-/**
- * P231 r6: the services a customer can book on the storefront. A service row with a sourceProductId is the listing of a
- * product added to the store (SWP-STORE-LISTING-SERVER), not a bookable service, so it is not counted again.
- */
-function bookableServices(services: Record<string, unknown>[]) {
-  return services.filter((s) => !s.sourceProductId);
-}
 
 function buildStoreTools(): AiTool[] {
   return [

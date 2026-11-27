@@ -28,6 +28,7 @@ import { WorkspaceMetricStrip, type MetricStripItem } from "@/components/ui/work
 import { formatPrice } from "@/lib/format";
 import type { Service, Product, StorefrontConfig, FaqEntry } from "@/lib/client";
 import Image from "next/image";
+import { liveProducts, bookableServices } from "../storefront-counts";
 
 type SeoProps = {
   storefrontConfig: StorefrontConfig;
@@ -487,8 +488,8 @@ export function MerchandisingMode({
               businessTagline={businessData?.tagline ?? undefined}
               // P231 r6 (D-303): only what is on the storefront: products live on the store, and bookable services (a
               // service with a sourceProductId is a product's store listing, not a service to book).
-              productsCount={commerceProducts.filter((p) => liveProductIds.has(p.id) && p.isActive !== false).length}
-              servicesCount={services.filter((sv) => !sv.sourceProductId).length}
+              productsCount={liveProducts(commerceProducts, liveProductIds).length}
+              servicesCount={bookableServices(services).length}
               hasDelivery={activeDeliveryMethodsCount > 0}
               testimonialCount={testimonials.length}
               onApplyFaq={handleApplyFaq}

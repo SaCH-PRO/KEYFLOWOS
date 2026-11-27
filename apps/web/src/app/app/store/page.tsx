@@ -29,6 +29,7 @@ import { MerchandisingMode } from "./components/merchandising-mode";
 import { CatalogMode } from "./components/catalog-mode";
 import { OperationsMode } from "./components/operations-mode";
 import { LaunchMode } from "./components/launch-mode";
+import { liveProducts, bookableServices } from "./storefront-counts";
 
 type HeroSection = { imageUrl?: string; coverImageUrl?: string; headline?: string; subheadline?: string; ctaText?: string };
 type SocialProofSection = { testimonials?: unknown[] };
@@ -90,8 +91,8 @@ export default function StorePage() {
       activeView: activeTab,
       itemCount: productCount,
       // P231 r6 (D-303): the AI hub writes customer-facing copy from these, so only the products live on the storefront.
-      products: s.commerceProducts.filter((p) => (s.liveProductIds?.has(p.id) ?? false) && p.isActive !== false),
-      services: s.services,
+      products: liveProducts(s.commerceProducts, s.liveProductIds),
+      services: bookableServices(s.services),
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
       storeEnabled: s.storeEnabled,
       hasHeroImage: !!(_hero?.imageUrl || _hero?.coverImageUrl),
@@ -303,6 +304,7 @@ export default function StorePage() {
                 businessData={s.businessData}
                 services={s.services}
                 commerceProducts={s.commerceProducts}
+                liveProductIds={s.liveProductIds}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
