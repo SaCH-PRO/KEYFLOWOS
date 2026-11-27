@@ -291,6 +291,25 @@ describe("R21-4: the modal ends only the edit open at the switch", () => {
   });
 });
 
+describe("R21-4: an edit passed after the modal opened is the one the switch ends", () => {
+  it("an edit of A passed after opening, then a switch to B with it still passed, is no edit on B", async () => {
+    const el = (b: string, editing: Expense | null) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={editing} onClose={vi.fn()} onSaved={vi.fn()} />;
+    const view = render(el("biz_A", null));
+    const a1 = expense({ id: "exp_A1", status: "PAID" });
+    view.rerender(el("biz_A", a1));
+    await settle();
+    expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
+    ws.bid = "biz_B";
+    view.rerender(el("biz_B", a1));
+    await settle();
+    expect(screen.queryByRole("button", { name: "Update" }), "A's edit, passed after opening, is still an edit on B").toBeNull();
+    fill("B toner", "20");
+    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
+    await settle();
+    expect(client.updateExpense).not.toHaveBeenCalled();
+  });
+});
+
 describe("R21-5: the modal's Extract dropped at a switch", () => {
   it("leaves B's Extract enabled", async () => {
     const ex = deferred<unknown>();
