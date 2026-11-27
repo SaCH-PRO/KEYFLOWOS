@@ -445,4 +445,53 @@ describe('PricingService real-DB PostgreSQL proof (v92c_)', () => {
     expect(prodBTiers).toHaveLength(1);
     expect(prodBTiers[0].price).toBe(55);
   });
+
+  it('[P156-R2-1] RED-BEFORE: concurrent upsertProductTierPrice, setProductTierPrices, and deleteProductTierPrice serialize per (businessId, productId) without P2002 or merged hybrid sets', async () => {
+    await service.setProductTierPrices(ID.bizA, ID.prodA, []);
+
+    // 1. 8 parallel upserts creating the same fresh (prodA, DISTRIBUTOR) tier must converge with zero P2002 errors.
+    const upsertResults = await Promise.all(
+      [60, 61, 62, 63, 64, 65, 66, 67].map((price) =>
+        service.upsertProductTierPrice(ID.bizA, ID.prodA, 'DISTRIBUTOR', price),
+      ),
+    );
+    expect(upsertResults).toHaveLength(8);
+    const afterUpserts = await service.listProductTierPrices(ID.bizA, ID.prodA);
+    expect(afterUpserts).toHaveLength(1);
+    expect(afterUpserts[0].tier).toBe('DISTRIBUTOR');
+
+    // 2. Parallel disjoint atomic replacements must end in EITHER [WHOLESALE] OR [VIP], never a merged hybrid [VIP, WHOLESALE].
+    for (let round = 0; round < 5; round++) {
+      await service.setProductTierPrices(ID.bizA, ID.prodA, []);
+      await Promise.all([
+        service.setProductTierPrices(ID.bizA, ID.prodA, [{ tier: 'WHOLESALE', price: 80 }]),
+        service.setProductTierPrices(ID.bizA, ID.prodA, [{ tier: 'VIP', price: 70 }]),
+      ]);
+      const tiers = (await service.listProductTierPrices(ID.bizA, ID.prodA)).map((r) => r.tier);
+      expect(
+        tiers.length === 1 && (tiers[0] === 'WHOLESALE' || tiers[0] === 'VIP'),
+        `expected atomic replacement result [WHOLESALE] or [VIP], got ${JSON.stringify(tiers)}`,
+      ).toBe(true);
+    }
+
+    // 3. Concurrent upsert + delete must never throw spurious 404 NotFoundException for a live product.
+    for (let round = 0; round < 4; round++) {
+      await service.upsertProductTierPrice(ID.bizA, ID.prodA, 'VIP', 75);
+      await Promise.all([
+        service.upsertProductTierPrice(ID.bizA, ID.prodA, 'VIP', 72),
+        service.deleteProductTierPrice(ID.bizA, ID.prodA, 'VIP'),
+      ]);
+    }
+  });
+
+  it('[P156-R2-2] positive write/read path works inside active runWithTenant context', async () => {
+    const resolved = await tenant.runWithTenant(ID.bizA, ID.ownerA, async () => {
+      await service.setProductTierPrices(ID.bizA, ID.prodA, [{ tier: 'WHOLESALE', price: 79 }]);
+      await service.upsertProductTierPrice(ID.bizA, ID.prodA, 'VIP', 69);
+      return service.resolveProductPrice(ID.bizA, ID.prodA, ID.contactWholesaleA);
+    });
+    expect(resolved.effectivePrice).toBe(79);
+    expect(resolved.source).toBe('TIER');
+    expect(resolved.contactTier).toBe('WHOLESALE');
+  });
 });
