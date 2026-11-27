@@ -61,15 +61,16 @@ function readBusinessIdModels(clientSrc: string): string[] {
 }
 
 function parseSchemaModelBlocks(schemaSrc: string): Map<string, string> {
+  const cleaned = stripComments(schemaSrc);
   const map = new Map<string, string>();
   const re = /^model\s+([A-Za-z][A-Za-z0-9_]*)\s*\{/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(schemaSrc))) {
+  while ((m = re.exec(cleaned))) {
     const name = m[1];
     const start = m.index + m[0].length;
-    const end = schemaSrc.indexOf('\n}', start);
+    const end = cleaned.indexOf('\n}', start);
     if (end < 0) continue;
-    map.set(name, schemaSrc.slice(start, end));
+    map.set(name, cleaned.slice(start, end));
   }
   return map;
 }
