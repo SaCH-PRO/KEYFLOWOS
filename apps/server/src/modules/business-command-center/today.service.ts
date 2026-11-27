@@ -564,6 +564,11 @@ export class TodayService {
 
     const items: TodayNeedsYouItem[] = [];
     for (const p of pending) {
+      // P206 (D-298, Journey I2): human approval requests are surfaced via
+      // loadApprovalRequests (kind: 'APPROVAL_REQUEST') so they remain
+      // visible under KEY_DISABLED and their Approve/Reject buttons decide the
+      // real ApprovalRequest row rather than duplicating as KEY_PROPOSAL.
+      if (p.sourceType === 'HUMAN_WORKFLOW') continue;
       const createdAt = typeof p.createdAt === 'string' ? p.createdAt : new Date().toISOString();
       items.push({
         id: `proposal:${p.id}`,
@@ -592,6 +597,7 @@ export class TodayService {
       });
     }
     for (const p of approved) {
+      if (p.sourceType === 'HUMAN_WORKFLOW') continue;
       const createdAt = typeof p.createdAt === 'string' ? p.createdAt : new Date().toISOString();
       items.push({
         id: `proposal:${p.id}`,
@@ -627,7 +633,6 @@ export class TodayService {
       where: {
         businessId,
         status: 'pending',
-        migratedToProposalId: null,
         ...(!canSeeAllBusinessApprovals
           ? {
               steps: {

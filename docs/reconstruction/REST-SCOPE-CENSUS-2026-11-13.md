@@ -1089,7 +1089,7 @@ ModuleScopeGuard at class level).
 | --- | --- | --- | --- | --- |
 | `ApprovalController.approve` | POST | `/businesses/:businessId/approvals/:approvalId/approve` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
 | `ApprovalController.cancel` | DELETE | `/businesses/:businessId/approvals/:approvalId` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
-| `ApprovalController.create` | POST | `/businesses/:businessId/approvals` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
+| `ApprovalController.create` | POST | `/businesses/:businessId/approvals` | exempt-check | check:assertMayCreateApprovalRequest (P206, D-298/D-71/D-96: per-requestType write scope — expenses:write for expense/po, revenue:write for quote_discount/refund, content:write for content_delivery, operations:write for all others and unknown types fail-closed) |
 | `ApprovalController.delegate` | POST | `/businesses/:businessId/approvals/:approvalId/delegate` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
 | `ApprovalController.escalate` | POST | `/businesses/:businessId/approvals/:approvalId/escalate` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
 | `ApprovalController.reject` | POST | `/businesses/:businessId/approvals/:approvalId/reject` | applied | operations:write — SWP-CENSUS-V1-B (P90) |
