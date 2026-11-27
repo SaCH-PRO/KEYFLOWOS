@@ -310,13 +310,13 @@ describe('P229 FU-SLOTS-OVERNIGHT-HOURS (D-311, v92l_)', () => {
     expect(friLate.status).toBe(201);
     const bkId = friLate.body.bookingId as string;
 
-    // 2. Reschedule onto Saturday 00:30 (within Friday's 18:00-02:00 spillover, even though Saturday is closed)
+    // 2. Reschedule onto Saturday 00:00 (00:00-01:00 within Friday's 18:00-02:00 spillover, even though Saturday is closed)
     const moved = await bookingsService.rescheduleBooking(
       ID.bizOvernight,
       bkId,
-      new Date(isoAt(SAT_DATE, '00:30')),
+      new Date(isoAt(SAT_DATE, '00:00')),
     );
-    expect(new Date(moved.startTime).toISOString()).toBe(new Date(isoAt(SAT_DATE, '00:30')).toISOString());
+    expect(new Date(moved.startTime).toISOString()).toBe(new Date(isoAt(SAT_DATE, '00:00')).toISOString());
 
     // 3. Reschedule onto Saturday 01:30 (ends 02:30 > 02:00) rejected
     await expect(
