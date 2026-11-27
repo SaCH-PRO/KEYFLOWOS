@@ -1,5 +1,7 @@
 "use client";
 
+import { ReadFailureNote } from "./read-failure-note";
+import type { BlockRead } from "./use-expenses-data";
 import React, { useState, useRef, useId } from "react";
 import {
   X,
@@ -51,6 +53,11 @@ interface ExpenseFormSideSheetProps {
    * its ref-based `isCurrentBusiness`; without it, the component's own latest `businessId` (useShownBusiness).
    */
   isCurrentBusiness?: (businessId: string) => boolean;
+  /** R24b: the reads behind the category list and the links; a refused one is said, never shown as none. */
+  categoriesRead?: BlockRead;
+  onRetryCategories?: () => void;
+  linksRead?: BlockRead;
+  onRetryLinks?: () => void;
 }
 
 export interface ExpensePrefill {
@@ -215,6 +222,10 @@ export function ExpenseFormSideSheet({
   onClose,
   onSaved,
   isCurrentBusiness: hookCheck,
+  categoriesRead,
+  onRetryCategories,
+  linksRead,
+  onRetryLinks,
 }: ExpenseFormSideSheetProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
@@ -676,6 +687,7 @@ export function ExpenseFormSideSheet({
                     </option>
                   ))}
                 </select>
+                <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} className="mt-1 text-xs text-muted-foreground" />
                 {selectedCategory && (
                   <div
                     className="absolute right-8 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full"
@@ -728,7 +740,8 @@ export function ExpenseFormSideSheet({
             </div>
           </div>
 
-          {/* Linking */}
+          {/* Linking. R24b: links that could not be read are said, never left out as if there were none. */}
+          <ReadFailureNote read={linksRead} onRetry={onRetryLinks} />
           {hasLinking && (
             <div className="p-3 rounded-xl bg-white/[0.02] border border-border/40 space-y-3">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">

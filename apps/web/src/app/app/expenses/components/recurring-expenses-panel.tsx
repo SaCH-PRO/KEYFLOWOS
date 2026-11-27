@@ -1,5 +1,7 @@
 "use client";
 
+import { ReadFailureNote } from "./read-failure-note";
+import type { BlockRead } from "./use-expenses-data";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -31,6 +33,9 @@ interface RecurringExpensesPanelProps {
   triggerNew?: number;
   /** R12: the data hook's check that the business an action was for is still the one shown. */
   isCurrentBusiness?: (businessId: string) => boolean;
+  /** R24b: the categories read's own state; a refused one is said here, where schedules name their category. */
+  categoriesRead?: BlockRead;
+  onRetryCategories?: () => void;
 }
 
 const FREQUENCIES: Record<string, string> = {
@@ -41,7 +46,7 @@ const FREQUENCIES: Record<string, string> = {
   YEARLY: "Yearly",
 };
 
-export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck }: RecurringExpensesPanelProps) {
+export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck, categoriesRead, onRetryCategories }: RecurringExpensesPanelProps) {
   const shownCheck = useShownBusiness(businessId);
   const isCurrentBusiness = hookCheck ?? shownCheck;
   // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
@@ -175,6 +180,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
 
   return (
     <div className="space-y-4">
+      <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} />
       {recurring.length === 0 && !loading ? (
         <EmptyState
           icon={Repeat}

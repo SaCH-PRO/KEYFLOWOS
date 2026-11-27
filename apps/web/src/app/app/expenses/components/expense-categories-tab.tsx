@@ -1,5 +1,7 @@
 "use client";
 
+import { ReadFailureNote, readFailure } from "./read-failure-note";
+import type { BlockRead } from "./use-expenses-data";
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Plus, Palette, X, Receipt, Target } from "lucide-react";
@@ -17,9 +19,12 @@ interface ExpenseCategoriesTabProps {
   removeCategory: (businessId: string, categoryId: string) => boolean;
   summary: ExpenseSummary | null;
   budgets: ExpenseBudget[];
+  /** R24b: the categories read's own state: a refused one is said, never shown as "No categories yet". */
+  categoriesRead?: BlockRead;
+  onRetry?: () => void;
 }
 
-export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness, addCategory, removeCategory, summary, budgets }: ExpenseCategoriesTabProps) {
+export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness, addCategory, removeCategory, summary, budgets, categoriesRead, onRetry }: ExpenseCategoriesTabProps) {
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0]);
   // EXPENSES-HUB-3: the client answers a refused create as { error } and does not throw; it used to say
@@ -92,7 +97,11 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
         </div>
       </div>
 
-      {categoryData.length > 0 ? (
+      {readFailure(categoriesRead) ? (
+        <div className="kf-card rounded-xl p-8 text-center">
+          <ReadFailureNote read={categoriesRead} onRetry={onRetry} className="text-sm text-muted-foreground" />
+        </div>
+      ) : categoryData.length > 0 ? (
         <div className="kf-card rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border/40">
             <h3 className="text-sm font-semibold flex items-center gap-2">

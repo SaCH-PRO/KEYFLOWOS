@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { Expense } from "@/lib/client";
 
 const blocked = vi.hoisted(() => ({ on: false }));
@@ -88,20 +88,9 @@ afterEach(() => { blocked.on = false; });
 
 
 
-function deferred<T>() {
-  let resolve: (v: T) => void = () => {};
-  let reject: (e: unknown) => void = () => {};
-  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
-}
-const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 
 
 
-async function openEditAndSave() {
-  fireEvent.click(screen.getByRole("button", { name: /Edit expense/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "Update Expense" }));
-}
 
 
 const WORDS = "Request refused by the server";

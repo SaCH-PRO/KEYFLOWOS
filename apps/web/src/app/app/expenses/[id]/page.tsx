@@ -31,7 +31,9 @@ import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate, canStartFor, refusedStart } from "../components/expense-utils";
 import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, RECEIPT_UNAVAILABLE_NOTE, receiptKind } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { refusalMessage } from "@/lib/failure-kit";
+import { refusalMessage, readState } from "@/lib/failure-kit";
+import { ReadFailureNote, readFailure } from "../components/read-failure-note";
+import type { BlockRead } from "../components/use-expenses-data";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 
 /**
@@ -85,6 +87,12 @@ export default function ExpenseDetailPage() {
   const [expense, setExpense] = useState<Expense | null>(null);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
+  // R24b (D-315): the categories and budgets reads keep their own state: a refused one is said, never shown as
+  // "Uncategorized" or "No budget set". Retry reads the page again.
+  const [catRead, setCatRead] = useState<BlockRead>({ kind: "loading" });
+  const [budRead, setBudRead] = useState<BlockRead>({ kind: "loading" });
+  const [readAgain, setReadAgain] = useState(0);
+  const retryRead = useCallback(() => setReadAgain((n) => n + 1), []);
   const [loading, setLoading] = useState(true);
   const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [showEdit, setShowEdit] = useState(false);
@@ -151,13 +159,17 @@ export default function ExpenseDetailPage() {
           return;
         }
         setExpense(expRes.data);
-        if (catRes.data) setCategories(catRes.data);
+        const catState = readState(catRes, { what: "the category" });
+        setCatRead(catState);
+        setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
         // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
         const { month, year } = expenseMonth(expRes.data.date, businessId);
         const budRes = await fetchExpenseBudgets(businessId, month, year);
         if (!active) return;
         if (!isCurrentBusiness(businessId)) { leave(); return; }
-        if (budRes.data) setBudgets(budRes.data);
+        const budState = readState(budRes, { what: "this category's budget" });
+        setBudRead(budState);
+        setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
       } catch {
         // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
         if (active && canStartFor(businessId, isCurrentBusiness)) toast.error("Failed to load expense");
@@ -167,9 +179,13 @@ export default function ExpenseDetailPage() {
     return () => {
       active = false;
     };
-  }, [businessId, expenseId, isCurrentBusiness, leave]);
+    // R24b: readAgain is a Retry of a refused categories or budgets read.
+  }, [businessId, expenseId, isCurrentBusiness, leave, readAgain]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
+  // R24b: an expense with a category the page could not read is never called "Uncategorized".
+  const categoryUnread = !!expense?.categoryId && !category && readFailure(catRead) !== null;
+  const categoryLabel = category?.name || (categoryUnread ? "Couldn't load the category" : "Uncategorized");
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);
   const status = useMemo(() => (expense ? deriveStatus(expense) : { label: "", color: "", bg: "" }), [expense]);
 
@@ -298,7 +314,7 @@ export default function ExpenseDetailPage() {
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              {formatCurrency(expense.amount, expense.currency, businessId)} · {category?.name || "Uncategorized"} · {expense.vendor || "—"} · {expense.paymentMethod || "—"}
+              {formatCurrency(expense.amount, expense.currency, businessId)} · {categoryLabel} · {expense.vendor || "—"} · {expense.paymentMethod || "—"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -406,13 +422,14 @@ export default function ExpenseDetailPage() {
                 <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Category</label>
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-background">
                   {category?.color && <div className="w-2 h-2 rounded-full" style={{ background: category.color }} />}
-                  <span className="text-sm text-foreground">{category?.name || "Uncategorized"}</span>
+                  <span className="text-sm text-foreground">{categoryLabel}</span>
                 </div>
+                {categoryUnread && <ReadFailureNote read={catRead} onRetry={retryRead} className="mt-1 text-xs text-muted-foreground" />}
               </div>
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Budget line</label>
                 <div className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground">
-                  {category?.name || "Uncategorized"}
+                  {categoryLabel}
                 </div>
               </div>
               <div>
@@ -438,7 +455,7 @@ export default function ExpenseDetailPage() {
             <div className="rounded-xl border border-border bg-card shadow-sm p-4">
               <h3 className="text-sm font-semibold text-foreground mb-1">Budget impact</h3>
               <p className="text-xs text-muted-foreground mb-3">
-                {category?.name || "Uncategorized"} · {budgetMonthLabel}
+                {categoryLabel} · {budgetMonthLabel}
               </p>
               {budget ? (
                 <div className="space-y-2">
@@ -479,7 +496,11 @@ export default function ExpenseDetailPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No budget set for this category.</p>
+                readFailure(budRead) ? (
+                  <ReadFailureNote read={budRead} onRetry={retryRead} className="text-sm text-muted-foreground" />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No budget set for this category.</p>
+                )
               )}
             </div>
 
@@ -540,6 +561,8 @@ export default function ExpenseDetailPage() {
         <ExpenseFormSideSheet
           businessId={businessId}
           categories={categories}
+          categoriesRead={catRead}
+          onRetryCategories={retryRead}
           editingExpense={expense}
           onClose={() => setShowEdit(false)}
           onSaved={async () => {

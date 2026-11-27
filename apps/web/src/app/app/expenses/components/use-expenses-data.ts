@@ -42,6 +42,14 @@ export function useExpensesData() {
   const [read, setRead] = useState<ExpensesRead>({ kind: "loading" });
   const [summaryRead, setSummaryRead] = useState<BlockRead>({ kind: "loading" });
   const [budgetsRead, setBudgetsRead] = useState<BlockRead>({ kind: "loading" });
+  // R24b (D-315): each secondary read keeps its own state, so a refused one is said ("Couldn't load ...") where its
+  // block shows, never shown as an empty block.
+  const [categoriesRead, setCategoriesRead] = useState<BlockRead>({ kind: "loading" });
+  const [vendorsRead, setVendorsRead] = useState<BlockRead>({ kind: "loading" });
+  const [marginRead, setMarginRead] = useState<BlockRead>({ kind: "loading" });
+  const [candidatesRead, setCandidatesRead] = useState<BlockRead>({ kind: "loading" });
+  const [pickersRead, setPickersRead] = useState<BlockRead>({ kind: "loading" });
+  const [pickersAgain, setPickersAgain] = useState(0);
   const [businessId, setBusinessId] = useState<string | null>(null);
   // SEC-EXH3-1: the business every reply is checked against, and the generation of the latest read; a reply for
   // another business, or for an older read, writes nothing.
@@ -84,6 +92,11 @@ export function useExpensesData() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
+  // R24b: when the whole read fails, its secondary blocks failed with it (never "loading" for good, never empty).
+  const failSecondary = useCallback((st: BlockRead) => {
+    setCategoriesRead(st); setVendorsRead(st); setMarginRead(st); setCandidatesRead(st);
+  }, []);
+
   const clearAll = useCallback(() => {
     setExpenses([]); setTotalExpenses(0); setSummary(null); setBudgets([]); setCategories([]);
     setVendors([]); setMarginData(null); setRecurringCandidates([]);
@@ -106,6 +119,11 @@ export function useExpensesData() {
       setPage(1);
       setSummaryRead({ kind: "loading" });
       setBudgetsRead({ kind: "loading" });
+      setCategoriesRead({ kind: "loading" });
+      setVendorsRead({ kind: "loading" });
+      setMarginRead({ kind: "loading" });
+      setCandidatesRead({ kind: "loading" });
+      setPickersRead({ kind: "loading" });
       // COR MINOR-7: with no business there is nothing to read; say so instead of spinning.
       setRead(next ? { kind: "loading" } : { kind: "no-business" });
       setLoading(Boolean(next));
@@ -141,6 +159,8 @@ export function useExpensesData() {
           fetchContacts(businessId),
         ]);
         if (!still()) return;
+        const failedPicker = [projRes, svcRes, ctRes].map((r) => readState(r, { what: "the projects, services and contacts to link" })).find((st) => st.kind !== "ok");
+        setPickersRead(failedPicker ?? { kind: "ok" });
         if (projRes.data) {
           setProjects(projRes.data.map((p) => ({ id: p.id, name: p.name })));
         }
@@ -153,10 +173,14 @@ export function useExpensesData() {
             name: c.displayName || [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Unknown",
           })));
         }
-      } catch {}
+      } catch {
+        if (businessRef.current === businessId) setPickersRead({ kind: "failed", message: "Couldn't load the projects, services and contacts to link." });
+      }
     })();
     // R6 S-3: and again on every adopted switch (a batched A -> B -> A clears the lists and leaves businessId as it was).
-  }, [businessId, switchEpoch]);
+    // R24b: and on a Retry of a refused picker read.
+  }, [businessId, switchEpoch, pickersAgain]);
+  const retryPickers = useCallback(() => setPickersAgain((n) => n + 1), []);
 
   const readParams = JSON.stringify([period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
   // R8-3: this effect must stay above the read effect below. Effects run in order, so the read that a parameter
@@ -204,28 +228,38 @@ export function useExpensesData() {
       if (state.kind !== "ok") {
         // Nothing of an earlier read stays on screen behind a refusal or a failure.
         clearAll();
+        failSecondary(state);
         setLoading(false);
         return;
       }
       if (expRes.data) { setExpenses(expRes.data.data); setTotalExpenses(expRes.data.total); }
-      if (catRes.data) setCategories(catRes.data);
+      const catState = readState(catRes, { what: "expense categories" });
+      setCategoriesRead(catState);
+      setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
       // COR MINOR-7: the summary and the budgets each answer for their own block.
       const sumState = readState(sumRes, { what: "the expense summary" });
       setSummaryRead(sumState);
       setSummary(sumState.kind === "ok" ? sumRes.data ?? null : null);
-      if (venRes.data) setVendors(venRes.data);
+      const venState = readState(venRes, { what: "vendor analytics" });
+      setVendorsRead(venState);
+      setVendors(venState.kind === "ok" ? venRes.data ?? [] : []);
       const budState = readState(budRes, { what: "the budgets" });
       setBudgetsRead(budState);
       setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
-      if (margRes.data) setMarginData(margRes.data);
-      if (recRes.data) setRecurringCandidates(recRes.data.candidates);
+      const margState = readState(margRes, { what: "the margin analysis" });
+      setMarginRead(margState);
+      setMarginData(margState.kind === "ok" ? margRes.data ?? null : null);
+      const recState = readState(recRes, { what: "recurring patterns" });
+      setCandidatesRead(recState);
+      setRecurringCandidates(recState.kind === "ok" ? recRes.data?.candidates ?? [] : []);
     } catch {
       if (!current()) return;
       clearAll();
       setRead({ kind: "failed", message: "Couldn't load expenses." });
+      failSecondary({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-  }, [clearAll, businessId, switchEpoch, refresh, readParams, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  }, [clearAll, failSecondary, businessId, switchEpoch, refresh, readParams, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
@@ -249,7 +283,8 @@ export function useExpensesData() {
   const nearAlertCount = budgets.filter(b => b.isNearAlert && !b.isOverBudget).length;
 
   return {
-    businessId, read, summaryRead, budgetsRead, expenses, totalExpenses, categories,
+    businessId, read, summaryRead, budgetsRead, categoriesRead, vendorsRead, marginRead, candidatesRead, pickersRead, retryPickers,
+    expenses, totalExpenses, categories,
     isCurrentBusiness, addCategory, removeCategory,
     summary, vendors, budgets, marginData, recurringCandidates, loading, loadData,
     projects, services, contacts,

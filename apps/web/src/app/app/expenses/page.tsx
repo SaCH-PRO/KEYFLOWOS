@@ -31,6 +31,7 @@ import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { useUpload } from "@/hooks/use-upload";
 import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
+import { ReadFailureNote } from "./components/read-failure-note";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
 import { PERIODS, formatCurrency, formatDate, expenseExportFileName, startRefusal, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./components/expense-utils";
@@ -302,6 +303,8 @@ export default function ExpensesInboxPage() {
     const overBudget = d.budgets.filter((b) => b.isOverBudget).length;
     return { spentInPeriod, pendingApproval, missingReceipts, overBudget };
   }, [d.summary, d.expenses, d.budgets]);
+  // R24b: a Retry of a refused block reads the page again (the hook's reads are one round trip).
+  const retryRead = () => { void d.loadData(); };
   const summaryOk = d.summaryRead.kind === "ok";
   const budgetsOk = d.budgetsRead.kind === "ok";
   /** What a block whose own read did not come back shows instead of a figure (COR MINOR-7). */
@@ -520,6 +523,8 @@ export default function ExpensesInboxPage() {
               removeCategory={d.removeCategory}
               summary={d.summary}
               budgets={d.budgets}
+              categoriesRead={d.categoriesRead}
+              onRetry={retryRead}
             />
           </div>
         )}
@@ -535,7 +540,7 @@ export default function ExpensesInboxPage() {
                 New recurring expense
               </button>
             </div>
-            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} isCurrentBusiness={d.isCurrentBusiness} />
+            <RecurringExpensesPanel businessId={d.businessId} categories={d.categories} triggerNew={recurringTrigger} isCurrentBusiness={d.isCurrentBusiness} categoriesRead={d.categoriesRead} onRetryCategories={retryRead} />
           </div>
         )}
 
@@ -624,6 +629,7 @@ export default function ExpensesInboxPage() {
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
+            <ReadFailureNote read={d.categoriesRead} onRetry={retryRead} />
             {d.filterCategory && (
               <button
                 onClick={() => d.setFilterCategory("")}
@@ -910,6 +916,10 @@ export default function ExpensesInboxPage() {
             void d.loadData();
           }}
           isCurrentBusiness={d.isCurrentBusiness}
+          categoriesRead={d.categoriesRead}
+          onRetryCategories={retryRead}
+          linksRead={d.pickersRead}
+          onRetryLinks={d.retryPickers}
         />
       )}
 
