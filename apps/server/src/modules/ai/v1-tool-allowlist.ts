@@ -187,9 +187,11 @@ const HIDDEN_TOOL_TO_MODULE: ReadonlyMap<string, V1HiddenModuleKey> = (() => {
  * for reviewed v1 tools (`V1_KEY_TOOLS`), or `''` if unclassified.
  */
 export function v1ToolModuleFamily(toolName: string): string {
-  const hidden = HIDDEN_TOOL_TO_MODULE.get(toolName);
+  const normalized = typeof toolName === 'string' ? toolName.trim().toLowerCase() : '';
+  if (!normalized) return '';
+  const hidden = HIDDEN_TOOL_TO_MODULE.get(normalized);
   if (hidden) return hidden;
-  if (V1_KEY_TOOLS.has(toolName)) return 'v1_core';
+  if (V1_KEY_TOOLS.has(normalized)) return 'v1_core';
   return '';
 }
 

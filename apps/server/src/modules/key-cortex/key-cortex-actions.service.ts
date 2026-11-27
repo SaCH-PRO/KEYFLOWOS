@@ -214,7 +214,7 @@ export class KeyCortexActionsService implements OnModuleInit {
     // batch closed, so no action runs and no approval is created.
     const verdicts: LegacyAutonomyDecision[] = [];
     for (const action of actions) {
-      const v1Refusal = v1ToolRefusalReason(this.actionTypeToToolName(action.actionType));
+      const v1Refusal = this.v1RefusalForAction(action);
       if (v1Refusal) {
         verdicts.push({ allowed: false, requiresApproval: false, reason: v1Refusal });
         continue;
@@ -294,7 +294,7 @@ export class KeyCortexActionsService implements OnModuleInit {
     this.logger.debug(`Executing action "${actionType}" for business ${businessId}`);
 
     const toolName = this.actionTypeToToolName(actionType);
-    const v1Refusal = v1ToolRefusalReason(toolName);
+    const v1Refusal = this.v1RefusalForAction(action);
     if (v1Refusal) {
       return {
         actionType,
@@ -329,7 +329,19 @@ export class KeyCortexActionsService implements OnModuleInit {
   }
 
   private actionTypeToToolName(actionType: CortexActionType): string {
-    return `cortex.${actionType.toLowerCase()}`;
+    return `cortex.${String(actionType).trim().toLowerCase()}`;
+  }
+
+  private v1RefusalForAction(action: CortexActionResult): string | null {
+    const direct = v1ToolRefusalReason(this.actionTypeToToolName(action.actionType));
+    if (direct) return direct;
+    if (String(action.actionType).trim().toUpperCase() === 'EXECUTE_TOOL') {
+      const nestedTool = (action.result as Record<string, unknown> | undefined)?.toolName;
+      if (typeof nestedTool === 'string') {
+        return v1ToolRefusalReason(nestedTool);
+      }
+    }
+    return null;
   }
 
   private async resolveAutonomyLevel(businessId: string): Promise<number> {
@@ -429,6 +441,11 @@ export class KeyCortexActionsService implements OnModuleInit {
     action: CortexActionResult,
     session?: CortexSession,
   ): Promise<{ approved: boolean; approvalRequestId?: string }> {
+    const v1Refusal = this.v1RefusalForAction(action);
+    if (v1Refusal) {
+      this.logger.warn(`Refused approval request for disabled v1 action "${action.actionType}": ${v1Refusal}`);
+      return { approved: false };
+    }
     this.logger.warn(
       `Approval required for "${action.actionType}" — ` +
         `Impact: ${action.estimatedImpact ?? 'unknown'}`,

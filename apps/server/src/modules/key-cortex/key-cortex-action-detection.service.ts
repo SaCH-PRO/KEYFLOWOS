@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CortexActionType, CortexActionResult } from './key-cortex.types';
+import { isToolAllowedInV1 } from '../ai/v1-tool-allowlist';
 
 /**
  * KeyCortexActionDetectionService
@@ -156,7 +157,7 @@ export class KeyCortexActionDetectionService {
       }
     }
 
-    return actions;
+    return actions.filter((a) => isToolAllowedInV1(`cortex.${String(a.actionType).trim().toLowerCase()}`));
   }
 
   isValidActionType(type: string): type is CortexActionType {

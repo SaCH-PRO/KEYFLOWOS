@@ -14,6 +14,7 @@ import {
 } from '../ai/model-gateway.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import { v1ToolRefusalReason } from '../ai/v1-tool-allowlist';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import {
@@ -2095,6 +2096,11 @@ export class KeyCortexQueryPipelineService {
       // graph-actions.controller, which imports the flow orchestrator.
       const { memberToolRunAuthority } = await import('../ai/plan-step-authority');
       for (const name of tools) {
+        const v1Refusal = v1ToolRefusalReason(name);
+        if (v1Refusal) {
+          refusals.set(name, v1Refusal);
+          continue;
+        }
         const { refusal } = await memberToolRunAuthority(this.prisma, query.businessId, query.userId, name);
         if (refusal) refusals.set(name, refusal);
       }

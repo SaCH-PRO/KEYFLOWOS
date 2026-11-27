@@ -146,4 +146,179 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
     ]);
     expect(scopedTools.size).toBeGreaterThan(50);
   });
+
+  it('R1 security hardening: case/whitespace bypasses and v1ToolModuleFamily normalization', async () => {
+    const mod = await import('./v1-tool-allowlist');
+    for (const variant of [
+      'EXECUTE_CUSTOM_LOGIC',
+      ' execute_custom_logic ',
+      'CORTEX.SEND_EMAIL',
+      ' cortex.send_email ',
+      ' SEND_EMAIL ',
+      ' PAYROLL_MARK_PAID ',
+      'Payroll_Approve_Run',
+    ]) {
+      expect(mod.isToolAllowedInV1(variant), variant).toBe(false);
+      expect(mod.v1ToolRefusalReason(variant), variant).toBe('not available in this version');
+    }
+    expect(mod.v1ToolModuleFamily(' CRM_LIST_CONTACTS ')).toBe('v1_core');
+    expect(mod.v1ToolModuleFamily(' PROJECTS_LIST ')).toBe('projects');
+  });
+
+  it('R1 security hardening: AiOversightService.evaluate & PlanExecutorService.evaluateStep refuse disabled tools with zero approval creation', async () => {
+    const { AiOversightService } = await import('./ai-oversight.service');
+    const oversight = Object.assign(Object.create(AiOversightService.prototype), {
+      getAutonomySettings: vi.fn(),
+    }) as any;
+
+    for (const disabled of ['execute_custom_logic', 'EXECUTE_CUSTOM_LOGIC', 'payroll_mark_paid', 'cortex.send_email']) {
+      const decision = await oversight.evaluate(BIZ, disabled);
+      expect(decision.allowed, disabled).toBe(false);
+      expect(decision.requiresFormalApproval, disabled).toBe(false);
+      expect(decision.requiresAdminApproval, disabled).toBe(false);
+      expect(decision.reason, disabled).toBe('not available in this version');
+    }
+    expect(oversight.getAutonomySettings).not.toHaveBeenCalled();
+
+    const { PlanExecutorService } = await import('./plan-executor.service');
+    const evaluateAction = vi.fn();
+    const executor = Object.assign(Object.create(PlanExecutorService.prototype), {
+      autonomyOrchestrator: { evaluateAction },
+      governance: oversight,
+      logger: quiet,
+    }) as any;
+
+    for (const disabled of ['execute_custom_logic', 'payroll_generate_run', ' PAYROLL_APPROVE_RUN ']) {
+      const stepDecision = await executor.evaluateStep(BIZ, disabled);
+      expect(stepDecision, disabled).toEqual({
+        allowed: false,
+        reason: 'not available in this version',
+        requiresFormalApproval: false,
+        requiresAdminApproval: false,
+      });
+    }
+    expect(evaluateAction).not.toHaveBeenCalled();
+  });
+
+  it('R1 security hardening: KeyCortexToolLoopService.handleToolCalls refuses disabled tools before safety/autonomy approval', async () => {
+    const { KeyCortexToolLoopService } = await import('../key-cortex/key-cortex-tool-loop.service');
+    const safetyCheck = vi.fn();
+    const autonomyEvaluate = vi.fn();
+    const registryExecute = vi.fn();
+    const modelGateway = {
+      complete: vi.fn(async () => ({ content: 'Tools refused in v1' })),
+    };
+    const loop = Object.assign(Object.create(KeyCortexToolLoopService.prototype), {
+      logger: quiet,
+      modelGateway,
+      toolRegistry: {
+        getTool: () => ({ name: 'cortex.send_email', riskTier: 3 }),
+        execute: registryExecute,
+      },
+      safety: { check: safetyCheck, recordExecution: vi.fn() },
+      autonomyOrchestrator: { evaluate: autonomyEvaluate },
+      autonomyLevelService: { resolve: vi.fn(async () => ({ level: 1 })) },
+    }) as any;
+
+    const out = await loop.handleToolCalls(
+      {
+        toolCalls: [
+          { id: 'tc_1', function: { name: 'CORTEX.SEND_EMAIL', arguments: '{}' } },
+          { id: 'tc_2', function: { name: 'EXECUTE_CUSTOM_LOGIC', arguments: '{}' } },
+        ],
+      },
+      [{ role: 'user', content: 'test' }],
+      { businessId: BIZ, userId: OWNER, message: 'test' },
+      { provider: 'openai', model: 'gpt-4o-mini', tier: 1, reason: 'test' },
+      {},
+      'general',
+    );
+
+    expect(out?.actions).toHaveLength(2);
+    for (const a of out!.actions) {
+      expect(a.status).toBe('error');
+      expect(a.error).toBe('not available in this version');
+      expect(a.requiresApproval).toBe(false);
+    }
+    expect(safetyCheck).not.toHaveBeenCalled();
+    expect(autonomyEvaluate).not.toHaveBeenCalled();
+    expect(registryExecute).not.toHaveBeenCalled();
+  });
+
+  it('R1 security hardening: KeyCortexActionsService blocks nested EXECUTE_TOOL, whitespace actionType, and requestApproval with zero proposals', async () => {
+    const { KeyCortexActionsService } = await import('../key-cortex/key-cortex-actions.service');
+    const createProposal = vi.fn();
+    const evaluateAutonomy = vi.fn(async () => ({ allowed: true, requiresApproval: true }));
+    const trackActionExecution = vi.fn(async () => undefined);
+    const registryExecute = vi.fn();
+
+    const svc = Object.assign(Object.create(KeyCortexActionsService.prototype), {
+      logger: quiet,
+      proposalService: { create: createProposal },
+      keyCortexToolRegistry: { execute: registryExecute },
+      evaluateAutonomy,
+      trackActionExecution,
+      emitActionEvent: vi.fn(),
+    }) as any;
+
+    const session = { id: 'sess_1', businessId: BIZ, userId: OWNER };
+    const batch = await svc.executeActions(
+      [
+        { actionType: 'EXECUTE_TOOL', status: 'pending', description: 'nested', result: { toolName: 'cortex.send_email' } },
+        { actionType: 'EXECUTE_TOOL', status: 'pending', description: 'nested2', result: { toolName: ' EXECUTE_CUSTOM_LOGIC ' } },
+        { actionType: ' SEND_EMAIL ' as any, status: 'pending', description: 'padded', result: {} },
+      ],
+      session,
+    );
+
+    expect(batch).toHaveLength(3);
+    for (const res of batch) {
+      expect(res.status).toBe('blocked');
+      expect(res.requiresApproval).toBe(false);
+      expect(res.error).toBe('not available in this version');
+    }
+    expect(evaluateAutonomy).not.toHaveBeenCalled();
+    expect(createProposal).not.toHaveBeenCalled();
+    expect(registryExecute).not.toHaveBeenCalled();
+
+    const directApproval = await svc.requestApproval(
+      { actionType: 'EXECUTE_TOOL', status: 'pending', description: 'nested', result: { toolName: 'payroll_mark_paid' } },
+      session,
+    );
+    expect(directApproval).toEqual({ approved: false });
+    expect(createProposal).not.toHaveBeenCalled();
+  });
+
+  it('R1 security hardening: KeyCortexActionDetectionService omits SEND_EMAIL, SEND_MESSAGE, and GENERATE_REPORT', async () => {
+    const { KeyCortexActionDetectionService } = await import('../key-cortex/key-cortex-action-detection.service');
+    const detector = new KeyCortexActionDetectionService();
+    const detected = detector.detectActions(
+      '[[ACTION:SEND_EMAIL]]send email[[/ACTION]] [[ACTION:SEND_MESSAGE]]send msg[[/ACTION]] [[ACTION:GENERATE_REPORT]]gen report[[/ACTION]] [[ACTION:CREATE_TASK]]create task[[/ACTION]]',
+    );
+    const types = detected.map((a) => a.actionType);
+    expect(types).not.toContain('SEND_EMAIL');
+    expect(types).not.toContain('SEND_MESSAGE');
+    expect(types).not.toContain('GENERATE_REPORT');
+    expect(types).toContain('CREATE_TASK');
+  });
+
+  it('R1 security hardening: FlowOrchestratorService.executeTool throws ForbiddenException so ActionDispatcherService treats v1 refusal as final', async () => {
+    const { ForbiddenException } = await import('@nestjs/common');
+    const { orchestrator } = makeOrchestrator();
+    await expect(
+      (orchestrator as any).executeTool(BIZ, 'execute_custom_logic', {}, undefined, undefined, {
+        surface: 'CHAT',
+        principalUserId: OWNER,
+      }),
+    ).resolves.toMatchObject({
+      success: false,
+      error: 'not available in this version',
+    });
+    // executeToolDirectly rethrows the ForbiddenException recorded in TOOL_HTTP_EXCEPTIONS
+    await expect(
+      (orchestrator as any).executeToolDirectly(BIZ, 'execute_custom_logic', {}, undefined, {
+        surface: 'PLAN_QUEUE',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
