@@ -173,6 +173,8 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     // Then let the effects of that answer run, and only then look: everything is still there.
     await settle();
     expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    // Still enabled after the window: Try again is not left dead by something that disables it late.
+    expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
   });
