@@ -40,8 +40,10 @@ export default function PortalPage() {
   // shows Loading and only its answer lands: an older read, or one for a business no longer selected, never does.
   const [pending, setPending] = useState<{ businessId: string; read: number } | null>(null);
   const latestRead = useRef(0);
-  // The Grant form, tied to the business it was opened for, with what was typed and why a Grant failed. Opening it,
-  // Cancel and a switch to another business all start it afresh.
+  // The Grant form, tied to the business it was opened for, with what was typed and why a Grant failed. It shows only
+  // while that business is selected (another business opens its own, empty form; back to this one, it is as it was).
+  // Opening it starts it afresh, unless it is already open here (Grant Access pressed again keeps what was typed and
+  // its error); Cancel and a successful Grant close it.
   const [form, setForm] = useState<{ businessId: string; contactId: string; error: string | null } | null>(null);
   // The business the page is showing: a read for any other (a switch while it ran) is neither started nor applied.
   const currentBusiness = useRef(businessId);
@@ -57,7 +59,11 @@ export default function PortalPage() {
   const showForm = openForm !== null;
   const contactId = openForm?.contactId ?? "";
   const grantError = openForm?.error ?? null;
-  const setShowForm = (open: boolean) => setForm(open && businessId ? { businessId, contactId: "", error: null } : null);
+  const setShowForm = (open: boolean) =>
+    setForm((f) => {
+      if (!open || !businessId) return null;
+      return f && f.businessId === businessId ? f : { businessId, contactId: "", error: null };
+    });
   const setContactId = (value: string) => setForm((f) => (f ? { ...f, contactId: value } : f));
 
   async function loadData() {
