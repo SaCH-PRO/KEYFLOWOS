@@ -10,6 +10,7 @@ import {
   MEMORY_DATA_CLASS_RANK,
   type MemoryRowDataClass,
 } from './memory-classification';
+import { getMemoryClassReadMode } from '../key-cortex/memory-class-read-projection';
 
 function sqlDataClassRank(col: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`CASE ${col}
@@ -138,6 +139,8 @@ export interface SemanticMemory {
   sourceId: string;
   metadata: Record<string, any>;
   similarity: number;
+  dataClass?: string | null;
+  moduleScope?: string[];
 }
 
 export interface StoreMemoryInput {
@@ -459,7 +462,7 @@ export class SemanticMemoryService {
       // are not served. FU-MEMORY-COPIES-REWRITE review SEC-FUMCR-1/2: nor is a copy of a settings row
       // (AI_MEMORY_SETTINGS_CATEGORIES); only a backfill run before the review repair made one.
       let query = Prisma.sql`
-        SELECT id, content, source_type, source_id, metadata,
+        SELECT id, content, source_type, source_id, metadata, data_class, module_scope,
                1 - (embedding <=> ${vectorLiteral}::vector) as similarity,
                (embedding <=> ${vectorLiteral}::vector)::text as distance
         FROM "ai_memory_embeddings" e
@@ -476,6 +479,10 @@ export class SemanticMemoryService {
             )
           )
       `;
+
+      if (getMemoryClassReadMode() === 'ACTIVE') {
+        query = Prisma.sql`${query} AND (e.data_class IS NULL OR e.data_class <> 'SECRET_BEARING')`;
+      }
 
       if (params.sourceTypes && params.sourceTypes.length > 0) {
         query = Prisma.sql`${query} AND source_type IN (${Prisma.join(params.sourceTypes)})`;
@@ -506,6 +513,8 @@ export class SemanticMemoryService {
           source_type: string;
           source_id: string;
           metadata: any;
+          data_class?: string | null;
+          module_scope?: string[] | null;
           similarity: number;
           distance: string;
         }>>(Prisma.sql`${query}${keyset} ORDER BY ${distance}, e.id LIMIT ${take}`);
@@ -515,6 +524,8 @@ export class SemanticMemoryService {
           sourceType: r.source_type,
           sourceId: r.source_id,
           metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
+          dataClass: r.data_class ?? null,
+          moduleScope: Array.isArray(r.module_scope) ? r.module_scope : [],
           similarity: Number(r.similarity),
           distance: r.distance,
         }));

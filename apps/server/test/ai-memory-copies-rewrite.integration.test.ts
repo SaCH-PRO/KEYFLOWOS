@@ -784,10 +784,19 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       expect(await copiesOf(promoted.id), 'the promoted row, copied again').toEqual([backfillCopy('learning', `learned:${fn}`, promotedNow.value)]);
       expect(await copiesOf(tuning.id), 'the tuning row, copied again').toEqual([backfillCopy('evolution_tuning', 'personality_tone', tuningNow.value)]);
       embeddedBefore = app.embedded.length;
-      const search = await app.api.search(ID.member);
-      expect(search).not.toContain('V71I-06-OLD');
-      expect(search, 'served with no backfill run').toContain('V71I-06-NEW-PROMOTED');
-      expect(search, 'served with no backfill run').toContain('V71I-06-NEW-TONE');
+      const memberSearch = await app.api.search(ID.member);
+      expect(memberSearch).not.toContain('V71I-06-OLD');
+      expect(memberSearch, 'served with no backfill run').toContain('V71I-06-NEW-PROMOTED');
+      // MEM-CLASS-READ (P137): evolution_tuning carries moduleScope=['ai'] (MEM-CLASS-COLUMNS);
+      // default STAFF has ai:none, so evolution_tuning is withheld from member and served to owner.
+      expect(memberSearch, 'ai-scoped evolution_tuning withheld from default STAFF').not.toContain('V71I-06-NEW-TONE');
+      expect(app.embedded.length - embeddedBefore, 'only the question').toBe(1);
+
+      embeddedBefore = app.embedded.length;
+      const ownerSearch = await app.api.search(ID.owner);
+      expect(ownerSearch).not.toContain('V71I-06-OLD');
+      expect(ownerSearch, 'owner sees promoted learning copy with no backfill run').toContain('V71I-06-NEW-PROMOTED');
+      expect(ownerSearch, 'owner sees rewritten evolution_tuning copy with no backfill run').toContain('V71I-06-NEW-TONE');
       expect(app.embedded.length - embeddedBefore, 'only the question').toBe(1);
     } finally {
       await app.close();
