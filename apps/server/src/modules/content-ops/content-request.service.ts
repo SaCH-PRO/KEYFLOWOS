@@ -94,7 +94,7 @@ export class ContentRequestService {
     const [items, total] = await Promise.all([
       this.prisma.client.contentRequest.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: options?.offset ?? 0,
         take: options?.limit ?? 50,
       }),

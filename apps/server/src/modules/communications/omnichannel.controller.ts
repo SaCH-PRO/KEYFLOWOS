@@ -64,7 +64,7 @@ export class OmnichannelController {
     const [items, total] = await Promise.all([
       prisma.interactionIntent.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: Math.min(parseInt(limit ?? '50', 10), 100),
         skip: parseInt(offset ?? '0', 10),
         include: {
@@ -317,7 +317,7 @@ export class OmnichannelController {
     const [threads, drafts, intents] = await Promise.all([
       prisma.keyInboxThread.findMany({
         where: { businessId },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
         include: {
