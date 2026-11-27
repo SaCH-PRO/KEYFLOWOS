@@ -212,8 +212,8 @@ beforeAll(async () => {
   }).compile();
 
   bookingsAdapter = new BookingsAdapterService(
-    moduleRef.get(PrismaService),
     moduleRef.get(BookingsService),
+    moduleRef.get(PrismaService),
     moduleRef.get(CatalogService),
   );
   bookingOptimizer = moduleRef.get(BookingOptimizerService);
@@ -367,7 +367,12 @@ afterAll(async () => {
 });
 
 describe('P229 FU-SLOTS-OVERNIGHT-HOURS (D-311, v92l_)', () => {
-  const guest = { firstName: 'Night', lastName: 'Owl', email: `${P}guest@test.local` };
+  const guest = {
+    firstName: 'Night',
+    lastName: 'Owl',
+    email: `${P}guest@test.local`,
+    phone: '+18685550199',
+  };
 
   it('[SOH-01] Friday 18:00–02:00 offers 18:00..23:30 on Friday and 00:00..01:00 spillover on closed Saturday across public /slots, KEY get_availability, and BookingOptimizerService', async () => {
     const friSlots = await request(app.getHttpServer())
