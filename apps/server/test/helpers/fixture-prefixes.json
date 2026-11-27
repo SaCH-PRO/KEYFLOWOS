@@ -838,6 +838,11 @@
       "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
     },
     {
+      "prefix": "v92h_",
+      "owner": "apps/server/test/expense-receipt-read.integration.test.ts",
+      "packet": "V1-92 (FU-RECEIPT-READ-ROUTE, P222)"
+    },
+    {
       "prefix": "v93a_",
       "owner": "apps/server/test/key-connector-authority.integration.test.ts",
       "packet": "V1-93 (W7-KEY-CONNECTOR-TENANT)"
