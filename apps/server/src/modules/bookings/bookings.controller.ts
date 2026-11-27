@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject,
 import { Response } from 'express';
 import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
+import { isStrictIsoDateTimeWithTz } from './business-hours.util';
 import { BookingWaitlistService } from './booking-waitlist.service';
 import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
@@ -285,8 +286,18 @@ export class BookingsController {
     // 2026-12-15 returned "date":"2026-12-14".
     const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? '');
     if (!parts) throw new BadRequestException('date must be YYYY-MM-DD');
-    const day = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
-    if (Number.isNaN(day.getTime())) throw new BadRequestException('date must be a valid date');
+    const year = Number(parts[1]);
+    const month = Number(parts[2]);
+    const dayOfMonth = Number(parts[3]);
+    const day = new Date(year, month - 1, dayOfMonth);
+    if (
+      Number.isNaN(day.getTime()) ||
+      day.getFullYear() !== year ||
+      day.getMonth() !== month - 1 ||
+      day.getDate() !== dayOfMonth
+    ) {
+      throw new BadRequestException('date must be a valid date');
+    }
     await this.catalog.assertPublicStore(businessId);
     return this.bookings.getAvailableSlots({
       businessId,
@@ -319,6 +330,21 @@ export class BookingsController {
       throw new BadRequestException(storefrontMethodUnsupported(rawMethod as string));
     }
 
+    // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1, R1-SEC-01): validate
+    // startTime as a strict RFC 3339 / ISO 8601 date-time with explicit
+    // timezone here as well as in PublicCreateBookingDto so invalid, blank,
+    // non-string, date-only, ordinal, timezone-less, 24:00 rollover, or
+    // impossible calendar dates always answer 400 and never reach
+    // BookingsService as Invalid Date (NaN) or server-TZ-dependent instants.
+    const rawStartTime: unknown = body?.startTime;
+    if (!isStrictIsoDateTimeWithTz(rawStartTime)) {
+      throw new BadRequestException('startTime must be a valid ISO 8601 date string');
+    }
+    const startTime = new Date(rawStartTime);
+    if (Number.isNaN(startTime.getTime())) {
+      throw new BadRequestException('startTime must be a valid ISO 8601 date string');
+    }
+
     const limitCheck = await this.subscriptions.checkLimit(businessId, 'bookings');
     if (!limitCheck.allowed) {
       const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
@@ -336,7 +362,7 @@ export class BookingsController {
       businessId,
       serviceId: sanitizeRequired(body.serviceId, 'serviceId', 200),
       staffId: body.staffId ? sanitizeString(body.staffId, 200) : undefined,
-      startTime: new Date(body.startTime),
+      startTime,
       contact: {
         firstName: sanitizeRequired(body.firstName, 'firstName', 100),
         lastName: sanitizeRequired(body.lastName, 'lastName', 100),

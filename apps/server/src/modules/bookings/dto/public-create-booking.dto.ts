@@ -6,9 +6,11 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
+import { STRICT_ISO_DATETIME_WITH_TZ_RE } from '../business-hours.util';
 
 const stripHtml = ({ value }: { value: any }) =>
   typeof value === 'string' ? value.replace(/<[^>]*>/g, '').trim() : value;
@@ -30,7 +32,10 @@ export class PublicCreateBookingDto {
   @IsOptional()
   staffId?: string | null;
 
-  @IsISO8601()
+  @IsISO8601({ strict: true, strictSeparator: true })
+  @Matches(STRICT_ISO_DATETIME_WITH_TZ_RE, {
+    message: 'startTime must be a valid ISO 8601 date string',
+  })
   startTime!: string;
 
   @IsString()

@@ -16,6 +16,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { todaySeedFixtures } from './helpers/today-seed-time.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 120_000 });
 
@@ -332,21 +333,10 @@ beforeAll(async () => {
   });
 
   const now = new Date();
-  // Seed today's booking at local noon in bizA's timezone (America/Port_of_Spain, UTC-4)
-  // so it always falls inside TodayService's [dayStart, dayEnd] window at every hour of the UTC day.
-  const localNoonToday = (() => {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Port_of_Spain',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(now);
-    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-    // America/Port_of_Spain is fixed UTC-4 (no DST): 12:00 local = 16:00 UTC on that local date.
-    return new Date(Date.UTC(get('year'), get('month') - 1, get('day'), 16, 0, 0, 0));
-  })();
-  const bookingEnd = new Date(localNoonToday.getTime() + 60 * 60 * 1000);
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  // Seed today's fixtures anchored to bizA's business timezone (America/Port_of_Spain)
+  // so bookings, due-today invoices, and tasks stay strictly inside TodayService's
+  // [dayStart, dayEnd] window at every hour of the 24-hour UTC clock (P203).
+  const { bookingStart, bookingEnd, dueToday, yesterday } = todaySeedFixtures(now, 'America/Port_of_Spain');
 
   // Today's booking
   await db.booking.create({
@@ -355,7 +345,7 @@ beforeAll(async () => {
       businessId: ID.bizA,
       contactId: ID.contactMaria,
       serviceId: ID.serviceA,
-      startTime: localNoonToday,
+      startTime: bookingStart,
       endTime: bookingEnd,
       status: 'CONFIRMED',
     },
@@ -387,7 +377,7 @@ beforeAll(async () => {
       total: 800,
       currency: 'TTD',
       issueDate: yesterday,
-      dueDate: now,
+      dueDate: dueToday,
     },
   });
   await db.payment.create({
@@ -416,7 +406,7 @@ beforeAll(async () => {
       subtotal: 650,
       total: 650,
       currency: 'TTD',
-      acceptedAt: now,
+      acceptedAt: dueToday,
     },
   });
 
@@ -428,7 +418,7 @@ beforeAll(async () => {
       contactId: ID.contactMaria,
       title: 'Follow up with Maria',
       status: 'OPEN',
-      dueDate: now,
+      dueDate: dueToday,
     },
   });
 
@@ -657,27 +647,18 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
         ownerId: ID.ownerA,
       },
     });
-    const now = new Date();
-    // 14:00 local time in America/Port_of_Spain (fixed UTC-4 -> 18:00 UTC on that local date)
-    // stays inside TodayService's [dayStart, dayEnd] window at every hour of the UTC day.
-    const soonStart = (() => {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/Port_of_Spain',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).formatToParts(now);
-      const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-      return new Date(Date.UTC(get('year'), get('month') - 1, get('day'), 18, 0, 0, 0));
-    })();
+    const { privateBookingStart, privateBookingEnd, yesterday: td06Yesterday } = todaySeedFixtures(
+      new Date(),
+      'America/Port_of_Spain',
+    );
     await db.booking.create({
       data: {
         id: privateBookingId,
         businessId: ID.bizA,
         contactId: privateContactId,
         serviceId: ID.serviceA,
-        startTime: soonStart,
-        endTime: new Date(soonStart.getTime() + 60 * 60_000),
+        startTime: privateBookingStart,
+        endTime: privateBookingEnd,
         status: 'CONFIRMED',
       },
     });
@@ -688,7 +669,7 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
         contactId: privateContactId,
         invoiceNumber: `${P}INV-VIP`,
         status: 'OVERDUE',
-        dueDate: new Date(now.getTime() - 24 * 60 * 60_000),
+        dueDate: td06Yesterday,
         subtotal: 900,
         total: 900,
         currency: 'TTD',
@@ -847,4 +828,50 @@ describe('P79 — V1-65 (TODAY-AGGREGATE, P0): four-block per-member Today read'
       `/key-autonomy/businesses/${ID.bizA}/actions/proposals/${keyProposalItem.sourceId}/`,
     );
   });
+
+  it('[TD-09] P203 (FU-TODAY-AGGREGATE-TZ-SEED): bookings seeded via todaySeedFixtures remain visible in Today during 02:00–04:00 UTC (22:00–24:00 America/Port_of_Spain)', async () => {
+    const midnightBookingId = `${P}bookingMidnight`;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // Pin clock to 02:30 UTC (22:30 Port-of-Spain) — inside the 02:00–04:00 UTC window where now+2h crossed local midnight
+      vi.setSystemTime(new Date('2026-11-26T02:30:00.000Z'));
+      const { bookingStart, bookingEnd } = todaySeedFixtures(new Date(), 'America/Port_of_Spain');
+
+      await db.booking.create({
+        data: {
+          id: midnightBookingId,
+          businessId: ID.bizA,
+          contactId: ID.contactMaria,
+          serviceId: ID.serviceA,
+          startTime: bookingStart,
+          endTime: bookingEnd,
+          status: 'CONFIRMED',
+        },
+      });
+
+      const owner0230 = await getToday(ID.bizA, ID.ownerA).expect(200);
+      expect(
+        owner0230.body.today.bookings.some(
+          (b: any) => b.id === midnightBookingId && b.customerName === 'Maria Lopez' && b.contactId === ID.contactMaria,
+        ),
+      ).toBe(true);
+
+      const staff0230 = await getToday(ID.bizA, ID.staffBookings).expect(200);
+      expect(
+        staff0230.body.today.bookings.some((b: any) => b.id === midnightBookingId && b.customerName === 'Maria Lopez'),
+      ).toBe(true);
+
+      // Advance to 03:55 UTC (23:55 Port-of-Spain, 5 minutes before local midnight) — still visible for owner and staff
+      vi.setSystemTime(new Date('2026-11-26T03:55:00.000Z'));
+      const owner0355 = await getToday(ID.bizA, ID.ownerA).expect(200);
+      expect(owner0355.body.today.bookings.some((b: any) => b.id === midnightBookingId)).toBe(true);
+
+      const staff0355 = await getToday(ID.bizA, ID.staffBookings).expect(200);
+      expect(staff0355.body.today.bookings.some((b: any) => b.id === midnightBookingId)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      await db.$executeRaw`DELETE FROM bookings WHERE id = ${midnightBookingId}`;
+    }
+  });
 });
+
