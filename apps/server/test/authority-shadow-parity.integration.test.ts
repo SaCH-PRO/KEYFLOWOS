@@ -20,6 +20,7 @@ import {
   LEVEL_RANK,
   memberModuleLevel,
   rankOf,
+  type AccessLevel,
   type CanonicalModule,
 } from '../src/core/authority/module-vocabulary';
 import { EffectiveAuthorityResolver } from '../src/core/authority/effective-authority.resolver';
@@ -44,11 +45,11 @@ type EnvelopeShape = {
   permissionScopes: unknown;
 };
 
-const ALL_NONE_MAP: Record<string, string> = Object.fromEntries(
+const ALL_NONE_MAP: Record<CanonicalModule, AccessLevel> = Object.fromEntries(
   CANONICAL_MODULES.map((m) => [m, 'none']),
-);
+) as Record<CanonicalModule, AccessLevel>;
 
-const MIXED_EXPLICIT_MAP: Record<string, string> = {
+const MIXED_EXPLICIT_MAP: Record<CanonicalModule, AccessLevel> = {
   crm: 'admin',
   revenue: 'write',
   bookings: 'read',
@@ -61,9 +62,7 @@ const MIXED_EXPLICIT_MAP: Record<string, string> = {
   content: 'read',
   projects: 'write',
   automations: 'read',
-  inventory: 'write',
-  reports: 'read',
-  commerce: 'write',
+  storefront: 'write',
   connect: 'read',
 };
 
@@ -140,7 +139,7 @@ afterAll(async () => {
 });
 
 describe('RR-AUTHORITY-SHADOW-PARITY: base-envelope parity matrix on Postgres (v72r_)', () => {
-  it('agrees 100% across every role x base-envelope shape x canonical module x minLevel (864 cells)', async () => {
+  it('agrees 100% across every role x base-envelope shape x canonical module x minLevel (756 cells)', async () => {
     const disagreements: string[] = [];
     let checkedCells = 0;
 
@@ -327,8 +326,8 @@ describe('RR-AUTHORITY-SHADOW-PARITY: positions and grants narrow inside envelop
 
     const snap = securitySignals.snapshot();
     expect(snap.counts.authority_shadow_mismatch).toBe(1);
-    const labelKey = `revenue:${resolved.modules.revenue.reason}`;
-    expect(snap.byLabel.authority_shadow_mismatch[labelKey]).toBe(1);
+    expect(resolved.modules.revenue.reason).toBe('position_narrowed');
+    expect(snap.byLabel.authority_shadow_mismatch['revenue:position_narrowed']).toBe(1);
 
     // Zero tenant or user IDs leak into SecuritySignals snapshot
     const serialized = JSON.stringify(snap);

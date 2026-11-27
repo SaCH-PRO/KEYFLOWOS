@@ -1,9 +1,10 @@
 /**
- * RR-SECURITY-SIGNAL-COUNTERS (P158; D-261, D-262):
- * Bounded in-process runtime counters for security-relevant refusals:
+ * RR-SECURITY-SIGNAL-COUNTERS (P158; D-261, D-262) & RR-AUTHORITY-SHADOW-PARITY:
+ * Bounded in-process runtime counters for security-relevant refusals & shadow mismatches:
  *   - bearer_verification_failed
  *   - cross_business_refusal
  *   - webhook_signature_failed
+ *   - authority_shadow_mismatch
  *
  * Design invariants (matching ErrorRegistry):
  *   - Fixed label cardinality cap per signal (MAX_LABELS_PER_SIGNAL); excess labels roll into OVERFLOW_LABEL.

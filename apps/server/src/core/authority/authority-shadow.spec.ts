@@ -185,8 +185,9 @@ describe('shadow/compare is observation only', () => {
     const { securitySignals } = await import('../observability/security-signals');
     securitySignals.reset();
 
-    const prisma = prismaWith({ id: 'mem_1', role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 });
-    const resolver = {
+    // Direction 1: legacy ALLOW vs resolver DENY
+    const allowPrisma = prismaWith({ id: 'mem_1', role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 });
+    const denyResolver = {
       resolve: vi.fn(async () => ({
         modules: { operations: { module: 'operations', level: 'none', reason: 'explicit_deny', explicitDeny: true, sources: [] } },
         positions: [],
@@ -194,24 +195,47 @@ describe('shadow/compare is observation only', () => {
       })),
     } as unknown as EffectiveAuthorityResolver;
 
-    const warn = vi.fn();
-    const guard = new ModuleScopeGuard(prisma, new Reflector(), resolver);
-    (guard as any).logger = { warn, debug: vi.fn(), error: vi.fn() };
+    const warnAllow = vi.fn();
+    const allowGuard = new ModuleScopeGuard(allowPrisma, new Reflector(), denyResolver);
+    (allowGuard as any).logger = { warn: warnAllow, debug: vi.fn(), error: vi.fn() };
 
-    const r = await run(guard, Shadowed.prototype.handler);
+    const rAllow = await run(allowGuard, Shadowed.prototype.handler);
+    expect(rAllow.allowed).toBe(true);
+    expect(warnAllow).toHaveBeenCalledTimes(1);
 
-    expect(r.allowed).toBe(true);
-    expect(warn).toHaveBeenCalledTimes(1);
+    const snap1 = securitySignals.snapshot();
+    expect(snap1.counts.authority_shadow_mismatch).toBe(1);
+    expect(snap1.byLabel.authority_shadow_mismatch['operations:explicit_deny']).toBe(1);
 
-    const snap = securitySignals.snapshot();
-    expect((snap.counts as Record<string, number>).authority_shadow_mismatch).toBe(1);
-    const labels = (snap.byLabel as Record<string, Record<string, number>>).authority_shadow_mismatch ?? {};
-    expect(labels['operations:explicit_deny']).toBe(1);
+    // Direction 2: legacy DENY vs resolver ALLOW
+    const denyPrisma = prismaWith({ id: 'mem_2', role: 'STAFF', permissionScopes: {}, maxApprovalTier: 0 });
+    const allowResolver = {
+      resolve: vi.fn(async () => ({
+        modules: { operations: { module: 'operations', level: 'admin', reason: 'role_default', explicitDeny: false, sources: [] } },
+        positions: [],
+        validity: { truncated: false },
+      })),
+    } as unknown as EffectiveAuthorityResolver;
 
-    const serialized = JSON.stringify(snap);
+    const warnDeny = vi.fn();
+    const denyGuard = new ModuleScopeGuard(denyPrisma, new Reflector(), allowResolver);
+    (denyGuard as any).logger = { warn: warnDeny, debug: vi.fn(), error: vi.fn() };
+
+    const rDeny = await run(denyGuard, Shadowed.prototype.handler);
+    expect(rDeny.allowed).toBe(false);
+    expect(rDeny.error).toBeInstanceOf(ForbiddenException);
+    expect(warnDeny).toHaveBeenCalledTimes(1);
+
+    const snap2 = securitySignals.snapshot();
+    expect(snap2.counts.authority_shadow_mismatch).toBe(2);
+    expect(snap2.byLabel.authority_shadow_mismatch['operations:explicit_deny']).toBe(1);
+    expect(snap2.byLabel.authority_shadow_mismatch['operations:role_default']).toBe(1);
+
+    const serialized = JSON.stringify(snap2);
     expect(serialized).not.toContain(BUSINESS);
     expect(serialized).not.toContain('user_1');
     expect(serialized).not.toContain('mem_1');
+    expect(serialized).not.toContain('mem_2');
   });
 
   it('does not increment authority_shadow_mismatch when legacy and resolver agree', async () => {
@@ -227,7 +251,7 @@ describe('shadow/compare is observation only', () => {
 
     expect(r.allowed).toBe(true);
     expect(warn).not.toHaveBeenCalled();
-    expect((securitySignals.snapshot().counts as Record<string, number>).authority_shadow_mismatch).toBe(0);
+    expect(securitySignals.snapshot().counts.authority_shadow_mismatch).toBe(0);
   });
 });
 
