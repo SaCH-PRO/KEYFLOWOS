@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-3 repair round 19 (R18 reviews at c2a3e49).
  *
  *   R19-1  the modal, after an announced switch, keeps none of A's form: Save after A's save lands sends nothing for
@@ -69,7 +72,6 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpensePipeline } from "../components/expense-pipeline";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
 import { ExpenseList } from "../components/expense-list";
@@ -137,10 +139,6 @@ function expense(over: Partial<Expense> = {}): Expense {
     createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
   } as Expense;
 }
-function fill(description = "A rent", amount = "500") {
-  fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: description } });
-  fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: amount } });
-}
 afterEach(() => {
   ZONES.biz_A = "America/Port_of_Spain";
   vi.useRealTimers();
@@ -149,61 +147,6 @@ afterEach(() => {
 
 afterEach(() => { blocked.on = false; });
 const always = () => true;
-
-describe("R19-1: the modal keeps none of A's form after an announced switch", () => {
-  it("A's save lands after the switch; Save then sends nothing for B with A's data", async () => {
-    const create = deferred<unknown>();
-    client.createExpense.mockReturnValueOnce(create.promise).mockResolvedValue(ok({ id: "exp_B_new" }));
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fill("A rent", "500");
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await waitFor(() => expect(client.createExpense).toHaveBeenCalledTimes(1));
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => { create.resolve(ok({ id: "exp_A_new" })); });
-    await settle();
-    expect((screen.getByPlaceholderText("What was this expense for?") as HTMLInputElement).value, "A's form is on B").toBe("");
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await settle();
-    expect(client.createExpense.mock.calls.filter((c) => c[0] === "biz_B" && (c[1] as { description?: string }).description === "A rent")).toEqual([]);
-  });
-});
-
-describe("R19-1b: the modal's edit of A's expense, after an announced switch", () => {
-  it("is no longer an edit: Save sends no update of A's expense under B", async () => {
-    client.updateExpense.mockResolvedValue(ok(expense({ status: "PAID" })));
-    client.createExpense.mockResolvedValue(ok({ id: "exp_B_new" }));
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={expense({ status: "PAID" })} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await settle();
-    expect(screen.queryByRole("button", { name: "Update" }), "still an edit of A's expense").toBeNull();
-    fill("B rent", "40");
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await settle();
-    expect(client.updateExpense).not.toHaveBeenCalled();
-  });
-});
-
-describe("R19-2: the modal's refused save after the switch", () => {
-  it("says nothing on B", async () => {
-    const create = deferred<unknown>();
-    client.createExpense.mockReturnValue(create.promise);
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fill();
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await waitFor(() => expect(client.createExpense).toHaveBeenCalled());
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => { create.resolve({ data: null, error: "Amount can't change on a posted expense", status: 409 }); });
-    await settle();
-    noToast2();
-  });
-});
 
 describe("R19-3: a refused start says the truth, as the component shows it", () => {
   const openCategories = () => render(<ExpenseCategoriesTab businessId="biz_A" categories={CATS.biz_A} isCurrentBusiness={always} addCategory={() => true} removeCategory={() => true} summary={null} budgets={[]} />);

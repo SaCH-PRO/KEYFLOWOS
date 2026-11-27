@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-3 repair round 18 (R17 reviews at 1eee70b).
  *
  *   R18-1 MAJOR  a write that asks first (window.confirm) checks the business again after the answer: a switch made
@@ -69,7 +72,6 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpensePipeline } from "../components/expense-pipeline";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 
@@ -207,30 +209,6 @@ describe("R18-2: the sheet, a first write landing under a silent switch", () => 
   });
 });
 
-describe("R18-3: the modal, a landed save", () => {
-  it.each(["announced", "silent"] as const)("completes its schedule for A and says nothing on B (%s switch)", async (how) => {
-    const create = deferred<unknown>();
-    client.createExpense.mockReturnValue(create.promise);
-    client.createRecurringExpense.mockResolvedValue(ok({ id: "rec_A_new" }));
-    const onSaved = vi.fn();
-    const onClose = vi.fn();
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={onClose} onSaved={onSaved} />;
-    const view = render(el("biz_A"));
-    fill();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await waitFor(() => expect(client.createExpense).toHaveBeenCalledWith("biz_A", expect.anything()));
-    ws.bid = "biz_B";
-    if (how === "announced") view.rerender(el("biz_B"));
-    await act(async () => { create.resolve(ok({ id: "exp_A_new" })); });
-    await settle();
-    expect(client.createRecurringExpense, "the expense is left without its schedule").toHaveBeenCalledWith("biz_A", expect.anything());
-    noToast2();
-    expect(onSaved).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-});
-
 describe("R18-5: the sheet's receipt upload consults the given check", () => {
   it("a given check that says no sends no upload, though the stored id is A", async () => {
     render(sheet("biz_A", { isCurrentBusiness: () => false }));
@@ -279,25 +257,4 @@ describe("R18-8: A's zone, taken when the save starts", () => {
     expect(upload?.fileName).toMatch(/-2026-11-21\.jpg$/);
   });
 
-  it("the modal's schedule is dated in A's zone after the cache holds B", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-11-20T20:00:00.000Z"));
-    ZONES.biz_A = "Asia/Tokyo";
-    const create = deferred<unknown>();
-    client.createExpense.mockReturnValue(create.promise);
-    client.createRecurringExpense.mockResolvedValue(ok({ id: "rec_A_new" }));
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fill();
-    fireEvent.change(document.querySelector('input[type="date"]')!, { target: { value: "2026-10-21" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await waitFor(() => expect(client.createExpense).toHaveBeenCalled());
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => { create.resolve(ok({ id: "exp_A_new" })); });
-    await settle();
-    const body = client.createRecurringExpense.mock.calls[0]?.[1] as { nextRunDate?: string };
-    expect(body?.nextRunDate).toBe("2026-12-21");
-  });
 });

@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-3 repair round 14 (R13 review at 246cbd4): replies for A that land on B, through the real page.
  *
  *   R14-1 MAJOR  the Add expense sheet: A's save answering (or throwing) after the switch to B, with B's own sheet
@@ -66,7 +69,6 @@ import { toast } from "sonner";
 import ExpensesInboxPage from "../page";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { renderHook } from "@testing-library/react";
 import { useExpensesData } from "../components/use-expenses-data";
@@ -259,31 +261,6 @@ describe("R14-1: the Add expense sheet across a switch", () => {
   });
 });
 
-describe("R14-1: the e2e fixture's ExpenseFormModal", () => {
-  it.each(["answers", "throws"] as const)("A's save that %s after its business is no longer shown says nothing and does not close", async (outcome) => {
-    const save = deferred<unknown>();
-    client.createExpense.mockReturnValue(save.promise);
-    const onSaved = vi.fn();
-    const onClose = vi.fn();
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={onClose} onSaved={onSaved} />;
-    const view = render(el("biz_A"));
-    fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: "A diesel" } });
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "50" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await waitFor(() => expect(client.createExpense).toHaveBeenCalled());
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => {
-      if (outcome === "answers") save.resolve(ok({ id: "exp_A_new" }));
-      else save.reject(new TypeError("Failed to fetch"));
-    });
-    await settle();
-    noToast2();
-    expect(onSaved).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-});
-
 describe("R14-1: receipt upload and extraction in the sheet and the modal, answering after the switch", () => {
   const DRIVE = "https://drive.google.com/file/d/abc/view";
   const editing = expense({ status: "PAID", receiptUrl: DRIVE });
@@ -307,63 +284,6 @@ describe("R14-1: receipt upload and extraction in the sheet and the modal, answe
     expect(toast.info).not.toHaveBeenCalled();
   });
 
-  it.each(["answers", "throws"] as const)("the modal's Extract with AI that %s says nothing on B", async (outcome) => {
-    const ex = deferred<unknown>();
-    client.extractReceipt.mockReturnValue(ex.promise);
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={editing} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fireEvent.click(extractButton());
-    await waitFor(() => expect(client.extractReceipt).toHaveBeenCalled());
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => {
-      if (outcome === "answers") ex.resolve(ok({ invoiceData: { total: 99, lineItems: [{ description: "A toner" }] }, confidence: 0.9 }));
-      else ex.reject(new TypeError("Failed to fetch"));
-    });
-    await settle();
-    noToast2();
-  });
-
-  it.each(["answers", "throws"] as const)("the modal's receipt upload that %s says nothing on B", async (outcome) => {
-    const up = deferred<unknown>();
-    upload.uploadFile.mockReturnValue(up.promise);
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } });
-    await waitFor(() => expect(upload.uploadFile).toHaveBeenCalled());
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => {
-      if (outcome === "answers") up.resolve({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj_1", metadata: {} });
-      else up.reject(new TypeError("Failed to fetch"));
-    });
-    await settle();
-    noToast2();
-  });
-});
-
-describe("R14-1: the modal's recurring save whose schedule answers after its business is no longer shown", () => {
-  it("says nothing and neither saves nor closes", async () => {
-    client.createExpense.mockResolvedValue(ok({ id: "exp_A_new" }));
-    const schedule = deferred<unknown>();
-    client.createRecurringExpense.mockReturnValue(schedule.promise);
-    const onSaved = vi.fn();
-    const onClose = vi.fn();
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={onClose} onSaved={onSaved} />;
-    const view = render(el("biz_A"));
-    fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: "A rent" } });
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "500" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await waitFor(() => expect(client.createRecurringExpense).toHaveBeenCalledWith("biz_A", expect.anything()));
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => { schedule.resolve(ok({ id: "rec_A_new" })); });
-    await settle();
-    noToast2();
-    expect(onSaved).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
 });
 
 describe("R14-2: the data hook's picker read", () => {

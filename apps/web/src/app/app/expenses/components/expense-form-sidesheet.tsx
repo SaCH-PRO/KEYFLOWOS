@@ -522,7 +522,9 @@ export function ExpenseFormSideSheet({
         toast.info("Could not extract data from receipt");
       }
     } catch (_err) {
-      if (live()) toast.error("Extraction failed");
+      // R22-2: as the reply above, a failure answering after the switch changes nothing of this sheet.
+      if (!live()) return;
+      toast.error("Extraction failed");
     }
     setExtracting(false);
   };

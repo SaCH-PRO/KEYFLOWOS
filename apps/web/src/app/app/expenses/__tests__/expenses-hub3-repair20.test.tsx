@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-3 repair round 20 (R19 reviews at 7a0cb4e).
  *
  *   R20-1  every remaining reply site judges its reply by the start check's test: under a silent switch (the stored id
@@ -68,7 +71,6 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpensePipeline } from "../components/expense-pipeline";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
 import { ExpenseList } from "../components/expense-list";
@@ -134,10 +136,6 @@ function expense(over: Partial<Expense> = {}): Expense {
     createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
   } as Expense;
 }
-function fill(description = "A rent", amount = "500") {
-  fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: description } });
-  fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: amount } });
-}
 afterEach(() => {
   ZONES.biz_A = "America/Port_of_Spain";
   vi.useRealTimers();
@@ -169,12 +167,6 @@ const list = () => render(
   />,
 );
 const BUDGET = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
-const modal = (extra: Partial<React.ComponentProps<typeof ExpenseFormModal>> = {}) => {
-  const onSaved = vi.fn();
-  const onClose = vi.fn();
-  render(<ExpenseFormModal businessId="biz_A" categories={[]} editingExpense={null} onClose={onClose} onSaved={onSaved} isCurrentBusiness={always} {...extra} />);
-  return { onSaved, onClose };
-};
 const SITES: Site[] = [
   {
     name: "pipeline Delete", call: () => client.deleteExpense,
@@ -228,41 +220,6 @@ const SITES: Site[] = [
     },
     answer: () => ok(expense({ status: "PAID" })),
   },
-  {
-    name: "the modal's refused save", call: () => client.createExpense,
-    mount: () => modal(),
-    go: async () => { fill(); fireEvent.click(screen.getByRole("button", { name: "Add Expense" })); },
-    answer: () => ({ data: null, error: "Amount can't change on a posted expense", status: 409 }),
-    outcomes: ["answers"],
-  },
-  {
-    name: "the modal's save", call: () => client.createExpense,
-    mount: () => modal(),
-    go: async () => { fill(); fireEvent.click(screen.getByRole("button", { name: "Add Expense" })); },
-    answer: () => ok({ id: "exp_A_new" }),
-  },
-  {
-    name: "the modal's schedule", call: () => client.createRecurringExpense,
-    mount: () => { client.createExpense.mockResolvedValue(ok({ id: "exp_A_new" })); return modal(); },
-    go: async () => {
-      fill();
-      fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    },
-    answer: () => ok({ id: "rec_A_new" }),
-  },
-  {
-    name: "the modal's receipt upload", call: () => upload.uploadFile,
-    mount: () => modal(),
-    go: async () => { fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } }); },
-    answer: () => ({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj_1", metadata: {} }),
-  },
-  {
-    name: "the modal's Extract with AI", call: () => client.extractReceipt,
-    mount: () => modal({ editingExpense: expense({ status: "PAID", receiptUrl: "https://drive.google.com/file/d/abc/view" }) }),
-    go: async () => { fireEvent.click(screen.getAllByRole("button").find((b) => /Extract with AI/.test(b.textContent ?? ""))!); },
-    answer: () => ok({ invoiceData: { total: 99, lineItems: [{ description: "A toner" }] }, confidence: 0.9 }),
-  },
 ];
 
 describe("R20-1: every remaining reply site, under a silent switch", () => {
@@ -288,39 +245,6 @@ describe("R20-1: every remaining reply site, under a silent switch", () => {
       });
     }
   }
-});
-
-describe("R20-2: the modal, A -> B -> A", () => {
-  it("gives an Add form: no update of A's expense with blank or new fields", async () => {
-    client.updateExpense.mockResolvedValue(ok(expense({ status: "PAID" })));
-    client.createExpense.mockResolvedValue(ok({ id: "exp_A_new" }));
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={expense({ status: "PAID" })} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await settle();
-    ws.bid = "biz_A";
-    view.rerender(el("biz_A"));
-    await settle();
-    expect(screen.queryByRole("button", { name: "Update" }), "back on A, the cleared edit came back").toBeNull();
-    fill("A new", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await settle();
-    expect(client.updateExpense).not.toHaveBeenCalled();
-  });
-});
-
-describe("R20-3: the modal's currency", () => {
-  it("follows the business it shows", async () => {
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    expect(screen.getByText(/Amount \(TTD\)/)).toBeTruthy();
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await settle();
-    expect(screen.getByText(/Amount \(USD\)/), "B's form names A's currency").toBeTruthy();
-  });
 });
 
 describe("R20-4: the recurring panel, re-rendered A -> B", () => {

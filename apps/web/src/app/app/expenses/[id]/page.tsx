@@ -95,7 +95,10 @@ export default function ExpenseDetailPage() {
   // R14-4: this page shows one business's expense. A switch (this tab's switcher, or another tab's stored id) leaves
   // for the Expenses list and stops showing it; a reply for it that lands after the switch says nothing.
   const [left, setLeft] = useState(false);
-  const isCurrentBusiness = useCallback((forBusiness: string) => getStoredBusinessId() === forBusiness, []);
+  // R22-3: and this page still shows it. Once it has left (this tab's switch), a reply is stale even if another tab
+  // stores this business again before its storage event arrives.
+  const leftRef = useRef(false);
+  const isCurrentBusiness = useCallback((forBusiness: string) => !leftRef.current && getStoredBusinessId() === forBusiness, []);
   // R19-5: replies to this page's actions are judged by the start check's test.
   const live = (forBusiness: string) => canStartFor(forBusiness, isCurrentBusiness);
   // R15-5: leaving is one step, used by the listeners and by a read that lands after the stored business moved on.
@@ -103,8 +106,7 @@ export default function ExpenseDetailPage() {
   // read effect (which depends on leave).
   const routerRef = useRef(router);
   useEffect(() => { routerRef.current = router; }, [router]);
-  // R16-2: once only. A real switch fires the listener, and the read that then lands is stale too.
-  const leftRef = useRef(false);
+  // R16-2: once only (leftRef, above). A real switch fires the listener, and the read that then lands is stale too.
   const leave = useCallback(() => {
     if (leftRef.current) return;
     leftRef.current = true;

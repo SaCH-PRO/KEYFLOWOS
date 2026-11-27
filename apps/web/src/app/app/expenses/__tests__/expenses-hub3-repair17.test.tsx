@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-3 repair round 17 (R16 reviews at 4e1ef6b): one start check on every write, and the multi-step save.
  *
  *   R17-1  a save whose first write has landed for A completes its remaining steps for A after the switch to B (no
@@ -67,7 +70,6 @@ import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
 import { ExpenseList } from "../components/expense-list";
 import { ExpensePipeline } from "../components/expense-pipeline";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 
@@ -288,21 +290,6 @@ const STARTS: Start[] = [
     name: "the sheet's receipt upload", call: () => upload.uploadFile,
     mount: () => { render(sheet("biz_A")); },
     go: async () => { fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } }); },
-  },
-  {
-    name: "the modal's save", call: () => client.createExpense,
-    mount: () => { render(<ExpenseFormModal businessId="biz_A" categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />); },
-    go: async () => { fill(); fireEvent.click(screen.getByRole("button", { name: "Add Expense" })); },
-  },
-  {
-    name: "the modal's receipt upload", call: () => upload.uploadFile,
-    mount: () => { render(<ExpenseFormModal businessId="biz_A" categories={[]} editingExpense={null} onClose={vi.fn()} onSaved={vi.fn()} />); },
-    go: async () => { fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } }); },
-  },
-  {
-    name: "the modal's Extract with AI", call: () => client.extractReceipt,
-    mount: () => { render(<ExpenseFormModal businessId="biz_A" categories={[]} editingExpense={expense({ status: "PAID", receiptUrl: "https://drive.google.com/file/d/abc/view" })} onClose={vi.fn()} onSaved={vi.fn()} />); },
-    go: async () => { fireEvent.click(screen.getAllByRole("button").find((b) => /Extract with AI/.test(b.textContent ?? ""))!); },
   },
   {
     name: "budgets save", call: () => client.upsertExpenseBudget,

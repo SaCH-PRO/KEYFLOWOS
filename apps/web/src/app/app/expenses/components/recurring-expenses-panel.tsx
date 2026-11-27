@@ -74,7 +74,10 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       // business this panel shows, which may be one other than the stored, R19-5 leaves it so.)
       if (!isCurrentBusiness(businessId)) return;
       if (res.data) setRecurring(res.data);
-    } catch {}
+    } catch {
+      // R22-1: a read that fails for a business no longer shown leaves the one shown loading: its own read is out.
+      if (!isCurrentBusiness(businessId)) return;
+    }
     setLoading(false);
   }, [businessId, isCurrentBusiness]);
 

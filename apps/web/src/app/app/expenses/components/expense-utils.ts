@@ -344,7 +344,7 @@ export const BUSINESS_UNREADABLE = "Couldn't check which business is open. Reloa
  * Two exceptions, both deliberate: an export that arrives after a switch still downloads (the owner asked for it,
  * and its file names the business it is for: expenseExportFileName); and a save whose first write has landed
  * completes its remaining steps (extra fields, schedule, Drive copy) for the same business, in that business's zone
- * taken when the save started, silently (expense-form-sidesheet.tsx, expense-form-modal.tsx), so a bill is never
+ * taken when the save started, silently (expense-form-sidesheet.tsx), so a bill is never
  * left without its schedule or a schedule without its receipt.
  */
 export function startRefusal(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): string | null {

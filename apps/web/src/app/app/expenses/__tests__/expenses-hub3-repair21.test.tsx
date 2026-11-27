@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-3 repair round 21 (R20 reviews at 1d4ab51).
  *
  *   R21-1 MAJOR  every reply site of the side sheet (the sheet the Expenses and detail pages use) judges its reply by
@@ -70,7 +73,6 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { useExpensesData } from "../components/use-expenses-data";
 import { renderHook } from "@testing-library/react";
@@ -269,61 +271,3 @@ describe("R21-3: the recurring panel, re-rendered A -> B", () => {
   });
 });
 
-describe("R21-4: the modal ends only the edit open at the switch", () => {
-  it("a fresh edit passed after the switch still updates", async () => {
-    client.updateExpense.mockResolvedValue(ok(expense({ id: "exp_B1" })));
-    const el = (b: string, editing: Expense | null) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={editing} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A", expense({ id: "exp_A1", status: "PAID" })));
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B", null));
-    await settle();
-    view.rerender(el("biz_B", expense({ id: "exp_B1", status: "PAID" })));
-    await settle();
-    expect(screen.getByRole("button", { name: "Update" }), "B's own edit is not an edit").toBeTruthy();
-    fill("B toner", "20");
-    fireEvent.click(screen.getByRole("button", { name: "Update" }));
-    await waitFor(() => expect(client.updateExpense).toHaveBeenCalledWith("biz_B", "exp_B1", expect.anything()));
-  });
-});
-
-describe("R21-4: an edit passed after the modal opened is the one the switch ends", () => {
-  it("an edit of A passed after opening, then a switch to B with it still passed, is no edit on B", async () => {
-    const el = (b: string, editing: Expense | null) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={editing} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A", null));
-    const a1 = expense({ id: "exp_A1", status: "PAID" });
-    view.rerender(el("biz_A", a1));
-    await settle();
-    expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B", a1));
-    await settle();
-    expect(screen.queryByRole("button", { name: "Update" }), "A's edit, passed after opening, is still an edit on B").toBeNull();
-    fill("B toner", "20");
-    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
-    await settle();
-    expect(client.updateExpense).not.toHaveBeenCalled();
-  });
-});
-
-describe("R21-5: the modal's Extract dropped at a switch", () => {
-  it("leaves B's Extract enabled", async () => {
-    const ex = deferred<unknown>();
-    client.extractReceipt.mockReturnValue(ex.promise);
-    const el = (b: string) => <ExpenseFormModal businessId={b} categories={[]} editingExpense={expense({ status: "PAID", receiptUrl: "https://drive.google.com/file/d/abc/view" })} onClose={vi.fn()} onSaved={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fireEvent.click(screen.getAllByRole("button").find((b) => /Extract with AI/.test(b.textContent ?? ""))!);
-    await waitFor(() => expect(client.extractReceipt).toHaveBeenCalled());
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await act(async () => { ex.resolve(ok({ invoiceData: { total: 1 }, confidence: 0.5 })); });
-    await settle();
-    upload.uploadFile.mockResolvedValue({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_B/obj_9", metadata: {} });
-    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } });
-    const extract = await waitFor(() => {
-      const b = screen.getAllByRole("button").find((x) => /Extract with AI|Extracting/.test(x.textContent ?? ""));
-      expect(b).toBeTruthy();
-      return b as HTMLButtonElement;
-    });
-    expect(extract.disabled, "B's Extract is stuck on A's").toBe(false);
-  });
-});
