@@ -721,9 +721,9 @@ function PublicBookingPageInner() {
     returnUrl?: string;
   }, opts?: { newAttempt?: boolean }): Promise<StoreOrderResponse | null> => {
     // An explicit payment retry after the provider failed is a new checkout attempt (a new order), as before.
-    // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered. Nothing
-    // on the page reaches this when it is not (the cart holds no product line and Retry is not drawn); it is kept so
-    // a later caller cannot send one by mistake. The server refuses the order itself (P233).
+    // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered.
+    // Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-05, WHS2-06, WHS2-19); kept until
+    // the server refusal (P233) is on main.
     if (storeOffered !== true) throw new Error(STORE_CHECKOUT_NOT_OFFERED);
     if (opts?.newAttempt) checkoutKeyring.reset();
     return postStorefrontCheckout(slug, payload, checkoutKeyring.keyFor(payload));

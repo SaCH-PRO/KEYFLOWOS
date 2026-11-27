@@ -68,6 +68,9 @@ export default function ProductDetailPage() {
 
   const addToCart = useCallback(
     (ci: CatalogItem, qty = 1) => {
+      // WEDGE-HIDE-STORE part 2. Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-14,
+      // WHS2-23); kept until the server refusal (P233) is on main.
+      if (!ci.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === ci.id && c.itemType === ci.itemType);
         let next: CartItem[];
@@ -84,7 +87,7 @@ export default function ProductDetailPage() {
       });
       if (business?.id) trackStoreEvent(business.id, "add_to_cart", ci.id);
     },
-    [slug, business]
+    [slug, business, storeOffered]
   );
 
   const removeFromCart = useCallback(
