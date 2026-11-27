@@ -46,23 +46,23 @@
 
 | Leak Class | Definition | Stores Exercised | Active Proof in `memory-eval-leak.integration.test.ts` |
 |---|---|---|---|
-| **`E-TEN`** | Cross-tenant isolation: Tenant A readers never receive Tenant B rows | All 10 stores (`AiMemory`, `AiMemoryEmbedding`, `TemporalFlowMemory`, `CognitionMemory`, `KeyCortexMemory`, `GenomeMemoryEvent`, `CognitiveEvent`, `BusinessEvent`, `AiExecutionLog`, `CortexActionLog`) | Test `1. E-TEN` (20+ service readers including pgvector raw SQL, unified retrieval, temporal, salience, genome, cognitive bus, ethics, audit) |
-| **`E-REV-DIRECT`** | Direct revenue leak: `revenue:none` staff never receive `REVENUE` rows or monetary figures; `OWNER` does | `AiMemory` (facts/patterns/suggestions), `AiMemoryEmbedding`, `TemporalFlowMemory`, `BusinessEvent`, `KeyCortexMemory` (`reflection_session`) | Test `2. E-REV-DIRECT` |
-| **`E-REV-INDIRECT`** | Indirect/derived revenue leak: zero-keyword `REVENUE` facts, VIP cohorts, patterns, suggestions withheld from `revenue:none` staff | `AiMemory` (facts/patterns/suggestions), `AiMemoryEmbedding`, `TemporalFlowMemory`, `UnifiedMemoryRetrievalService`, `KeyCortexContextV2Service` | Test `3. E-REV-INDIRECT` |
-| **`E-MEMBERLESS`** | No-actor / background (`reader: null`) and foreign-tenant non-member callers fail closed | `AiMemory`, `TemporalFlowMemory`, `UnifiedMemoryRetrievalService`, `CognitionMemory`, `CortexActionLog`, `AiExecutionLog`, `AgentController.getDetectedPatterns`, `readersOwnCognitionMemory` | Test `4. E-MEMBERLESS` |
-| **`E-UNCLASS`** | `UNCLASSIFIED`, unrecognized `dataClass`, invalid `moduleScope`, legacy NULL document embeddings, and `SECRET_BEARING` fail closed | `AiMemory`, `AiMemoryEmbedding` (pgvector raw SQL), `KnowledgeSource` | Test `5. E-UNCLASS` |
-| **`E-MEMBER`** | D-130 member cognition & personal rows strictly bound to `ownerUserId === actor.id` (even `OWNER` cannot read staff private cognition) | `CognitionMemory`, `KeyCortexMemory`, `CortexActionLog`, `AiExecutionLog`, `RoleEngineService`, `KeyCortexEndocrineService`, `KeyCortexImmuneService` | Test `6. E-MEMBER` |
+| **`E-TEN`** | Cross-tenant isolation: Tenant A readers never receive Tenant B rows | 9 stores actively (`AiMemory`, `AiMemoryEmbedding`, `TemporalFlowMemory`, `CognitionMemory`, `KeyCortexMemory`, `GenomeMemoryEvent`, `CognitiveEvent`, `BusinessEvent`, `AiExecutionLog`); `CortexActionLog` `E-TEN` (`KeyCortexActionsService.getActionHistory`, `tenantPredicate: no`) tracked via `it.todo #5` | Tests `1. E-TEN` & `7. Complete projected reader coverage` (39 runtime-verified fixed projected read symbols including pgvector raw SQL, unified retrieval, temporal, salience, endocrine, immune, creativity, weekly reflection, genome governance, execution log paging, ethics, audit) |
+| **`E-REV-DIRECT`** | Direct revenue leak: `revenue:none` staff never receive `REVENUE` rows or monetary figures; `OWNER` does | `AiMemory` (facts/patterns/suggestions), `AiMemoryEmbedding`, `TemporalFlowMemory`, `BusinessEvent`, `KeyCortexMemory` (`reflection_session`, `weak_signal`, `endocrine_state`), `GenomeMemoryEvent`, `AiExecutionLog` | Tests `2. E-REV-DIRECT` & `7. Complete projected reader coverage` |
+| **`E-REV-INDIRECT`** | Indirect/derived revenue leak: zero-keyword `REVENUE` facts, VIP cohorts, patterns, suggestions withheld from `revenue:none` staff | `AiMemory` (facts/patterns/suggestions), `AiMemoryEmbedding`, `TemporalFlowMemory`, `UnifiedMemoryRetrievalService`, `KeyCortexContextV2Service`, `KeyCortexSalienceService.describeForPrompt` | Tests `3. E-REV-INDIRECT` & `7. Complete projected reader coverage` |
+| **`E-MEMBERLESS`** | No-actor / background (`reader: null`) and foreign-tenant non-member callers fail closed | `AiMemory`, `TemporalFlowMemory`, `UnifiedMemoryRetrievalService`, `CognitionMemory`, `CortexActionLog`, `AiExecutionLog`, `AgentController.getDetectedPatterns`, `AiController.servedExecutionLogPage`, `readersOwnCognitionMemory` | Tests `4. E-MEMBERLESS` & `7. Complete projected reader coverage` |
+| **`E-UNCLASS`** | `UNCLASSIFIED`, unrecognized `dataClass`, invalid `moduleScope`, legacy NULL document embeddings, and `SECRET_BEARING` fail closed | `AiMemory`, `AiMemoryEmbedding` (pgvector raw SQL), `KeyCortexMemory` (`immune_incident`), `KnowledgeSource` | Tests `5. E-UNCLASS` & `7. Complete projected reader coverage` |
+| **`E-MEMBER`** | D-130 member cognition & personal rows strictly bound to `ownerUserId === actor.id` (even `OWNER` cannot read staff private cognition) | `CognitionMemory`, `KeyCortexMemory`, `CortexActionLog`, `AiExecutionLog`, `RoleEngineService`, `KeyCortexCreativityService` | Tests `6. E-MEMBER` & `7. Complete projected reader coverage` |
 
 ### 3.2 `MEM-CENSUS` Registry Coverage Accounting (Base `a9bd4b30`)
 
-Verified programmatically in Test `0. MEM-CENSUS registry coverage` against `apps/server/src/modules/key-cortex/memory-path-registry.ts`:
+Verified programmatically in Test `0. MEM-CENSUS registry coverage` and enforced at runtime by Test `8. Runtime coverage proof` against `apps/server/src/modules/key-cortex/memory-path-registry.ts`:
 
 | Registry Partition | Count | Disposition |
 |---|---:|---|
-| Total `MEMORY_STORE_PATHS` entries | **186** | 100% accounted for (0 silently uncovered) |
-| Read paths (`kind === 'read'`) | **122** | 63 projected read entries across 42 unique symbols actively covered; 56 `system-internal` reads tenant-verified; 3 `unprojected` reads tracked as named `it.todo` |
+| Total `MEMORY_STORE_PATHS` entries | **186** | 100% accounted for (0 silently uncovered, 0 double-claimed) |
+| Read paths (`kind === 'read'`) | **122** | 60 fixed projected read entries across **39 unique symbols** actively invoked at runtime (enforced by Test 8); 55 `system-internal` reads tenant-verified; 7 unfixed reads tracked as named `it.todo` (`3` `unprojected` + `3` projected with `tenantPredicate: no` + `1` `system-internal` with `tenantPredicate: no`) |
 | Write paths (`kind === 'write'`) | **64** | 63 tenant-scoped (`yes` / `ambient-only`); 1 unscoped write tracked as named `it.todo` |
-| Unfixed paths (`tenantPredicate === 'no'` or `projection === 'unprojected'`) | **8** | 8 explicit named `it.todo` entries below citing owning follow-up packet ids |
+| Unfixed paths (`tenantPredicate === 'no'` or `projection === 'unprojected'`) | **8** | 8 explicit named `it.todo` entries below citing owning follow-up packet ids (zero overlap with active runtime-enforced symbol set) |
 | `DORMANT_MEMORY_PATHS` | **7** | All 7 cite owning follow-up packets (`MEM-CLASS-COLUMNS`, `D-130`, `D-257`) |
 
 ### 3.3 Explicit Named `it.todo` Ledger (Unfixed Registry Paths)
