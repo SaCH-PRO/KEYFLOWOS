@@ -629,7 +629,7 @@ export class AiUsageService {
     const [logs, total] = await Promise.all([
       this.prisma.client.aiUsageLog.findMany({
         where: { businessId },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         skip: offset,
         select: {

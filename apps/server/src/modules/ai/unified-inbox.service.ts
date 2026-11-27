@@ -184,7 +184,7 @@ export class UnifiedInboxService {
     const [threads, total] = await Promise.all([
       this.prisma.client.keyInboxThread.findMany({
         where,
-        orderBy: { lastMessageAt: 'desc' },
+        orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
         take: filters?.limit ?? 50,
         skip: filters?.offset ?? 0,
         include: {

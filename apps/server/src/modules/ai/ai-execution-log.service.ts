@@ -134,7 +134,7 @@ export class AiExecutionLogService {
     const [rawLogs, rawTotal] = await Promise.all([
       this.prisma.client.aiExecutionLog.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: activeScoped ? Math.min(limit + offset + 100, 500) : limit,
         skip: activeScoped ? 0 : offset,
       }),

@@ -27,6 +27,17 @@ export interface PayRateInput {
 export interface PayrollRunFilters {
   status?: string;
   limit?: number;
+  /** P235 (D-310 / D-100): explicit money visibility override; omit with viewerUserId to resolve, or fails closed (false). */
+  includeMoney?: boolean;
+  /** P235 (D-310 / D-100): server-verified viewer userId used to resolve revenue:read when includeMoney is omitted. */
+  viewerUserId?: string | null;
+}
+
+export interface PayrollMoneyReadOptions {
+  /** P235 (D-310 / D-100): explicit money visibility override; omit with viewerUserId to resolve, or fails closed (false). */
+  includeMoney?: boolean;
+  /** P235 (D-310 / D-100): server-verified viewer userId used to resolve revenue:read when includeMoney is omitted. */
+  viewerUserId?: string | null;
 }
 
 /**
@@ -43,6 +54,8 @@ export interface MarkRunPaidInput {
   paymentMethod?: string | null;
   actorId?: string | null;
   initiatedBy?: string | null;
+  /** P235 (D-310 / D-100): false withholds totalGross from the HTTP response. */
+  includeMoney?: boolean;
 }
 
 /**
@@ -54,6 +67,8 @@ export interface MarkRunPaidInput {
 export interface DiscardRunInput {
   reason?: unknown;
   actorId?: string | null;
+  /** P235 (D-310 / D-100): false withholds totalGross from the HTTP response. */
+  includeMoney?: boolean;
 }
 
 /** The currency a business with none recorded keeps (the column default; CashPositionService reads it so too). */
@@ -62,6 +77,45 @@ const DEFAULT_BUSINESS_CURRENCY = 'TTD';
 /** The FinancialAccount types money can leave by, and the chart rows they keep cash in (V1-34). */
 const DISBURSEMENT_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 const CASH_CLASS_SYSTEM_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
+
+/**
+ * P235 (FU-PAYROLL-IS-MONEY, D-310 / D-100 / D-140): whether `actorUserId`
+ * may read payroll money figures in `businessId`. Evaluates canonical
+ * `memberModuleLevel(membership, 'revenue')` for every role including
+ * explicit-scope OWNERs (D-140); short-circuits system actors and fails
+ * closed (false) when actor or membership is absent.
+ *
+ * Exported as a standalone helper (like `resolveTimelineViewer`) rather than a
+ * governed `PayrollService` method so static route-to-tool authority derivation
+ * (`job-role-tool-families.spec.ts`) keeps ungoverned tools strictly ungoverned.
+ */
+export async function canReadPayrollMoney(
+  prisma: PrismaService,
+  businessId: string,
+  actorUserId?: string | null,
+): Promise<boolean> {
+  if (!actorUserId || typeof actorUserId !== 'string') return false;
+  const uid = actorUserId.trim();
+  if (!uid || uid === KEY_SYSTEM_ACTOR_ID) return false;
+  const user = await prisma.client.user.findUnique({ where: { id: uid }, select: { role: true } });
+  if (user?.role === 'SUPER_ADMIN') return true;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: uid, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return false;
+  return rankOf(memberModuleLevel(membership, 'revenue')) >= LEVEL_RANK.read;
+}
+
+export interface PayrollRateRow<TAmount extends number | null = number | null> {
+  id: string;
+  assignmentId: string;
+  staffName: string;
+  amount: TAmount;
+  currency: string;
+  periodType: string;
+  effectiveFrom: Date;
+}
 
 /**
  * Payroll MVP: rates per staff position (OrgAssignment) + pay runs
@@ -80,6 +134,12 @@ export class PayrollService {
     // than paying a run with no books.
     @Optional() @Inject(ExpensePostingService) private readonly expensePosting?: ExpensePostingService | null,
   ) {}
+
+  private async resolveIncludeMoney(businessId: string, opts?: PayrollMoneyReadOptions): Promise<boolean> {
+    if (typeof opts?.includeMoney === 'boolean') return opts.includeMoney;
+    if (opts?.viewerUserId) return canReadPayrollMoney(this.prisma, businessId, opts.viewerUserId);
+    return false;
+  }
 
   // ── Rates ──────────────────────────────────────────────────────────────
 
@@ -107,7 +167,10 @@ export class PayrollService {
   }
 
   /** Latest effective rate per assignment. */
-  async listRates(businessId: string) {
+  async listRates(businessId: string, opts: { includeMoney: true }): Promise<PayrollRateRow<number>[]>;
+  async listRates(businessId: string, opts?: PayrollMoneyReadOptions): Promise<PayrollRateRow<number | null>[]>;
+  async listRates(businessId: string, opts: PayrollMoneyReadOptions = {}): Promise<PayrollRateRow<number | null>[]> {
+    const includeMoney = await this.resolveIncludeMoney(businessId, opts);
     const rates = await this.prisma.client.payRate.findMany({
       where: { businessId },
       orderBy: { effectiveFrom: 'desc' },
@@ -121,7 +184,7 @@ export class PayrollService {
       id: r.id,
       assignmentId: r.assignmentId,
       staffName: this.assignmentName(r.assignment),
-      amount: Number(r.amount),
+      amount: includeMoney ? Number(r.amount) : null,
       currency: r.currency,
       periodType: r.periodType,
       effectiveFrom: r.effectiveFrom,
@@ -157,7 +220,7 @@ export class PayrollService {
       throw new BadRequestException(`A payroll run already overlaps this period (${overlap.id}, status ${overlap.status})`);
     }
 
-    const rates = await this.listRates(businessId);
+    const rates = await this.listRates(businessId, { includeMoney: true });
     if (rates.length === 0) {
       throw new BadRequestException('No pay rates configured — set staff rates first (payroll_set_rate)');
     }
@@ -242,6 +305,7 @@ export class PayrollService {
   // ── Runs ───────────────────────────────────────────────────────────────
 
   async listRuns(businessId: string, filters: PayrollRunFilters = {}) {
+    const includeMoney = await this.resolveIncludeMoney(businessId, filters);
     const runs = await this.prisma.client.payrollRun.findMany({
       where: { businessId, ...(filters.status ? { status: filters.status } : {}) },
       orderBy: { periodEnd: 'desc' },
@@ -252,13 +316,14 @@ export class PayrollService {
       periodStart: r.periodStart,
       periodEnd: r.periodEnd,
       status: r.status,
-      totalGross: Number(r.totalGross),
+      totalGross: includeMoney ? Number(r.totalGross) : null,
       currency: r.currency,
       itemCount: r.itemCount,
     }));
   }
 
-  async getRun(businessId: string, runId: string) {
+  async getRun(businessId: string, runId: string, opts: PayrollMoneyReadOptions = {}) {
+    const includeMoney = await this.resolveIncludeMoney(businessId, opts);
     const run = await this.prisma.client.payrollRun.findFirst({
       where: { id: runId, businessId },
       include: { items: { include: { assignment: true } } },
@@ -266,22 +331,26 @@ export class PayrollService {
     if (!run) throw new NotFoundException('Payroll run not found');
     return {
       ...run,
-      totalGross: Number(run.totalGross),
+      totalGross: includeMoney ? Number(run.totalGross) : null,
       items: run.items.map((i) => ({
         id: i.id,
         assignmentId: i.assignmentId,
         staffName: this.assignmentName(i.assignment),
         hoursWorked: i.hoursWorked === null ? null : Number(i.hoursWorked),
-        grossPay: Number(i.grossPay),
+        grossPay: includeMoney ? Number(i.grossPay) : null,
         currency: i.currency,
-        notes: i.notes,
+        notes: includeMoney ? i.notes : null,
       })),
     };
   }
 
   // ── Tier-3 transitions ─────────────────────────────────────────────────
 
-  async approveRun(businessId: string, runId: string, userId?: string) {
+  async approveRun(businessId: string, runId: string, userId?: string, opts: PayrollMoneyReadOptions = {}) {
+    const includeMoney = await this.resolveIncludeMoney(businessId, {
+      includeMoney: opts.includeMoney,
+      viewerUserId: opts.viewerUserId !== undefined ? opts.viewerUserId : userId ?? null,
+    });
     const approved = await this.prisma.client.$transaction(async (tx) => {
       const run = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
       if (!run) throw new NotFoundException('Payroll run not found');
@@ -300,7 +369,7 @@ export class PayrollService {
       return updated;
     });
     invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
-    return approved;
+    return includeMoney ? approved : { ...approved, totalGross: null };
   }
 
   /**
@@ -394,7 +463,25 @@ export class PayrollService {
       return run;
     });
     invalidateBusinessFinancialSnapshotCache(businessId);
-    return paid;
+    let includeMoney: boolean;
+    if (typeof input.includeMoney === 'boolean') {
+      includeMoney = input.includeMoney;
+    } else {
+      const people = [...new Set(
+        [input.actorId, input.initiatedBy]
+          .map((s) => (typeof s === 'string' ? s.trim() : ''))
+          .filter((id) => id.length > 0 && id !== KEY_SYSTEM_ACTOR_ID),
+      )];
+      if (people.length === 0) {
+        includeMoney = false;
+      } else {
+        const checks = await Promise.all(
+          people.map((personId) => canReadPayrollMoney(this.prisma, businessId, personId)),
+        );
+        includeMoney = checks.every(Boolean);
+      }
+    }
+    return includeMoney ? paid : { ...paid, totalGross: null };
   }
 
   /**
@@ -516,10 +603,14 @@ export class PayrollService {
         },
       });
 
+      const includeMoney =
+        typeof input.includeMoney === 'boolean'
+          ? input.includeMoney
+          : user?.role === 'SUPER_ADMIN' || rankOf(memberModuleLevel(membership, 'revenue')) >= LEVEL_RANK.read;
       const updated = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
       return {
         ...(updated ?? { ...run, status: 'VOID', notes: updatedNotes }),
-        totalGross: Number((updated ?? run).totalGross),
+        totalGross: includeMoney ? Number((updated ?? run).totalGross) : null,
         discardedById: actorId,
         discardReason: reason,
         discardedAt: discardedAt.toISOString(),

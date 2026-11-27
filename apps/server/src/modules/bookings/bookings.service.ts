@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { contactWhereWithId } from '../crm/crm.helpers';
+import { contactPhoneForStorage, phoneKeyReadsAs } from '../crm/crm-data-quality.util';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { CommerceService } from '../commerce/commerce.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
@@ -38,6 +39,7 @@ import {
   toCents,
 } from './booking-payment-status.listener';
 import { CANCEL_INITIATORS, CancelInitiator } from './dto/update-booking-status.dto';
+import { MAX_PUBLIC_RELEASE_BOOKING_IDS } from './dto/public-create-booking.dto';
 import {
   PAYMENT_METHOD_NOT_OFFERED,
   STOREFRONT_CHECKOUT_METHODS,
@@ -57,7 +59,7 @@ import {
   DEFAULT_BUSINESS_OPEN_MIN,
   PUBLIC_SLOT_INTERVAL_MINS,
   isOnSlotGrid,
-  readBusinessDayHours,
+  readBusinessDateWindows,
 } from './business-hours.util';
 
 /** V1-64: the provider names a refused public booking's message uses. */
@@ -114,7 +116,11 @@ type SlotParams = {
   end: Date;
   bufferMins?: number | null;
   excludeBookingId?: string;
+  excludeBookingIds?: string[];
 };
+
+const RELEASABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['DRAFT', 'VOID']);
+const BLOCKING_PAYMENT_STATUSES: ReadonlySet<string> = new Set(['SUCCESSFUL', 'COMPLETED', 'PAID', 'PENDING']);
 
 /** Minutes in a day on the business's clock: the picker's candidate starts stay below it. */
 const MINUTES_PER_DAY = 1440;
@@ -1220,7 +1226,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // now does too: the whole buffer on the business's hours, none on a staff
     // member's own. The picker fitted the appointment alone, so it offered a
     // start whose buffer ran past closing that every write path then refused.
-    let windows: Array<{ openMin: number; closeMin: number; bufferMins: number }> = [];
+    let windows: Array<{ openMin: number; closeMin: number; gridAnchorMin: number; bufferMins: number }> = [];
     if (staffId) {
       const availability = await this.prisma.client.availability.findMany({
         where: { staffId, staff: { businessId, deletedAt: null } },
@@ -1231,7 +1237,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           .map((a) => {
             const [sh, sm] = a.startTime.split(':').map(Number);
             const [eh, em] = a.endTime.split(':').map(Number);
-            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em, bufferMins: 0 };
+            const openMin = sh * 60 + sm;
+            return { openMin, closeMin: eh * 60 + em, gridAnchorMin: openMin, bufferMins: 0 };
           });
         // Configured, but not for this day: the staff member does not work today.
         if (windows.length === 0) return { date, slots: [] };
@@ -1239,17 +1246,35 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (windows.length === 0) {
-      const dayHours = readBusinessDayHours(business?.businessHours, weekday);
-      if (dayHours?.closed) {
+      const schedule = readBusinessDateWindows(business?.businessHours, weekday);
+      if (schedule.status === 'closed') {
         return { date, slots: [] };
       }
       // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
       const bufferMins = Math.max(0, service.bufferMins ?? 0);
-      windows = [
-        dayHours
-          ? { openMin: dayHours.openMin, closeMin: dayHours.closeMin, bufferMins }
-          : { openMin: DEFAULT_BUSINESS_OPEN_MIN, closeMin: DEFAULT_BUSINESS_CLOSE_MIN, bufferMins },
-      ];
+      if (schedule.status === 'open') {
+        windows = schedule.windows.map((w) => ({
+          openMin: w.openMin,
+          closeMin: w.closeMin,
+          gridAnchorMin: w.gridAnchorMin,
+          bufferMins,
+        }));
+      } else {
+        windows = [
+          ...schedule.windows.map((w) => ({
+            openMin: w.openMin,
+            closeMin: w.closeMin,
+            gridAnchorMin: w.gridAnchorMin,
+            bufferMins,
+          })),
+          {
+            openMin: DEFAULT_BUSINESS_OPEN_MIN,
+            closeMin: DEFAULT_BUSINESS_CLOSE_MIN,
+            gridAnchorMin: DEFAULT_BUSINESS_OPEN_MIN,
+            bufferMins,
+          },
+        ];
+      }
     }
 
     const earliest = service.leadTimeMins && service.leadTimeMins > 0
@@ -1257,6 +1282,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       : new Date();
 
     const slots: string[] = [];
+    const seen = new Set<string>();
     for (const w of windows) {
       // W10-BOOKING-BUFFER review repair (SEC-W10BB-1): the candidate starts are
       // this day's, 00:00 to 23:59, whatever the service row holds. With no
@@ -1264,14 +1290,21 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       // buffer was floored at zero, a negative buffer) walked starts far past
       // midnight and blocked the event loop of the public slots route and KEY
       // get_availability; none of them is a time on this day, so none was offered.
+      // P229 (D-311): align firstM to w.gridAnchorMin so overnight spillover
+      // preserves offset shift grids across midnight (e.g. 18:15 -> 00:15, 00:45).
+      const floorMin = Math.max(0, w.openMin);
+      const offsetFromAnchor = (((w.gridAnchorMin - floorMin) % interval) + interval) % interval;
+      const firstM = floorMin + offsetFromAnchor;
       for (
-        let m = Math.max(0, w.openMin);
+        let m = firstM;
         m < MINUTES_PER_DAY && m + service.duration + w.bufferMins <= w.closeMin;
         m += interval
       ) {
         const start = zonedInstant(year, month, dayOfMonth, m, zone);
         // A time the clocks skip that day (DST) is not a time anyone can book.
         if (wallClock(start, zone).minutes !== m) continue;
+        const iso = start.toISOString();
+        if (seen.has(iso)) continue;
         const end = new Date(start.getTime() + service.duration * 60000);
         if (start < earliest) continue;
 
@@ -1286,13 +1319,15 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
             end,
             bufferMins: service.bufferMins,
           });
-          slots.push(start.toISOString());
+          seen.add(iso);
+          slots.push(iso);
         } catch {
           // taken — omit it
         }
       }
     }
 
+    slots.sort();
     return { date, slots };
   }
 
@@ -1312,6 +1347,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const bufferMins = Math.max(0, params.bufferMins ?? 0);
     const bufferMs = bufferMins * 60000;
 
+    const excludedIds = [
+      ...(params.excludeBookingId ? [params.excludeBookingId] : []),
+      ...(params.excludeBookingIds ?? []),
+    ];
+
     const clash = await db.booking.findFirst({
       where: {
         businessId: params.businessId,
@@ -1319,7 +1359,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         deletedAt: null,
         startTime: { lt: new Date(params.end.getTime() + bufferMs) },
         endTime: { gt: new Date(params.start.getTime() - bufferMs) },
-        ...(params.excludeBookingId ? { id: { not: params.excludeBookingId } } : {}),
+        ...(excludedIds.length === 1
+          ? { id: { not: excludedIds[0] } }
+          : excludedIds.length > 1
+            ? { id: { notIn: excludedIds } }
+            : {}),
         // Without a staff member the service itself is the resource being
         // consumed; with one, that person is.
         ...(params.staffId ? { staffId: params.staffId } : { serviceId: params.serviceId }),
@@ -1349,10 +1393,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * transaction and writes, so the second of two claims sees the first. No
    * migration and no constraint: the table already holds overlapping rows.
    */
-  private claimSlot<T>(slot: SlotParams, write: (tx: PrismaTx) => Promise<T>): Promise<T> {
+  private claimSlot<T>(
+    slot: SlotParams,
+    write: (tx: PrismaTx) => Promise<T>,
+    beforeCheck?: (tx: PrismaTx) => Promise<void>,
+  ): Promise<T> {
     const key = `${SLOT_LOCK_NAMESPACE}${slot.businessId}:${slot.staffId || slot.serviceId}`;
     return this.prisma.client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      if (beforeCheck) {
+        await beforeCheck(tx);
+      }
       await this.assertSlotFree(slot, tx);
       return write(tx);
     }, SLOT_CLAIM_TX_OPTIONS);
@@ -1552,24 +1603,42 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const dayHours = readBusinessDayHours(params.hours, startClock.weekday);
-    if (!dayHours) {
-      if (params.enforceSlotGrid && !isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN)) {
-        throw new BadRequestException(
-          `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
+    const schedule = readBusinessDateWindows(params.hours, startClock.weekday);
+    // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
+    const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
+    if (schedule.status === 'unconfigured') {
+      if (params.enforceSlotGrid) {
+        const coveringSpillover = schedule.windows.filter(
+          (w) => startMinsOfDay >= w.openMin && endMins <= w.closeMin,
         );
+        const withinDefaultWindow =
+          startMinsOfDay >= DEFAULT_BUSINESS_OPEN_MIN && endMins <= DEFAULT_BUSINESS_CLOSE_MIN;
+        const onGrid =
+          coveringSpillover.length > 0
+            ? coveringSpillover.some((w) => isOnSlotGrid(start, startMinsOfDay, w.gridAnchorMin)) ||
+              (withinDefaultWindow && isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN))
+            : isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN);
+        if (!onGrid) {
+          throw new BadRequestException(
+            `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
+          );
+        }
       }
       return;
     }
-    if (dayHours.closed) {
+    if (schedule.status === 'closed') {
       throw new BadRequestException('This business is closed on the selected day.');
     }
-    // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
-    const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
-    if (startMinsOfDay < dayHours.openMin || endMins > dayHours.closeMin) {
+    const coveringWindows = schedule.windows.filter(
+      (w) => startMinsOfDay >= w.openMin && endMins <= w.closeMin,
+    );
+    if (coveringWindows.length === 0) {
       throw new BadRequestException('The selected time is outside business hours.');
     }
-    if (params.enforceSlotGrid && !isOnSlotGrid(start, startMinsOfDay, dayHours.openMin)) {
+    if (
+      params.enforceSlotGrid &&
+      !coveringWindows.some((w) => isOnSlotGrid(start, startMinsOfDay, w.gridAnchorMin))
+    ) {
       throw new BadRequestException(
         `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
       );
@@ -1664,19 +1733,25 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!hasStaffSchedule) {
-      const dayHours = readBusinessDayHours(business?.businessHours, startClock.weekday);
-      if (dayHours?.closed) {
+      const schedule = readBusinessDateWindows(business?.businessHours, startClock.weekday);
+      if (schedule.status === 'closed') {
         throw new BadRequestException('The business is closed on this day.');
       }
-      if (dayHours) {
+      if (schedule.status === 'open') {
         // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
         // both create paths (assertWithinSchedule) and the picker read it; a
         // staff member's own hours above are read without it, as there. A
         // negative buffer counts as none (SEC-W10BB-1).
         const bookingEndMin = endMinsOfDay + Math.max(0, service?.bufferMins ?? 0);
-        if (startMinsOfDay < dayHours.openMin || bookingEndMin > dayHours.closeMin) {
+        const withinAny = schedule.windows.some(
+          (w) => startMinsOfDay >= w.openMin && bookingEndMin <= w.closeMin,
+        );
+        if (!withinAny) {
+          const summary = schedule.windows
+            .map((w) => (w.spillover ? `00:00 – ${w.close}` : `${w.open} – ${w.close}`))
+            .join(', ');
           throw new BadRequestException(
-            `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
+            `The selected time is outside business hours (${summary}).`,
           );
         }
       }
@@ -2041,6 +2116,243 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * V1-92 / P228 (FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK): deduplicate and bound
+   * candidate prior booking IDs passed by a public checkout retry/rebook.
+   */
+  private collectReleaseBookingIds(
+    replaceBookingId?: string | null,
+    releaseBookingIds?: string[] | null,
+  ): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (raw: string | null | undefined) => {
+      if (typeof raw !== 'string') return;
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.length > 200 || seen.has(trimmed) || out.length >= MAX_PUBLIC_RELEASE_BOOKING_IDS) return;
+      seen.add(trimmed);
+      out.push(trimmed);
+    };
+    push(replaceBookingId);
+    if (Array.isArray(releaseBookingIds)) {
+      for (const id of releaseBookingIds) push(id);
+    }
+    return out;
+  }
+
+  /**
+   * Fail-closed payment/settlement guard (R1-SEC-02, CR-P228-4): only an
+   * unpaid PENDING booking whose attached invoices (if any) are DRAFT or VOID,
+   * carry zero settled or pending own-tenant payments, and carry zero APPLIED
+   * credit notes may be released on rebook.
+   */
+  private isBookingUnpaidAndReleasable(row: {
+    status: BookingStatus;
+    paymentStatus: string | null;
+    deletedAt: Date | null;
+    invoice: { id: string; status: string; payments: Array<{ status: string }>; creditNotes: Array<{ amount: unknown }> } | null;
+    depositInvoice: { id: string; status: string; payments: Array<{ status: string }>; creditNotes: Array<{ amount: unknown }> } | null;
+  }): boolean {
+    if (row.deletedAt !== null) return false;
+    if (row.status !== 'PENDING') return false;
+    if (row.paymentStatus !== 'UNPAID') return false;
+    for (const inv of [row.invoice, row.depositInvoice]) {
+      if (!inv) continue;
+      if (!RELEASABLE_INVOICE_STATUSES.has(inv.status)) return false;
+      if (inv.payments.some((p) => BLOCKING_PAYMENT_STATUSES.has(p.status))) return false;
+      if (inv.creditNotes.length > 0) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Unified customer-identity verification shared by pre-check and `beforeCheck(tx)`
+   * (R1-SEC-03, CR-P228-1):
+   * - Never allows phone-fallback to cancel a booking whose stored email
+   *   contradicts the caller's normalized email.
+   * - Matches case-insensitive email, or falls back to E.164 phone comparison
+   *   (under `businessCountry`) when either side has no email.
+   */
+  private contactMatchesRebookCaller(
+    stored: { email?: string | null; phone?: string | null; phoneNormalized?: string | null } | null,
+    caller: { email?: string | null; phone?: string | null },
+    businessCountry?: string | null,
+  ): boolean {
+    if (!stored) return false;
+    const callerEmail = caller.email?.trim().toLowerCase() || null;
+    const storedEmail = stored.email?.trim().toLowerCase() || null;
+    if (storedEmail && callerEmail && storedEmail !== callerEmail) return false;
+    if (storedEmail && callerEmail && storedEmail === callerEmail) return true;
+    const callerPhone = caller.phone?.trim() || null;
+    if (!callerPhone) return false;
+    const parsedCaller = contactPhoneForStorage(callerPhone, businessCountry);
+    const storedKeys = [stored.phoneNormalized, stored.phone].filter((v): v is string => !!v?.trim());
+    if (parsedCaller.e164) {
+      return storedKeys.some((k) => phoneKeyReadsAs(k, parsedCaller.e164!, businessCountry));
+    }
+    return storedKeys.some((k) => k.trim() === callerPhone);
+  }
+
+  /**
+   * Read-only pre-check for early `assertSlotFree` so a customer retrying their
+   * own slot is not blocked by their own unpaid PENDING hold. Authoritative
+   * locking, re-verification, cancellation, and DRAFT invoice withdrawal run
+   * atomically inside `claimSlot`.
+   */
+  private async findPreCheckReleasableBookingIds(
+    businessId: string,
+    candidateIds: string[],
+    contactInput: { email?: string | null; phone?: string | null },
+    businessCountry?: string | null,
+  ): Promise<string[]> {
+    if (candidateIds.length === 0) return [];
+    const invSelect = settlementInvoiceSelect(businessId);
+    const rows = await this.prisma.client.booking.findMany({
+      where: {
+        id: { in: candidateIds },
+        businessId,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        deletedAt: null,
+      },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        deletedAt: true,
+        contact: { select: { email: true, phone: true, phoneNormalized: true } },
+        invoice: { select: invSelect },
+        depositInvoice: { select: invSelect },
+      },
+    });
+    return rows
+      .filter(
+        (row) =>
+          this.isBookingUnpaidAndReleasable(row) &&
+          this.contactMatchesRebookCaller(row.contact, contactInput, businessCountry),
+      )
+      .map((row) => row.id);
+  }
+
+  /**
+   * Authoritative in-transaction P228 hold release (R1-SEC-01, CR-P228-2):
+   * locks linked invoices `FOR UPDATE` first (canonical `invoices -> bookings`
+   * order matching `bookings.service.ts:1004`), locks candidate bookings
+   * `FOR NO KEY UPDATE`, re-reads status/payments/creditNotes/contact under
+   * those locks, cancels verified unpaid PENDING holds, and soft-deletes their
+   * DRAFT invoices inside the same `claimSlot` transaction so any slot conflict
+   * rolls back both booking cancellation and invoice withdrawal atomically.
+   */
+  private async releaseRebookHoldsInTx(
+    tx: PrismaTx,
+    params: {
+      businessId: string;
+      contactId: string;
+      candidateIds: string[];
+      callerContact: { email?: string | null; phone?: string | null };
+      businessCountry?: string | null;
+    },
+  ): Promise<void> {
+    if (params.candidateIds.length === 0) return;
+
+    const initial = await tx.booking.findMany({
+      where: {
+        id: { in: params.candidateIds },
+        businessId: params.businessId,
+        contactId: params.contactId,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        deletedAt: null,
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true, invoiceId: true, depositInvoiceId: true },
+    });
+    if (initial.length === 0) return;
+
+    const sortedBookingIds = initial.map((r) => r.id).sort();
+    const sortedInvoiceIds = [
+      ...new Set(
+        initial
+          .flatMap((r) => [r.invoiceId, r.depositInvoiceId])
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ].sort();
+
+    if (sortedInvoiceIds.length > 0) {
+      await tx.$queryRaw`
+        SELECT id FROM invoices
+        WHERE business_id = ${params.businessId} AND id IN (${Prisma.join(sortedInvoiceIds)})
+        ORDER BY id ASC
+        FOR UPDATE
+      `;
+    }
+    await tx.$queryRaw`
+      SELECT id FROM bookings
+      WHERE business_id = ${params.businessId} AND id IN (${Prisma.join(sortedBookingIds)})
+      ORDER BY id ASC
+      FOR NO KEY UPDATE
+    `;
+
+    const invSelect = settlementInvoiceSelect(params.businessId);
+    const locked = await tx.booking.findMany({
+      where: {
+        id: { in: sortedBookingIds },
+        businessId: params.businessId,
+        contactId: params.contactId,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        deletedAt: null,
+      },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        deletedAt: true,
+        contact: { select: { email: true, phone: true, phoneNormalized: true } },
+        invoice: { select: invSelect },
+        depositInvoice: { select: invSelect },
+      },
+    });
+
+    for (const row of locked) {
+      if (
+        !this.isBookingUnpaidAndReleasable(row) ||
+        !this.contactMatchesRebookCaller(row.contact, params.callerContact, params.businessCountry)
+      ) {
+        continue;
+      }
+      const cancelled = await tx.booking.updateMany({
+        where: {
+          id: row.id,
+          businessId: params.businessId,
+          contactId: params.contactId,
+          status: 'PENDING',
+          paymentStatus: 'UNPAID',
+          deletedAt: null,
+        },
+        data: { status: 'CANCELLED' },
+      });
+      if (cancelled.count === 1) {
+        const draftInvoiceIds = [row.invoice, row.depositInvoice]
+          .filter((inv): inv is NonNullable<typeof inv> => !!inv && inv.status === 'DRAFT')
+          .map((inv) => inv.id);
+        if (draftInvoiceIds.length > 0) {
+          await tx.invoice.updateMany({
+            where: {
+              id: { in: draftInvoiceIds },
+              businessId: params.businessId,
+              status: 'DRAFT',
+              deletedAt: null,
+            },
+            data: { deletedAt: new Date() },
+          });
+        }
+      }
+    }
+  }
+
   async publicCreateBooking(input: {
     businessId: string;
     serviceId: string;
@@ -2062,6 +2374,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
      * gate; null is "none sent". A caller that leaves it undefined is compared on storefrontSlug.
      */
     storefrontSlugAsSent?: string | null;
+    replaceBookingId?: string | null;
+    releaseBookingIds?: string[] | null;
   }) {
     // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): reject invalid or
     // non-Date startTime defensively with 400 before any DB read or write.
@@ -2109,6 +2423,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     this.assertLeadTime(service.leadTimeMins, start);
 
+    const candidateReleaseIds = this.collectReleaseBookingIds(input.replaceBookingId, input.releaseBookingIds);
+    const preCheckExcludeIds = await this.findPreCheckReleasableBookingIds(
+      input.businessId,
+      candidateReleaseIds,
+      input.contact,
+      business.country,
+    );
+
     const slot: SlotParams = {
       businessId: input.businessId,
       serviceId: service.id,
@@ -2117,7 +2439,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       end,
       bufferMins: service.bufferMins,
     };
-    await this.assertSlotFree(slot);
+    await this.assertSlotFree(preCheckExcludeIds.length > 0 ? { ...slot, excludeBookingIds: preCheckExcludeIds } : slot);
 
     await this.assertWithinSchedule({
       businessId: input.businessId,
@@ -2216,12 +2538,23 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // The early read above refused a taken slot before the contact and invoices
     // were touched; the claim settles the race with requests in flight. Losing
     // it leaves the invoices drawn up above for a booking that was not written.
-    const booking = await this.claimSlot(slot, (tx) => tx.booking.create({ data: bookingData })).catch(
-      async (err: unknown) => {
-        await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
-        throw err;
-      },
-    );
+    const booking = await this.claimSlot(
+      slot,
+      (tx) => tx.booking.create({ data: bookingData }),
+      candidateReleaseIds.length > 0
+        ? (tx) =>
+            this.releaseRebookHoldsInTx(tx, {
+              businessId: input.businessId,
+              contactId: contact.id,
+              candidateIds: candidateReleaseIds,
+              callerContact: input.contact,
+              businessCountry: business.country,
+            })
+        : undefined,
+    ).catch(async (err: unknown) => {
+      await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
+      throw err;
+    });
 
     const payload: BookingCreatedPayload = {
       booking,

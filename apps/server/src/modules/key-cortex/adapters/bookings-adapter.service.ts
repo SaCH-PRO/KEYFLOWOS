@@ -4,6 +4,7 @@ import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { BookingsService } from '../../bookings/bookings.service';
 import { CatalogService } from '../../catalog/catalog.service';
+import { readBusinessDateWindows } from '../../bookings/business-hours.util';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,22 +34,6 @@ function calendarDay(value: string, name: string): number {
  * pool connection. Two months covers "next month" asked on any day.
  */
 export const KEY_AVAILABILITY_MAX_DAYS = 62;
-
-const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-
-/**
- * The opening hours a business day row sets, in minutes past midnight, or
- * null when the row sets none (missing, closed, or without open/close times):
- * the rows getAvailableSlots offers nothing on and createBooking refuses or
- * leaves unchecked.
- */
-function openHours(hours: unknown, weekday: number): { openMin: number; closeMin: number } | null {
-  const day = (hours as Record<string, { open?: string; close?: string; closed?: boolean } | undefined> | null)?.[DAY_KEYS[weekday]];
-  if (!day || day.closed || !day.open || !day.close) return null;
-  const [oh, om] = day.open.split(':').map(Number);
-  const [ch, cm] = day.close.split(':').map(Number);
-  return { openMin: oh * 60 + om, closeMin: ch * 60 + cm };
-}
 
 const DAY_TO_INDEX: Record<string, number> = {
   sun: 0,
@@ -312,7 +297,7 @@ export class BookingsAdapterService {
       for (let day = firstDay; day <= lastDay; day += DAY_MS) {
         const d = new Date(day);
         const weekday = d.getUTCDay();
-        if (onBusinessHours ? !openHours(business?.businessHours, weekday) : !ownWeekdays.has(weekday)) continue;
+        if (onBusinessHours ? readBusinessDateWindows(business?.businessHours, weekday).status === 'closed' : !ownWeekdays.has(weekday)) continue;
         // Handed over as the public slots route hands it: that calendar day's
         // midnight on the server's clock, which getAvailableSlots reads back.
         const { slots: starts } = await this.bookings.getAvailableSlots({

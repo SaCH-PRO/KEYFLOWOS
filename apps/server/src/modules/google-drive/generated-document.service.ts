@@ -136,7 +136,7 @@ export class GeneratedDocumentService {
         ...(filters?.entityType ? { entityType: filters.entityType } : {}),
         ...(filters?.entityId ? { entityId: filters.entityId } : {}),
       },
-      orderBy: { generatedAt: 'desc' },
+      orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
       take: filters?.limit ?? 50,
       skip: filters?.offset ?? 0,
     });
