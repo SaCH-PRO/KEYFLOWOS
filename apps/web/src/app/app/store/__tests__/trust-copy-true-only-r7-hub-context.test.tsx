@@ -21,6 +21,8 @@ const data = vi.hoisted(() => ({
   business: { name: "Pepper Co" },
   hours: {},
 }));
+// r10: the store graph was read (a null graph means "not read", and then nothing is said about what is live).
+const GRAPH = vi.hoisted(() => ({ mappings: [], liveCount: 0, draftCount: 0, driftCount: 0, totalProducts: 0, totalServices: 0, serviceNameIndex: {} }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/app/store",
@@ -37,7 +39,7 @@ vi.mock("../hooks/use-store-data", () => ({
   useStoreData: () => ({
     loading: false, loadError: null, businessId: "biz_r7", storeEnabled: true,
     storefrontConfig: data.config, businessData: data.business, businessHours: data.hours,
-    commerceProducts: data.products, services: data.services, activeDeliveryMethodsCount: 0, readiness: null, storeGraph: null,
+    commerceProducts: data.products, services: data.services, activeDeliveryMethodsCount: 0, readiness: null, storeGraph: GRAPH,
     liveProductIds: data.live, stockByProduct: null,
     emitEvent: vi.fn(), loadData: vi.fn(), getPublicBookingUrl: () => "", toggleStoreEnabled: vi.fn(),
   }),

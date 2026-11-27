@@ -101,12 +101,14 @@ describe("R9-3: pins", () => {
     expect(offer).toEqual({ products: 0, packages: 0, services: 0, orderableServices: 1 });
   });
 
-  it("F3/M20: every product off, and a bookable service the storefront hides: 'Add it…'; two: 'Add them…'", async () => {
+  // r10 (m3): a bookable service the storefront hides is told to unhide it, as a hidden product is, not to "add it".
+  it("F3/M20: every product off, and a bookable service the storefront hides: 'Unhide it'; two: 'Unhide them'", async () => {
     const one = await nothing({ products: [product("p0", false), product("p1", false)], services: [{ id: "s_hidden", name: "Tasting" }], storeServices: [] });
-    expect(one?.description).toBe("1 item in your catalog is not on your store yet. Add it to your store so visitors have something to browse and buy.");
-    expect(one?.actionLabel).toBe("Add it to your store");
+    expect(one?.description).toBe("1 service is on your store but hidden. Unhide it in the catalog so visitors can book it.");
+    expect(one?.actionLabel).toBe("Unhide it");
     const two = await nothing({ products: [product("p0", false)], services: [{ id: "s_a", name: "Tasting" }, { id: "s_b", name: "Class" }], storeServices: [] });
-    expect(two?.actionLabel).toBe("Add them to your store");
+    expect(two?.actionLabel).toBe("Unhide them");
+    expect(two?.description).not.toMatch(/\badd\b/i);
   });
 
   it("F4: the meta description's '...' boundary: 80 characters whole, 81 cut", async () => {
