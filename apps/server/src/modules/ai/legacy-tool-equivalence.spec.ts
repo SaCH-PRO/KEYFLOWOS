@@ -8,6 +8,8 @@
  * fails closed with a plain refusal for OBSOLETE tools (e.g. hidden v1 social),
  * prevents risk-tier/approval/scope loosening, and preserves KEY_DISABLED (D-17).
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FLOW_TOOLS, getManualEquivalentRoute, getToolByName } from './flow-tool-registry';
 import { KEY_BOOKS_MEMBERSHIP_READ_TOOLS } from './graph-actions.controller';
@@ -528,3 +530,40 @@ describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): KEY_DISABLED (D-17) still turns KEY o
     expect(prisma.client.messageIntake.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe('P160 (RR-LEGACY-FALLBACK-REMOVE): legacy fallback and KeyToolRegistryService removed', () => {
+  it('no disposition is SPECIALIZATION or MISSING and KeyToolRegistryService is not provided by AiModule', async () => {
+    const { LEGACY_TOOL_EQUIVALENCE } = await loadEquivalence();
+
+    const remainingLegacy = LEGACY_TOOL_EQUIVALENCE.filter(
+      (e) => e.disposition === 'SPECIALIZATION' || e.disposition === 'MISSING',
+    );
+    expect(
+      remainingLegacy.map((e) => `${e.legacyKey}:${e.disposition}`),
+      'every former legacy tool must be promoted to SAME/ALIAS or retired as OBSOLETE',
+    ).toEqual([]);
+
+    const aiModuleSrc = readFileSync(resolve(__dirname, 'ai.module.ts'), 'utf8');
+    expect(aiModuleSrc, 'AiModule must not provide or export KeyToolRegistryService').not.toMatch(
+      /\bKeyToolRegistryService\b/,
+    );
+    expect(
+      existsSync(resolve(__dirname, 'key-tool-registry.service.ts')),
+      'key-tool-registry.service.ts must be deleted once no caller uses it',
+    ).toBe(false);
+
+    const keyCommandSrc = readFileSync(resolve(__dirname, 'key-command.service.ts'), 'utf8');
+    expect(keyCommandSrc, 'KeyCommandService must not reference KeyToolRegistryService').not.toMatch(
+      /\bKeyToolRegistryService\b/,
+    );
+
+    const cortexActionsSrc = readFileSync(
+      resolve(__dirname, '../key-cortex/key-cortex-actions.service.ts'),
+      'utf8',
+    );
+    expect(cortexActionsSrc, 'KeyCortexActionsService must not reference KeyToolRegistryService').not.toMatch(
+      /\bKeyToolRegistryService\b/,
+    );
+  });
+});
+
