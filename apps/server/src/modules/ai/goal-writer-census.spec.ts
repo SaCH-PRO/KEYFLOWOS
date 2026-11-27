@@ -1,24 +1,55 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as ts from 'typescript';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
 const CENSUS_DOC_PATH = path.join(REPO_ROOT, 'docs/reconstruction/GOAL-SYSTEM-CENSUS.md');
 
+const SOURCE_FILE_EXT_RE = /\.(?:[cm]?ts|tsx|[cm]?js)$/;
+const TEST_OR_DECL_EXT_RE = /\.(?:spec|test|e2e-spec)\.(?:[cm]?ts|tsx|[cm]?js)$|\.d\.[cm]?ts$/;
+
 /**
- * Strips `/* ... *\/` block comments and `// ...` line comments while preserving
- * single-, double-, and backtick-quoted string literals so SQL table names
- * (`ai_goals`, `business_goals`) inside template/string literals remain visible.
+ * Strips TypeScript/JavaScript comments using the full TypeScript parser AST
+ * (`ts.createSourceFile`) so regex literals and nested template literals can
+ * never desync stripping, SQL table names (`ai_goals`, `business_goals`) inside
+ * strings/templates stay intact, and comments are replaced with whitespace so
+ * adjacent tokens cannot merge to evade detection.
  */
 export function stripCommentsPreservingStrings(src: string): string {
-  return src.replace(
-    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
-    (match) => {
-      const first = match[0];
-      if (first === '"' || first === "'" || first === '`') return match;
-      return '';
-    },
+  const sf = ts.createSourceFile(
+    'scan.ts',
+    src,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ false,
+    ts.ScriptKind.TS,
   );
+  const parts: string[] = [];
+  let cursor = 0;
+
+  const visit = (node: ts.Node) => {
+    const children = node.getChildren(sf);
+    if (children.length === 0) {
+      const start = node.getStart(sf);
+      if (node.pos >= cursor && start > node.pos) {
+        const trivia = src.slice(node.pos, start);
+        if (trivia.includes('//') || trivia.includes('/*')) {
+          parts.push(src.slice(cursor, node.pos));
+          parts.push(trivia.includes('\n') ? '\n' : ' ');
+          cursor = start;
+        }
+      }
+      return;
+    }
+    for (const child of children) {
+      visit(child);
+    }
+  };
+  visit(sf);
+
+  if (cursor === 0) return src;
+  parts.push(src.slice(cursor));
+  return parts.join('');
 }
 
 export type GoalModelName = 'AiGoal' | 'BusinessGoal';
@@ -115,11 +146,8 @@ function walkTsSourceFiles(dir: string): string[] {
       out.push(...walkTsSourceFiles(full));
     } else if (
       entry.isFile() &&
-      entry.name.endsWith('.ts') &&
-      !entry.name.endsWith('.spec.ts') &&
-      !entry.name.endsWith('.test.ts') &&
-      !entry.name.endsWith('.e2e-spec.ts') &&
-      !entry.name.endsWith('.d.ts')
+      SOURCE_FILE_EXT_RE.test(entry.name) &&
+      !TEST_OR_DECL_EXT_RE.test(entry.name)
     ) {
       out.push(full);
     }
