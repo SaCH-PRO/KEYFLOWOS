@@ -60,6 +60,8 @@ const EXISTING: Expense = {
 type Form = "modal" | "sidesheet";
 
 function mount(form: Form, editing: Expense | null) {
+  // The sheet saves only for the business the workspace has chosen (EXPENSES-HUB-3 R16-3): this one.
+  window.localStorage.setItem("kf_business_id", BUSINESS);
   const onSaved = vi.fn();
   const onClose = vi.fn();
   const props = { businessId: BUSINESS, categories: [], editingExpense: editing, onClose, onSaved };

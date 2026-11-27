@@ -318,6 +318,12 @@ export function ExpenseFormSideSheet({
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
+    // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
+    if (!live() || getStoredBusinessId() !== businessId) {
+      toast.error("The business changed in another tab. Close this sheet and reload, then save.");
+      return;
+    }
     const tags = formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {

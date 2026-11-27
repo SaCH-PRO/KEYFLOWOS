@@ -109,6 +109,21 @@ describe("R16-1: a read landing after the page has gone", () => {
   });
 });
 
+describe("R16-1b: a budgets read landing after the page has gone", () => {
+  it("navigates nowhere", async () => {
+    const budgets = deferred<unknown>();
+    client.getExpense.mockResolvedValue(ok(expense()));
+    client.fetchExpenseBudgets.mockReturnValue(budgets.promise);
+    const view = render(<ExpenseDetailPage />);
+    await waitFor(() => expect(client.fetchExpenseBudgets).toHaveBeenCalled());
+    view.unmount();
+    silentSwitch("biz_B");
+    await act(async () => { budgets.resolve(ok([])); });
+    await settle();
+    expect(nav.replace).toHaveBeenCalledTimes(0);
+  });
+});
+
 describe("R16-2: a real switch leaves once", () => {
   it("the listener, then A's read landing: replace exactly once", async () => {
     const read = deferred<unknown>();

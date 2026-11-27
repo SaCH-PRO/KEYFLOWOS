@@ -263,7 +263,23 @@ export const EXPENSES_BUSINESS_ID_KEY = "kf_business_id";
  */
 export function expenseExportFileName(businessId: string, now: Date = new Date()): string {
   const cached = getCachedBusiness();
-  const label = cached?.id === businessId && cached.name ? cached.name : businessId;
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "business";
-  return `expenses-${slug}-${now.toISOString().split("T")[0]}.csv`;
+  // R16-5: only this business's cache entry names it; another's never does.
+  const name = cached?.id === businessId && typeof cached.name === "string" ? cached.name : "";
+  // R16-4: letters and digits of any script (NFKD drops accents: "Café Ñandú" is "cafe-nandu"); a name with none
+  // falls back to the business id's slug, so two such businesses never share a file name; at most 60 characters;
+  // nothing path-like survives (only letters, digits and single dashes do). Dated on the business's own day.
+  const slug = exportSlug(name) || exportSlug(businessId) || "business";
+  return `expenses-${slug}-${todayInBusinessZone(now, businessId)}.csv`;
+}
+
+const EXPORT_SLUG_MAX = 60;
+function exportSlug(text: string): string {
+  return text
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, EXPORT_SLUG_MAX)
+    .replace(/-+$/g, "");
 }

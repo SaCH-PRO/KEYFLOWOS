@@ -101,7 +101,11 @@ export default function ExpenseDetailPage() {
   // read effect (which depends on leave).
   const routerRef = useRef(router);
   useEffect(() => { routerRef.current = router; }, [router]);
+  // R16-2: once only. A real switch fires the listener, and the read that then lands is stale too.
+  const leftRef = useRef(false);
   const leave = useCallback(() => {
+    if (leftRef.current) return;
+    leftRef.current = true;
     setLeft(true);
     routerRef.current.replace("/app/expenses");
   }, []);
@@ -122,6 +126,9 @@ export default function ExpenseDetailPage() {
 
   useEffect(() => {
     if (!businessId || !expenseId) return;
+    // R16-1: a read that lands after this page has gone (unmounted, or the read replaced) does nothing, and above
+    // all navigates nowhere: the user may be on another page by then.
+    let active = true;
     (async () => {
       setLoading(true);
       try {
@@ -129,6 +136,7 @@ export default function ExpenseDetailPage() {
           getExpense(businessId, expenseId),
           fetchExpenseCategories(businessId),
         ]);
+        if (!active) return;
         // R15-5: a read that lands for a business no longer stored writes nothing and leaves the page at once
         // (another tab's switch can reach the stored id before its storage event reaches this tab).
         if (!isCurrentBusiness(businessId)) { leave(); return; }
@@ -138,14 +146,18 @@ export default function ExpenseDetailPage() {
         if (expRes.data) {
           const { month, year } = expenseMonth(expRes.data.date, businessId);
           const budRes = await fetchExpenseBudgets(businessId, month, year);
+          if (!active) return;
           if (!isCurrentBusiness(businessId)) { leave(); return; }
           if (budRes.data) setBudgets(budRes.data);
         }
       } catch {
-        if (isCurrentBusiness(businessId)) toast.error("Failed to load expense");
+        if (active && isCurrentBusiness(businessId)) toast.error("Failed to load expense");
       }
-      setLoading(false);
+      if (active) setLoading(false);
     })();
+    return () => {
+      active = false;
+    };
   }, [businessId, expenseId, isCurrentBusiness, leave]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
