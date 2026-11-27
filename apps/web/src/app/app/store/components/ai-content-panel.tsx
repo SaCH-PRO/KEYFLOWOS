@@ -68,13 +68,35 @@ const ACTIONS: { id: ActionType; icon: React.ElementType; label: string; desc: s
  * reviews there are, true at any rating, never that the customers are happy or satisfied or keep coming back.
  */
 function trustCopyFor(testimonialCount: number): { trustBadges: string[]; socialProofCopy: string[] } {
-  if (testimonialCount <= 0) return { trustBadges: [], socialProofCopy: [] };
+  // r5: a count that is not a positive number (NaN, undefined) suggests nothing.
+  if (!(testimonialCount > 0)) return { trustBadges: [], socialProofCopy: [] };
   const reviews = testimonialCount === 1 ? "review" : "reviews";
   return {
     trustBadges: [`${testimonialCount} customer ${reviews}`],
     socialProofCopy: [`Read ${testimonialCount} ${reviews} from our customers.`],
   };
 }
+
+/**
+ * P231 r5 (D-303): the words for what the store offers, from its real product and service counts, so no copy says
+ * customers can buy what is not sold or book what is not offered; with neither, none of it.
+ */
+function offerWords(products: number, services: number) {
+  const sells = products > 0;
+  const books = services > 0;
+  const total = Math.max(0, products) + Math.max(0, services);
+  return {
+    sells,
+    books,
+    total,
+    noun: sells && books ? "products and services" : sells ? "products" : books ? "services" : "",
+    action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
+    items: `${total} item${total === 1 ? "" : "s"}`,
+  };
+}
+
+/** P231 r5: an answer still holding a [bracketed] part for the merchant to fill in. */
+const HAS_PLACEHOLDER = /\[your\s|\[what makes/;
 
 export function AiContentPanel({
   storeName,
@@ -101,7 +123,8 @@ export function AiContentPanel({
   const [selectedSeoDesc, setSelectedSeoDesc] = useState("");
 
   const name = storeName || "Your Store";
-  const totalItems = productsCount + servicesCount;
+  const offer = offerWords(productsCount, servicesCount);
+  const totalItems = offer.total;
   const trustResult = trustRequested ? trustCopyFor(testimonialCount) : null;
 
   async function generate(action: ActionType) {
@@ -125,28 +148,36 @@ export function AiContentPanel({
       }
       faqs.push({ question: `What makes ${name} different?`, answer: "[what makes your business different]", category: "About" });
       faqs.push({ question: "How can I contact you?", answer: "Reach us through the contact section on our storefront. We respond within [your response time].", category: "Support" });
-      faqs.push({ question: "What is your refund policy?", answer: "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] in advance.", category: "Refunds" });
-      setFaqResult({ faqs, instruction: "Fill in the [bracketed] parts with your own policies, then click 'Add All to FAQ' to apply them to your FAQ Manager, and save." });
+      faqs.push({
+        question: "What is your refund policy?",
+        answer: servicesCount > 0
+          ? "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] in advance."
+          : "We offer refunds within [your refund window] of purchase.",
+        category: "Refunds",
+      });
+      // r5: the [bracketed] parts can only be filled in once the answers are in the FAQ Manager.
+      setFaqResult({ faqs, instruction: "Click 'Add All to FAQ', then fill in the [bracketed] parts with your own policies in the FAQ Manager, and save." });
     }
 
     if (action === "seo") {
       const tagline = businessTagline || "";
+      // P231 r4b-r5: no "fast delivery", "instantly", "quality" or "curated" the product does not check, and only what
+      // the store really offers (from its counts): no "buy" without products, no "book" without services.
       const metaTitleOptions = [
-        `${name} — Shop Online Today`.slice(0, 60),
-        tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? `${totalItems} Items` : "Products & Services"}`.slice(0, 60),
-        `Buy ${name} Products Online`.slice(0, 60),
+        `${name} — ${offer.sells ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`.slice(0, 60),
+        tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? `${totalItems} Item${totalItems === 1 ? "" : "s"}` : "Online"}`.slice(0, 60),
+        `${name} Online`.slice(0, 60),
       ];
       const metaDescOptions = [
-        // P231 r4b: no "fast delivery", "instantly" or "quality" the product does not check.
-        `Browse ${totalItems > 0 ? totalItems : ""} products and services at ${name}. Order or book online.`.slice(0, 160),
-        `${name} — ${tagline || "products and services available online"}. Book or buy online.`.slice(0, 160),
-        `Discover everything ${name} has to offer. ${businessDescription ? businessDescription.slice(0, 80) + "..." : "Shop our curated catalog online today."}`.slice(0, 160),
+        (totalItems > 0 ? `Browse ${totalItems} ${offer.noun} at ${name}. ${offer.action}` : `Visit ${name} online.`).slice(0, 160),
+        `${name} — ${tagline || (offer.noun ? `${offer.noun} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`.slice(0, 160),
+        `Discover ${name} online.${businessDescription ? ` ${businessDescription.slice(0, 80)}...` : ""}`.slice(0, 160),
       ];
       setSeoResult({
         metaTitleOptions,
         metaDescOptions,
         recommendation: { metaTitle: metaTitleOptions[0], metaDescription: metaDescOptions[0] },
-        keywords: [name.toLowerCase(), "buy online", "book online", "local business"],
+        keywords: [name.toLowerCase(), ...(offer.sells ? ["buy online"] : []), ...(offer.books ? ["book online"] : [])],
         instruction: "Select the title and description that best represents your store, then click Apply.",
       });
       setSelectedSeoTitle(metaTitleOptions[0]);
@@ -158,18 +189,20 @@ export function AiContentPanel({
     if (action === "launch") {
       setLaunchResult({
         socialPosts: [
-          // P231 r4b: the store's own item count (not "N+"), and no "fast response" below.
-          `🚀 We're officially live! ${name} is now open online. Browse our ${totalItems > 0 ? `${totalItems} item${totalItems === 1 ? "" : "s"}` : "products and services"} and place your first order today. Link in bio! ✨`,
-          `Big news! 🎉 ${name} just launched online. Shop, book, and explore — all in one place. Drop a comment if you want the link! 👇`,
-          `We've been working hard behind the scenes, and it's finally here. ${name} is now live online. Come shop with us! 🛍️`,
+          // P231 r4b-r5: the store's own item count (not "N+"), no "fast response", and only what it really offers.
+          totalItems > 0
+            ? `🚀 We're officially live! ${name} is now open online. Browse our ${offer.items}. Link in bio! ✨`
+            : `🚀 We're officially live! ${name} is now open online. Link in bio! ✨`,
+          `Big news! 🎉 ${name} just launched online.${offer.action ? ` ${offer.action}` : ""} Drop a comment if you want the link! 👇`,
+          `We've been working hard behind the scenes, and it's finally here. ${name} is now live online. Come take a look! 🛍️`,
         ],
         whatsappMessages: [
-          `Hi! Just wanted to let you know that ${name} is now live online! 🎉 You can browse and shop directly at our store. Would love to see you there! 😊`,
+          `Hi! Just wanted to let you know that ${name} is now live online! 🎉 Would love to see you there! 😊`,
           `Big news — ${name} is now online! 🚀 Check it out and let me know what you think!`,
         ],
         emailSubjectLines: [
           `We're Live! ${name} Is Now Online`,
-          `Big News from ${name} — Shop Us Online`,
+          `Big News from ${name} — Visit Us Online`,
           `${name} Just Launched — Come Check It Out`,
         ],
       });
@@ -253,11 +286,21 @@ export function AiContentPanel({
                       <p className="text-xs font-semibold">{faq.question}</p>
                       <CopyBtn text={`Q: ${faq.question}\nA: ${faq.answer}`} />
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{faq.answer}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{faq.answer}</p>
+                    {HAS_PLACEHOLDER.test(faq.answer) && (
+                      <p role="note" className="text-[9px] font-semibold mt-0.5" style={{ color: "hsl(var(--kf-warning))" }}>
+                        Fill in the [bracketed] part in the FAQ Manager.
+                      </p>
+                    )}
                     <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full mt-1 inline-block" style={{ background: "hsl(var(--kf-accent2)/0.1)", color: "hsl(var(--kf-accent2))" }}>{faq.category}</span>
                   </div>
                 ))}
               </div>
+              {faqResult.faqs.some((f) => HAS_PLACEHOLDER.test(f.answer)) && (
+                <p role="note" className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
+                  Some answers have [bracketed] parts: fill them in before your customers see them.
+                </p>
+              )}
               {onApplyFaq && (
                 <button
                   type="button"

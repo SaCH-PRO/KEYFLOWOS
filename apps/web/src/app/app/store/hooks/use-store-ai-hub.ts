@@ -419,6 +419,25 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
   return suggestions;
 }
 
+/**
+ * P231 r5 (D-303): the words for what the store offers, from its real product and service counts, so no generated copy
+ * says customers can buy what is not sold or book what is not offered; with neither, none of it.
+ */
+function offerWords(products: number, services: number) {
+  const sells = products > 0;
+  const books = services > 0;
+  const total = Math.max(0, products) + Math.max(0, services);
+  return {
+    sells,
+    books,
+    total,
+    noun: sells && books ? "products and services" : sells ? "products" : books ? "services" : "",
+    action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
+    items: `${total} item${total === 1 ? "" : "s"}`,
+    Items: `${total} Item${total === 1 ? "" : "s"}`,
+  };
+}
+
 function buildStoreTools(): AiTool[] {
   return [
     {
@@ -445,28 +464,30 @@ function buildStoreTools(): AiTool[] {
           ...services.map((s) => (s.category as string) || "Service").filter(Boolean),
         ])].slice(0, 3);
 
-        const categoryStr = categories.length > 0 ? categories.join(", ") : "products and services";
+        const offer = offerWords(products.length, services.length);
+        const categoryStr = categories.length > 0 ? categories.join(", ") : offer.noun;
 
+        // P231 r4b-r5 (D-303): no quality, speed, delivery or offer the product does not know the merchant has, and
+        // only what the store really offers (its counts); a store with nothing yet is offered none of it.
         const headlines = [
-          // P231 r4b (D-303): no quality, speed, delivery or offer the product does not know the merchant has.
           `${storeName} — ${tagline || "Now Online"}`,
-          `Discover ${categoryStr} from ${storeName}`,
-          `Your go-to for ${categoryStr}`,
+          ...(categoryStr ? [`Discover ${categoryStr} from ${storeName}`, `Your go-to for ${categoryStr}`] : []),
         ];
         const subheadlines = [
-          description || `Browse ${totalItems} ${categoryStr}. Book or buy online.`,
-          `${totalItems > 0 ? `${totalItems} items` : "Everything you need"} — available online, anytime.`,
-          `${categoryStr.charAt(0).toUpperCase() + categoryStr.slice(1)} from ${storeName}, online.`,
+          ...(description ? [description] : totalItems > 0 ? [`Browse ${totalItems} ${categoryStr}. ${offer.action}`] : []),
+          ...(totalItems > 0 ? [`${offer.items}, online.`] : []),
+          ...(categoryStr ? [`${categoryStr.charAt(0).toUpperCase() + categoryStr.slice(1)} from ${storeName}, online.`] : []),
         ];
+        // A store with no description and nothing yet still gets one true subheadline.
+        if (subheadlines.length === 0) subheadlines.push(`${storeName}, now online.`);
         const offerRibbons = [
-          "🎉 Now Open Online — Shop Today",
+          offer.sells ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
           "✨ [your latest news]",
           "🔥 [your offer]",
         ];
         const ctas = [
-          "Shop Now",
-          "Book Today",
-          "Explore Collection",
+          ...(offer.sells ? ["Shop Now", "Explore Collection"] : []),
+          ...(offer.books ? ["Book Today"] : []),
           "Get Started",
         ];
 
@@ -733,14 +754,17 @@ function buildStoreTools(): AiTool[] {
 
         faqs.push({
           question: "What is your refund policy?",
-          answer: "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] before the scheduled time. Please contact us to initiate a refund.",
+          answer: services.length > 0
+            ? "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] before the scheduled time. Please contact us to initiate a refund."
+            : "We offer refunds within [your refund window] of purchase. Please contact us to initiate a refund.",
           category: "Refunds",
         });
 
         return {
-          summary: `Generated ${faqs.length} FAQ entries for "${storeName}" covering bookings, payments, delivery, and support.`,
+          // r5: the topics the entries really cover.
+          summary: `Generated ${faqs.length} FAQ entries for "${storeName}" covering ${[...new Set(faqs.map((f) => f.category.toLowerCase()))].join(", ")}.`,
           faqs,
-          instruction: "Copy these FAQs into your FAQ Manager in the Merchandising tab, filling in the [bracketed] parts with your own policies. You can edit and customize each answer.",
+          instruction: "Copy these FAQs into your FAQ Manager in the Merchandising tab, then fill in the [bracketed] parts with your own policies there before you save.",
         };
       },
     },
@@ -766,28 +790,29 @@ function buildStoreTools(): AiTool[] {
           ...services.map((s) => (s.category as string)).filter(Boolean),
         ])].slice(0, 3);
 
-        const primaryCategory = categories[0] || "Products & Services";
-        const totalItems = products.length + services.length;
+        const offer = offerWords(products.length, services.length);
+        const primaryCategory = categories[0] || offer.noun;
+        const totalItems = offer.total;
 
+        // P231 r4b-r5: no "instantly", "delivered to you" or "quality" the product does not check, and only what the
+        // store really offers (its counts): no "shop"/"buy" without products, no "book" without services.
         const metaTitleOptions = [
-          `${storeName} — ${primaryCategory} Online`,
-          `${storeName} | Shop ${primaryCategory}`,
-          tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? `${totalItems} Items` : primaryCategory}`,
+          primaryCategory ? `${storeName} — ${primaryCategory} Online` : `${storeName} — Now Online`,
+          offer.sells ? `${storeName} | Shop ${primaryCategory}` : offer.books ? `${storeName} | Book ${primaryCategory}` : `${storeName} Online`,
+          tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? offer.Items : "Online"}`,
         ].map((t) => t.slice(0, 60));
 
         const metaDescOptions = [
-          // P231 r4b: no "instantly", "delivered to you" or "quality" the product does not check.
-          `Browse ${totalItems > 0 ? totalItems : ""} ${primaryCategory} at ${storeName}. Book or buy online.`.slice(0, 160),
-          `${storeName} offers ${categories.join(", ") || primaryCategory}. Discover our catalog and order online today.`.slice(0, 160),
-          `Shop ${primaryCategory} from ${storeName}. ${tagline || "Products and services available online."}`.slice(0, 160),
+          (totalItems > 0 ? `Browse ${totalItems} ${primaryCategory} at ${storeName}. ${offer.action}` : `Visit ${storeName} online.`).slice(0, 160),
+          (primaryCategory ? `${storeName} offers ${categories.join(", ") || primaryCategory}.${offer.action ? ` ${offer.action}` : ""}` : `${storeName} is now online.`).slice(0, 160),
+          `${storeName}${primaryCategory ? ` — ${primaryCategory}` : ""}. ${tagline || "Now online."}`.slice(0, 160),
         ];
 
         const keywords = [
           storeName.toLowerCase(),
           ...categories.map((c) => c.toLowerCase()),
-          "buy online",
-          "book online",
-          "local business",
+          ...(offer.sells ? ["buy online"] : []),
+          ...(offer.books ? ["book online"] : []),
         ];
 
         const issues: { field: string; issue: string; suggestion: string }[] = [];
@@ -799,7 +824,7 @@ function buildStoreTools(): AiTool[] {
         }
 
         return {
-          summary: `Generated SEO metadata for "${storeName}" targeting "${primaryCategory}".`,
+          summary: primaryCategory ? `Generated SEO metadata for "${storeName}" targeting "${primaryCategory}".` : `Generated SEO metadata for "${storeName}".`,
           metaTitleOptions,
           metaDescOptions,
           recommendation: {
@@ -825,11 +850,9 @@ function buildStoreTools(): AiTool[] {
         const storeName = d.storeName || "Your Store";
         const testimonials = (d.testimonials ?? []) as unknown[];
 
-        // P231 r1-r3 (D-303): no guarantee or service claim the product does not check ("100% Satisfaction
+        // P231 r1-r5 (D-303): no guarantee or service claim the product does not check ("100% Satisfaction
         // Guarantee", "Secure, Encrypted Checkout", "Verified Business", "5-Star Rated", "Secure Payments",
-        // "Fast, Reliable Service", "Real Human Support").
-        const guarantees: string[] = [];
-
+        // "Fast, Reliable Service", "Real Human Support"); r5: no guarantees field at all.
         // P231 r2-r4: only what the testimonials show, and none without them. r4: how many reviews there are, true at
         // any rating, never that the customers are happy or satisfied or keep coming back; and no "is committed to
         // delivering quality" about copy, which the product does not check.
@@ -841,10 +864,12 @@ function buildStoreTools(): AiTool[] {
           summary: testimonials.length > 0
             ? `Generated trust badges and social proof language for "${storeName}" from its ${testimonials.length} testimonial${testimonials.length === 1 ? "" : "s"}.`
             : `No trust copy for "${storeName}" yet: add testimonials, and the copy suggested will point to them.`,
-          guarantees,
           trustBadges,
           socialProofCopy,
-          instruction: "Add trust badges to your description, and social proof copy near your testimonials section.",
+          // r5: the instruction matches the result, and the badge counts reviews, so it is kept up to date.
+          instruction: testimonials.length > 0
+            ? "Add the review count to your description and the social proof copy near your testimonials section; update them when your reviews change."
+            : "Add testimonials under Social Proof first; trust copy is then suggested from them.",
         };
       },
     },
@@ -863,23 +888,28 @@ function buildStoreTools(): AiTool[] {
         const products = (d.products ?? []) as Record<string, unknown>[];
 
         const services = (d.services ?? []) as Record<string, unknown>[];
-        const totalItems = products.length + services.length;
+        const offer = offerWords(products.length, services.length);
+        const totalItems = offer.total;
 
+        // P231 r4b-r5: the store's own item count (not "N+"), no "fast response" or "more coming soon", only what the
+        // store really offers (its counts), and no existing customer base it may not have ("As always … amazing
+        // customers like you").
         const socialPosts = [
-          // P231 r4b: the store's own item count (not "N+"), no "fast response", no "more coming soon".
-          `🚀 We're officially live! ${storeName} is now open online. Browse our ${totalItems > 0 ? `${totalItems} item${totalItems === 1 ? "" : "s"}` : "products and services"} and place your first order today. Link in bio! ✨`,
-          `Big news! 🎉 ${storeName} just launched online. Shop, book, and explore — all in one place. Drop a comment if you want the link! 👇`,
-          `We've been working hard behind the scenes, and it's finally here. ${storeName} is now live online. Come shop with us! 🛍️`,
+          totalItems > 0
+            ? `🚀 We're officially live! ${storeName} is now open online. Browse our ${offer.items}. Link in bio! ✨`
+            : `🚀 We're officially live! ${storeName} is now open online. Link in bio! ✨`,
+          `Big news! 🎉 ${storeName} just launched online.${offer.action ? ` ${offer.action}` : ""} Drop a comment if you want the link! 👇`,
+          `We've been working hard behind the scenes, and it's finally here. ${storeName} is now live online. Come take a look! 🛍️`,
         ];
 
         const whatsappMessages = [
-          `Hi! Just wanted to let you know that ${storeName} is now live online! 🎉 You can browse and shop directly at ${d.storeName ? "[your store link]" : "our store"}. Would love to see you there! 😊`,
+          `Hi! Just wanted to let you know that ${storeName} is now live online! 🎉 You can find us at ${d.storeName ? "[your store link]" : "our store"}. Would love to see you there! 😊`,
           `Big news — ${storeName} is now online! 🚀 Check it out and let me know what you think!`,
         ];
 
         const emailSubjectLines = [
           `We're Live! ${storeName} Is Now Online`,
-          `Big News from ${storeName} — Shop Us Online`,
+          `Big News from ${storeName} — Visit Us Online`,
           `${storeName} Just Launched — Come Check It Out`,
         ];
 
@@ -887,13 +917,13 @@ function buildStoreTools(): AiTool[] {
 
 We're thrilled to announce that ${storeName} is now live online!
 
-You can now browse our full catalog, book services, and place orders directly from our store — anytime, anywhere.
+${offer.sells && offer.books ? "You can now buy and book directly from our store." : offer.sells ? "You can now order directly from our store." : offer.books ? "You can now book directly from our store." : "Take a look at our store."}
 
-${totalItems > 0 ? `We have ${totalItems} item${totalItems === 1 ? "" : "s"} available.` : "We're just getting started."}
+${totalItems > 0 ? `We have ${offer.items} available.` : "We're just getting started."}
 
 [Your Store Link]
 
-As always, thank you for your support. We couldn't do this without amazing customers like you.
+Thank you for reading.
 
 Warmly,
 ${storeName}`;
