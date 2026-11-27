@@ -237,7 +237,7 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     write: [
       // P206 (FU-TODAY-APPROVALS-STAFF, D-298): ApprovalController.create moved to per-requestType assertMayCreateApprovalRequest
       'contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief',
-      'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
+      'command_create_item', 'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
       // FOLLOW3-D15: ProcurementService writes the request where { id, businessId }, so the three vendor
       // transitions rejoin operations at their route level (GOVERNED_UNGRANTED from R0-13g until then)
       'procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced',

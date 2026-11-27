@@ -437,7 +437,7 @@ beforeAll(async () => {
   // them) into the same registry, as onModuleInit does in the app. Positionally, as Nest constructs
   // it: prisma, the AI-module tool registry, the command service, the canonical registry.
   const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
-  actions = new KeyCortexActionsService(prisma, undefined, {} as any, registry);
+  actions = new KeyCortexActionsService(prisma, {} as any, registry);
   actions.onModuleInit();
 
   const { KeyCortexLifecycleService } = await import('../src/modules/key-cortex/key-cortex-lifecycle.service');
@@ -3159,7 +3159,6 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       const reg = new KeyCortexToolRegistryService(prisma, fpsStubs.safety as any, {} as any, fpsStubs.saga as any, undefined, undefined, undefined, undefined);
       const legacy = new KeyCortexActionsService(
         prisma,
-        undefined,
         {} as any,
         reg,
         undefined,

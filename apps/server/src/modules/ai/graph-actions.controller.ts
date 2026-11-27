@@ -195,6 +195,13 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
   fetch_client_health: [{ module: 'revenue', minLevel: 'read' }],
   fetch_business_summary: [{ module: 'revenue', minLevel: 'read' }, { module: 'expenses', minLevel: 'read' }],
   fetch_expense_pressure: [{ module: 'revenue', minLevel: 'read' }, { module: 'expenses', minLevel: 'read' }],
+  // P160 (RR-LEGACY-FALLBACK-REMOVE): promoted legacy tools backed directly by Prisma hold
+  // member chat / KeyCommand / cortex bridge to their exact module scopes (D-100/D-145/D-234/D-37).
+  finance_list_overdue_invoices: [{ module: 'revenue', minLevel: 'read' }],
+  finance_create_invoice_reminder_draft: [{ module: 'revenue', minLevel: 'write' }],
+  commerce_summarize_revenue: [{ module: 'revenue', minLevel: 'read' }],
+  crm_recommend_follow_ups: [{ module: 'crm', minLevel: 'read' }],
+  crm_create_reminder: [{ module: 'crm', minLevel: 'write' }],
 };
 
 /**
@@ -239,6 +246,9 @@ export const KEY_BOOKS_MEMBERSHIP_READ_TOOLS: ReadonlySet<string> = new Set([
   'finance_safe_to_spend',
   'finance_cashflow_forecast',
   'finance_money_moves',
+  'finance_list_overdue_invoices',
+  'finance_create_invoice_reminder_draft',
+  'commerce_summarize_revenue',
 ]);
 
 /**
@@ -274,6 +284,7 @@ export const GRAPH_ACTION_CONTACT_READ_TOOLS: ReadonlySet<string> = new Set([
   'crm_search_contacts',
   'crm_find_duplicates',
   'crm_merge_preview',
+  'crm_recommend_follow_ups',
 ]);
 
 const CONTACT_READ_NO_PRINCIPAL =

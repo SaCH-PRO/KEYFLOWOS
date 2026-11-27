@@ -1,39 +1,82 @@
 /**
- * P154 — RR-LEGACY-TOOLS-CLASSIFY (D-261, D-262, D-17, D-100, D-119, D-145, D-234):
+ * P154 (RR-LEGACY-TOOLS-CLASSIFY) + P160 (RR-LEGACY-FALLBACK-REMOVE):
+ * (D-261, D-262, D-17, D-37, D-40, D-100, D-104, D-119, D-145, D-234, D-260)
  *
- * Classifies every legacy tool registered in KeyToolRegistryService (all 14)
- * against FLOW_TOOLS in a checked-in equivalence table (`legacy-tool-equivalence.ts`),
- * routes SAME/ALIAS entries to their canonical FLOW_TOOLS capability so canonical
- * authority gates (including revenue:read and D-104 membership) apply identically,
- * fails closed with a plain refusal for OBSOLETE tools (e.g. hidden v1 social),
- * prevents risk-tier/approval/scope loosening, and preserves KEY_DISABLED (D-17).
+ * Verifies:
+ *   1. Every one of the 14 former legacy tool keys is classified in
+ *      `LEGACY_TOOL_EQUIVALENCE` with ZERO `SPECIALIZATION` or `MISSING`
+ *      entries remaining, and `KeyToolRegistryService` is deleted and not
+ *      provided by `AiModule` or referenced by `KeyCommandService` /
+ *      `KeyCortexActionsService`.
+ *   2. Every former legacy tool name answers either its canonical `FLOW_TOOLS`
+ *      capability or a plain fail-closed refusal through `KeyCommandService`
+ *      (one case per key, all 14 covered).
+ *   3. Per-tool authority enforcement for EVERY newly promoted canonical tool
+ *      (`finance_list_overdue_invoices`, `finance_create_invoice_reminder_draft`,
+ *      `crm_recommend_follow_ups`, `command_create_item`,
+ *      `commerce_summarize_revenue`, `crm_create_reminder`): OWNER allowed,
+ *      STAFF without required module scope refused, `revenue:read`/`revenue:write`
+ *      + D-104 membership where it derives money, D-37 contact visibility.
+ *   4. No risk-tier, approval, or memberless exposure loosening, business
+ *      blockedTools preservation, and `KEY_DISABLED` (D-17) fail-closed.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FLOW_TOOLS, getManualEquivalentRoute, getToolByName } from './flow-tool-registry';
-import { KEY_BOOKS_MEMBERSHIP_READ_TOOLS } from './graph-actions.controller';
+import {
+  GRAPH_ACTION_CONTACT_READ_TOOLS,
+  KEY_BOOKS_MEMBERSHIP_READ_TOOLS,
+  graphActionRequirement,
+} from './graph-actions.controller';
 import { KeyCommandService, type KeyCommandPlan } from './key-command.service';
-import { KeyToolRegistryService } from './key-tool-registry.service';
 import { MEMBERLESS_KEY_TOOLS } from './memberless-key-tools';
-import { keyMemberToolScopes } from './plan-step-authority';
+import {
+  keyMemberToolScopes,
+  memberToolScopeRefusal,
+  noMemberToolRefusal,
+} from './plan-step-authority';
 import { CANONICAL_MODULE_TOOLS } from '../structure/job-role-policy.service';
+import {
+  LEGACY_TOOL_EQUIVALENCE,
+  LEGACY_TOOL_EQUIVALENCE_BY_KEY,
+  getLegacyToolEquivalence,
+  type LegacyToolDisposition,
+} from './legacy-tool-equivalence';
 
-type LegacyToolDisposition = 'SAME' | 'ALIAS' | 'SPECIALIZATION' | 'OBSOLETE' | 'MISSING';
+const ALL_14_FORMER_LEGACY_KEYS = [
+  'commerce.summarizeRevenue',
+  'connect.listDriveIntake',
+  'connect.scanDrive',
+  'contacts.createCommandItem',
+  'contacts.recommendFollowUps',
+  'finance.calculateSafeToSpend',
+  'finance.cashflowForecast',
+  'finance.createInvoiceReminderDraft',
+  'finance.generateMoneyMoves',
+  'finance.listOverdueInvoices',
+  'finance.summarizeCashPosition',
+  'messages.listMessageIntake',
+  'social.listRecentEngagement',
+  'timeline.createReminder',
+] as const;
 
-interface LegacyToolEquivalenceEntry {
-  readonly legacyKey: string;
-  readonly disposition: LegacyToolDisposition;
-  readonly canonicalTool?: string;
-  readonly reason: string;
-}
-
-interface EquivalenceModule {
-  LEGACY_TOOL_EQUIVALENCE: ReadonlyArray<LegacyToolEquivalenceEntry>;
-  LEGACY_TOOL_EQUIVALENCE_BY_KEY: ReadonlyMap<string, LegacyToolEquivalenceEntry>;
-  getLegacyToolEquivalence: (legacyKey: string) => LegacyToolEquivalenceEntry | undefined;
-  obsoleteLegacyToolRefusal: (entry: LegacyToolEquivalenceEntry) => string;
-}
+const LEGACY_RISK_TIERS: Readonly<Record<string, number>> = {
+  'finance.summarizeCashPosition': 1,
+  'finance.calculateSafeToSpend': 1,
+  'finance.listOverdueInvoices': 1,
+  'finance.generateMoneyMoves': 1,
+  'finance.cashflowForecast': 1,
+  'finance.createInvoiceReminderDraft': 2,
+  'contacts.recommendFollowUps': 1,
+  'contacts.createCommandItem': 1,
+  'commerce.summarizeRevenue': 1,
+  'timeline.createReminder': 1,
+  'connect.scanDrive': 1,
+  'connect.listDriveIntake': 1,
+  'messages.listMessageIntake': 1,
+  'social.listRecentEngagement': 1,
+};
 
 const VALID_DISPOSITIONS: ReadonlySet<string> = new Set<LegacyToolDisposition>([
   'SAME',
@@ -42,14 +85,6 @@ const VALID_DISPOSITIONS: ReadonlySet<string> = new Set<LegacyToolDisposition>([
   'OBSOLETE',
   'MISSING',
 ]);
-
-const EQUIVALENCE_SPECIFIER = './legacy-tool-equivalence';
-
-async function loadEquivalence(): Promise<EquivalenceModule> {
-  const mod = (await import(EQUIVALENCE_SPECIFIER).catch(() => null)) as EquivalenceModule | null;
-  expect(mod, 'apps/server/src/modules/ai/legacy-tool-equivalence.ts must exist').not.toBeNull();
-  return mod!;
-}
 
 type Member = { userRole?: string; role?: string; permissionScopes?: Record<string, string> | null } | null;
 
@@ -72,39 +107,8 @@ const POLICY = {
   approvalTimeoutHours: 24,
 };
 
-function makeRealLegacyRegistry(prismaOverride?: Record<string, unknown>) {
-  const prisma = {
-    client: {
-      socialEngagement: { findMany: vi.fn().mockResolvedValue([]) },
-      messageIntake: { findMany: vi.fn().mockResolvedValue([]) },
-      financialAccount: { findMany: vi.fn().mockResolvedValue([]) },
-      ...(prismaOverride ?? {}),
-    },
-  };
-  const auditLog = { logToolExecution: vi.fn().mockResolvedValue(undefined) };
-  const registry = new KeyToolRegistryService(
-    prisma as any,
-    { calculate: vi.fn().mockResolvedValue({ safeToSpend: 1000 }) } as any,
-    { forecast: vi.fn().mockResolvedValue({ horizonDays: 90 }) } as any,
-    { generate: vi.fn().mockResolvedValue([]) } as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    auditLog as any,
-  );
-  return { registry, prisma, auditLog };
-}
-
-function makeHarness(opts: {
-  member?: Member;
-  canonicalNames?: string[];
-  includeAllFlowTools?: boolean;
-  policy?: Partial<typeof POLICY> & { degraded?: boolean };
-} = {}) {
-  const member: Member = opts.member === undefined ? { role: 'OWNER', permissionScopes: null } : opts.member;
-  const prisma = {
+function makePrismaForMember(member: Member) {
+  return {
     client: {
       keyCommand: { update: vi.fn().mockResolvedValue({}) },
       user: {
@@ -125,6 +129,16 @@ function makeHarness(opts: {
       contact: { findMany: vi.fn().mockResolvedValue([]) },
     },
   };
+}
+
+function makeHarness(opts: {
+  member?: Member;
+  canonicalNames?: string[];
+  includeAllFlowTools?: boolean;
+  policy?: Partial<typeof POLICY> & { degraded?: boolean };
+} = {}) {
+  const member: Member = opts.member === undefined ? { role: 'OWNER', permissionScopes: null } : opts.member;
+  const prisma = makePrismaForMember(member);
   const timeline = { recordEvent: vi.fn().mockResolvedValue(undefined) };
 
   const flowList =
@@ -143,12 +157,6 @@ function makeHarness(opts: {
     execute: vi.fn().mockResolvedValue({ success: true, data: { from: 'canonical' } }),
   };
 
-  const { registry: realLegacy } = makeRealLegacyRegistry();
-  const legacy = {
-    getTool: vi.fn((module: string, name: string) => realLegacy.getTool(module, name)),
-    execute: vi.fn().mockResolvedValue({ success: true, data: { from: 'legacy' } }),
-  };
-
   const oversight = {
     evaluate: vi.fn().mockResolvedValue(AUTO),
     getAutonomySettings: vi.fn().mockResolvedValue({ ...POLICY, ...opts.policy }),
@@ -158,14 +166,13 @@ function makeHarness(opts: {
   const service = new KeyCommandService(
     prisma as any,
     timeline as any,
-    legacy as any,
     {} as any,
     canonical as any,
     oversight as any,
     safety as any,
   );
 
-  return { service, prisma, timeline, canonical, legacy, oversight, safety, realLegacy };
+  return { service, prisma, timeline, canonical, oversight, safety };
 }
 
 function makePlan(module: string, tool: string, input: Record<string, unknown> = {}): KeyCommandPlan {
@@ -187,354 +194,8 @@ afterEach(() => {
   else process.env.KEY_DISABLED = savedKeyDisabled;
 });
 
-describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): legacy tool equivalence table', () => {
-  it('classifies every single key registered in KeyToolRegistryService (all 14) with zero stale entries and valid FLOW_TOOLS targets', async () => {
-    const { LEGACY_TOOL_EQUIVALENCE, LEGACY_TOOL_EQUIVALENCE_BY_KEY, getLegacyToolEquivalence } =
-      await loadEquivalence();
-    const { registry } = makeRealLegacyRegistry();
-    const registeredKeys = registry.listTools().map((t) => t.key).sort();
-
-    expect(registeredKeys.length).toBe(14);
-
-    const tableKeys = LEGACY_TOOL_EQUIVALENCE.map((e) => e.legacyKey);
-    expect(new Set(tableKeys).size, 'no duplicate legacyKey entries').toBe(tableKeys.length);
-    expect([...tableKeys].sort()).toEqual(registeredKeys);
-    expect(LEGACY_TOOL_EQUIVALENCE_BY_KEY.size).toBe(registeredKeys.length);
-
-    let sameCount = 0;
-    let aliasCount = 0;
-    let obsoleteCount = 0;
-
-    for (const entry of LEGACY_TOOL_EQUIVALENCE) {
-      expect(VALID_DISPOSITIONS.has(entry.disposition), `${entry.legacyKey}: invalid disposition`).toBe(true);
-      expect(entry.reason.trim().length, `${entry.legacyKey}: reason must be non-empty`).toBeGreaterThan(10);
-      expect(getLegacyToolEquivalence(entry.legacyKey)).toEqual(entry);
-
-      if (entry.disposition === 'SAME' || entry.disposition === 'ALIAS') {
-        if (entry.disposition === 'SAME') sameCount += 1;
-        if (entry.disposition === 'ALIAS') aliasCount += 1;
-
-        expect(typeof entry.canonicalTool, `${entry.legacyKey}: canonicalTool required`).toBe('string');
-        const flowTool = getToolByName(entry.canonicalTool!);
-        expect(flowTool, `${entry.legacyKey} -> ${entry.canonicalTool} must exist in FLOW_TOOLS`).toBeDefined();
-        expect(
-          getManualEquivalentRoute(flowTool!).startsWith('/app/'),
-          `${entry.canonicalTool} must preserve a manualEquivalentRoute`,
-        ).toBe(true);
-      } else {
-        if (entry.disposition === 'OBSOLETE') obsoleteCount += 1;
-        expect(entry.canonicalTool, `${entry.legacyKey}: non-SAME/ALIAS must not set canonicalTool`).toBeUndefined();
-      }
-    }
-
-    expect(sameCount).toBeGreaterThanOrEqual(1);
-    expect(aliasCount).toBeGreaterThanOrEqual(1);
-    expect(obsoleteCount).toBeGreaterThanOrEqual(1);
-  });
-});
-
-describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): canonical routing for SAME/ALIAS tools', () => {
-  it('resolves every SAME/ALIAS legacy tool to registry "canonical" with its canonicalTool and executes canonically', async () => {
-    const { LEGACY_TOOL_EQUIVALENCE } = await loadEquivalence();
-    const canonicalEntries = LEGACY_TOOL_EQUIVALENCE.filter(
-      (e) => e.disposition === 'SAME' || e.disposition === 'ALIAS',
-    );
-    expect(canonicalEntries.length).toBeGreaterThanOrEqual(4);
-
-    for (const entry of canonicalEntries) {
-      const { module, tool } = splitLegacyKey(entry.legacyKey);
-      const h = makeHarness();
-      const step = makePlan(module, tool).steps[0];
-
-      const resolved = (h.service as unknown as { resolveCapability: (s: typeof step) => any }).resolveCapability(step);
-      expect(resolved, entry.legacyKey).toBeDefined();
-      expect(resolved.registry, entry.legacyKey).toBe('canonical');
-      expect(resolved.name, entry.legacyKey).toBe(entry.canonicalTool);
-      expect(resolved.toolName, entry.legacyKey).toBe(entry.canonicalTool);
-
-      const results = await h.service.executeApprovedPlan('cmd_canon', makePlan(module, tool), 'biz_1', 'user_1');
-      expect(h.canonical.execute, entry.legacyKey).toHaveBeenCalledTimes(1);
-      expect(h.canonical.execute.mock.calls[0][0], entry.legacyKey).toBe(entry.canonicalTool);
-      expect(h.legacy.execute, entry.legacyKey).not.toHaveBeenCalled();
-      expect(results[0], entry.legacyKey).toMatchObject({ success: true, tool: entry.canonicalTool });
-    }
-  });
-
-  it('routes the 4 canonical finance tools directly to FLOW_TOOLS canonical capabilities (never legacy)', () => {
-    const expected: Array<[string, string, string]> = [
-      ['finance', 'summarizeCashPosition', 'finance_safe_to_spend'],
-      ['finance', 'calculateSafeToSpend', 'finance_safe_to_spend'],
-      ['finance', 'generateMoneyMoves', 'finance_money_moves'],
-      ['finance', 'cashflowForecast', 'finance_cashflow_forecast'],
-    ];
-    const h = makeHarness();
-
-    for (const [module, tool, expectedCanonical] of expected) {
-      const step = makePlan(module, tool).steps[0];
-      const resolved = (h.service as unknown as { resolveCapability: (s: typeof step) => any }).resolveCapability(step);
-      expect(resolved, `${module}.${tool}`).toMatchObject({
-        registry: 'canonical',
-        name: expectedCanonical,
-        toolName: expectedCanonical,
-      });
-    }
-  });
-
-  it('fails closed (never falls back to legacy) when a SAME/ALIAS canonical target is absent from canonical registry', async () => {
-    const h = makeHarness({ includeAllFlowTools: false, canonicalNames: [] });
-    const step = makePlan('finance', 'summarizeCashPosition').steps[0];
-
-    const resolved = (h.service as unknown as { resolveCapability: (s: typeof step) => any }).resolveCapability(step);
-    expect(resolved).toBeUndefined();
-
-    const results = await h.service.executeApprovedPlan(
-      'cmd_missing_canon',
-      makePlan('finance', 'summarizeCashPosition'),
-      'biz_1',
-      'user_1',
-    );
-    expect(h.canonical.execute).not.toHaveBeenCalled();
-    expect(h.legacy.execute).not.toHaveBeenCalled();
-    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
-  });
-
-  it('keeps SPECIALIZATION/MISSING legacy tools on the legacy registry until RR-LEGACY-FALLBACK-REMOVE (control)', async () => {
-    const h = makeHarness({ includeAllFlowTools: true });
-    const step = makePlan('messages', 'listMessageIntake').steps[0];
-
-    const resolved = (h.service as unknown as { resolveCapability: (s: typeof step) => any }).resolveCapability(step);
-    expect(resolved).toMatchObject({ registry: 'legacy', name: 'messages.listMessageIntake' });
-
-    const results = await h.service.executeApprovedPlan(
-      'cmd_legacy_ctrl',
-      makePlan('messages', 'listMessageIntake'),
-      'biz_1',
-      'user_1',
-    );
-    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
-    expect(h.canonical.execute).not.toHaveBeenCalled();
-    expect(results[0]).toMatchObject({ success: true, tool: 'messages.listMessageIntake' });
-  });
-});
-
-describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): revenue authority enforcement (D-100/D-145/D-234/D-104)', () => {
-  const ALIASED_FINANCE_STEPS: Array<[string, string, string]> = [
-    ['finance', 'summarizeCashPosition', 'finance_safe_to_spend'],
-    ['finance', 'calculateSafeToSpend', 'finance_safe_to_spend'],
-    ['finance', 'generateMoneyMoves', 'finance_money_moves'],
-    ['finance', 'cashflowForecast', 'finance_cashflow_forecast'],
-  ];
-
-  it.each(ALIASED_FINANCE_STEPS)(
-    'refuses %s.%s (-> %s) for a member without revenue:read and allows OWNER / revenue:read member',
-    async (module, tool, canonicalName) => {
-      // Verify canonical authority metadata requires revenue:read + D-104 membership.
-      expect(CANONICAL_MODULE_TOOLS.revenue[canonicalName]).toBe('read');
-      expect(keyMemberToolScopes(canonicalName)).toEqual(
-        expect.arrayContaining([{ module: 'revenue', minLevel: 'read' }]),
-      );
-      expect(KEY_BOOKS_MEMBERSHIP_READ_TOOLS.has(canonicalName)).toBe(true);
-
-      // Member without revenue:read is refused identically to calling the canonical tool directly.
-      const denied = makeHarness({
-        member: { role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'read' } },
-      });
-      const deniedRes = await denied.service.executeApprovedPlan('cmd_deny', makePlan(module, tool), 'biz_1', 'user_1');
-      expect(denied.canonical.execute).not.toHaveBeenCalled();
-      expect(denied.legacy.execute).not.toHaveBeenCalled();
-      expect(deniedRes[0]).toMatchObject({ success: false, notExecuted: true, tool: canonicalName });
-      expect(deniedRes[0].error).toMatch(/revenue requires read access/i);
-
-      // Anonymous call (no member) fails closed.
-      const anon = makeHarness();
-      const anonRes = await anon.service.executeApprovedPlan('cmd_anon', makePlan(module, tool), 'biz_1', undefined);
-      expect(anon.canonical.execute).not.toHaveBeenCalled();
-      expect(anon.legacy.execute).not.toHaveBeenCalled();
-      expect(anonRes[0]).toMatchObject({ success: false, notExecuted: true });
-
-      // Platform SUPER_ADMIN who is NOT a member of this business is refused (D-104).
-      const saOutsider = makeHarness({ member: { userRole: 'SUPER_ADMIN', role: undefined } });
-      const saRes = await saOutsider.service.executeApprovedPlan('cmd_sa', makePlan(module, tool), 'biz_1', 'user_1');
-      expect(saOutsider.canonical.execute).not.toHaveBeenCalled();
-      expect(saOutsider.legacy.execute).not.toHaveBeenCalled();
-      expect(saRes[0]).toMatchObject({ success: false, notExecuted: true });
-      expect(saRes[0].error).toMatch(/No access to this business/i);
-
-      // Negative control 1: OWNER succeeds canonically.
-      const owner = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
-      const ownerRes = await owner.service.executeApprovedPlan('cmd_owner', makePlan(module, tool), 'biz_1', 'user_1');
-      expect(owner.canonical.execute).toHaveBeenCalledTimes(1);
-      expect(owner.canonical.execute.mock.calls[0][0]).toBe(canonicalName);
-      expect(owner.legacy.execute).not.toHaveBeenCalled();
-      expect(ownerRes[0]).toMatchObject({ success: true, tool: canonicalName });
-
-      // Negative control 2: STAFF with revenue:read succeeds canonically.
-      const staffRev = makeHarness({ member: { role: 'STAFF', permissionScopes: { revenue: 'read' } } });
-      const staffRes = await staffRev.service.executeApprovedPlan(
-        'cmd_staff_rev',
-        makePlan(module, tool),
-        'biz_1',
-        'user_1',
-      );
-      expect(staffRev.canonical.execute).toHaveBeenCalledTimes(1);
-      expect(staffRev.legacy.execute).not.toHaveBeenCalled();
-      expect(staffRes[0]).toMatchObject({ success: true, tool: canonicalName });
-    },
-  );
-});
-
-describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): OBSOLETE tools fail closed with zero side effects', () => {
-  it('refuses social.listRecentEngagement through KeyCommandService with a plain message and zero execution', async () => {
-    const h = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
-    const step = makePlan('social', 'listRecentEngagement', { limit: 10 }).steps[0];
-
-    const resolved = (h.service as unknown as { resolveCapability: (s: typeof step) => any }).resolveCapability(step);
-    expect(resolved).toBeUndefined();
-
-    const results = await h.service.executeApprovedPlan(
-      'cmd_obs',
-      makePlan('social', 'listRecentEngagement', { limit: 10 }),
-      'biz_1',
-      'user_1',
-    );
-    expect(h.canonical.execute).not.toHaveBeenCalled();
-    expect(h.legacy.execute).not.toHaveBeenCalled();
-    expect(results[0]).toMatchObject({
-      success: false,
-      notExecuted: true,
-      requiresApproval: false,
-      tool: 'social.listRecentEngagement',
-    });
-    expect(results[0].error).toMatch(/obsolete/i);
-  });
-
-  it('refuses every OBSOLETE entry in LEGACY_TOOL_EQUIVALENCE through both KeyCommandService and KeyToolRegistryService', async () => {
-    const { LEGACY_TOOL_EQUIVALENCE } = await loadEquivalence();
-    const obsoleteEntries = LEGACY_TOOL_EQUIVALENCE.filter((e) => e.disposition === 'OBSOLETE');
-    expect(obsoleteEntries.length).toBeGreaterThanOrEqual(1);
-
-    for (const entry of obsoleteEntries) {
-      const { module, tool } = splitLegacyKey(entry.legacyKey);
-      const h = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
-      const cmdResults = await h.service.executeApprovedPlan('cmd_obs_all', makePlan(module, tool), 'biz_1', 'user_1');
-      expect(h.canonical.execute, entry.legacyKey).not.toHaveBeenCalled();
-      expect(h.legacy.execute, entry.legacyKey).not.toHaveBeenCalled();
-      expect(cmdResults[0], entry.legacyKey).toMatchObject({
-        success: false,
-        notExecuted: true,
-        tool: entry.legacyKey,
-      });
-      expect(cmdResults[0].error, entry.legacyKey).toMatch(/obsolete/i);
-
-      const { registry, prisma } = makeRealLegacyRegistry();
-      const directResult = await registry.execute(
-        module,
-        tool,
-        { businessId: 'biz_1', userId: 'user_1', autonomyLevel: 4 },
-        {},
-      );
-      expect(directResult, entry.legacyKey).toMatchObject({ success: false, notExecuted: true });
-      expect(directResult.error, entry.legacyKey).toMatch(/obsolete/i);
-      expect(prisma.client.socialEngagement.findMany).not.toHaveBeenCalled();
-    }
-  });
-});
-
-describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): no risk-tier, approval, or scope loosening', () => {
-  it('ensures no SAME/ALIAS entry loosens riskTier, approval requirement, or memberless exposure relative to its legacy tool', async () => {
-    const { LEGACY_TOOL_EQUIVALENCE } = await loadEquivalence();
-    const { registry } = makeRealLegacyRegistry();
-
-    for (const entry of LEGACY_TOOL_EQUIVALENCE) {
-      if (entry.disposition !== 'SAME' && entry.disposition !== 'ALIAS') continue;
-      const { module, tool } = splitLegacyKey(entry.legacyKey);
-      const legacyTool = registry.getTool(module, tool);
-      const canonicalTool = getToolByName(entry.canonicalTool!);
-
-      expect(legacyTool, entry.legacyKey).toBeDefined();
-      expect(canonicalTool, entry.canonicalTool).toBeDefined();
-      expect(
-        canonicalTool!.riskTier,
-        `${entry.legacyKey} -> ${entry.canonicalTool} must not loosen riskTier`,
-      ).toBeGreaterThanOrEqual(legacyTool!.riskTier);
-      if (legacyTool!.requiresApproval) {
-        expect(
-          canonicalTool!.riskTier,
-          `${entry.legacyKey} required approval; canonical must remain approval-gated`,
-        ).toBeGreaterThanOrEqual(3);
-      }
-      if (module === 'finance' || module === 'commerce') {
-        expect(
-          Object.prototype.hasOwnProperty.call(MEMBERLESS_KEY_TOOLS, entry.canonicalTool!),
-          `${entry.canonicalTool} must never be memberless-allowlisted`,
-        ).toBe(false);
-      }
-    }
-  });
-
-  it('keeps business blockedTools naming the legacy tool effective after canonical aliasing', async () => {
-    const h = makeHarness({
-      member: { role: 'OWNER', permissionScopes: null },
-      policy: { blockedTools: ['summarizeCashPosition'] },
-    });
-
-    const results = await h.service.executeApprovedPlan(
-      'cmd_legacy_block',
-      makePlan('finance', 'summarizeCashPosition'),
-      'biz_1',
-      'user_1',
-    );
-    expect(h.canonical.execute).not.toHaveBeenCalled();
-    expect(h.legacy.execute).not.toHaveBeenCalled();
-    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(results[0].error).toContain('Tool "summarizeCashPosition" is blocked');
-  });
-});
-
-describe('P154 (RR-LEGACY-TOOLS-CLASSIFY): KEY_DISABLED (D-17) still turns KEY off cleanly', () => {
-  it('refuses both aliased canonical tools and legacy tools with zero execution when KEY_DISABLED=1', async () => {
-    process.env.KEY_DISABLED = '1';
-
-    const h = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
-    const aliasedRes = await h.service.executeApprovedPlan(
-      'cmd_disabled_1',
-      makePlan('finance', 'summarizeCashPosition'),
-      'biz_1',
-      'user_1',
-    );
-    expect(h.canonical.execute).not.toHaveBeenCalled();
-    expect(h.legacy.execute).not.toHaveBeenCalled();
-    expect(aliasedRes[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(aliasedRes[0].error).toMatch(/KEY_DISABLED/i);
-
-    const legacyRes = await h.service.executeApprovedPlan(
-      'cmd_disabled_2',
-      makePlan('messages', 'listMessageIntake'),
-      'biz_1',
-      'user_1',
-    );
-    expect(h.canonical.execute).not.toHaveBeenCalled();
-    expect(h.legacy.execute).not.toHaveBeenCalled();
-    expect(legacyRes[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(legacyRes[0].error).toMatch(/KEY_DISABLED/i);
-
-    const { registry, prisma } = makeRealLegacyRegistry();
-    const directRes = await registry.execute(
-      'messages',
-      'listMessageIntake',
-      { businessId: 'biz_1', userId: 'user_1', autonomyLevel: 4 },
-      {},
-    );
-    expect(directRes).toMatchObject({ success: false, notExecuted: true });
-    expect(directRes.error).toMatch(/KEY_DISABLED/i);
-    expect(prisma.client.messageIntake.findMany).not.toHaveBeenCalled();
-  });
-});
-
 describe('P160 (RR-LEGACY-FALLBACK-REMOVE): legacy fallback and KeyToolRegistryService removed', () => {
-  it('no disposition is SPECIALIZATION or MISSING and KeyToolRegistryService is not provided by AiModule', async () => {
-    const { LEGACY_TOOL_EQUIVALENCE } = await loadEquivalence();
-
+  it('no disposition is SPECIALIZATION or MISSING and KeyToolRegistryService is not provided by AiModule', () => {
     const remainingLegacy = LEGACY_TOOL_EQUIVALENCE.filter(
       (e) => e.disposition === 'SPECIALIZATION' || e.disposition === 'MISSING',
     );
@@ -567,3 +228,362 @@ describe('P160 (RR-LEGACY-FALLBACK-REMOVE): legacy fallback and KeyToolRegistryS
   });
 });
 
+describe('P154/P160: legacy tool equivalence table covers all 14 former legacy keys cleanly', () => {
+  it('classifies every one of the 14 former legacy keys with zero stale entries and valid FLOW_TOOLS targets', () => {
+    const tableKeys = LEGACY_TOOL_EQUIVALENCE.map((e) => e.legacyKey);
+    expect(new Set(tableKeys).size, 'no duplicate legacyKey entries').toBe(tableKeys.length);
+    expect([...tableKeys].sort()).toEqual([...ALL_14_FORMER_LEGACY_KEYS]);
+    expect(LEGACY_TOOL_EQUIVALENCE_BY_KEY.size).toBe(14);
+
+    let sameCount = 0;
+    let aliasCount = 0;
+    let obsoleteCount = 0;
+
+    for (const entry of LEGACY_TOOL_EQUIVALENCE) {
+      expect(VALID_DISPOSITIONS.has(entry.disposition), `${entry.legacyKey}: invalid disposition`).toBe(true);
+      expect(entry.reason.trim().length, `${entry.legacyKey}: reason must be non-empty`).toBeGreaterThan(10);
+      expect(getLegacyToolEquivalence(entry.legacyKey)).toEqual(entry);
+
+      if (entry.disposition === 'SAME' || entry.disposition === 'ALIAS') {
+        if (entry.disposition === 'SAME') sameCount += 1;
+        if (entry.disposition === 'ALIAS') aliasCount += 1;
+
+        expect(typeof entry.canonicalTool, `${entry.legacyKey}: canonicalTool required`).toBe('string');
+        const flowTool = getToolByName(entry.canonicalTool!);
+        expect(flowTool, `${entry.legacyKey} -> ${entry.canonicalTool} must exist in FLOW_TOOLS`).toBeDefined();
+        expect(
+          getManualEquivalentRoute(flowTool!).startsWith('/app/'),
+          `${entry.canonicalTool} must preserve a manualEquivalentRoute`,
+        ).toBe(true);
+      } else {
+        if (entry.disposition === 'OBSOLETE') obsoleteCount += 1;
+        expect(entry.canonicalTool, `${entry.legacyKey}: non-SAME/ALIAS must not set canonicalTool`).toBeUndefined();
+      }
+    }
+
+    expect(sameCount).toBe(9);
+    expect(aliasCount).toBe(1);
+    expect(obsoleteCount).toBe(4);
+  });
+});
+
+describe('P160: every former legacy tool name answers canonical or plain refusal through KeyCommand (all 14)', () => {
+  const EXPECTED_KEY_COMMAND_OUTCOME: Array<{
+    legacyKey: string;
+    mode: 'canonical-read' | 'canonical-non-read-refused' | 'obsolete-refused';
+    canonicalTool?: string;
+  }> = [
+    { legacyKey: 'finance.summarizeCashPosition', mode: 'canonical-read', canonicalTool: 'finance_safe_to_spend' },
+    { legacyKey: 'finance.calculateSafeToSpend', mode: 'canonical-read', canonicalTool: 'finance_safe_to_spend' },
+    { legacyKey: 'finance.listOverdueInvoices', mode: 'canonical-read', canonicalTool: 'finance_list_overdue_invoices' },
+    { legacyKey: 'finance.generateMoneyMoves', mode: 'canonical-read', canonicalTool: 'finance_money_moves' },
+    { legacyKey: 'finance.cashflowForecast', mode: 'canonical-read', canonicalTool: 'finance_cashflow_forecast' },
+    { legacyKey: 'finance.createInvoiceReminderDraft', mode: 'canonical-non-read-refused', canonicalTool: 'finance_create_invoice_reminder_draft' },
+    { legacyKey: 'contacts.recommendFollowUps', mode: 'canonical-read', canonicalTool: 'crm_recommend_follow_ups' },
+    { legacyKey: 'contacts.createCommandItem', mode: 'canonical-non-read-refused', canonicalTool: 'command_create_item' },
+    { legacyKey: 'commerce.summarizeRevenue', mode: 'canonical-read', canonicalTool: 'commerce_summarize_revenue' },
+    { legacyKey: 'timeline.createReminder', mode: 'canonical-non-read-refused', canonicalTool: 'crm_create_reminder' },
+    { legacyKey: 'connect.scanDrive', mode: 'obsolete-refused' },
+    { legacyKey: 'connect.listDriveIntake', mode: 'obsolete-refused' },
+    { legacyKey: 'messages.listMessageIntake', mode: 'obsolete-refused' },
+    { legacyKey: 'social.listRecentEngagement', mode: 'obsolete-refused' },
+  ];
+
+  it.each(EXPECTED_KEY_COMMAND_OUTCOME)(
+    '$legacyKey -> $mode ($canonicalTool)',
+    async ({ legacyKey, mode, canonicalTool }) => {
+      const { module, tool } = splitLegacyKey(legacyKey);
+      const h = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
+      const step = makePlan(module, tool).steps[0];
+      const resolved = (h.service as unknown as { resolveCapability: (s: typeof step) => any }).resolveCapability(step);
+
+      if (mode === 'obsolete-refused') {
+        expect(resolved).toBeUndefined();
+        const res = await h.service.executeApprovedPlan('cmd_14', makePlan(module, tool), 'biz_1', 'user_1');
+        expect(h.canonical.execute).not.toHaveBeenCalled();
+        expect(res[0]).toMatchObject({ success: false, notExecuted: true, requiresApproval: false, tool: legacyKey });
+        expect(res[0].error).toMatch(/obsolete/i);
+        return;
+      }
+
+      expect(resolved).toMatchObject({
+        registry: 'canonical',
+        name: canonicalTool,
+        toolName: canonicalTool,
+        aliasedFrom: legacyKey,
+      });
+
+      const res = await h.service.executeApprovedPlan('cmd_14', makePlan(module, tool), 'biz_1', 'user_1');
+      if (mode === 'canonical-read') {
+        expect(h.canonical.execute).toHaveBeenCalledTimes(1);
+        expect(h.canonical.execute.mock.calls[0][0]).toBe(canonicalTool);
+        expect(res[0]).toMatchObject({ success: true, tool: canonicalTool });
+      } else {
+        // Non-read-only canonical tool (draft/write) resolves canonically but 'ask' refuses to mutate the business.
+        expect(h.canonical.execute).not.toHaveBeenCalled();
+        expect(res[0]).toMatchObject({
+          success: false,
+          notExecuted: true,
+          requiresApproval: true,
+          tool: canonicalTool,
+        });
+        expect(res[0].error).toMatch(/not a read-only capability/i);
+      }
+    },
+  );
+
+  it('fails closed when a SAME/ALIAS canonical target is absent from canonical registry', async () => {
+    const h = makeHarness({ includeAllFlowTools: false, canonicalNames: [] });
+    const step = makePlan('finance', 'summarizeCashPosition').steps[0];
+    expect((h.service as any).resolveCapability(step)).toBeUndefined();
+
+    const results = await h.service.executeApprovedPlan(
+      'cmd_missing_canon',
+      makePlan('finance', 'summarizeCashPosition'),
+      'biz_1',
+      'user_1',
+    );
+    expect(h.canonical.execute).not.toHaveBeenCalled();
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
+  });
+});
+
+describe('P160: per-tool authority enforcement for all 6 newly promoted canonical tools', () => {
+  const PROMOTED_AUTHORITY_CASES: Array<{
+    tool: string;
+    requiredModule: string;
+    requiredLevel: 'read' | 'write';
+    booksMembershipRead: boolean;
+    contactRead: boolean;
+    allowStaffScopes: Record<string, string>;
+    denyStaffScopes: Record<string, string>;
+  }> = [
+    {
+      tool: 'finance_list_overdue_invoices',
+      requiredModule: 'revenue',
+      requiredLevel: 'read',
+      booksMembershipRead: true,
+      contactRead: false,
+      allowStaffScopes: { revenue: 'read' },
+      denyStaffScopes: { revenue: 'none', crm: 'read' },
+    },
+    {
+      tool: 'finance_create_invoice_reminder_draft',
+      requiredModule: 'revenue',
+      requiredLevel: 'write',
+      booksMembershipRead: true,
+      contactRead: false,
+      allowStaffScopes: { revenue: 'write' },
+      denyStaffScopes: { revenue: 'read' },
+    },
+    {
+      tool: 'commerce_summarize_revenue',
+      requiredModule: 'revenue',
+      requiredLevel: 'read',
+      booksMembershipRead: true,
+      contactRead: false,
+      allowStaffScopes: { revenue: 'read' },
+      denyStaffScopes: { revenue: 'none', crm: 'read' },
+    },
+    {
+      tool: 'crm_recommend_follow_ups',
+      requiredModule: 'crm',
+      requiredLevel: 'read',
+      booksMembershipRead: false,
+      contactRead: true,
+      allowStaffScopes: { crm: 'read' },
+      denyStaffScopes: { crm: 'none', revenue: 'read' },
+    },
+    {
+      tool: 'command_create_item',
+      requiredModule: 'operations',
+      requiredLevel: 'write',
+      booksMembershipRead: false,
+      contactRead: false,
+      allowStaffScopes: { operations: 'write' },
+      denyStaffScopes: { operations: 'read' },
+    },
+    {
+      tool: 'crm_create_reminder',
+      requiredModule: 'crm',
+      requiredLevel: 'write',
+      booksMembershipRead: false,
+      contactRead: false,
+      allowStaffScopes: { crm: 'write' },
+      denyStaffScopes: { crm: 'read' },
+    },
+  ];
+
+  it.each(PROMOTED_AUTHORITY_CASES)(
+    '$tool enforces $requiredModule:$requiredLevel (OWNER allowed, scoped STAFF allowed, STAFF without scope refused)',
+    async ({ tool, requiredModule, requiredLevel, booksMembershipRead, contactRead, allowStaffScopes, denyStaffScopes }) => {
+      const flowTool = getToolByName(tool);
+      expect(flowTool, `${tool} must exist in FLOW_TOOLS`).toBeDefined();
+      expect(getManualEquivalentRoute(flowTool!).startsWith('/app/')).toBe(true);
+
+      const req = graphActionRequirement(tool);
+      expect(req).not.toBeNull();
+      expect(keyMemberToolScopes(tool)).toEqual(
+        expect.arrayContaining([{ module: requiredModule, minLevel: requiredLevel }]),
+      );
+
+      if (tool === 'command_create_item') {
+        expect(CANONICAL_MODULE_TOOLS.operations.command_create_item).toBe('write');
+      }
+      expect(KEY_BOOKS_MEMBERSHIP_READ_TOOLS.has(tool)).toBe(booksMembershipRead);
+      expect(GRAPH_ACTION_CONTACT_READ_TOOLS.has(tool)).toBe(contactRead);
+      if (contactRead) {
+        expect(noMemberToolRefusal(tool)).not.toBeNull();
+      }
+
+      // OWNER allowed
+      const ownerRefusal = await memberToolScopeRefusal(
+        makePrismaForMember({ role: 'OWNER', permissionScopes: null }) as any,
+        'biz_1',
+        'user_1',
+        tool,
+      );
+      expect(ownerRefusal).toBeNull();
+
+      // STAFF with required scope allowed
+      const staffAllowRefusal = await memberToolScopeRefusal(
+        makePrismaForMember({ role: 'STAFF', permissionScopes: allowStaffScopes }) as any,
+        'biz_1',
+        'user_1',
+        tool,
+      );
+      expect(staffAllowRefusal).toBeNull();
+
+      // STAFF without required scope refused
+      const staffDenyRefusal = await memberToolScopeRefusal(
+        makePrismaForMember({ role: 'STAFF', permissionScopes: denyStaffScopes }) as any,
+        'biz_1',
+        'user_1',
+        tool,
+      );
+      expect(staffDenyRefusal).not.toBeNull();
+      expect(staffDenyRefusal!).toContain(`${requiredModule} requires ${requiredLevel} access`);
+
+      // Non-member refused
+      const nonMemberRefusal = await memberToolScopeRefusal(
+        makePrismaForMember(null) as any,
+        'biz_1',
+        'user_1',
+        tool,
+      );
+      expect(nonMemberRefusal).not.toBeNull();
+
+      // Money-deriving tools refuse platform SUPER_ADMIN without membership (D-104 / D-46)
+      if (booksMembershipRead) {
+        const saOutsiderRefusal = await memberToolScopeRefusal(
+          makePrismaForMember({ userRole: 'SUPER_ADMIN', role: undefined }) as any,
+          'biz_1',
+          'user_1',
+          tool,
+        );
+        expect(saOutsiderRefusal).not.toBeNull();
+        expect(saOutsiderRefusal!).toMatch(/No access to this business|Not a member/i);
+      }
+    },
+  );
+});
+
+describe('P154/P160: revenue authority enforcement through KeyCommand (D-100/D-145/D-234/D-104)', () => {
+  const ALIASED_MONEY_READ_STEPS: Array<[string, string, string]> = [
+    ['finance', 'summarizeCashPosition', 'finance_safe_to_spend'],
+    ['finance', 'calculateSafeToSpend', 'finance_safe_to_spend'],
+    ['finance', 'listOverdueInvoices', 'finance_list_overdue_invoices'],
+    ['finance', 'generateMoneyMoves', 'finance_money_moves'],
+    ['finance', 'cashflowForecast', 'finance_cashflow_forecast'],
+    ['commerce', 'summarizeRevenue', 'commerce_summarize_revenue'],
+  ];
+
+  it.each(ALIASED_MONEY_READ_STEPS)(
+    'refuses %s.%s (-> %s) for a member without revenue:read and non-member SUPER_ADMIN, allows OWNER and revenue:read STAFF',
+    async (module, tool, canonicalName) => {
+      const denied = makeHarness({
+        member: { role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'read' } },
+      });
+      const deniedRes = await denied.service.executeApprovedPlan('cmd_deny', makePlan(module, tool), 'biz_1', 'user_1');
+      expect(denied.canonical.execute).not.toHaveBeenCalled();
+      expect(deniedRes[0]).toMatchObject({ success: false, notExecuted: true, tool: canonicalName });
+      expect(deniedRes[0].error).toMatch(/revenue requires read access/i);
+
+      const anon = makeHarness();
+      const anonRes = await anon.service.executeApprovedPlan('cmd_anon', makePlan(module, tool), 'biz_1', undefined);
+      expect(anon.canonical.execute).not.toHaveBeenCalled();
+      expect(anonRes[0]).toMatchObject({ success: false, notExecuted: true });
+
+      const saOutsider = makeHarness({ member: { userRole: 'SUPER_ADMIN', role: undefined } });
+      const saRes = await saOutsider.service.executeApprovedPlan('cmd_sa', makePlan(module, tool), 'biz_1', 'user_1');
+      expect(saOutsider.canonical.execute).not.toHaveBeenCalled();
+      expect(saRes[0]).toMatchObject({ success: false, notExecuted: true });
+      expect(saRes[0].error).toMatch(/No access to this business/i);
+
+      const owner = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
+      const ownerRes = await owner.service.executeApprovedPlan('cmd_owner', makePlan(module, tool), 'biz_1', 'user_1');
+      expect(owner.canonical.execute).toHaveBeenCalledTimes(1);
+      expect(owner.canonical.execute.mock.calls[0][0]).toBe(canonicalName);
+      expect(ownerRes[0]).toMatchObject({ success: true, tool: canonicalName });
+
+      const staffRev = makeHarness({ member: { role: 'STAFF', permissionScopes: { revenue: 'read' } } });
+      const staffRes = await staffRev.service.executeApprovedPlan('cmd_staff_rev', makePlan(module, tool), 'biz_1', 'user_1');
+      expect(staffRev.canonical.execute).toHaveBeenCalledTimes(1);
+      expect(staffRes[0]).toMatchObject({ success: true, tool: canonicalName });
+    },
+  );
+});
+
+describe('P154/P160: no risk-tier loosening, blockedTools preservation, and KEY_DISABLED (D-17)', () => {
+  it('ensures no SAME/ALIAS entry loosens riskTier or exposes money tools as memberless', () => {
+    for (const entry of LEGACY_TOOL_EQUIVALENCE) {
+      if (entry.disposition !== 'SAME' && entry.disposition !== 'ALIAS') continue;
+      const { module } = splitLegacyKey(entry.legacyKey);
+      const canonicalTool = getToolByName(entry.canonicalTool!);
+      expect(canonicalTool, entry.canonicalTool).toBeDefined();
+      expect(
+        canonicalTool!.riskTier,
+        `${entry.legacyKey} -> ${entry.canonicalTool} must not loosen riskTier`,
+      ).toBeGreaterThanOrEqual(LEGACY_RISK_TIERS[entry.legacyKey]);
+      if (module === 'finance' || module === 'commerce') {
+        expect(
+          Object.prototype.hasOwnProperty.call(MEMBERLESS_KEY_TOOLS, entry.canonicalTool!),
+          `${entry.canonicalTool} must never be memberless-allowlisted`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('keeps business blockedTools naming the legacy tool effective after canonical promotion', async () => {
+    const h = makeHarness({
+      member: { role: 'OWNER', permissionScopes: null },
+      policy: { blockedTools: ['summarizeCashPosition'] },
+    });
+
+    const results = await h.service.executeApprovedPlan(
+      'cmd_legacy_block',
+      makePlan('finance', 'summarizeCashPosition'),
+      'biz_1',
+      'user_1',
+    );
+    expect(h.canonical.execute).not.toHaveBeenCalled();
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
+    expect(results[0].error).toContain('Tool "summarizeCashPosition" is blocked');
+  });
+
+  it('refuses both promoted canonical tools and obsolete keys with zero execution when KEY_DISABLED=1', async () => {
+    process.env.KEY_DISABLED = '1';
+
+    const h = makeHarness({ member: { role: 'OWNER', permissionScopes: null } });
+    for (const [module, tool] of [
+      ['finance', 'summarizeCashPosition'],
+      ['commerce', 'summarizeRevenue'],
+      ['messages', 'listMessageIntake'],
+    ] as const) {
+      const res = await h.service.executeApprovedPlan('cmd_disabled', makePlan(module, tool), 'biz_1', 'user_1');
+      expect(h.canonical.execute).not.toHaveBeenCalled();
+      expect(res[0]).toMatchObject({ success: false, notExecuted: true });
+      expect(res[0].error).toMatch(/KEY_DISABLED/i);
+    }
+  });
+});

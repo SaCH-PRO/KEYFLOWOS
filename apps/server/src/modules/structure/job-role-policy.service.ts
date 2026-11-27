@@ -223,7 +223,7 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // is no longer derived as a static operations:write tool.
     // command_* and procurement_*: the command-centre item and procurement routes require
     // operations (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
-    command_discharge_obligation: 'write', command_list_due_obligations: 'read',
+    command_create_item: 'write', command_discharge_obligation: 'write', command_list_due_obligations: 'read',
     contract_create_tag: 'write', contract_extract_terms: 'write', contract_list_tags: 'read',
     contracts_acknowledge_alert: 'write', contracts_create: 'write', contracts_delete: 'write',
     contracts_get: 'read', contracts_list: 'read', contracts_stats: 'read',

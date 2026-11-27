@@ -3,8 +3,6 @@ import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service'
 import { REMINDABLE_INVOICE_STATUSES } from '../commerce/invoice-workflow.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
-import { ToolResult } from './key-tool-registry.service';
-import { KeyToolRegistryService } from './key-tool-registry.service';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { CommandService } from '../command/command.service';
 import { AiOversightService } from './ai-oversight.service';
@@ -16,6 +14,14 @@ import { CANONICAL_MODULES, LEVEL_RANK, defaultScopesForRole, rankOf, type Canon
 import { keyDisabled } from '../../core/config/env';
 import { getLegacyToolEquivalence, obsoleteLegacyToolRefusal } from './legacy-tool-equivalence';
 import type { KeyCommand, Prisma } from '@prisma/client';
+
+export interface ToolResult<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  logs?: string[];
+  notExecuted?: boolean;
+}
 
 export enum KeyMode {
   ASK = 'ask',
@@ -104,14 +110,9 @@ interface AskRead {
 
 const ASK_READ_CAPABILITIES: ReadonlyMap<string, AskRead> = new Map<string, AskRead>([
   // The commerce invoice reads: RequireModuleScope('revenue', 'read').
-  ['commerce.summarizeRevenue', { blockableAs: ['commerce'], memberScope: 'revenue' }],
+  ['commerce_summarize_revenue', { blockableAs: ['commerce', 'revenue'], memberScope: 'revenue' }],
   // GET crm/businesses/:b/contacts: RequireModuleScope('crm', 'read') + visibilityClause.
-  ['contacts.recommendFollowUps', { blockableAs: ['crm', 'contacts'], memberScope: 'crm', contactVisibility: true }],
-  // GET drive/businesses/:b/intake and communications/businesses/:b/message-intake
-  // require membership only (AuthGuard + BusinessGuard), which the 'ask' route
-  // already holds.
-  ['connect.listDriveIntake', { blockableAs: ['connect'] }],
-  ['messages.listMessageIntake', { blockableAs: ['messages'] }],
+  ['crm_recommend_follow_ups', { blockableAs: ['crm', 'contacts'], memberScope: 'crm', contactVisibility: true }],
 ]);
 
 /** The KeyCommand status of an 'ask', and the Activity ledger entry that says the same thing (SEC-V109-3). */
@@ -203,10 +204,10 @@ type JsonObject = Record<string, unknown>;
 const isJsonObject = (v: unknown): v is JsonObject => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 type ResolvedCapability = {
-  registry: 'canonical' | 'legacy';
-  /** The identity it resolved under: a bare FLOW_TOOLS name or `module.tool`. */
+  registry: 'canonical';
+  /** The identity it resolved under: a bare FLOW_TOOLS name or dotted organ capability. */
   name: string;
-  /** Tool identity (bare canonical FLOW_TOOLS name when canonical, else `module.tool`). */
+  /** Tool identity (bare canonical FLOW_TOOLS name or dotted organ capability). */
   toolName: string;
   riskTier: number;
   requiresApproval: boolean;
@@ -225,9 +226,6 @@ export class KeyCommandService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
-    @Optional()
-    @Inject(forwardRef(() => KeyToolRegistryService))
-    private readonly toolRegistry: KeyToolRegistryService | undefined,
     @Inject(forwardRef(() => CommandService)) private readonly commandService: CommandService,
     @Optional()
     @Inject(forwardRef(() => KeyCortexToolRegistryService))
@@ -406,9 +404,7 @@ export class KeyCommandService {
       const ctx = { businessId, userId: userId ?? undefined, commandId, autonomyLevel: KeyAutonomyLevel.INTERNAL_EXEC };
       let result: KeyCommandStepResult;
       try {
-        result = capability.registry === 'canonical'
-          ? await this.keyCortexToolRegistry!.execute(capability.name, ctx, step.input)
-          : await this.toolRegistry!.execute(step.module, step.tool, ctx, step.input);
+        result = await this.keyCortexToolRegistry!.execute(capability.name, ctx, step.input);
         if (gate.contactScope) result = await this.scopeContacts(result, businessId, gate.contactScope);
       } catch (err) {
         result = { success: false, error: (err as Error).message };
@@ -510,14 +506,12 @@ export class KeyCommandService {
   }
 
   /**
-   * Which registry serves a step, and under which identity. FLOW_TOOLS are
-   * bridged into the canonical registry under their BARE names; organ tools
-   * there are dotted. Legacy KeyToolRegistryService tools classified as SAME
-   * or ALIAS in `legacy-tool-equivalence.ts` resolve directly to their
-   * canonical FLOW_TOOLS capability (failing closed if absent); OBSOLETE
-   * legacy tools fail closed (`undefined`) and never fall through; remaining
-   * SPECIALIZATION/MISSING tools keep bare canonical -> dotted canonical ->
-   * legacy lookup (#160, the @@ -200 hunk only).
+   * Which canonical capability serves a step, and under which identity.
+   * FLOW_TOOLS are bridged into the canonical registry under their BARE names;
+   * organ tools there are dotted. Former legacy `module.tool` keys classified
+   * as SAME or ALIAS in `legacy-tool-equivalence.ts` resolve directly to their
+   * canonical FLOW_TOOLS capability (failing closed if absent); OBSOLETE keys
+   * fail closed (`undefined`). No legacy registry fallback remains (P160).
    */
   private resolveCapability(step: KeyCommandPlan['steps'][number]): ResolvedCapability | undefined {
     const dotted = `${step.module}.${step.tool}`;
@@ -532,38 +526,29 @@ export class KeyCommandService {
         const tool = this.keyCortexToolRegistry?.getTool(canonicalName);
         if (!tool) return undefined;
         const flow = getToolByName(canonicalName);
-        const legacy = this.toolRegistry?.getTool(step.module, step.tool);
         return {
           registry: 'canonical',
           name: canonicalName,
           toolName: canonicalName,
-          riskTier: Math.max(tool.riskTier, flow?.riskTier ?? 1, legacy?.riskTier ?? 1),
-          requiresApproval: tool.requiresApproval || (legacy?.requiresApproval ?? false),
+          riskTier: Math.max(tool.riskTier, flow?.riskTier ?? 1),
+          requiresApproval: tool.requiresApproval,
           aliasedFrom: dotted,
         };
       }
+      return undefined;
     }
     for (const name of [step.tool, dotted]) {
       const tool = this.keyCortexToolRegistry?.getTool(name);
       if (tool) {
+        const flow = getToolByName(name);
         return {
           registry: 'canonical',
           name,
           toolName: name,
-          riskTier: tool.riskTier,
+          riskTier: Math.max(tool.riskTier, flow?.riskTier ?? 1),
           requiresApproval: tool.requiresApproval,
         };
       }
-    }
-    const legacy = this.toolRegistry?.getTool(step.module, step.tool);
-    if (legacy) {
-      return {
-        registry: 'legacy',
-        name: dotted,
-        toolName: dotted,
-        riskTier: legacy.riskTier,
-        requiresApproval: legacy.requiresApproval,
-      };
     }
     return undefined;
   }
@@ -591,7 +576,7 @@ export class KeyCommandService {
       return refuse(planned, 'KEY is disabled on this server (KEY_DISABLED); nothing was run');
     }
 
-    // RR-LEGACY-TOOLS-CLASSIFY: OBSOLETE legacy tools fail closed with a plain refusal.
+    // RR-LEGACY-TOOLS-CLASSIFY / RR-LEGACY-FALLBACK-REMOVE: OBSOLETE legacy tools fail closed with a plain refusal.
     const equivalence = getLegacyToolEquivalence(planned);
     if (equivalence?.disposition === 'OBSOLETE') {
       return refuse(planned, obsoleteLegacyToolRefusal(equivalence));
@@ -633,24 +618,22 @@ export class KeyCommandService {
       // exact-name blocks and its own fail-closed state through `allowed`.
       const needsHuman = decision.requiresQuickConfirm || decision.requiresFormalApproval || decision.requiresAdminApproval;
       if (needsHuman && getToolByName(name)) return refuse(name, decision.reason, true);
-      // ...but not on module blocks, nor on a block of the bare tool name: it
-      // infers a module only from snake_case FLOW names (SEC-V109-2).
-      if (read) {
-        const blocked = await this.businessBlock(businessId, step.tool, name, read);
-        if (blocked) return refuse(name, blocked);
-      } else if (capability.aliasedFrom) {
-        // Preserve business tool and module blocks across canonical aliasing: AiOversightService.inferModule
-        // returns null for `finance_*` tools, so check both the legacy module (e.g. 'finance') and the
-        // canonical tool's authority modules (e.g. 'revenue'), plus canonical & legacy blockedTools.
+      // Check business-level blockedTools / blockedModules across canonical, aliased legacy, and bare names (SEC-V109-2).
+      if (read || capability.aliasedFrom) {
         const settings = await this.oversight.getAutonomySettings(businessId);
         if (settings.degraded) return refuse(name, "KEY oversight could not read this business's AI policy; nothing was run");
         const tools = settings.blockedTools ?? [];
-        const toolBlock = [name, capability.aliasedFrom, step.tool].find((t) => tools.includes(t));
+        const candidateTools = Array.from(
+          new Set([name, ...(capability.aliasedFrom ? [capability.aliasedFrom] : []), step.tool]),
+        );
+        const toolBlock = candidateTools.find((t) => tools.includes(t));
         if (toolBlock) return refuse(name, `Tool "${toolBlock}" is blocked by business settings`);
         const modules = settings.blockedModules ?? [];
         const { keyMemberToolScopes } = await import('./plan-step-authority');
         const scopeModules = keyMemberToolScopes(name, step.input).map((s) => s.module);
-        const candidateModules = Array.from(new Set([step.module, ...scopeModules]));
+        const candidateModules = Array.from(
+          new Set([...(read?.blockableAs ?? []), step.module, ...scopeModules]),
+        );
         const blockedModulesLower = new Set(modules.map((m) => m.toLowerCase()));
         const moduleBlock = candidateModules.find((m) => blockedModulesLower.has(m.toLowerCase()));
         if (moduleBlock) return refuse(name, `Module "${moduleBlock}" is blocked by business settings`);
@@ -661,48 +644,28 @@ export class KeyCommandService {
     }
 
     let contactScope: ContactScope = null;
-    if (read && (read.memberScope || read.contactVisibility)) {
+    try {
+      const { keyMemberToolScopes, memberToolScopeRefusal } = await import('./plan-step-authority');
+      const requiredScopes = keyMemberToolScopes(name, step.input);
+      if (requiredScopes.length > 0) {
+        if (!userId) {
+          return refuse(name, `${name} reads member-scoped data and no member is named; nothing was run`);
+        }
+        const scopeRefusal = await memberToolScopeRefusal(this.prisma, businessId, userId, name, step.input);
+        if (scopeRefusal) return refuse(name, scopeRefusal);
+      }
+    } catch (err) {
+      this.logger.warn(`[ask] member scope for ${name} could not be resolved in ${businessId}: ${(err as Error).message}`);
+      return refuse(name, `${name}: this member's access could not be confirmed; nothing was run`);
+    }
+
+    if (read?.contactVisibility) {
       const actor = await this.bindAskActor(businessId, userId, name, read);
       if (!actor.allowed) return refuse(name, actor.reason);
       contactScope = actor.contactScope;
-    } else if (capability.aliasedFrom) {
-      // RR-LEGACY-TOOLS-CLASSIFY (D-100/D-145/D-234/D-104): enforce the canonical
-      // tool's member module scopes (including revenue:read and Books membership)
-      // identically to calling the canonical tool directly.
-      try {
-        const { keyMemberToolScopes, memberToolScopeRefusal } = await import('./plan-step-authority');
-        const requiredScopes = keyMemberToolScopes(name, step.input);
-        if (requiredScopes.length > 0) {
-          if (!userId) {
-            return refuse(name, `${name} reads member-scoped data and no member is named; nothing was run`);
-          }
-          const scopeRefusal = await memberToolScopeRefusal(this.prisma, businessId, userId, name, step.input);
-          if (scopeRefusal) return refuse(name, scopeRefusal);
-        }
-      } catch (err) {
-        this.logger.warn(`[ask] member scope for ${name} could not be resolved in ${businessId}: ${(err as Error).message}`);
-        return refuse(name, `${name}: this member's access could not be confirmed; nothing was run`);
-      }
     }
 
     return { cleared: true, capability, contactScope };
-  }
-
-  /**
-   * The business's own block on a dotted 'ask' read, from the policy oversight
-   * reads (AiOversightService.getAutonomySettings). A policy that could not be
-   * read blocks, as oversight's own fail-closed state does. Null when clear.
-   */
-  private async businessBlock(businessId: string, tool: string, name: string, read: AskRead): Promise<string | null> {
-    const settings = await this.oversight!.getAutonomySettings(businessId);
-    if (settings.degraded) return 'KEY oversight could not read this business\'s AI policy; nothing was run';
-    const tools = settings.blockedTools ?? [];
-    const toolBlock = [name, tool].find((t) => tools.includes(t));
-    if (toolBlock) return `Tool "${toolBlock}" is blocked by business settings`;
-    const modules = settings.blockedModules ?? [];
-    const moduleBlock = read.blockableAs.find((m) => modules.includes(m));
-    if (moduleBlock) return `Module "${moduleBlock}" is blocked by business settings`;
-    return null;
   }
 
   /**

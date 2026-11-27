@@ -131,11 +131,10 @@ beforeAll(async () => {
   const { AiController } = await import('../src/modules/ai/ai.controller');
   const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
   const { KeyCommandService } = await import('../src/modules/ai/key-command.service');
-  const { KeyToolRegistryService } = await import('../src/modules/ai/key-tool-registry.service');
+  const { KeyCortexToolRegistryService } = await import('../src/modules/key-cortex/key-cortex-tool-registry.service');
   const { KeyAutonomySafetyService } = await import('../src/modules/key-autonomy/key-autonomy-safety.service');
+  const { recommendStaleFollowUps, summarizePaidRevenue } = await import('../src/modules/ai/legacy-promoted-tools.helper');
   crm = await import('../src/modules/crm/crm-permissions.helper');
-
-  const toolAudit = { logToolExecution: async () => undefined };
 
   const moduleRef = await Test.createTestingModule({
     controllers: [AiController],
@@ -154,18 +153,51 @@ beforeAll(async () => {
       },
       { provide: KeyAutonomySafetyService, useFactory: (prisma: any) => new KeyAutonomySafetyService(prisma), inject: [PrismaService] },
       {
-        provide: KeyToolRegistryService,
-        // The reads 'ask' plans use prisma only; the finance/command/connector collaborators are off the boundary.
-        useFactory: (prisma: any, timeline: any) =>
-          new KeyToolRegistryService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, timeline, {} as any, toolAudit as any),
-        inject: [PrismaService, TimelineService],
+        provide: KeyCortexToolRegistryService,
+        // P160 (RR-LEGACY-FALLBACK-REMOVE): canonical registry serving the promoted FLOW_TOOLS reads over real PrismaService.
+        useFactory: (prisma: any) => {
+          const tools = new Map<string, any>([
+            [
+              'commerce_summarize_revenue',
+              {
+                name: 'commerce_summarize_revenue',
+                module: 'read',
+                riskTier: 1,
+                requiresApproval: false,
+                handler: async (ctx: any) => ({ success: true, data: await summarizePaidRevenue(prisma, ctx.businessId) }),
+              },
+            ],
+            [
+              'crm_recommend_follow_ups',
+              {
+                name: 'crm_recommend_follow_ups',
+                module: 'read',
+                riskTier: 1,
+                requiresApproval: false,
+                handler: async (ctx: any, input: any) => {
+                  const access = ctx.userId ? await crm.resolveCrmAccess(prisma, ctx.businessId, ctx.userId) : null;
+                  const vis = access && ctx.userId ? crm.visibilityClause(access, ctx.userId) : null;
+                  return { success: true, data: await recommendStaleFollowUps(prisma, ctx.businessId, input?.daysStale, input?.limit, vis) };
+                },
+              },
+            ],
+          ]);
+          return {
+            getTool: (name: string) => tools.get(name),
+            execute: async (name: string, ctx: any, input: any) => {
+              const t = tools.get(name);
+              if (!t) return { success: false, error: `Unknown tool: ${name}` };
+              return t.handler(ctx, input);
+            },
+          };
+        },
+        inject: [PrismaService],
       },
       {
         provide: KeyCommandService,
-        // As ai.module.ts wires it, minus the canonical (cortex) registry: no 'ask' plan names a FLOW tool.
-        useFactory: (prisma: any, timeline: any, legacy: any, oversight: any, safety: any) =>
-          new KeyCommandService(prisma, timeline, legacy, {} as any, undefined, oversight, safety),
-        inject: [PrismaService, TimelineService, KeyToolRegistryService, AiOversightService, KeyAutonomySafetyService],
+        useFactory: (prisma: any, timeline: any, canonical: any, oversight: any, safety: any) =>
+          new KeyCommandService(prisma, timeline, {} as any, canonical, oversight, safety),
+        inject: [PrismaService, TimelineService, KeyCortexToolRegistryService, AiOversightService, KeyAutonomySafetyService],
       },
     ],
   })
@@ -222,9 +254,8 @@ beforeAll(async () => {
     });
   }
 
-  // P154 (RR-LEGACY-TOOLS-CLASSIFY): social.listRecentEngagement is OBSOLETE and refused before policy blocks;
-  // pin bare-tool-name blocking on active legacy read listMessageIntake instead.
-  const blockedPolicy = JSON.stringify({ blockedModules: ['crm', 'commerce'], blockedTools: ['listMessageIntake'] });
+  // P160 (RR-LEGACY-FALLBACK-REMOVE): pin module block (crm) and bare-tool-name block on summarizeRevenue.
+  const blockedPolicy = JSON.stringify({ blockedModules: ['crm'], blockedTools: ['summarizeRevenue'] });
   await db.aiMemory.create({
     data: { businessId: ID.bizBlocked, category: 'settings', key: 'autonomy', source: 'user', value: blockedPolicy },
   });
@@ -257,7 +288,7 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
     const res = await ask(ID.staffNone, 'who should I follow up with?');
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'contacts.recommendFollowUps' });
+    expect(res.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'crm_recommend_follow_ups' });
     expect(JSON.stringify(res.body)).not.toContain(PRIVATE_EMAIL);
     expect(JSON.stringify(res.body)).not.toContain(TEAM_EMAIL);
     expect((await commandRow(res.body.commandId)).status).toBe('REJECTED');
@@ -288,7 +319,7 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
     expect(JSON.stringify(owned.body)).toContain(PRIVATE_EMAIL);
 
     const row = await commandRow(owned.body.commandId);
-    expect(row.executionResult.outputs[0]).toMatchObject({ success: true, tool: 'contacts.recommendFollowUps', dataWithheld: true });
+    expect(row.executionResult.outputs[0]).toMatchObject({ success: true, tool: 'crm_recommend_follow_ups', dataWithheld: true });
     expect(JSON.stringify(row.executionResult)).not.toContain(PRIVATE_EMAIL);
 
     const listed = await listCommands(ID.staffNone);
@@ -302,8 +333,8 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
 
   it('a STAFF member with revenue none gets no revenue summary; one with role-default scopes does (control)', async () => {
     const refused = await ask(ID.staffNone, 'how much revenue did we make?');
-    expect(refused.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'commerce.summarizeRevenue' });
-    expect(refused.body.results[0].error).toMatch(/revenue read access/);
+    expect(refused.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'commerce_summarize_revenue' });
+    expect(refused.body.results[0].error).toMatch(/revenue requires read access/);
     expect(refused.body.results[0]).not.toHaveProperty('data');
 
     const answered = await ask(ID.staffRead, 'how much revenue did we make?');
@@ -311,8 +342,8 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
   });
 });
 
-describe("SEC-V109-2 a business's module and tool blocks stop the dotted 'ask' reads", () => {
-  it('blockedModules crm stops the follow-up list and commerce stops the revenue summary', async () => {
+describe("SEC-V109-2 a business's module and tool blocks stop the promoted 'ask' reads", () => {
+  it('blockedModules crm stops the follow-up list and blockedTools summarizeRevenue stops the revenue summary', async () => {
     const followUps = await ask(ID.owner, 'follow up', ID.bizBlocked);
     expect(followUps.body.results[0]).toMatchObject({ success: false, notExecuted: true });
     expect(followUps.body.results[0].error).toContain('Module "crm" is blocked');
@@ -321,16 +352,17 @@ describe("SEC-V109-2 a business's module and tool blocks stop the dotted 'ask' r
 
     const revenue = await ask(ID.owner, 'how much revenue', ID.bizBlocked);
     expect(revenue.body.results[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(revenue.body.results[0].error).toContain('Module "commerce" is blocked');
+    expect(revenue.body.results[0].error).toContain('Tool "summarizeRevenue" is blocked');
   });
 
-  it('a bare tool name in blockedTools stops that read; an unblocked read still runs (control)', async () => {
+  it('hidden-v1 obsolete reads (message intake, drive intake) fail closed without executing', async () => {
     const messages = await ask(ID.owner, 'check messages in my inbox', ID.bizBlocked);
-    expect(messages.body.results[0]).toMatchObject({ success: false, notExecuted: true });
-    expect(messages.body.results[0].error).toContain('Tool "listMessageIntake" is blocked');
+    expect(messages.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'messages.listMessageIntake' });
+    expect(messages.body.results[0].error).toMatch(/obsolete/i);
 
     const drive = await ask(ID.owner, 'what did key find in drive intake?', ID.bizBlocked);
-    expect(drive.body.results[0]).toMatchObject({ success: true, tool: 'connect.listDriveIntake' });
+    expect(drive.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'connect.listDriveIntake' });
+    expect(drive.body.results[0].error).toMatch(/obsolete/i);
   });
 });
 
@@ -339,7 +371,7 @@ describe('CR-V109-1 ruling: an advisory business answers no ask read (oversight 
     const res = await ask(ID.owner, 'what is my revenue', ID.bizAdvisory);
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'commerce.summarizeRevenue' });
+    expect(res.body.results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'commerce_summarize_revenue' });
     expect(res.body.results[0].error).toMatch(/advisory mode/);
     expect((await commandRow(res.body.commandId)).status).toBe('REJECTED');
   });
@@ -355,15 +387,15 @@ describe('SEC-V109-3 the Activity ledger matches the KeyCommand status and names
     const row = await ledgerRow(res.body.commandId);
     expect(row).toMatchObject({ businessId: ID.bizKill, action: 'command.refused', status: 'CANCELLED', actorType: 'AI', actorId: ID.owner });
     expect(row.title).not.toMatch(/failed/i);
-    expect(row.data.results[0]).toMatchObject({ tool: 'commerce.summarizeRevenue', notExecuted: true });
+    expect(row.data.results[0]).toMatchObject({ tool: 'commerce_summarize_revenue', notExecuted: true });
   });
 
-  it("'scan drive' is recorded as awaiting approval (PENDING), as its KeyCommand row is PLANNED", async () => {
+  it("'scan drive' (retired as OBSOLETE in P160, hidden v1 module D-152) is recorded as refused (CANCELLED)", async () => {
     const res = await ask(ID.staffRead, 'scan drive');
-    expect((await commandRow(res.body.commandId)).status).toBe('PLANNED');
+    expect((await commandRow(res.body.commandId)).status).toBe('REJECTED');
 
     const row = await ledgerRow(res.body.commandId);
-    expect(row).toMatchObject({ action: 'command.awaiting_approval', status: 'PENDING', actorId: ID.staffRead });
+    expect(row).toMatchObject({ action: 'command.refused', status: 'CANCELLED', actorId: ID.staffRead });
   });
 
   it('an executed ask is recorded as executed (COMPLETED), with the asking member', async () => {
