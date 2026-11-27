@@ -58,7 +58,7 @@ const net = vi.hoisted(() => ({
   orderAnswer: null as Record<string, unknown> | null,
   posts: [] as Array<{ path: string; body: unknown }>,
   /** WEDGE-HIDE-STORE part 2: what the storefront read answers for storeCheckout (false: a business that does not sell). */
-  storeCheckout: false,
+  storeCheckout: false as boolean | "fails",
 }));
 /** Who fills in the checkout form, and how they pay (reset to the default customer before each case). */
 const form = vi.hoisted(() => ({ firstName: "", lastName: "", email: "", phone: "", paymentMethod: "" }));
@@ -82,7 +82,9 @@ vi.mock("@/lib/api", () => ({
     if (path.endsWith("/services") || path.endsWith("/staff") || path.endsWith("/products")) return { data: [], error: null };
     // WEDGE-HIDE-STORE part 2 (D-263): only the mixed-cart cases (SEC-W9WCN-1) are a business whose store checkout
     // is offered. The service-only cases (CR-V28-3) run with it NOT offered: bookings do not depend on it.
-    if (path === `/site/storefront/public/${SLUG}`) return { data: { storeCheckout: net.storeCheckout }, error: null };
+    if (path === `/site/storefront/public/${SLUG}`) {
+      return net.storeCheckout === "fails" ? { data: null, error: "Request failed" } : { data: { storeCheckout: net.storeCheckout }, error: null };
+    }
     return { data: null, error: null };
   },
   apiPost: async ({ path, body }: { path: string; body: unknown }) => {
@@ -383,5 +385,38 @@ describe("SEC-W9WCN-1: a checkout's booking token link never reaches the next cu
     openSpy.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "View invoice and receipt" }));
     expect(openSpy).toHaveBeenCalledWith(BRAVO_LINK, "_blank", "noopener,noreferrer");
+  });
+});
+
+/**
+ * WEDGE-HIDE-STORE part 2 (P225), repair round 4: a service-only checkout clears the lines it checked out, not the
+ * product lines the gate was hiding. Those are dropped only by a definite answer that the store is not offered.
+ */
+describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it did not check out", () => {
+  const storedIds = () => (JSON.parse(window.localStorage.getItem(`kf_cart_${SLUG}`) ?? "[]") as Array<{ id: string }>).map((c) => c.id);
+
+  it("WHS2-32 the storefront read failed: the service is booked, the hidden product line is kept, and a retry that answers true still has it", async () => {
+    net.storeCheckout = "fails";
+    net.bookingAnswer = { success: true, bookingId: "v95q_bk_w32" };
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
+    await bookTheService();
+    expect(orderPosts()).toHaveLength(0);
+    await waitFor(() => expect(storedIds()).toEqual([PRODUCT.id]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue Shopping" }));
+    net.storeCheckout = true;
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
+    expect(storedIds()).toEqual([PRODUCT.id]);
+    expect(orderPosts()).toHaveLength(0);
+  });
+
+  it("WHS2-33 a definite 'not offered': the service is booked and the stored product line is dropped", async () => {
+    net.storeCheckout = false;
+    net.bookingAnswer = { success: true, bookingId: "v95q_bk_w33" };
+    window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE, PRODUCT]));
+    await bookTheService();
+    await waitFor(() => expect(storedIds()).toEqual([]));
+    expect(orderPosts()).toHaveLength(0);
   });
 });

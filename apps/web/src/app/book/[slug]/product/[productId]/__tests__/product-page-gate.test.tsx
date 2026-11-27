@@ -8,13 +8,15 @@ import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 const api = vi.hoisted(() => ({ apiGet: vi.fn() }));
+/** The item this page is for (the product by default; WHS2-40 opens a bookable service). */
+const route = vi.hoisted(() => ({ productId: "prod_whs2_pepper" }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return { ...actual, apiGet: api.apiGet };
 });
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ slug: SLUG, productId: PRODUCT.id }),
+  useParams: () => ({ slug: SLUG, productId: route.productId }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(""),
   usePathname: () => `/book/${SLUG}/product/${PRODUCT.id}`,
@@ -35,6 +37,7 @@ const PRODUCT = {
 };
 const PRODUCT_LINE = { id: PRODUCT.id, name: PRODUCT.name, description: null, price: 35, currency: "TTD", duration: null, imageUrl: null, itemType: "product", requiresBooking: false, quantity: 2 };
 const SERVICE_LINE = { id: "svc_whs2_cut", name: "Haircut", description: null, price: 120, currency: "TTD", duration: 30, imageUrl: null, itemType: "service", requiresBooking: true, quantity: 1 };
+const SERVICE = { id: "svc_whs2_cut", name: "Haircut", description: null, duration: 30, price: 120 };
 const CART_KEY = `kf_cart_${SLUG}`;
 const ADD = /^(add to cart|pre-order)/i;
 const COULD_NOT_CHECK = /couldn.t check online ordering/i;
@@ -42,12 +45,13 @@ let storefront: Record<string, unknown> | null = {};
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
 
 beforeEach(() => {
+  route.productId = PRODUCT.id;
   window.localStorage.clear();
   api.apiGet.mockReset();
   api.apiGet.mockImplementation(async (path: string) => {
     if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
     if (path === `/site/storefront/public/${SLUG}`) return storefront ? { data: storefront, error: null } : { data: null, error: "Request failed" };
-    if (path.endsWith("/services")) return { data: [], error: null };
+    if (path.endsWith("/services")) return { data: [SERVICE], error: null };
     if (path.endsWith("/products")) return { data: [PRODUCT], error: null };
     return { data: null, error: null };
   });
@@ -131,4 +135,64 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
     expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
   });
+
+  it("WHS2-23e the storefront read failed: no quantity stepper, no checkout badges, no empty buy bar", async () => {
+    storefront = null;
+    render(<ProductDetailPage />);
+    await screen.findAllByText(PRODUCT.name);
+    expect(screen.queryByText("Qty:")).toBeNull();
+    expect(screen.queryByText("Secure Checkout")).toBeNull();
+    expect(screen.queryByText("Instant Confirmation")).toBeNull();
+    expect(document.querySelector('[data-buy-bar]')).toBeNull();
+    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+  });
+
+  it("WHS2-39 the storefront read failed, and failed again on retry: the notice, Try again and the stored lines all stay", async () => {
+    storefront = null;
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<ProductDetailPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`)).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
+  });
+
+  it("WHS2-41 Try again is disabled while its read is out", async () => {
+    storefront = null;
+    render(<ProductDetailPage />);
+    const tryAgain = await screen.findByRole("button", { name: "Try again" });
+    let release: (v: unknown) => void = () => {};
+    const held = new Promise((r) => { release = r; });
+    const usual = api.apiGet.getMockImplementation()!;
+    api.apiGet.mockImplementation(async (path: string) => {
+      if (path === `/site/storefront/public/${SLUG}`) { await held; return { data: { storefront: {}, storeCheckout: true }, error: null }; }
+      return usual(path);
+    });
+    try {
+      fireEvent.click(tryAgain);
+      await waitFor(() => expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(true));
+    } finally {
+      release(null);
+    }
+    expect((await screen.findAllByRole("button", { name: ADD })).length).toBeGreaterThan(0);
+  });
+
+  for (const [label, answer] of [
+    ["the field is missing (a server without P233)", { storefront: {} }],
+    ["storeCheckout is false", { storefront: {}, storeCheckout: false }],
+    ["the storefront read failed", null],
+  ] as Array<[string, Record<string, unknown> | null]>) {
+    it(`WHS2-40 a bookable service's page is untouched when ${label}: its button stays and books it, with no notice`, async () => {
+      storefront = answer;
+      route.productId = SERVICE.id;
+      render(<ProductDetailPage />);
+      const buttons = await screen.findAllByRole("button", { name: ADD });
+      expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+      fireEvent.click(buttons[0]);
+      await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE.id]));
+    });
+  }
 });
