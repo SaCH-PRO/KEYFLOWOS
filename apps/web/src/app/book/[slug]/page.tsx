@@ -31,7 +31,7 @@ import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
 import { createCheckoutKeyring, postStorefrontCheckout } from "./components/checkout-request";
-import { storeCheckoutOffered, withoutStoreLines, STORE_CHECKOUT_NOT_OFFERED, STORE_CHECK_FAILED, STORE_CHECK_FAILED_GO_BACK } from "@/lib/api/store-checkout";
+import { storeCheckoutOffered, withoutStoreLines, STORE_CHECKOUT_NOT_OFFERED, STORE_CHECK_FAILED, STORE_CHECK_FAILED_NO_RETRY } from "@/lib/api/store-checkout";
 import { TrustBar, SecurityFooter } from "./components/trust-bar";
 import { StoreSectionWrapper } from "./components/store-section-wrapper";
 import { OrderConfirmation } from "./components/order-confirmation";
@@ -235,6 +235,17 @@ function PublicBookingPageInner() {
     },
     [slug]
   );
+
+  // WEDGE-HIDE-STORE part 2: a finished checkout clears the lines it checked out (`cart`), not the product lines the
+  // gate was hiding from it. Those stay stored until a definite "not offered" answer drops them (the effect below),
+  // so a booking made while the storefront read had failed costs a selling business's customer no cart.
+  const clearCheckedOutCart = useCallback(() => {
+    setCart((prev) => {
+      const next = prev.filter((line) => !cart.includes(line));
+      saveCart(slug, next);
+      return next;
+    });
+  }, [cart, slug]);
 
   const addToCart = useCallback(
     (item: CatalogItem) => {
@@ -845,11 +856,11 @@ function PublicBookingPageInner() {
     setCompletedBookingResults([]);
     setCompletedBookingKey(null);
     setFailedOrderPayload(null);
-    updateCart([]);
+    clearCheckedOutCart();
     handleRemovePromo();
     if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
     return false;
-  }, [cart, cartTotal, shippingZones, business?.id, updateCart, handleRemovePromo, slug]);
+  }, [cart, cartTotal, shippingZones, business?.id, clearCheckedOutCart, handleRemovePromo, slug]);
 
   const handleCheckoutSubmit = async (data: {
     serviceBookings: Record<string, ServiceBookingData>;
@@ -1013,7 +1024,7 @@ function PublicBookingPageInner() {
       setCompletedBookingResults([]);
       setCompletedBookingKey(null);
       setFailedOrderPayload(null);
-      updateCart([]);
+      clearCheckedOutCart();
       handleRemovePromo();
       if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
     }
@@ -1198,7 +1209,7 @@ function PublicBookingPageInner() {
             setFailedOrderPayload(null);
           }}
           onRetryPayment={storeRetryBlocked ? undefined : handleRetryPayment}
-          retryUnavailableMessage={storeRetryBlocked ? (storeCheckFailed ? STORE_CHECK_FAILED_GO_BACK : STORE_CHECKOUT_NOT_OFFERED) : undefined}
+          retryUnavailableMessage={storeRetryBlocked ? (storeCheckFailed ? (paymentPending ? STORE_CHECK_FAILED : STORE_CHECK_FAILED_NO_RETRY) : STORE_CHECKOUT_NOT_OFFERED) : undefined}
           formatDate={formatDate}
           formatTime={formatTime}
         />
@@ -1343,7 +1354,9 @@ function PublicBookingPageInner() {
                 </h2>
               </div>
             )}
-            {storeCheckFailed && (products.length > 0 || storedCart.length !== cart.length) && (
+            {/* Shown only when it concerns this page: a product is listed for sale, or the stored cart holds a product
+                line that is not being shown. */}
+            {storeCheckFailed && (catalogItems.some((i) => i.notForSale) || storedCart.length !== cart.length) && (
               <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <span>{STORE_CHECK_FAILED}</span>
                 <button
