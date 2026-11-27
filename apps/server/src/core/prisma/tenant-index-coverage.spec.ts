@@ -27,9 +27,22 @@ const SCHEMA_PATH = path.join(ROOT, 'packages', 'db', 'prisma', 'schema.prisma')
 
 /**
  * Shrink-only ledger of `BUSINESS_ID_MODELS` lacking a `businessId`-led index.
- * RED commit starts empty to expose every currently unindexed tenant model.
+ * Re-derived directly against `packages/db/prisma/schema.prisma`; adding indexes
+ * ships only inside an owner-approved migration set (D-167). Remove an entry as
+ * soon as its migration lands (stale entries fail CI).
  */
-const ACKNOWLEDGED_UNINDEXED: Record<string, string> = {};
+const ACKNOWLEDGED_UNINDEXED: Record<string, string> = {
+  AiPlanResult:
+    'Only declares @@index([planId]); missing businessId-led index (deferred to owner-approved migration, D-167).',
+  Cohort:
+    'Declares no secondary index on businessId; missing businessId-led index (deferred to owner-approved migration, D-167).',
+  CommunityComment:
+    'Only declares @@index([postId]) despite trash queries filtering by (businessId, deletedAt) (deferred to owner-approved migration, D-167).',
+  Course:
+    'Only declares @@index([category]) after joining BUSINESS_ID_MODELS; missing businessId-led index (deferred to owner-approved migration, D-167).',
+  KeyInteractionFeedback:
+    'Only declares @@index([sessionId, createdAt]); missing businessId-led index (deferred to owner-approved migration, D-167).',
+};
 
 function readBusinessIdModels(clientSrc: string): string[] {
   const at = clientSrc.indexOf('const BUSINESS_ID_MODELS = new Set([');
