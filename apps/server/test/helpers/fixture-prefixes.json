@@ -843,6 +843,11 @@
       "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
     },
     {
+      "prefix": "v92h_",
+      "owner": "apps/server/test/expense-receipt-read.integration.test.ts",
+      "packet": "V1-92 (FU-RECEIPT-READ-ROUTE, P222)"
+    },
+    {
       "prefix": "v93a_",
       "owner": "apps/server/test/key-connector-authority.integration.test.ts",
       "packet": "V1-93 (W7-KEY-CONNECTOR-TENANT)"
@@ -1657,6 +1662,11 @@
       "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
     },
     {
+      "prefix": "v72r_",
+      "owner": "apps/server/test/authority-shadow-parity.integration.test.ts",
+      "packet": "V1-72 (RR-AUTHORITY-SHADOW-PARITY)"
+    },
+    {
       "prefix": "v91n_",
       "owner": "apps/server/test/secret-reads-portal-integration.integration.test.ts",
       "packet": "V1-91 (FU-SECRET-READS-PORTAL-INTEGRATION, P145)"
@@ -1675,6 +1685,26 @@
       "prefix": "v92b_",
       "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
+    },
+    {
+      "prefix": "v92c_",
+      "owner": "apps/server/test/pricing-service.integration.test.ts",
+      "packet": "V1-92 (TOF-TIER-PRICING-SCHEMA, P156)"
+    },
+    {
+      "prefix": "v66a_",
+      "owner": "apps/server/test/tier-pricing.integration.test.ts",
+      "packet": "V1-66 (TOF-TIER-PRICING-ROUTES)"
+    },
+    {
+      "prefix": "v92i_",
+      "owner": "apps/server/test/today-orders-premise.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-ORDERS-PREMISE, P205)"
+    },
+    {
+      "prefix": "v92j_",
+      "owner": "apps/server/test/today-approvals-staff.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-APPROVALS-STAFF, P206)"
     }
   ],
   "pendingRenames": [],

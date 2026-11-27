@@ -116,10 +116,10 @@ const PROBES: Probe[] = [
     directPrisma: true,
   },
   {
-    label: 'ApprovalController.create',
+    label: 'ApprovalController.approve',
     method: 'post',
-    path: (b) => `/businesses/${b}/approvals`,
-    body: () => ({ requestType: 'EXPENSE', title: 'Approve equipment' }),
+    path: (b) => `/businesses/${b}/approvals/${P}missing/approve`,
+    body: () => ({ decision: 'approve' }),
     module: 'operations',
     level: 'write',
   },
@@ -201,10 +201,11 @@ const EXPECTED_OPEN_SCOPES: Array<{
   { controller: 'ActionsController', handler: 'remindContact', module: 'crm', level: 'write' },
   { controller: 'ActionsController', handler: 'sendReceipt', module: 'revenue', level: 'write' },
 
-  // ApprovalController (6 -> operations:write)
+  // ApprovalController (5 -> operations:write; create moved to exempt-check
+  // check:assertMayCreateApprovalRequest in P206 / D-298 and is tested in
+  // test/today-approvals-staff.integration.test.ts)
   { controller: 'ApprovalController', handler: 'approve', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'cancel', module: 'operations', level: 'write' },
-  { controller: 'ApprovalController', handler: 'create', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'delegate', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'escalate', module: 'operations', level: 'write' },
   { controller: 'ApprovalController', handler: 'reject', module: 'operations', level: 'write' },
@@ -471,7 +472,20 @@ beforeAll(async () => {
       RateLimitGuard,
       PublicRateLimitGuard,
       { provide: REDIS_CLIENT, useValue: redisClient },
-      { provide: ApprovalRequestService, useValue: makeRecorder('ApprovalRequestService') },
+      {
+        provide: ApprovalRequestService,
+        useValue: new Proxy(makeRecorder('ApprovalRequestService'), {
+          get(target, prop) {
+            if (prop === 'getById') {
+              return async (id: string) => {
+                serviceCalls.push({ service: 'ApprovalRequestService', op: 'getById' });
+                return { id, businessId: ID.bizA, status: 'pending' };
+              };
+            }
+            return (target as Record<string, unknown>)[prop as string];
+          },
+        }),
+      },
       { provide: ConnectorRegistryService, useValue: makeRecorder('ConnectorRegistryService') },
       { provide: ConnectorActivityService, useValue: makeRecorder('ConnectorActivityService') },
       { provide: ConnectorHealthMonitorService, useValue: makeRecorder('ConnectorHealthMonitorService') },
@@ -591,8 +605,8 @@ describe('P90 — SWP-CENSUS-V1-B (8 controllers / 46 open rows)', () => {
     }
   });
 
-  it('[CV1B-06] Exhaustive metadata & guard-order verification across all 46 open V1-B rows', () => {
-    expect(EXPECTED_OPEN_SCOPES).toHaveLength(46);
+  it('[CV1B-06] Exhaustive metadata & guard-order verification across all 45 applied V1-B rows (ApprovalController.create moved to exempt-check in P206)', () => {
+    expect(EXPECTED_OPEN_SCOPES).toHaveLength(45);
 
     for (const row of EXPECTED_OPEN_SCOPES) {
       const ControllerCls = controllersMap[row.controller];

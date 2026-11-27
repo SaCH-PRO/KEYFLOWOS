@@ -23,7 +23,7 @@ import { DecideApprovalStepDto } from './dto/decide-approval-step.dto';
 import { DelegateApprovalStepDto } from './dto/delegate-approval-step.dto';
 import { ListApprovalsQueryDto } from './dto/list-approvals-query.dto';
 
-type PrincipalRequest = ExpressRequest & { user?: { id?: string } };
+type PrincipalRequest = ExpressRequest & { user?: { id?: string; role?: string } };
 
 /**
  * The authenticated caller (V1-31). These routes used to fall back to
@@ -46,7 +46,6 @@ export class ApprovalController {
   constructor(private readonly approvals: ApprovalRequestService) {}
 
   @Post('businesses/:businessId/approvals')
-  @RequireModuleScope('operations', 'write')
   @RateLimit(20, 60_000)
   async create(
     @Param('businessId') businessId: string,
@@ -54,6 +53,12 @@ export class ApprovalController {
     @Request() req: PrincipalRequest,
   ) {
     const requesterId = principalOf(req);
+    const { canDecide } = await this.approvals.assertMayCreateApprovalRequest(
+      businessId,
+      requesterId,
+      body.requestType,
+      req?.user?.role,
+    );
     return this.approvals.createRequest({
       businessId,
       requesterId,
@@ -63,6 +68,7 @@ export class ApprovalController {
       payload: body.payload,
       threshold: body.threshold,
       steps: body.steps,
+      allowAutoApprove: canDecide,
     });
   }
 
