@@ -872,4 +872,74 @@ describe('KEY path (review ST-D10-3, CR-2; W9-KEY-OBLIGATIONS-CALLS, D-88)', () 
     expect(out).toMatchObject({ id: plain.id, alreadyDischarged: false });
     expect((await db.commandItem.findUnique({ where: { id: plain.id } })).dischargedAt).not.toBeNull();
   });
+
+  it('[PAGING-01] W11-PAGING-TOTAL-ORDER-B: CommandService.findMany pages 4 items with identical priority/urgency/createdAt deterministically by id DESC across both the Prisma path and the restricted raw-SQL path', async () => {
+    const tieModule = `${P}tie_page`;
+    const tieAt = new Date('2030-06-01T12:00:00.000Z');
+    // Insert ascending IDs so heap insertion order (a, b, c, d) disagrees with deterministic id DESC (d, c, b, a).
+    const tieIds = [`${P}tie_a`, `${P}tie_b`, `${P}tie_c`, `${P}tie_d`];
+    const hiddenId = `${P}tie_priv`;
+    try {
+      for (const id of tieIds) {
+        await db.commandItem.create({
+          data: {
+            id,
+            businessId: ID.bizA,
+            title: `Tied ${id}`,
+            category: 'OPERATIONS',
+            actionType: 'FOLLOW_UP',
+            sourceModule: tieModule,
+            priority: 75,
+            urgency: 'NORMAL',
+            status: 'OPEN',
+            createdAt: tieAt,
+          },
+        });
+      }
+      // One hidden item in the same sourceModule forces staffOwned down the restricted raw-SQL path (hidden.length > 0).
+      await db.commandItem.create({
+        data: {
+          id: hiddenId,
+          businessId: ID.bizA,
+          title: `Hidden ${PRIVATE_NAME}`,
+          category: 'OPERATIONS',
+          actionType: 'FOLLOW_UP',
+          sourceModule: tieModule,
+          priority: 10,
+          urgency: 'LOW',
+          status: 'OPEN',
+          ownerType: 'CONTACT',
+          ownerId: ID.cPriv,
+          createdAt: tieAt,
+        },
+      });
+
+      const expectedDesc = [...tieIds].reverse();
+
+      // 1. OWNER -> Prisma findMany path (5 items total: 4 tied at priority 75 + 1 lower priority hiddenId).
+      const ownerP1 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=0`, ID.owner);
+      expect(ownerP1.status).toBe(200);
+      expect(ownerP1.body.total).toBe(5);
+      // Trigger an MVCC heap rewrite on a tied row between pages to prove tie-break survives heap movement.
+      await db.commandItem.update({ where: { id: tieIds[0] }, data: { title: `Tied ${tieIds[0]} updated` } });
+      const ownerP2 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=2`, ID.owner);
+      expect(ownerP2.status).toBe(200);
+      const ownerCombined = [...ownerP1.body.items.map((i: any) => i.id), ...ownerP2.body.items.map((i: any) => i.id)];
+      expect(ownerCombined).toEqual(expectedDesc);
+      expect(new Set(ownerCombined).size).toBe(4);
+
+      // 2. staffOwned -> restricted raw-SQL path (4 visible tied items; hiddenId excluded).
+      const staffP1 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=0`, ID.staffOwned);
+      expect(staffP1.status).toBe(200);
+      expect(staffP1.body.total).toBe(4);
+      const staffP2 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=2`, ID.staffOwned);
+      expect(staffP2.status).toBe(200);
+      const staffCombined = [...staffP1.body.items.map((i: any) => i.id), ...staffP2.body.items.map((i: any) => i.id)];
+      expect(staffCombined).toEqual(expectedDesc);
+      expect(new Set(staffCombined).size).toBe(4);
+      expect(staffCombined).not.toContain(hiddenId);
+    } finally {
+      await db.commandItem.deleteMany({ where: { businessId: ID.bizA, sourceModule: tieModule } });
+    }
+  });
 });
