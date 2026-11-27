@@ -6,7 +6,7 @@
  * them: its addToCart refuses a product line itself. Here the catalog is replaced by a door that calls addToCart
  * with a product and with a service, whatever the answer, so only the page's guard stands between it and the cart.
  *
- *   WHS2-19  not offered: the product is refused, the service is taken
+ *   WHS2-19  not offered: the product is refused (no cart line, no add_to_cart event), the service is taken
  *   WHS2-20  offered: both are taken
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
@@ -29,6 +29,8 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
   usePathname: () => `/book/${SLUG}`,
 }));
+const client = vi.hoisted(() => ({ trackStoreEvent: vi.fn() }));
+vi.mock("@/lib/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/client")>()), trackStoreEvent: client.trackStoreEvent }));
 vi.mock("../components/catalog-grid", () => ({
   CatalogGrid: ({ addToCart }: { addToCart: (item: Record<string, unknown>) => void }) => (
     <>
@@ -56,6 +58,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   window.localStorage.clear();
+  client.trackStoreEvent.mockClear();
   api.apiGet.mockReset();
   api.apiGet.mockImplementation(async (path: string) => {
     if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
@@ -82,6 +85,9 @@ describe("WEDGE-HIDE-STORE part 2: the page's addToCart refuses a product when t
       fireEvent.click(screen.getByRole("button", { name: "Door: add the service" }));
       await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([door.SERVICE.id]));
       expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+      // Refused at the door, not only filtered out afterwards: the store is not told a product went into a cart.
+      const added = client.trackStoreEvent.mock.calls.filter(([, event]) => event === "add_to_cart").map(([, , id]) => id);
+      expect(added).toEqual([door.SERVICE.id]);
     });
   }
 
