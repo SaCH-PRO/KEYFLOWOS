@@ -515,9 +515,9 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.status === 'CANCELLED')).toBe(true);
 
-    const invRows = await db.invoice.findMany({ where: { id: { in: [inv1, inv2] } } });
+    const invRows = await Promise.all([inv1, inv2].map((id) => db.invoice.findUnique({ where: { id } })));
     expect(invRows).toHaveLength(2);
-    expect(invRows.every((r) => r.deletedAt !== null)).toBe(true);
+    expect(invRows.every((r) => r !== null && r.deletedAt !== null)).toBe(true);
 
     const slots1 = await request(app.getHttpServer())
       .get(`/bookings/public/businesses/${ID.bizA}/slots`)
@@ -753,6 +753,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
         invoiceId: pSucc.invId!,
         amount: 100,
         currency: 'TTD',
+        provider: 'STRIPE',
         method: 'STRIPE',
         status: 'SUCCESSFUL',
       },
@@ -767,6 +768,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
         invoiceId: pPend.invId!,
         amount: 100,
         currency: 'TTD',
+        provider: 'MANUAL',
         method: 'MANUAL',
         status: 'PENDING',
       },
