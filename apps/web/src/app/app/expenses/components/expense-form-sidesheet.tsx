@@ -93,12 +93,32 @@ const MAX_DECODE_ROUNDS = 4;
  * percent-decoded up to MAX_DECODE_ROUNDS times ("%256Fbjects", "/%2Fobjects/x"). A path that will not decode is
  * treated as one: it is not a receipt anyone can be sent to.
  */
+/**
+ * An object path: "/objects" after any run of slashes, looking through a leading "/__api" (R7-1: next.config rewrites
+ * /__api/* to the API on any host that serves the app), ended by "/", a matrix ";" (R8-2) or the end.
+ */
+const OBJECT_PATH = /^\/+(?:__api\/+)*objects(?:[/;]|$)/i;
+
+/** A path as a URL path resolver reads it (R8-1): backslashes as slashes, "." and ".." segments resolved. */
+function resolveDotSegments(path: string): string {
+  const out: string[] = [];
+  for (const segment of path.replace(/\\/g, "/").split("/")) {
+    if (segment === ".") continue;
+    if (segment === "..") {
+      if (out.length > 1) out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return out.join("/");
+}
+
 function isObjectLikePath(path: string): boolean {
   let p = path;
   for (let round = 0; round <= MAX_DECODE_ROUNDS; round += 1) {
-    // R7-1: "/__api/..." is the API on any host that serves the app (next.config rewrites it), so a leading
-    // "/__api" (after any run of slashes) is looked through.
-    if (/^\/+(?:__api\/+)*objects(\/|$)/i.test(p)) return true;
+    // R8-2: a NUL, raw or decoded, ends a path differently on different servers: refused.
+    if (p.includes("\u0000") || /%00/.test(p)) return true;
+    if (OBJECT_PATH.test(p) || OBJECT_PATH.test(resolveDotSegments(p))) return true;
     let next: string;
     try {
       next = decodeURIComponent(p);

@@ -158,6 +158,10 @@ export function useExpensesData() {
   }, [businessId, switchEpoch]);
 
   const readParams = JSON.stringify([period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  // R8-3: this effect must stay above the read effect below. Effects run in order, so the read that a parameter
+  // change starts sees paramsRef already holding the new parameters. Were the order swapped, that read would find the
+  // ref stale, refuse itself and bump `refresh`; the read would still happen, once, a render later (the fetch count is
+  // the same, so tests cannot tell), at the cost of an extra render on every parameter change.
   useEffect(() => { paramsRef.current = readParams; }, [readParams]);
 
   const loadData = useCallback(async () => {
