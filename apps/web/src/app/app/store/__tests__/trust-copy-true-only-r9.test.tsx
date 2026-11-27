@@ -152,6 +152,10 @@ describe("R9-4: cut at a word, with '...', whenever text is dropped", () => {
       whole(t, `${LONG_NAME} — Shop Online Today | ${tagline} Online`);
     }
     expect(titles.filter((t) => t.endsWith("...")).length).toBeGreaterThan(0);
+    // the rendered Meta Title options, exactly (two of them clip to the same text, so each is checked in place)
+    const label = screen.getByText("Meta Title");
+    const shown = [...(label.nextElementSibling?.querySelectorAll("button span.flex-1") ?? [])].map((e) => e.textContent);
+    expect(shown).toEqual(titles);
     expect(text()).not.toMatch(new RegExp(`${LONG_NAME} — Shop Online T(?!oday)`));
   });
 
