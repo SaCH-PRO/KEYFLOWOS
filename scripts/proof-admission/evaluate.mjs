@@ -43,6 +43,24 @@ const EXIT = Object.freeze({
 
 const HEAD_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
+/**
+ * Bounded ceiling for harness-raised report staleness windows
+ * (W11-LOAD-SENSITIVE-TESTS): slow serial `--no-file-parallelism` runs take
+ * ~891 s, exceeding the 600 s manifest default, so the harness can raise the
+ * staleness window up to 2 hours while preserving exact-head binding 100%.
+ */
+export const MAX_REPORT_AGE_SECONDS_LIMIT = 7200;
+
+/** Strict parser for a bounded positive staleness override in seconds; null when invalid. */
+export function parseMaxReportAgeSeconds(raw) {
+  if (raw === undefined || raw === null) return null;
+  const text = typeof raw === 'number' ? String(raw) : String(raw).trim();
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+  const value = Number(text);
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_REPORT_AGE_SECONDS_LIMIT) return null;
+  return value;
+}
+
 function normalizeCaseId(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -192,9 +210,11 @@ function collectAssertions(report) {
 /**
  * @param manifest  a case manifest
  * @param report    a vitest JSON report: one packet's run or a combined run
- * @param options   { expectHead, sourceHead }: with expectHead the verdict is
- *                  REJECTED unless sourceHead, the head the report is judged
- *                  at, is exactly expectHead.
+ * @param options   { expectHead, sourceHead, maxReportAgeSeconds }: with
+ *                  expectHead the verdict is REJECTED unless sourceHead, the
+ *                  head the report is judged at, is exactly expectHead.
+ *                  maxReportAgeSeconds, when supplied by the harness, raises a
+ *                  manifest's maxReportAgeSeconds up to MAX_REPORT_AGE_SECONDS_LIMIT.
  */
 export function evaluateProof(manifest, report, options = {}) {
   const manifestErrors = validateManifest(manifest);
@@ -217,6 +237,14 @@ export function evaluateProof(manifest, report, options = {}) {
     }
   }
 
+  let overrideMaxAge = null;
+  if (options.maxReportAgeSeconds !== undefined && options.maxReportAgeSeconds !== null) {
+    overrideMaxAge = parseMaxReportAgeSeconds(options.maxReportAgeSeconds);
+    if (overrideMaxAge === null) {
+      return verdict('REJECTED', ['KF_PROOF_ARGUMENT_INVALID']);
+    }
+  }
+
   const collected = collectAssertions(report);
   if (collected.error) {
     return verdict('REJECTED', [collected.error]);
@@ -227,11 +255,13 @@ export function evaluateProof(manifest, report, options = {}) {
     if (!Number.isFinite(report.startTime)) {
       return verdict('REJECTED', ['KF_PROOF_REPORT_MALFORMED']);
     }
+    const effectiveMaxReportAgeSeconds =
+      overrideMaxAge !== null ? Math.max(manifest.maxReportAgeSeconds, overrideMaxAge) : manifest.maxReportAgeSeconds;
     reportAgeMs = Date.now() - report.startTime;
-    if (reportAgeMs < -60_000 || reportAgeMs > manifest.maxReportAgeSeconds * 1000) {
+    if (reportAgeMs < -60_000 || reportAgeMs > effectiveMaxReportAgeSeconds * 1000) {
       return verdict('REJECTED', ['KF_PROOF_REPORT_STALE'], {
         reportAgeMs,
-        maxReportAgeSeconds: manifest.maxReportAgeSeconds,
+        maxReportAgeSeconds: effectiveMaxReportAgeSeconds,
       });
     }
   }
@@ -418,6 +448,20 @@ function main() {
     );
     process.exit(EXIT.REJECTED);
   }
+  let maxReportAgeSeconds;
+  if (args['max-report-age-seconds'] !== undefined) {
+    maxReportAgeSeconds = parseMaxReportAgeSeconds(args['max-report-age-seconds']);
+    if (maxReportAgeSeconds === null) {
+      console.log(
+        JSON.stringify(
+          verdict('REJECTED', ['KF_PROOF_ARGUMENT_INVALID'], {
+            message: `--max-report-age-seconds takes a positive number up to ${MAX_REPORT_AGE_SECONDS_LIMIT}`,
+          }),
+        ),
+      );
+      process.exit(EXIT.REJECTED);
+    }
+  }
 
   let manifest;
   try {
@@ -442,7 +486,11 @@ function main() {
   }
 
   const head = sourceHead();
-  const result = evaluateProof(manifest, report, { expectHead: args['expect-head'], sourceHead: head });
+  const result = evaluateProof(manifest, report, {
+    expectHead: args['expect-head'],
+    sourceHead: head,
+    ...(maxReportAgeSeconds !== undefined ? { maxReportAgeSeconds } : {}),
+  });
   const receipt = {
     ...result,
     sourceHead: head,

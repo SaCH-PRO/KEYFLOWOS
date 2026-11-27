@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { isTokenEncrypted } from '../../core/crypto/token-crypto';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { channelBinderOf, isMessagingProvider, providerMetaBoundBy, rebindsChannelAccount } from './channel-audience';
+import { stripConnectionSecrets, stripDestinationSecrets } from './channel-secret-redaction';
 
 /** Why sync-from-social copies no messaging account (SWEEP-P0-FOLLOWUP repair, SEC-FU-1). */
 const SOCIAL_SYNC_SKIPS_MESSAGING =
@@ -10,30 +11,17 @@ const SOCIAL_SYNC_SKIPS_MESSAGING =
 
 type ConnectionRecord = Awaited<ReturnType<PrismaService['client']['channelConnection']['findFirst']>>;
 
-function stripSecrets(conn: NonNullable<ConnectionRecord>) {
-  const { token, refreshToken, ...safe } = conn;
-  return safe;
+function stripSecrets<T extends NonNullable<ConnectionRecord>>(conn: T) {
+  return stripConnectionSecrets(conn as unknown as Record<string, unknown>);
 }
 
 /**
- * SWEEP-P0-SCOPES round 2 class repair (CW-2): a destination's own credential (a page's access token in
- * destinationMeta, written by syncFromSocial and by the destination writes) is never answered. GET
- * destinations answered it to every member.
+ * SWEEP-P0-SCOPES round 2 class repair (CW-2) & FU-NESTED-CREDENTIAL-READS (P149):
+ * a destination's own credential (a page's access token or other secret in destinationMeta,
+ * written by syncFromSocial and by destination writes) is never answered.
  */
-const DESTINATION_SECRET_KEY = /token|secret|password|api_?key|credential/i;
-function stripDestinationMeta(meta: unknown): unknown {
-  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return meta;
-  return Object.fromEntries(Object.entries(meta as Record<string, unknown>).filter(([key]) => !DESTINATION_SECRET_KEY.test(key)));
-}
-
-function stripSecretsFromDestination(dest: Record<string, unknown>) {
-  const out: Record<string, unknown> = { ...dest };
-  if ('destinationMeta' in out) out.destinationMeta = stripDestinationMeta(out.destinationMeta);
-  if (out.connection && typeof out.connection === 'object' && out.connection !== null) {
-    const { token, refreshToken, ...safeConn } = out.connection as Record<string, unknown>;
-    out.connection = safeConn;
-  }
-  return out;
+function stripSecretsFromDestination<T extends Record<string, unknown>>(dest: T) {
+  return stripDestinationSecrets(dest);
 }
 
 /** The fields a destination write may set (the body is handed over whole: an id or a connection in it is not written). */
@@ -277,10 +265,11 @@ export class ChannelConnectionService {
   }
 
   async updateHealthState(id: string, healthState: string, healthMessage?: string) {
-    return this.prisma.client.channelConnection.update({
+    const updated = await this.prisma.client.channelConnection.update({
       where: { id },
       data: { healthState, healthMessage, lastCheckedAt: new Date() },
     });
+    return stripSecrets(updated);
   }
 
   async getHealthSummary(businessId: string) {
@@ -338,7 +327,7 @@ export class ChannelConnectionService {
         healthState: kept.healthState,
         healthMessage: kept.healthMessage,
         lastCheckedAt: kept.lastCheckedAt,
-        destinations: kept.destinations,
+        destinations: kept.destinations.map((d) => stripSecretsFromDestination(d as unknown as Record<string, unknown>)),
       };
     }
 
@@ -382,7 +371,7 @@ export class ChannelConnectionService {
       healthState: updated.healthState,
       healthMessage: updated.healthMessage,
       lastCheckedAt: updated.lastCheckedAt,
-      destinations: updated.destinations,
+      destinations: updated.destinations.map((d) => stripSecretsFromDestination(d as unknown as Record<string, unknown>)),
     };
   }
 
