@@ -148,9 +148,13 @@ export function offerWords(o: Partial<StorefrontOffer>) {
   const books = booked > 0;
   const buys = products + packages + orderable > 0;
   const total = products + packages + services;
-  const kinds: [number, string][] = [[products, "product"], [packages, "package"], [services, "service"]];
+  // r12: a partial count names only what it counts, by its own noun: with the products not known, the services it
+  // counts are the booked ones ("to book"; a SERVICE-category product, bought, may be on the store too); with the
+  // services not known, the bought ones ("to buy"; a bookable service may be on the store too).
+  const servicesAre = !productsKnown && servicesKnown ? " to book" : productsKnown && !servicesKnown ? " to buy" : "";
+  const kinds: [number, string, string][] = [[products, "product", ""], [packages, "package", ""], [services, "service", servicesAre]];
   const present = kinds.filter(([n]) => n > 0);
-  const noun = list(present.map(([n, w]) => plural(n, w)));
+  const noun = list(present.map(([n, w, are]) => `${plural(n, w)}${are}`));
   return {
     /**
      * r11: not everything on the store is known (the store graph or the storefront config was not read): the copy
@@ -167,7 +171,7 @@ export function offerWords(o: Partial<StorefrontOffer>) {
     total,
     noun,
     Noun: noun.replace(/\b(product|package|service)/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)),
-    counted: list(present.map(([n, w]) => `${n} ${plural(n, w)}`)),
+    counted: list(present.map(([n, w, are]) => `${n} ${plural(n, w)}${are}`)),
     action: books && buys ? "Book or buy online." : buys ? "Buy online." : books ? "Book online." : "",
     items: `${total} ${plural(total, "item")}`,
     Items: `${total} ${plural(total, "Item")}`,
@@ -179,17 +183,28 @@ const segmenter =
 /** The text's graphemes (what a reader counts as characters), or its code points where Intl.Segmenter is missing. */
 const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
 const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
+/**
+ * r12: what is dropped before the "...": whitespace, sentence punctuation and an opening bracket or quote (it opens
+ * nothing); a "%", a closing bracket or quote, a straight quote (it may close one) stay.
+ */
+const SENTENCE_END = /[\s.,;:!?…—–\-([{“‘«]+$/u;
+/** Holds something other than whitespace and punctuation (a letter, a digit, a symbol, an emoji). */
+const hasContent = (t: string) => /[^\s\p{P}]/u.test(t);
 
 /**
- * P231 r9-r11: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
+ * P231 r9-r12: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
  * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text, and never
  * "..." alone:
  * - the cut is at the last whitespace (any: a space, a tab, a no-break space, an ideographic space) inside the room
  *   left for the "..."; a word that ends exactly where the room ends is kept whole;
  * - leading whitespace is not a break (a break needs a word before it);
  * - a single word longer than the room is cut hard, then "...";
- * - trailing whitespace and punctuation before the "..." are dropped; when that would leave nothing (the kept part is
- *   all whitespace or punctuation), the text's first non-whitespace characters are cut hard instead, then "...";
+ * - trailing whitespace and sentence punctuation (. , ; : ! ? … and dashes) and an opening bracket or quote before
+ *   the "..." are dropped; a "%", a closing bracket or quote, a straight quote stay ("Get 50%...", "(50% off)...");
+ * - when the kept part holds no letter, digit or symbol (all whitespace or punctuation), the text is cut hard instead,
+ *   from its first non-whitespace or, when that too holds none, from its first letter, digit or symbol, dropping the
+ *   same trailing characters; only a text of punctuation and whitespace alone keeps punctuation before the "...",
+ *   never whitespace;
  * - with `max` of 3 or less there is no room for "..." and a character: the text's first `max` characters;
  * - a text of whitespace only, longer than `max`, gives "".
  */
@@ -206,11 +221,21 @@ export function clip(text: string, max: number): string {
     // the room's last character. (At i = 0 the prefix is empty, so `i > 0` and `i >= 0` agree there.)
     if (i > 0 && room.slice(0, i).join("").trim() !== "") end = i;
   }
-  const kept = room.slice(0, end).join("").replace(/[\s\p{P}]+$/u, "");
-  if (kept.trim() !== "") return `${kept}...`;
+  const kept = room.slice(0, end).join("").replace(SENTENCE_END, "");
+  if (hasContent(kept)) return `${kept}...`;
+  // r11-r12: the kept part is whitespace or punctuation only: a hard cut from the text's first non-whitespace, its
+  // trailing whitespace and sentence punctuation dropped as above; when that leaves no letter, digit or symbol, a
+  // hard cut from the text's first one; a text with none (punctuation only) keeps its punctuation, never whitespace,
+  // before the "...".
+  const cutAt = (i: number) => g.slice(i, i + max - 3).join("");
   const start = g.findIndex((c) => !isSpace(c));
   if (start < 0) return "";
-  return `${g.slice(start, start + max - 3).join("")}...`;
+  let cut = cutAt(start).replace(SENTENCE_END, "");
+  if (!hasContent(cut)) {
+    const content = g.findIndex((c) => hasContent(c));
+    cut = content < 0 ? cutAt(start).replace(/\s+$/u, "") : cutAt(content).replace(SENTENCE_END, "");
+  }
+  return `${cut}...`;
 }
 
 /** `n thing(s)`, for any count-bearing string. */

@@ -10,9 +10,10 @@ type StoreCustomData = {
   products?: unknown[];
   services?: unknown[];
   /**
-   * P231 r7-r10: what the storefront shows (the copy tools): the products on the store, and the bookable services.
-   * `null` when it is not known (the store graph was not read: still loading, failed, or refused): then nothing is
-   * said about what is on the store, and the copy counts no product (never the whole catalog as if it were live).
+   * P231 r7-r12: what the storefront shows (the copy tools): the products on the store, and the bookable services.
+   * `null` or absent when it is not known (the store graph or the storefront config was not read: still loading,
+   * failed, or refused; or a caller without the store's view): then nothing is said about what is on the store, and
+   * the copy counts none of it (never the whole catalog as if it were live).
    */
   storeProducts?: unknown[] | null;
   storeServices?: unknown[] | null;
@@ -156,7 +157,7 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
       actionLabel: "Add items",
       actionKey: "switch_tab:catalog",
     });
-  } else if (Array.isArray(data.storeProducts) && data.storeServices !== null && storeOffer(data).total === 0) {
+  } else if (Array.isArray(data.storeProducts) && Array.isArray(data.storeServices) && storeOffer(data).total === 0) {
     // P231 r7-r10: the catalog has items, but none is on the store (only said when what is on the store is known: r10,
     // not when the store graph was not read). Say what to do, in the number each part counts:
     // - active products not listed: add them;
@@ -469,17 +470,16 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
 }
 
 /**
- * P231 r7 (D-303): the lists the copy tools write from: what the storefront shows (storeProducts, storeServices, from
- * the store page), or, given only products and services (a caller without the store's live view), those, drawn and
- * counted the way /book draws them (storefront-counts.ts). The analysis tools keep reading the whole catalog.
+ * P231 r7-r12 (D-303): the lists the copy tools write from: what the storefront shows (storeProducts, storeServices,
+ * from the store page), counted the way /book draws them (storefront-counts.ts). A list not given (null, or absent:
+ * r12, never the whole catalog in its place) is not known: it is not counted, and the offer is partial, so the copy
+ * states no total. The analysis tools keep reading the whole catalog.
  */
 function storeOffer(d: StoreCustomData) {
-  // r10-r11: null is "not known" (products: the store graph or the storefront config was not read; services: the
-  // config was not read): it is not counted, and the offer is partial, so the copy states no total.
-  const productsKnown = d.storeProducts !== null;
-  const servicesKnown = d.storeServices !== null;
-  const products = (productsKnown ? (d.storeProducts ?? d.products ?? []) : []) as Record<string, unknown>[];
-  const services = bookableServices((servicesKnown ? (d.storeServices ?? d.services ?? []) : []) as Record<string, unknown>[]);
+  const productsKnown = Array.isArray(d.storeProducts);
+  const servicesKnown = Array.isArray(d.storeServices);
+  const products = (productsKnown ? d.storeProducts : []) as Record<string, unknown>[];
+  const services = bookableServices((servicesKnown ? d.storeServices : []) as Record<string, unknown>[]);
   return offerWords({ ...offerOf(products, services), productsKnown, servicesKnown });
 }
 
