@@ -57,6 +57,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { trackAsyncWrites } from './helpers/async-writes.js';
 
 // Many cases here make a dozen HTTP calls and real-DB reads each; under the one
 // parallel run of every bound suite (run-manifests) the default 5s budget times
@@ -77,6 +78,7 @@ let db: any;
 let app: any;
 let crm: any; // the real CrmService
 let keyAdapter: any; // the real KEY CrmAdapterService over the real CrmService
+let asyncWrites: ReturnType<typeof trackAsyncWrites> | undefined;
 
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension). Contacts are
@@ -116,17 +118,13 @@ function events(contactId: string, type: string) {
   });
 }
 
-/** The ContactAuditEntry write is fire-and-forget (DEC-CONTACTS-002): wait for it to land. */
-async function auditEntries(contactId: string, action: string, timeoutMs = 5_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const rows = await db.contactAuditEntry.findMany({
-      where: { businessId: ID.bizA, contactId, action },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (rows.length > 0 || Date.now() > deadline) return rows;
-    await new Promise((r) => setTimeout(r, 50));
-  }
+/** Wait for any fire-and-forget ContactAuditEntry write (DEC-CONTACTS-002) to land, then read. */
+async function auditEntries(contactId: string, action: string) {
+  await settle();
+  return db.contactAuditEntry.findMany({
+    where: { businessId: ID.bizA, contactId, action },
+    orderBy: { createdAt: 'asc' },
+  });
 }
 
 /** Every durable trace the contact routes write for the tenant, for "writes nothing". */
@@ -141,8 +139,19 @@ async function traceCounts() {
   return { contacts, live, contactEvents, audits, teamLogs };
 }
 
-/** Let any fire-and-forget write a request might have started reach the database. */
-const settle = () => new Promise((r) => setTimeout(r, 300));
+/**
+ * Wait until every fire-and-forget write a request started has landed (or
+ * failed): ContactAuditService.write (DEC-CONTACTS-002) and the team log
+ * TeamAuditInterceptor writes after the HTTP response.
+ *
+ * P142 (FU-CONTACTS-AUDIT-FLAKE): replaces the fixed 300 ms sleep that let
+ * late teamActivityLog writes from earlier cases (e.g. ST-C PATCH + DELETE)
+ * bleed into ST-R3 / CR-1's traceCounts() under full-suite load.
+ */
+const settle = async () => {
+  if (!asyncWrites) throw new Error('settle(): the async-write tracker is not installed');
+  await asyncWrites.drain();
+};
 
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
@@ -189,6 +198,13 @@ beforeAll(async () => {
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
   const { CrmAdapterService } = await import('../src/modules/key-cortex/adapters/crm-adapter.service');
+
+  // ---- P142 (FU-CONTACTS-AUDIT-FLAKE): track the two fire-and-forget
+  // writers so settle() awaits every in-flight write deterministically. -----
+  asyncWrites = trackAsyncWrites([
+    [ContactAuditService.prototype, 'write'],
+    [TeamAuditInterceptor.prototype, 'record'],
+  ]);
 
   // ---- the real HTTP path (wired before any row is seeded, so a wiring
   // fault is reported as itself and not as a seeding failure) -------------
@@ -271,8 +287,13 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  if (app) await app.close();
-  if (db) await cleanup();
+  try {
+    if (asyncWrites) await asyncWrites.drain();
+    if (app) await app.close();
+    if (db) await cleanup();
+  } finally {
+    asyncWrites?.restore();
+  }
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -384,6 +405,7 @@ describe('a request with no identity is refused (401) and writes nothing', () =>
   });
 
   it('POST without identity: 401, no contact, event, audit entry or team log', async () => {
+    await settle();
     const before = await traceCounts();
     const res = await post(null, { firstName: `${P}Ghost`, email: `${P}ghost@test.local` });
     expect(res.status).toBe(401);
@@ -393,6 +415,7 @@ describe('a request with no identity is refused (401) and writes nothing', () =>
   });
 
   it('PATCH without identity: 401, the row is unchanged and nothing is written', async () => {
+    await settle();
     const before = await traceCounts();
     const res = await patch(null, contactId, { firstName: `${P}Hijacked` });
     expect(res.status).toBe(401);
@@ -403,6 +426,7 @@ describe('a request with no identity is refused (401) and writes nothing', () =>
   });
 
   it('DELETE without identity: 401, the row stays live and nothing is written', async () => {
+    await settle();
     const before = await traceCounts();
     const res = await del(null, contactId);
     expect(res.status).toBe(401);
@@ -522,6 +546,7 @@ describe('ST-1: PATCH cannot reassign a contact without the reassign permission'
 
   it('NEGATIVE CONTROL: a write-scoped staff member (reassign false) PATCHing ownerId to themself is refused 403 and nothing is written', async () => {
     const contact = await seedContact(ID.owner);
+    await settle();
     const before = await traceCounts();
     const res = await patch(ID.staff, contact.id, { ownerId: ID.staff });
     expect(res.status).toBe(403);
@@ -532,6 +557,7 @@ describe('ST-1: PATCH cannot reassign a contact without the reassign permission'
 
   it('NEGATIVE CONTROL: the refusal also covers a reassignment bundled with an ordinary edit (no partial write)', async () => {
     const contact = await seedContact(ID.owner);
+    await settle();
     const before = await traceCounts();
     const res = await patch(ID.staff, contact.id, { ownerId: ID.staff, jobTitle: 'Bundled' });
     expect(res.status).toBe(403);
@@ -888,3 +914,143 @@ describe('ST-R3 / CR-1: enrichment applies the GET visibility clause before the 
     expect(await contactTraces(contact.id)).toEqual({ contactEvents: 0, audits: 0 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// P142 (FU-CONTACTS-AUDIT-FLAKE): deterministic drain of late fire-and-forget
+// team-activity writes from earlier HTTP cases (e.g. ST-C PATCH + DELETE) so
+// they never bleed into ST-R3 / CR-1's traceCounts() under full-suite load,
+// while preserving strict refusal detection if a refusal itself writes a log.
+// ---------------------------------------------------------------------------
+
+describe('P142 FU-CONTACTS-AUDIT-FLAKE: deterministic drain under forced team-activity delay', () => {
+  it('[CAA-DRAIN-01] awaits two delayed fire-and-forget teamActivityLog writes before ST-R3/CR-1 baseline, passes refusal traceCounts() deterministically, and still detects a refusal that writes a team log', async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+    const { ContactEnrichmentService } = await import('../src/modules/crm/enrichment/contact-enrichment.service');
+
+    const interceptor = app.get(TeamAuditInterceptor) as unknown as {
+      prisma: { client: Record<string, unknown> };
+      record: (row: Record<string, unknown>, oncePerEntity: boolean) => Promise<void>;
+    };
+    const realPrisma = interceptor.prisma;
+
+    const createDeferred = () => {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { promise, release };
+    };
+
+    const initialGate = createDeferred();
+    const controlGate = createDeferred();
+    let activeGate: Promise<void> = initialGate.promise;
+
+    await settle();
+    const atStart = await traceCounts();
+    const prior = await seedContact(ID.owner);
+    const hiddenContact = await seedSensitiveContact('PRIVATE', ID.owner);
+
+    interceptor.prisma = {
+      client: new Proxy(realPrisma.client, {
+        get(target, prop, receiver) {
+          if (prop === 'teamActivityLog') {
+            const delegate = Reflect.get(target, prop, receiver) as Record<string, (...args: unknown[]) => Promise<unknown>>;
+            return new Proxy(delegate, {
+              get(dTarget, dProp, dReceiver) {
+                if (dProp === 'create') {
+                  return async (...args: unknown[]) => {
+                    await activeGate;
+                    return dTarget.create(...args);
+                  };
+                }
+                return Reflect.get(dTarget, dProp, dReceiver);
+              },
+            });
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }),
+    };
+
+    try {
+      // Reproduce the two ST-C HTTP writes immediately preceding ST-R3 / CR-1.
+      expect((await patch(ID.staff, prior.id, { status: 'CLIENT' })).status).toBe(200);
+      expect((await del(ID.owner, prior.id)).status).toBe(200);
+
+      // Both HTTP responses answered while their teamActivityLog inserts are deterministically held in flight.
+      expect(asyncWrites!.inFlight()).toBeGreaterThanOrEqual(2);
+      expect((await traceCounts()).teamLogs).toBe(atStart.teamLogs);
+
+      // Verify settle() stays pending while the gate holds those two writes in flight.
+      let settledWhileHeld = false;
+      const drained = settle().then(() => {
+        settledWhileHeld = true;
+      });
+      await new Promise<void>((r) => setImmediate(r));
+      expect(settledWhileHeld).toBe(false);
+
+      initialGate.release();
+      await drained;
+      expect(settledWhileHeld).toBe(true);
+
+      await settle();
+      const before = await traceCounts();
+      expect(before.teamLogs).toBe(atStart.teamLogs + 2);
+      expect(asyncWrites!.inFlight()).toBe(0);
+
+      // Run the ST-R3 / CR-1 enrichment refusal: writes zero rows across all five trace tables.
+      const lookups: unknown[] = [];
+      const provider = { key: 'stub', enabled: true, enrich: async (query: unknown) => { lookups.push(query); return { status: 'no_match' }; } };
+      const enrichment = new ContactEnrichmentService(app.get(PrismaService), crm, provider as never);
+      const refusal = await enrichment
+        .enrichContact({ businessId: ID.bizA, contactId: hiddenContact.id, actorUserId: ID.staff, force: true })
+        .then(
+          (value: unknown) => ({ value }),
+          (err: { status?: number; getResponse?: () => unknown }) => ({ status: err?.status, response: err?.getResponse?.() }),
+        );
+      expect(refusal).toMatchObject({ status: 404, response: { message: 'Contact not found' } });
+      expect(lookups).toEqual([]);
+
+      await settle();
+      expect(await traceCounts()).toEqual(before);
+
+      // Negative control: if a refusal path erroneously writes a held teamActivityLog row,
+      // settle() waits for it and traceCounts() strictly catches the +1 teamLogs regression.
+      activeGate = controlGate.promise;
+      void interceptor.record(
+        {
+          businessId: ID.bizA,
+          userId: ID.staff,
+          module: 'crm',
+          action: 'contact_enrich_refused_control',
+          entityType: 'contact',
+          entityId: hiddenContact.id,
+          title: 'negative control team log',
+        },
+        false,
+      );
+      expect(asyncWrites!.inFlight()).toBeGreaterThanOrEqual(1);
+      let controlSettledWhileHeld = false;
+      const controlDrained = settle().then(() => {
+        controlSettledWhileHeld = true;
+      });
+      await new Promise<void>((r) => setImmediate(r));
+      expect(controlSettledWhileHeld).toBe(false);
+
+      controlGate.release();
+      await controlDrained;
+      expect(controlSettledWhileHeld).toBe(true);
+
+      const afterControlWrite = await traceCounts();
+      expect(afterControlWrite.teamLogs).toBe(before.teamLogs + 1);
+      expect(afterControlWrite).not.toEqual(before);
+    } finally {
+      initialGate.release();
+      controlGate.release();
+      await settle();
+      interceptor.prisma = realPrisma;
+    }
+  });
+});
+
