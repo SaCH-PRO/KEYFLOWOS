@@ -478,7 +478,7 @@ export class CrmDataQualityService {
     const [items, total, openCounts] = await Promise.all([
       this.prisma.client.contactDataIssue.findMany({
         where,
-        orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         skip: offset,
         include: {

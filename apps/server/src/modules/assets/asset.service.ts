@@ -111,7 +111,7 @@ export class AssetService {
     const [items, total] = await Promise.all([
       this.prisma.client.asset.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: filters?.offset ?? 0,
         take: filters?.limit ?? 50,
       }),

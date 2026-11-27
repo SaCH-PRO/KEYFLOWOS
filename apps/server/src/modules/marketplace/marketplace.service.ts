@@ -347,7 +347,7 @@ export class MarketplaceService {
       this.prisma.client.marketplaceListing.findMany({
         where,
         include: { product: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -963,7 +963,7 @@ export class MarketplaceService {
           items: { include: { product: true } },
           shipments: true,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -1557,7 +1557,7 @@ export class MarketplaceService {
       this.prisma.client.shipment.findMany({
         where,
         include: { order: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -1636,7 +1636,7 @@ export class MarketplaceService {
     const [data, total] = await Promise.all([
       this.prisma.client.customsDeclaration.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -1721,7 +1721,7 @@ export class MarketplaceService {
       this.prisma.client.preOrder.findMany({
         where,
         include: { product: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -1868,7 +1868,7 @@ export class MarketplaceService {
     const [data, total] = await Promise.all([
       this.prisma.client.purchaseOrder.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
