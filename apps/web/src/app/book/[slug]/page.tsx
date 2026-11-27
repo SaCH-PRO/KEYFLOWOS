@@ -758,7 +758,7 @@ function PublicBookingPageInner() {
     // An explicit payment retry after the provider failed is a new checkout attempt (a new order), as before.
     // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered.
     // Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-05, WHS2-06, WHS2-06b, WHS2-19,
-    // WHS2-28); kept until the server refusal (P233) is on main.
+    // WHS2-28). The server refuses the order itself (P233: 403 STORE_CHECKOUT_NOT_OFFERED); this guard stays as well.
     if (storeOffered !== true) throw new Error(STORE_CHECKOUT_NOT_OFFERED);
     if (opts?.newAttempt) checkoutKeyring.reset();
     return postStorefrontCheckout(slug, payload, checkoutKeyring.keyFor(payload));
@@ -1512,8 +1512,8 @@ function PublicBookingPageInner() {
         )}
 
         {/* WEDGE-HIDE-STORE part 2. Defence in depth for this block and the intake below: unreachable while the
-            buttons are hidden (only Find Your Match opens them; pinned by WHS2-16, WHS2-25); kept until the server
-            refusal (P233) is on main. */}
+            buttons are hidden (only Find Your Match opens them; pinned by WHS2-16, WHS2-25). The server refuses the
+            order itself (P233: 403 STORE_CHECKOUT_NOT_OFFERED); these gates stay as well. */}
         {storeOffered === true && showGuidedSelector && !guidedIntake && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
             <GuidedSelector
