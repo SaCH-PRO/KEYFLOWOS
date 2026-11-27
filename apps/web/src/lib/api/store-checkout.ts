@@ -23,11 +23,11 @@ export function storeCheckoutOffered(storefrontAnswer: unknown): boolean {
  */
 export const STORE_CHECK_FAILED = "Couldn't check online ordering.";
 /**
- * The same, on the Payment Failed view of a kept order. It promises no retry: that view has none while the check has
- * failed. (The pending view says only STORE_CHECK_FAILED beside "contact the business": a second order must not be
- * invited while the first may still settle.)
+ * The same, on the Payment Failed view of a kept order. It promises no retry, now or later: the kept order is read
+ * once and Back to Shop discards it, so this page can never offer one. (The pending view says only STORE_CHECK_FAILED
+ * beside "contact the business": a second order must not be invited while the first may still settle.)
  */
-export const STORE_CHECK_FAILED_NO_RETRY = "Couldn't check online ordering, so this payment can't be tried again right now.";
+export const STORE_CHECK_FAILED_NO_RETRY = "Couldn't check online ordering, so this payment can't be tried again here. Please contact the business.";
 
 /** What the page says when a store order is asked for and the store checkout is not offered. */
 export const STORE_CHECKOUT_NOT_OFFERED = "Online orders are not available from this business.";
