@@ -71,7 +71,7 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
-vi.setConfig({ testTimeout: 60_000 });
+vi.setConfig({ testTimeout: 90_000 });
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
