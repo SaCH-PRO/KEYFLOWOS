@@ -505,7 +505,9 @@ export class TodayService {
       const customerName = formatCustomerName(liveContact);
       const visibleContactId = liveContact && access.crmRead ? q.contactId : null;
       const acceptedIso = q.acceptedAt ? q.acceptedAt.toISOString() : q.createdAt.toISOString();
-      const quoteHref = `/app/commerce?tab=quotes&quoteId=${encodeURIComponent(q.id)}`;
+      // P214 (FU-TODAY-QUOTE-HREF / COR-3): commerce/page.tsx reads `tab=quotes` + `recordType=quote&recordId=<id>`
+      // (and strips recordType/recordId on drawer close); it does not read `quoteId`.
+      const quoteHref = `/app/commerce?tab=quotes&recordType=quote&recordId=${encodeURIComponent(q.id)}`;
       todayItems.push({
         id: q.id,
         quoteNumber: q.quoteNumber,
