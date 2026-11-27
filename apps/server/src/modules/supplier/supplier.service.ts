@@ -65,7 +65,7 @@ export class SupplierService {
     const [data, total] = await Promise.all([
       this.prisma.client.supplierConnection.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
@@ -196,7 +196,7 @@ export class SupplierService {
     const [data, total] = await Promise.all([
       this.prisma.client.supplierProduct.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: { _count: { select: { variants: true, sourceLinks: true } } },
