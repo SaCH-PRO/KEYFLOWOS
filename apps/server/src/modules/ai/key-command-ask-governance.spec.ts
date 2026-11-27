@@ -15,6 +15,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { KeyCommandService, type KeyCommandPlan } from './key-command.service';
+import { getLegacyToolEquivalence } from './legacy-tool-equivalence';
 
 type Def = { name: string; module: string; riskTier: 1 | 2 | 3 | 4; requiresApproval: boolean };
 
@@ -350,12 +351,13 @@ describe("V1-09 'ask' is read-only", () => {
   });
 
   it('keeps answering every read intent it plans (control)', async () => {
+    // Note: social.listRecentEngagement was retired as OBSOLETE in P154 (RR-LEGACY-TOOLS-CLASSIFY,
+    // hidden v1 module per D-152) and fails closed; covered in legacy-tool-equivalence.spec.ts.
     const intents = [
       { domain: 'commerce', action: 'revenue_summary' },
       { domain: 'contacts', action: 'follow_up' },
       { domain: 'connect', action: 'drive_findings' },
       { domain: 'messages', action: 'message_intake' },
-      { domain: 'social', action: 'recent_engagement' },
     ];
     for (const intent of intents) {
       const h = harness();
@@ -499,7 +501,7 @@ describe("SEC-V109-2 'ask' honours the business's module and tool blocks on dott
   it.each([
     ['contacts.recommendFollowUps', 'recommendFollowUps', 'contacts', 'crm'],
     ['commerce.summarizeRevenue', 'summarizeRevenue', 'commerce', 'commerce'],
-    ['social.listRecentEngagement', 'listRecentEngagement', 'social', 'content'],
+    ['messages.listMessageIntake', 'listMessageIntake', 'messages', 'messages'],
   ])('runs no %s while blockedModules holds %s', async (_name, tool, module, blockedModule) => {
     const h = harness({ policy: { blockedModules: [blockedModule] } });
 
@@ -607,3 +609,78 @@ describe('CR-V109-1 advisory mode refuses ask reads (ruling: oversight governs r
     expect(lastStatus(h.prisma)).toBe('REJECTED');
   });
 });
+
+describe('P154 R2: blockedModules on SAME/ALIAS canonical-routed tools and unknown legacy keys', () => {
+  const ALIASED_FINANCE: Array<[string, string, string]> = [
+    ['finance', 'summarizeCashPosition', 'finance_safe_to_spend'],
+    ['finance', 'calculateSafeToSpend', 'finance_safe_to_spend'],
+    ['finance', 'generateMoneyMoves', 'finance_money_moves'],
+    ['finance', 'cashflowForecast', 'finance_cashflow_forecast'],
+  ];
+
+  const CANONICAL_FINANCE: Def[] = [
+    { name: 'finance_safe_to_spend', module: 'read', riskTier: 1, requiresApproval: false },
+    { name: 'finance_money_moves', module: 'read', riskTier: 1, requiresApproval: false },
+    { name: 'finance_cashflow_forecast', module: 'read', riskTier: 1, requiresApproval: false },
+  ];
+
+  it.each(ALIASED_FINANCE)(
+    'refuses %s.%s (-> %s) when blockedModules holds "finance" with zero canonical execution',
+    async (module, tool, canonicalName) => {
+      const h = harness({
+        canonical: CANONICAL_FINANCE,
+        policy: { blockedModules: ['finance'] },
+      });
+
+      const results = await h.service.executeApprovedPlan('cmd_1', plan(tool, module), 'biz_1', 'user_1');
+
+      expectNothingRan(h);
+      expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: canonicalName });
+      expect(results[0].error).toContain('Module "finance" is blocked');
+      expect(lastStatus(h.prisma)).toBe('REJECTED');
+    },
+  );
+
+  it.each(ALIASED_FINANCE)(
+    'refuses %s.%s (-> %s) when blockedModules holds "revenue" with zero canonical execution',
+    async (module, tool, canonicalName) => {
+      const h = harness({
+        canonical: CANONICAL_FINANCE,
+        policy: { blockedModules: ['revenue'] },
+      });
+
+      const results = await h.service.executeApprovedPlan('cmd_1', plan(tool, module), 'biz_1', 'user_1');
+
+      expectNothingRan(h);
+      expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: canonicalName });
+      expect(results[0].error).toContain('Module "revenue" is blocked');
+      expect(lastStatus(h.prisma)).toBe('REJECTED');
+    },
+  );
+
+  it('allows an aliased canonical finance tool when an unrelated module is blocked (control)', async () => {
+    const h = harness({
+      canonical: CANONICAL_FINANCE,
+      policy: { blockedModules: ['bookings'] },
+    });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeCashPosition', 'finance'), 'biz_1', 'user_1');
+
+    expect(h.canonical.execute).toHaveBeenCalledTimes(1);
+    expect(h.canonical.execute.mock.calls[0][0]).toBe('finance_safe_to_spend');
+    expect(h.legacy.execute).not.toHaveBeenCalled();
+    expect(results[0]).toMatchObject({ success: true, tool: 'finance_safe_to_spend' });
+  });
+
+  it('returns undefined for an unknown legacy key and fails closed in executeApprovedPlan', async () => {
+    expect(getLegacyToolEquivalence('unknown.tool')).toBeUndefined();
+
+    const h = harness({ canonical: CANONICAL_FINANCE });
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('tool', 'unknown'), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'unknown.tool' });
+    expect(lastStatus(h.prisma)).toBe('REJECTED');
+  });
+});
+

@@ -2511,7 +2511,7 @@ export class StoreOrderService {
     const [rows, total] = await Promise.all([
       this.prisma.client.marketplaceOrder.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: FULFILMENT_ORDER_SELECT,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -2545,7 +2545,7 @@ export class StoreOrderService {
     const [data, total] = await Promise.all([
       this.prisma.client.marketplaceOrder.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: { items: true },
         skip: (page - 1) * pageSize,
         take: pageSize,

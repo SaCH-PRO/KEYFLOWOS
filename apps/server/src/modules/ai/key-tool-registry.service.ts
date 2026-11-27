@@ -14,12 +14,15 @@ import { readInvoiceMoney } from '../commerce/commerce-stats.service';
 import { balanceOfStoredRows, creditAwareBalance } from '../commerce/invoice-workflow.service';
 import { fromCents, sumMoney, toCents } from '../commerce/money';
 import { normalizeCurrency } from '../finance/posting.service';
+import { keyDisabled } from '../../core/config/env';
+import { getLegacyToolEquivalence, obsoleteLegacyToolRefusal } from './legacy-tool-equivalence';
 
 export interface ToolResult<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
   logs?: string[];
+  notExecuted?: boolean;
 }
 
 export interface KeyToolContext {
@@ -732,9 +735,27 @@ export class KeyToolRegistryService {
     rawInput: Record<string, unknown>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<ToolResult<any>> {
+    if (keyDisabled()) {
+      return {
+        success: false,
+        notExecuted: true,
+        error: 'KEY is disabled on this server (KEY_DISABLED); nothing was run',
+      };
+    }
+
+    const dottedKey = `${module}.${name}`;
+    const equivalence = getLegacyToolEquivalence(dottedKey);
+    if (equivalence?.disposition === 'OBSOLETE') {
+      return {
+        success: false,
+        notExecuted: true,
+        error: obsoleteLegacyToolRefusal(equivalence),
+      };
+    }
+
     const tool = this.getTool(module, name);
     if (!tool) {
-      return { success: false, error: `Tool ${module}.${name} not found in registry` };
+      return { success: false, notExecuted: true, error: `Tool ${module}.${name} not found in registry` };
     }
 
     // Validate input
