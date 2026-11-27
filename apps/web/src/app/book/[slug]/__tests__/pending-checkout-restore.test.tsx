@@ -11,11 +11,18 @@
  *   RST-04  a record that is a JSON array or string is removed and ignored
  *   RST-05  hand-edited order number, order id, e-mail, booking refs and item fields never crash the confirmation;
  *           the order id is encoded wherever it goes into a URL
- *   RST-06  order lines with a negative, fractional or huge quantity, or a negative or unbounded price, are dropped
+ *   RST-06  order lines with a negative, fractional or zero quantity, or a negative or infinite price, are dropped
+ *   RST-07  the confirmation's order link encodes the order id (/, ? and #)
+ *   RST-08  a restored line's image renders only from an http(s) or same-site URL; anything else (an object, a
+ *           javascript: or data: URL, a //host URL) renders no image
+ *   RST-09  an empty or blank order number, order id or e-mail is none: the booking confirmation, no blank Order #
+ *           and no blank booking reference
+ *   RST-10  a quantity that is not a safe whole number up to 999 (1e21, 1e308, 1000) is dropped, and so is a line
+ *           whose total overflows (a finite price times its quantity)
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { SLUG, BUSINESS, nothing, passthrough } = vi.hoisted(() => ({
   SLUG: "bsi-shop",
@@ -247,5 +254,60 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
     for (const b of bad) expect(screen.queryByText(b.name), b.name).toBeNull();
     expect(screen.queryByText("RST Gift Box"), "an unbounded price").toBeNull();
     expect(screen.queryByText(/∞|-\s?TTD|TTD\s?-/)).toBeNull();
+  });
+
+  it("RST-07 the confirmation's order link encodes the order id", async () => {
+    const openSpy: MockInstance<typeof window.open> = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      const id = "rst/ord?x=1#frag";
+      await restored({ orderId: id });
+      fireEvent.click(screen.getByRole("button", { name: "View order details" }));
+      expect(openSpy).toHaveBeenCalledWith(
+        `http://api.bsi.test/site/storefront/public/order/${encodeURIComponent(id)}?email=${encodeURIComponent("rst@example.test")}`,
+        "_blank",
+      );
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it("RST-08 a restored line's image renders only from an http(s) or same-site URL", async () => {
+    const refused: unknown[] = [{ src: "x", width: 1, height: 1 }, "javascript:alert(1)", "data:image/png;base64,AAAA", "//evil.test/x.png", "  "];
+    for (const imageUrl of refused) {
+      await restored({ items: [{ ...ITEMS[0], imageUrl }] });
+      expect(screen.getByText("RST Candle")).toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "RST Candle" }), JSON.stringify(imageUrl)).toBeNull();
+      cleanup();
+    }
+    for (const imageUrl of ["https://cdn.rst.test/candle.png", "http://cdn.rst.test/candle.png", "/images/candle.png"]) {
+      await restored({ items: [{ ...ITEMS[0], imageUrl }] });
+      expect(screen.getByRole("img", { name: "RST Candle" }).getAttribute("src"), imageUrl).toBe(imageUrl);
+      cleanup();
+    }
+  });
+
+  it("RST-09 an empty or blank order number, order id or e-mail is none", async () => {
+    for (const blank of ["", "   "]) {
+      window.localStorage.setItem(KEY, record({ orderNumber: blank, orderId: blank, customerEmail: blank }));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 }), JSON.stringify(blank)).toBeInTheDocument();
+      expect(screen.queryByText("Order #")).toBeNull();
+      expect(screen.queryByText("Booking Ref:")).toBeNull();
+      expect(net.gets.some((p) => p.startsWith("/site/storefront/public/order/")), "no status read for a blank id").toBe(false);
+      cleanup();
+    }
+  });
+
+  it("RST-10 a quantity beyond a safe whole number up to 999, or a line total that overflows, is dropped", async () => {
+    const bad = [
+      { ...ITEMS[0], id: "q1", name: "RST Huge Qty", quantity: 1e21 },
+      { ...ITEMS[0], id: "q2", name: "RST Max Qty", quantity: 1e308 },
+      { ...ITEMS[0], id: "q3", name: "RST Thousand Qty", quantity: 1000 },
+      { ...ITEMS[0], id: "q4", name: "RST Overflow Total", price: 1e308, quantity: 2 },
+    ];
+    await restored({ items: [...bad, { ...ITEMS[1], quantity: 999, price: 1 }] });
+    for (const b of bad) expect(screen.queryByText(b.name), b.name).toBeNull();
+    expect(screen.getByText("RST Gift Box"), "999 is a quantity").toBeInTheDocument();
+    expect(screen.queryByText(/∞/)).toBeNull();
   });
 });
