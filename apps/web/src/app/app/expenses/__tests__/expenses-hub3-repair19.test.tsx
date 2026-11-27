@@ -331,17 +331,28 @@ describe("R19-5: replies under a silent switch say nothing", () => {
   }
 
   it("the page's receipt upload: a reply under a silent switch says nothing and opens no sheet", async () => {
+    // R20-8: deterministic under load. Each step waits for its own condition (long timeouts), and the reply is
+    // resolved, awaited and its continuation flushed inside act, so nothing rests on a fixed delay.
     const up = deferred<unknown>();
     upload.uploadFile.mockReturnValue(up.promise);
     render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()));
-    const input = Array.from(document.querySelectorAll('input[type="file"]')).find((i) => i.getAttribute("capture") !== null || true) as HTMLInputElement;
+    const LONG = { timeout: 10000 };
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    await screen.findByRole("tab", { name: "Categories" }, LONG); // the page has rendered for A
+    const input = await waitFor(() => {
+      const found = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+      expect(found).toBeTruthy();
+      return found!;
+    }, LONG);
     fireEvent.change(input, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } });
-    await waitFor(() => expect(upload.uploadFile).toHaveBeenCalled());
+    await waitFor(() => expect(upload.uploadFile).toHaveBeenCalled(), LONG);
     ws.bid = "biz_B";
-    await act(async () => { up.resolve({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj_1", metadata: {} }); });
-    await settle();
+    await act(async () => {
+      up.resolve({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj_1", metadata: {} });
+      await up.promise;
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
     noToast2();
     expect(screen.queryByRole("dialog"), "a sheet opened for B with A's receipt").toBeNull();
-  });
+  }, 30000);
 });

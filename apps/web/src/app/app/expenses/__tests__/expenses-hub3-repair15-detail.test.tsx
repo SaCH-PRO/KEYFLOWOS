@@ -114,6 +114,7 @@ describe("R15-1: Pay checks the business before sending", () => {
     expect(finance.payBill).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(BUSINESS_CHANGED_ELSEWHERE);
+    expect(toast.error, "an extra toast").toHaveBeenCalledTimes(1);
   });
 });
 
@@ -216,6 +217,7 @@ describe("R15-5: with the stored id already B", () => {
     expect(finance.voidBill).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(BUSINESS_CHANGED_ELSEWHERE);
+    expect(toast.error, "an extra toast").toHaveBeenCalledTimes(1);
   });
 
   it("delete sends nothing for A, and says the business changed (R19-3)", async () => {
@@ -228,6 +230,7 @@ describe("R15-5: with the stored id already B", () => {
     expect(client.deleteExpense).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(BUSINESS_CHANGED_ELSEWHERE);
+    expect(toast.error, "an extra toast").toHaveBeenCalledTimes(1);
   });
 
   it("the edit sheet's save answering after the switch says nothing (the page gives the sheet its check)", async () => {
