@@ -2,18 +2,19 @@ import { TrendingUp, ShoppingCart, CalendarCheck, Sparkles } from "lucide-react"
 
 interface CaseStudyMetrics {
   windowDays: number;
-  recentOrders: number;
+  // P230: these seven are withheld by the server (P139) on booking-only studies.
+  recentOrders?: number;
   priorOrders?: number;
-  recentRevenue: number;
+  recentRevenue?: number;
   priorRevenue?: number;
   currency: string;
   recentBookings: number;
   priorBookings?: number;
-  orderGrowthPct: number | null;
-  revenueGrowthPct: number | null;
+  orderGrowthPct?: number | null;
+  revenueGrowthPct?: number | null;
   bookingGrowthPct: number | null;
   topService: string | null;
-  topProduct: string | null;
+  topProduct?: string | null;
 }
 
 export interface PublicCaseStudy {
@@ -25,7 +26,12 @@ export interface PublicCaseStudy {
   publishedAt: string | null;
 }
 
-function formatCurrency(amount: number, currency: string) {
+/**
+ * P230: an amount the server withheld (members below revenue:read, booking-only studies; server P139) or that is not
+ * a finite number is never formatted: it reads "—", never "TTD NaN" (and never reaches toFixed on undefined).
+ */
+function formatCurrency(amount: number | null | undefined, currency: string) {
+  if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -87,22 +93,27 @@ export default function CaseStudiesSection({
                 )}
 
                 <dl className="grid grid-cols-3 gap-3 mt-4">
-                  <Stat
-                    icon={ShoppingCart}
-                    label={`Orders (${m.windowDays}d)`}
-                    value={String(m.recentOrders)}
-                    delta={m.orderGrowthPct}
-                    windowDays={m.windowDays}
-                    accent={accent}
-                  />
-                  <Stat
-                    icon={TrendingUp}
-                    label="Revenue"
-                    value={formatCurrency(m.recentRevenue, m.currency)}
-                    delta={m.revenueGrowthPct}
-                    windowDays={m.windowDays}
-                    accent={accent}
-                  />
+                  {/* P230: the Orders and Revenue tiles show only when the server sent those figures. */}
+                  {typeof m.recentOrders === "number" && (
+                    <Stat
+                      icon={ShoppingCart}
+                      label={`Orders (${m.windowDays}d)`}
+                      value={String(m.recentOrders)}
+                      delta={m.orderGrowthPct}
+                      windowDays={m.windowDays}
+                      accent={accent}
+                    />
+                  )}
+                  {typeof m.recentRevenue === "number" && (
+                    <Stat
+                      icon={TrendingUp}
+                      label="Revenue"
+                      value={formatCurrency(m.recentRevenue, m.currency)}
+                      delta={m.revenueGrowthPct}
+                      windowDays={m.windowDays}
+                      accent={accent}
+                    />
+                  )}
                   <Stat
                     icon={CalendarCheck}
                     label="Bookings"
