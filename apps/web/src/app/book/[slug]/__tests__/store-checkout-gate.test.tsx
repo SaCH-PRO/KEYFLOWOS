@@ -55,11 +55,12 @@ let paymentStatus = "FAILED";
 const ADD = /^(add|pre-order|add to cart)$/i;
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
 /**
- * Lets React finish what the last update started: its commit and the passive effects after it (the stored cart is
- * rewritten in one). A "nothing was deleted" check is only worth anything after this, never inside the waitFor that
- * saw the update, which passes on the first commit, before those effects have run.
+ * Gives the page a bounded window of real time (50 ms, inside act) to finish what the last update started: its
+ * commit, the passive effects after it (the stored cart is rewritten in one), and anything those put on a timer. A
+ * "nothing was deleted" check is only worth anything after this window, never inside the waitFor that saw the update,
+ * which passes on the first commit, and never after a single microtask, which a deferred deletion outlives.
  */
-const settle = () => act(async () => { await Promise.resolve(); });
+const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 50)));
 /** The stored cart as written: null when the page never wrote one, "[]" when it wrote an empty cart. */
 const storedCartRaw = (): string | null => window.localStorage.getItem(CART_KEY);
 const checkoutPosts = () => api.apiPost.mock.calls.filter(([arg]) => String((arg as { path?: string })?.path ?? "").endsWith("/checkout"));
@@ -298,6 +299,7 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
     window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
     render(<PublicBookingPage />);
     expect(await screen.findByText(COULD_NOT_CHECK)).toBeTruthy();
+    await settle();
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
 
     storefront = { storefront: {}, storeCheckout: false };

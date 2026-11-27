@@ -43,10 +43,12 @@ const ADD = /^(add to cart|pre-order)/i;
 const COULD_NOT_CHECK = /couldn.t check online ordering/i;
 let storefront: Record<string, unknown> | null = {};
 /**
- * Lets React finish what the last update started: its commit and the passive effects after it (the stored cart is
- * rewritten in one). A "nothing was deleted" check comes after this, never inside the waitFor that saw the update.
+ * Gives the page a bounded window of real time (50 ms, inside act) to finish what the last update started: its
+ * commit, the passive effects after it (the stored cart is rewritten in one), and anything those put on a timer. A
+ * "nothing was deleted" check comes after this window, never inside the waitFor that saw the update and never after
+ * a single microtask.
  */
-const settle = () => act(async () => { await Promise.resolve(); });
+const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 50)));
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
 
 beforeEach(() => {
@@ -135,6 +137,7 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
     render(<ProductDetailPage />);
     expect(await screen.findByText(COULD_NOT_CHECK)).toBeTruthy();
+    await settle();
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
 
     storefront = { storefront: {}, storeCheckout: false };

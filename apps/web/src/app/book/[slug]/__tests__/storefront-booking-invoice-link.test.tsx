@@ -394,6 +394,8 @@ describe("SEC-W9WCN-1: a checkout's booking token link never reaches the next cu
  */
 describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it did not check out", () => {
   const storedIds = () => (JSON.parse(window.localStorage.getItem(`kf_cart_${SLUG}`) ?? "[]") as Array<{ id: string }>).map((c) => c.id);
+  /** A bounded window of real time (50 ms, inside act) for the page's commit, effects and timers, before a "nothing was deleted" check. */
+  const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 50)));
   /** The stored cart as written: "[]" when the page wrote an empty cart (null would mean it never wrote one). */
   const storedRaw = () => window.localStorage.getItem(`kf_cart_${SLUG}`);
 
@@ -404,13 +406,16 @@ describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it d
     await bookTheService();
     expect(orderPosts()).toHaveLength(0);
     await waitFor(() => expect(storedIds()).toEqual([PRODUCT.id]));
+    // The booked service's line is gone; after the window the hidden product line is still stored, not deleted late.
+    await settle();
+    expect(storedIds()).toEqual([PRODUCT.id]);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue Shopping" }));
     net.storeCheckout = true;
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
-    // Let the effects of that answer run before looking: a "nothing was deleted" check is worth nothing before them.
-    await act(async () => { await Promise.resolve(); });
+    // Give the page its window before looking: a "nothing was deleted" check is worth nothing before it.
+    await settle();
     expect(storedIds()).toEqual([PRODUCT.id]);
     expect(orderPosts()).toHaveLength(0);
   });
