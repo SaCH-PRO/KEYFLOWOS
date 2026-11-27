@@ -237,7 +237,7 @@ Main is at `c1ea190d`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
-| **Owner** | - | - | Section 4 questions 40, 41, 43 to 50, 64, 66 (second half), 68 to 70 and 73; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| **Owner** | - | - | Section 4 questions 40, 41, 44 to 48, 50, 64, 68, 69 and 73 (D-307 two-hour defaults running for all except 50); USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
 | `wave/v1-docs-p19` | main `c1ea190d` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -356,24 +356,22 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
     new token even if the user signed out while the refresh was in flight, which can leave a token on the device.
     Proposed follow-up FU-REFRESH-AFTER-SIGNOUT (web, S). (Default: follow-on unless you put it on launch.)
 
-43. **Who may edit services, prices and deposits.** The service routes have only AuthGuard and BusinessGuard, so any member, STAFF included, can change prices and deposits. Require bookings or storefront write? (Default: as today until ruled.)
 44. **Push after sign-out.** Signing out leaves the device's push on. Once owner alerts are live, a shared tablet keeps getting the previous owner's payment alerts. Unsubscribe the device on sign-out? (Default: follow-up web packet in handleLogout.)
 45. **Owners of several businesses.** A device's push row holds one business, so an owner of X and Y gets Y's owner alerts by email, not push. One device for all the member's businesses? (Default: email fallback as today.)
 46. **Shell bottom padding (BUG-004 family).** The scroll root's `pb-28` is not effective inside the `h-full` page box, so a phone page's last control can sit under the bottom nav. P62 and the deposit half added local `pb-24 md:pb-0`. Fix the whole shell in one packet? (Default: yes, follow-up web packet.)
 47. **Same mount pattern as the SideSheet fix.** `record-detail-drawer.tsx` and `booking-side-sheet.tsx` have the same pattern, and the shared SideSheet has no focus trap (the commerce sheet does). Follow-up web packets? (Default: yes, follow-on.)
 48. **Deposit journeys.** Journey B2 needs a "New service" dialog in Schedule > Services, and F4 needs the deposit shown at the customer checkout (`/book/<slug>`). Neither is in SWP-SERVICE-DEPOSIT's write set. Which packets own them? (Default: find or add them in the plan.)
 
-49. **Payroll amounts and D-100 (server).** A member with operations read but no revenue read can read payroll gross: the runs list's `totalGross`, and `data.totalGross` on the P59 discard Activity row, which `canReadActivityRow` does not withhold. Treat payroll amounts as money under D-100? (Default: yes; a server follow-up gates them on revenue read.)
 50. **USAGE-COUNT-SCRIPT for SWP-FIN-OVERVIEW-TRUTH.** The plan asks for the count of live businesses with DRAFT or APPROVED payroll runs. That needs production data, so only you can run it. (Default: run it before the production redeploy.)
 
 
 
 64. **Session-storage census approach** (asked; the orchestrator took the stricter default: the resolver proves only a small grammar and everything else fails closed). Overrule if you prefer patching shape by shape or accepting documented gaps.
 68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
-70. **Overnight opening hours.** The web pins hours past midnight (18:00-02:00) as real (store-hours MIN-3, CUSTOMER-PAGE-HONESTY); the server's P227 reader rejects close-before-open and falls back to 09:00-17:00, so such a business is shown its hours but offered 09:00-17:00 slots. Support overnight hours (server row P229 teaches the reader), or rule them unsupported (a follow-up then changes the web and MIN-3)? (Default: a recorded divergence until you rule; P229 proposed.)
 73. **Trust claims on the KeyFlowOS homepage.** `apps/web/src/app/page.tsx:176-179` (the platform's own landing page, not a merchant's customer page) shows static "SSL Encrypted", "Secure Payments" and "99.9% Uptime" badges; nothing measures uptime. D-303 covers customer pages. (A) Extend D-303 to the homepage: keep only claims we can show (e.g. "SSL Encrypted" when served over https), drop "99.9% Uptime" and "Secure Payments" unless backed (Recommended); (B) leave the homepage as marketing, outside D-303. (Found by the P231 round 3 security review, #273.)
 69. **Control room successor.** #80 is full (2,500 comments); lanes now post on #273. Update CLAUDE.md, AGENTS.md and the agent-memory docs to name #273 (and a rule for the next rollover), in a docs packet? (Default: yes, in the next Claude docs squash; until then this file says so.)
-66. **Published case studies have no public page** now that /site redirects to /book (second half of the old trust-wording question; the first half is D-303). Add a case-study section to /book, or leave them unpublished at launch? (Default: unpublished.)
+
+**Ruled 2026-11-27 (D-309 to D-312, the orchestrator session):** 43 = D-309 (bookings or store write), 49 = D-310 (payroll is money), 70 = D-311 (overnight hours supported, P229), 66 = D-312 (case studies unpublished).
 
 **Ruled 2026-11-27 (D-307, D-308, #273 7224705459):** 74 = D-307 (2-hour default after a notification; never irreversible), 75 = D-308 (no deferring minors).
 
