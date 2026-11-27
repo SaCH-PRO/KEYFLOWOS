@@ -127,6 +127,20 @@ function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
 }
 
+/**
+ * Prisma transaction/lock-wait timeout: P2028 (interactive transaction could not
+ * start or expired) or P2010 wrapping Postgres SQLSTATE 55P03 (lock_not_available
+ * / lock_timeout). Matched on error code rather than `instanceof` so it holds
+ * whichever `@prisma/client` copy raised it.
+ */
+export function isCoaLockTimeout(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const e = err as { code?: unknown; meta?: { code?: unknown } };
+  if (e.code === 'P2028') return true;
+  if (e.code === 'P2010' && e.meta?.code === '55P03') return true;
+  return false;
+}
+
 @Injectable()
 export class ChartOfAccountsSeederService {
   private readonly logger = new Logger(ChartOfAccountsSeederService.name);
@@ -183,7 +197,7 @@ export class ChartOfAccountsSeederService {
     const tenant = getCurrentBusinessId() ?? businessId;
     const running = this.inFlight.get(tenant);
     if (running) return running;
-    const run = this.seedSystemAccounts(businessId, tenant).finally(() => {
+    const run = this.seedSystemAccounts(tenant).finally(() => {
       if (this.inFlight.get(tenant) === run) this.inFlight.delete(tenant);
     });
     this.inFlight.set(tenant, run);
@@ -205,11 +219,11 @@ export class ChartOfAccountsSeederService {
     return true;
   }
 
-  private async seedSystemAccounts(businessId: string, tenant: string): Promise<CoaSeedResult> {
+  private async seedSystemAccounts(tenant: string): Promise<CoaSeedResult> {
     // Fast path: if all system accounts and parent links are already present,
     // avoid taking the advisory lock transaction on steady-state reads.
     const preCheck = await this.prisma.client.chartOfAccount.findMany({
-      where: { businessId, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
+      where: { businessId: tenant, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
       select: { id: true, systemKey: true, parentId: true },
     });
     if (this.isSeedComplete(preCheck)) {
@@ -224,7 +238,7 @@ export class ChartOfAccountsSeederService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
 
       const existing = await tx.chartOfAccount.findMany({
-        where: { businessId, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
+        where: { businessId: tenant, systemKey: { in: SYSTEM_COA.map((s) => s.systemKey) } },
         select: { id: true, systemKey: true, parentId: true },
       });
       const haveBySystemKey = new Map<string, { id: string; parentId: string | null }>();
@@ -282,7 +296,7 @@ export class ChartOfAccountsSeederService {
             }
           }
 
-          const row = await this.upsertSystemAccount(tx, businessId, seed, codeToAssign);
+          const row = await this.upsertSystemAccount(tx, tenant, seed, codeToAssign);
           if (row) {
             seeded += 1;
             haveBySystemKey.set(row.systemKey ?? seed.systemKey, {
@@ -312,7 +326,7 @@ export class ChartOfAccountsSeederService {
 
       return { seeded, skippedCodes };
     }, COA_CODE_TX_OPTIONS).catch((err: unknown) => {
-      if ((err as { code?: unknown } | null)?.code === 'P2028') {
+      if (isCoaLockTimeout(err)) {
         throw new ServiceUnavailableException(
           { code: 'COA_CODE_BUSY', message: 'The chart of accounts is busy. Please try again.' },
           { cause: err },
@@ -323,20 +337,23 @@ export class ChartOfAccountsSeederService {
   }
 
   /**
-   * Upsert one system account inside the locked transaction. Keeps the P2002
-   * re-read fallback for defense-in-depth (e.g. if a row landed outside the lock).
+   * Upsert one system account inside the locked transaction, wrapped in a
+   * PostgreSQL savepoint so a P2002 (e.g. if a row landed outside the lock)
+   * rolls back only the failed statement instead of aborting the outer
+   * transaction with SQLSTATE 25P02 before the fallback re-read runs.
    */
   private async upsertSystemAccount(
     tx: Prisma.TransactionClient,
-    businessId: string,
+    tenant: string,
     seed: CoaSeed,
     code: string | null,
   ): Promise<{ id: string; systemKey: string | null; parentId: string | null } | null> {
+    await tx.$executeRaw`SAVEPOINT sp_coa_seed`;
     try {
-      return await tx.chartOfAccount.upsert({
-        where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
+      const row = await tx.chartOfAccount.upsert({
+        where: { businessId_systemKey: { businessId: tenant, systemKey: seed.systemKey } },
         create: {
-          businessId,
+          businessId: tenant,
           systemKey: seed.systemKey,
           name: seed.name,
           type: seed.type,
@@ -348,10 +365,14 @@ export class ChartOfAccountsSeederService {
         update: {},
         select: { id: true, systemKey: true, parentId: true },
       });
+      await tx.$executeRaw`RELEASE SAVEPOINT sp_coa_seed`;
+      return row;
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
+      await tx.$executeRaw`ROLLBACK TO SAVEPOINT sp_coa_seed`;
+      await tx.$executeRaw`RELEASE SAVEPOINT sp_coa_seed`;
       return tx.chartOfAccount.findUnique({
-        where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
+        where: { businessId_systemKey: { businessId: tenant, systemKey: seed.systemKey } },
         select: { id: true, systemKey: true, parentId: true },
       });
     }
@@ -364,8 +385,9 @@ export class ChartOfAccountsSeederService {
    * category is linked. Safe to call on every read.
    */
   async linkExpenseCategories(businessId: string): Promise<void> {
+    const tenant = getCurrentBusinessId() ?? businessId;
     const unlinked = await this.prisma.client.expenseCategory.findMany({
-      where: { businessId, chartOfAccountId: null },
+      where: { businessId: tenant, chartOfAccountId: null },
       select: { id: true, name: true },
     });
     if (unlinked.length === 0) return;
@@ -374,7 +396,7 @@ export class ChartOfAccountsSeederService {
       new Set(EXPENSE_CATEGORY_NAME_MAP.map((m) => m.systemKey).concat(['EXPENSE_GENERAL'])),
     );
     const coaRows = await this.prisma.client.chartOfAccount.findMany({
-      where: { businessId, systemKey: { in: expenseKeys } },
+      where: { businessId: tenant, systemKey: { in: expenseKeys } },
       select: { id: true, systemKey: true },
     });
     const coaBySystemKey = new Map(coaRows.map((r) => [r.systemKey ?? '', r.id] as const));
@@ -393,13 +415,14 @@ export class ChartOfAccountsSeederService {
 
   /** Resolve a system COA row by key — seeds defaults if missing. */
   async getBySystemKey(businessId: string, systemKey: string) {
+    const tenant = getCurrentBusinessId() ?? businessId;
     let row = await this.prisma.client.chartOfAccount.findUnique({
-      where: { businessId_systemKey: { businessId, systemKey } },
+      where: { businessId_systemKey: { businessId: tenant, systemKey } },
     });
     if (!row) {
-      await this.ensureDefaults(businessId);
+      await this.ensureDefaults(tenant);
       row = await this.prisma.client.chartOfAccount.findUnique({
-        where: { businessId_systemKey: { businessId, systemKey } },
+        where: { businessId_systemKey: { businessId: tenant, systemKey } },
       });
     }
     return row;

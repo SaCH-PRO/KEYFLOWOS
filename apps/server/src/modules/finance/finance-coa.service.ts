@@ -10,6 +10,7 @@ import {
   COA_CODE_LOCK_NAMESPACE,
   COA_CODE_TX_OPTIONS,
   COA_CODE_WHITESPACE,
+  isCoaLockTimeout,
   trimCoaCode,
 } from './chart-of-accounts-seeder.service';
 
@@ -246,7 +247,7 @@ export class FinanceCoaService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
       return fn(tx, tenant);
     }, COA_CODE_TX_OPTIONS).catch((err: unknown) => {
-      if ((err as { code?: unknown } | null)?.code === 'P2028') {
+      if (isCoaLockTimeout(err)) {
         throw new ServiceUnavailableException(
           { code: 'COA_CODE_BUSY', message: 'The chart of accounts is busy. Please try again.' },
           { cause: err },
