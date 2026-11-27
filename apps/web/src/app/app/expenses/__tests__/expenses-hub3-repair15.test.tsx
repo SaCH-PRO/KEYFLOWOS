@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Expense, ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
+import type { ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ws = vi.hoisted(() => ({ bid: "biz_A" as string | null }));
 const client = vi.hoisted(() => ({
@@ -82,13 +82,6 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function expense(over: Partial<Expense> = {}): Expense {
-  return {
-    id: "exp_A1", description: "Diesel", amount: 50, currency: "TTD", date: "2026-11-20T00:00:00.000Z", vendor: "Shell",
-    paymentMethod: "cash", tags: [], isRecurring: false, status: "BILL", categoryId: "cat_A_fuel",
-    createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
-  } as Expense;
-}
 const SCHEDULE = {
   id: "rec_A1", name: "Rent", frequency: "MONTHLY", nextRunDate: "2026-12-01T00:00:00.000Z", isActive: true, runCount: 0,
   failureCount: 0, description: "Rent", amount: 1000, currency: "TTD", createsBill: false,
@@ -130,10 +123,6 @@ const noToast2 = () => {
   expect(toast.success).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
 };
-async function openSheet() {
-  fireEvent.click((await screen.findAllByRole("button", { name: "Add expense" }))[0]);
-  return screen.findByRole("dialog");
-}
 
 
 describe("R15-2: the export's file name", () => {
@@ -230,6 +219,9 @@ describe("R15-7: editors after the switch", () => {
     ws.bid = "biz_B";
     view.rerender(el("biz_B"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Update$/ })).toBeNull());
+    // No builder at all is left open: not A's schedule, and not an empty one either.
+    await waitFor(() => expect(screen.queryByPlaceholderText("e.g., Office Rent"), "a builder is still open on B").toBeNull());
+    expect(screen.queryByRole("button", { name: /^Create$/ })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Add Recurring Expense" }));
     expect(await screen.findByRole("button", { name: /^Create$/ }), "New opened A's schedule").toBeTruthy();
     expect((screen.getByPlaceholderText("e.g., Office Rent") as HTMLInputElement).value).toBe("");

@@ -161,6 +161,12 @@ export function BillPayDialog({
   // loading or failed, not only the disabled button.
   const pay = async () => {
     if (inFlight.current || !canPay) return;
+    // R15-1: checked before sending too. Another tab's switch can reach the stored id before its storage event
+    // reaches this tab: nothing is paid for the business no longer shown, and the dialog for it closes.
+    if (!isCurrentBusiness(businessId)) {
+      onClose();
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setSaid(null);

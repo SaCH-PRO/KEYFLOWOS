@@ -250,3 +250,20 @@ export function useShownBusiness(businessId: string | null | undefined): (forBus
   useLayoutEffect(() => { shown.current = businessId; }, [businessId]);
   return useCallback((forBusiness: string) => Boolean(forBusiness) && shown.current === forBusiness, []);
 }
+
+/**
+ * EXPENSES-HUB-3 R15: the localStorage key the workspace keeps the chosen business under (lib/workspace.ts
+ * BUSINESS_ID_KEY, not exported there). A spec checks it against the key setStoredBusinessId writes.
+ */
+export const EXPENSES_BUSINESS_ID_KEY = "kf_business_id";
+
+/**
+ * EXPENSES-HUB-3 R15: the CSV's file name names the business it is for (taken when the export is asked for), so an
+ * export that arrives after a switch cannot pass for the other business's: expenses-<business>-<YYYY-MM-DD>.csv.
+ */
+export function expenseExportFileName(businessId: string, now: Date = new Date()): string {
+  const cached = getCachedBusiness();
+  const label = cached?.id === businessId && cached.name ? cached.name : businessId;
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "business";
+  return `expenses-${slug}-${now.toISOString().split("T")[0]}.csv`;
+}

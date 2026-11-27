@@ -158,14 +158,17 @@ describe("R15-4: another tab's switch, and unmount", () => {
 });
 
 describe("R15-5: with the stored id already B", () => {
-  it("A's expense read that lands writes nothing: no A expense shown", async () => {
+  it("A's expense read that lands writes nothing and leaves at once: no A expense shown", async () => {
     const read = deferred<unknown>();
     client.getExpense.mockReturnValue(read.promise);
+    client.fetchExpenseBudgets.mockReturnValue(new Promise(() => {})); // the budgets read never answers
     render(<ExpenseDetailPage />);
     await waitFor(() => expect(client.getExpense).toHaveBeenCalledWith("biz_A", "exp_A1"));
     silentSwitch("biz_B");
     await act(async () => { read.resolve(ok(expense())); });
     await settle();
+    expect(nav.replace, "the page stays on A's expense under B").toHaveBeenCalledWith("/app/expenses");
+    expect(client.fetchExpenseBudgets, "A's budgets were read under B").not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Office Depot" }), "A's expense is shown under B").toBeNull();
   });
 
@@ -181,6 +184,7 @@ describe("R15-5: with the stored id already B", () => {
     });
     await settle();
     expect(screen.queryByText("Monthly budget"), "A's budget is shown under B").toBeNull();
+    expect(nav.replace).toHaveBeenCalledWith("/app/expenses");
   });
 
   it.each(["silently", "announced"] as const)("a failing read of A, with the switch made %s, says nothing", async (how) => {

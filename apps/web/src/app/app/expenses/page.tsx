@@ -34,7 +34,7 @@ import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
-import { PERIODS, formatCurrency, formatDate } from "./components/expense-utils";
+import { PERIODS, formatCurrency, formatDate, expenseExportFileName } from "./components/expense-utils";
 import { NoAccessState } from "@/components/ui/no-access-state";
 
 /* ───────────────────────────────────────────
@@ -330,6 +330,7 @@ export default function ExpensesInboxPage() {
   const handleExport = () => {
     if (!d.businessId) return;
     const forBusiness = d.businessId;
+    const fileName = expenseExportFileName(forBusiness);
     // R14-3: a failure after a switch is not said on the other business. A CSV that arrives after the switch still
     // downloads: the owner asked for that export, and the file names nothing but the rows it holds.
     fetch(getExpenseExportUrl(forBusiness), { headers: getAuthHeaders() })
@@ -341,7 +342,7 @@ export default function ExpensesInboxPage() {
       .then((b) => {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b);
-        a.download = `expenses-${new Date().toISOString().split("T")[0]}.csv`;
+        a.download = fileName; // R15-2: names the business the export was asked for
         a.click();
       })
       .catch((err: unknown) => {

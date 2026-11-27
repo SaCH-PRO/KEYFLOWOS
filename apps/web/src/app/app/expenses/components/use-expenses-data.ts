@@ -21,6 +21,7 @@ import {
   RecurringCandidate,
 } from "@/lib/client";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
+import { EXPENSES_BUSINESS_ID_KEY } from "./expense-utils";
 import { readState, type ReadState } from "@/lib/failure-kit";
 
 export interface ProjectOption { id: string; name: string }
@@ -32,8 +33,8 @@ export type ExpensesRead = { kind: "loading" } | { kind: "no-business" } | ReadS
 /** One block's own read (the summary, the budgets): a refusal of it is said in its block, never shown as zeros. */
 export type BlockRead = { kind: "loading" } | ReadState;
 
-/** The localStorage key the workspace keeps the chosen business under (lib/workspace.ts BUSINESS_ID_KEY). */
-const BUSINESS_ID_KEY = "kf_business_id";
+/** The localStorage key the workspace keeps the chosen business under (one copy, in expense-utils; R15). */
+const BUSINESS_ID_KEY = EXPENSES_BUSINESS_ID_KEY;
 
 export function useExpensesData() {
   // EXPENSES-HUB-3 (BUG-064, journey J6): a refused or failed read was swallowed here, so the page showed

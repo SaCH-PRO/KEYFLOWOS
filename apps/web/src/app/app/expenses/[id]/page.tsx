@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -27,8 +27,8 @@ import {
   ExpenseBudget,
 } from "@/lib/client";
 import { voidBill } from "@/lib/api/finance";
-import { getStoredBusinessId } from "@/lib/workspace";
-import { businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate } from "../components/expense-utils";
+import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
+import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, RECEIPT_UNAVAILABLE_NOTE, receiptKind } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { refusalMessage } from "@/lib/failure-kit";
@@ -77,13 +77,6 @@ function expenseMonth(date: string, businessId: string | null): { month: number;
   return { year: Number(day.slice(0, 4)), month: Number(day.slice(5, 7)) };
 }
 
-/**
- * R14-4: the workspace's switch announcement and stored-id key (lib/workspace.ts BUSINESS_CHANGED_EVENT and
- * BUSINESS_ID_KEY), as use-expenses-data.ts spells the key: this page listens for both.
- */
-const BUSINESS_CHANGED = "kf:business-changed";
-const BUSINESS_ID_KEY = "kf_business_id";
-
 export default function ExpenseDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -103,21 +96,29 @@ export default function ExpenseDetailPage() {
   // for the Expenses list and stops showing it; a reply for it that lands after the switch says nothing.
   const [left, setLeft] = useState(false);
   const isCurrentBusiness = useCallback((forBusiness: string) => getStoredBusinessId() === forBusiness, []);
+  // R15-5: leaving is one step, used by the listeners and by a read that lands after the stored business moved on.
+  // The router is read through a ref: a router object that changes identity between renders must not re-run the
+  // read effect (which depends on leave).
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; }, [router]);
+  const leave = useCallback(() => {
+    setLeft(true);
+    routerRef.current.replace("/app/expenses");
+  }, []);
   useEffect(() => {
     if (!businessId) return;
     const check = () => {
       if (getStoredBusinessId() === businessId) return;
-      setLeft(true);
-      router.replace("/app/expenses");
+      leave();
     };
-    const onStorage = (e: StorageEvent) => { if (e.key === null || e.key === BUSINESS_ID_KEY) check(); };
-    window.addEventListener(BUSINESS_CHANGED, check);
+    const onStorage = (e: StorageEvent) => { if (e.key === null || e.key === EXPENSES_BUSINESS_ID_KEY) check(); };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, check);
     window.addEventListener("storage", onStorage);
     return () => {
-      window.removeEventListener(BUSINESS_CHANGED, check);
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, check);
       window.removeEventListener("storage", onStorage);
     };
-  }, [businessId, router]);
+  }, [businessId, leave]);
 
   useEffect(() => {
     if (!businessId || !expenseId) return;
@@ -128,14 +129,16 @@ export default function ExpenseDetailPage() {
           getExpense(businessId, expenseId),
           fetchExpenseCategories(businessId),
         ]);
-        if (!isCurrentBusiness(businessId)) return;
+        // R15-5: a read that lands for a business no longer stored writes nothing and leaves the page at once
+        // (another tab's switch can reach the stored id before its storage event reaches this tab).
+        if (!isCurrentBusiness(businessId)) { leave(); return; }
         if (expRes.data) setExpense(expRes.data);
         if (catRes.data) setCategories(catRes.data);
         // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
         if (expRes.data) {
           const { month, year } = expenseMonth(expRes.data.date, businessId);
           const budRes = await fetchExpenseBudgets(businessId, month, year);
-          if (!isCurrentBusiness(businessId)) return;
+          if (!isCurrentBusiness(businessId)) { leave(); return; }
           if (budRes.data) setBudgets(budRes.data);
         }
       } catch {
@@ -143,7 +146,7 @@ export default function ExpenseDetailPage() {
       }
       setLoading(false);
     })();
-  }, [businessId, expenseId, isCurrentBusiness]);
+  }, [businessId, expenseId, isCurrentBusiness, leave]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);

@@ -30,6 +30,7 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
 }));
 vi.mock("@/lib/workspace", () => ({
+  BUSINESS_CHANGED_EVENT: "kf:business-changed",
   getStoredBusinessId: () => "biz_hub3_detail",
   getCachedBusiness: () => ({ id: "biz_hub3_detail", name: "Detail Co", currency: "TTD", timezone: "America/Port_of_Spain" }),
 }));

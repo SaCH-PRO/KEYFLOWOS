@@ -105,7 +105,7 @@ describe("R14-4a: a switch while A's expense is open", () => {
     expect(screen.queryByRole("button", { name: /Delete expense/ })).toBeNull();
   });
 
-  it("control: a storage event for the same business changes nothing", async () => {
+  it("control: a business-changed event for the same business changes nothing (R15: the StorageEvent cases are in repair15-detail)", async () => {
     await mount();
     act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_A" } })); });
     await settle();

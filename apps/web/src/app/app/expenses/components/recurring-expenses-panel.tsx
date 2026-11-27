@@ -54,6 +54,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   if (editorFor !== businessId) {
     setEditorFor(businessId);
     setShowBuilder(false);
+    // Not observable on its own (every path that opens the builder sets `editing` first, and only the builder
+    // saves): kept so no state of the old business outlives the switch. R15's mutation table lists it as equivalent.
     setEditing(null);
   }
 
