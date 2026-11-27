@@ -137,7 +137,7 @@ export class KnowledgeIngestionService {
     const offset = Math.min(Math.max(rawOffset, 0), MAX_PG_INT32);
     return this.prisma.client.knowledgeSource.findMany({
       where: { businessId, ...(status ? { status } : {}) },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
       skip: offset,
       select: {

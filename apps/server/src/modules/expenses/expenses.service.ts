@@ -244,7 +244,7 @@ export class ExpensesService {
     const [data, total] = await Promise.all([
       this.prisma.client.expense.findMany({
         where,
-        orderBy: { date: 'desc' },
+        orderBy: [{ date: 'desc' }, { id: 'desc' }],
         include: { category: true },
         skip,
         take: limit,

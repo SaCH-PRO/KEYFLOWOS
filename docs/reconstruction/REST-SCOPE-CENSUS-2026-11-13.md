@@ -1147,16 +1147,16 @@ ModuleScopeGuard at class level).
 | --- | --- | --- | --- | --- |
 | `BookingsController.getCalendarAuthUrl` | GET | `/bookings/businesses/:businessId/calendar/auth-url` | exempt-check | check:assertGoogleConnectOwner (a credential-binding start, CEN-09; the Google Calendar consent is the owner's, D-99) |
 | `BookingsController.addToWaitlist` | POST | `/bookings/businesses/:businessId/waitlist` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `BookingsController.cancelWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/cancel` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.convertWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/convert` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.createBooking` | POST | `/bookings/businesses/:businessId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.createExternalCalendarEvent` | POST | `/bookings/businesses/:businessId/calendar/events` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.createInvoiceFromBooking` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/create-invoice` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.createService` | POST | `/bookings/businesses/:businessId/services` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createService` | POST | `/bookings/businesses/:businessId/services` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `BookingsController.createStaff` | POST | `/bookings/businesses/:businessId/staff` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.deleteExternalCalendarEvent` | DELETE | `/bookings/businesses/:businessId/calendar/events/:eventId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.deleteService` | DELETE | `/bookings/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.deleteService` | DELETE | `/bookings/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `BookingsController.deleteStaff` | DELETE | `/bookings/businesses/:businessId/staff/:staffId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.disconnectCalendar` | POST | `/bookings/businesses/:businessId/calendar/disconnect` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `BookingsController.offerWaitlistSlot` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/offer` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
@@ -1171,7 +1171,7 @@ ModuleScopeGuard at class level).
 | `BookingsController.updateCalendarSettings` | PATCH | `/bookings/businesses/:businessId/calendar/settings` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `BookingsController.updateExternalCalendarEvent` | PATCH | `/bookings/businesses/:businessId/calendar/events/:eventId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.updateReminderSettings` | PATCH | `/bookings/businesses/:businessId/reminder-settings` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.updateService` | PATCH | `/bookings/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateService` | PATCH | `/bookings/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 
 ### BusinessAssetsController (`business-assets/business-assets.controller.ts`)
 
@@ -1278,14 +1278,14 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `CatalogController.batchServices` | POST | `/catalog/businesses/:businessId/services/batch` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.batchServices` | POST | `/catalog/businesses/:businessId/services/batch` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `CatalogController.bulkUpdateProducts` | PATCH | `/catalog/businesses/:businessId/products/bulk` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
 | `CatalogController.createProduct` | POST | `/catalog/businesses/:businessId/products` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
-| `CatalogController.createService` | POST | `/catalog/businesses/:businessId/services` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.createService` | POST | `/catalog/businesses/:businessId/services` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `CatalogController.deleteProduct` | DELETE | `/catalog/businesses/:businessId/products/:productId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
-| `CatalogController.deleteService` | DELETE | `/catalog/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.deleteService` | DELETE | `/catalog/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `CatalogController.updateProduct` | PATCH | `/catalog/businesses/:businessId/products/:productId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
-| `CatalogController.updateService` | PATCH | `/catalog/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.updateService` | PATCH | `/catalog/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 
 ### ChangeOrderController (`change-orders/change-order.controller.ts`)
 

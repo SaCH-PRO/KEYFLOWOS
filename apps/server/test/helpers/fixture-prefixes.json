@@ -1735,6 +1735,11 @@
       "prefix": "v92n_",
       "owner": "apps/server/test/payroll-is-money.integration.test.ts",
       "packet": "V1-92 (FU-PAYROLL-IS-MONEY, P235)"
+    },
+    {
+      "prefix": "v92o_",
+      "owner": "apps/server/test/service-write-scope.integration.test.ts",
+      "packet": "V1-92 (P234 FU-SERVICE-WRITE-SCOPE, D-317)"
     }
   ],
   "pendingRenames": [],

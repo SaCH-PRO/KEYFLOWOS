@@ -31,7 +31,7 @@ export class SignalsService {
     const [items, total] = await Promise.all([
       this.prisma.client.businessSignal.findMany({
         where,
-        orderBy: [{ severity: 'desc' }, { lastSeenAt: 'desc' }],
+        orderBy: [{ severity: 'desc' }, { lastSeenAt: 'desc' }, { id: 'desc' }],
         take: opts?.limit ?? 50,
         skip: opts?.offset ?? 0,
       }),

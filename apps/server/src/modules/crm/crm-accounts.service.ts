@@ -215,7 +215,7 @@ export class CrmAccountsService {
     const skip = filters.skip ?? 0;
 
     const [items, total] = await Promise.all([
-      this.db.account.findMany({ where, orderBy: [{ name: 'asc' }], skip, take }),
+      this.db.account.findMany({ where, orderBy: [{ name: 'asc' }, { id: 'asc' }], skip, take }),
       this.db.account.count({ where }),
     ]);
 

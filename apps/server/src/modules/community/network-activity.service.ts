@@ -63,7 +63,7 @@ export class NetworkActivityService {
     const [data, total] = await Promise.all([
       this.prisma.client.networkActivity.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: { actor: { select: businessSelect } },
         skip,
         take: limit,
