@@ -81,9 +81,12 @@ export default function StorePage() {
   const deliveryCount = s.activeDeliveryMethodsCount ?? 0;
   // P231 r7 (D-303): what the storefront shows, for the hub's copy tools (its analysis tools read the whole catalog),
   // and a key of it, so the context follows a product added, removed, switched off or hidden.
+  // r10: without the store graph (not read yet, failed, or refused: liveProductIds is then empty) what is live is not
+  // known: null, so the hub says nothing about what is on the store, and its copy counts no product.
+  const graphRead = s.storeGraph != null;
   const storeServices = bookableServices(s.services, s.storefrontConfig);
-  const storeProducts = liveProducts(s.commerceProducts, s.liveProductIds, { services: s.services, stock: s.stockByProduct, storefrontConfig: s.storefrontConfig });
-  const storeKey = `${storeProducts.map((p) => p.id).join(",")}|${storeServices.map((sv) => sv.id).join(",")}`;
+  const storeProducts = graphRead ? liveProducts(s.commerceProducts, s.liveProductIds, { services: s.services, stock: s.stockByProduct, storefrontConfig: s.storefrontConfig }) : null;
+  const storeKey = `${storeProducts ? storeProducts.map((p) => p.id).join(",") : "?"}|${storeServices.map((sv) => sv.id).join(",")}`;
 
   useEffect(() => {
     if (!s.businessId) return;

@@ -9,9 +9,13 @@ type StoreCustomData = {
   /** The whole catalog (the analysis tools). */
   products?: unknown[];
   services?: unknown[];
-  /** P231 r7: what the storefront shows (the copy tools): the products on the store, and the bookable services. */
-  storeProducts?: unknown[];
-  storeServices?: unknown[];
+  /**
+   * P231 r7-r10: what the storefront shows (the copy tools): the products on the store, and the bookable services.
+   * `null` when it is not known (the store graph was not read: still loading, failed, or refused): then nothing is
+   * said about what is on the store, and the copy counts no product (never the whole catalog as if it were live).
+   */
+  storeProducts?: unknown[] | null;
+  storeServices?: unknown[] | null;
   testimonials?: unknown[];
   storeEnabled?: boolean;
   hasHeroImage?: boolean;
@@ -152,24 +156,31 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
       actionLabel: "Add items",
       actionKey: "switch_tab:catalog",
     });
-  } else if (data.storeProducts !== undefined && storeOffer(data).total === 0) {
-    // P231 r7-r9: the catalog has items, but none is on the store. Say what to do for the items that are: those not on
-    // it yet are to be added (a bookable service the storefront hides too); with none of those, switched-off products
-    // are to be switched on (and added, if they are not listed); with neither, the listed products are out of stock or
-    // hidden. Every word agrees with its count.
+  } else if (Array.isArray(data.storeProducts) && storeOffer(data).total === 0) {
+    // P231 r7-r10: the catalog has items, but none is on the store (only said when what is on the store is known: r10,
+    // not when the store graph was not read). Say what to do, in the number each part counts:
+    // - active products not listed: add them;
+    // - otherwise, every product switched off (and no hidden service): switch them on, and add the ones not listed;
+    // - otherwise, what is listed and on is not showing: a product out of stock or hidden, a bookable service the
+    //   storefront hides (r10: unhide it, as a hidden product is told, not "add it").
     const listed = new Set(services.map((s) => s.sourceProductId).filter(Boolean));
     const shown = new Set(((data.storeServices ?? []) as Record<string, unknown>[]).map((s) => s.id));
     const active = products.filter((p) => p.isActive !== false);
-    const toAdd = active.filter((p) => !listed.has(p.id)).length + bookable.filter((s) => !shown.has(s.id)).length;
+    const toAdd = active.filter((p) => !listed.has(p.id)).length;
+    const hiddenServices = bookable.filter((s) => !shown.has(s.id)).length;
+    const notShowing = active.length + hiddenServices;
     const off = products.length - active.length;
     const offUnlisted = products.filter((p) => p.isActive === false && !listed.has(p.id)).length;
     const pron = (n: number) => (n === 1 ? "it" : "them");
+    const addUnlisted = offUnlisted === 0 ? "" : offUnlisted === off ? `, then add ${pron(off)} to your store` : `, then add the ${offUnlisted === 1 ? "one" : offUnlisted} not on your store yet`;
     const [description, actionLabel] =
       toAdd > 0
         ? [`${counted(toAdd, "item")} in your catalog ${toAdd === 1 ? "is" : "are"} not on your store yet. Add ${pron(toAdd)} to your store so visitors have something to browse and buy.`, `Add ${pron(toAdd)} to your store`]
-        : active.length === 0
-          ? [`Your catalog has ${counted(off, "item")}, but ${off === 1 ? "it is" : "every one is"} switched off. Switch ${pron(off)} on${offUnlisted > 0 ? `, then add ${pron(off)} to your store` : ""} so visitors have something to browse and buy.`, `Switch ${pron(off)} on`]
-          : [`${counted(active.length, "item")} ${active.length === 1 ? "is" : "are"} on your store but not showing: ${active.length === 1 ? "it is" : "they are"} out of stock or hidden. Check ${active.length === 1 ? "its" : "their"} stock and visibility in the catalog.`, "Check the catalog"];
+        : notShowing === 0
+          ? [`Your catalog has ${counted(off, "item")}, but ${off === 1 ? "it is" : "every one is"} switched off. Switch ${pron(off)} on${addUnlisted} so visitors have something to browse and buy.`, `Switch ${pron(off)} on`]
+          : active.length === 0
+            ? [`${counted(hiddenServices, "service")} ${hiddenServices === 1 ? "is" : "are"} on your store but hidden. Unhide ${pron(hiddenServices)} in the catalog so visitors can book ${pron(hiddenServices)}.`, `Unhide ${pron(hiddenServices)}`]
+            : [`${counted(notShowing, "item")} ${notShowing === 1 ? "is" : "are"} on your store but not showing: ${notShowing === 1 ? "it is" : "they are"} out of stock or hidden. Check ${notShowing === 1 ? "its" : "their"} stock and visibility in the catalog.`, "Check the catalog"];
     suggestions.push({
       id: `nothing-on-store-${Date.now()}`,
       type: "risk",
@@ -462,7 +473,8 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
  * counted the way /book draws them (storefront-counts.ts). The analysis tools keep reading the whole catalog.
  */
 function storeOffer(d: StoreCustomData) {
-  const products = (d.storeProducts ?? d.products ?? []) as Record<string, unknown>[];
+  // r10: null is "not known": no product is counted (an under-claim, never a false one).
+  const products = (d.storeProducts === null ? [] : (d.storeProducts ?? d.products ?? [])) as Record<string, unknown>[];
   const services = bookableServices((d.storeServices ?? d.services ?? []) as Record<string, unknown>[]);
   return offerWords(offerOf(products, services));
 }
@@ -1172,8 +1184,8 @@ export function useStoreAiHub() {
     itemCount?: number;
     products?: unknown[];
     services?: unknown[];
-    storeProducts?: unknown[];
-    storeServices?: unknown[];
+    storeProducts?: unknown[] | null;
+    storeServices?: unknown[] | null;
     testimonials?: unknown[];
     storeEnabled?: boolean;
     hasHeroImage?: boolean;

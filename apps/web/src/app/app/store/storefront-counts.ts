@@ -158,15 +158,34 @@ export function offerWords(o: Partial<StorefrontOffer>) {
   };
 }
 
+const segmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+/** The text's graphemes (what a reader counts as characters), or its code points where Intl.Segmenter is missing. */
+const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
+const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
+
 /**
- * P231 r9: `text` cut to at most `max` characters at a word boundary, with "..." whenever anything is dropped (never a
- * word cut in half, never a cut without "...", never "..." after a whole text).
+ * P231 r9-r10: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
+ * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text:
+ * - the cut is at the last whitespace (any: a space, a tab, a no-break space) inside the room left for the "...";
+ *   a word that ends exactly where the room ends is kept whole;
+ * - leading whitespace is not a break (a break needs a word before it), so the cut is never a bare "...";
+ * - a single word longer than the room is cut hard, then "...";
+ * - trailing whitespace and punctuation before the "..." are dropped;
+ * - with `max` under 3 there is no room for "...": the text's first `max` characters.
  */
 export function clip(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const room = text.slice(0, Math.max(0, max - 3));
-  const at = room.lastIndexOf(" ");
-  return `${(at > 0 ? room.slice(0, at) : room).replace(/[\s.,;:!?—–-]+$/u, "")}...`;
+  const g = graphemes(text);
+  if (g.length <= max) return text;
+  if (max < 3) return g.slice(0, Math.max(0, max)).join("");
+  const room = g.slice(0, max - 3);
+  let end = room.length;
+  if (!isSpace(g[room.length])) {
+    let i = room.length - 1;
+    while (i >= 0 && !isSpace(room[i])) i--;
+    if (i > 0 && room.slice(0, i).join("").trim() !== "") end = i;
+  }
+  return `${room.slice(0, end).join("").replace(/[\s.,;:!?—–-]+$/u, "")}...`;
 }
 
 /** `n thing(s)`, for any count-bearing string. */
