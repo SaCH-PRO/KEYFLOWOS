@@ -617,7 +617,14 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       for (const reader of ['owner', 'revenue', 'blind'] as Reader[]) {
         const hits = (await searchFor(reader, 50)).join('\n').toLowerCase();
         expect(hits, `${reader}: the stale copy`).not.toContain(REV);
-        expect(hits, `${reader}: the current copy`).toContain(okMarker(7).toLowerCase());
+        // P125 R1-SEC-02 + P137 MEM-CLASS-READ: rewriting a REVENUE temporal row in place monotonically
+        // preserves data_class=REVENUE & module_scope=['crm','operations','revenue'], so only readers
+        // with revenue:read see the rewritten copy; blind readers see neither stale nor rewritten copy.
+        if (reader === 'blind') {
+          expect(hits, `${reader}: monotonic REVENUE taint`).not.toContain(okMarker(7).toLowerCase());
+        } else {
+          expect(hits, `${reader}: the current copy`).toContain(okMarker(7).toLowerCase());
+        }
       }
     } finally {
       await clearMemory();

@@ -598,6 +598,21 @@ export function viewerReadsRevenue(viewer: CortexMemberAuthority | undefined): b
   return rankOf(viewer.scopes.revenue || 'none') >= LEVEL_RANK.read;
 }
 
+/**
+ * MEM-CLASS-READ (P137, R1 Blocker 4): builds the canonical MemoryReaderContext
+ * from a CortexMemberAuthority so every memory read path enforces `data_class`,
+ * `module_scope`, `PERSONAL` ownership, and `SECRET_BEARING` uniformly.
+ */
+export function viewerMemoryReaderContext(
+  viewer: CortexMemberAuthority | undefined,
+): import('./memory-class-read-projection').MemoryReaderContext {
+  if (!viewer) return { reader: null, sight: () => false };
+  return {
+    reader: viewer.userId ?? null,
+    sight: (mod) => viewer.superAdmin || rankOf(viewer.scopes[mod] || 'none') >= LEVEL_RANK.read,
+  };
+}
+
 /** The membership roles that may write the KEY autonomy profile (V1-03). */
 const AUTONOMY_PROFILE_WRITER_ROLES = new Set(['OWNER', 'ADMIN']);
 
@@ -2541,7 +2556,7 @@ export class KeyCortexController {
       // Otherwise, parse natural language into structured commands
       const capabilities = this.connector.getAllCapabilities();
       const context = v2ContextForReader(
-        (await this.contextV2.getFullContext(dto.businessId)) as unknown as Record<string, unknown>,
+        (await this.contextV2.getFullContext(dto.businessId, viewerMemoryReaderContext(member))) as unknown as Record<string, unknown>,
         viewerReadsRevenue(member),
       );
 
@@ -2716,7 +2731,10 @@ export class KeyCortexController {
     }
 
     try {
-      const context = await this.contextV2.getFullContext(businessId);
+      const ownerReaderCtx = req?.user?.id
+        ? { reader: req.user.id, sight: () => true }
+        : undefined;
+      const context = await this.contextV2.getFullContext(businessId, ownerReaderCtx);
       const formatted = this.contextV2.formatContextForPrompt(context);
       const selfModel = this.operationalSelfModel
         ? await this.operationalSelfModel.build(businessId, req?.user?.id)
@@ -3122,7 +3140,7 @@ export class KeyCortexController {
         if (cmd.type === 'natural') {
           const capabilities = this.connector.getAllCapabilities();
           const context = v2ContextForReader(
-            (await this.contextV2.getFullContext(dto.businessId)) as unknown as Record<string, unknown>,
+            (await this.contextV2.getFullContext(dto.businessId, viewerMemoryReaderContext(member))) as unknown as Record<string, unknown>,
             viewerReadsRevenue(member),
           );
           const parsed = await this.command.parseIntent(cmd.command, {
@@ -4754,6 +4772,7 @@ export class KeyCortexController {
       kinds: requested as Array<keyof typeof AWARENESS_TYPES>,
       sinceDays: days,
       readsRevenue: viewerReadsRevenue(viewer),
+      readerContext: viewerMemoryReaderContext(viewer),
     });
 
     return {

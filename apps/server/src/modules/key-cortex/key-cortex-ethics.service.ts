@@ -30,6 +30,11 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  projectBusinessEventRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import {
   EthicalEvaluation,
@@ -318,11 +323,30 @@ export class KeyCortexEthicsService {
    * Look up a past decision in the event log and reconstruct
    * a human-readable ethical explanation.
    */
-  async explainDecision(decisionId: string, businessId: string): Promise<string> {
-    const event = await this.prisma.client.businessEvent.findFirst({
+  async explainDecision(
+    decisionId: string,
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<string> {
+    const rawEvent = await this.prisma.client.businessEvent.findFirst({
       where: { id: decisionId, businessId },
     });
 
+    if (!rawEvent) {
+      return `Decision ${decisionId} not found in the event log for business ${businessId}.`;
+    }
+
+    const visible = readerContext
+      ? projectBusinessEventRowsForReader([rawEvent], readerContext, {
+          businessId,
+          path: 'KeyCortexEthicsService.explainDecision',
+          logger: this.logger,
+        })
+      : filterOutSecretRows([rawEvent], (e) => ({
+          dataClass: null,
+          texts: [e.eventType, e.subjectType, e.action, JSON.stringify(e.after ?? null), JSON.stringify(e.metadata ?? null)],
+        }));
+    const event = visible[0];
     if (!event) {
       return `Decision ${decisionId} not found in the event log for business ${businessId}.`;
     }

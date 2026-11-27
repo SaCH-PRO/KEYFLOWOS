@@ -1632,6 +1632,11 @@
       "packet": "V1-91 (FU-CASE-STUDY-REVENUE, P139)"
     },
     {
+      "prefix": "v91m_",
+      "owner": "apps/server/test/memory-class-read.integration.test.ts",
+      "packet": "V1-91 (MEM-CLASS-READ, P137)"
+    },
+    {
       "prefix": "v67s_",
       "owner": "apps/server/test/legacy-modules-store.integration.test.ts",
       "packet": "V1-67 (WEDGE-HIDE-STORE, P225, D-263: the store on NAV-B-LEGACY-SERVER's legacy answer)"
