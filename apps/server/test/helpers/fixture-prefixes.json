@@ -1630,6 +1630,11 @@
       "prefix": "v91k_",
       "owner": "apps/server/test/case-study-revenue-scope.integration.test.ts",
       "packet": "V1-91 (FU-CASE-STUDY-REVENUE, P139)"
+    },
+    {
+      "prefix": "v91m_",
+      "owner": "apps/server/test/memory-class-read.integration.test.ts",
+      "packet": "V1-91 (MEM-CLASS-READ, P137)"
     }
   ],
   "pendingRenames": [],

@@ -16,7 +16,11 @@ import type {
 } from './temporal-flow-memory.types';
 import {
   buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
+  fetchProjectedBatch,
+  filterOutSecretRows,
   getMemoryClassReadMode,
+  isRowUnconditionallySecret,
   projectTemporalMemoryRowsForReader,
   type MemoryReaderContext,
 } from '../key-cortex/memory-class-read-projection';
@@ -233,22 +237,47 @@ export class TemporalFlowMemoryService {
     // MEM-TEMPORAL-SCOPE: no business, or an entity id that is not a string (an operator object, a list),
     // matches nothing.
     if (!isKey(businessId) || !isEntityId(entityId)) return [];
+    const mode = getMemoryClassReadMode();
     const preFilter =
-      readerContext && getMemoryClassReadMode() === 'ACTIVE'
+      readerContext && mode === 'ACTIVE'
         ? buildDbMemoryClassPreFilter(readerContext)
-        : undefined;
-    const rows = await this.prisma.client.temporalFlowMemory.findMany({
-      where: {
-        businessId,
-        entityType,
-        ...(entityId !== undefined ? { entityId: entityId ?? null } : {}),
-        ...(preFilter ? { AND: [preFilter] } : {}),
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: 100,
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
+    const where = {
+      businessId,
+      entityType,
+      ...(entityId !== undefined ? { entityId: entityId ?? null } : {}),
+      ...(preFilter ? { AND: [preFilter] } : {}),
+    };
+    const fetchPage = (skip: number, take: number) =>
+      this.prisma.client.temporalFlowMemory.findMany({
+        where,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        ...(skip > 0 ? { skip } : {}),
+        take,
+      });
+
+    if (!readerContext) {
+      const rows = await fetchPage(0, 100);
+      return filterOutSecretRows(rows, (r) => ({
+        dataClass: (r as { dataClass?: unknown }).dataClass,
+        texts: [r.entityType, r.type, r.sourceModule, r.content],
+      }));
+    }
+
+    if (mode !== 'ACTIVE') {
+      const rows = await fetchPage(0, 100);
+      return this.projectRowsForReader(businessId, rows, readerContext, 'TemporalFlowMemoryService.findByEntity');
+    }
+
+    return fetchProjectedBatch<TemporalFlowMemoryData>({
+      targetCount: 100,
+      batchSize: 100,
+      fetchPage,
+      projectPage: (page) =>
+        this.projectRowsForReader(businessId, page, readerContext, 'TemporalFlowMemoryService.findByEntity'),
     });
-    if (!readerContext) return rows;
-    return this.projectRowsForReader(businessId, rows, readerContext, 'TemporalFlowMemoryService.findByEntity');
   }
 
   async findMany(
@@ -258,29 +287,54 @@ export class TemporalFlowMemoryService {
   ): Promise<TemporalFlowMemoryData[]> {
     if (!isKey(businessId) || !isEntityId(query.entityId)) return [];
     const limit = query.limit ?? 100;
+    const mode = getMemoryClassReadMode();
     const preFilter =
-      readerContext && getMemoryClassReadMode() === 'ACTIVE'
+      readerContext && mode === 'ACTIVE'
         ? buildDbMemoryClassPreFilter(readerContext)
-        : undefined;
-    const rows = await this.prisma.client.temporalFlowMemory.findMany({
-      where: {
-        businessId,
-        ...(query.entityType ? { entityType: query.entityType } : {}),
-        ...(query.entityId !== undefined ? { entityId: query.entityId ?? null } : {}),
-        ...(query.type ? { type: query.type } : {}),
-        ...(preFilter ? { AND: [preFilter] } : {}),
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: limit,
-    });
-    if (!readerContext) return rows;
-    const projected = await this.projectRowsForReader(
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
+    const where = {
       businessId,
-      rows,
-      readerContext,
-      'TemporalFlowMemoryService.findMany',
-    );
-    return projected.slice(0, limit);
+      ...(query.entityType ? { entityType: query.entityType } : {}),
+      ...(query.entityId !== undefined ? { entityId: query.entityId ?? null } : {}),
+      ...(query.type ? { type: query.type } : {}),
+      ...(preFilter ? { AND: [preFilter] } : {}),
+    };
+    const fetchPage = (skip: number, take: number) =>
+      this.prisma.client.temporalFlowMemory.findMany({
+        where,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        ...(skip > 0 ? { skip } : {}),
+        take,
+      });
+
+    if (!readerContext) {
+      const rows = await fetchPage(0, limit);
+      return filterOutSecretRows(rows, (r) => ({
+        dataClass: (r as { dataClass?: unknown }).dataClass,
+        texts: [r.entityType, r.type, r.sourceModule, r.content],
+      }));
+    }
+
+    if (mode !== 'ACTIVE') {
+      const rows = await fetchPage(0, limit);
+      const projected = await this.projectRowsForReader(
+        businessId,
+        rows,
+        readerContext,
+        'TemporalFlowMemoryService.findMany',
+      );
+      return projected.slice(0, limit);
+    }
+
+    return fetchProjectedBatch<TemporalFlowMemoryData>({
+      targetCount: limit,
+      batchSize: Math.max(limit, 50),
+      fetchPage,
+      projectPage: (page) =>
+        this.projectRowsForReader(businessId, page, readerContext, 'TemporalFlowMemoryService.findMany'),
+    });
   }
 
   async searchMemory(businessId: string, query: string, limit = 10): Promise<ReturnType<SemanticMemoryService['search']>> {
@@ -303,7 +357,22 @@ export class TemporalFlowMemoryService {
   ): Promise<TemporalFlowMemoryData | null> {
     if (!isKey(businessId) || !isKey(memoryId)) return null;
     const row = await this.prisma.client.temporalFlowMemory.findFirst({ where: { id: memoryId, businessId } });
-    if (!row || !readerContext) return row;
+    if (!row) return null;
+    const mode = getMemoryClassReadMode();
+    if (!readerContext) {
+      if (
+        mode !== 'OFF' &&
+        isRowUnconditionallySecret((row as { dataClass?: unknown }).dataClass, [
+          row.entityType,
+          row.type,
+          row.sourceModule,
+          row.content,
+        ])
+      ) {
+        return null;
+      }
+      return row;
+    }
     const [visible] = await this.projectRowsForReader(
       businessId,
       [row],
@@ -419,22 +488,34 @@ export class TemporalFlowMemoryService {
   }
 
   async getStats(businessId: string, readerContext?: MemoryReaderContext) {
-    if (readerContext && getMemoryClassReadMode() === 'ACTIVE') {
-      const visible = await this.findMany(businessId, { limit: 1000 }, readerContext);
+    const mode = getMemoryClassReadMode();
+    if (readerContext && mode === 'ACTIVE') {
+      const visible = await this.findMany(businessId, { limit: Number.POSITIVE_INFINITY }, readerContext);
       const byType: Record<string, number> = {};
       for (const row of visible) {
         byType[row.type] = (byType[row.type] ?? 0) + 1;
       }
       return { total: visible.length, byType };
     }
+    const baseWhere =
+      mode !== 'OFF' && !readerContext
+        ? { businessId, AND: [buildDbNonSecretPreFilter()] }
+        : { businessId };
     const [total, byType] = await Promise.all([
-      this.prisma.client.temporalFlowMemory.count({ where: { businessId } }),
+      this.prisma.client.temporalFlowMemory.count({ where: baseWhere }),
       this.prisma.client.temporalFlowMemory.groupBy({
         by: ['type'],
-        where: { businessId },
+        where: baseWhere,
         _count: { id: true },
       }),
     ]);
+    if (readerContext && mode === 'SHADOW') {
+      try {
+        await this.findMany(businessId, { limit: 1000 }, readerContext);
+      } catch {
+        // Crash-isolated shadow evaluation
+      }
+    }
     return {
       total,
       byType: byType.reduce((acc: Record<string, number>, cur: { type: string; _count: { id: number } }) => {

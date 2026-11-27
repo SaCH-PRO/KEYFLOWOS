@@ -16,6 +16,7 @@ import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service'
 import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
 import {
   buildDbMemoryClassPreFilter,
+  fetchProjectedBatch,
   getMemoryClassReadMode,
   projectAiMemoryRowsForReader,
 } from '../key-cortex/memory-class-read-projection';
@@ -155,23 +156,40 @@ export class AgentController {
     const reader = req?.user?.id ?? null;
     const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'agentPatterns');
     const readerCtx = { reader, sight };
+    const mode = getMemoryClassReadMode();
     const preFilter =
-      getMemoryClassReadMode() === 'ACTIVE'
+      mode === 'ACTIVE'
         ? buildDbMemoryClassPreFilter(readerCtx)
         : undefined;
-    const memories = await this.prisma.client.aiMemory.findMany({
-      where: {
-        businessId,
-        category: 'patterns',
-        ...(preFilter ? { AND: [preFilter] } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
-    const visible = projectAiMemoryRowsForReader(memories, readerCtx, {
+    const where = {
       businessId,
-      path: 'AgentController.getDetectedPatterns',
-    }).slice(0, 50);
+      category: 'patterns',
+      ...(preFilter ? { AND: [preFilter] } : {}),
+    };
+    const fetchPage = (skip: number, take: number) =>
+      this.prisma.client.aiMemory.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(skip > 0 ? { skip } : {}),
+        take,
+      });
+
+    const visible =
+      mode === 'ACTIVE'
+        ? await fetchProjectedBatch({
+            targetCount: 50,
+            batchSize: 100,
+            fetchPage,
+            projectPage: (page) =>
+              projectAiMemoryRowsForReader(page, readerCtx, {
+                businessId,
+                path: 'AgentController.getDetectedPatterns',
+              }),
+          })
+        : projectAiMemoryRowsForReader(await fetchPage(0, 100), readerCtx, {
+            businessId,
+            path: 'AgentController.getDetectedPatterns',
+          }).slice(0, 50);
 
     return {
       patterns: visible.map((m) => ({

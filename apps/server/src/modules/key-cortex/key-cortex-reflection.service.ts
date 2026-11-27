@@ -26,6 +26,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  projectKeyCortexMemoryRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
@@ -188,19 +193,37 @@ export class KeyCortexReflectionService {
    * this returned null after every restart and the consciousness layer that
    * consumes it saw a KEY with no recollection of ever having reflected.
    */
-  async getLastReflectionSession(businessId: string): Promise<ReflectionSession | null> {
-    const cached = this.lastSessions.get(businessId);
+  async getLastReflectionSession(
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<ReflectionSession | null> {
+    const cached = !readerContext ? this.lastSessions.get(businessId) : undefined;
     if (cached) return cached;
 
     try {
       const row = await this.prisma.client.keyCortexMemory.findFirst({
         where: { businessId, type: MEMORY_TYPE_SESSION },
-        select: { key: true, value: true, createdAt: true },
+        select: { id: true, key: true, userId: true, value: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       });
       if (!row) return null;
 
-      const parsed = JSON.parse(row.value) as {
+      const visibleRows = readerContext
+        ? projectKeyCortexMemoryRowsForReader(
+            [{ ...row, type: MEMORY_TYPE_SESSION }],
+            readerContext,
+            {
+              businessId,
+              path: 'KeyCortexReflectionService.getLastReflectionSession',
+              logger: this.logger,
+              revenueOnlyTypes: new Set([MEMORY_TYPE_SESSION]),
+            },
+          )
+        : filterOutSecretRows([row], (r) => ({ dataClass: null, texts: [r.value] }));
+      const kept = visibleRows[0];
+      if (!kept) return null;
+
+      const parsed = JSON.parse(kept.value) as {
         type?: string;
         startedAt?: string;
         durationMs?: number;
@@ -210,16 +233,18 @@ export class KeyCortexReflectionService {
       };
 
       const session: ReflectionSession = {
-        id: row.key,
+        id: kept.key,
         type: (parsed.type ?? 'reflection') as ReflectionSessionType,
-        startedAt: parsed.startedAt ? new Date(parsed.startedAt) : row.createdAt,
+        startedAt: parsed.startedAt ? new Date(parsed.startedAt) : kept.createdAt,
         durationMs: parsed.durationMs ?? 0,
         insights: parsed.insights ?? [],
         actionsTaken: parsed.actionsTaken ?? [],
         businessId,
         metadata: parsed.metadata,
       };
-      this.lastSessions.set(businessId, session);
+      if (!readerContext) {
+        this.lastSessions.set(businessId, session);
+      }
       return session;
     } catch (error: unknown) {
       this.logger.debug(
@@ -1231,8 +1256,9 @@ Return JSON array:
     businessId: string,
     weekStart: Date,
     weekEnd: Date,
+    readerContext?: MemoryReaderContext,
   ): Promise<ReflectionSession[]> {
-    let rows: Array<{ key: string; value: string; createdAt: Date }>;
+    let rows: Array<{ id?: string; key: string; userId?: string | null; value: string; createdAt: Date }>;
     try {
       rows = await this.prisma.client.keyCortexMemory.findMany({
         where: {
@@ -1240,7 +1266,7 @@ Return JSON array:
           type: MEMORY_TYPE_SESSION,
           createdAt: { gte: weekStart, lte: weekEnd },
         },
-        select: { key: true, value: true, createdAt: true },
+        select: { id: true, key: true, userId: true, value: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
         // Bounded: a busy business runs a reflection every 30 minutes, so a
         // week is ~336 cycles. This ceiling keeps a pathological case from
@@ -1255,8 +1281,21 @@ Return JSON array:
       return [];
     }
 
+    const visible = readerContext
+      ? projectKeyCortexMemoryRowsForReader(
+          rows.map((r) => ({ ...r, type: MEMORY_TYPE_SESSION })),
+          readerContext,
+          {
+            businessId,
+            path: 'KeyCortexReflectionService.getWeeklySessions',
+            logger: this.logger,
+            revenueOnlyTypes: new Set([MEMORY_TYPE_SESSION]),
+          },
+        )
+      : filterOutSecretRows(rows, (r) => ({ dataClass: null, texts: [r.value] }));
+
     const sessions: ReflectionSession[] = [];
-    for (const row of rows) {
+    for (const row of visible) {
       // One malformed row must not lose the whole week.
       try {
         const parsed = JSON.parse(row.value) as {

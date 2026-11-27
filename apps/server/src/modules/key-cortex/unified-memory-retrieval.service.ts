@@ -19,14 +19,22 @@ import type {
 } from './unified-memory.types';
 import {
   buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
   classifyAiMemoryForRead,
+  classifyEmbeddingForRead,
   classifyTemporalMemoryForRead,
+  evaluateBusinessEventForReader,
+  evaluateEpisodicLogForReader,
   evaluateMemoryClassAccess,
+  fetchProjectedBatch,
   getMemoryClassReadMode,
+  isRowUnconditionallySecret,
   logMemoryClassShadowDiff,
   type MemoryClassShadowDiffEntry,
+  type ReadMemoryClassification,
 } from './memory-class-read-projection';
 import type { TemporalEventProvenance } from '../ai/memory-classification';
+import { isMoneyLabel, isMoneyMemoryEvent } from '../business-genome/key-genome/genome-finance-scope';
 
 interface RawMemoryRow {
   id: string;
@@ -50,7 +58,7 @@ interface RawMemoryRow {
   sourceModule?: string | null;
   sourceEventIds?: string[];
   dataClass?: string | null;
-  moduleScope?: string[];
+  moduleScope?: readonly string[] | null;
   ownerUserId?: string | null;
   userResponse?: string;
   recommendation?: string;
@@ -175,7 +183,11 @@ export class UnifiedMemoryRetrievalService {
     const readerCtx = options.readerContext;
     const classMode = getMemoryClassReadMode();
     const applyDbPreFilter = Boolean(readerCtx) && classMode === 'ACTIVE';
-    const classPreFilter = applyDbPreFilter ? buildDbMemoryClassPreFilter(readerCtx!) : undefined;
+    const classPreFilter = applyDbPreFilter
+      ? buildDbMemoryClassPreFilter(readerCtx!)
+      : classMode !== 'OFF'
+        ? buildDbNonSecretPreFilter()
+        : undefined;
 
     // P92 (MEM-EXPIRED-NOT-SERVED): exclude expired AiMemory rows, matching AiMemoryService.getAll and SemanticMemoryService.
     const aiMemoryWhere: any = {
@@ -224,7 +236,7 @@ export class UnifiedMemoryRetrievalService {
     const episodicWhereOfEvents: any = { ...episodicWhere, NOT: { source: KEY_OBSERVATION_SOURCE } };
     const personalWhere: any = { ...episodicWhere };
     if (options.userId) personalWhere.userId = options.userId;
-    else if (applyDbPreFilter && readerCtx?.reader) personalWhere.userId = readerCtx.reader;
+    if (applyDbPreFilter && readerCtx?.reader) personalWhere.userId = readerCtx.reader;
     // W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: a read that names the stores it wants (sourceTypes) does not
     // query a personal store it leaves out. A prompt with no reader names the business-wide stores, so it reads no
     // member's AiExecutionLog or CortexActionLog row at all, rather than every member's rows to drop afterwards.
@@ -232,6 +244,150 @@ export class UnifiedMemoryRetrievalService {
       includeEpisodic &&
       !(applyDbPreFilter && readerCtx?.reader === null) &&
       (!options.sourceTypes || options.sourceTypes.includes(source));
+
+    const resolvedTemporalClass = new Map<string, ReadMemoryClassification>();
+
+    const loadAiMemories = async () => {
+      const fetchPage = (skip: number) =>
+        this.prisma.client.aiMemory.findMany({
+          where: aiMemoryWhere,
+          orderBy: { createdAt: 'desc' },
+          ...(skip > 0 ? { skip } : {}),
+          take: 50,
+          select: {
+            id: true,
+            category: true,
+            key: true,
+            value: true,
+            source: true,
+            confidence: true,
+            dataClass: true,
+            moduleScope: true,
+            createdAt: true,
+          },
+        });
+      if (!applyDbPreFilter || !readerCtx) return fetchPage(0);
+      return fetchProjectedBatch({
+        targetCount: 50,
+        batchSize: 50,
+        fetchPage: (skip) => fetchPage(skip),
+        projectPage: (page) =>
+          page.filter((m: any) => {
+            const classified = classifyAiMemoryForRead({
+              id: m.id,
+              category: m.category,
+              key: m.key,
+              value: m.value,
+              source: m.source ?? null,
+              dataClass: m.dataClass ?? null,
+              moduleScope: m.moduleScope ?? null,
+            });
+            return evaluateMemoryClassAccess(
+              {
+                dataClass: classified.dataClass,
+                moduleScope: classified.moduleScope,
+                invalidDataClass: classified.invalidDataClass,
+                invalidModuleScope: classified.invalidModuleScope,
+                hasOwnerColumn: false,
+                backstopTexts: [m.category, m.key, m.value],
+                skipExpenseBackstop: m.category === DOCUMENT_EXTRACTION_CATEGORY,
+              },
+              readerCtx,
+            ).allowed;
+          }),
+      });
+    };
+
+    const loadTemporalMemories = async () => {
+      const fetchPage = (skip: number) =>
+        this.prisma.client.temporalFlowMemory.findMany({
+          where: temporalWhere,
+          orderBy: { createdAt: 'desc' },
+          ...(skip > 0 ? { skip } : {}),
+          take: 50,
+          select: {
+            id: true,
+            entityType: true,
+            entityId: true,
+            type: true,
+            content: true,
+            sourceModule: true,
+            sourceEventIds: true,
+            confidence: true,
+            dataClass: true,
+            moduleScope: true,
+            createdAt: true,
+            metadata: true,
+          },
+        });
+      if (!applyDbPreFilter || !readerCtx) return fetchPage(0);
+      return fetchProjectedBatch({
+        targetCount: 50,
+        batchSize: 50,
+        fetchPage: (skip) => fetchPage(skip),
+        projectPage: async (page) => {
+          const legacyIds = new Set<string>();
+          for (const t of page as any[]) {
+            if (!t.dataClass && t.entityType !== 'business' && t.sourceModule !== 'key_cortex') {
+              for (const evId of t.sourceEventIds ?? []) legacyIds.add(evId);
+            }
+          }
+          const pageEventMap = new Map<string, TemporalEventProvenance>();
+          if (legacyIds.size > 0 && this.prisma.client.temporalFlowEvent?.findMany) {
+            try {
+              const fetched = await this.prisma.client.temporalFlowEvent.findMany({
+                where: { businessId, id: { in: [...legacyIds] } },
+                select: {
+                  id: true,
+                  source: true,
+                  type: true,
+                  module: true,
+                  entityType: true,
+                  title: true,
+                  summary: true,
+                  description: true,
+                },
+              });
+              for (const ev of fetched) pageEventMap.set(ev.id, ev);
+            } catch (err: unknown) {
+              this.logger.warn(
+                `[unifiedMemory][${businessId}] temporal event resolution failed (fail closed): ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
+          return page.filter((t: any) => {
+            const classified = classifyTemporalMemoryForRead(
+              {
+                id: t.id,
+                entityType: t.entityType,
+                entityId: t.entityId ?? null,
+                type: t.type ?? null,
+                sourceModule: t.sourceModule ?? null,
+                sourceEventIds: Array.isArray(t.sourceEventIds) ? t.sourceEventIds : [],
+                metadata: t.metadata,
+                content: t.content ?? null,
+                dataClass: t.dataClass ?? null,
+                moduleScope: t.moduleScope ?? null,
+              },
+              pageEventMap,
+            );
+            resolvedTemporalClass.set(t.id, classified);
+            return evaluateMemoryClassAccess(
+              {
+                dataClass: classified.dataClass,
+                moduleScope: classified.moduleScope,
+                invalidDataClass: classified.invalidDataClass,
+                invalidModuleScope: classified.invalidModuleScope,
+                hasOwnerColumn: false,
+                backstopTexts: [t.entityType, t.type, t.sourceModule, t.content],
+                unclassifiedRequiresAllModules: true,
+              },
+              readerCtx,
+            ).allowed;
+          });
+        },
+      });
+    };
 
     const [
       aiMemories,
@@ -243,22 +399,7 @@ export class UnifiedMemoryRetrievalService {
       aiExecutionLogs,
       cortexActionLogs,
     ] = await Promise.all([
-      this.prisma.client.aiMemory.findMany({
-        where: aiMemoryWhere,
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: {
-          id: true,
-          category: true,
-          key: true,
-          value: true,
-          source: true,
-          confidence: true,
-          dataClass: true,
-          moduleScope: true,
-          createdAt: true,
-        },
-      }),
+      loadAiMemories(),
       this.prisma.client.genomeMemoryEvent.findMany({
         where: whereBase,
         orderBy: { createdAt: 'desc' },
@@ -278,25 +419,7 @@ export class UnifiedMemoryRetrievalService {
           metadata: true,
         },
       }),
-      this.prisma.client.temporalFlowMemory.findMany({
-        where: temporalWhere,
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: {
-          id: true,
-          entityType: true,
-          entityId: true,
-          type: true,
-          content: true,
-          sourceModule: true,
-          sourceEventIds: true,
-          confidence: true,
-          dataClass: true,
-          moduleScope: true,
-          createdAt: true,
-          metadata: true,
-        },
-      }),
+      loadTemporalMemories(),
       skipCognition
         ? Promise.resolve([])
         : this.prisma.client.cognitionMemory.findMany({
@@ -357,6 +480,7 @@ export class UnifiedMemoryRetrievalService {
             take: 50,
             select: {
               id: true,
+              userId: true,
               action: true,
               toolName: true,
               module: true,
@@ -376,6 +500,7 @@ export class UnifiedMemoryRetrievalService {
             take: 50,
             select: {
               id: true,
+              userId: true,
               actionType: true,
               status: true,
               description: true,
@@ -413,7 +538,7 @@ export class UnifiedMemoryRetrievalService {
       const classMeta: MemoryClassFragmentMeta = {
         store: 'ai_memory',
         dataClass: m.dataClass ?? null,
-        moduleScope: Array.isArray(m.moduleScope) ? m.moduleScope : [],
+        moduleScope: m.moduleScope ?? null,
         hasOwnerColumn: false,
         category: m.category,
         key: m.key,
@@ -427,7 +552,7 @@ export class UnifiedMemoryRetrievalService {
         value: m.value,
         source: m.source ?? null,
         dataClass: m.dataClass ?? null,
-        moduleScope: Array.isArray(m.moduleScope) ? m.moduleScope : [],
+        moduleScope: m.moduleScope ?? null,
         content: `${m.category}.${m.key}: ${m.value}`,
         confidence: m.confidence ?? 1,
         createdAt: m.createdAt,
@@ -451,10 +576,17 @@ export class UnifiedMemoryRetrievalService {
     }
 
     for (const t of temporalMemories as any[]) {
+      const resolved = resolvedTemporalClass.get(t.id);
+      const effectiveDataClass =
+        resolved && !resolved.invalidDataClass && !t.dataClass ? resolved.dataClass : (t.dataClass ?? null);
+      const effectiveModuleScope =
+        resolved && !resolved.invalidModuleScope && !t.dataClass
+          ? resolved.moduleScope
+          : (t.moduleScope ?? null);
       const classMeta: MemoryClassFragmentMeta = {
         store: 'temporal_flow_memory',
-        dataClass: t.dataClass ?? null,
-        moduleScope: Array.isArray(t.moduleScope) ? t.moduleScope : [],
+        dataClass: effectiveDataClass,
+        moduleScope: effectiveModuleScope,
         hasOwnerColumn: false,
         entityType: t.entityType,
         entityId: t.entityId ?? null,
@@ -470,8 +602,8 @@ export class UnifiedMemoryRetrievalService {
         type: t.type,
         sourceModule: t.sourceModule ?? null,
         sourceEventIds: Array.isArray(t.sourceEventIds) ? t.sourceEventIds : [],
-        dataClass: t.dataClass ?? null,
-        moduleScope: Array.isArray(t.moduleScope) ? t.moduleScope : [],
+        dataClass: effectiveDataClass,
+        moduleScope: effectiveModuleScope,
         content: t.content,
         confidence: t.confidence,
         createdAt: t.createdAt,
@@ -536,6 +668,7 @@ export class UnifiedMemoryRetrievalService {
       rows.push({
         id: l.id,
         sourceType: 'ai_execution_log',
+        ownerUserId: l.userId ?? null,
         eventType: l.action,
         content: `${l.action}${l.toolName ? ' (' + l.toolName + ')' : ''}${l.module ? ' [' + l.module + ']' : ''}: ${l.success ? 'success' : 'failure'} — ${l.rationale ?? JSON.stringify(l.outputSummary ?? l.inputSummary ?? {})}`,
         confidence: l.success ? 0.85 : 0.6,
@@ -548,6 +681,7 @@ export class UnifiedMemoryRetrievalService {
       rows.push({
         id: l.id,
         sourceType: 'cortex_action_log',
+        ownerUserId: l.userId ?? null,
         eventType: l.actionType,
         content: `${l.actionType}: ${l.status}${l.description ? ' — ' + l.description : ''}${l.result ? ' — ' + l.result : ''}`,
         confidence: l.status === 'success' ? 0.9 : 0.6,
@@ -560,9 +694,9 @@ export class UnifiedMemoryRetrievalService {
   }
 
   /**
-   * MEM-CLASS-READ (P137, design 6.1): filters candidate rows through the unified
-   * `data_class` / `module_scope` / `PERSONAL` / backstop projection BEFORE
-   * composite ranking and BEFORE slicing to `limit`.
+   * MEM-CLASS-READ (P137, design 6.1): filters candidate rows across ALL stores
+   * through the unified `data_class` / `module_scope` / `PERSONAL` / backstop
+   * projection BEFORE composite ranking and BEFORE slicing to `limit`.
    */
   private async filterRowsBeforeRank(
     businessId: string,
@@ -572,13 +706,22 @@ export class UnifiedMemoryRetrievalService {
     const mode = getMemoryClassReadMode();
     if (mode === 'OFF') return rows;
 
-    // Even when no readerContext is passed, SECRET_BEARING rows are NEVER served.
+    // Even when no readerContext is passed, SECRET_BEARING and secret-pattern rows are NEVER served.
     if (!readerCtx) {
       if (mode === 'SHADOW') return rows;
-      return rows.filter((r) => r.dataClass !== 'SECRET_BEARING');
+      return rows.filter(
+        (r) =>
+          !isRowUnconditionallySecret(r.dataClass, [
+            r.value,
+            r.content,
+            r.summary,
+            r.title,
+            r.recommendation,
+          ]),
+      );
     }
 
-    // Batch-resolve source temporal events for any legacy dataClass=null TemporalFlowMemory rows.
+    // Batch-resolve source temporal events for any remaining legacy dataClass=null TemporalFlowMemory rows.
     const legacyEventIds = new Set<string>();
     for (const row of rows) {
       if (
@@ -614,6 +757,33 @@ export class UnifiedMemoryRetrievalService {
       }
     }
 
+    const PROPOSAL_GENOME_SOURCES = new Set(['KEY_ACTION_PROPOSAL', 'GOVERNANCE_DECISION']);
+    const isProposalEvent = (row: RawMemoryRow): boolean => {
+      if (row.entityType === 'key_action_proposal') return true;
+      if (row.eventType === 'GOVERNANCE_DECISION') return true;
+      const ev = (row.eventType ?? '').toLowerCase();
+      if (ev.includes('proposal')) return true;
+      const meta = row.metadata && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : null;
+      if (meta) {
+        if (typeof meta.sourceType === 'string' && meta.sourceType.toLowerCase().includes('proposal')) {
+          return true;
+        }
+        const genomeRow =
+          meta[GENOME_ROW_METADATA_KEY] && typeof meta[GENOME_ROW_METADATA_KEY] === 'object'
+            ? (meta[GENOME_ROW_METADATA_KEY] as GenomeRowColumns)
+            : null;
+        if (typeof genomeRow?.sourceType === 'string' && PROPOSAL_GENOME_SOURCES.has(genomeRow.sourceType)) {
+          return true;
+        }
+        const payload =
+          meta.payload && typeof meta.payload === 'object' ? (meta.payload as Record<string, unknown>) : null;
+        if (payload?.eventType === 'GOVERNANCE_DECISION' || payload?.subjectType === 'key_action_proposal') {
+          return true;
+        }
+      }
+      return false;
+    };
+
     const evaluateRow = (row: RawMemoryRow) => {
       switch (row.sourceType) {
         case 'ai_memory': {
@@ -624,12 +794,14 @@ export class UnifiedMemoryRetrievalService {
             value: row.value ?? row.content ?? null,
             source: row.source ?? null,
             dataClass: row.dataClass ?? null,
-            moduleScope: row.moduleScope ?? [],
+            moduleScope: (row.moduleScope as readonly string[] | null | undefined) ?? null,
           });
           return evaluateMemoryClassAccess(
             {
               dataClass: classified.dataClass,
               moduleScope: classified.moduleScope,
+              invalidDataClass: classified.invalidDataClass,
+              invalidModuleScope: classified.invalidModuleScope,
               hasOwnerColumn: false,
               backstopTexts: [row.category, row.key, row.value ?? row.content],
               skipExpenseBackstop: row.category === DOCUMENT_EXTRACTION_CATEGORY,
@@ -649,14 +821,39 @@ export class UnifiedMemoryRetrievalService {
               metadata: row.metadata,
               content: row.content ?? null,
               dataClass: row.dataClass ?? null,
-              moduleScope: row.moduleScope ?? [],
+              moduleScope: (row.moduleScope as readonly string[] | null | undefined) ?? null,
             },
             eventMap,
           );
+          // R1 Blocker 3: stamp resolved classification onto fragment metadata so downstream
+          // `readersOwnPromptMemory` does not re-classify legacy NULL rows without `eventMap`.
+          if (!row.dataClass && !classified.invalidDataClass && !classified.invalidModuleScope) {
+            const existingMeta =
+              row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+                ? (row.metadata as Record<string, unknown>)
+                : {};
+            const existingClassMeta =
+              existingMeta[MEMORY_CLASS_METADATA_KEY] &&
+              typeof existingMeta[MEMORY_CLASS_METADATA_KEY] === 'object' &&
+              !Array.isArray(existingMeta[MEMORY_CLASS_METADATA_KEY])
+                ? (existingMeta[MEMORY_CLASS_METADATA_KEY] as Record<string, unknown>)
+                : {};
+            row.metadata = {
+              ...existingMeta,
+              [MEMORY_CLASS_METADATA_KEY]: {
+                ...existingClassMeta,
+                store: 'temporal_flow_memory',
+                dataClass: classified.dataClass,
+                moduleScope: classified.moduleScope,
+              },
+            };
+          }
           return evaluateMemoryClassAccess(
             {
               dataClass: classified.dataClass,
               moduleScope: classified.moduleScope,
+              invalidDataClass: classified.invalidDataClass,
+              invalidModuleScope: classified.invalidModuleScope,
               hasOwnerColumn: false,
               backstopTexts: [row.entityType, row.type, row.sourceModule, row.content],
               unclassifiedRequiresAllModules: true,
@@ -671,12 +868,144 @@ export class UnifiedMemoryRetrievalService {
               moduleScope: [],
               hasOwnerColumn: true,
               ownerUserId: row.ownerUserId ?? null,
+              backstopTexts: [row.content],
+            },
+            readerCtx,
+          );
+        }
+        case 'ai_memory_embedding': {
+          const meta =
+            row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+              ? (row.metadata as Record<string, unknown>)
+              : {};
+          const semanticSource =
+            meta[SEMANTIC_SOURCE_METADATA_KEY] && typeof meta[SEMANTIC_SOURCE_METADATA_KEY] === 'object'
+              ? (meta[SEMANTIC_SOURCE_METADATA_KEY] as { sourceType?: unknown })
+              : undefined;
+          const embSourceType =
+            typeof semanticSource?.sourceType === 'string' ? semanticSource.sourceType : 'unknown';
+          const classified = classifyEmbeddingForRead({
+            id: row.id,
+            sourceType: embSourceType,
+            content: row.content ?? null,
+            metadata: meta,
+            dataClass: row.dataClass ?? null,
+            moduleScope: (row.moduleScope as readonly string[] | null | undefined) ?? null,
+          });
+          const isDocExtraction =
+            embSourceType === 'memory' &&
+            (meta.category === DOCUMENT_EXTRACTION_CATEGORY || meta.type === DOCUMENT_EXTRACTION_CATEGORY);
+          return evaluateMemoryClassAccess(
+            {
+              dataClass: classified.dataClass,
+              moduleScope: classified.moduleScope,
+              invalidDataClass: classified.invalidDataClass,
+              invalidModuleScope: classified.invalidModuleScope,
+              hasOwnerColumn: false,
+              backstopTexts: [row.content],
+              skipExpenseBackstop: isDocExtraction,
+            },
+            readerCtx,
+          );
+        }
+        case 'ai_execution_log':
+        case 'cortex_action_log': {
+          const meta =
+            row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+              ? (row.metadata as Record<string, unknown>)
+              : {};
+          return evaluateEpisodicLogForReader(
+            {
+              id: row.id,
+              userId: row.ownerUserId ?? null,
+              module: typeof meta.module === 'string' ? meta.module : null,
+              toolName: typeof meta.toolName === 'string' ? meta.toolName : null,
+              action: row.eventType ?? null,
+              actionType: row.eventType ?? null,
+              description: row.content ?? null,
+            },
+            readerCtx,
+          );
+        }
+        case 'genome_memory_event': {
+          // Proposal outcome genome records follow D-226/D-238 (memberlessProposalView / financialProposalRecordIds)
+          if (isProposalEvent(row)) {
+            if (isRowUnconditionallySecret(row.dataClass, [row.title, row.summary, row.content])) {
+              return evaluateMemoryClassAccess(
+                { dataClass: 'SECRET_BEARING', moduleScope: [] },
+                readerCtx,
+              );
+            }
+            return {
+              allowed: true,
+              reason: 'proposal_surface_projection',
+              effectiveDataClass: 'GENERAL' as const,
+              effectiveModuleScope: [],
+            };
+          }
+          const meta =
+            row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+              ? (row.metadata as Record<string, unknown>)
+              : {};
+          const genomeRow =
+            meta[GENOME_ROW_METADATA_KEY] && typeof meta[GENOME_ROW_METADATA_KEY] === 'object'
+              ? (meta[GENOME_ROW_METADATA_KEY] as GenomeRowColumns)
+              : null;
+          // Match FU-KEY-MEMORY-MONEY-SIGHT (`genomeModulesOf`): money genome events require `revenue:read`;
+          // non-money genome summaries (e.g. OPERATIONS_GENOME) remain general business summaries.
+          const isMoney = genomeRow
+            ? isMoneyMemoryEvent(genomeRow) ||
+              isMoneyLabel(genomeRow.domain) ||
+              isMoneyLabel(genomeRow.section)
+            : false;
+          return evaluateMemoryClassAccess(
+            {
+              dataClass: isMoney ? 'REVENUE' : 'GENERAL',
+              moduleScope: isMoney ? ['revenue'] : [],
+              hasOwnerColumn: false,
+              backstopTexts: [row.title, row.summary, row.content],
+            },
+            readerCtx,
+          );
+        }
+        case 'business_event':
+        case 'cognitive_event': {
+          // Proposal events follow D-226 / D-238 (DB-backed financial classification + memberlessProposalView
+          // in readersOwnPromptMemory); still enforce unconditional secret defense here.
+          if (isProposalEvent(row)) {
+            if (isRowUnconditionallySecret(row.dataClass, [row.content])) {
+              return evaluateMemoryClassAccess(
+                { dataClass: 'SECRET_BEARING', moduleScope: [] },
+                readerCtx,
+              );
+            }
+            return {
+              allowed: true,
+              reason: 'proposal_surface_projection',
+              effectiveDataClass: 'GENERAL' as const,
+              effectiveModuleScope: [],
+            };
+          }
+          const meta =
+            row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+              ? (row.metadata as Record<string, unknown>)
+              : {};
+          return evaluateBusinessEventForReader(
+            {
+              id: row.id,
+              eventType: row.eventType ?? null,
+              subjectType: row.entityType ?? (typeof meta.sourceType === 'string' ? meta.sourceType : null),
+              action: typeof meta.action === 'string' ? meta.action : null,
+              source: typeof meta.source === 'string' ? meta.source : null,
+              before: meta.before,
+              after: meta.after ?? meta.payload,
+              metadata: meta.metadata,
             },
             readerCtx,
           );
         }
         default: {
-          if (row.dataClass === 'SECRET_BEARING') {
+          if (isRowUnconditionallySecret(row.dataClass, [row.content, row.value, row.summary])) {
             return evaluateMemoryClassAccess(
               { dataClass: 'SECRET_BEARING', moduleScope: [] },
               readerCtx,
@@ -693,32 +1022,36 @@ export class UnifiedMemoryRetrievalService {
     };
 
     if (mode === 'SHADOW') {
-      const diffs: MemoryClassShadowDiffEntry[] = [];
-      let projectedCount = 0;
-      for (const row of rows) {
-        const decision = evaluateRow(row);
-        if (decision.allowed) projectedCount += 1;
-        else {
-          diffs.push({
-            id: row.id,
-            store: row.sourceType ?? 'unknown',
-            dataClass: decision.effectiveDataClass,
-            moduleScope: decision.effectiveModuleScope,
-            legacyAllowed: true,
-            projectedAllowed: false,
-            reason: decision.reason,
-          });
+      try {
+        const diffs: MemoryClassShadowDiffEntry[] = [];
+        let projectedCount = 0;
+        for (const row of rows) {
+          const decision = evaluateRow(row);
+          if (decision.allowed) projectedCount += 1;
+          else {
+            diffs.push({
+              id: row.id ?? 'unknown',
+              store: row.sourceType ?? 'unknown',
+              dataClass: decision.effectiveDataClass,
+              moduleScope: decision.effectiveModuleScope,
+              legacyAllowed: true,
+              projectedAllowed: false,
+              reason: decision.reason,
+            });
+          }
         }
+        logMemoryClassShadowDiff(this.logger, {
+          path: 'UnifiedMemoryRetrievalService.retrieveContext',
+          businessId,
+          readerPresent: readerCtx.reader !== null,
+          totalCandidates: rows.length,
+          legacyCount: rows.length,
+          projectedCount,
+          diffs,
+        });
+      } catch {
+        // Crash-isolated: shadow failure never impacts live retrieval.
       }
-      logMemoryClassShadowDiff(this.logger, {
-        path: 'UnifiedMemoryRetrievalService.retrieveContext',
-        businessId,
-        readerPresent: readerCtx.reader !== null,
-        totalCandidates: rows.length,
-        legacyCount: rows.length,
-        projectedCount,
-        diffs,
-      });
       return rows;
     }
 
@@ -783,7 +1116,7 @@ export class UnifiedMemoryRetrievalService {
         similarity: r.similarity,
         confidence: r.similarity,
         dataClass: r.dataClass ?? null,
-        moduleScope: Array.isArray(r.moduleScope) ? r.moduleScope : [],
+        moduleScope: r.moduleScope ?? null,
         createdAt: r.metadata?.createdAt ? new Date(r.metadata.createdAt as string) : new Date(),
         // MEM-UNIFIED-SEMANTIC-SIGHT: the copy keeps its source, written after the copy's own metadata.
         metadata: this.semanticMetadata(r),
@@ -871,7 +1204,7 @@ export class UnifiedMemoryRetrievalService {
     const classMeta: MemoryClassFragmentMeta = {
       store: 'ai_memory_embedding',
       dataClass: r.dataClass ?? null,
-      moduleScope: Array.isArray(r.moduleScope) ? r.moduleScope : [],
+      moduleScope: r.moduleScope ?? null,
       hasOwnerColumn: false,
       source: r.sourceType,
     };

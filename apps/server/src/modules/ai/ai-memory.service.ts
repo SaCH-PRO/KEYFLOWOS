@@ -23,7 +23,10 @@ import {
 } from './memory-classification';
 import {
   buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
+  filterOutSecretRows,
   getMemoryClassReadMode,
+  isRowUnconditionallySecret,
   projectAiMemoryRowsForReader,
   type MemoryReaderContext,
 } from '../key-cortex/memory-class-read-projection';
@@ -335,10 +338,13 @@ export class AiMemoryService {
    * the profile interview's prompt and KEY's cortex memory read this.
    */
   async getAll(businessId: string, readerContext?: MemoryReaderContext): Promise<MemoryEntry[]> {
+    const mode = getMemoryClassReadMode();
     const preFilter =
-      readerContext && getMemoryClassReadMode() === 'ACTIVE'
+      readerContext && mode === 'ACTIVE'
         ? buildDbMemoryClassPreFilter(readerContext)
-        : undefined;
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
     const records = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
@@ -351,7 +357,12 @@ export class AiMemoryService {
       },
       orderBy: [{ category: 'asc' }, { updatedAt: 'desc' }],
     });
-    if (!readerContext) return records;
+    if (!readerContext) {
+      return filterOutSecretRows(records, (r) => ({
+        dataClass: (r as { dataClass?: unknown }).dataClass,
+        texts: [r.category, r.key, r.value],
+      }));
+    }
     return projectAiMemoryRowsForReader(records, readerContext, {
       businessId,
       path: 'AiMemoryService.getAll',
@@ -366,10 +377,13 @@ export class AiMemoryService {
     readerContext?: MemoryReaderContext,
   ): Promise<MemoryEntry[]> {
     if (isAiMemorySettingsCategory(category)) return [];
+    const mode = getMemoryClassReadMode();
     const preFilter =
-      readerContext && getMemoryClassReadMode() === 'ACTIVE'
+      readerContext && mode === 'ACTIVE'
         ? buildDbMemoryClassPreFilter(readerContext)
-        : undefined;
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
     const records = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
@@ -382,7 +396,12 @@ export class AiMemoryService {
       },
       orderBy: { updatedAt: 'desc' },
     });
-    if (!readerContext) return records;
+    if (!readerContext) {
+      return filterOutSecretRows(records, (r) => ({
+        dataClass: (r as { dataClass?: unknown }).dataClass,
+        texts: [r.category, r.key, r.value],
+      }));
+    }
     return projectAiMemoryRowsForReader(records, readerContext, {
       businessId,
       path: 'AiMemoryService.getByCategory',
@@ -401,7 +420,21 @@ export class AiMemoryService {
         businessId_category_key: { businessId, category, key },
       },
     });
-    if (!row || !readerContext) return row;
+    if (!row) return null;
+    if (!readerContext) {
+      if (
+        getMemoryClassReadMode() !== 'OFF' &&
+        (isAiMemorySettingsCategory(row.category) ||
+          isRowUnconditionallySecret((row as { dataClass?: unknown }).dataClass, [
+            row.category,
+            row.key,
+            row.value,
+          ]))
+      ) {
+        return null;
+      }
+      return row;
+    }
     const [visible] = projectAiMemoryRowsForReader([row], readerContext, {
       businessId,
       path: 'AiMemoryService.get',

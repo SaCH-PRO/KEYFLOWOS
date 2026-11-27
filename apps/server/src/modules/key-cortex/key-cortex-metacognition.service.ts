@@ -5,6 +5,11 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  projectBusinessEventRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { EXECUTED_ACTION_RESULTS, KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
 import { BusinessEventType } from '@prisma/client';
@@ -380,9 +385,12 @@ export class KeyCortexMetacognitionService {
    * Produces a human-readable explanation that includes evidence
    * count, historical accuracy on similar claims, and caveats.
    */
-  async explainConfidence(statementId: string): Promise<string> {
+  async explainConfidence(
+    statementId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<string> {
     // Look up the statement — search across decisions
-    const events = await this.prisma.client.businessEvent.findMany({
+    const rawEvents = await this.prisma.client.businessEvent.findMany({
       where: {
         metadata: {
           path: ['correlationId'],
@@ -392,6 +400,15 @@ export class KeyCortexMetacognitionService {
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
+    const events = readerContext
+      ? projectBusinessEventRowsForReader(rawEvents, readerContext, {
+          path: 'KeyCortexMetacognitionService.explainConfidence',
+          logger: this.logger,
+        })
+      : filterOutSecretRows(rawEvents, (e) => ({
+          dataClass: null,
+          texts: [e.eventType, e.subjectType, e.action, JSON.stringify(e.after ?? null), JSON.stringify(e.metadata ?? null)],
+        }));
 
     if (events.length === 0) {
       return `I don't have a record of statement ${statementId} in my memory. This could be because:\n` +

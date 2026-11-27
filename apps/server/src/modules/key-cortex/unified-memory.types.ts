@@ -33,7 +33,7 @@ export const MEMORY_CLASS_METADATA_KEY = '__memoryClass';
 export interface MemoryClassFragmentMeta {
   store: MemorySourceType;
   dataClass: MemoryRowDataClass | string | null;
-  moduleScope: readonly string[];
+  moduleScope: readonly string[] | null;
   ownerUserId?: string | null;
   hasOwnerColumn?: boolean;
   category?: string | null;
@@ -52,11 +52,6 @@ export interface MemoryReaderContext {
   reader: string | null;
   /** Module read-level predicate (`rankOf(memberModuleLevel(membership, mod)) >= LEVEL_RANK.read`). */
   sight: (module: CanonicalModule) => boolean;
-  /**
-   * Optional flag for sight-only callers (such as synchronous prompt helpers that
-   * receive a `ModuleSight` without a member userId). Defaults to false.
-   */
-  sightOnly?: boolean;
 }
 
 /**
