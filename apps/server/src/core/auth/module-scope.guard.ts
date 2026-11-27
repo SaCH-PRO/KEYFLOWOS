@@ -7,6 +7,7 @@ import { resolveRequestBusinessId } from './request-business-id';
 import { securitySignals } from '../observability/security-signals';
 
 export const MODULE_SCOPE_KEY = 'module_scope';
+export const MODULE_SCOPE_ALTERNATIVES_KEY = 'module_scope_alternatives';
 
 export interface ModuleScopeRequirement {
   module: string;
@@ -15,6 +16,30 @@ export interface ModuleScopeRequirement {
 
 export const RequireModuleScope = (module: string, minLevel: 'read' | 'write' | 'admin' = 'read') =>
   SetMetadata(MODULE_SCOPE_KEY, { module, minLevel } as ModuleScopeRequirement);
+
+/**
+ * Declares an alternative module scope (OR semantics) alongside `@RequireModuleScope`.
+ * Kept as a separate decorator so static censuses scanning `@RequireModuleScope('mod', 'lvl')`
+ * (e.g., `job-role-tool-families.spec.ts`) keep parsing every guarded route unchanged.
+ * Multiple `@RequireAlternativeModuleScope` decorators on one handler compose additively.
+ */
+export const RequireAlternativeModuleScope = (
+  module: string,
+  minLevel: 'read' | 'write' | 'admin' = 'read',
+): MethodDecorator => {
+  return (_target, _propertyKey, descriptor) => {
+    const existing: ModuleScopeRequirement[] =
+      (Reflect.getMetadata(MODULE_SCOPE_ALTERNATIVES_KEY, descriptor.value as object) as
+        | ModuleScopeRequirement[]
+        | undefined) ?? [];
+    Reflect.defineMetadata(
+      MODULE_SCOPE_ALTERNATIVES_KEY,
+      [...existing, { module, minLevel }],
+      descriptor.value as object,
+    );
+    return descriptor;
+  };
+};
 
 export const AUTHORITY_SHADOW_KEY = 'authority_shadow';
 
@@ -59,8 +84,14 @@ export class ModuleScopeGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requirement = this.reflector.get<ModuleScopeRequirement>(MODULE_SCOPE_KEY, context.getHandler());
-    if (!requirement) return true;
+    const primary = this.reflector.get<ModuleScopeRequirement>(MODULE_SCOPE_KEY, context.getHandler());
+    const rawAlternatives = this.reflector.get<ModuleScopeRequirement[]>(
+      MODULE_SCOPE_ALTERNATIVES_KEY,
+      context.getHandler(),
+    );
+    const alternatives = Array.isArray(rawAlternatives) ? rawAlternatives : [];
+    const requirements: ModuleScopeRequirement[] = primary ? [primary, ...alternatives] : alternatives;
+    if (requirements.length === 0) return true;
 
     const req = context.switchToHttp().getRequest<{ user?: { id?: string; role?: string }; params?: Record<string, string>; query?: Record<string, string>; body?: Record<string, string> }>();
     const user = req.user;
@@ -84,22 +115,31 @@ export class ModuleScopeGuard implements CanActivate {
     // The explicit map (any non-null object, an array included) else the role's defaults; a
     // missing key is 'none'. One helper, shared with the readers that must agree with this guard
     // (PR195-PORT review SEC-P195-2: KEY's standing context had read an array as role defaults).
-    const memberLevel = memberModuleLevel(membership, requirement.module);
-    const memberRank = rankOf(memberLevel);
-    const requiredRank = LEVEL_RANK[requirement.minLevel] ?? 1;
+    const evaluated = requirements.map((requirement) => {
+      const memberLevel = memberModuleLevel(membership, requirement.module);
+      const memberRank = rankOf(memberLevel);
+      const requiredRank = LEVEL_RANK[requirement.minLevel] ?? 1;
+      return { requirement, memberLevel, allows: memberRank >= requiredRank };
+    });
 
-    const legacyAllows = memberRank >= requiredRank;
+    const legacyAllows = evaluated.some((entry) => entry.allows);
 
     // Shadow AFTER the legacy decision is computed and BEFORE it is acted on, so a
     // mismatch is recorded for both outcomes rather than only for the ones that pass.
     if (this.reflector.get<boolean>(AUTHORITY_SHADOW_KEY, context.getHandler())) {
-      await this.shadowCompare(businessId, user.id, requirement, legacyAllows, memberLevel);
+      await this.shadowCompare(businessId, user.id, evaluated, legacyAllows);
     }
 
     if (!legacyAllows) {
-      throw new ForbiddenException(
-        `Insufficient permissions: ${requirement.module} requires ${requirement.minLevel} access (you have ${memberLevel})`,
-      );
+      if (evaluated.length === 1) {
+        const [{ requirement, memberLevel }] = evaluated;
+        throw new ForbiddenException(
+          `Insufficient permissions: ${requirement.module} requires ${requirement.minLevel} access (you have ${memberLevel})`,
+        );
+      }
+      const needed = evaluated.map((e) => `${e.requirement.module} ${e.requirement.minLevel}`).join(' or ');
+      const held = evaluated.map((e) => `${e.requirement.module}:${e.memberLevel}`).join(', ');
+      throw new ForbiddenException(`Insufficient permissions: requires ${needed} access (you have ${held})`);
     }
 
     return true;
@@ -117,32 +157,40 @@ export class ModuleScopeGuard implements CanActivate {
   private async shadowCompare(
     businessId: string,
     userId: string,
-    requirement: ModuleScopeRequirement,
+    evaluated: Array<{ requirement: ModuleScopeRequirement; memberLevel: string; allows: boolean }>,
     legacyAllows: boolean,
-    legacyLevel: string,
   ): Promise<void> {
     if (!this.authority) return;
     try {
-      if (!isCanonicalModule(requirement.module)) {
-        this.logger.warn(`[authority-shadow] non-canonical module "${requirement.module}" — skipped`);
-        return;
+      for (const { requirement } of evaluated) {
+        if (!isCanonicalModule(requirement.module)) {
+          this.logger.warn(`[authority-shadow] non-canonical module "${requirement.module}" — skipped`);
+          return;
+        }
       }
       const result = await this.authority.resolve(businessId, userId);
-      const decision = result.modules[requirement.module];
-      const resolverAllows = LEVEL_RANK[decision.level] >= (LEVEL_RANK[requirement.minLevel] ?? 1);
+      const resolverEntries = evaluated.map(({ requirement }) => {
+        const decision = result.modules[requirement.module as keyof typeof result.modules];
+        const allows = LEVEL_RANK[decision.level] >= (LEVEL_RANK[requirement.minLevel] ?? 1);
+        return { requirement, decision, allows };
+      });
+      const resolverAllows = resolverEntries.some((entry) => entry.allows);
 
       if (resolverAllows === legacyAllows) return;
 
+      const focal =
+        resolverEntries.find((entry, idx) => entry.allows !== evaluated[idx].allows) ?? resolverEntries[0];
       const reason =
-        typeof decision.reason === 'string' && decision.reason ? decision.reason : 'unknown';
-      securitySignals.record('authority_shadow_mismatch', `${requirement.module}:${reason}`);
+        typeof focal.decision.reason === 'string' && focal.decision.reason ? focal.decision.reason : 'unknown';
+      securitySignals.record('authority_shadow_mismatch', `${focal.requirement.module}:${reason}`);
 
       this.logger.warn(
         `[authority-shadow] MISMATCH business=${businessId} user=${userId} ` +
-          `module=${requirement.module} min=${requirement.minLevel} ` +
-          `legacy=${legacyAllows ? 'ALLOW' : 'DENY'}(${legacyLevel}) ` +
-          `resolver=${resolverAllows ? 'ALLOW' : 'DENY'}(${decision.level}) ` +
-          `reason=${decision.reason} explicitDeny=${decision.explicitDeny} ` +
+          `module=${evaluated.map((e) => e.requirement.module).join('|')} ` +
+          `min=${evaluated.map((e) => e.requirement.minLevel).join('|')} ` +
+          `legacy=${legacyAllows ? 'ALLOW' : 'DENY'}(${evaluated.map((e) => e.memberLevel).join('|')}) ` +
+          `resolver=${resolverAllows ? 'ALLOW' : 'DENY'}(${resolverEntries.map((e) => e.decision.level).join('|')}) ` +
+          `reason=${reason} explicitDeny=${focal.decision.explicitDeny} ` +
           `positions=${result.positions.length} truncated=${result.validity.truncated}`,
       );
     } catch (err) {
