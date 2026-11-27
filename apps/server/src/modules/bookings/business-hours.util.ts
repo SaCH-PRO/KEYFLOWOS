@@ -29,9 +29,28 @@ export const DEFAULT_BUSINESS_CLOSE_MIN = 17 * 60;
 /** Public booking slot grid interval in minutes, shared by getAvailableSlots and publicCreateBooking (P226). */
 export const PUBLIC_SLOT_INTERVAL_MINS = 30;
 
+/** Minutes in a standard 24-hour calendar day. */
+const MINUTES_PER_DAY = 24 * 60;
+
 export type ParsedBusinessDayHours =
   | { closed: true }
   | { closed: false; openMin: number; closeMin: number; open: string; close: string };
+
+export interface BusinessDateWindow {
+  openMin: number;
+  closeMin: number;
+  /** Grid anchor in this date's minute coordinates (negative for previous-day overnight spillover). */
+  gridAnchorMin: number;
+  open: string;
+  close: string;
+  /** True when this window is the post-midnight spillover from the previous weekday's overnight shift. */
+  spillover: boolean;
+}
+
+export type ResolvedBusinessDateSchedule =
+  | { status: 'unconfigured'; windows: BusinessDateWindow[] }
+  | { status: 'closed'; windows: [] }
+  | { status: 'open'; windows: BusinessDateWindow[] };
 
 const HHMM_RE = /^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 const MIDNIGHT_END_RE = /^24:00(?::00)?$/;
@@ -77,17 +96,22 @@ function parseDayEntry(raw: unknown): ParsedBusinessDayHours | null {
   }
 
   const openMin = parseTimeToMinutes(ownProp(entry, 'open'), false);
-  const closeMin = parseTimeToMinutes(ownProp(entry, 'close'), true);
-  if (openMin === null || closeMin === null || openMin >= closeMin) {
+  const closeMinRaw = parseTimeToMinutes(ownProp(entry, 'close'), true);
+  if (openMin === null || closeMinRaw === null || openMin === closeMinRaw) {
     return null;
   }
+
+  // D-311 (P229 FU-SLOTS-OVERNIGHT-HOURS): when close is earlier than open
+  // (e.g. 18:00–02:00 or 18:00–00:00), the shift crosses midnight and ends at
+  // closeMinRaw + 1440 in the opening day's minute coordinates.
+  const closeMin = closeMinRaw < openMin ? closeMinRaw + MINUTES_PER_DAY : closeMinRaw;
 
   return {
     closed: false,
     openMin,
     closeMin,
     open: formatMinutes(openMin),
-    close: formatMinutes(closeMin),
+    close: formatMinutes(closeMinRaw),
   };
 }
 
@@ -139,7 +163,8 @@ function candidateDayEntries(hours: Record<string, unknown>, weekday: number): u
  * `{ closed: true }`):
  *   - `{ closed: true }` when the day explicitly has `closed === true`
  *   - `{ closed: false, openMin, closeMin, open, close }` when open with valid
- *     `open < close` times (`00:00`–`23:59`, `close` may be `24:00`)
+ *     distinct `open` and `close` times (`00:00`–`23:59`, `close` may be `24:00`;
+ *     overnight spans `open > close` return `closeMin = close + 1440`)
  *   - `null` when `businessHours` is null/malformed, the day key is absent, or
  *     no candidate entry parses cleanly
  */
@@ -165,16 +190,72 @@ export function readBusinessDayHours(
 }
 
 /**
- * V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): whether a booking start
- * instant lands on the exact slot grid that `getAvailableSlots` emits for a
- * window opening at `openMin` (minutes past midnight in the business timezone):
+ * D-311 (P229 FU-SLOTS-OVERNIGHT-HOURS): resolve all active business-hour
+ * windows on `weekday`, including any post-midnight spillover from the previous
+ * weekday's overnight shift (`prevDay.closeMin > 1440`).
+ *
+ * - `status: 'open'` when `today` is open OR `today` is closed while the
+ *   previous day's overnight shift spills past midnight into `weekday`.
+ * - `status: 'closed'` when `today` is explicitly closed and no overnight
+ *   spillover enters `weekday`.
+ * - `status: 'unconfigured'` when `today` has no valid entry (still carrying
+ *   any previous-day overnight spillover in `windows`).
+ */
+export function readBusinessDateWindows(
+  businessHours: unknown,
+  weekday: number,
+): ResolvedBusinessDateSchedule {
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+    return { status: 'unconfigured', windows: [] };
+  }
+
+  const prevWeekday = (weekday + 6) % 7;
+  const prevDay = readBusinessDayHours(businessHours, prevWeekday);
+  const today = readBusinessDayHours(businessHours, weekday);
+
+  const windows: BusinessDateWindow[] = [];
+  if (prevDay && !prevDay.closed && prevDay.closeMin > MINUTES_PER_DAY) {
+    windows.push({
+      openMin: 0,
+      closeMin: prevDay.closeMin - MINUTES_PER_DAY,
+      gridAnchorMin: prevDay.openMin - MINUTES_PER_DAY,
+      open: prevDay.open,
+      close: prevDay.close,
+      spillover: true,
+    });
+  }
+
+  if (today === null) {
+    return { status: 'unconfigured', windows };
+  }
+  if (today.closed) {
+    return windows.length > 0 ? { status: 'open', windows } : { status: 'closed', windows: [] };
+  }
+
+  windows.push({
+    openMin: today.openMin,
+    closeMin: today.closeMin,
+    gridAnchorMin: today.openMin,
+    open: today.open,
+    close: today.close,
+    spillover: false,
+  });
+
+  return { status: 'open', windows };
+}
+
+/**
+ * V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1) & P229 (D-311): whether
+ * a booking start instant lands on the exact slot grid that `getAvailableSlots`
+ * emits for a window anchored at `gridAnchorMin` (minutes past midnight in the
+ * business timezone; may be negative for a previous-day overnight spillover):
  *   - zero seconds and zero milliseconds (`zonedInstant` emits whole minutes)
- *   - `(startMinsOfDay - Math.max(0, openMin)) % intervalMins === 0`
+ *   - `(startMinsOfDay - gridAnchorMin) % intervalMins === 0`
  */
 export function isOnSlotGrid(
   start: Date,
   startMinsOfDay: number,
-  openMin: number,
+  gridAnchorMin: number,
   intervalMins = PUBLIC_SLOT_INTERVAL_MINS,
 ): boolean {
   if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
@@ -183,11 +264,15 @@ export function isOnSlotGrid(
   if (start.getUTCSeconds() !== 0 || start.getUTCMilliseconds() !== 0) {
     return false;
   }
-  if (!Number.isInteger(startMinsOfDay) || !Number.isFinite(openMin) || !Number.isFinite(intervalMins) || intervalMins <= 0) {
+  if (
+    !Number.isInteger(startMinsOfDay) ||
+    !Number.isFinite(gridAnchorMin) ||
+    !Number.isFinite(intervalMins) ||
+    intervalMins <= 0
+  ) {
     return false;
   }
-  const anchor = Math.max(0, openMin);
-  const remainder = (((startMinsOfDay - anchor) % intervalMins) + intervalMins) % intervalMins;
+  const remainder = (((startMinsOfDay - gridAnchorMin) % intervalMins) + intervalMins) % intervalMins;
   return remainder === 0;
 }
 
