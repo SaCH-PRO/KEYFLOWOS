@@ -12,8 +12,7 @@
  * WHAT IS READ (TypeScript AST, every non-test `.ts` file under `apps/server/src`: `modules/`,
  * `core/` and the app root): each `@Controller` class, its class-level `@UseGuards`, and per
  * `@Get` handler the method-level `@UseGuards`, `@RequireModuleScope(module, level)` (level
- * defaults to `read`), the handler body, and 1-hop service return expressions for secret-bearing
- * reads.
+ * defaults to `read`), the handler body, and 1-hop service bodies for secret-bearing reads.
  *
  * THE POPULATION: a route is a membership-only GET when its verb is `GET`, it runs a member guard
  * (`AuthGuard`, `BusinessGuard`, or `OptionalAuthGuard`), and it does not carry an ENFORCED scope
@@ -21,6 +20,9 @@
  * (no member guard) are pinned by `core/auth/public-surface.spec.ts` and are not this census.
  *
  * THE DOC: every census table row is `| \`Class.handler\` | GET | \`/path\` | disposition | reason |`.
+ * Table parsing is FAIL-CLOSED: any non-header, non-separator pipe line outside the 2-column
+ * Disposition summary table that fails the strict row grammar is recorded in `schemaProblems`
+ * (failing RCEN-01 rather than being silently skipped).
  * Dispositions:
  *   applied           enforced scope (`module:level` via `@RequireModuleScope` + `ModuleScopeGuard`)
  *                     or per-member scope check (`check:<name>` / `service-check:<name>` + named scope).
@@ -41,14 +43,17 @@
  *                     scope, or stop-the-line unprotected secret-read finding for immediate fix).
  *
  * WHAT IS REQUIRED:
- *   RCEN-01  the doc exists and parses; every row is unique, verb is GET, valid disposition, non-empty reason.
+ *   RCEN-01  the doc exists and parses fail-closed; every row is unique, verb is GET, valid disposition,
+ *            non-empty reason, zero malformed table rows.
  *   RCEN-02  every membership-only GET route has a row in the census doc.
  *   RCEN-03  every row names a real GET route with its exact path, and its disposition matches reality
  *            (enforced/checked `applied`, verified `exempt-check`/`exempt-guard`, canonical `module:level`
  *            on `open`, ruling on `exempt-ruled`, and every AST-detected secret-bearing GET marked `secret-read`).
  *   RCEN-03b expected V1 plan rows (TODAY-AGGREGATE, READY-TO-SEND, CLAIM-LOOP, NAV-B-LEGACY-SERVER) are pinned.
- *   RCEN-04  negative controls: synthetic secret-bearing GET without `secret-read`, unregistered
- *            membership-only GET, stale/phantom row, `open` without scope, fake `applied`, and
+ *   RCEN-04  negative controls: synthetic secret-bearing GETs (direct literal, variable-assigned secret
+ *            object with `authData`, variable-assigned raw `portalAccess.findMany` even with nested
+ *            `include: { ...: { select } }`), malformed/duplicate/non-GET/unknown-disposition/empty-reason
+ *            table rows, unregistered GET, stale/phantom row, `open` without scope, fake `applied`, and
  *            fake `exempt-guard` all FAIL the census validator.
  */
 import { describe, it, expect } from 'vitest';
@@ -78,13 +83,30 @@ const DISPOSITIONS = new Set([
   'secret-read',
 ]);
 
-/** Property names that indicate an unmasked secret or bearer token returned in a GET response. */
+/** Property names that indicate an unmasked secret, credential, or bearer token returned in a GET response. */
 const SECRET_FIELD_NAME =
-  /^(signingSecret|webhookSecret|clientSecret|apiKey|privateKey|secretKey|passwordHash|password|accessToken|refreshToken|authToken|encryptedCredentials|accessTokenEncrypted|refreshTokenEncrypted|stripeSecretKey|stripeWebhookSecret|paypalClientSecret|wipayApiKey|byokOpenai|byokAnthropic|byokXai|byokKimi|byokGoogle|byokNative|secret|token|previewToken)$/i;
+  /^(signingSecret|webhookSecret|clientSecret|apiKey|privateKey|secretKey|passwordHash|password|accessToken|refreshToken|authToken|encryptedCredentials|accessTokenEncrypted|refreshTokenEncrypted|stripeSecretKey|stripeWebhookSecret|paypalClientSecret|wipayApiKey|byokOpenai|byokAnthropic|byokXai|byokKimi|byokGoogle|byokNative|authData|authDataRef|credentials|secret|token|previewToken)$/i;
 
-/** Prisma delegates whose raw rows contain secrets or bearer tokens if returned without a `select` projection. */
-const RAW_SECRET_DELEGATE =
-  /\.(portalAccess|webhook|socialConnection|channelConnection|channelDestination|supplierConnection|bankConnection|integrationConnection|connectorAccount)\s*\.\s*(findUnique|findFirst|findMany|findUniqueOrThrow|findFirstOrThrow)\s*\(/;
+/** Prisma delegates whose raw rows contain secrets or bearer tokens if queried without a top-level `select`. */
+const RAW_SECRET_DELEGATES = new Set([
+  'portalAccess',
+  'webhook',
+  'socialConnection',
+  'channelConnection',
+  'channelDestination',
+  'supplierConnection',
+  'bankConnection',
+  'integrationConnection',
+  'connectorAccount',
+]);
+
+const PRISMA_READ_METHODS = new Set([
+  'findUnique',
+  'findFirst',
+  'findMany',
+  'findUniqueOrThrow',
+  'findFirstOrThrow',
+]);
 
 interface ParsedFile {
   file: string;
@@ -100,7 +122,7 @@ interface GetRoute {
   guards: string[];
   scope?: { module: string; minLevel: string };
   body: string;
-  /** Secret/token property names or raw secret-bearing Prisma delegates directly or 1-hop returned. */
+  /** Secret/token property names or raw secret-bearing Prisma delegates directly or 1-hop read/returned. */
   secretSignals: string[];
 }
 
@@ -111,6 +133,11 @@ interface CensusRow {
   disposition: string;
   reason: string;
   line: number;
+}
+
+interface ParsedCensus {
+  rows: CensusRow[];
+  parseProblems: string[];
 }
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -133,33 +160,85 @@ function parsedServerFiles(): ParsedFile[] {
   return parsedCache;
 }
 
+/** True only when the Prisma find call's own options object literal carries a top-level `select` key. */
+function hasTopLevelSelect(callExpr: ts.CallExpression): boolean {
+  const firstArg = callExpr.arguments[0];
+  if (!firstArg || !ts.isObjectLiteralExpression(firstArg)) return false;
+  return firstArg.properties.some(
+    (p) =>
+      (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+      ((ts.isIdentifier(p.name) && p.name.text === 'select') ||
+        (ts.isStringLiteral(p.name) && p.name.text === 'select')),
+  );
+}
+
 function collectReturnedSecretSignals(body: ts.Block | undefined, sf: ts.SourceFile): string[] {
   const found = new Set<string>();
   if (!body) return [];
 
-  const scanExpression = (expr: ts.Node): void => {
-    if (ts.isPropertyAssignment(expr)) {
+  const scanObjectProps = (node: ts.Node): void => {
+    if (ts.isPropertyAssignment(node)) {
       const propName =
-        ts.isIdentifier(expr.name) || ts.isStringLiteral(expr.name) ? expr.name.text : '';
+        ts.isIdentifier(node.name) || ts.isStringLiteral(node.name) ? node.name.text : '';
       if (SECRET_FIELD_NAME.test(propName)) {
-        const initText = expr.initializer.getText(sf).trim();
+        const initText = node.initializer.getText(sf).trim();
         // Explicit masking (`••••`, `****`), boolean checks (`!!x`), or literal null/undefined/boolean are safe.
         const isMasked = /•|\*{3,}|^!{1,2}|^null$|^undefined$|^false$|^true$/.test(initText);
         if (!isMasked) found.add(propName);
       }
-    } else if (ts.isShorthandPropertyAssignment(expr)) {
-      if (SECRET_FIELD_NAME.test(expr.name.text)) found.add(expr.name.text);
+    } else if (ts.isShorthandPropertyAssignment(node)) {
+      if (SECRET_FIELD_NAME.test(node.name.text)) found.add(node.name.text);
     }
-    ts.forEachChild(expr, scanExpression);
+    ts.forEachChild(node, scanObjectProps);
   };
 
+  // Track variable declarations so `const out = { authData: c.authData }; return out;` is detected.
+  const varInits = new Map<string, ts.Expression>();
+  const collectVars = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      varInits.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, collectVars);
+  };
+  collectVars(body);
+
+  const unwrap = (e: ts.Expression): ts.Expression => (ts.isAwaitExpression(e) ? e.expression : e);
+
   const visit = (node: ts.Node): void => {
+    // Detect ANY call to a secret-bearing Prisma delegate in the body lacking a top-level `select:`
+    // (catches direct returns, variable assignments, Promise.all destructuring, and nested `include: { rel: { select } }`).
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      if (PRISMA_READ_METHODS.has(method)) {
+        const recv = node.expression.expression;
+        const delegateName = ts.isPropertyAccessExpression(recv)
+          ? recv.name.text
+          : ts.isIdentifier(recv)
+            ? recv.text
+            : '';
+        if (RAW_SECRET_DELEGATES.has(delegateName) && !hasTopLevelSelect(node)) {
+          found.add(`raw:${delegateName}`);
+        }
+      }
+    }
+
     if (ts.isReturnStatement(node) && node.expression) {
-      scanExpression(node.expression);
-      const retText = node.expression.getText(sf);
-      if (RAW_SECRET_DELEGATE.test(retText) && !/\bselect\s*:/.test(retText)) {
-        const match = RAW_SECRET_DELEGATE.exec(retText);
-        if (match) found.add(`raw:${match[1]}`);
+      scanObjectProps(node.expression);
+      const ret = unwrap(node.expression);
+      if (ts.isIdentifier(ret) && varInits.has(ret.text)) {
+        scanObjectProps(varInits.get(ret.text)!);
+      } else if (ts.isObjectLiteralExpression(ret)) {
+        for (const prop of ret.properties) {
+          if (ts.isShorthandPropertyAssignment(prop) && varInits.has(prop.name.text)) {
+            scanObjectProps(varInits.get(prop.name.text)!);
+          } else if (
+            ts.isPropertyAssignment(prop) &&
+            ts.isIdentifier(prop.initializer) &&
+            varInits.has(prop.initializer.text)
+          ) {
+            scanObjectProps(varInits.get(prop.initializer.text)!);
+          }
+        }
       }
     }
     ts.forEachChild(node, visit);
@@ -258,25 +337,66 @@ const isMemberRoute = (r: GetRoute): boolean => r.guards.some((g) => MEMBER_GUAR
 const membershipOnlyGets = (allGets: GetRoute[]): GetRoute[] =>
   allGets.filter((r) => isMemberRoute(r) && !isEnforced(r));
 
-function parseCensusRows(markdown: string): CensusRow[] {
+const SUMMARY_TABLE_HEADER = /^\|\s*Disposition\s*\|\s*Count\s*\|\s*$/i;
+const ROUTE_TABLE_HEADER = /^\|\s*route\s*\|\s*verb\s*\|\s*path\s*\|\s*disposition\s*\|\s*reason\s*\|\s*$/i;
+const TABLE_SEPARATOR = /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/;
+const SUMMARY_TABLE_ROW = /^\|\s*[a-z-]+\s*\|\s*\d+\s*\|\s*$/;
+const ROUTE_TABLE_ROW =
+  /^\|\s*`([A-Za-z0-9_]+\.[A-Za-z0-9_]+)`\s*\|\s*([A-Z]+)\s*\|\s*`?([^|`]*)`?\s*\|\s*([a-z-]+)\s*\|\s*([^|]*)\s*\|\s*$/;
+
+/**
+ * Fail-closed markdown route table parser:
+ * - Recognizes the 2-column Summary table (`| Disposition | Count |`) and skips its separator/numeric rows.
+ * - Recognizes 5-column route table headers (`| route | verb | path | disposition | reason |`) and separators.
+ * - Any other pipe-delimited line MUST match `ROUTE_TABLE_ROW` cleanly; otherwise an explicit error is
+ *   recorded in `parseProblems` so typos (e.g. `OPEN`, `exempt_own`, missing backticks, wrong column count,
+ *   unescaped `|` inside cells) fail RCEN-01 instead of silently disappearing.
+ */
+function parseCensus(markdown: string): ParsedCensus {
   const rows: CensusRow[] = [];
-  markdown.split('\n').forEach((line, index) => {
-    const m =
-      /^\|\s*`([A-Za-z0-9_]+\.[A-Za-z0-9_]+)`\s*\|\s*([A-Z]+)\s*\|\s*`?([^|`]*)`?\s*\|\s*([a-z-]+)\s*\|\s*(.*?)\s*\|\s*$/.exec(
-        line,
-      );
-    if (m) {
-      rows.push({
-        key: m[1],
-        verb: m[2],
-        path: m[3].trim(),
-        disposition: m[4],
-        reason: m[5],
-        line: index + 1,
-      });
+  const parseProblems: string[] = [];
+  let inSummaryTable = false;
+
+  markdown.split('\n').forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line.startsWith('|')) {
+      inSummaryTable = false;
+      return;
     }
+    if (SUMMARY_TABLE_HEADER.test(line)) {
+      inSummaryTable = true;
+      return;
+    }
+    if (ROUTE_TABLE_HEADER.test(line)) {
+      inSummaryTable = false;
+      return;
+    }
+    if (TABLE_SEPARATOR.test(line)) {
+      return;
+    }
+    if (inSummaryTable) {
+      if (!SUMMARY_TABLE_ROW.test(line)) {
+        parseProblems.push(`line ${index + 1}: malformed summary table row: ${line}`);
+      }
+      return;
+    }
+
+    const m = ROUTE_TABLE_ROW.exec(line);
+    if (!m) {
+      parseProblems.push(`line ${index + 1}: malformed route table row: ${line}`);
+      return;
+    }
+    rows.push({
+      key: m[1],
+      verb: m[2],
+      path: m[3].trim(),
+      disposition: m[4],
+      reason: m[5],
+      line: index + 1,
+    });
   });
-  return rows;
+
+  return { rows, parseProblems };
 }
 
 interface CensusValidationResult {
@@ -288,15 +408,16 @@ interface CensusValidationResult {
 
 function validateReadCensus(
   allGets: GetRoute[],
-  rows: CensusRow[],
+  parsed: ParsedCensus,
   moduleSourceOf: (file: string) => string,
 ): CensusValidationResult {
+  const { rows, parseProblems } = parsed;
   const byKey = new Map(allGets.map((r) => [r.key, r]));
   const population = membershipOnlyGets(allGets);
   const inPopulation = new Set(population.map((r) => r.key));
   const rowByKey = new Map<string, CensusRow>();
 
-  const schemaProblems: string[] = [];
+  const schemaProblems: string[] = [...parseProblems];
   const missingRoutes: string[] = [];
   const realityProblems: string[] = [];
   const secretReadProblems: string[] = [];
@@ -444,7 +565,7 @@ function validateReadCensus(
     }
   }
 
-  // Secret-read invariant: any membership-only GET whose AST returns an unmasked secret/token
+  // Secret-read invariant: any membership-only GET whose AST reads/returns an unmasked secret/token
   // field or raw secret-bearing Prisma delegate MUST be classified as `secret-read`.
   for (const r of population) {
     if (r.secretSignals.length === 0) continue;
@@ -495,32 +616,32 @@ describe('REST read-side scope census (SWP-READ-SCOPE-CENSUS)', () => {
     expect(byKey.get('IdentityController.getLegacyModules')?.path).toBe('/identity/businesses/:businessId/legacy-modules');
   });
 
-  it('[RCEN-01] docs/reconstruction/REST-READ-SCOPE-CENSUS.md exists and parses cleanly with strict schema validation', () => {
+  it('[RCEN-01] docs/reconstruction/REST-READ-SCOPE-CENSUS.md exists and parses cleanly with fail-closed schema validation', () => {
     expect(existsSync(CENSUS), `missing census doc: ${CENSUS}`).toBe(true);
-    const rows = parseCensusRows(readFileSync(CENSUS, 'utf8'));
-    expect(rows.length).toBeGreaterThanOrEqual(population.length);
-    const { schemaProblems } = validateReadCensus(allGets, rows, moduleSourceOf);
+    const parsed = parseCensus(readFileSync(CENSUS, 'utf8'));
+    expect(parsed.rows.length).toBeGreaterThanOrEqual(population.length);
+    const { schemaProblems } = validateReadCensus(allGets, parsed, moduleSourceOf);
     expect(schemaProblems).toEqual([]);
   });
 
   it('[RCEN-02] every membership-only GET route has an exact row in REST-READ-SCOPE-CENSUS.md', () => {
     expect(existsSync(CENSUS), `missing census doc: ${CENSUS}`).toBe(true);
-    const rows = parseCensusRows(readFileSync(CENSUS, 'utf8'));
-    const { missingRoutes } = validateReadCensus(allGets, rows, moduleSourceOf);
+    const parsed = parseCensus(readFileSync(CENSUS, 'utf8'));
+    const { missingRoutes } = validateReadCensus(allGets, parsed, moduleSourceOf);
     expect(missingRoutes).toEqual([]);
   });
 
   it('[RCEN-03] every row names a real GET route and its disposition matches codebase reality (including secret-read invariant)', () => {
     expect(existsSync(CENSUS), `missing census doc: ${CENSUS}`).toBe(true);
-    const rows = parseCensusRows(readFileSync(CENSUS, 'utf8'));
-    const { realityProblems, secretReadProblems } = validateReadCensus(allGets, rows, moduleSourceOf);
+    const parsed = parseCensus(readFileSync(CENSUS, 'utf8'));
+    const { realityProblems, secretReadProblems } = validateReadCensus(allGets, parsed, moduleSourceOf);
     expect(realityProblems).toEqual([]);
     expect(secretReadProblems).toEqual([]);
   });
 
   it('[RCEN-03b] expected V1 plan rows are pinned accurately', () => {
     expect(existsSync(CENSUS), `missing census doc: ${CENSUS}`).toBe(true);
-    const rows = new Map(parseCensusRows(readFileSync(CENSUS, 'utf8')).map((r) => [r.key, r]));
+    const rows = new Map(parseCensus(readFileSync(CENSUS, 'utf8')).rows.map((r) => [r.key, r]));
 
     const today = rows.get('TodayController.getToday');
     expect(today?.disposition).toBe('applied');
@@ -539,7 +660,7 @@ describe('REST read-side scope census (SWP-READ-SCOPE-CENSUS)', () => {
     expect(legacyModules?.disposition).toBe('exempt-own');
   });
 
-  it('[RCEN-04] negative controls: synthetic secret-bearing GET without secret-read, unregistered GET, stale row, and bogus dispositions all FAIL', () => {
+  it('[RCEN-04] negative controls: synthetic secret-bearing GETs, malformed/invalid schema rows, unregistered GET, stale row, and bogus dispositions all FAIL', () => {
     const synthFile = join(SRC, 'modules/synthetic-rcen04/synthetic-rcen04.controller.ts');
     const synthSource = `
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
@@ -553,8 +674,19 @@ export class SyntheticReadController {
   }
 
   @Get('businesses/:businessId/raw-secrets')
-  getRawSecrets(@Param('businessId') businessId: string) {
-    return this.prisma.client.webhook.findMany({ where: { businessId } });
+  async getRawSecrets(@Param('businessId') businessId: string) {
+    const rows = await this.prisma.client.portalAccess.findMany({
+      where: { businessId },
+      include: { business: { select: { id: true } } },
+    });
+    return rows;
+  }
+
+  @Get('businesses/:businessId/var-auth-data')
+  getVarAuthData(@Param('businessId') businessId: string) {
+    const c = { authData: { token: 'live_secret' }, authDataRef: 'ref_1' };
+    const out = { businessId, authData: c.authData, authDataRef: c.authDataRef };
+    return out;
   }
 
   @Get('businesses/:businessId/unregistered-data')
@@ -576,31 +708,41 @@ export class SyntheticReadController {
       },
     ];
     const synthRoutes = extractGetRoutes(parsedSynth, SRC);
-    expect(synthRoutes).toHaveLength(4);
+    expect(synthRoutes).toHaveLength(5);
     expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getWebhookSecret')?.secretSignals).toEqual([
       'apiKey',
       'signingSecret',
       'webhookSecret',
     ]);
+    // Variable-assigned raw Prisma delegate read (even with nested `include: { business: { select } }`) is detected.
     expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getRawSecrets')?.secretSignals).toEqual([
-      'raw:webhook',
+      'raw:portalAccess',
+    ]);
+    // Variable-assigned secret object literal (`authData` / `authDataRef`) returned by identifier is detected.
+    expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getVarAuthData')?.secretSignals).toEqual([
+      'authData',
+      'authDataRef',
     ]);
 
     const synthModuleSource = () => synthSource;
 
-    // 1. Secret-bearing GETs misclassified as `open` or `exempt-own` (or missing) MUST fail secretReadProblems.
-    const badSecretCensus = parseCensusRows(`
+    // 1. Secret-bearing GETs misclassified as `open` / `exempt-own` / omitted MUST fail secretReadProblems.
+    const badSecretCensus = parseCensus(`
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
 | \`SyntheticReadController.getWebhookSecret\` | GET | \`/synthetic/businesses/:businessId/webhook-secret\` | open | settings:read follow-up |
 | \`SyntheticReadController.getRawSecrets\` | GET | \`/synthetic/businesses/:businessId/raw-secrets\` | exempt-own | caller owns business |
+| \`SyntheticReadController.getVarAuthData\` | GET | \`/synthetic/businesses/:businessId/var-auth-data\` | open | connect:read follow-up |
 | \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | open | missing scope name |
 | \`SyntheticReadController.phantomRoute\` | GET | \`/synthetic/businesses/:businessId/gone\` | open | revenue:read |
 `);
     const badResult = validateReadCensus(synthRoutes, badSecretCensus, synthModuleSource);
 
-    // Negative control 1: secret-bearing GET without `secret-read` FAILS
-    expect(badResult.secretReadProblems).toHaveLength(2);
-    expect(badResult.secretReadProblems[0]).toContain('SyntheticReadController.getWebhookSecret');
-    expect(badResult.secretReadProblems[1]).toContain('SyntheticReadController.getRawSecrets');
+    // Negative control 1: secret-bearing GETs (direct, variable raw Prisma with nested select, variable object) FAIL
+    expect(badResult.secretReadProblems).toHaveLength(3);
+    expect(badResult.secretReadProblems.some((p) => p.includes('getWebhookSecret'))).toBe(true);
+    expect(badResult.secretReadProblems.some((p) => p.includes('getRawSecrets'))).toBe(true);
+    expect(badResult.secretReadProblems.some((p) => p.includes('getVarAuthData'))).toBe(true);
 
     // Negative control 2: unregistered membership-only GET FAILS
     expect(badResult.missingRoutes).toHaveLength(1);
@@ -615,9 +757,12 @@ export class SyntheticReadController {
     );
 
     // Negative control 4: fake `applied` and fake `exempt-guard` FAIL
-    const fakeGateCensus = parseCensusRows(`
+    const fakeGateCensus = parseCensus(`
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
 | \`SyntheticReadController.getWebhookSecret\` | GET | \`/synthetic/businesses/:businessId/webhook-secret\` | secret-read | stop-the-line secret read |
-| \`SyntheticReadController.getRawSecrets\` | GET | \`/synthetic/businesses/:businessId/raw-secrets\` | secret-read | stop-the-line raw webhook read |
+| \`SyntheticReadController.getRawSecrets\` | GET | \`/synthetic/businesses/:businessId/raw-secrets\` | secret-read | stop-the-line raw portalAccess read |
+| \`SyntheticReadController.getVarAuthData\` | GET | \`/synthetic/businesses/:businessId/var-auth-data\` | secret-read | stop-the-line authData read |
 | \`SyntheticReadController.getUnregisteredData\` | GET | \`/synthetic/businesses/:businessId/unregistered-data\` | applied | revenue:read (claimed without guard or check) |
 | \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | exempt-guard | guard:AdminGuard (not on route) |
 `);
@@ -631,10 +776,33 @@ export class SyntheticReadController {
       true,
     );
 
+    // Negative control 5 (fail-closed schemaProblems): malformed rows (uppercase/underscore disposition typo,
+    // missing backticks, wrong column count), duplicate key, non-GET verb, unknown disposition, and empty reason ALL FAIL.
+    const badSchemaCensus = parseCensus(`
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
+| \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | OPEN | uppercase disposition typo |
+| SyntheticReadController.getOpenData | GET | \`/synthetic/businesses/:businessId/open-data\` | open | missing backticks |
+| \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | open | too | many | columns |
+| \`SyntheticReadController.getWebhookSecret\` | POST | \`/synthetic/businesses/:businessId/webhook-secret\` | secret-read | non-GET verb |
+| \`SyntheticReadController.getWebhookSecret\` | GET | \`/synthetic/businesses/:businessId/webhook-secret\` | bogus-disp | duplicate + unknown disposition |
+| \`SyntheticReadController.getRawSecrets\` | GET | \`/synthetic/businesses/:businessId/raw-secrets\` | secret-read |   |
+`);
+    const badSchemaResult = validateReadCensus(synthRoutes, badSchemaCensus, synthModuleSource);
+    expect(badSchemaResult.schemaProblems.length).toBeGreaterThanOrEqual(7);
+    expect(badSchemaResult.schemaProblems.filter((p) => p.includes('malformed route table row'))).toHaveLength(3);
+    expect(badSchemaResult.schemaProblems.some((p) => p.includes('expected GET'))).toBe(true);
+    expect(badSchemaResult.schemaProblems.some((p) => p.includes('listed twice'))).toBe(true);
+    expect(badSchemaResult.schemaProblems.some((p) => p.includes('unknown disposition bogus-disp'))).toBe(true);
+    expect(badSchemaResult.schemaProblems.some((p) => p.includes('gives no reason'))).toBe(true);
+
     // Control passes cleanly when every row is honest and valid
-    const validCensus = parseCensusRows(`
+    const validCensus = parseCensus(`
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
 | \`SyntheticReadController.getWebhookSecret\` | GET | \`/synthetic/businesses/:businessId/webhook-secret\` | secret-read | stop-the-line finding: returns signingSecret, apiKey, webhookSecret |
-| \`SyntheticReadController.getRawSecrets\` | GET | \`/synthetic/businesses/:businessId/raw-secrets\` | secret-read | stop-the-line finding: returns raw webhook rows |
+| \`SyntheticReadController.getRawSecrets\` | GET | \`/synthetic/businesses/:businessId/raw-secrets\` | secret-read | stop-the-line finding: returns raw portalAccess rows |
+| \`SyntheticReadController.getVarAuthData\` | GET | \`/synthetic/businesses/:businessId/var-auth-data\` | secret-read | stop-the-line finding: returns authData and authDataRef |
 | \`SyntheticReadController.getUnregisteredData\` | GET | \`/synthetic/businesses/:businessId/unregistered-data\` | open | crm:read follow-up |
 | \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | open | revenue:read follow-up |
 `);
