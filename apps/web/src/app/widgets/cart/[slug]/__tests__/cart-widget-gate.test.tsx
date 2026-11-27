@@ -43,6 +43,22 @@ describe("WEDGE-HIDE-STORE part 2: /widgets/cart/<slug>", () => {
     expect(await screen.findByRole("button", { name: "Checkout" })).toBeTruthy();
   });
 
+  it("WHS2-11b storeCheckout true: a filled-in checkout sends exactly one store order", async () => {
+    answer = { data: { products: [PRODUCT], storeCheckout: true }, error: null };
+    api.apiPost.mockImplementation(async () => ({ data: { order: { id: "ord_whs2_w" } }, error: null }));
+    const { container } = render(<CartWidgetPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Checkout" }));
+    const [name, email] = Array.from(container.querySelectorAll("input"));
+    fireEvent.change(name, { target: { value: "Ana Ali" } });
+    fireEvent.change(email, { target: { value: "ana@whs2.test" } });
+    fireEvent.click(screen.getByRole("button", { name: /^pay /i }));
+    expect(await screen.findByText("Order placed!")).toBeTruthy();
+    const posts = api.apiPost.mock.calls.filter(([arg]) => String((arg as { path?: string })?.path ?? "").endsWith("/checkout"));
+    expect(posts).toHaveLength(1);
+    expect((posts[0][0] as { body: { items: unknown } }).body.items).toEqual([{ productId: PRODUCT.id, quantity: 1 }]);
+  });
+
   for (const [label, data] of [
     ["the field is missing (a server without P233)", { products: [PRODUCT] }],
     ["storeCheckout is false", { products: [PRODUCT], storeCheckout: false }],

@@ -49,6 +49,8 @@ const ORDER_PAYLOAD = { items: [{ productId: PRODUCT.id, quantity: 1 }], custome
 let storefront: Record<string, unknown> | "fails" = { storefront: {} };
 let services: unknown[] = [];
 let products: unknown[] = [];
+/** What the order status read answers for a kept order (FAILED: the Payment Failed view; PENDING: the pending view). */
+let paymentStatus = "FAILED";
 
 const ADD = /^(add|pre-order|add to cart)$/i;
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
@@ -67,6 +69,7 @@ beforeAll(() => {
 beforeEach(() => {
   window.localStorage.clear();
   storefront = { storefront: {} };
+  paymentStatus = "FAILED";
   services = [];
   products = [];
   api.apiPost.mockReset();
@@ -75,7 +78,7 @@ beforeEach(() => {
   api.apiGet.mockImplementation(async (path: string) => {
     if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
     if (path === `/site/storefront/public/${SLUG}`) return storefront === "fails" ? { data: null, error: "Request failed" } : { data: storefront, error: null };
-    if (path.startsWith("/site/storefront/public/order/")) return { data: { paymentStatus: "FAILED", status: "PENDING" }, error: null };
+    if (path.startsWith("/site/storefront/public/order/")) return { data: { paymentStatus, status: "PENDING" }, error: null };
     if (path === `/bookings/public/businesses/${BUSINESS.id}/services`) return { data: services, error: null };
     if (path === `/bookings/public/businesses/${BUSINESS.id}/staff`) return { data: [], error: null };
     if (path === `/commerce/public/businesses/${BUSINESS.id}/products`) return { data: products, error: null };
@@ -94,8 +97,12 @@ const NOT_OFFERED: Array<[string, Record<string, unknown> | "fails"]> = [
   ["the field is missing (a server without P233)", { storefront: {} }],
   ["storeCheckout is false", { storefront: {}, storeCheckout: false }],
   ["storeCheckout is a truthy non-boolean", { storefront: {}, storeCheckout: "true" }],
-  ["the storefront read failed", "fails"],
 ];
+const KEPT_ORDER = {
+  orderId: "ord_whs2_1", orderNumber: "ORD-1001", customerEmail: "ana@whs2.test", items: [PRODUCT_LINE], orderTotal: 70,
+  paymentMethod: "wipay", orderPayload: ORDER_PAYLOAD,
+};
+const COULD_NOT_CHECK = /couldn.t check online ordering/i;
 
 describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only on storeCheckout: true", () => {
   it("WHS2-03 storeCheckout true: a product can be added to the cart", async () => {
@@ -171,9 +178,23 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
       expect(await screen.findByRole("heading", { name: "Payment Failed" })).toBeTruthy();
       expect(screen.getByText("Online orders are not available from this business.")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
+      // It does not tell the customer to try again, or to pick another method, when neither can be done here.
+      expect(screen.queryByText(/please try again|different payment method/i)).toBeNull();
       // The one way on is back to the page: no dead Retry to loop on.
       fireEvent.click(screen.getByRole("button", { name: /back to shop/i }));
       await waitFor(() => expect(screen.queryByRole("heading", { name: "Payment Failed" })).toBeNull());
+      expect(checkoutPosts()).toHaveLength(0);
+    });
+    it(`WHS2-06b not offered when ${label}: a kept order still pending offers no retry, says why, and claims nothing it does not know`, async () => {
+      storefront = answer;
+      paymentStatus = "PENDING";
+      window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: "Payment not confirmed" })).toBeTruthy();
+      expect(screen.getByText("Online orders are not available from this business.")).toBeTruthy();
+      expect(screen.queryByText(/still being processed|check back shortly/i)).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Payment Processing" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
       expect(checkoutPosts()).toHaveLength(0);
     });
   }
@@ -211,6 +232,98 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
     render(<PublicBookingPage />);
     fireEvent.click(await screen.findByRole("button", { name: /retry payment|try again/i }));
     await waitFor(() => expect(checkoutPosts()).toHaveLength(1));
+  });
+
+  it("WHS2-08b storeCheckout true: a kept order still pending keeps its own words and its Retry", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    paymentStatus = "PENDING";
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment Processing" })).toBeTruthy();
+    expect(screen.getByText(/still being processed/i)).toBeTruthy();
+    expect(screen.queryByText("Online orders are not available from this business.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /retry payment/i }));
+    await waitFor(() => expect(checkoutPosts()).toHaveLength(1));
+  });
+
+  it("WHS2-08c storeCheckout true: the Payment Failed view keeps its try-again words", async () => {
+    storefront = { storefront: {}, storeCheckout: true };
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment Failed" })).toBeTruthy();
+    expect(screen.getByText(/please try again or choose a different payment method/i)).toBeTruthy();
+  });
+
+  // Repair round 3, item 5: a storefront read that FAILED is not the answer "not offered". The gate stays closed, but
+  // nothing is deleted, and the customer can ask again.
+  it("WHS2-25 the storefront read failed: gate closed, stored cart kept, a notice with Try again; a retry that answers true gives the cart back", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /find your match/i })).toBeNull();
+    // The only Add buttons are the service's (already in the cart: none adds a product).
+    for (const button of screen.queryAllByRole("button", { name: ADD })) fireEvent.click(button);
+    await new Promise((r) => setTimeout(r, 50));
+    // Nothing was deleted: the product line is still stored.
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+
+    storefront = { storefront: {}, storeCheckout: true };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+  });
+
+  it("WHS2-26 the storefront read failed, then a retry answers false: only then are the stored product lines dropped", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    expect(await screen.findByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+
+    storefront = { storefront: {}, storeCheckout: false };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE.id]));
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+    expect(screen.getByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+  });
+
+  it("WHS2-27 the storefront read failed, and failed again on retry: the notice stays and nothing is deleted", async () => {
+    storefront = "fails";
+    products = [PRODUCT];
+    services = [SERVICE];
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await screen.findByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+  });
+
+  it("WHS2-28 the storefront read failed: a kept failed order sends no store order (no Retry; it says the check failed, not that orders are unavailable)", async () => {
+    storefront = "fails";
+    window.localStorage.setItem(`kf_pending_checkout_${SLUG}`, JSON.stringify(KEPT_ORDER));
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole("heading", { name: "Payment Failed" })).toBeTruthy();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(screen.queryByText("Online orders are not available from this business.")).toBeNull();
+    expect(screen.queryByRole("button", { name: /retry payment|try again/i })).toBeNull();
+    expect(checkoutPosts()).toHaveLength(0);
+  });
+
+  it("WHS2-29 a business with no product and no stored product line shows no notice when the storefront read failed", async () => {
+    storefront = "fails";
+    services = [SERVICE];
+    render(<PublicBookingPage />);
+    await screen.findAllByText(SERVICE.name, { exact: true });
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
   });
 
   it("WHS2-09 while the answer is not yet known the stored cart is not rewritten; a late 'true' gives the whole cart back", async () => {

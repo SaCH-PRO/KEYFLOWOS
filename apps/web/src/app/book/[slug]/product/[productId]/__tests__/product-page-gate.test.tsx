@@ -37,6 +37,7 @@ const PRODUCT_LINE = { id: PRODUCT.id, name: PRODUCT.name, description: null, pr
 const SERVICE_LINE = { id: "svc_whs2_cut", name: "Haircut", description: null, price: 120, currency: "TTD", duration: 30, imageUrl: null, itemType: "service", requiresBooking: true, quantity: 1 };
 const CART_KEY = `kf_cart_${SLUG}`;
 const ADD = /^(add to cart|pre-order)/i;
+const COULD_NOT_CHECK = /couldn.t check online ordering/i;
 let storefront: Record<string, unknown> | null = {};
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
 
@@ -72,7 +73,6 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
   for (const [label, answer] of [
     ["the field is missing (a server without P233)", { storefront: {} }],
     ["storeCheckout is false", { storefront: {}, storeCheckout: false }],
-    ["the storefront read failed", null],
   ] as Array<[string, Record<string, unknown> | null]>) {
     it(`WHS2-14 not offered when ${label}: no Add to Cart, and a restored product line is dropped`, async () => {
       storefront = answer;
@@ -96,4 +96,39 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
       expect(document.querySelector('[data-buy-bar]')).toBeNull();
     });
   }
+
+  it("WHS2-30 the storefront read failed: no buying controls, stored cart kept, a notice; a retry that answers true brings Add to Cart and the cart back", async () => {
+    storefront = null;
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<ProductDetailPage />);
+    await screen.findAllByText(PRODUCT.name);
+    expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    expect(screen.queryByText("Qty:")).toBeNull();
+    expect(document.querySelector('[data-buy-bar]')).toBeNull();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
+
+    storefront = { storefront: {}, storeCheckout: true };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+    expect(screen.getByText("Qty:")).toBeTruthy();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
+  });
+
+  it("WHS2-31 the storefront read failed, then a retry answers false: only then are the stored product lines dropped", async () => {
+    storefront = null;
+    window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
+    render(<ProductDetailPage />);
+    expect(await screen.findByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
+
+    storefront = { storefront: {}, storeCheckout: false };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE_LINE.id]));
+    expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
+    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+  });
 });
