@@ -742,7 +742,7 @@ describe('W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): name_mismatch withheld rows
   it('TV-11 (P235 FU-PAYROLL-IS-MONEY, D-310 / D-100 / D-140): payrollRowCarriesMoney and canReadActivityRow withhold payroll Activity rows without revenue:read across snake_case/PascalCase entityTypes, payroll.* prefixes, and object/JSON data fields, while leaving non-payroll operations rows visible', async () => {
     const { canReadActivityRow, payrollRowCarriesMoney } = await visibility();
     const viewer = (modules: string[], extra: Partial<{ readsUnmapped: boolean; readsOwnerWithheld: boolean }> = {}) => ({
-      readableModules: new Set(modules),
+      readable: new Set(modules),
       readsUnmapped: extra.readsUnmapped ?? false,
       readsOwnerWithheld: extra.readsOwnerWithheld ?? false,
     });

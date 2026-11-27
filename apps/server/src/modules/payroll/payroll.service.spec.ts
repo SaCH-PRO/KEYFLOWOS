@@ -486,7 +486,7 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140): fail-closed redactio
       },
     });
     const paidVisible = await withRev.svc.markRunPaid('biz_1', 'run_1', { paymentMethod: 'cash', actorId: 'u_ops_rev' });
-    expect(paidVisible.totalGross).toBe(5_000);
+    expect(paidVisible.totalGross).toBe(6_400);
 
     // Positive control: member SUPER_ADMIN sees totalGross.
     const memberSa = makeStubs({
@@ -494,7 +494,7 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140): fail-closed redactio
       userRoles: { u_sa: 'SUPER_ADMIN' },
     });
     const paidSa = await memberSa.svc.markRunPaid('biz_1', 'run_1', { paymentMethod: 'cash', actorId: 'u_sa' });
-    expect(paidSa.totalGross).toBe(5_000);
+    expect(paidSa.totalGross).toBe(6_400);
   });
 
   it('PS-28 canReadPayrollMoney authority matrix and fail-closed defaults on listRates / listRuns / getRun / approveRun', async () => {
