@@ -16,7 +16,7 @@ import { CreateWaitlistEntryDto } from './dto/create-waitlist-entry.dto';
 import { OfferWaitlistSlotDto } from './dto/offer-waitlist-slot.dto';
 import { WaitlistQueryDto } from './dto/waitlist-query.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
-import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
+import { MAX_PUBLIC_RELEASE_BOOKING_IDS, PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { appUrl } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -345,6 +345,31 @@ export class BookingsController {
       throw new BadRequestException('startTime must be a valid ISO 8601 date string');
     }
 
+    const rawReplaceBookingId: unknown = body?.replaceBookingId;
+    if (
+      rawReplaceBookingId !== undefined &&
+      rawReplaceBookingId !== null &&
+      (typeof rawReplaceBookingId !== 'string' || rawReplaceBookingId.length > 200)
+    ) {
+      throw new BadRequestException('replaceBookingId must be a string up to 200 characters');
+    }
+    const rawReleaseBookingIds: unknown = body?.releaseBookingIds;
+    let releaseBookingIds: string[] | undefined;
+    if (rawReleaseBookingIds !== undefined && rawReleaseBookingIds !== null) {
+      if (
+        !Array.isArray(rawReleaseBookingIds) ||
+        rawReleaseBookingIds.length > MAX_PUBLIC_RELEASE_BOOKING_IDS ||
+        rawReleaseBookingIds.some((id) => typeof id !== 'string' || id.length > 200)
+      ) {
+        throw new BadRequestException(
+          `releaseBookingIds must be an array of up to ${MAX_PUBLIC_RELEASE_BOOKING_IDS} strings`,
+        );
+      }
+      releaseBookingIds = rawReleaseBookingIds
+        .map((id) => sanitizeString(id, 200))
+        .filter((id): id is string => !!id);
+    }
+
     const limitCheck = await this.subscriptions.checkLimit(businessId, 'bookings');
     if (!limitCheck.allowed) {
       const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
@@ -382,6 +407,8 @@ export class BookingsController {
       referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
       orgUnitId: body.orgUnitId ? sanitizeString(body.orgUnitId, 200) : undefined,
       paymentMethod,
+      replaceBookingId: rawReplaceBookingId ? sanitizeString(rawReplaceBookingId, 200) : undefined,
+      releaseBookingIds,
     });
   }
 

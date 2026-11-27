@@ -38,6 +38,7 @@ import {
   toCents,
 } from './booking-payment-status.listener';
 import { CANCEL_INITIATORS, CancelInitiator } from './dto/update-booking-status.dto';
+import { MAX_PUBLIC_RELEASE_BOOKING_IDS } from './dto/public-create-booking.dto';
 import {
   PAYMENT_METHOD_NOT_OFFERED,
   STOREFRONT_CHECKOUT_METHODS,
@@ -114,7 +115,11 @@ type SlotParams = {
   end: Date;
   bufferMins?: number | null;
   excludeBookingId?: string;
+  excludeBookingIds?: string[];
 };
+
+const SETTLED_PAYMENT_STATUSES: string[] = ['SUCCESSFUL', 'COMPLETED', 'PAID'];
+const PAID_INVOICE_STATUSES: string[] = ['PAID', 'PARTIALLY_PAID'];
 
 /** Minutes in a day on the business's clock: the picker's candidate starts stay below it. */
 const MINUTES_PER_DAY = 1440;
@@ -1312,6 +1317,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const bufferMins = Math.max(0, params.bufferMins ?? 0);
     const bufferMs = bufferMins * 60000;
 
+    const excludedIds = [
+      ...(params.excludeBookingId ? [params.excludeBookingId] : []),
+      ...(params.excludeBookingIds ?? []),
+    ];
+
     const clash = await db.booking.findFirst({
       where: {
         businessId: params.businessId,
@@ -1319,7 +1329,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         deletedAt: null,
         startTime: { lt: new Date(params.end.getTime() + bufferMs) },
         endTime: { gt: new Date(params.start.getTime() - bufferMs) },
-        ...(params.excludeBookingId ? { id: { not: params.excludeBookingId } } : {}),
+        ...(excludedIds.length === 1
+          ? { id: { not: excludedIds[0] } }
+          : excludedIds.length > 1
+            ? { id: { notIn: excludedIds } }
+            : {}),
         // Without a staff member the service itself is the resource being
         // consumed; with one, that person is.
         ...(params.staffId ? { staffId: params.staffId } : { serviceId: params.serviceId }),
@@ -1349,10 +1363,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * transaction and writes, so the second of two claims sees the first. No
    * migration and no constraint: the table already holds overlapping rows.
    */
-  private claimSlot<T>(slot: SlotParams, write: (tx: PrismaTx) => Promise<T>): Promise<T> {
+  private claimSlot<T>(
+    slot: SlotParams,
+    write: (tx: PrismaTx) => Promise<T>,
+    beforeCheck?: (tx: PrismaTx) => Promise<void>,
+  ): Promise<T> {
     const key = `${SLOT_LOCK_NAMESPACE}${slot.businessId}:${slot.staffId || slot.serviceId}`;
     return this.prisma.client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      if (beforeCheck) {
+        await beforeCheck(tx);
+      }
       await this.assertSlotFree(slot, tx);
       return write(tx);
     }, SLOT_CLAIM_TX_OPTIONS);
@@ -2041,6 +2062,107 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * V1-92 / P228 (FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK): deduplicate and bound
+   * candidate prior booking IDs passed by a public checkout retry/rebook.
+   */
+  private collectReleaseBookingIds(
+    replaceBookingId?: string | null,
+    releaseBookingIds?: string[] | null,
+  ): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (raw: string | null | undefined) => {
+      if (typeof raw !== 'string') return;
+      const trimmed = raw.trim();
+      if (!trimmed || seen.has(trimmed) || out.length >= MAX_PUBLIC_RELEASE_BOOKING_IDS) return;
+      seen.add(trimmed);
+      out.push(trimmed);
+    };
+    push(replaceBookingId);
+    if (Array.isArray(releaseBookingIds)) {
+      for (const id of releaseBookingIds) push(id);
+    }
+    return out;
+  }
+
+  private isBookingUnpaidAndReleasable(row: {
+    status: BookingStatus;
+    paymentStatus: string | null;
+    deletedAt: Date | null;
+    invoice: { id: string; status: string; payments: Array<{ id: string }> } | null;
+    depositInvoice: { id: string; status: string; payments: Array<{ id: string }> } | null;
+  }): boolean {
+    if (row.deletedAt !== null) return false;
+    if (row.status !== 'PENDING') return false;
+    if (row.paymentStatus !== 'UNPAID') return false;
+    for (const inv of [row.invoice, row.depositInvoice]) {
+      if (!inv) continue;
+      if (PAID_INVOICE_STATUSES.includes(inv.status)) return false;
+      if (inv.payments.length > 0) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Read-only pre-check for the early `assertSlotFree` call (before contact
+   * creation or invoice writes) so a customer retrying their own slot is not
+   * blocked by their own unpaid PENDING hold. The authoritative check and
+   * cancellation still happen atomically inside `claimSlot`'s transaction
+   * keyed on `contact.id`.
+   */
+  private async findPreCheckReleasableBookingIds(
+    businessId: string,
+    candidateIds: string[],
+    contactInput: { email?: string | null; phone?: string | null },
+  ): Promise<string[]> {
+    if (candidateIds.length === 0) return [];
+    const normalizedEmail = contactInput.email?.trim().toLowerCase() || null;
+    const normalizedPhone = contactInput.phone?.trim() || null;
+    if (!normalizedEmail && !normalizedPhone) return [];
+
+    const rows = await this.prisma.client.booking.findMany({
+      where: {
+        id: { in: candidateIds },
+        businessId,
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        deletedAt: true,
+        contact: { select: { email: true, phone: true } },
+        invoice: {
+          select: {
+            id: true,
+            status: true,
+            payments: { where: { status: { in: SETTLED_PAYMENT_STATUSES } }, select: { id: true }, take: 1 },
+          },
+        },
+        depositInvoice: {
+          select: {
+            id: true,
+            status: true,
+            payments: { where: { status: { in: SETTLED_PAYMENT_STATUSES } }, select: { id: true }, take: 1 },
+          },
+        },
+      },
+    });
+
+    return rows
+      .filter((row) => {
+        if (!this.isBookingUnpaidAndReleasable(row)) return false;
+        if (normalizedEmail) {
+          return row.contact?.email?.trim().toLowerCase() === normalizedEmail;
+        }
+        return row.contact?.phone?.trim() === normalizedPhone;
+      })
+      .map((row) => row.id);
+  }
+
   async publicCreateBooking(input: {
     businessId: string;
     serviceId: string;
@@ -2062,6 +2184,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
      * gate; null is "none sent". A caller that leaves it undefined is compared on storefrontSlug.
      */
     storefrontSlugAsSent?: string | null;
+    /**
+     * V1-92 / P228 (FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK): optional prior unpaid
+     * PENDING booking ID(s) held by the same customer to cancel atomically when
+     * this rebook commits.
+     */
+    replaceBookingId?: string | null;
+    releaseBookingIds?: string[] | null;
   }) {
     // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): reject invalid or
     // non-Date startTime defensively with 400 before any DB read or write.
@@ -2109,6 +2238,16 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     this.assertLeadTime(service.leadTimeMins, start);
 
+    const candidateReleaseIds = this.collectReleaseBookingIds(
+      input.replaceBookingId,
+      input.releaseBookingIds,
+    );
+    const preCheckExcludeIds = await this.findPreCheckReleasableBookingIds(
+      input.businessId,
+      candidateReleaseIds,
+      input.contact,
+    );
+
     const slot: SlotParams = {
       businessId: input.businessId,
       serviceId: service.id,
@@ -2117,7 +2256,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       end,
       bufferMins: service.bufferMins,
     };
-    await this.assertSlotFree(slot);
+    await this.assertSlotFree(
+      preCheckExcludeIds.length > 0 ? { ...slot, excludeBookingIds: preCheckExcludeIds } : slot,
+    );
 
     await this.assertWithinSchedule({
       businessId: input.businessId,
@@ -2216,12 +2357,85 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // The early read above refused a taken slot before the contact and invoices
     // were touched; the claim settles the race with requests in flight. Losing
     // it leaves the invoices drawn up above for a booking that was not written.
-    const booking = await this.claimSlot(slot, (tx) => tx.booking.create({ data: bookingData })).catch(
-      async (err: unknown) => {
-        await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
-        throw err;
-      },
-    );
+    // P228: when candidateReleaseIds are supplied, verify and cancel only the
+    // same contact's unpaid PENDING holds inside the claim transaction BEFORE
+    // assertSlotFree(slot, tx) so retrying the same slot never self-collides,
+    // a concurrently confirmed/paid booking is never cancelled or double-booked,
+    // and any slot conflict automatically rolls back the cancellation.
+    const releasedInvoiceIds: string[] = [];
+    const booking = await this.claimSlot(
+      slot,
+      (tx) => tx.booking.create({ data: bookingData }),
+      candidateReleaseIds.length > 0
+        ? async (tx) => {
+            releasedInvoiceIds.length = 0;
+            const candidates = await tx.booking.findMany({
+              where: {
+                id: { in: candidateReleaseIds },
+                businessId: input.businessId,
+                contactId: contact.id,
+                status: 'PENDING',
+                paymentStatus: 'UNPAID',
+                deletedAt: null,
+              },
+              select: {
+                id: true,
+                status: true,
+                paymentStatus: true,
+                deletedAt: true,
+                invoice: {
+                  select: {
+                    id: true,
+                    status: true,
+                    payments: {
+                      where: { status: { in: SETTLED_PAYMENT_STATUSES } },
+                      select: { id: true },
+                      take: 1,
+                    },
+                  },
+                },
+                depositInvoice: {
+                  select: {
+                    id: true,
+                    status: true,
+                    payments: {
+                      where: { status: { in: SETTLED_PAYMENT_STATUSES } },
+                      select: { id: true },
+                      take: 1,
+                    },
+                  },
+                },
+              },
+            });
+
+            for (const row of candidates) {
+              if (!this.isBookingUnpaidAndReleasable(row)) continue;
+              const cancelled = await tx.booking.updateMany({
+                where: {
+                  id: row.id,
+                  businessId: input.businessId,
+                  contactId: contact.id,
+                  status: 'PENDING',
+                  paymentStatus: 'UNPAID',
+                  deletedAt: null,
+                },
+                data: { status: 'CANCELLED' },
+              });
+              if (cancelled.count === 1) {
+                if (row.invoice?.status === 'DRAFT') releasedInvoiceIds.push(row.invoice.id);
+                if (row.depositInvoice?.status === 'DRAFT') releasedInvoiceIds.push(row.depositInvoice.id);
+              }
+            }
+          }
+        : undefined,
+    ).catch(async (err: unknown) => {
+      await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
+      throw err;
+    });
+
+    if (releasedInvoiceIds.length > 0) {
+      await this.withdrawDraftInvoices(input.businessId, releasedInvoiceIds);
+    }
 
     const payload: BookingCreatedPayload = {
       booking,
