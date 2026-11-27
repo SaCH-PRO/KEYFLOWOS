@@ -1715,6 +1715,11 @@
       "prefix": "v92l_",
       "owner": "apps/server/test/slots-overnight-hours.integration.test.ts",
       "packet": "V1-92 (FU-SLOTS-OVERNIGHT-HOURS, P229)"
+    },
+    {
+      "prefix": "v92n_",
+      "owner": "apps/server/test/payroll-is-money.integration.test.ts",
+      "packet": "V1-92 (FU-PAYROLL-IS-MONEY, P235)"
     }
   ],
   "pendingRenames": [],
