@@ -96,7 +96,17 @@ function makeStub(
     return row;
   };
 
-  const client = {
+  const client: any = {
+    $transaction: vi.fn(async (fn: (tx: any) => Promise<unknown>) => fn(client)),
+    $executeRaw: vi.fn(async () => 1),
+    $queryRaw: vi.fn(async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      // Matches the seeder's active-coded-accounts query:
+      // SELECT id, name, lower(btrim(code, $1)) AS norm_code FROM chart_of_accounts WHERE business_id = $2 ...
+      const tenant = values[1] as string | undefined;
+      return Array.from(coa.values())
+        .filter((r: any) => (!tenant || r.businessId === tenant) && r.isActive !== false && typeof r.code === 'string' && r.code.trim() !== '')
+        .map((r: any) => ({ id: r.id, name: r.name, norm_code: r.code.trim().toLowerCase() }));
+    }),
     chartOfAccount: {
       findMany: vi.fn(async (args: any) => {
         const businessId = tenantOf(args.where.businessId);
