@@ -158,9 +158,6 @@ export function useExpensesData() {
   }, [businessId, switchEpoch]);
 
   const readParams = JSON.stringify([period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
-  // R9-2: the filters whose change resets the page (the setPage(1) effect above), and those of the last read started.
-  const pageResetFilters = JSON.stringify([period, filterCategory, filterPayment, filterStatus, debouncedSearch]);
-  const lastReadFiltersRef = useRef<string | null>(null);
   // R8-3: this effect must stay above the read effect below. Effects run in order, so the read that a parameter
   // change starts sees paramsRef already holding the new parameters. Were the order swapped, that read would find the
   // ref stale, refuse itself and bump `refresh`; the read would still happen, once, a render later (the fetch count is
@@ -181,10 +178,10 @@ export function useExpensesData() {
       setRefresh((n) => n + 1);
       return;
     }
-    // R9-2: a filter change on a later page is read once, on page 1: the setPage(1) effect runs in the same commit, so
-    // a read with the old page and the new filters would only be replaced (and was a wasted request).
-    if (page !== 1 && lastReadFiltersRef.current !== null && pageResetFilters !== lastReadFiltersRef.current) return;
-    lastReadFiltersRef.current = pageResetFilters;
+    // R10: a filter change on a later page may also read the old page with the new filters before the setPage(1)
+    // reset lands; that read is replaced (the generation guard drops its reply). It is not skipped: the skip of round 9
+    // compared with the last read started while the reset compares with the last render, and the two could part (a
+    // page change batched after the reset), leaving the old filter's rows on screen and every later read refused.
     const generation = ++generationRef.current;
     const current = () => generation === generationRef.current && businessRef.current === businessId;
     setLoading(true);
@@ -227,7 +224,7 @@ export function useExpensesData() {
       setRead({ kind: "failed", message: "Couldn't load expenses." });
     }
     setLoading(false);
-  }, [clearAll, businessId, switchEpoch, refresh, readParams, pageResetFilters, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
+  }, [clearAll, businessId, switchEpoch, refresh, readParams, period, debouncedSearch, filterCategory, filterPayment, filterStatus, customStart, customEnd, page, pageSize]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
   useEffect(() => { void loadData(); }, [loadData]);
