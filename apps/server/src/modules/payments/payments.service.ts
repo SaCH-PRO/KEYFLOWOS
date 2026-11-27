@@ -297,6 +297,17 @@ const VOID_INVOICE_NOTHING_TO_REFUND = 'void_invoice_nothing_to_refund' as const
 const PAYPAL_REFUND_PAIRED_PROVIDER = 'paypal-refund-paired';
 const paypalPairedWith = (handRefundId: string) => `paired:${handRefundId}`;
 
+/**
+ * W11-LOAD-SENSITIVE-TESTS (MR-02 / MR-03): provider payment and refund posting
+ * transactions lock the invoice row, record the Payment row, and post or
+ * reverse ledger entries (a completing refund reverses both the original
+ * payment posting and prior partial refund postings inside one commit). Under
+ * load or against a remote database that can exceed Prisma's 5 s interactive
+ * transaction default and abort a genuine payment or refund ("Transaction
+ * already closed"). Matches CommerceService's RECORD_PAYMENT_TX_OPTIONS.
+ */
+export const PAYMENT_POSTING_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const;
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -343,7 +354,7 @@ export class PaymentsService {
         });
       }
       return created;
-    });
+    }, PAYMENT_POSTING_TX_OPTIONS);
   }
 
   /**
@@ -570,7 +581,7 @@ export class PaymentsService {
       });
       if (onRecorded) await onRecorded(txClient, amount);
       return created;
-    });
+    }, PAYMENT_POSTING_TX_OPTIONS);
   }
 
   /**
@@ -688,7 +699,7 @@ export class PaymentsService {
         });
       }
       return created;
-    });
+    }, PAYMENT_POSTING_TX_OPTIONS);
   }
 
   /**
