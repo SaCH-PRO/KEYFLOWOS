@@ -23,7 +23,7 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({}),
 }));
 
-import { storefrontOffer, offerWords } from "../storefront-counts";
+import { storefrontOffer, offerWords, liveProducts, offerOf } from "../storefront-counts";
 import { AiContentPanel } from "../components/ai-content-panel";
 import { MerchandisingMode } from "../components/merchandising-mode";
 import { FaqManager } from "../components/faq-manager";
@@ -70,6 +70,14 @@ describe("R8-1: the name de-dupe is /book's", () => {
     const offer = storefrontOffer(services, products, new Set(["p_hair"]), { storefrontConfig: config });
     expect(offer).toEqual({ products: 0, packages: 0, services: 0, orderableServices: 0 });
     expect(offerWords(offer).counted).toBe("");
+  });
+
+  it("liveProducts itself drops the 'Haircut' product against the hidden 'Haircut' service", () => {
+    expect(liveProducts(products, new Set(["p_hair"]), { services, storefrontConfig: config })).toEqual([]);
+  });
+
+  it("offerOf de-dupes against the services it is given (the hub's copy tools, given no store view)", () => {
+    expect(offerOf(products, [{ name: "Haircut" }])).toEqual({ products: 0, packages: 0, services: 1, orderableServices: 0 });
   });
 
   it("the panel, through the merchandising view, says no 'Browse 1 service'", async () => {
