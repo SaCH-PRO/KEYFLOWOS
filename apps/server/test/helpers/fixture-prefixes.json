@@ -1695,6 +1695,11 @@
       "prefix": "v66a_",
       "owner": "apps/server/test/tier-pricing.integration.test.ts",
       "packet": "V1-66 (TOF-TIER-PRICING-ROUTES)"
+    },
+    {
+      "prefix": "v92i_",
+      "owner": "apps/server/test/today-orders-premise.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-ORDERS-PREMISE, P205)"
     }
   ],
   "pendingRenames": [],

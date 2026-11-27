@@ -95,18 +95,15 @@ const APPROVAL_TYPE_SCOPE: Readonly<Record<string, 'revenueRead' | 'expensesRead
     general: 'operationsRead',
   };
 
-const CLOSED_ORDER_STATUSES = [
-  'shipped',
-  'delivered',
-  'completed',
-  'cancelled',
-  'refunded',
-  'SHIPPED',
-  'DELIVERED',
-  'COMPLETED',
-  'CANCELLED',
-  'REFUNDED',
-];
+const CLOSED_ORDER_STATUS_LOWER = new Set(['shipped', 'delivered', 'completed', 'cancelled', 'refunded']);
+
+/**
+ * P205 (FU-TODAY-ORDERS-PREMISE, D-298, Journey I3): payment statuses that
+ * exclude an order from the Today fulfilment queue. Open unpaid/pending/paid
+ * orders stay visible to fulfil; refunded, failed, cancelled, and voided
+ * payment states are excluded.
+ */
+const CLOSED_ORDER_PAYMENT_STATUS_LOWER = new Set(['refunded', 'failed', 'cancelled', 'void']);
 
 const NEEDS_YOU_PRIORITY: Record<TodayNeedsYouKind, number> = {
   CLAIM: 100,
@@ -963,13 +960,20 @@ export class TodayService {
     const rows = await this.prisma.client.marketplaceOrder.findMany({
       where: {
         businessId,
-        paymentStatus: 'PAID',
-        status: { notIn: CLOSED_ORDER_STATUSES },
+        NOT: [
+          ...[...CLOSED_ORDER_STATUS_LOWER].map((s) => ({
+            status: { equals: s, mode: 'insensitive' as const },
+          })),
+          ...[...CLOSED_ORDER_PAYMENT_STATUS_LOWER].map((s) => ({
+            paymentStatus: { equals: s, mode: 'insensitive' as const },
+          })),
+        ],
       },
       select: {
         id: true,
         orderNumber: true,
         status: true,
+        paymentStatus: true,
         total: true,
         currency: true,
         customerName: true,
@@ -978,16 +982,22 @@ export class TodayService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
     });
-    return rows.map((o) => ({
-      id: o.id,
-      orderNumber: o.orderNumber,
-      status: o.status,
-      // D-57 / D-100 / D-234: withhold PAID order monetary totals below revenue:read.
-      total: access.revenueRead ? Number(o.total) : null,
-      currency: o.currency || 'TTD',
-      customerName: o.customerName || null,
-      createdAt: o.createdAt.toISOString(),
-    }));
+    return rows
+      .filter((o) => {
+        const st = (o.status || '').trim().toLowerCase();
+        const ps = (o.paymentStatus || '').trim().toLowerCase();
+        return !CLOSED_ORDER_STATUS_LOWER.has(st) && !CLOSED_ORDER_PAYMENT_STATUS_LOWER.has(ps);
+      })
+      .map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        status: o.status,
+        // D-57 / D-100 / D-234: withhold order monetary totals below revenue:read.
+        total: access.revenueRead ? Number(o.total) : null,
+        currency: o.currency || 'TTD',
+        customerName: o.customerName || null,
+        createdAt: o.createdAt.toISOString(),
+      }));
   }
 
   private async loadReminders(
