@@ -2746,7 +2746,7 @@ ${triage.standingContext}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
-                content: JSON.stringify(result.success === false ? { error: result.error } : (result.result ?? null)),
+                content: JSON.stringify(result.success === false ? { error: result.error ?? 'Unknown error' } : (result.result ?? null)),
               });
             }
           }
@@ -3031,22 +3031,22 @@ ${triage.standingContext}`;
       );
       const toolResults = fillToolResultSlots(slots, executedResults);
 
-      const followUpMessages: GatewayMessage[] = [
-        ...messages,
-        {
-          role: 'assistant' as const,
-          content: assistantMessage.content || null,
-          tool_calls: assistantMessage.tool_calls,
-        },
-        ...toolResults.map((result) => ({
-          role: 'tool' as const,
-          tool_call_id: result.toolCallId,
-          content: JSON.stringify(result.success ? result.result : { error: result.error }),
-        })),
-      ];
-
       let followUpGateway: Awaited<ReturnType<AiUsageService['trackAndComplete']>>;
       try {
+        const followUpMessages: GatewayMessage[] = [
+          ...messages,
+          {
+            role: 'assistant' as const,
+            content: assistantMessage.content || null,
+            tool_calls: assistantMessage.tool_calls,
+          },
+          ...toolResults.map((result) => ({
+            role: 'tool' as const,
+            tool_call_id: result.toolCallId,
+            content: JSON.stringify(result.success ? result.result : { error: result.error }),
+          })),
+        ];
+
         followUpGateway = await this.aiUsage.trackAndComplete(
           businessId,
           undefined,
@@ -3269,7 +3269,7 @@ ${triage.standingContext}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
-                content: JSON.stringify(result.success === false ? { error: result.error } : (result.result ?? null)),
+                content: JSON.stringify(result.success === false ? { error: result.error ?? 'Unknown error' } : (result.result ?? null)),
               });
             }
           }
@@ -3617,29 +3617,29 @@ ${triage.standingContext}`;
       );
       const toolResults = fillToolResultSlots(slots, executedResults);
 
-      yield { type: 'tool_results', toolResults };
-
-      const onboardingCard = this.extractOnboardingCard(toolResults);
-      if (onboardingCard) {
-        yield { type: 'card', card: onboardingCard };
-      }
-
-      const followUpMessages: GatewayMessage[] = [
-        ...messages,
-        {
-          role: 'assistant' as const,
-          content: fullContent || null,
-          tool_calls: rawToolCalls,
-        },
-        ...toolResults.map((result) => ({
-          role: 'tool' as const,
-          tool_call_id: result.toolCallId,
-          content: JSON.stringify(result.success ? result.result : { error: result.error }),
-        })),
-      ];
-
       let followUpCompleted = false;
       try {
+        yield { type: 'tool_results', toolResults };
+
+        const onboardingCard = this.extractOnboardingCard(toolResults);
+        if (onboardingCard) {
+          yield { type: 'card', card: onboardingCard };
+        }
+
+        const followUpMessages: GatewayMessage[] = [
+          ...messages,
+          {
+            role: 'assistant' as const,
+            content: fullContent || null,
+            tool_calls: rawToolCalls,
+          },
+          ...toolResults.map((result) => ({
+            role: 'tool' as const,
+            tool_call_id: result.toolCallId,
+            content: JSON.stringify(result.success ? result.result : { error: result.error }),
+          })),
+        ];
+
         const followUpStream = this.aiUsage.trackAndStream(
           businessId,
           undefined,
