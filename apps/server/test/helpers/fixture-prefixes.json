@@ -1705,6 +1705,11 @@
       "prefix": "v92j_",
       "owner": "apps/server/test/today-approvals-staff.integration.test.ts",
       "packet": "V1-92 (FU-TODAY-APPROVALS-STAFF, P206)"
+    },
+    {
+      "prefix": "v92k_",
+      "owner": "apps/server/test/public-booking-rebook-release.integration.test.ts",
+      "packet": "V1-92 (P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK)"
     }
   ],
   "pendingRenames": [],

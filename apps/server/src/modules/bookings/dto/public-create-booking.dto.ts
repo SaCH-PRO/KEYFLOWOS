@@ -1,5 +1,7 @@
 import { Type, Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsISO8601,
   IsNotEmpty,
   IsNumber,
@@ -11,6 +13,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { STRICT_ISO_DATETIME_WITH_TZ_RE } from '../business-hours.util';
+
+export const MAX_PUBLIC_RELEASE_BOOKING_IDS = 10;
 
 const stripHtml = ({ value }: { value: any }) =>
   typeof value === 'string' ? value.replace(/<[^>]*>/g, '').trim() : value;
@@ -122,4 +126,21 @@ export class PublicCreateBookingDto {
   @IsOptional()
   @MaxLength(32)
   paymentMethod?: string | null;
+
+  /**
+   * V1-92 / P228 (FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK): optional prior unpaid
+   * PENDING booking ID (or IDs for multi-service checkout) held by the same
+   * customer in this business to release atomically when this rebook succeeds.
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  replaceBookingId?: string | null;
+
+  @IsArray()
+  @IsOptional()
+  @ArrayMaxSize(MAX_PUBLIC_RELEASE_BOOKING_IDS)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  releaseBookingIds?: string[] | null;
 }
