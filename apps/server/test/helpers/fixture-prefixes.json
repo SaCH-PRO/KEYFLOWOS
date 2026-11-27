@@ -1775,6 +1775,11 @@
       "prefix": "v72k_",
       "owner": "apps/server/test/key-learning-outcome-semantics.integration.test.ts",
       "packet": "V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)"
+    },
+    {
+      "prefix": "v63c_",
+      "owner": "apps/server/test/key-v1-tool-allowlist.integration.test.ts",
+      "packet": "V1-63 (KEY-TOOL-ALLOWLIST)"
     }
   ],
   "pendingRenames": [],
