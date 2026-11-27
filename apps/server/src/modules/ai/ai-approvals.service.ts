@@ -42,7 +42,7 @@ export class AiApprovalsService {
 
     const items = await this.prisma.client.aiApprovalItem.findMany({
       where,
-      orderBy: [{ riskTier: 'desc' }, { createdAt: 'asc' }],
+      orderBy: [{ riskTier: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
       take: take + 1,
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,

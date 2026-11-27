@@ -325,7 +325,7 @@ export class CommandService {
         const [page, counted] = await Promise.all([
           this.prisma.client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
             SELECT ci.id FROM command_items ci WHERE ${visible}
-            ORDER BY ci.priority DESC, ci.urgency DESC, ci.created_at DESC
+            ORDER BY ci.priority DESC, ci.urgency DESC, ci.created_at DESC, ci.id DESC
             LIMIT ${take} OFFSET ${filters.offset ?? 0}`),
           this.prisma.client.$queryRaw<Array<{ n: number }>>(Prisma.sql`
             SELECT count(*)::int AS n FROM command_items ci WHERE ${visible}`),
@@ -337,7 +337,7 @@ export class CommandService {
     const [items, total] = await Promise.all([
       this.prisma.client.commandItem.findMany({
         where,
-        orderBy: [{ priority: 'desc' }, { urgency: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ priority: 'desc' }, { urgency: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 25,
         skip: filters.offset ?? 0,
       }),

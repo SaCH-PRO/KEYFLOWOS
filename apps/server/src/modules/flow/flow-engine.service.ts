@@ -65,7 +65,7 @@ export class FlowEngineService {
     const [items, total] = await Promise.all([
       this.prisma.client.automationFlow.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 25,
         skip: filters.offset ?? 0,
         include: {
