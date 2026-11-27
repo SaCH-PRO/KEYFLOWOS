@@ -118,11 +118,14 @@ export class PresenceController {
   @Get('businesses/:businessId/orders')
   listOrders(
     @Param('businessId') businessId: string,
+    @Req() req: any,
     @Query('limit') limit?: string,
   ) {
-    return this.overview.listStorefrontOrders(businessId, {
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
+    return this.overview.listStorefrontOrders(
+      businessId,
+      { limit: limit ? parseInt(limit, 10) : undefined },
+      presenceActor(req) ?? null,
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
