@@ -1152,7 +1152,8 @@ function isInsideTypeNode(node: ts.Node): boolean {
  *   - import-aliased (`import { X as Y }`) and namespace-qualified (`ns.X`) callers
  *
  * Calls from another method that is ALSO registered in `DORMANT_MEMORY_PATHS`
- * (e.g., dormant `selfTune` calling private `applyTuningAdjustment`) stay inside
+ * (e.g., dormant `KeyCortexMemoryService.storePreference` calling
+ * `UnifiedMemoryWriterService.storePreference`) stay inside
  * the dormant subgraph; the first non-dormant caller of ANY dormant entry
  * immediately fails `MEM-CEN-05`.
  */
