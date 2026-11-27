@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CustomerJourneyService } from './customer-journey.service';
 import { GrowthIntelligenceService } from './growth-intelligence.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
-import { schedulersDisabled } from '../../core/config/env';
+import { growthIntelligenceSchedulerDisabled, schedulersDisabled } from '../../core/config/env';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_DELAY_MS = 120 * 1000;
@@ -41,6 +41,10 @@ export class GrowthIntelligenceSchedulerService implements OnModuleInit, OnModul
   onModuleInit() {
     if (schedulersDisabled()) {
       this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
+    if (growthIntelligenceSchedulerDisabled()) {
+      this.logger.log('GrowthIntelligenceSchedulerService disabled via GROWTH_INTELLIGENCE_SCHEDULER_DISABLED');
       return;
     }
     this.startupTimeout = setTimeout(() => {
