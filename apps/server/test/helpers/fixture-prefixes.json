@@ -1685,6 +1685,26 @@
       "prefix": "v92b_",
       "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
+    },
+    {
+      "prefix": "v92c_",
+      "owner": "apps/server/test/pricing-service.integration.test.ts",
+      "packet": "V1-92 (TOF-TIER-PRICING-SCHEMA, P156)"
+    },
+    {
+      "prefix": "v66a_",
+      "owner": "apps/server/test/tier-pricing.integration.test.ts",
+      "packet": "V1-66 (TOF-TIER-PRICING-ROUTES)"
+    },
+    {
+      "prefix": "v92i_",
+      "owner": "apps/server/test/today-orders-premise.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-ORDERS-PREMISE, P205)"
+    },
+    {
+      "prefix": "v92j_",
+      "owner": "apps/server/test/today-approvals-staff.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-APPROVALS-STAFF, P206)"
     }
   ],
   "pendingRenames": [],
