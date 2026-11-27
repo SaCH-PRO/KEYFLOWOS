@@ -21,37 +21,50 @@ export class PayrollController {
 
   @Get('rates')
   @RequireModuleScope('operations', 'read')
-  listRates(@Param('businessId') businessId: string) {
-    return this.payroll.listRates(businessId);
+  async listRates(
+    @Param('businessId') businessId: string,
+    @Req() req?: { user?: { id?: string } },
+  ) {
+    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
+    return this.payroll.listRates(businessId, { includeMoney });
   }
 
   @Get('runs')
   @RequireModuleScope('operations', 'read')
-  listRuns(
+  async listRuns(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
+    @Req() req?: { user?: { id?: string } },
   ) {
+    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
     return this.payroll.listRuns(businessId, {
       status,
       limit: limit ? Number(limit) : undefined,
+      includeMoney,
     });
   }
 
   @Get('runs/:runId')
   @RequireModuleScope('operations', 'read')
-  getRun(@Param('businessId') businessId: string, @Param('runId') runId: string) {
-    return this.payroll.getRun(businessId, runId);
+  async getRun(
+    @Param('businessId') businessId: string,
+    @Param('runId') runId: string,
+    @Req() req?: { user?: { id?: string } },
+  ) {
+    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
+    return this.payroll.getRun(businessId, runId, { includeMoney });
   }
 
   @Post('runs/:runId/approve')
   @RequireModuleScope('operations', 'write')
-  approveRun(
+  async approveRun(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.payroll.approveRun(businessId, runId, req.user?.id);
+    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
+    return this.payroll.approveRun(businessId, runId, req?.user?.id, { includeMoney });
   }
 
   /**
@@ -66,16 +79,18 @@ export class PayrollController {
    */
   @Post('runs/:runId/mark-paid')
   @RequireModuleScope('operations', 'write')
-  markRunPaid(
+  async markRunPaid(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
     @Body() body: { paymentAccountId?: string; paymentMethod?: string } | undefined,
     @Req() req: { user?: { id?: string } },
   ) {
+    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
     return this.payroll.markRunPaid(businessId, runId, {
       paymentAccountId: typeof body?.paymentAccountId === 'string' ? body.paymentAccountId : undefined,
       paymentMethod: typeof body?.paymentMethod === 'string' ? body.paymentMethod : undefined,
       actorId: req?.user?.id ?? null,
+      includeMoney,
     });
   }
 
@@ -88,15 +103,17 @@ export class PayrollController {
    */
   @Post('runs/:runId/discard')
   @RequireModuleScope('operations', 'write')
-  discardRun(
+  async discardRun(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
     @Body() body: { reason?: unknown } | undefined,
     @Req() req: { user?: { id?: string } },
   ) {
+    const includeMoney = await this.payroll.canReadPayrollMoney(businessId, req?.user?.id ?? null);
     return this.payroll.discardRun(businessId, runId, {
       reason: body?.reason,
       actorId: req?.user?.id ?? null,
+      includeMoney,
     });
   }
 }

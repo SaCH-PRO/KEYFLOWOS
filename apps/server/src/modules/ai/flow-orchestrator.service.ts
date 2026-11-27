@@ -8067,7 +8067,9 @@ ${triage.standingContext}`;
       }
       // === PAYROLL ===
       case 'payroll_list_rates': {
-        const rates = await this.getPayroll().listRates(businessId);
+        const actor = (await this.contactBindMember(businessId, action)) ?? null;
+        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
+        const rates = await this.getPayroll().listRates(businessId, { includeMoney });
         return { rates };
       }
       case 'payroll_set_rate': {
@@ -8089,11 +8091,15 @@ ${triage.standingContext}`;
         return { id: run.id, totalGross: Number(run.totalGross), itemCount: run.itemCount };
       }
       case 'payroll_list_runs': {
-        const runs = await this.getPayroll().listRuns(businessId, { status: args.status, limit: args.limit });
+        const actor = (await this.contactBindMember(businessId, action)) ?? null;
+        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
+        const runs = await this.getPayroll().listRuns(businessId, { status: args.status, limit: args.limit, includeMoney });
         return { runs };
       }
       case 'payroll_get_run': {
-        const run = await this.getPayroll().getRun(businessId, args.runId);
+        const actor = (await this.contactBindMember(businessId, action)) ?? null;
+        const includeMoney = await this.getPayroll().canReadPayrollMoney(businessId, actor);
+        const run = await this.getPayroll().getRun(businessId, args.runId, { includeMoney });
         return { run };
       }
       case 'payroll_approve_run': {

@@ -27,6 +27,8 @@ export interface PayRateInput {
 export interface PayrollRunFilters {
   status?: string;
   limit?: number;
+  /** P235 (D-310 / D-100): false withholds totalGross from readers without revenue:read. */
+  includeMoney?: boolean;
 }
 
 /**
@@ -43,6 +45,8 @@ export interface MarkRunPaidInput {
   paymentMethod?: string | null;
   actorId?: string | null;
   initiatedBy?: string | null;
+  /** P235 (D-310 / D-100): false withholds totalGross from the HTTP response. */
+  includeMoney?: boolean;
 }
 
 /**
@@ -54,6 +58,8 @@ export interface MarkRunPaidInput {
 export interface DiscardRunInput {
   reason?: unknown;
   actorId?: string | null;
+  /** P235 (D-310 / D-100): false withholds totalGross from the HTTP response. */
+  includeMoney?: boolean;
 }
 
 /** The currency a business with none recorded keeps (the column default; CashPositionService reads it so too). */
@@ -81,6 +87,26 @@ export class PayrollService {
     @Optional() @Inject(ExpensePostingService) private readonly expensePosting?: ExpensePostingService | null,
   ) {}
 
+  /**
+   * P235 (FU-PAYROLL-IS-MONEY, D-310 / D-100 / D-140): whether `actorUserId`
+   * may read payroll money figures in `businessId`. Evaluates canonical
+   * `memberModuleLevel(membership, 'revenue')` for every role including
+   * explicit-scope OWNERs (D-140); fails closed (false) when actor or
+   * membership is absent.
+   */
+  async canReadPayrollMoney(businessId: string, actorUserId?: string | null): Promise<boolean> {
+    if (!actorUserId || typeof actorUserId !== 'string' || !actorUserId.trim()) return false;
+    const uid = actorUserId.trim();
+    const user = await this.prisma.client.user.findUnique({ where: { id: uid }, select: { role: true } });
+    if (user?.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: uid, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return false;
+    return rankOf(memberModuleLevel(membership, 'revenue')) >= LEVEL_RANK.read;
+  }
+
   // ── Rates ──────────────────────────────────────────────────────────────
 
   async setRate(businessId: string, input: PayRateInput) {
@@ -107,7 +133,8 @@ export class PayrollService {
   }
 
   /** Latest effective rate per assignment. */
-  async listRates(businessId: string) {
+  async listRates(businessId: string, opts: { includeMoney?: boolean } = {}) {
+    const includeMoney = opts.includeMoney ?? true;
     const rates = await this.prisma.client.payRate.findMany({
       where: { businessId },
       orderBy: { effectiveFrom: 'desc' },
@@ -121,7 +148,7 @@ export class PayrollService {
       id: r.id,
       assignmentId: r.assignmentId,
       staffName: this.assignmentName(r.assignment),
-      amount: Number(r.amount),
+      amount: includeMoney ? Number(r.amount) : null,
       currency: r.currency,
       periodType: r.periodType,
       effectiveFrom: r.effectiveFrom,
@@ -242,6 +269,7 @@ export class PayrollService {
   // ── Runs ───────────────────────────────────────────────────────────────
 
   async listRuns(businessId: string, filters: PayrollRunFilters = {}) {
+    const includeMoney = filters.includeMoney ?? true;
     const runs = await this.prisma.client.payrollRun.findMany({
       where: { businessId, ...(filters.status ? { status: filters.status } : {}) },
       orderBy: { periodEnd: 'desc' },
@@ -252,13 +280,14 @@ export class PayrollService {
       periodStart: r.periodStart,
       periodEnd: r.periodEnd,
       status: r.status,
-      totalGross: Number(r.totalGross),
+      totalGross: includeMoney ? Number(r.totalGross) : null,
       currency: r.currency,
       itemCount: r.itemCount,
     }));
   }
 
-  async getRun(businessId: string, runId: string) {
+  async getRun(businessId: string, runId: string, opts: { includeMoney?: boolean } = {}) {
+    const includeMoney = opts.includeMoney ?? true;
     const run = await this.prisma.client.payrollRun.findFirst({
       where: { id: runId, businessId },
       include: { items: { include: { assignment: true } } },
@@ -266,22 +295,23 @@ export class PayrollService {
     if (!run) throw new NotFoundException('Payroll run not found');
     return {
       ...run,
-      totalGross: Number(run.totalGross),
+      totalGross: includeMoney ? Number(run.totalGross) : null,
       items: run.items.map((i) => ({
         id: i.id,
         assignmentId: i.assignmentId,
         staffName: this.assignmentName(i.assignment),
         hoursWorked: i.hoursWorked === null ? null : Number(i.hoursWorked),
-        grossPay: Number(i.grossPay),
+        grossPay: includeMoney ? Number(i.grossPay) : null,
         currency: i.currency,
-        notes: i.notes,
+        notes: includeMoney ? i.notes : null,
       })),
     };
   }
 
   // ── Tier-3 transitions ─────────────────────────────────────────────────
 
-  async approveRun(businessId: string, runId: string, userId?: string) {
+  async approveRun(businessId: string, runId: string, userId?: string, opts: { includeMoney?: boolean } = {}) {
+    const includeMoney = opts.includeMoney ?? true;
     const approved = await this.prisma.client.$transaction(async (tx) => {
       const run = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
       if (!run) throw new NotFoundException('Payroll run not found');
@@ -300,7 +330,7 @@ export class PayrollService {
       return updated;
     });
     invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
-    return approved;
+    return includeMoney ? approved : { ...approved, totalGross: null };
   }
 
   /**
@@ -394,7 +424,8 @@ export class PayrollService {
       return run;
     });
     invalidateBusinessFinancialSnapshotCache(businessId);
-    return paid;
+    const includeMoney = input.includeMoney ?? true;
+    return includeMoney ? paid : { ...paid, totalGross: null };
   }
 
   /**
@@ -516,10 +547,11 @@ export class PayrollService {
         },
       });
 
+      const includeMoney = input.includeMoney ?? true;
       const updated = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
       return {
         ...(updated ?? { ...run, status: 'VOID', notes: updatedNotes }),
-        totalGross: Number((updated ?? run).totalGross),
+        totalGross: includeMoney ? Number((updated ?? run).totalGross) : null,
         discardedById: actorId,
         discardReason: reason,
         discardedAt: discardedAt.toISOString(),
