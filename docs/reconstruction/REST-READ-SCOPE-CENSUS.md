@@ -27,6 +27,13 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
    column (`enc:v1:...`) to any business member without projection/stripping.
    **Tracked follow-up:** `FU-SUPPLIER-CREDENTIALS-NESTED-INCLUDE` (replace `supplierConnection: true` with an explicit non-secret `select:` and gate on `storefront:read`).
 
+4. **`CommunicationsController.getContent` (`GET /communications/businesses/:businessId/content/:id`), `CommunicationsController.getConnection` (`GET /communications/businesses/:businessId/connections/:id`), & `CommunicationsController.listConnections` (`GET /communications/businesses/:businessId/connections`)** — **UNSTRIPPED NESTED `ChannelDestination.destinationMeta` PAGE `accessToken`.**
+   All three routes run only `AuthGuard` + `BusinessGuard` (no `@RequireModuleScope`, no `ModuleScopeGuard`).
+   `getContent` includes `deliveries: { include: { destination: true } }`, returning raw `ChannelDestination.destinationMeta`
+   (including Facebook/Instagram page `accessToken`) directly to any business member; `getConnection` and `listConnections` call
+   `stripSecrets` on top-level `ChannelConnection.token`/`refreshToken` ONLY, leaving nested `destinations[].destinationMeta` unstripped.
+   **Tracked P0 follow-up:** `FU-COMMS-DESTINATION-META-SECRETS` (apply `stripSecretsFromDestination` to nested `destination`/`destinations` across all three reads and gate on `content:read`).
+
 ## High-Priority Non-Secret Findings
 
 - **`AiIntelligenceController.getCrossBusinessIntelligence` (`GET /ai/intelligence/cross-business`)** — queries `membership.findMany` across ALL businesses where the caller holds any membership and returns `totalRevenue`, `totalOverdueAmount`, `dealValue`, invoice/contact/booking counts, and dollar-amount insights with **zero per-business module-scope check** (recommended: enforce per-business `revenue:read` / `ai:read` filtering).
@@ -56,8 +63,8 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | exempt-owner | 1 |
 | exempt-public | 4 |
 | exempt-system | 10 |
-| open | 441 |
-| secret-read | 29 |
+| open | 439 |
+| secret-read | 31 |
 
 ## Expected V1 Plan Rows & Pinned Applied Reads
 
@@ -74,9 +81,11 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `AiController.getAiPreferences` | GET | `/ai/businesses/:businessId/ai/preferences` | secret-read | BYOK keys (`byokOpenai`, `byokAnthropic`, `byokXai`) masked as literal bullet placeholder in handler; `byokKimi`/`byokGoogle`/`byokNative` not returned; follow-up should gate on `settings:read` |
 | `AiController.getAiProviders` | GET | `/ai/businesses/:businessId/ai/providers` | secret-read | reads preferences internally (`service-check:listSelectableProviders`) and returns only `usingOwnKey: boolean` and provider availability metadata; no key leaves the handler |
 | `ApiKeysController.list` | GET | `/api/businesses/:businessId/api-keys` | secret-read | `settings:read` — name, prefix, and scopes only (raw key hashed and returned once at create) |
-| `CommunicationsController.getConnection` | GET | `/communications/businesses/:businessId/connections/:id` | secret-read | `service-check:stripSecrets` removes tokens (SWEEP-P0 reviewed); follow-up should gate on `content:read` |
+| `CommunicationsController.deliverySummary` | GET | `/communications/businesses/:businessId/content/:id/delivery-summary` | secret-read | reads `destination: true` internally (`service-check:getDeliverySummary`) and returns an explicit non-secret summary allowlist; no destination tokens leave the handler; follow-up should gate on `content:read` |
+| `CommunicationsController.getConnection` | GET | `/communications/businesses/:businessId/connections/:id` | secret-read | STOP-THE-LINE FINDING (partial strip): `service-check:stripSecrets` removes top-level `token`/`refreshToken` ONLY and still leaves nested `destinations[].destinationMeta` (with Facebook/Instagram page `accessToken`) unstripped; tracked in `FU-COMMS-DESTINATION-META-SECRETS` (apply `stripSecretsFromDestination` + gate on `content:read`) |
+| `CommunicationsController.getContent` | GET | `/communications/businesses/:businessId/content/:id` | secret-read | STOP-THE-LINE FINDING (unstripped nested include): includes `deliveries: { include: { destination: true } }`, returning raw `ChannelDestination.destinationMeta` (with Facebook/Instagram page `accessToken`) to any business member without scope; tracked in `FU-COMMS-DESTINATION-META-SECRETS` (strip `destinationMeta` + gate on `content:read`) |
 | `CommunicationsController.healthSummary` | GET | `/communications/businesses/:businessId/connections/health-summary` | secret-read | reads `channelConnection.findMany` (`service-check:getHealthSummary`) and maps to an explicit non-secret allowlist (`id`, `provider`, `label`, `healthState`, `healthMessage`, `lastCheckedAt`, destination counts); no tokens leave the handler; follow-up should gate on `content:read` |
-| `CommunicationsController.listConnections` | GET | `/communications/businesses/:businessId/connections` | secret-read | `service-check:stripSecrets` removes tokens on every row (SWEEP-P0 reviewed); follow-up should gate on `content:read` |
+| `CommunicationsController.listConnections` | GET | `/communications/businesses/:businessId/connections` | secret-read | STOP-THE-LINE FINDING (partial strip): `service-check:stripSecrets` removes top-level `token`/`refreshToken` ONLY and still leaves nested `destinations[].destinationMeta` (with Facebook/Instagram page `accessToken`) unstripped; tracked in `FU-COMMS-DESTINATION-META-SECRETS` (apply `stripSecretsFromDestination` + gate on `content:read`) |
 | `CommunicationsController.listDestinations` | GET | `/communications/businesses/:businessId/destinations` | secret-read | `service-check:stripSecretsFromDestination` removes page access tokens and credential keys from `destinationMeta` (SWEEP-P0 CW-2); follow-up should gate on `content:read` |
 | `ConnectorController.getCredentials` | GET | `/connectors/businesses/:businessId/credentials/:type` | secret-read | secret fields answered masked (`check:getMaskedCredentials`, last 4 chars only); form schema stays readable by members (SWEEP-P0 reviewed) |
 | `ConnectorController.getWebhookInfo` | GET | `/connectors/businesses/:businessId/webhook-info/:type` | secret-read | `settings:admin` — returns inbound form webhook signing secret (SWEEP-P0 SEC-1) |
@@ -468,14 +477,12 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | --- | --- | --- | --- | --- |
 | `DocumentTemplateController.list` | GET | `/commerce/document-templates/businesses/:businessId` | open | follow-up: `settings:read` (membership-only read; no enforced module scope) |
 
-### `modules/communications/communications.controller.ts` (6)
+### `modules/communications/communications.controller.ts` (4)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `CommunicationsController.audienceHealth` | GET | `/communications/businesses/:businessId/audience/health` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.deliveryEvents` | GET | `/communications/businesses/:businessId/deliveries/:deliveryId/events` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
-| `CommunicationsController.deliverySummary` | GET | `/communications/businesses/:businessId/content/:id/delivery-summary` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
-| `CommunicationsController.getContent` | GET | `/communications/businesses/:businessId/content/:id` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.listContent` | GET | `/communications/businesses/:businessId/content` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.listDeliveries` | GET | `/communications/businesses/:businessId/deliveries` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 

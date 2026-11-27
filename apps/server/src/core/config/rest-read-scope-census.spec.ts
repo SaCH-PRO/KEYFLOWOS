@@ -160,14 +160,20 @@ function parsedServerFiles(): ParsedFile[] {
   return parsedCache;
 }
 
-/** Relation field names (singular and plural) mapping back to secret-bearing Prisma delegates for nested `include:` detection. */
-const SECRET_RELATION_TO_DELEGATE: ReadonlyMap<string, string> = new Map(
-  [...RAW_SECRET_DELEGATES].flatMap((d) => [
+/** Relation field names (singular, plural, and schema-actual Prisma relation aliases) mapping back to secret-bearing Prisma delegates for nested `include:` detection. */
+const SECRET_RELATION_TO_DELEGATE: ReadonlyMap<string, string> = new Map([
+  ...[...RAW_SECRET_DELEGATES].flatMap((d): [string, string][] => [
     [d, d],
     [`${d}s`, d],
     [`${d}es`, d],
   ]),
-);
+  // Schema-actual Prisma relation field names whose names differ from the model delegate name:
+  ['destination', 'channelDestination'],
+  ['destinations', 'channelDestination'],
+  ['connection', 'channelConnection'],
+  ['socialConns', 'socialConnection'],
+  ['portalAccessTokens', 'portalAccess'],
+]);
 
 /** True only when an object literal carries a top-level `select` key. */
 function objHasTopLevelSelect(obj: ts.ObjectLiteralExpression): boolean {
@@ -741,6 +747,14 @@ export class SyntheticReadController {
     });
   }
 
+  @Get('businesses/:businessId/delivery-destination-include')
+  getDeliveryDestinationInclude(@Param('businessId') businessId: string) {
+    return this.prisma.client.outboundContent.findFirst({
+      where: { businessId },
+      include: { deliveries: { include: { destination: true } } },
+    });
+  }
+
   @Get('businesses/:businessId/safe-nested-select')
   getSafeNestedSelect(@Param('businessId') businessId: string) {
     return this.prisma.client.supplierProduct.findMany({
@@ -768,7 +782,7 @@ export class SyntheticReadController {
       },
     ];
     const synthRoutes = extractGetRoutes(parsedSynth, SRC);
-    expect(synthRoutes).toHaveLength(8);
+    expect(synthRoutes).toHaveLength(9);
     expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getWebhookSecret')?.secretSignals).toEqual([
       'apiKey',
       'signingSecret',
@@ -783,13 +797,16 @@ export class SyntheticReadController {
       'authData',
       'authDataRef',
     ]);
-    // Direct and deeply nested `include: { supplierConnection: true }` are detected; explicit `select:` is NOT falsely flagged.
+    // Direct, deeply nested, and schema-aliased (`destination`) includes are detected; explicit `select:` is NOT falsely flagged.
     expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getNestedInclude')?.secretSignals).toEqual([
       'include:supplierConnection',
     ]);
     expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getDeepNestedInclude')?.secretSignals).toEqual([
       'include:supplierConnection',
     ]);
+    expect(
+      synthRoutes.find((r) => r.key === 'SyntheticReadController.getDeliveryDestinationInclude')?.secretSignals,
+    ).toEqual(['include:channelDestination']);
     expect(synthRoutes.find((r) => r.key === 'SyntheticReadController.getSafeNestedSelect')?.secretSignals).toEqual([]);
 
     const synthModuleSource = () => synthSource;
@@ -803,19 +820,21 @@ export class SyntheticReadController {
 | \`SyntheticReadController.getVarAuthData\` | GET | \`/synthetic/businesses/:businessId/var-auth-data\` | open | connect:read follow-up |
 | \`SyntheticReadController.getNestedInclude\` | GET | \`/synthetic/businesses/:businessId/nested-include\` | open | storefront:read follow-up |
 | \`SyntheticReadController.getDeepNestedInclude\` | GET | \`/synthetic/businesses/:businessId/deep-nested-include\` | open | storefront:read follow-up |
+| \`SyntheticReadController.getDeliveryDestinationInclude\` | GET | \`/synthetic/businesses/:businessId/delivery-destination-include\` | open | content:read follow-up |
 | \`SyntheticReadController.getSafeNestedSelect\` | GET | \`/synthetic/businesses/:businessId/safe-nested-select\` | open | storefront:read follow-up |
 | \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | open | missing scope name |
 | \`SyntheticReadController.phantomRoute\` | GET | \`/synthetic/businesses/:businessId/gone\` | open | revenue:read |
 `);
     const badResult = validateReadCensus(synthRoutes, badSecretCensus, synthModuleSource);
 
-    // Negative control 1: secret-bearing GETs (direct, variable raw Prisma, variable object, direct & deep nested include) FAIL; safe select does NOT.
-    expect(badResult.secretReadProblems).toHaveLength(5);
+    // Negative control 1: secret-bearing GETs (direct, variable raw Prisma, variable object, nested & aliased includes) FAIL; safe select does NOT.
+    expect(badResult.secretReadProblems).toHaveLength(6);
     expect(badResult.secretReadProblems.some((p) => p.includes('getWebhookSecret'))).toBe(true);
     expect(badResult.secretReadProblems.some((p) => p.includes('getRawSecrets'))).toBe(true);
     expect(badResult.secretReadProblems.some((p) => p.includes('getVarAuthData'))).toBe(true);
     expect(badResult.secretReadProblems.some((p) => p.includes('getNestedInclude'))).toBe(true);
     expect(badResult.secretReadProblems.some((p) => p.includes('getDeepNestedInclude'))).toBe(true);
+    expect(badResult.secretReadProblems.some((p) => p.includes('getDeliveryDestinationInclude'))).toBe(true);
     expect(badResult.secretReadProblems.some((p) => p.includes('getSafeNestedSelect'))).toBe(false);
 
     // Negative control 2: unregistered membership-only GET FAILS
@@ -839,6 +858,7 @@ export class SyntheticReadController {
 | \`SyntheticReadController.getVarAuthData\` | GET | \`/synthetic/businesses/:businessId/var-auth-data\` | secret-read | stop-the-line authData read |
 | \`SyntheticReadController.getNestedInclude\` | GET | \`/synthetic/businesses/:businessId/nested-include\` | secret-read | stop-the-line nested include read |
 | \`SyntheticReadController.getDeepNestedInclude\` | GET | \`/synthetic/businesses/:businessId/deep-nested-include\` | secret-read | stop-the-line deep nested include read |
+| \`SyntheticReadController.getDeliveryDestinationInclude\` | GET | \`/synthetic/businesses/:businessId/delivery-destination-include\` | secret-read | stop-the-line destination include read |
 | \`SyntheticReadController.getSafeNestedSelect\` | GET | \`/synthetic/businesses/:businessId/safe-nested-select\` | open | storefront:read follow-up |
 | \`SyntheticReadController.getUnregisteredData\` | GET | \`/synthetic/businesses/:businessId/unregistered-data\` | applied | revenue:read (claimed without guard or check) |
 | \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | exempt-guard | guard:AdminGuard (not on route) |
@@ -882,6 +902,7 @@ export class SyntheticReadController {
 | \`SyntheticReadController.getVarAuthData\` | GET | \`/synthetic/businesses/:businessId/var-auth-data\` | secret-read | stop-the-line finding: returns authData and authDataRef |
 | \`SyntheticReadController.getNestedInclude\` | GET | \`/synthetic/businesses/:businessId/nested-include\` | secret-read | stop-the-line finding: nested include of supplierConnection |
 | \`SyntheticReadController.getDeepNestedInclude\` | GET | \`/synthetic/businesses/:businessId/deep-nested-include\` | secret-read | stop-the-line finding: deep nested include of supplierConnection |
+| \`SyntheticReadController.getDeliveryDestinationInclude\` | GET | \`/synthetic/businesses/:businessId/delivery-destination-include\` | secret-read | stop-the-line finding: nested include of destination (channelDestination) |
 | \`SyntheticReadController.getSafeNestedSelect\` | GET | \`/synthetic/businesses/:businessId/safe-nested-select\` | open | storefront:read follow-up |
 | \`SyntheticReadController.getUnregisteredData\` | GET | \`/synthetic/businesses/:businessId/unregistered-data\` | open | crm:read follow-up |
 | \`SyntheticReadController.getOpenData\` | GET | \`/synthetic/businesses/:businessId/open-data\` | open | revenue:read follow-up |
