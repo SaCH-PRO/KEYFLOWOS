@@ -182,7 +182,7 @@ export function ItemDetailModal({
                 <CheckCircle2 className="w-4 h-4" />
                 In Cart — Remove
               </button>
-            ) : (
+            ) : item.notForSale ? null : (
               <button
                 onClick={() => addToCart(item)}
                 className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all hover:scale-[1.02] min-h-[44px]"

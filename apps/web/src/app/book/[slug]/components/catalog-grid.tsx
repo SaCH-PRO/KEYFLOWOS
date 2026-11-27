@@ -353,7 +353,7 @@ export function CatalogGrid({
                   </button>
                 </div>
               )
-            ) : item.purchasable === false ? (
+            ) : item.notForSale ? null : item.purchasable === false ? (
               <button
                 disabled
                 onClick={(e) => e.stopPropagation()}
@@ -525,7 +525,7 @@ export function CatalogGrid({
                 </div>
               )
             ) : (
-              item.purchasable === false ? (
+              item.notForSale ? null : item.purchasable === false ? (
                 <button
                   disabled
                   onClick={(e) => e.stopPropagation()}

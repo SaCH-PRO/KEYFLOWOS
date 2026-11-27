@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
+import { storeCheckoutOffered, STORE_CHECKOUT_NOT_OFFERED } from '@/lib/api/store-checkout';
 
 interface Product {
   id: string;
@@ -28,7 +29,7 @@ export default function CartWidgetPage() {
   const primary = searchParams.get('primary') || '#f97316';
   const singleProductId = searchParams.get('productId') || '';
 
-  const [step, setStep] = useState<'loading' | 'browse' | 'checkout' | 'success' | 'error'>('loading');
+  const [step, setStep] = useState<'loading' | 'browse' | 'checkout' | 'success' | 'error' | 'unavailable'>('loading');
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
@@ -48,7 +49,15 @@ export default function CartWidgetPage() {
 
   useEffect(() => {
     apiGet<{ products?: Product[] }>(`/site/storefront/public/${encodeURIComponent(slug)}`)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // WEDGE-HIDE-STORE part 2 (P225, D-263): the widget sells only when the storefront answers
+        // storeCheckout: true (lib/api/store-checkout.ts). Anything else: not available, nothing listed, no order.
+        if (error || !storeCheckoutOffered(data)) {
+          setProducts([]);
+          setCart([]);
+          setStep('unavailable');
+          return;
+        }
         const list = data?.products ?? [];
         setProducts(list);
         if (singleProductId) {
@@ -58,8 +67,9 @@ export default function CartWidgetPage() {
         setStep('browse');
       })
       .catch(() => {
-        setStep('error');
-        setErrorMsg('Unable to load products.');
+        setProducts([]);
+        setCart([]);
+        setStep('unavailable');
       });
   }, [slug, singleProductId, addToCart]);
 
@@ -78,7 +88,7 @@ export default function CartWidgetPage() {
 
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0) return;
+    if (cart.length === 0 || step === 'unavailable') return;
     setStep('loading');
     const { data, error } = await apiPost<{
       order: { id: string };
@@ -131,6 +141,12 @@ export default function CartWidgetPage() {
         {step === 'loading' && (
           <div className="flex justify-center py-8">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent" style={{ color: primary }} />
+          </div>
+        )}
+
+        {step === 'unavailable' && (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${card}`}>
+            <p>{STORE_CHECKOUT_NOT_OFFERED}</p>
           </div>
         )}
 

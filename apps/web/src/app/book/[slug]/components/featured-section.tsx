@@ -176,7 +176,7 @@ export function FeaturedSection({
                     <span className="text-sm font-bold tabular-nums" style={{ color: itemColor }}>
                       {formatPrice(item.price, item.currency)}
                     </span>
-                    <button
+                    {!item.notForSale && <button
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!inCart) addToCart(item);
@@ -189,7 +189,7 @@ export function FeaturedSection({
                       }}
                     >
                       {inCart ? <CheckCircle2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    </button>
+                    </button>}
                   </div>
                 </div>
               </div>

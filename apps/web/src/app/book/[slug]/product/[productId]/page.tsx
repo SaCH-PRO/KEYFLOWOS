@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { apiGet } from "@/lib/api";
@@ -35,6 +35,7 @@ import { CartDrawer } from "../../components/cart-drawer";
 import { Breadcrumbs } from "../../components/category-nav";
 import { ProductSchema, BreadcrumbListSchema } from "../../components/structured-data";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { storeCheckoutOffered, withoutStoreLines } from "@/lib/api/store-checkout";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -47,7 +48,11 @@ export default function ProductDetailPage() {
   const [relatedItems, setRelatedItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // WEDGE-HIDE-STORE part 2 (P225, D-263): as on /book/<slug>. null while the storefront read is out; only `true`
+  // sells. Otherwise nothing here goes in the cart and the cart shows no product line.
+  const [storeOffered, setStoreOffered] = useState<boolean | null>(null);
+  const [storedCart, setCart] = useState<CartItem[]>([]);
+  const cart = useMemo(() => (storeOffered === true ? storedCart : withoutStoreLines(storedCart)), [storeOffered, storedCart]);
   const [cartOpen, setCartOpen] = useState(false);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -63,6 +68,7 @@ export default function ProductDetailPage() {
 
   const addToCart = useCallback(
     (ci: CatalogItem, qty = 1) => {
+      if (!ci.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === ci.id && c.itemType === ci.itemType);
         let next: CartItem[];
@@ -79,7 +85,7 @@ export default function ProductDetailPage() {
       });
       if (business?.id) trackStoreEvent(business.id, "add_to_cart", ci.id);
     },
-    [slug, business]
+    [slug, business, storeOffered]
   );
 
   const removeFromCart = useCallback(
@@ -135,6 +141,8 @@ export default function ProductDetailPage() {
       const sfRes = await apiGet<{ storefront?: StorefrontConfig; storefrontConfig?: StorefrontConfig }>(`/site/storefront/public/${encodeURIComponent(slug)}`);
       if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+      const offered = sfRes.error ? false : storeCheckoutOffered(sfRes.data);
+      setStoreOffered(offered);
 
       const [servicesRes, productsRes] = await Promise.all([
         apiGet<Service[]>(`/bookings/public/businesses/${res.data.id}/services`),
@@ -177,6 +185,7 @@ export default function ProductDetailPage() {
           availableQuantity: p.availableQuantity,
           stockStatus: p.stockStatus,
           purchasable: p.purchasable,
+          notForSale: !offered,
         });
       }
 
@@ -199,6 +208,18 @@ export default function ProductDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (slug) setCart(loadCart(slug));
   }, [slug]);
+
+  // WEDGE-HIDE-STORE part 2: on a "not offered" answer the restored cart's product lines are dropped for good.
+  useEffect(() => {
+    if (storeOffered !== false) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
+    setCart((prev) => {
+      const next = withoutStoreLines(prev);
+      if (next.length === prev.length) return prev;
+      saveCart(slug, next);
+      return next;
+    });
+  }, [storeOffered, slug, storedCart]);
 
   useEffect(() => {
     if (item && business) {
@@ -427,7 +448,7 @@ export default function ProductDetailPage() {
                   <CheckCircle2 className="w-5 h-5" />
                   In Cart — Remove
                 </button>
-              ) : item.purchasable === false ? (
+              ) : item.notForSale ? null : item.purchasable === false ? (
                 <button
                   disabled
                   className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-semibold min-h-[44px] cursor-not-allowed bg-gray-100 text-gray-400 border border-gray-200"
@@ -531,7 +552,7 @@ export default function ProductDetailPage() {
             <CheckCircle2 className="w-5 h-5" />
             In Cart — Tap to Remove
           </button>
-        ) : item.purchasable === false ? (
+        ) : item.notForSale ? null : item.purchasable === false ? (
           <button
             disabled
             className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-semibold min-h-[44px] cursor-not-allowed bg-gray-200 text-gray-500"

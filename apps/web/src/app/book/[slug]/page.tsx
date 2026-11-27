@@ -31,6 +31,7 @@ import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
 import { createCheckoutKeyring, postStorefrontCheckout } from "./components/checkout-request";
+import { storeCheckoutOffered, withoutStoreLines, STORE_CHECKOUT_NOT_OFFERED } from "@/lib/api/store-checkout";
 import { TrustBar, SecurityFooter } from "./components/trust-bar";
 import { StoreSectionWrapper } from "./components/store-section-wrapper";
 import { OrderConfirmation } from "./components/order-confirmation";
@@ -162,7 +163,12 @@ function PublicBookingPageInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // WEDGE-HIDE-STORE part 2 (P225, D-263): whether the store checkout is offered, as the storefront read answers it
+  // (lib/api/store-checkout.ts). null while that read is out. Only `true` sells: until then, and on false, a missing
+  // field or a failed read, no product goes in the cart, the cart shows no product line and no store order is sent.
+  const [storeOffered, setStoreOffered] = useState<boolean | null>(null);
+  const [storedCart, setCart] = useState<CartItem[]>([]);
+  const cart = useMemo(() => (storeOffered === true ? storedCart : withoutStoreLines(storedCart)), [storeOffered, storedCart]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutMode, setCheckoutMode] = useState(false);
   const [promoCode, setPromoCode] = useState<PromoCode | null>(null);
@@ -229,6 +235,7 @@ function PublicBookingPageInner() {
   const addToCart = useCallback(
     (item: CatalogItem) => {
       if (item.purchasable === false) return;
+      if (!item.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === item.id && c.itemType === item.itemType);
         let next: CartItem[];
@@ -245,7 +252,7 @@ function PublicBookingPageInner() {
       });
       if (business?.id) trackStoreEvent(business.id, 'add_to_cart', item.id);
     },
-    [slug, business]
+    [slug, business, storeOffered]
   );
 
   const removeFromCart = useCallback(
@@ -370,6 +377,7 @@ function PublicBookingPageInner() {
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
       if (sfRes.data?.shippingZones) setShippingZones(sfRes.data.shippingZones);
       if (typeof sfRes.data?.completedOrdersCount === 'number') setCompletedOrdersCount(sfRes.data.completedOrdersCount);
+      setStoreOffered(sfRes.error ? false : storeCheckoutOffered(sfRes.data));
 
       if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
@@ -402,6 +410,18 @@ function PublicBookingPageInner() {
       setPromoCode(loadPromoCode(slug));
     }
   }, [slug]);
+
+  // WEDGE-HIDE-STORE part 2: once the answer is "not offered", the restored cart's product lines are dropped for
+  // good. While the answer is out they are only not shown, so a late answer costs a selling business no cart.
+  useEffect(() => {
+    if (storeOffered !== false) return;
+    setCart((prev) => {
+      const next = withoutStoreLines(prev);
+      if (next.length === prev.length) return prev;
+      saveCart(slug, next);
+      return next;
+    });
+  }, [storeOffered, slug, storedCart]);
 
   useEffect(() => {
     if (!fontPairing || fontPairing.id === "inter-inter") return;
@@ -586,6 +606,7 @@ function PublicBookingPageInner() {
         availableQuantity: p.availableQuantity,
         stockStatus: p.stockStatus,
         purchasable: p.purchasable,
+        notForSale: storeOffered !== true,
       };
       if (p.category === "PRODUCT") {
         items.push({
@@ -702,9 +723,11 @@ function PublicBookingPageInner() {
     returnUrl?: string;
   }, opts?: { newAttempt?: boolean }): Promise<StoreOrderResponse | null> => {
     // An explicit payment retry after the provider failed is a new checkout attempt (a new order), as before.
+    // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered.
+    if (storeOffered !== true) throw new Error(STORE_CHECKOUT_NOT_OFFERED);
     if (opts?.newAttempt) checkoutKeyring.reset();
     return postStorefrontCheckout(slug, payload, checkoutKeyring.keyFor(payload));
-  }, [slug, checkoutKeyring]);
+  }, [slug, checkoutKeyring, storeOffered]);
 
   const handleStoreOrderResult = useCallback((
     storeOrder: StoreOrderResponse | null,
@@ -1649,7 +1672,7 @@ function PublicBookingPageInner() {
         onClose={() => setWishlistOpen(false)}
         items={wishlist.items}
         onRemove={wishlist.remove}
-        onAddToCart={addToCart}
+        onAddToCart={storeOffered === true ? addToCart : undefined}
         primaryColor={primaryColor}
       />
 
