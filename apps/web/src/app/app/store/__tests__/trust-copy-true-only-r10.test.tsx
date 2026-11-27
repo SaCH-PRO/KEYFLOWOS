@@ -101,12 +101,12 @@ describe("R10-1..4: 'Empty Catalog' and 'Nothing on Your Store Yet'", () => {
 
   it("m4: a listed product that is on, and a switched-off one: the 1 that is not showing", async () => {
     const out = await nothing({ products: [product("p0"), product("p1", false)], services: [listing("p0")] });
-    expect(out?.description).toBe("1 item is on your store but not showing: it is out of stock or hidden. Check its stock and visibility in the catalog.");
+    expect(out?.description).toBe("1 item is set up for your store but not showing on it. Check its status, category, stock and visibility in the catalog."); // r11 wording
   });
 
   it("a listed product on and not showing, and a hidden service: 2 not showing", async () => {
     const out = await nothing({ products: [product("p0")], services: [listing("p0"), { id: "s0", name: "Tasting" }], storeServices: [] });
-    expect(out?.description).toMatch(/^2 items are on your store but not showing/);
+    expect(out?.description).toMatch(/^2 items are set up for your store but not showing on it\./); // r11 wording
   });
 });
 
@@ -174,7 +174,13 @@ describe("R10-5 (m5): every clip limit, at the limit and one past it", () => {
 });
 
 describe("R10-6..8: clip()", () => {
-  it("m6: breaks on any whitespace (a no-break space, a tab)", () => {
+  it("m6: breaks on any whitespace (a no-break space, an ideographic space, a tab, a newline)", () => {
+    // r11: the no-break space and the ideographic space written as code points, so the test cannot hold a plain space.
+    const nbsp = String.fromCharCode(0xa0);
+    const ideo = String.fromCharCode(0x3000);
+    expect(clip(`aaaa${nbsp}bbbbbb`, 9)).toBe("aaaa...");
+    expect(clip(`aaaa${ideo}bbbbbb`, 9)).toBe("aaaa...");
+    expect(clip(`aa${nbsp}bb${ideo}cccccc`, 10)).toBe(`aa${nbsp}bb...`);
     expect(clip("aaaa bbbbbb", 9)).toBe("aaaa...");
     expect(clip("aaaa\tbbbbbb", 9)).toBe("aaaa...");
     expect(clip("aaaa\nbbbbbb", 9)).toBe("aaaa...");

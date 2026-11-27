@@ -198,11 +198,12 @@ describe("R9-5: 'Nothing on Your Store Yet' says what is true, in the number it 
 
   it("listed and on, but not showing (out of stock or hidden): check its stock and visibility", async () => {
     const one = await nothing({ products: [product("p0")], services: [{ id: "s_l0", sourceProductId: "p0" }] });
-    expect(one?.description).toBe("1 item is on your store but not showing: it is out of stock or hidden. Check its stock and visibility in the catalog.");
+    // r11: worded true for every cause (out of stock, hidden, a category /book does not draw, a mapping not live).
+    expect(one?.description).toBe("1 item is set up for your store but not showing on it. Check its status, category, stock and visibility in the catalog.");
     expect(one?.actionLabel).toBe("Check the catalog");
     expect(one?.description).not.toMatch(/add/i);
     const two = await nothing({ products: [product("p0"), product("p1")], services: [{ id: "s_l0", sourceProductId: "p0" }, { id: "s_l1", sourceProductId: "p1" }] });
-    expect(two?.description).toBe("2 items are on your store but not showing: they are out of stock or hidden. Check their stock and visibility in the catalog.");
+    expect(two?.description).toBe("2 items are set up for your store but not showing on it. Check their status, category, stock and visibility in the catalog.");
   });
 
   it("2 products off and not listed: plural", async () => {
