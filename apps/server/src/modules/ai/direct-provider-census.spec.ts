@@ -1,19 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-
-type DirectProviderSiteKind = 'direct-call' | 'non-calling-reference';
-
-interface DirectProviderCensusEntry {
-  readonly file: string;
-  readonly kind: DirectProviderSiteKind;
-  readonly purpose: string;
-  readonly metered: boolean;
-  readonly honoursKeyDisabled: boolean;
-  readonly supportsByok: boolean;
-  readonly migrationTarget: string;
-}
-
-const DIRECT_PROVIDER_CENSUS: readonly DirectProviderCensusEntry[] = [];
+import {
+  DIRECT_PROVIDER_CENSUS,
+  type DirectProviderCensusEntry,
+} from './direct-provider-census';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
