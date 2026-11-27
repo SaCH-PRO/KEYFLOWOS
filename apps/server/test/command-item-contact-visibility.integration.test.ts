@@ -872,8 +872,10 @@ describe('KEY path (review ST-D10-3, CR-2; W9-KEY-OBLIGATIONS-CALLS, D-88)', () 
     expect(out).toMatchObject({ id: plain.id, alreadyDischarged: false });
     expect((await db.commandItem.findUnique({ where: { id: plain.id } })).dischargedAt).not.toBeNull();
   });
+});
 
-  it('[PAGING-01] W11-PAGING-TOTAL-ORDER-B: CommandService.findMany pages 4 items with identical priority/urgency/createdAt deterministically by id DESC across both the Prisma path and the restricted raw-SQL path', async () => {
+describe('W11-PAGING-TOTAL-ORDER-B: deterministic tie-breaking', () => {
+  it('[PAGING-01] CommandService.findMany pages 4 items with identical priority/urgency/createdAt deterministically by id DESC across both the Prisma path and the restricted raw-SQL path', async () => {
     const tieModule = `${P}tie_page`;
     const tieAt = new Date('2030-06-01T12:00:00.000Z');
     // Insert ascending IDs so heap insertion order (a, b, c, d) disagrees with deterministic id DESC (d, c, b, a).
@@ -915,16 +917,21 @@ describe('KEY path (review ST-D10-3, CR-2; W9-KEY-OBLIGATIONS-CALLS, D-88)', () 
       });
 
       const expectedDesc = [...tieIds].reverse();
+      const idsOf = (body: { items: Array<{ id: string }> }) => body.items.map((i: { id: string }) => i.id);
 
       // 1. OWNER -> Prisma findMany path (5 items total: 4 tied at priority 75 + 1 lower priority hiddenId).
       const ownerP1 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=0`, ID.owner);
       expect(ownerP1.status).toBe(200);
       expect(ownerP1.body.total).toBe(5);
+      const ownerP1Ids = idsOf(ownerP1.body);
+      expect(ownerP1Ids).toEqual(expectedDesc.slice(0, 2));
       // Trigger an MVCC heap rewrite on a tied row between pages to prove tie-break survives heap movement.
       await db.commandItem.update({ where: { id: tieIds[0] }, data: { title: `Tied ${tieIds[0]} updated` } });
       const ownerP2 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=2`, ID.owner);
       expect(ownerP2.status).toBe(200);
-      const ownerCombined = [...ownerP1.body.items.map((i: any) => i.id), ...ownerP2.body.items.map((i: any) => i.id)];
+      const ownerP2Ids = idsOf(ownerP2.body);
+      expect(ownerP2Ids).toEqual(expectedDesc.slice(2, 4));
+      const ownerCombined = [...ownerP1Ids, ...ownerP2Ids];
       expect(ownerCombined).toEqual(expectedDesc);
       expect(new Set(ownerCombined).size).toBe(4);
 
@@ -932,9 +939,15 @@ describe('KEY path (review ST-D10-3, CR-2; W9-KEY-OBLIGATIONS-CALLS, D-88)', () 
       const staffP1 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=0`, ID.staffOwned);
       expect(staffP1.status).toBe(200);
       expect(staffP1.body.total).toBe(4);
+      const staffP1Ids = idsOf(staffP1.body);
+      expect(staffP1Ids).toEqual(expectedDesc.slice(0, 2));
+      // Trigger an MVCC heap rewrite between pages on the restricted raw-SQL path as well.
+      await db.commandItem.update({ where: { id: tieIds[1] }, data: { title: `Tied ${tieIds[1]} updated` } });
       const staffP2 = await send('get', `${cmd}/items?sourceModule=${tieModule}&limit=2&offset=2`, ID.staffOwned);
       expect(staffP2.status).toBe(200);
-      const staffCombined = [...staffP1.body.items.map((i: any) => i.id), ...staffP2.body.items.map((i: any) => i.id)];
+      const staffP2Ids = idsOf(staffP2.body);
+      expect(staffP2Ids).toEqual(expectedDesc.slice(2, 4));
+      const staffCombined = [...staffP1Ids, ...staffP2Ids];
       expect(staffCombined).toEqual(expectedDesc);
       expect(new Set(staffCombined).size).toBe(4);
       expect(staffCombined).not.toContain(hiddenId);
