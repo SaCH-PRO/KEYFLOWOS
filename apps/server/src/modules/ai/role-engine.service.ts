@@ -3,6 +3,12 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from './ai-memory.service';
 import { modulesFromIdentifiers } from './memory-classification';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  projectEpisodicLogRowsForReader,
+  type MemoryReaderContext,
+} from '../key-cortex/memory-class-read-projection';
 
 export type BusinessRole = 'sales' | 'finance' | 'support' | 'operations' | 'marketing' | 'general' | 'operator' | 'executive';
 
@@ -683,7 +689,11 @@ export class RoleEngineService {
     });
   }
 
-  async getRoleContext(businessId: string, role: BusinessRole): Promise<RoleContext> {
+  async getRoleContext(
+    businessId: string,
+    role: BusinessRole,
+    readerContext?: MemoryReaderContext,
+  ): Promise<RoleContext> {
     const definition = this.getRoleDefinition(role);
 
     // Get active goals for this role
@@ -697,17 +707,43 @@ export class RoleEngineService {
       take: 5,
     });
 
-    // Get recent execution logs for this role
-    const logs = await this.prisma.client.aiExecutionLog.findMany({
-      where: {
-        businessId,
-        action: { contains: role, mode: 'insensitive' },
-        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-      },
-      select: { action: true, createdAt: true, success: true },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    });
+    const mode = getMemoryClassReadMode();
+    const activeScoped = Boolean(readerContext) && mode === 'ACTIVE';
+    // Get recent execution logs for this role (scoped to owning member under ACTIVE when readerContext supplied)
+    const rawLogs =
+      activeScoped && readerContext?.reader === null
+        ? []
+        : await this.prisma.client.aiExecutionLog.findMany({
+            where: {
+              businessId,
+              action: { contains: role, mode: 'insensitive' },
+              createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+              ...(activeScoped && readerContext?.reader ? { userId: readerContext.reader } : {}),
+            },
+            select: {
+              id: true,
+              userId: true,
+              module: true,
+              toolName: true,
+              rationale: true,
+              action: true,
+              createdAt: true,
+              success: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: readerContext ? 30 : 10,
+          });
+    const logs = readerContext
+      ? projectEpisodicLogRowsForReader(rawLogs, readerContext, {
+          businessId,
+          store: 'ai_execution_log',
+          path: 'RoleEngineService.getRoleContext',
+          logger: this.logger,
+        }).slice(0, 10)
+      : filterOutSecretRows(rawLogs, (l) => ({
+          dataClass: null,
+          texts: [l.action, l.toolName, l.module, l.rationale],
+        }));
 
     // Count pending approvals relevant to this role
     const pendingApprovals = await this.prisma.client.aiApprovalItem.count({

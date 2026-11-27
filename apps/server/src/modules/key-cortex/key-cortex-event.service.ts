@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  projectBusinessEventRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { withoutForgottenPersonalData } from '../business-events/business-event.service';
 import { BusinessEvent, BusinessEventType, Prisma } from '@prisma/client';
 
@@ -668,24 +674,56 @@ export class KeyCortexEventService {
    * KEY's observations of one business, newest first, with flexible filtering: the type (event_type), the observing
    * organ (actor_id), the module and genome flag (metadata), a time window, and a limit (at most 1000) and offset.
    */
-  async getEvents(businessId: string, filters: KeyObservationFilters = {}): Promise<BusinessEvent[]> {
-    return this.prisma.client.businessEvent.findMany({
+  async getEvents(
+    businessId: string,
+    filters: KeyObservationFilters = {},
+    readerContext?: MemoryReaderContext,
+  ): Promise<BusinessEvent[]> {
+    const limit = Math.min(Math.max(filters.limit ?? 100, 0), MAX_READ);
+    const offset = Math.max(filters.offset ?? 0, 0);
+    const raw = await this.prisma.client.businessEvent.findMany({
       where: this.observationsWhere(businessId, filters),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: Math.min(Math.max(filters.limit ?? 100, 0), MAX_READ),
-      skip: Math.max(filters.offset ?? 0, 0),
+      take: readerContext ? Math.min(limit + offset + 200, MAX_READ) : limit,
+      skip: readerContext ? 0 : offset,
     });
+    if (!readerContext) {
+      return filterOutSecretRows(raw, (e) => ({
+        dataClass: null,
+        texts: [e.eventType, e.subjectType, e.action, JSON.stringify(e.after ?? null), JSON.stringify(e.metadata ?? null)],
+      }));
+    }
+    return projectBusinessEventRowsForReader(raw, readerContext, {
+      businessId,
+      path: 'KeyCortexEventService.getEvents',
+      logger: this.logger,
+    }).slice(offset, offset + limit);
   }
 
   /**
    * The event chain of one correlation id in one business, oldest first: every business_events row of `businessId`
    * that carries it (KEY's and the bus's alike). It used to read the correlation id across every business.
    */
-  async getEventChain(businessId: string, correlationId: string): Promise<BusinessEvent[]> {
-    return this.prisma.client.businessEvent.findMany({
+  async getEventChain(
+    businessId: string,
+    correlationId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<BusinessEvent[]> {
+    const raw = await this.prisma.client.businessEvent.findMany({
       where: { businessId: requireBusiness(businessId), correlationId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: MAX_READ,
+    });
+    if (!readerContext) {
+      return filterOutSecretRows(raw, (e) => ({
+        dataClass: null,
+        texts: [e.eventType, e.subjectType, e.action, JSON.stringify(e.after ?? null), JSON.stringify(e.metadata ?? null)],
+      }));
+    }
+    return projectBusinessEventRowsForReader(raw, readerContext, {
+      businessId,
+      path: 'KeyCortexEventService.getEventChain',
+      logger: this.logger,
     });
   }
 
@@ -696,11 +734,21 @@ export class KeyCortexEventService {
   async getEventStats(
     businessId: string,
     period: 'day' | 'week' | 'month',
+    readerContext?: MemoryReaderContext,
   ): Promise<Record<string, number>> {
     const start = new Date();
     if (period === 'day') start.setDate(start.getDate() - 1);
     else if (period === 'week') start.setDate(start.getDate() - 7);
     else start.setMonth(start.getMonth() - 1);
+
+    if (readerContext && getMemoryClassReadMode() === 'ACTIVE') {
+      const visible = await this.getEvents(businessId, { startDate: start, limit: MAX_READ }, readerContext);
+      const tally: Record<string, number> = {};
+      for (const ev of visible) {
+        tally[ev.eventType] = (tally[ev.eventType] ?? 0) + 1;
+      }
+      return tally;
+    }
 
     const counts = await this.prisma.client.businessEvent.groupBy({
       by: ['eventType'],

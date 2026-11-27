@@ -16,6 +16,16 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { InvoiceStatus } from '@prisma/client';
 import { subDays, subWeeks, subMonths, startOfMonth, startOfWeek, startOfDay, endOfDay, format } from 'date-fns';
+import {
+  buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
+  fetchProjectedBatch,
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  projectTemporalMemoryRowsForReader,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
+import type { TemporalEventProvenance } from '../ai/memory-classification';
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -287,13 +297,22 @@ export class KeyCortexContextV2Service {
 
   /* ─────── Full Context Assembly ─────── */
 
-  async getFullContext(businessId: string): Promise<FullBusinessContext> {
+  async getFullContext(
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<FullBusinessContext> {
     const cacheKey = `key_cortex:context:${businessId}`;
     try {
       const cached = await this.redis.get(cacheKey);
       if (cached) {
         this.logger.debug(`[getFullContext] Cache hit for ${businessId}`);
-        return JSON.parse(cached) as FullBusinessContext;
+        const parsed = JSON.parse(cached) as FullBusinessContext;
+        if (readerContext) {
+          // MEM-CLASS-READ (R1 Blocker 4): never serve another reader's cached temporalContext across readers.
+          const temporal = await this.getTemporalContext(businessId, readerContext);
+          return { ...parsed, temporal };
+        }
+        return parsed;
       }
     } catch {
       // ignore cache errors, proceed to fetch fresh data
@@ -308,7 +327,7 @@ export class KeyCortexContextV2Service {
       this.getBookingsContext(businessId),
       this.getCommunicationsContext(businessId),
       this.getAutopilotContext(businessId),
-      this.getTemporalContext(businessId),
+      this.getTemporalContext(businessId, readerContext),
       this.getInboxContext(businessId),
       this.getGenomeContext(businessId),
       this.getDeviceContext(businessId),
@@ -361,11 +380,13 @@ export class KeyCortexContextV2Service {
     const elapsed = Date.now() - start;
     this.logger.log(`[getFullContext] Assembled in ${elapsed}ms for ${businessId}`);
 
-    try {
-      await this.redis.set(cacheKey, JSON.stringify(context), this.CACHE_TTL);
-      await this.redis.set(`key_cortex:context:last:${businessId}`, JSON.stringify(context), 86400);
-    } catch {
-      // ignore cache write errors
+    if (!readerContext) {
+      try {
+        await this.redis.set(cacheKey, JSON.stringify(context), this.CACHE_TTL);
+        await this.redis.set(`key_cortex:context:last:${businessId}`, JSON.stringify(context), 86400);
+      } catch {
+        // ignore cache write errors
+      }
     }
 
     return context;
@@ -932,7 +953,10 @@ export class KeyCortexContextV2Service {
 
   /* ─────── Temporal/Memory Context ─────── */
 
-  async getTemporalContext(businessId: string): Promise<TemporalContext> {
+  async getTemporalContext(
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<TemporalContext> {
     try {
       // TemporalFlowMemoryService has no getRecentMemories or getDetectedPatterns
       // — those names belong to TemporalAdapterService and to nothing at all
@@ -942,16 +966,134 @@ export class KeyCortexContextV2Service {
       // on `type`, which is what a detected pattern actually is in this schema:
       // a recurring kind of memory, with a count, an average confidence and a
       // first/last sighting.
-      const [memories, patterns] = await Promise.all([
+      const mode = getMemoryClassReadMode();
+      if (readerContext && mode !== 'OFF') {
+        const preFilter = mode === 'ACTIVE' ? buildDbMemoryClassPreFilter(readerContext) : undefined;
+        const where = preFilter ? { businessId, AND: [preFilter] } : { businessId };
+        const fetchPage = (skip: number, take: number) =>
+          this.prisma.client.temporalFlowMemory.findMany({
+            where,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            ...(skip > 0 ? { skip } : {}),
+            take,
+            select: {
+              id: true,
+              entityType: true,
+              entityId: true,
+              type: true,
+              content: true,
+              sourceModule: true,
+              sourceEventIds: true,
+              metadata: true,
+              confidence: true,
+              dataClass: true,
+              moduleScope: true,
+              createdAt: true,
+            },
+          });
+
+        const projectPage = async (page: Awaited<ReturnType<typeof fetchPage>>) => {
+          const legacyEventIds = new Set<string>();
+          for (const r of page) {
+            if (!r.dataClass && r.entityType !== 'business' && r.sourceModule !== 'key_cortex') {
+              for (const id of r.sourceEventIds ?? []) legacyEventIds.add(id);
+            }
+          }
+          const eventMap = new Map<string, TemporalEventProvenance>();
+          if (legacyEventIds.size > 0 && this.prisma.client.temporalFlowEvent?.findMany) {
+            const fetched = await this.prisma.client.temporalFlowEvent.findMany({
+              where: { businessId, id: { in: [...legacyEventIds] } },
+              select: {
+                id: true,
+                source: true,
+                type: true,
+                module: true,
+                entityType: true,
+                title: true,
+                summary: true,
+                description: true,
+              },
+            });
+            for (const ev of fetched) eventMap.set(ev.id, ev);
+          }
+          return projectTemporalMemoryRowsForReader(page, readerContext, {
+            businessId,
+            path: 'KeyCortexContextV2Service.getTemporalContext',
+            logger: this.logger,
+            events: eventMap,
+          });
+        };
+
+        const visible =
+          mode === 'ACTIVE'
+            ? await fetchProjectedBatch({
+                targetCount: Number.POSITIVE_INFINITY,
+                batchSize: 200,
+                maxScanRows: 2000,
+                fetchPage,
+                projectPage,
+              })
+            : await projectPage(await fetchPage(0, 200));
+
+        const grouped = new Map<
+          string,
+          { count: number; confidenceSum: number; firstSeen: Date; lastSeen: Date }
+        >();
+        for (const m of visible) {
+          const key = m.type ?? '';
+          const cur = grouped.get(key);
+          const conf = m.confidence ?? 0;
+          if (!cur) {
+            grouped.set(key, {
+              count: 1,
+              confidenceSum: conf,
+              firstSeen: m.createdAt,
+              lastSeen: m.createdAt,
+            });
+          } else {
+            cur.count += 1;
+            cur.confidenceSum += conf;
+            if (m.createdAt < cur.firstSeen) cur.firstSeen = m.createdAt;
+            if (m.createdAt > cur.lastSeen) cur.lastSeen = m.createdAt;
+          }
+        }
+        const patternsDetected = [...grouped.entries()]
+          .sort((a, b) => b[1].count - a[1].count)
+          .slice(0, 10)
+          .map(([pattern, stats]) => ({
+            pattern,
+            frequency: stats.count,
+            confidence: stats.count > 0 ? stats.confidenceSum / stats.count : 0,
+            firstSeen: stats.firstSeen,
+            lastSeen: stats.lastSeen,
+          }));
+        return {
+          recentMemories: visible.slice(0, 20).map((m) => ({
+            id: m.id,
+            content: m.content ?? '',
+            type: m.type ?? 'memory',
+            importance: m.confidence ?? 0,
+            createdAt: m.createdAt,
+          })),
+          patternsDetected,
+          contextWindow: 20,
+        };
+      }
+
+      const baseWhere =
+        mode !== 'OFF'
+          ? { businessId, AND: [buildDbNonSecretPreFilter()] }
+          : { businessId };
+      const [rawMemories, patterns] = await Promise.all([
         this.prisma.client.temporalFlowMemory.findMany({
-          where: { businessId },
+          where: baseWhere,
           orderBy: { createdAt: 'desc' },
           take: 20,
-          select: { id: true, content: true, type: true, confidence: true, createdAt: true },
+          select: { id: true, content: true, type: true, confidence: true, dataClass: true, createdAt: true },
         }),
         this.prisma.client.temporalFlowMemory.groupBy({
           by: ['type'],
-          where: { businessId },
+          where: baseWhere,
           _count: { type: true },
           _avg: { confidence: true },
           _min: { createdAt: true },
@@ -960,6 +1102,10 @@ export class KeyCortexContextV2Service {
           take: 10,
         }),
       ]);
+      const memories = filterOutSecretRows(rawMemories, (m) => ({
+        dataClass: (m as { dataClass?: unknown }).dataClass,
+        texts: [m.type, m.content],
+      }));
 
       return {
         recentMemories: memories.map((m) => ({

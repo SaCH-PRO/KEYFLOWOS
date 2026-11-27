@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "d54b3e15a2073cde6de1510ea6cff24d83874b18",
-  "main_commit_date": "2026-11-27T03:21:14+00:00",
+  "main_sha": "c1ea190db3228483455b95eed1356b3c8f10b965",
+  "main_commit_date": "2026-11-27T05:35:26+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 235,
-    "points": 352.5,
-    "pct_by_points": 61.8
+    "packets": 238,
+    "points": 357.5,
+    "pct_by_points": 62.7
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 161,
-    "points": 218,
-    "pct_by_points": 38.2
+    "packets": 158,
+    "points": 213,
+    "pct_by_points": 37.3
    }
   },
   "by_step": {
@@ -66,15 +66,15 @@
     "total": 7
    },
    "3": {
-    "done": 93,
+    "done": 94,
     "in-progress": 0,
-    "todo": 56,
+    "todo": 55,
     "total": 149
    },
    "4": {
-    "done": 33,
+    "done": 35,
     "in-progress": 0,
-    "todo": 20,
+    "todo": 18,
     "total": 53
    },
    "5": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 145,
+    "done": 148,
     "in-progress": 0,
-    "todo": 110,
+    "todo": 107,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 80,
+   "prior-status-file": 79,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 99,
-   "compacted-commit": 87,
-   "no-evidence": 100,
+   "code-commit-subject": 101,
+   "compacted-commit": 88,
+   "no-evidence": 98,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -193,6 +193,7 @@
    "MEM-EXPIRED-NOT-SERVED",
    "MEM-CLASS-COLUMNS",
    "MEM-CLASS-BACKFILL",
+   "MEM-CLASS-READ",
    "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
@@ -215,6 +216,7 @@
    "RR-RETENTION-EXPIRED-EXPORTS",
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "RR-PRIVACY-DELETED-CONTACT-GATES",
    "FU-TIMELINE-CALLERS-SCOPE",
    "FU-UNTRUSTED-INBOUND-FENCE",
    "FU-STORE-ORDERS-MONEY-SCOPE",
@@ -231,8 +233,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 94,
-  "todo_with_dependencies_met_launch": 61
+  "todo_with_dependencies_met": 93,
+  "todo_with_dependencies_met_launch": 59
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -311,16 +313,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
-   "id": "SWP-BOOKING-SLOTS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 10
@@ -456,31 +448,11 @@
    "unblocks": 2
   },
   {
-   "id": "MEM-CLASS-READ",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
    "id": "FU-ARCH-MAP-REFRESH",
    "step": 3,
    "priority": "P2",
    "size": "S",
    "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
-   "step": 4,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 1
@@ -717,6 +689,16 @@
   },
   {
    "id": "MEM-CONSOLIDATION-CHECKPOINT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-HONEST-RETRIEVAL",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -1006,6 +988,16 @@
    "unblocks": 0
   },
   {
+   "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-FORWARDREF-RATCHET",
    "step": 3,
    "priority": "P3",
@@ -1258,16 +1250,6 @@
    "unblocks": 10
   },
   {
-   "id": "SWP-BOOKING-SLOTS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
    "id": "W11-LOAD-SENSITIVE-TESTS",
    "step": 7,
    "priority": "P2",
@@ -1378,31 +1360,11 @@
    "unblocks": 2
   },
   {
-   "id": "MEM-CLASS-READ",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
    "id": "FU-ARCH-MAP-REFRESH",
    "step": 3,
    "priority": "P2",
    "size": "S",
    "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
-   "step": 4,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 1
@@ -1710,6 +1672,16 @@
   {
    "id": "RR-DIRECT-PROVIDER-CENSUS",
    "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
+   "step": 4,
    "priority": "P3",
    "size": "S",
    "lane": "server",
@@ -2785,15 +2757,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "11553725"
+   ],
    "depends_on": [
     "SWP-KEY-SHELL-SMOKE"
    ],
    "title": "Public booking offers only free slots that end before closing",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWEEP-RERUN-S3",
@@ -6113,10 +6087,12 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "1172bd1d"
+   ],
    "depends_on": [
     "MEM-CLASS-COLUMNS",
     "MEM-SEMANTIC-SIGHT",
@@ -6125,7 +6101,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "One reader projection decides every memory read by data class; derived items inherit their sources' class",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-TEMPORAL-EMBED-DEDUP",
@@ -6160,7 +6136,7 @@
     "MEM-CLASS-READ"
    ],
    "title": "Memory retrieval reports channel failures distinctly from 'nothing found', and KEY says 'not recorded'",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-CONSOLIDATION-CHECKPOINT",
@@ -8039,15 +8015,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "27dfd5b3"
+   ],
    "depends_on": [
     "RR-ERASURE-BUSINESS-EVENTS"
    ],
    "title": "A soft-deleted or forget-pending contact is neither exported nor emailed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
@@ -8064,7 +8042,7 @@
     "RR-PRIVACY-DELETED-CONTACT-GATES"
    ],
    "title": "Cancelling a forget request restores only what the forget request deleted",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-VITEST-DECORATOR-METADATA",

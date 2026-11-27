@@ -21,6 +21,15 @@ import {
   unionModuleScopes,
   type MemoryRowDataClass,
 } from './memory-classification';
+import {
+  buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  isRowUnconditionallySecret,
+  projectAiMemoryRowsForReader,
+  type MemoryReaderContext,
+} from '../key-cortex/memory-class-read-projection';
 
 export type MemoryCategory =
   | 'goals'
@@ -328,7 +337,14 @@ export class AiMemoryService {
    * the autonomy settings), which are configuration their own services read by key: GET .../ai/memory (any member),
    * the profile interview's prompt and KEY's cortex memory read this.
    */
-  async getAll(businessId: string): Promise<MemoryEntry[]> {
+  async getAll(businessId: string, readerContext?: MemoryReaderContext): Promise<MemoryEntry[]> {
+    const mode = getMemoryClassReadMode();
+    const preFilter =
+      readerContext && mode === 'ACTIVE'
+        ? buildDbMemoryClassPreFilter(readerContext)
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
     const records = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
@@ -337,16 +353,38 @@ export class AiMemoryService {
           { expiresAt: null },
           { expiresAt: { gt: new Date() } },
         ],
+        ...(preFilter ? { AND: [preFilter] } : {}),
       },
       orderBy: [{ category: 'asc' }, { updatedAt: 'desc' }],
     });
-    return records;
+    if (!readerContext) {
+      return filterOutSecretRows(records, (r) => ({
+        dataClass: (r as { dataClass?: unknown }).dataClass,
+        texts: [r.category, r.key, r.value],
+      }));
+    }
+    return projectAiMemoryRowsForReader(records, readerContext, {
+      businessId,
+      path: 'AiMemoryService.getAll',
+      logger: this.logger,
+    });
   }
 
   /** The category's rows that have not expired; none for a settings category (review SEC-FUMCR-2, as getAll). */
-  async getByCategory(businessId: string, category: MemoryCategory): Promise<MemoryEntry[]> {
+  async getByCategory(
+    businessId: string,
+    category: MemoryCategory,
+    readerContext?: MemoryReaderContext,
+  ): Promise<MemoryEntry[]> {
     if (isAiMemorySettingsCategory(category)) return [];
-    return this.prisma.client.aiMemory.findMany({
+    const mode = getMemoryClassReadMode();
+    const preFilter =
+      readerContext && mode === 'ACTIVE'
+        ? buildDbMemoryClassPreFilter(readerContext)
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
+    const records = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
         category,
@@ -354,17 +392,55 @@ export class AiMemoryService {
           { expiresAt: null },
           { expiresAt: { gt: new Date() } },
         ],
+        ...(preFilter ? { AND: [preFilter] } : {}),
       },
       orderBy: { updatedAt: 'desc' },
     });
+    if (!readerContext) {
+      return filterOutSecretRows(records, (r) => ({
+        dataClass: (r as { dataClass?: unknown }).dataClass,
+        texts: [r.category, r.key, r.value],
+      }));
+    }
+    return projectAiMemoryRowsForReader(records, readerContext, {
+      businessId,
+      path: 'AiMemoryService.getByCategory',
+      logger: this.logger,
+    });
   }
 
-  async get(businessId: string, category: MemoryCategory, key: string): Promise<MemoryEntry | null> {
-    return this.prisma.client.aiMemory.findUnique({
+  async get(
+    businessId: string,
+    category: MemoryCategory,
+    key: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<MemoryEntry | null> {
+    const row = await this.prisma.client.aiMemory.findUnique({
       where: {
         businessId_category_key: { businessId, category, key },
       },
     });
+    if (!row) return null;
+    if (!readerContext) {
+      if (
+        getMemoryClassReadMode() !== 'OFF' &&
+        (isAiMemorySettingsCategory(row.category) ||
+          isRowUnconditionallySecret((row as { dataClass?: unknown }).dataClass, [
+            row.category,
+            row.key,
+            row.value,
+          ]))
+      ) {
+        return null;
+      }
+      return row;
+    }
+    const [visible] = projectAiMemoryRowsForReader([row], readerContext, {
+      businessId,
+      path: 'AiMemoryService.get',
+      logger: this.logger,
+    });
+    return visible ?? null;
   }
 
   /**
@@ -456,10 +532,13 @@ export class AiMemoryService {
    */
   async buildContextBlock(
     businessId: string,
-    opts: { patternVisible?: (row: Pick<MemoryEntry, 'category' | 'key' | 'value'>) => boolean } = {},
+    opts: {
+      patternVisible?: (row: Pick<MemoryEntry, 'category' | 'key' | 'value'>) => boolean;
+      readerContext?: MemoryReaderContext;
+    } = {},
   ): Promise<MemoryContextBlock> {
     const [memories, blueprint] = await Promise.all([
-      this.getAll(businessId),
+      this.getAll(businessId, opts.readerContext),
       this.blueprint.getBlueprint(businessId).catch((err) => {
         this.logger.warn(`Failed to load blueprint for memory context: ${(err as Error).message}`);
         return null;

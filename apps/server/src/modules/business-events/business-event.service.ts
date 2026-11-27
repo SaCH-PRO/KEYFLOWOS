@@ -1,6 +1,11 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  projectBusinessEventRowsForReader,
+  type MemoryReaderContext,
+} from '../key-cortex/memory-class-read-projection';
 import { safeRedactedSnapshot } from '../../core/security/redaction';
 import {
   CreateBusinessEventInput,
@@ -327,18 +332,33 @@ export class BusinessEventService {
     subjectType: string,
     subjectId: string,
     limit: number = 50,
+    readerContext?: MemoryReaderContext,
   ) {
-    return this.prisma.client.businessEvent.findMany({
+    const raw = await this.prisma.client.businessEvent.findMany({
       where: { subjectType, subjectId },
       orderBy: { createdAt: 'asc' },
-      take: limit,
+      take: readerContext ? Math.min(limit * 3, 500) : limit,
     });
+    if (!readerContext) {
+      return filterOutSecretRows(raw, (e) => ({
+        dataClass: null,
+        texts: [e.eventType, e.subjectType, e.action, JSON.stringify(e.after ?? null), JSON.stringify(e.metadata ?? null)],
+      }));
+    }
+    return projectBusinessEventRowsForReader(raw, readerContext, {
+      path: 'BusinessEventService.getTimeline',
+      logger: this.logger,
+    }).slice(0, limit);
   }
 
   /**
    * Get audit trail for a business with filters.
    */
-  async getAuditTrail(businessId: string, filters: AuditFilter = {}) {
+  async getAuditTrail(
+    businessId: string,
+    filters: AuditFilter = {},
+    readerContext?: MemoryReaderContext,
+  ) {
     const where: any = { businessId };
 
     if (filters.eventTypes?.length) {
@@ -362,38 +382,72 @@ export class BusinessEventService {
       if (filters.endDate) where.createdAt.lte = filters.endDate;
     }
 
-    const [events, total] = await Promise.all([
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit ?? 50;
+    const [rawEvents, rawTotal] = await Promise.all([
       this.prisma.client.businessEvent.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        skip: filters.offset ?? 0,
-        take: filters.limit ?? 50,
+        skip: readerContext ? 0 : offset,
+        take: readerContext ? Math.min(offset + limit + 200, 1000) : limit,
       }),
       this.prisma.client.businessEvent.count({ where }),
     ]);
 
-    return { events, total, offset: filters.offset ?? 0, limit: filters.limit ?? 50 };
+    if (!readerContext) {
+      const safe = filterOutSecretRows(rawEvents, (e) => ({
+        dataClass: null,
+        texts: [e.eventType, e.subjectType, e.action, JSON.stringify(e.after ?? null), JSON.stringify(e.metadata ?? null)],
+      }));
+      return { events: safe, total: rawTotal, offset, limit };
+    }
+
+    const visible = projectBusinessEventRowsForReader(rawEvents, readerContext, {
+      businessId,
+      path: 'BusinessEventService.getAuditTrail',
+      logger: this.logger,
+    });
+    return {
+      events: visible.slice(offset, offset + limit),
+      total: visible.length,
+      offset,
+      limit,
+    };
   }
 
   /**
    * Get KPI stats for a business over a time window.
    */
-  async getKpiStats(businessId: string, windowDays: number = 7): Promise<KpiStats> {
+  async getKpiStats(
+    businessId: string,
+    windowDays: number = 7,
+    readerContext?: MemoryReaderContext,
+  ): Promise<KpiStats> {
     const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-    const events = await this.prisma.client.businessEvent.findMany({
+    const rawEvents = await this.prisma.client.businessEvent.findMany({
       where: {
         businessId,
         createdAt: { gte: since },
       },
       select: {
+        id: true,
         eventType: true,
+        subjectType: true,
+        source: true,
         actorType: true,
         riskScore: true,
         action: true,
         approvalId: true,
       },
     });
+    const events = readerContext
+      ? projectBusinessEventRowsForReader(rawEvents, readerContext, {
+          businessId,
+          path: 'BusinessEventService.getKpiStats',
+          logger: this.logger,
+        })
+      : rawEvents;
 
     const stats: KpiStats = {
       totalEvents: events.length,

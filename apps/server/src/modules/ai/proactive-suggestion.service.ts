@@ -6,6 +6,15 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
 import { classifyAiMemoryWrite, modulesFromIdentifiers } from './memory-classification';
 import { SemanticMemoryService } from './semantic-memory.service';
+import {
+  buildDbMemoryClassPreFilter,
+  buildDbNonSecretPreFilter,
+  fetchProjectedBatch,
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  projectAiMemoryRowsForReader,
+  type MemoryReaderContext,
+} from '../key-cortex/memory-class-read-projection';
 
 export interface ChatSuggestion {
   id: string;
@@ -115,18 +124,60 @@ export class ProactiveSuggestionService {
    * Fetch pending suggestions for the chat interface.
    * Returns suggestions that haven't been dismissed or acted on.
    */
-  async getPendingSuggestions(businessId: string): Promise<ChatSuggestion[]> {
-    const memories = await this.prisma.client.aiMemory.findMany({
-      where: {
-        businessId,
-        category: 'suggestion',
-        expiresAt: { gte: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    });
+  async getPendingSuggestions(
+    businessId: string,
+    readerContext?: MemoryReaderContext,
+  ): Promise<ChatSuggestion[]> {
+    const mode = getMemoryClassReadMode();
+    const preFilter =
+      readerContext && mode === 'ACTIVE'
+        ? buildDbMemoryClassPreFilter(readerContext)
+        : mode !== 'OFF'
+          ? buildDbNonSecretPreFilter()
+          : undefined;
+    const where = {
+      businessId,
+      category: 'suggestion',
+      expiresAt: { gte: new Date() },
+      ...(preFilter ? { AND: [preFilter] } : {}),
+    };
+    const fetchPage = (skip: number, take: number) =>
+      this.prisma.client.aiMemory.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(skip > 0 ? { skip } : {}),
+        take,
+      });
 
-    return memories
+    let visible: Awaited<ReturnType<typeof fetchPage>>;
+    if (!readerContext) {
+      const rows = await fetchPage(0, 10);
+      visible = filterOutSecretRows(rows, (m) => ({
+        dataClass: (m as { dataClass?: unknown }).dataClass,
+        texts: [m.category, m.key, m.value],
+      }));
+    } else if (mode !== 'ACTIVE') {
+      const rows = await fetchPage(0, 50);
+      visible = projectAiMemoryRowsForReader(rows, readerContext, {
+        businessId,
+        path: 'ProactiveSuggestionService.getPendingSuggestions',
+        logger: this.logger,
+      }).slice(0, 10);
+    } else {
+      visible = await fetchProjectedBatch({
+        targetCount: 10,
+        batchSize: 50,
+        fetchPage,
+        projectPage: (page) =>
+          projectAiMemoryRowsForReader(page, readerContext, {
+            businessId,
+            path: 'ProactiveSuggestionService.getPendingSuggestions',
+            logger: this.logger,
+          }),
+      });
+    }
+
+    return visible
       .map(m => {
         try {
           return JSON.parse(m.value) as ChatSuggestion;

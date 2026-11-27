@@ -287,6 +287,32 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     ip?: string | null;
     userAgent?: string | null;
   }) {
+    // RR-PRIVACY-DELETED-CONTACT-GATES (R35, D-25): refuse soft-deleted or
+    // forget-pending contacts before collecting child records, uploading
+    // objects, or creating an export job. Read past the soft-delete extension
+    // (tenant-scoped) so a deleted contact answers 409 CONTACT_DELETED while
+    // an absent or foreign contact keeps answering 404 Contact not found.
+    const statusRows = await this.prisma.client.$queryRaw<
+      Array<{ id: string; deletedAt: Date | null; forgetStatus: string | null }>
+    >`
+      SELECT c.id, c.deleted_at AS "deletedAt", r.status AS "forgetStatus"
+        FROM contacts c
+        LEFT JOIN contact_forget_requests r
+          ON r.contact_id = c.id
+         AND r.business_id = c.business_id
+         AND r.status = 'requested'
+       WHERE c.id = ${input.contactId}
+         AND c.business_id = ${input.businessId}`;
+    if (statusRows.length === 0) {
+      throw new NotFoundException('Contact not found');
+    }
+    if (statusRows[0].deletedAt !== null || statusRows[0].forgetStatus === 'requested') {
+      throw new ConflictException({
+        code: 'CONTACT_DELETED',
+        message: 'Cannot export a soft-deleted or forget-pending contact; restore the contact first',
+      });
+    }
+
     const bundle = await this.collectBundle(input.businessId, input.contactId);
     const json = JSON.stringify(bundle, null, 2);
     const jsonBuf = Buffer.from(json, 'utf8');
@@ -1244,9 +1270,18 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
 
   private async collectBundle(businessId: string, contactId: string) {
     const c = this.prisma.client;
-    const [contact, events, notes, tasks, media, quotes, invoices, bookings, audit, sequences] =
+    const contact = await c.contact.findFirst({ where: { id: contactId, businessId, deletedAt: null } });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    if (contact.deletedAt !== null) {
+      throw new ConflictException({
+        code: 'CONTACT_DELETED',
+        message: 'Cannot export a soft-deleted or forget-pending contact; restore the contact first',
+      });
+    }
+    const [events, notes, tasks, media, quotes, invoices, bookings, audit, sequences] =
       await Promise.all([
-        c.contact.findFirst({ where: { id: contactId, businessId } }),
         c.contactEvent.findMany({ where: { contactId, businessId }, orderBy: { createdAt: 'desc' } }),
         c.contactNote.findMany({ where: { contactId, businessId }, orderBy: { createdAt: 'desc' } }),
         c.contactTask.findMany({ where: { contactId, businessId }, orderBy: { createdAt: 'desc' } }),
@@ -1261,9 +1296,6 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         }),
         c.crmSequenceEnrollment.findMany({ where: { contactId } }).catch(() => []),
       ]);
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
     return {
       meta: {
         format: 'keyflow.contact-export.v1',

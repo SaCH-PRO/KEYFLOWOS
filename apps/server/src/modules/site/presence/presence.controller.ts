@@ -22,7 +22,8 @@ export class PresenceController {
     @Inject(StorefrontIntelligenceService) private readonly intelligence: StorefrontIntelligenceService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('content', 'read')
   @Get('businesses/:businessId/draft')
   getDraft(@Param('businessId') businessId: string) {
     return this.presence.getDraft(businessId);

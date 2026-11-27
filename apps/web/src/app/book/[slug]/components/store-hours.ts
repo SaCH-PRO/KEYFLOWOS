@@ -111,3 +111,17 @@ export function todaysHoursLabel(hours?: BusinessHours | null, timeZone?: string
   if (today.closed) return "Closed";
   return `${today.openText} – ${today.closeText}`;
 }
+
+/**
+ * SWP-BOOKING-SLOTS: whether the business is closed all day on a calendar date (YYYY-MM-DD), for the checkout's
+ * "Closed on <day>" banner. The weekday is the date's own, whatever the visitor's clock. Read through readDay, so
+ * both day-key spellings count, and a day whose data is unclear (or a date that is not one) is not called closed.
+ */
+export function isClosedOnDate(hours: BusinessHours | null | undefined, date: string): boolean {
+  if (!hours || typeof hours !== "object") return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? "");
+  if (!m) return false;
+  const at = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (Number.isNaN(at.getTime()) || at.getUTCDate() !== Number(m[3])) return false;
+  return readDay(hours, DAY_KEYS[at.getUTCDay()])?.closed === true;
+}
