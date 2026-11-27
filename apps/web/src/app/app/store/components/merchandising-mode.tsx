@@ -485,8 +485,10 @@ export function MerchandisingMode({
               storeName={businessData?.name}
               businessDescription={businessData?.description ?? undefined}
               businessTagline={businessData?.tagline ?? undefined}
-              productsCount={commerceProducts.length}
-              servicesCount={services.length}
+              // P231 r6 (D-303): only what is on the storefront: products live on the store, and bookable services (a
+              // service with a sourceProductId is a product's store listing, not a service to book).
+              productsCount={commerceProducts.filter((p) => liveProductIds.has(p.id) && p.isActive !== false).length}
+              servicesCount={services.filter((sv) => !sv.sourceProductId).length}
               hasDelivery={activeDeliveryMethodsCount > 0}
               testimonialCount={testimonials.length}
               onApplyFaq={handleApplyFaq}

@@ -17,6 +17,10 @@ import {
 } from "lucide-react";
 import type { StorefrontConfig, FaqEntry } from "@/lib/client";
 
+/** P231 r6 (D-303): text still holding a [bracketed] part (an AI suggestion's placeholder) for the merchant to fill in. */
+const HAS_PLACEHOLDER = /\[[^\]]+\]/;
+const needsFilling = (e: FaqEntry) => HAS_PLACEHOLDER.test(e.question) || HAS_PLACEHOLDER.test(e.answer);
+
 type Props = {
   config: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
@@ -32,6 +36,7 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuestion, setEditQuestion] = useState("");
   const [editAnswer, setEditAnswer] = useState("");
+  const unfilled = faqEntries.filter(needsFilling).length;
 
   const updateEntries = useCallback(
     (entries: FaqEntry[]) => {
@@ -132,6 +137,11 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
       </div>
 
       <div className="p-5 space-y-3">
+        {unfilled > 0 && (
+          <p role="alert" className="text-xs font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
+            {unfilled === 1 ? "1 entry still has" : `${unfilled} entries still have`} a [bracketed] part: fill it in with your own policy before you save, or your customers will see it.
+          </p>
+        )}
         {faqEntries.length === 0 && !showForm && (
           <div
             className="text-center py-8 rounded-xl"
@@ -199,6 +209,11 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium">{entry.question}</p>
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{entry.answer}</p>
+                    {needsFilling(entry) && (
+                      <p role="note" className="text-[10px] font-semibold mt-1" style={{ color: "hsl(var(--kf-warning))" }}>
+                        Fill in the [bracketed] part: click edit.
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button

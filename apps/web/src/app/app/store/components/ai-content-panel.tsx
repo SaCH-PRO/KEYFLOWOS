@@ -78,25 +78,32 @@ function trustCopyFor(testimonialCount: number): { trustBadges: string[]; social
 }
 
 /**
- * P231 r5 (D-303): the words for what the store offers, from its real product and service counts, so no copy says
- * customers can buy what is not sold or book what is not offered; with neither, none of it.
+ * P231 r5-r6 (D-303): the words for what the store offers, from its real counts of products live on the storefront and
+ * bookable services, so no copy says customers can buy what is not sold or book what is not offered; with neither,
+ * none of it. r6: a count is only ever paired with the noun it counts ("2 products and 1 service"), in the singular for
+ * one.
  */
-function offerWords(products: number, services: number) {
+function offerWords(productCount: number, serviceCount: number) {
+  const products = Math.max(0, Math.floor(productCount) || 0);
+  const services = Math.max(0, Math.floor(serviceCount) || 0);
   const sells = products > 0;
   const books = services > 0;
-  const total = Math.max(0, products) + Math.max(0, services);
+  const total = products + services;
+  const word = (n: number, w: string) => `${w}${n === 1 ? "" : "s"}`;
   return {
     sells,
     books,
     total,
-    noun: sells && books ? "products and services" : sells ? "products" : books ? "services" : "",
+    noun: [sells ? word(products, "product") : "", books ? word(services, "service") : ""].filter(Boolean).join(" and "),
+    counted: [sells ? `${products} ${word(products, "product")}` : "", books ? `${services} ${word(services, "service")}` : ""].filter(Boolean).join(" and "),
     action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
-    items: `${total} item${total === 1 ? "" : "s"}`,
+    items: `${total} ${word(total, "item")}`,
+    Items: `${total} ${word(total, "Item")}`,
   };
 }
 
-/** P231 r5: an answer still holding a [bracketed] part for the merchant to fill in. */
-const HAS_PLACEHOLDER = /\[your\s|\[what makes/;
+/** P231 r5-r6: text still holding a [bracketed] part for the merchant to fill in (any bracketed part). */
+const HAS_PLACEHOLDER = /\[[^\]]+\]/;
 
 export function AiContentPanel({
   storeName,
@@ -118,6 +125,8 @@ export function AiContentPanel({
   const [trustRequested, setTrustRequested] = useState(false);
   const [launchResult, setLaunchResult] = useState<{ socialPosts: string[]; whatsappMessages: string[]; emailSubjectLines: string[] } | null>(null);
   const [appliedFaq, setAppliedFaq] = useState(false);
+  // r6: once added, the answers are in the FAQ Manager, and that is where the [bracketed] parts are filled in.
+  const [faqAdded, setFaqAdded] = useState(false);
   const [appliedSeo, setAppliedSeo] = useState(false);
   const [selectedSeoTitle, setSelectedSeoTitle] = useState("");
   const [selectedSeoDesc, setSelectedSeoDesc] = useState("");
@@ -129,6 +138,7 @@ export function AiContentPanel({
 
   async function generate(action: ActionType) {
     setActiveAction(action);
+    if (action === "faq") setFaqAdded(false);
     setLoading(true);
     await new Promise((r) => setTimeout(r, 1000));
 
@@ -137,7 +147,8 @@ export function AiContentPanel({
       if (servicesCount > 0) {
         faqs.push({ question: "How do I book a service?", answer: `Simply browse our services and click "Book Now" on the one you want. You'll choose your preferred time and complete your booking in just a few steps.`, category: "Bookings" });
         // P231 r4 (D-303): the merchant's own policies are left as marked placeholders, never invented.
-        faqs.push({ question: "Can I reschedule or cancel?", answer: "Yes — you can reschedule or cancel up to [your cancellation notice] before your appointment. Contact us directly for any last-minute changes.", category: "Bookings" });
+        // r6: the policy itself is the merchant's, so the whole answer is theirs to fill in.
+        faqs.push({ question: "Can I reschedule or cancel?", answer: "[your reschedule and cancellation policy]", category: "Bookings" });
       }
       if (productsCount > 0) {
         faqs.push({ question: "What payment methods do you accept?", answer: "We accept [your payment methods]. All payments are processed at checkout.", category: "Payments" });
@@ -147,14 +158,9 @@ export function AiContentPanel({
         faqs.push({ question: "How long does delivery take?", answer: "Delivery takes [your delivery time]. Delivery options are shown at checkout.", category: "Delivery" });
       }
       faqs.push({ question: `What makes ${name} different?`, answer: "[what makes your business different]", category: "About" });
-      faqs.push({ question: "How can I contact you?", answer: "Reach us through the contact section on our storefront. We respond within [your response time].", category: "Support" });
-      faqs.push({
-        question: "What is your refund policy?",
-        answer: servicesCount > 0
-          ? "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] in advance."
-          : "We offer refunds within [your refund window] of purchase.",
-        category: "Refunds",
-      });
+      // r6: no contact section or refund the product does not know the store has.
+      faqs.push({ question: "How can I contact you?", answer: "Reach us at [your contact details]. We respond within [your response time].", category: "Support" });
+      faqs.push({ question: "What is your refund policy?", answer: "[your refund policy]", category: "Refunds" });
       // r5: the [bracketed] parts can only be filled in once the answers are in the FAQ Manager.
       setFaqResult({ faqs, instruction: "Click 'Add All to FAQ', then fill in the [bracketed] parts with your own policies in the FAQ Manager, and save." });
     }
@@ -165,12 +171,13 @@ export function AiContentPanel({
       // the store really offers (from its counts): no "buy" without products, no "book" without services.
       const metaTitleOptions = [
         `${name} — ${offer.sells ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`.slice(0, 60),
-        tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? `${totalItems} Item${totalItems === 1 ? "" : "s"}` : "Online"}`.slice(0, 60),
+        tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? offer.Items : "Online"}`.slice(0, 60),
         `${name} Online`.slice(0, 60),
       ];
       const metaDescOptions = [
-        (totalItems > 0 ? `Browse ${totalItems} ${offer.noun} at ${name}. ${offer.action}` : `Visit ${name} online.`).slice(0, 160),
-        `${name} — ${tagline || (offer.noun ? `${offer.noun} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`.slice(0, 160),
+        // r6: the count goes with the noun it counts.
+        (totalItems > 0 ? `Browse ${offer.counted} at ${name}. ${offer.action}` : `Visit ${name} online.`).slice(0, 160),
+        `${name} — ${tagline || (offer.counted ? `${offer.counted} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`.slice(0, 160),
         `Discover ${name} online.${businessDescription ? ` ${businessDescription.slice(0, 80)}...` : ""}`.slice(0, 160),
       ];
       setSeoResult({
@@ -298,13 +305,15 @@ export function AiContentPanel({
               </div>
               {faqResult.faqs.some((f) => HAS_PLACEHOLDER.test(f.answer)) && (
                 <p role="note" className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
-                  Some answers have [bracketed] parts: fill them in before your customers see them.
+                  {faqAdded
+                    ? "Added. Check the FAQ Manager: fill in the [bracketed] parts there before you save."
+                    : "Some answers have [bracketed] parts: fill them in before your customers see them."}
                 </p>
               )}
               {onApplyFaq && (
                 <button
                   type="button"
-                  onClick={() => { onApplyFaq(faqResult.faqs); setAppliedFaq(true); setTimeout(() => setAppliedFaq(false), 3000); }}
+                  onClick={() => { onApplyFaq(faqResult.faqs); setAppliedFaq(true); setFaqAdded(true); setTimeout(() => setAppliedFaq(false), 3000); }}
                   className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 min-h-[40px] transition-all"
                   style={{ background: appliedFaq ? "hsl(var(--kf-success)/0.12)" : "hsl(var(--kf-accent2))", color: appliedFaq ? "hsl(var(--kf-success))" : "white" }}
                 >

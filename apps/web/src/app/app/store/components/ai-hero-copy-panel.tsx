@@ -39,6 +39,28 @@ type Props = {
   onApply?: (fields: { headline?: string; subheadline?: string; ctaText?: string; ribbonText?: string }) => void;
 };
 
+/**
+ * P231 r6 (D-303): the words for what the store offers, from its real counts of products live on the storefront and
+ * bookable services (the same rules as the AI Content panel and the store AI hub): no "buy" without products, no
+ * "book" without services, each count with the noun it counts, in the singular for one.
+ */
+function offerWords(productCount: number, serviceCount: number) {
+  const products = Math.max(0, Math.floor(productCount) || 0);
+  const services = Math.max(0, Math.floor(serviceCount) || 0);
+  const sells = products > 0;
+  const books = services > 0;
+  const total = products + services;
+  const word = (n: number, w: string) => `${w}${n === 1 ? "" : "s"}`;
+  return {
+    sells,
+    books,
+    total,
+    counted: [sells ? `${products} ${word(products, "product")}` : "", books ? `${services} ${word(services, "service")}` : ""].filter(Boolean).join(" and "),
+    action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
+    items: `${total} ${word(total, "item")}`,
+  };
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -83,7 +105,7 @@ function OptionList({
           className="text-[10px] flex items-center gap-0.5 transition-colors"
           style={{ color: "hsl(var(--kf-accent1))" }}
         >
-          {open ? "Hide options" : `${options.length} options`}
+          {open ? "Hide options" : `${options.length} option${options.length === 1 ? "" : "s"}`}
           <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.15 }}>
             <ChevronDown className="w-3 h-3" />
           </motion.span>
@@ -153,32 +175,44 @@ export function AiHeroCopyPanel({
     const name = storeName || "Your Store";
     const tagline = businessTagline || "";
     const description = businessDescription || "";
-    const totalItems = productsCount + servicesCount;
+    const offer = offerWords(productsCount, servicesCount);
+
+    // P231 r6 (D-303): no quality ("Quality You Can Trust", "Premium"), speed ("in seconds"), delivery ("delivered to
+    // you"), "curated", "N+ Items", "all in one place", "New Arrivals Just Added" or "First-Time Customer Special" the
+    // product does not know the merchant has; only what the store really offers (its counts), and the merchant's own
+    // news and offers as [placeholders].
+    const headlines = [
+      `${name} — ${tagline || "Now Online"}`,
+      ...(offer.total > 0 ? [`Discover ${offer.counted} from ${name}`] : []),
+    ];
+    const subheadlines = [
+      ...(description ? [description.slice(0, 100)] : offer.total > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
+      ...(offer.total > 0 ? [`${offer.items}, online.`] : []),
+    ];
+    if (subheadlines.length === 0) subheadlines.push(`${name}, now online.`);
+    const offerRibbons = [
+      offer.sells ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
+      "✨ [your latest news]",
+      "🔥 [your offer]",
+    ];
+    const ctas = [
+      ...(offer.sells ? ["Shop Now", "Explore Collection"] : []),
+      ...(offer.books ? ["Book Today"] : []),
+      "Get Started",
+    ];
 
     const res: HeroCopyResult = {
-      headlines: [
-        `${name} — ${tagline || "Quality You Can Trust"}`,
-        `Discover What ${name} Has to Offer`,
-        `${totalItems > 0 ? `${totalItems}+ Items` : "Premium Products & Services"} from ${name}`,
-      ],
-      subheadlines: [
-        description ? description.slice(0, 100) : `Browse our curated collection of ${totalItems > 0 ? totalItems : "great"} offerings. Book or buy online in seconds.`,
-        `${totalItems > 0 ? `${totalItems} items` : "Everything you need"} — available online, anytime, delivered to you.`,
-        `Premium service and quality products, all in one place.`,
-      ],
-      offerRibbons: [
-        "🎉 Now Open Online — Shop Today",
-        "✨ New Arrivals Just Added",
-        "🔥 First-Time Customer Special — Ask Us How",
-      ],
-      ctas: ["Shop Now", "Book Today", "Explore Collection", "Get Started"],
+      headlines,
+      subheadlines,
+      offerRibbons,
+      ctas,
       recommendation: {
-        headline: `${name} — ${tagline || "Quality You Can Trust"}`,
-        subheadline: description ? description.slice(0, 100) : `Browse our curated collection. Book or buy online in seconds.`,
-        offerRibbon: "🎉 Now Open Online — Shop Today",
-        cta: servicesCount > productsCount ? "Book Today" : "Shop Now",
+        headline: headlines[0],
+        subheadline: subheadlines[0],
+        offerRibbon: offerRibbons[0],
+        cta: ctas[0],
       },
-      tip: "These are AI-generated suggestions based on your business profile. Click any option to use it, or copy and paste into your hero fields.",
+      tip: "These suggestions are built from your store details. Click any option to use it, or copy and paste into your hero fields. Replace any [bracketed] part with your own before you save.",
     };
 
     setResult(res);

@@ -89,7 +89,8 @@ export default function StorePage() {
       businessId: s.businessId,
       activeView: activeTab,
       itemCount: productCount,
-      products: s.commerceProducts,
+      // P231 r6 (D-303): the AI hub writes customer-facing copy from these, so only the products live on the storefront.
+      products: s.commerceProducts.filter((p) => (s.liveProductIds?.has(p.id) ?? false) && p.isActive !== false),
       services: s.services,
       testimonials: (s.storefrontConfig.socialProof as SocialProofSection | undefined)?.testimonials ?? [],
       storeEnabled: s.storeEnabled,

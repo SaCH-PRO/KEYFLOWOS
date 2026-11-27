@@ -420,22 +420,38 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
 }
 
 /**
- * P231 r5 (D-303): the words for what the store offers, from its real product and service counts, so no generated copy
- * says customers can buy what is not sold or book what is not offered; with neither, none of it.
+ * P231 r5-r6 (D-303): the words for what the store offers, from its real counts of products live on the storefront and
+ * bookable services, so no generated copy says customers can buy what is not sold or book what is not offered; with
+ * neither, none of it. r6: a count is only ever paired with the noun it counts ("2 products and 1 service"), in the
+ * singular for one; no category name is attached to a count.
  */
-function offerWords(products: number, services: number) {
+function offerWords(productCount: number, serviceCount: number) {
+  const products = Math.max(0, Math.floor(productCount) || 0);
+  const services = Math.max(0, Math.floor(serviceCount) || 0);
   const sells = products > 0;
   const books = services > 0;
-  const total = Math.max(0, products) + Math.max(0, services);
+  const total = products + services;
+  const word = (n: number, w: string) => `${w}${n === 1 ? "" : "s"}`;
+  const noun = [sells ? word(products, "product") : "", books ? word(services, "service") : ""].filter(Boolean).join(" and ");
   return {
     sells,
     books,
     total,
-    noun: sells && books ? "products and services" : sells ? "products" : books ? "services" : "",
+    noun,
+    Noun: noun.replace(/\b(product|service)/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)),
+    counted: [sells ? `${products} ${word(products, "product")}` : "", books ? `${services} ${word(services, "service")}` : ""].filter(Boolean).join(" and "),
     action: sells && books ? "Book or buy online." : sells ? "Buy online." : books ? "Book online." : "",
-    items: `${total} item${total === 1 ? "" : "s"}`,
-    Items: `${total} Item${total === 1 ? "" : "s"}`,
+    items: `${total} ${word(total, "item")}`,
+    Items: `${total} ${word(total, "Item")}`,
   };
+}
+
+/**
+ * P231 r6: the services a customer can book on the storefront. A service row with a sourceProductId is the listing of a
+ * product added to the store (SWP-STORE-LISTING-SERVER), not a bookable service, so it is not counted again.
+ */
+function bookableServices(services: Record<string, unknown>[]) {
+  return services.filter((s) => !s.sourceProductId);
 }
 
 function buildStoreTools(): AiTool[] {
@@ -454,29 +470,23 @@ function buildStoreTools(): AiTool[] {
 
         const products = (d.products ?? []) as Record<string, unknown>[];
 
-        const services = (d.services ?? []) as Record<string, unknown>[];
+        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
         const tagline = d.businessTagline || "";
         const description = d.businessDescription || "";
-        const totalItems = products.length + services.length;
-
-        const categories = [...new Set([
-          ...products.map((p) => p.category as string).filter(Boolean),
-          ...services.map((s) => (s.category as string) || "Service").filter(Boolean),
-        ])].slice(0, 3);
 
         const offer = offerWords(products.length, services.length);
-        const categoryStr = categories.length > 0 ? categories.join(", ") : offer.noun;
+        const totalItems = offer.total;
 
-        // P231 r4b-r5 (D-303): no quality, speed, delivery or offer the product does not know the merchant has, and
-        // only what the store really offers (its counts); a store with nothing yet is offered none of it.
+        // P231 r4b-r6 (D-303): no quality, speed, delivery, popularity ("Your go-to for") or offer the product does not
+        // know the merchant has, only what the store really offers (its counts), each count with the noun it counts;
+        // a store with nothing yet is offered none of it.
         const headlines = [
           `${storeName} — ${tagline || "Now Online"}`,
-          ...(categoryStr ? [`Discover ${categoryStr} from ${storeName}`, `Your go-to for ${categoryStr}`] : []),
+          ...(totalItems > 0 ? [`Discover ${offer.counted} from ${storeName}`] : []),
         ];
         const subheadlines = [
-          ...(description ? [description] : totalItems > 0 ? [`Browse ${totalItems} ${categoryStr}. ${offer.action}`] : []),
+          ...(description ? [description] : totalItems > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
           ...(totalItems > 0 ? [`${offer.items}, online.`] : []),
-          ...(categoryStr ? [`${categoryStr.charAt(0).toUpperCase() + categoryStr.slice(1)} from ${storeName}, online.`] : []),
         ];
         // A store with no description and nothing yet still gets one true subheadline.
         if (subheadlines.length === 0) subheadlines.push(`${storeName}, now online.`);
@@ -703,7 +713,7 @@ function buildStoreTools(): AiTool[] {
 
         const products = (d.products ?? []) as Record<string, unknown>[];
 
-        const services = (d.services ?? []) as Record<string, unknown>[];
+        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
         const storeName = d.storeName || "Your Store";
         const activeDelivery = d.activeDeliveryCount ?? 0;
 
@@ -717,8 +727,8 @@ function buildStoreTools(): AiTool[] {
           });
           faqs.push({
             question: "Can I reschedule or cancel my booking?",
-            // P231 r4 (D-303): the merchant's own policies are left as marked placeholders, never invented.
-            answer: "Yes, you can reschedule or cancel your booking up to [your cancellation notice] before your appointment. Please contact us directly for last-minute changes.",
+            // P231 r4-r6 (D-303): the merchant's own policy, so the whole answer is theirs to fill in.
+            answer: "[your reschedule and cancellation policy]",
             category: "Bookings",
           });
         }
@@ -735,7 +745,7 @@ function buildStoreTools(): AiTool[] {
           faqs.push({
             question: "How long does delivery take?",
             // P231 r4b: no "Express options" or "local pickup" the product does not know the merchant offers.
-            answer: "Delivery times vary by location and method. Delivery takes [your delivery time]. Delivery options are shown at checkout.",
+            answer: "Delivery takes [your delivery time]. Delivery options are shown at checkout.",
             category: "Delivery",
           });
         }
@@ -748,15 +758,15 @@ function buildStoreTools(): AiTool[] {
 
         faqs.push({
           question: "How can I contact you?",
-          answer: "You can reach us through the contact section on our storefront, or message us directly via the contact details listed on our page. We respond within [your response time].",
+          // r6: no contact section or contact details the product does not know the store shows.
+          answer: "Reach us at [your contact details]. We respond within [your response time].",
           category: "Support",
         });
 
         faqs.push({
           question: "What is your refund policy?",
-          answer: services.length > 0
-            ? "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] before the scheduled time. Please contact us to initiate a refund."
-            : "We offer refunds within [your refund window] of purchase. Please contact us to initiate a refund.",
+          // r6: no refund the product does not know the store offers.
+          answer: "[your refund policy]",
           category: "Refunds",
         });
 
@@ -781,36 +791,31 @@ function buildStoreTools(): AiTool[] {
 
         const products = (d.products ?? []) as Record<string, unknown>[];
 
-        const services = (d.services ?? []) as Record<string, unknown>[];
+        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
         const storeName = d.storeName || "Your Store";
         const tagline = d.businessTagline || "";
 
-        const categories = [...new Set([
-          ...products.map((p) => p.category as string).filter(Boolean),
-          ...services.map((s) => (s.category as string)).filter(Boolean),
-        ])].slice(0, 3);
-
         const offer = offerWords(products.length, services.length);
-        const primaryCategory = categories[0] || offer.noun;
         const totalItems = offer.total;
 
-        // P231 r4b-r5: no "instantly", "delivered to you" or "quality" the product does not check, and only what the
-        // store really offers (its counts): no "shop"/"buy" without products, no "book" without services.
+        // P231 r4b-r6: no "instantly", "delivered to you" or "quality" the product does not check, only what the store
+        // really offers (its counts): no "shop"/"buy" without products, no "book" without services; each count with the
+        // noun it counts, and the verb chosen by what is offered. (A commerce product's `category` is its type code,
+        // PRODUCT, SERVICE or PACKAGE, not a category name, so none is put in the copy.)
         const metaTitleOptions = [
-          primaryCategory ? `${storeName} — ${primaryCategory} Online` : `${storeName} — Now Online`,
-          offer.sells ? `${storeName} | Shop ${primaryCategory}` : offer.books ? `${storeName} | Book ${primaryCategory}` : `${storeName} Online`,
+          offer.Noun ? `${storeName} — ${offer.Noun} Online` : `${storeName} — Now Online`,
+          offer.sells && offer.books ? `${storeName} | Shop & Book Online` : offer.sells ? `${storeName} | Shop Online` : offer.books ? `${storeName} | Book Online` : `${storeName} Online`,
           tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? offer.Items : "Online"}`,
         ].map((t) => t.slice(0, 60));
 
         const metaDescOptions = [
-          (totalItems > 0 ? `Browse ${totalItems} ${primaryCategory} at ${storeName}. ${offer.action}` : `Visit ${storeName} online.`).slice(0, 160),
-          (primaryCategory ? `${storeName} offers ${categories.join(", ") || primaryCategory}.${offer.action ? ` ${offer.action}` : ""}` : `${storeName} is now online.`).slice(0, 160),
-          `${storeName}${primaryCategory ? ` — ${primaryCategory}` : ""}. ${tagline || "Now online."}`.slice(0, 160),
+          (totalItems > 0 ? `Browse ${offer.counted} at ${storeName}. ${offer.action}` : `Visit ${storeName} online.`).slice(0, 160),
+          (totalItems > 0 ? `${storeName} offers ${offer.counted} online.${offer.action ? ` ${offer.action}` : ""}` : `${storeName} is now online.`).slice(0, 160),
+          `${storeName}${offer.counted ? ` — ${offer.counted}` : ""}. ${tagline || "Now online."}`.slice(0, 160),
         ];
 
         const keywords = [
           storeName.toLowerCase(),
-          ...categories.map((c) => c.toLowerCase()),
           ...(offer.sells ? ["buy online"] : []),
           ...(offer.books ? ["book online"] : []),
         ];
@@ -824,7 +829,7 @@ function buildStoreTools(): AiTool[] {
         }
 
         return {
-          summary: primaryCategory ? `Generated SEO metadata for "${storeName}" targeting "${primaryCategory}".` : `Generated SEO metadata for "${storeName}".`,
+          summary: offer.noun ? `Generated SEO metadata for "${storeName}" targeting its ${offer.noun}.` : `Generated SEO metadata for "${storeName}".`,
           metaTitleOptions,
           metaDescOptions,
           recommendation: {
@@ -887,7 +892,7 @@ function buildStoreTools(): AiTool[] {
 
         const products = (d.products ?? []) as Record<string, unknown>[];
 
-        const services = (d.services ?? []) as Record<string, unknown>[];
+        const services = bookableServices((d.services ?? []) as Record<string, unknown>[]);
         const offer = offerWords(products.length, services.length);
         const totalItems = offer.total;
 
