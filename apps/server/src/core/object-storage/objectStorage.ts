@@ -467,6 +467,45 @@ export class ObjectStorageService {
   }
 
   /**
+   * P222 (FU-RECEIPT-READ-ROUTE): inspect a client-supplied `/objects/...`
+   * path for `businessId` via a single `HeadObjectCommand`. Fails closed with
+   * `ObjectNotFoundError` before touching S3 when `objectPath` is outside
+   * `businessId`'s upload namespace (zero existence oracle).
+   */
+  async statObjectForBusiness(
+    objectPath: string,
+    businessId: string,
+  ): Promise<{ contentType?: string; contentLength?: number }> {
+    if (!isObjectPathOfBusiness(objectPath, businessId)) {
+      throw new ObjectNotFoundError();
+    }
+    const entityId = objectPath.slice("/objects/".length);
+    const { client, bucket } = getClient();
+    const privateDir = this.getPrivateObjectDir();
+    const key = `${privateDir}/${entityId}`;
+    try {
+      const head = await client.send(
+        new HeadObjectCommand({ Bucket: bucket, Key: key }),
+      );
+      return {
+        contentType: head.ContentType,
+        contentLength:
+          typeof head.ContentLength === "number" ? head.ContentLength : undefined,
+      };
+    } catch (err: unknown) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (
+        e?.name === "NotFound" ||
+        e?.name === "NoSuchKey" ||
+        e?.$metadata?.httpStatusCode === 404
+      ) {
+        throw new ObjectNotFoundError();
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Read a client-supplied `/objects/<id>` path into memory for `businessId`
    * (resolveObjectForBusiness): an object of another business reads as absent.
    */
@@ -500,17 +539,31 @@ export class ObjectStorageService {
   }
 
   /**
-   * FU-OUTBOUND-ATTACHMENT-URL: the canonical `/objects/...` path a client URL
-   * names when it points at our storage, or null when it does not (an external
-   * URL, or not a URL at all). Recognised: a `/objects/...` path; an http(s)
-   * URL whose path holds `/objects/...` (the web's `${API_BASE}/objects/...`);
-   * a bucket URL under PRIVATE_OBJECT_DIR, signed or not (the query string is
-   * dropped). The host is not trusted for anything: the path is only ever read
-   * through resolveObjectForBusiness, so naming another host gains nothing.
+   * FU-OUTBOUND-ATTACHMENT-URL / P222: the canonical `/objects/...` path a
+   * client URL names when it points at our storage, or null when it does not
+   * (an external URL, or not a URL at all). Recognised: a `/objects/...` path;
+   * a relative proxy path `/__api/objects/...`; an http(s) URL whose path
+   * holds `/objects/...` (the web's `${API_BASE}/objects/...`); a bucket URL
+   * under PRIVATE_OBJECT_DIR, signed or not (the query string is dropped).
+   * The host is not trusted for anything: the path is only ever read through
+   * resolveObjectForBusiness / statObjectForBusiness, so naming another host
+   * gains nothing.
    */
   objectPathFromClientUrl(raw: unknown): string | null {
     if (typeof raw !== "string" || raw.length === 0) return null;
-    if (/^\/objects\//i.test(raw)) return `/objects/${raw.slice("/objects/".length)}`;
+    for (let i = 0; i < raw.length; i++) {
+      const code = raw.charCodeAt(i);
+      if (code <= 0x1f || code === 0x7f) return null;
+    }
+    if (raw.startsWith("/") && !raw.startsWith("//")) {
+      if (raw.includes("\\")) return null;
+      const pathOnly = raw.split(/[?#]/, 1)[0];
+      const relMatch = /^\/(?:__api\/)?objects\//i.exec(pathOnly);
+      if (relMatch) {
+        return `/objects/${pathOnly.slice(relMatch[0].length)}`;
+      }
+      return null;
+    }
     let url: URL;
     try {
       url = new URL(raw);
@@ -546,13 +599,16 @@ export class ObjectStorageService {
     }
 
     const privateDir = this.getPrivateObjectDir();
-    let pathname = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+    let pathname = decodeURIComponent(url.pathname)
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\/+/, "");
 
-    // FU-OUTBOUND-ATTACHMENT-URL review round 1 (C1-3) & round 2 (SEC-FUOAU-2):
-    // an endpoint with a path (Supabase Storage: https://<proj>.supabase.co/storage/v1/s3)
-    // prefixes every path-style URL with it — strip it and any repeated slashes first.
+    // FU-OUTBOUND-ATTACHMENT-URL review round 1 (C1-3) & round 2 (SEC-FUOAU-2)
+    // & P222 R2 (SEC-P222-8): an endpoint with a path (Supabase Storage:
+    // https://<proj>.supabase.co/storage/v1/s3) prefixes every path-style URL
+    // with it — collapse repeated slashes and strip it first.
     const { bucket, config } = getClient();
-    const endpointPath = endpointPathPrefix(config.endpoint);
+    const endpointPath = endpointPathPrefix(config.endpoint).replace(/\/{2,}/g, "/");
     if (endpointPath && pathname.startsWith(`${endpointPath}/`)) {
       pathname = pathname.slice(endpointPath.length + 1).replace(/^\/+/, "");
     }

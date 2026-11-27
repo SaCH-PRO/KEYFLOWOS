@@ -149,7 +149,7 @@ export class CrmListsService {
       const [contacts, total] = await Promise.all([
         this.prisma.client.contact.findMany({
           where,
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           skip: offset,
           take: requestedLimit,
         }),

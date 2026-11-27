@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf, isCanonicalModule } from '../authority/module-vocabulary';
 import { EffectiveAuthorityResolver } from '../authority/effective-authority.resolver';
 import { resolveRequestBusinessId } from './request-business-id';
+import { securitySignals } from '../observability/security-signals';
 
 export const MODULE_SCOPE_KEY = 'module_scope';
 
@@ -75,7 +76,10 @@ export class ModuleScopeGuard implements CanActivate {
       where: { userId_businessId: { userId: user.id, businessId } },
     });
 
-    if (!membership) throw new ForbiddenException('Not a member of this business');
+    if (!membership) {
+      securitySignals.record('cross_business_refusal', 'module_scope_guard');
+      throw new ForbiddenException('Not a member of this business');
+    }
 
     // The explicit map (any non-null object, an array included) else the role's defaults; a
     // missing key is 'none'. One helper, shared with the readers that must agree with this guard
@@ -128,6 +132,10 @@ export class ModuleScopeGuard implements CanActivate {
       const resolverAllows = LEVEL_RANK[decision.level] >= (LEVEL_RANK[requirement.minLevel] ?? 1);
 
       if (resolverAllows === legacyAllows) return;
+
+      const reason =
+        typeof decision.reason === 'string' && decision.reason ? decision.reason : 'unknown';
+      securitySignals.record('authority_shadow_mismatch', `${requirement.module}:${reason}`);
 
       this.logger.warn(
         `[authority-shadow] MISMATCH business=${businessId} user=${userId} ` +

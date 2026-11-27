@@ -243,7 +243,7 @@ export class TaskAssignmentService {
       const [items, total] = await Promise.all([
         this.prisma.client.taskAssignment.findMany({
           where,
-          orderBy: { assignedAt: 'desc' },
+          orderBy: [{ assignedAt: 'desc' }, { id: 'desc' }],
           skip: offset,
           take: limit,
         }),

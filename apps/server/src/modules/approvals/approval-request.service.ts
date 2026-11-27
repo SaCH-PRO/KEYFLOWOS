@@ -262,7 +262,7 @@ export class ApprovalRequestService {
       this.prisma.client.approvalRequest.findMany({
         where,
         include: { steps: { orderBy: { stepOrder: 'asc' } } },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: options?.offset ?? 0,
         take: options?.limit ?? 50,
       }),
