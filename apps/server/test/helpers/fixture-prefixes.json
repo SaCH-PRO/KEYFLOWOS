@@ -1670,6 +1670,11 @@
       "prefix": "v92b_",
       "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
+    },
+    {
+      "prefix": "v67s_",
+      "owner": "apps/server/test/legacy-modules-store.integration.test.ts",
+      "packet": "V1-67 (WEDGE-HIDE-STORE, P225, D-263: the store on NAV-B-LEGACY-SERVER's legacy answer)"
     }
   ],
   "pendingRenames": [],
