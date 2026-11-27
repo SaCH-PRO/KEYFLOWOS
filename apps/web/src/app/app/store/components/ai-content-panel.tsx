@@ -57,7 +57,7 @@ function CopyBtn({ text }: { text: string }) {
 const ACTIONS: { id: ActionType; icon: React.ElementType; label: string; desc: string; color: string }[] = [
   { id: "faq", icon: HelpCircle, label: "Generate FAQ", desc: "Create FAQ entries for your store", color: "hsl(var(--kf-accent2))" },
   { id: "seo", icon: Search, label: "Generate SEO", desc: "Craft optimized meta title & description", color: "hsl(var(--kf-accent1))" },
-  { id: "trust", icon: ShieldCheck, label: "Trust Copy", desc: "Guarantees, badges, social proof text", color: "hsl(var(--kf-success))" },
+  { id: "trust", icon: ShieldCheck, label: "Trust Copy", desc: "Badges and social proof from your testimonials", color: "hsl(var(--kf-success))" },
   { id: "launch", icon: Megaphone, label: "Launch Posts", desc: "Social media & WhatsApp launch copy", color: "hsl(var(--kf-warning))" },
 ];
 
@@ -135,25 +135,19 @@ export function AiContentPanel({
 
     if (action === "trust") {
       setTrustResult({
-        // P231 r1 (D-303): no paste-in guarantee or unverified badge ("100% Satisfaction Guarantee", "Secure,
-        // Encrypted Checkout", "Verified Business", "Secure Payments", "Quality Guaranteed").
-        guarantees: [
-          "⚡ Fast, Reliable Service",
-          "💬 Real Human Support",
-        ],
-        // P231 r2: praise only with testimonials to point to; none is suggested for a store without them.
+        // P231 r1-r3 (D-303): no guarantee or service claim the product does not check ("100% Satisfaction
+        // Guarantee", "Secure, Encrypted Checkout", "Verified Business", "Secure Payments", "Quality Guaranteed",
+        // "Fast, Reliable Service", "Real Human Support").
+        guarantees: [],
+        // P231 r2-r3: praise only with testimonials to point to, and only what they show (no "across the region");
+        // a store without them is suggested none.
         trustBadges: testimonialCount > 0 ? [`${testimonialCount}+ Happy Customers`] : [],
-        socialProofCopy: [
-          testimonialCount > 0
-            ? `Join ${testimonialCount}+ satisfied customers who trust ${name}.`
-            : "Join our growing community of satisfied customers.",
-          ...(testimonialCount > 0
-            ? [
-                "Real results, real reviews — see why customers keep coming back.",
-                `Trusted by customers across the region. See what they're saying below.`,
-              ]
-            : []),
-        ],
+        socialProofCopy: testimonialCount > 0
+          ? [
+              `Join ${testimonialCount}+ satisfied customers who trust ${name}.`,
+              "Real results, real reviews — see why customers keep coming back.",
+            ]
+          : [],
       });
     }
 
@@ -318,17 +312,12 @@ export function AiContentPanel({
 
           {!loading && activeAction === "trust" && trustResult && (
             <motion.div key="trust" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Guarantee Statements</p>
-                <div className="space-y-1">
-                  {trustResult.guarantees.map((g, i) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "hsl(var(--kf-success)/0.06)", border: "1px solid hsl(var(--kf-success)/0.12)" }}>
-                      <p className="text-xs">{g}</p>
-                      <CopyBtn text={g} />
-                    </div>
-                  ))}
-                </div>
-              </div>
+              {/* P231 r3: guarantee statements are no longer suggested (D-303); with no testimonials nothing is. */}
+              {trustResult.trustBadges.length === 0 && trustResult.socialProofCopy.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No trust copy yet. Add testimonials under Social Proof, and the copy suggested here will point to them.
+                </p>
+              )}
               {trustResult.trustBadges.length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Trust Badges</p>
@@ -342,6 +331,7 @@ export function AiContentPanel({
                 </div>
               </div>
               )}
+              {trustResult.socialProofCopy.length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Social Proof Copy</p>
                 {trustResult.socialProofCopy.map((c, i) => (
@@ -351,6 +341,7 @@ export function AiContentPanel({
                   </div>
                 ))}
               </div>
+              )}
             </motion.div>
           )}
 

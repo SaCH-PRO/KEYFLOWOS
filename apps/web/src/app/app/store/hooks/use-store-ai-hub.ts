@@ -816,7 +816,7 @@ function buildStoreTools(): AiTool[] {
     {
       id: "trust-copy-generator",
       name: "Trust Copy Generator",
-      description: "Generate trust badges, guarantee copy, and social proof language to add to your storefront.",
+      description: "Generate trust badges and social proof language, from your testimonials, to add to your storefront.",
       icon: "analysis",
       category: "generate",
       requiresSelection: false,
@@ -826,37 +826,33 @@ function buildStoreTools(): AiTool[] {
         const storeName = d.storeName || "Your Store";
         const testimonials = (d.testimonials ?? []) as unknown[];
 
-        // P231 r1 (D-303): no paste-in guarantee or unverified badge ("100% Satisfaction Guarantee", "Secure,
-        // Encrypted Checkout", "Verified Business", "5-Star Rated", "Secure Payments").
-        const guarantees = [
-          "⚡ Fast, Reliable Service",
-          "💬 Real Human Support",
-        ];
+        // P231 r1-r3 (D-303): no guarantee or service claim the product does not check ("100% Satisfaction
+        // Guarantee", "Secure, Encrypted Checkout", "Verified Business", "5-Star Rated", "Secure Payments",
+        // "Fast, Reliable Service", "Real Human Support").
+        const guarantees: string[] = [];
 
-        // P231 r2: praise only with testimonials to point to; none is suggested for a store without them.
+        // P231 r2-r3: praise only with testimonials to point to, and only what they show (no "across the region");
+        // a store without them is suggested none.
         const trustBadges = testimonials.length > 0 ? [`${testimonials.length}+ Happy Customers`] : [];
 
-        const socialProofCopy = [
-          testimonials.length > 0
-            ? `Join ${testimonials.length}+ satisfied customers who trust ${storeName}.`
-            : `Join our growing community of satisfied customers.`,
-          ...(testimonials.length > 0
-            ? [
-                `Trusted by customers across the region. See what they're saying below.`,
-                `Real results, real reviews — see why customers keep coming back.`,
-              ]
-            : []),
-        ];
+        const socialProofCopy = testimonials.length > 0
+          ? [
+              `Join ${testimonials.length}+ satisfied customers who trust ${storeName}.`,
+              `Real results, real reviews — see why customers keep coming back.`,
+            ]
+          : [];
 
         const aboutCopy = `${storeName} is committed to delivering quality ${d.businessDescription ? "— " + d.businessDescription : "products and services"}.`;
 
         return {
-          summary: `Generated trust copy, guarantee statements, and social proof language for "${storeName}".`,
+          summary: testimonials.length > 0
+            ? `Generated trust badges and social proof language for "${storeName}" from its ${testimonials.length} testimonial${testimonials.length === 1 ? "" : "s"}.`
+            : `No trust copy for "${storeName}" yet: add testimonials, and the copy suggested will point to them.`,
           guarantees,
           trustBadges,
           socialProofCopy,
           aboutCopy,
-          instruction: "Add guarantee copy to your hero ribbon, trust badges in your description, and social proof copy near your testimonials section.",
+          instruction: "Add trust badges to your description, and social proof copy near your testimonials section.",
         };
       },
     },

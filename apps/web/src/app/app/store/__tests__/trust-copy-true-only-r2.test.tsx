@@ -5,7 +5,9 @@
  *         processed "securely"
  *   R2-3  the Social Proof panel's Guarantee Text placeholder suggests no guarantee
  *   R2-4  "Trusted by Customers", "Real results, real reviews" and "Trusted by customers across the region" are
- *         suggested only when the store has testimonials; "Fast, Reliable Service" and "Real Human Support" stay
+ *         suggested only when the store has testimonials. Round 3 (review of 7485784, deliberately, under D-303):
+ *         "Trusted by customers across the region", "Fast, Reliable Service" and "Real Human Support" are no longer
+ *         suggested at all; the assertions that kept them are now that they are gone
  *   R2-5  the storefront preview's trust row shows the store's own trust lines
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -67,28 +69,26 @@ describe("R2-3: the Social Proof panel", () => {
 });
 
 describe("R2-4: praise only with testimonials", () => {
-  it("the panel's Trust Copy, with no testimonials, suggests none of it; Fast, Reliable Service stays", async () => {
-    await panelAction("Trust Copy", { storeName: "Pepper Co", productsCount: 2, testimonialCount: 0 }, /Fast, Reliable Service/);
+  it("the panel's Trust Copy, with no testimonials, suggests none of it (and, since round 3, no service claims)", async () => {
+    await panelAction("Trust Copy", { storeName: "Pepper Co", productsCount: 2, testimonialCount: 0 }, /No trust copy yet/);
     expect(text()).not.toMatch(UNEARNED_PRAISE);
-    expect(text()).toMatch(/Real Human Support/);
+    expect(text()).not.toMatch(/Fast, Reliable Service|Real Human Support/);
   });
 
   it("the panel's Trust Copy, with 3 testimonials, suggests it", async () => {
-    await panelAction("Trust Copy", { storeName: "Pepper Co", productsCount: 2, testimonialCount: 3 }, /Fast, Reliable Service/);
+    await panelAction("Trust Copy", { storeName: "Pepper Co", productsCount: 2, testimonialCount: 3 }, /3\+ Happy Customers/);
     expect(text()).toMatch(/Real results, real reviews/);
-    expect(text()).toMatch(/Trusted by customers across the region/);
-    expect(text()).toMatch(/3\+ Happy Customers/);
+    expect(text()).not.toMatch(/Trusted by customers across the region/); // round 3: testimonials show no reach
   });
 
   it("the hub's Trust Copy Generator, with no testimonials, suggests none of it; with testimonials, it does", async () => {
     const tool = hubTool("trust-copy-generator");
     const none = JSON.stringify(await tool.execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", testimonials: [] } }));
     expect(none).not.toMatch(UNEARNED_PRAISE);
-    expect(none).toMatch(/Fast, Reliable Service/);
-    expect(none).toMatch(/Real Human Support/);
+    expect(none).not.toMatch(/Fast, Reliable Service|Real Human Support/); // round 3
     const some = JSON.stringify(await tool.execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", testimonials: [1, 2, 3] } }));
     expect(some).toMatch(/Real results, real reviews/);
-    expect(some).toMatch(/Trusted by customers across the region/);
+    expect(some).not.toMatch(/Trusted by customers across the region/); // round 3
   });
 });
 
