@@ -64,13 +64,13 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
   Profile location, CW-3; connector Connect, CW-4); the round 3 class repair applied the channel
   connection health check (-1, CB-1) and moved the Drive share to exempt-check (WPH2-2).
   Now:
-  - exempt-check: 56 (66 before SWP-CENSUS-HIDDEN)
+  - exempt-check: 59 (66 before SWP-CENSUS-HIDDEN)
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
-  - deferred: 60 (none `held:`: the bank connections are settings admin since the PR195 merge, SWEEP-P0-FOLLOWUP)
-  - open: 271 (565 before SWP-CENSUS-HIDDEN)
-- Routes gated (applied): **406**: 304 by SWP-CENSUS-HIDDEN; **102** before it (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
+  - deferred: 53 (none `held:`: the bank connections are settings admin since the PR195 merge, SWEEP-P0-FOLLOWUP)
+  - open: 2 (57 before SWP-CENSUS-KEY-A; 271 after SWP-CENSUS-HIDDEN; 565 before SWP-CENSUS-HIDDEN)
+- Routes gated (applied): **683**: 55 by SWP-CENSUS-KEY-A; 222 across prior census sweeps; 304 by SWP-CENSUS-HIDDEN; **102** before it (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
   Outlook contacts consent start, SV-3; round 3: and crm read, WPH2-1); and 25 reads of the same controllers (round 2: the
   accounting summary, unsynced invoices and chart of accounts need revenue read). Beside these, the
   round 1 class repair added a settings admin check to routes that already enforced another scope

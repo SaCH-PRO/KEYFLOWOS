@@ -432,8 +432,15 @@ describe('SWP-CENSUS-KEY-A (V1-64): ModuleScopeGuard enforcement across all 6 KE
         }
         const methodGuards: unknown[] = Reflect.getMetadata('__guards__', handler) ?? [];
         const allGuards = [...classGuards, ...methodGuards];
-        if (!allGuards.includes(ModuleScopeGuardCls)) {
-          missing.push(`${ctrlName}.${methodName}: missing ModuleScopeGuard`);
+        const guardNames = allGuards.map((g) => (typeof g === 'function' ? g.name : String(g)));
+        const authIdx = guardNames.indexOf('AuthGuard');
+        const bizIdx = guardNames.indexOf('BusinessGuard');
+        const scopeIdx = guardNames.indexOf('ModuleScopeGuard');
+        if (authIdx < 0 || bizIdx < 0 || scopeIdx < 0 || !(authIdx < bizIdx && bizIdx < scopeIdx)) {
+          missing.push(`${ctrlName}.${methodName}: invalid guard order [${guardNames.join(', ')}]`);
+        }
+        if (guardNames.filter((n) => n === 'AuthGuard').length > 1 || guardNames.filter((n) => n === 'BusinessGuard').length > 1) {
+          missing.push(`${ctrlName}.${methodName}: duplicate guards [${guardNames.join(', ')}]`);
         }
         const scope = Reflect.getMetadata(MODULE_SCOPE_KEY, handler) ?? Reflect.getMetadata(MODULE_SCOPE_KEY, Ctrl);
         if (!scope || scope.module !== expected.module || scope.minLevel !== expected.minLevel) {

@@ -47,7 +47,7 @@ export class BlueprintOnboardingController {
     return this.onboarding.getHistory(businessId, actorId(user));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('settings', 'write')
   @Post('onboarding-chat')
   async onboardingChat(
@@ -59,7 +59,7 @@ export class BlueprintOnboardingController {
   }
 
   /** Starts the caller's own conversation over; other members' are untouched. */
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('settings', 'write')
   @Post('onboarding-reset')
   async onboardingReset(
