@@ -132,3 +132,63 @@ describe("R22-3: the detail page, left for B, with the stored id back on A", () 
     }
   }
 });
+
+describe("R22-3: the detail page's own check, after the page has left", () => {
+  const ACTIONS = [
+    ["void", () => finance.voidBill, /Void expense/, (b: HTMLButtonElement) => /Void expense/.test(b.textContent ?? "")],
+    ["delete", () => client.deleteExpense, /Delete expense/, (b: HTMLButtonElement) => (b.textContent ?? "").trim() === "Delete"],
+  ] as const;
+  for (const [name, call, button, confirm] of ACTIONS) {
+    it(`a ${name} confirm open when the page leaves for B is gone (R14-4): with the stored id back on A, pressing it sends nothing`, async () => {
+      call().mockReturnValue(new Promise(() => {}) as never);
+      await mount({ status: "PAID" });
+      const okButton = await openConfirm(button, confirm);
+      ws.bid = "biz_B";
+      act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } })); });
+      await waitFor(() => expect(nav.replace).toHaveBeenCalledWith("/app/expenses"));
+      ws.bid = "biz_A"; // another tab, before its storage event; the router has not yet unmounted this page
+      fireEvent.click(okButton);
+      await settle();
+      expect(call(), `A's ${name} sent after the page left`).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe("R22-3: a reply landing while storage is blocked", () => {
+  const ACTIONS = [
+    ["void", () => finance.voidBill, /Void expense/, (b: HTMLButtonElement) => /Void expense/.test(b.textContent ?? ""), () => ok(expense({ status: "VOID" }))],
+    ["delete", () => client.deleteExpense, /Delete expense/, (b: HTMLButtonElement) => (b.textContent ?? "").trim() === "Delete", () => ok(null)],
+  ] as const;
+  for (const [name, call, button, confirm, answer] of ACTIONS) {
+    for (const outcome of ["answers", "throws"] as const) {
+      it(`A's ${name} that ${outcome} says nothing and throws nothing`, async () => {
+        const pending = deferred<unknown>();
+        call().mockReturnValue(pending.promise as never);
+        const unhandled: unknown[] = [];
+        const onUnhandled = (e: PromiseRejectionEvent) => { unhandled.push(e.reason); e.preventDefault(); };
+        const onNode = (r: unknown) => { unhandled.push(r); };
+        window.addEventListener("unhandledrejection", onUnhandled);
+        process.on("unhandledRejection", onNode);
+        try {
+          await mount({ status: "PAID" });
+          fireEvent.click(await openConfirm(button, confirm));
+          await waitFor(() => expect(call()).toHaveBeenCalled());
+          blocked.on = true;
+          await act(async () => {
+            if (outcome === "answers") pending.resolve(answer());
+            else pending.reject(new TypeError("Failed to fetch"));
+          });
+          await settle();
+          blocked.on = false;
+          expect(toast.success).not.toHaveBeenCalled();
+          expect(toast.error).not.toHaveBeenCalled();
+          expect(unhandled, `A's ${name} reply threw with storage blocked`).toEqual([]);
+        } finally {
+          blocked.on = false;
+          window.removeEventListener("unhandledrejection", onUnhandled);
+          process.off("unhandledRejection", onNode);
+        }
+      });
+    }
+  }
+});

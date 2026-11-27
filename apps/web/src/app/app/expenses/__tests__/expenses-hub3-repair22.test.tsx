@@ -466,3 +466,31 @@ describe("R22-P (from the retired modal): the sheet's schedule under a silent sw
     });
   }
 });
+
+describe("R22-3: the page's receipt upload, before the switch is rendered", () => {
+  it("A's upload landing after the event to B and before React commits it, the stored id back on A, opens no sheet", async () => {
+    const up = deferred<unknown>();
+    upload.uploadFile.mockReturnValue(up.promise);
+    render(<ExpensesInboxPage />);
+    const LONG = { timeout: 10000 };
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    await screen.findByRole("tab", { name: "Categories" }, LONG);
+    const input = await waitFor(() => {
+      const found = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+      expect(found).toBeTruthy();
+      return found!;
+    }, LONG);
+    fireEvent.change(input, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } });
+    await waitFor(() => expect(upload.uploadFile).toHaveBeenCalled(), LONG);
+    await act(async () => {
+      ws.bid = "biz_B";
+      window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } }));
+      ws.bid = "biz_A"; // another tab, before its storage event
+      up.resolve({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj_1", metadata: {} });
+      await up.promise;
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+    noToast2();
+    expect(screen.queryByRole("dialog"), "a sheet opened on B with A's receipt").toBeNull();
+  }, 30000);
+});
