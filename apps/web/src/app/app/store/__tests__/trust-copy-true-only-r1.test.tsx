@@ -41,7 +41,8 @@ describe("MINOR-3: Trust Copy suggestions", () => {
     render(<AiContentPanel storeName="Pepper Co" productsCount={2} testimonialCount={3} />);
     fireEvent.click(screen.getByText("Trust Copy"));
     // The panel "generates" for 1 s, then its loading row animates out.
-    expect(await screen.findByText(/satisfied customers who trust Pepper Co/, undefined, { timeout: 4000 })).toBeTruthy();
+    // Round 4 (D-303): the copy counts the reviews; it no longer says the customers are satisfied.
+    expect(await screen.findByText(/Read 3 reviews from our customers/, undefined, { timeout: 4000 })).toBeTruthy();
     expect(text()).not.toMatch(UNVERIFIED);
   });
 
@@ -50,7 +51,7 @@ describe("MINOR-3: Trust Copy suggestions", () => {
     const tool = result.current.tools.find((t) => t.id === "trust-copy-generator");
     expect(tool).toBeTruthy();
     const out = await tool!.execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", testimonials: [1, 2, 3], businessDescription: "Hot sauces" } });
-    expect(JSON.stringify(out)).toMatch(/satisfied customers who trust Pepper Co/);
+    expect(JSON.stringify(out)).toMatch(/Read 3 reviews from our customers/); // round 4
     expect(JSON.stringify(out)).not.toMatch(UNVERIFIED);
   });
 });

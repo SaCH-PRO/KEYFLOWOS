@@ -9,6 +9,9 @@
  *         "Trusted by customers across the region", "Fast, Reliable Service" and "Real Human Support" are no longer
  *         suggested at all; the assertions that kept them are now that they are gone
  *   R2-5  the storefront preview's trust row shows the store's own trust lines
+ *
+ * Round 4 (D-303): "Real results, real reviews" is no longer suggested even with testimonials (it implies repeat
+ * custom the data does not show); the assertions that kept it now pin that it is gone.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
@@ -76,8 +79,9 @@ describe("R2-4: praise only with testimonials", () => {
   });
 
   it("the panel's Trust Copy, with 3 testimonials, suggests it", async () => {
-    await panelAction("Trust Copy", { storeName: "Pepper Co", productsCount: 2, testimonialCount: 3 }, /3\+ Happy Customers/);
-    expect(text()).toMatch(/Real results, real reviews/);
+    // Round 4 (D-303): a count of reviews, and no "Real results … keep coming back" (repeat custom is not shown).
+    await panelAction("Trust Copy", { storeName: "Pepper Co", productsCount: 2, testimonialCount: 3 }, /3 customer reviews/);
+    expect(text()).not.toMatch(/Real results, real reviews/);
     expect(text()).not.toMatch(/Trusted by customers across the region/); // round 3: testimonials show no reach
   });
 
@@ -87,7 +91,8 @@ describe("R2-4: praise only with testimonials", () => {
     expect(none).not.toMatch(UNEARNED_PRAISE);
     expect(none).not.toMatch(/Fast, Reliable Service|Real Human Support/); // round 3
     const some = JSON.stringify(await tool.execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", testimonials: [1, 2, 3] } }));
-    expect(some).toMatch(/Real results, real reviews/);
+    expect(some).toMatch(/Read 3 reviews from our customers/); // round 4
+    expect(some).not.toMatch(/Real results, real reviews/); // round 4
     expect(some).not.toMatch(/Trusted by customers across the region/); // round 3
   });
 });

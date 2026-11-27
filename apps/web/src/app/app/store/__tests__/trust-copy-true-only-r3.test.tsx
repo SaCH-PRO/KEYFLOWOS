@@ -8,6 +8,11 @@
  *         testimonials in the storefront config
  *   R3-4  under D-303, no "Trusted by customers across the region", "Fast, Reliable Service" or "Real Human Support"
  *         (the product checks none of them), with or without testimonials
+ *
+ * Round 4 (round-3 confirmations at ddedabe, deliberately, under D-303): the badge is "N customer reviews", not
+ * "N+ Happy Customers", and the copy "Read N reviews from our customers", not "Join N+ satisfied customers" (a count
+ * of testimonials says nothing about their rating); "Real results … keep coming back" is gone. The assertions that
+ * kept the old wording now pin the new (see trust-copy-true-only-r4).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
@@ -54,12 +59,13 @@ describe("the AI content panel's Trust Copy", () => {
     expect(text()).not.toMatch(UNCHECKED);
   });
 
-  it("with 3 testimonials: '3+ Happy Customers' and copy that quotes them, still no unchecked claim", async () => {
+  // Round 4 (D-303): the count of reviews, not that the customers are happy or satisfied or come back.
+  it("with 3 testimonials: '3 customer reviews' and copy that points to them, still no unchecked claim", async () => {
     render(<AiContentPanel storeName="Pepper Co" productsCount={2} testimonialCount={3} />);
     await generateTrustCopy();
-    expect(text()).toMatch(/3\+ Happy Customers/);
-    expect(text()).toMatch(/Join 3\+ satisfied customers who trust Pepper Co/);
-    expect(text()).toMatch(/Real results, real reviews/);
+    expect(text()).toMatch(/3 customer reviews/);
+    expect(text()).toMatch(/Read 3 reviews from our customers/);
+    expect(text()).not.toMatch(UNBACKED);
     expect(text()).not.toMatch(UNCHECKED);
   });
 });
@@ -74,10 +80,11 @@ describe("the store AI hub's Trust Copy Generator", () => {
     expect(JSON.stringify(out)).not.toMatch(UNCHECKED);
   });
 
-  it("with 3 testimonials: one '3+ Happy Customers' badge, copy that quotes them, no unchecked claim", async () => {
+  it("with 3 testimonials: one '3 customer reviews' badge, copy that points to them, no unchecked claim", async () => {
     const out = await hubTrust([1, 2, 3]);
-    expect(out.trustBadges).toEqual(["3+ Happy Customers"]);
-    expect(out.socialProofCopy.join(" ")).toMatch(/Join 3\+ satisfied customers who trust Pepper Co/);
+    expect(out.trustBadges).toEqual(["3 customer reviews"]); // round 4
+    expect(out.socialProofCopy.join(" ")).toMatch(/Read 3 reviews from our customers/); // round 4
+    expect(JSON.stringify(out)).not.toMatch(UNBACKED); // round 4
     expect(JSON.stringify(out)).not.toMatch(UNCHECKED);
   });
 });
@@ -107,9 +114,9 @@ describe("the merchandising view passes the store's real testimonial count", () 
     expect(text()).not.toMatch(/Happy Customers|satisfied customers/i);
   });
 
-  it("with 2 in the config, the panel suggests '2+ Happy Customers'", async () => {
+  it("with 2 in the config, the panel suggests '2 customer reviews'", async () => {
     mount([{ id: "t1", name: "Ann", text: "Great", rating: 5 }, { id: "t2", name: "Bo", text: "Hot!", rating: 5 }]);
     await generateTrustCopy();
-    expect(text()).toMatch(/2\+ Happy Customers/);
+    expect(text()).toMatch(/2 customer reviews/); // round 4
   });
 });
