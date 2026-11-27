@@ -4,17 +4,27 @@ import type { FaqEntry } from "@/lib/client";
 import { unfilledFaqEntries } from "../storefront-counts";
 
 /**
- * P231 r7: the warning shown by any Save that writes the FAQ entries (the whole storefront config) while some still
- * hold a [bracketed] part: it says how many, and where to fill them in. It does not block the save.
+ * P231 r7-r8: the warning shown by every Save that writes the FAQ entries (each save writes the whole storefront
+ * config) while some still hold a [bracketed] part: how many, and where to fill them in. It does not block the save.
+ * One per tab, by the tab's saves, so it shows whichever section is open:
+ * - "faq-manager": the FAQ Manager on its own, by its Save;
+ * - "merchandising": the Merchandising tab (Featured, Social Proof, SEO, FAQ and Policies saves), where the FAQ is;
+ * - "elsewhere": another tab (Design, Operations).
  */
-export function FaqPlaceholderWarning({ entries, where }: { entries: FaqEntry[] | null | undefined; where: "faq-manager" | "elsewhere" }) {
+export function FaqPlaceholderWarning({ entries, where }: { entries: FaqEntry[] | null | undefined; where: "faq-manager" | "merchandising" | "elsewhere" }) {
   const n = unfilledFaqEntries(entries).length;
   if (n === 0) return null;
+  const one = n === 1;
+  const lead = `${one ? "1 FAQ entry still has" : `${n} FAQ entries still have`} a [bracketed] part`;
+  const kept = `saves ${one ? "it as it is" : "them as they are"}`;
+  const fill = `Fill ${one ? "it" : "them"} in`;
   return (
     <p role="alert" className="text-xs font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
       {where === "faq-manager"
-        ? `${n === 1 ? "1 entry still has" : `${n} entries still have`} a [bracketed] part: fill it in with your own policy before you save, or your customers will see it.`
-        : `${n === 1 ? "1 FAQ entry still has" : `${n} FAQ entries still have`} a [bracketed] part: saving here saves ${n === 1 ? "it" : "them"} as ${n === 1 ? "it is" : "they are"}. Fill ${n === 1 ? "it" : "them"} in in the FAQ Manager (Merchandising → FAQ & Policies).`}
+        ? `${one ? "1 entry still has" : `${n} entries still have`} a [bracketed] part: fill it in with your own policy before you save, or your customers will see it.`
+        : where === "merchandising"
+          ? `${lead}: every Save on this tab ${kept}. ${fill} under FAQ & Policies, below.`
+          : `${lead}: saving here ${kept}. ${fill} under Merchandising → FAQ & Policies.`}
     </p>
   );
 }

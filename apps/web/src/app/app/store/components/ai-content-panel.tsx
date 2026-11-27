@@ -163,7 +163,7 @@ export function AiContentPanel({
         // r6: the count goes with the noun it counts.
         (totalItems > 0 ? `Browse ${offer.counted} at ${name}. ${offer.action}` : `Visit ${name} online.`).slice(0, 160),
         `${name} — ${tagline || (offer.counted ? `${offer.counted} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`.slice(0, 160),
-        `Discover ${name} online.${businessDescription ? ` ${businessDescription.slice(0, 80)}...` : ""}`.slice(0, 160),
+        `Discover ${name} online.${businessDescription ? ` ${businessDescription.length > 80 ? `${businessDescription.slice(0, 80)}...` : businessDescription}` : ""}`.slice(0, 160),
       ];
       setSeoResult({
         metaTitleOptions,

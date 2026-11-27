@@ -1,5 +1,6 @@
 "use client";
 
+import { FaqPlaceholderWarning } from "./faq-placeholder-warning";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
@@ -438,6 +439,8 @@ export function MerchandisingMode({
 
   return (
     <div className="space-y-4">
+      {/* P231 r8: every save on this tab (Featured, Social Proof, SEO, FAQ, Policies) writes the FAQ entries too. */}
+      <FaqPlaceholderWarning entries={faqEntries} where="merchandising" />
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <WorkspaceMetricStrip items={metrics} columns={4} compact />
       </motion.div>
@@ -505,7 +508,7 @@ export function MerchandisingMode({
           </AccordionSection>
           <AccordionSection title="FAQ & Policies" subtitle="Questions, refund policy & terms" icon={HelpCircle} accentColor={pc}>
             <div className="space-y-4">
-              <FaqManager config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} />
+              <FaqManager config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} saveWarning={false} />
               <div className="pt-2" style={{ borderTop: "1px solid hsl(var(--kf-border)/0.2)" }}>
                 <PolicyEditor config={storefrontConfig} onConfigChange={onConfigChange} onSave={onSaveConfig} saving={configSaving} />
               </div>

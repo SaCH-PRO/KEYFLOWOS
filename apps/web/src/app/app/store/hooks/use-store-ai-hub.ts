@@ -150,15 +150,21 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
       actionKey: "switch_tab:catalog",
     });
   } else if (data.storeProducts !== undefined && storeOffer(data).total === 0) {
-    // P231 r7: the catalog has items, but none is on the store: the store is empty, the catalog is not.
+    // P231 r7-r8: the catalog has items, but none is on the store: the store is empty, the catalog is not. The items
+    // are the products and the bookable services (a product's listing row is not a second item); when none is
+    // switched on, that is what to do first.
+    const items = counted(products.length + bookableServices(services).length, "item");
+    const switchedOff = products.every((p) => p.isActive === false) && bookableServices(services).length === 0;
     suggestions.push({
       id: `nothing-on-store-${Date.now()}`,
       type: "risk",
       title: "Nothing on Your Store Yet",
-      description: `Your catalog has ${counted(products.length + services.length, "item")}, but none is on your store yet. Add them to your store so visitors have something to browse and buy.`,
+      description: switchedOff
+        ? `Your catalog has ${items}, but every one is switched off. Switch them on, then add them to your store so visitors have something to browse and buy.`
+        : `Your catalog has ${items}, but none is on your store yet. Add them to your store so visitors have something to browse and buy.`,
       explanation: "Visitors only see what is on your store.",
       priority: "high",
-      actionLabel: "Add them to your store",
+      actionLabel: switchedOff ? "Switch them on" : "Add them to your store",
       actionKey: "switch_tab:catalog",
     });
   }

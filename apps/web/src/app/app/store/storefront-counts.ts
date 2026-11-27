@@ -62,7 +62,8 @@ export function liveProducts<P extends ProductLike>(
 ): P[] {
   if (!liveProductIds) return [];
   const hidden = hiddenByStorefront(opts.storefrontConfig);
-  const bookableNames = new Set(bookableServices(opts.services ?? [], opts.storefrontConfig).map((s) => s.name));
+  // r8: /book de-dupes against every public service (no sourceProductId), even one the catalog override hides.
+  const bookableNames = new Set(publicServiceNames(opts.services ?? []));
   return products.filter((p) => {
     if (!liveProductIds.has(p.id) || p.isActive === false || hidden.has(p.id)) return false;
     const category = categoryOf(p);
@@ -84,9 +85,22 @@ export type StorefrontOffer = {
   orderableServices: number;
 };
 
-/** Counts products already on the store (liveProducts) and bookable services by kind, as /book draws them. */
-export function offerOf(products: { category?: unknown; name?: unknown }[], services: { name?: unknown }[]): StorefrontOffer {
-  const names = new Set(services.map((s) => s.name));
+/** The names /book de-dupes a SERVICE-category product against: every public service's, hidden or not. */
+function publicServiceNames(services: ServiceLike[]): unknown[] {
+  return services.filter((s) => !s.sourceProductId).map((s) => s.name);
+}
+
+/**
+ * Counts products already on the store (liveProducts) and bookable services by kind, as /book draws them. A
+ * SERVICE-category product with the name of a public service (`dedupeNames`, by default the services given) is not
+ * drawn.
+ */
+export function offerOf(
+  products: { category?: unknown; name?: unknown }[],
+  services: { name?: unknown }[],
+  dedupeNames: Iterable<unknown> = services.map((s) => s.name),
+): StorefrontOffer {
+  const names = new Set(dedupeNames);
   const offer: StorefrontOffer = { products: 0, packages: 0, services: services.length, orderableServices: 0 };
   for (const p of products) {
     const category = categoryOf(p);
@@ -105,7 +119,8 @@ export function storefrontOffer(
   opts: { stock?: StockByProduct | null; storefrontConfig?: StorefrontConfig | null } = {},
 ): StorefrontOffer {
   const bookable = bookableServices(services, opts.storefrontConfig);
-  return offerOf(liveProducts(commerceProducts, liveProductIds, { ...opts, services: bookable }), bookable);
+  // r8: the de-dupe is against every public service, the hidden ones too (book/[slug]/page.tsx storeServiceNames).
+  return offerOf(liveProducts(commerceProducts, liveProductIds, { ...opts, services }), bookable, publicServiceNames(services));
 }
 
 const count = (n: unknown) => Math.max(0, Math.floor(Number(n)) || 0);
