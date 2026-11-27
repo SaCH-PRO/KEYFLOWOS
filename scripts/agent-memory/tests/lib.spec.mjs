@@ -56,6 +56,28 @@ test('deriveStatus: each derivation and its certainty', () => {
   assert.equal(deriveStatus(pk('A'), base).derived_from, 'no-evidence');
 });
 
+test('deriveStatus: a tests-only packet is done on its compacted RED commit alone', () => {
+  // compact.sh gives a tests-only packet (gate and census packets) one commit, its RED commit (Codex review of #221).
+  const base = { commits: [], wave2bOnMain: false, branches: [] };
+  assert.deepEqual(
+    deriveStatus(pk('A'), { ...base, commits: [c('test(web): RED for pkt/V1-A (compacted)', 'c'.repeat(40))] }),
+    { status: 'done', derived_from: 'compacted-tests-only', uncertain: false, evidence: ['cccccccc'] });
+  // a code packet keeps its fix commit as the evidence
+  const both = deriveStatus(pk('A'), { ...base, commits: [
+    c('test(web): RED for pkt/V1-A (compacted)', 'c'.repeat(40)), c('fix(web): pkt/V1-A (compacted)', 'd'.repeat(40))] });
+  assert.equal(both.derived_from, 'compacted-commit');
+  assert.deepEqual(both.evidence, ['dddddddd']);
+  // whole ids only, and a loose RED mention still is not done
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test(web): RED for pkt/V1-A-2 (compacted)')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test: RED for A')] }).status, 'todo');
+  // the whole subject must be the RED subject (M36 wave security confirmation, MINOR-1)
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test(web): RED for pkt/V1-A (compacted) revert')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('B'), { ...base, commits: [c('test(web): RED for pkt/V1-A (compacted), B RED for pkt/V1-B (compacted)')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test(web)!: RED for pkt/V1-A (compacted)')] }).status, 'todo');
+  assert.equal(deriveStatus(pk('A'), { ...base, commits: [c('test: RED for pkt/V1-A (compacted)')] }).status, 'done');
+  assert.equal(deriveStatus(pk('A.B'), { ...base, commits: [c('test(web): RED for pkt/V1-AxB (compacted)')] }).status, 'todo');
+});
+
 test('wave2bMerged', () => {
   assert.ok(wave2bMerged([c('v1 wave 2b: 28 packets and the v1 handoff guide (#214)')]));
   assert.ok(!wave2bMerged([c('docs: about v1 wave 2b')]));

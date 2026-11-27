@@ -50,6 +50,7 @@ import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helpe
 import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
+import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { depositPosition, type SettlementInvoice } from '../bookings/booking-payment-status.listener';
 
 /**
@@ -6004,6 +6005,10 @@ export class CommerceService {
    * is cleared, so a send that fails afterwards no longer removes the link
    * this caller hands out. It is read back; if that send already removed it,
    * the 409 asks the caller to try again rather than hand out a dead link.
+   * FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248, D-134): thrown as
+   * RetryableConflictException (identical HTTP 409 status/body) so KEY's plan
+   * queue and automated callers retry boundedly instead of sending a
+   * button-less invoice email.
    */
   private async reissueLink<T extends { id: string; token: string; active: boolean; expiresAt: Date | null }>(
     link: T,
@@ -6015,7 +6020,7 @@ export class CommerceService {
         data: { expiresAt: null },
       });
       const claimed = await this.prisma.client.paymentLink.findUnique({ where: { id: link.id } });
-      if (!claimed) throw new ConflictException('The pay link was withdrawn while it was being handed out; try again.');
+      if (!claimed) throw new RetryableConflictException('The pay link was withdrawn while it was being handed out; try again.');
       link = { ...link, ...claimed };
     }
     const live = link.active && (!link.expiresAt || link.expiresAt > new Date());

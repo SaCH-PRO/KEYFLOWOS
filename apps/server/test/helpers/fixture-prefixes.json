@@ -773,6 +773,11 @@
       "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
     },
     {
+      "prefix": "v87m_",
+      "owner": "apps/server/test/memory-class-columns.integration.test.ts",
+      "packet": "V1-87 (MEM-CLASS-COLUMNS)"
+    },
+    {
       "prefix": "v88a_",
       "owner": "apps/server/test/booking-attribution-currency.integration.test.ts",
       "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
@@ -806,6 +811,11 @@
       "prefix": "v89q_",
       "owner": "apps/server/test/review-solicitation-dedupe.integration.test.ts",
       "packet": "V1-89 (W3-D17b-REVIEW-SOLICIT-DEDUPE)"
+    },
+    {
+      "prefix": "v91b_",
+      "owner": "apps/server/test/recurring-expense-server.integration.test.ts",
+      "packet": "V1-91 (FU-RECURRING-EXPENSE-SERVER)"
     },
     {
       "prefix": "v92d_",
@@ -1550,6 +1560,76 @@
       "prefix": "v86r_",
       "owner": "apps/server/test/timeline-callers-scope-r1.integration.test.ts",
       "packet": "V1-86 (FU-TIMELINE-CALLERS-SCOPE, P122 R1)"
+    },
+    {
+      "prefix": "v72c_",
+      "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
+      "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
+    },
+    {
+      "prefix": "v70f_",
+      "owner": "apps/server/test/store-stripe-own-key.integration.test.ts",
+      "packet": "V1-70 (W1F-STORE-STRIPE-R0)"
+    },
+    {
+      "prefix": "v71g_",
+      "owner": "apps/server/test/contact-audit-residual.integration.test.ts",
+      "packet": "V1-71 (FU-CONTACT-AUDIT-RESIDUAL)"
+    },
+    {
+      "prefix": "v70e_",
+      "owner": "apps/server/test/settle-no-stock.integration.test.ts",
+      "packet": "V1-70 (W1F-SETTLE-NO-STOCK)"
+    },
+    {
+      "prefix": "v88p_",
+      "owner": "apps/server/test/proposal-money-tag.integration.test.ts",
+      "packet": "V1-88 (FU-PROPOSAL-MONEY-TAG)"
+    },
+    {
+      "prefix": "v91c_",
+      "owner": "apps/server/test/key-invoice-email-pay-link.integration.test.ts",
+      "packet": "V1-91 (FU-KEY-INVOICE-EMAIL-PAY-LINK)"
+    },
+    {
+      "prefix": "v91d_",
+      "owner": "apps/server/test/slots-hours-reader.integration.test.ts",
+      "packet": "V1-91 (FU-SLOTS-HOURS-READER, P227)"
+    },
+    {
+      "prefix": "v91a_",
+      "owner": "apps/server/test/admin-api-signin-kind.integration.test.ts",
+      "packet": "V1-91 (RR-ADMIN-API-SIGNIN-KIND)"
+    },
+    {
+      "prefix": "v91e_",
+      "owner": "apps/server/test/memory-class-backfill.integration.test.ts",
+      "packet": "V1-91 (MEM-CLASS-BACKFILL)"
+    },
+    {
+      "prefix": "v91f_",
+      "owner": "apps/server/test/store-orders-money-scope.integration.test.ts",
+      "packet": "V1-91 (FU-STORE-ORDERS-MONEY-SCOPE, P135)"
+    },
+    {
+      "prefix": "v91g_",
+      "owner": "apps/server/test/store-add-idempotent.integration.test.ts",
+      "packet": "V1-91 (FU-STORE-ADD-IDEMPOTENT, P204)"
+    },
+    {
+      "prefix": "v91h_",
+      "owner": "apps/server/test/public-booking-grid.integration.test.ts",
+      "packet": "V1-91 (FU-PUBLIC-BOOKING-GRID, P226)"
+    },
+    {
+      "prefix": "v91j_",
+      "owner": "apps/server/test/cash-label-sanitiser.integration.test.ts",
+      "packet": "V1-91 (FU-CASH-LABEL-SANITISER, P138)"
+    },
+    {
+      "prefix": "v91k_",
+      "owner": "apps/server/test/case-study-revenue-scope.integration.test.ts",
+      "packet": "V1-91 (FU-CASE-STUDY-REVENUE, P139)"
     },
     {
       "prefix": "v67s_",

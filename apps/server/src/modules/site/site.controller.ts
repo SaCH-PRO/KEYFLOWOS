@@ -343,10 +343,15 @@ export class SiteController {
     return this.storeOrderService.getPublicOrder(orderId, email);
   }
 
+  // FU-STORE-ORDERS-MONEY-SCOPE (D-100, D-234): every member reads orders for
+  // fulfilment; money columns, payment/discount fields, item prices, and
+  // non-fulfilment metadata keys are withheld from a member without revenue
+  // read. List count and pagination metadata are preserved.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/orders')
-  listOrders(
+  async listOrders(
     @Param('businessId') businessId: string,
+    @Req() req: Request,
     @Query('status') status?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
@@ -354,7 +359,8 @@ export class SiteController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
-    return this.storeOrderService.listOrders(businessId, {
+    const readsRevenue = await this.siteService.readsRevenue(businessId, requestActor(req));
+    return this.storeOrderService.listOrdersForReader(businessId, readsRevenue, {
       status,
       dateFrom,
       dateTo,
@@ -374,13 +380,17 @@ export class SiteController {
     return this.storeOrderService.getOrderSummaryForReader(businessId, readsRevenue);
   }
 
+  // FU-STORE-ORDERS-MONEY-SCOPE (D-100, D-234): withhold money, payment,
+  // item prices, and financial metadata below revenue read.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/orders/:orderId')
-  getOrderDetail(
+  async getOrderDetail(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
+    @Req() req: Request,
   ) {
-    return this.storeOrderService.getOrder(orderId, businessId);
+    const readsRevenue = await this.siteService.readsRevenue(businessId, requestActor(req));
+    return this.storeOrderService.getOrderForReader(orderId, businessId, readsRevenue);
   }
 
   /**
@@ -389,6 +399,8 @@ export class SiteController {
    * 200 and silently dropped. A status-only body is unchanged.
    * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the authenticated member is the actor, never a body field; a
    * SHIPPED by a member with revenue write books the order's shipping fee once per order.
+   * FU-STORE-ORDERS-MONEY-SCOPE (owner rulings D-100, D-234): the response omits money, payment, item-price, and
+   * financial metadata fields when the caller is below revenue read.
    */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('storefront', 'write')
@@ -397,9 +409,15 @@ export class SiteController {
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
     @Body() body: { status: string; paymentStatus?: unknown; paymentMethod?: unknown; paymentRef?: unknown },
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
-    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId, body, req?.user?.id ?? null);
+    return this.storeOrderService.updateOrderStatusForReader(
+      orderId,
+      body.status,
+      businessId,
+      body,
+      req?.user,
+    );
   }
 
   /**
@@ -712,18 +730,20 @@ export class SiteController {
   // -------------------------------------------------------------------------
   // S5 — Consent-gated case studies. Drafts are generated from real
   // platform data; publication requires explicit owner consent.
+  // FU-CASE-STUDY-REVENUE (P139, D-100): revenue and paid-order metrics are
+  // withheld below revenue:read on list, generate, publish, and unpublish.
   // -------------------------------------------------------------------------
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/case-studies')
-  listCaseStudies(@Param('businessId') businessId: string) {
-    return this.caseStudyService.list(businessId);
+  listCaseStudies(@Param('businessId') businessId: string, @Req() req: Request) {
+    return this.caseStudyService.list(businessId, requestActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/case-studies/generate')
-  generateCaseStudy(@Param('businessId') businessId: string) {
-    return this.caseStudyService.generateDraft(businessId);
+  generateCaseStudy(@Param('businessId') businessId: string, @Req() req: Request) {
+    return this.caseStudyService.generateDraft(businessId, requestActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -733,10 +753,12 @@ export class SiteController {
     @Param('businessId') businessId: string,
     @Param('caseStudyId') caseStudyId: string,
     @Body() body: { consent: boolean },
-    // Best-effort user attribution; we don't fail if the request user is
-    // missing because BusinessGuard already proves admin authority.
+    @Req() req: Request,
   ) {
-    return this.caseStudyService.publish(businessId, caseStudyId, { consent: !!body?.consent });
+    return this.caseStudyService.publishForReader(businessId, caseStudyId, {
+      consent: !!body?.consent,
+      actor: requestActor(req),
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -745,8 +767,9 @@ export class SiteController {
   unpublishCaseStudy(
     @Param('businessId') businessId: string,
     @Param('caseStudyId') caseStudyId: string,
+    @Req() req: Request,
   ) {
-    return this.caseStudyService.unpublish(businessId, caseStudyId);
+    return this.caseStudyService.unpublish(businessId, caseStudyId, requestActor(req));
   }
 
   @UseGuards(PublicRateLimitGuard)

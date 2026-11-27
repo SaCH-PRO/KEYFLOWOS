@@ -10,12 +10,18 @@ import {
 import { ModuleRef } from '@nestjs/core';
 import type { KeyActionProposal, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { isLostTransactionConflict } from '../../../core/prisma/transaction-conflict';
 import { AiExecutionLogService } from '../../ai/ai-execution-log.service';
 import { AiOversightService } from '../../ai/ai-oversight.service';
 import type { BusinessRole } from '../../ai/role-engine.service';
 import { CapabilityContractService, type CapabilityDefinition } from '../../capabilities/capability-contract.service';
 import { HelpdeskService } from '../../helpdesk/helpdesk.service';
 import { TemporalFlowService } from '../../temporal-flow/temporal-flow.service';
+import {
+  computeProposalCarriesMoney,
+  monotonicCarriesMoney,
+  structuralTextCarriesMoney,
+} from '../proposal-money-tag';
 import {
   ActionEnvelopeError,
   HELPDESK_CREATE_TICKET,
@@ -209,7 +215,8 @@ function isUniqueViolation(err: unknown): boolean {
  */
 const TRANSIENT_PRISMA_CODES: ReadonlySet<string> = new Set(['P2024', 'P2028', 'P2034']);
 
-function isDeterministicWriteRejection(err: unknown): boolean {
+export function isDeterministicWriteRejection(err: unknown): boolean {
+  if (isLostTransactionConflict(err)) return false;
   const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
   return typeof code === 'string' && /^P2\d{3}$/.test(code) && !TRANSIENT_PRISMA_CODES.has(code);
 }
@@ -403,18 +410,33 @@ export class KeyActionBoundaryService {
         });
       }
     } else {
+      const proposalTitle = `Create support ticket: ${envelope.material.title}`;
+      const proposalSummary = envelope.material.description;
+      const proposalSourceType = this.sourceTypeFor(surface);
+      const proposalPayload = { toolName: capability.name, inputPayload: envelope.material };
+      const carriesMoney = computeProposalCarriesMoney({
+        sourceType: proposalSourceType,
+        actionType: 'EXECUTE_TOOL',
+        toolName: capability.name,
+        module: capability.ownerModule,
+        title: proposalTitle,
+        summary: proposalSummary,
+        rationale: requirement.reason,
+        payload: proposalPayload,
+        inputPayload: envelope.material,
+      });
       const row = await this.prisma.client.keyActionProposal.create({
         data: {
           businessId,
           userId: requestedBy,
-          sourceType: this.sourceTypeFor(surface),
+          sourceType: proposalSourceType,
           sourceId: ctx.sourceId ?? null,
           sourceMode: surface,
-          title: `Create support ticket: ${envelope.material.title}`,
-          summary: envelope.material.description,
+          title: proposalTitle,
+          summary: proposalSummary,
           rationale: requirement.reason,
           actionType: 'EXECUTE_TOOL',
-          payload: { toolName: capability.name, inputPayload: envelope.material } as unknown as Prisma.InputJsonValue,
+          payload: proposalPayload as unknown as Prisma.InputJsonValue,
           toolName: capability.name,
           module: capability.ownerModule,
           inputPayload: envelope.material as unknown as Prisma.InputJsonValue,
@@ -425,6 +447,7 @@ export class KeyActionBoundaryService {
           riskLevel: capability.riskLevel.toUpperCase(),
           status: 'PENDING',
           requiresApproval: requirement.kind !== 'NONE',
+          carriesMoney,
           capabilityName: capability.name,
           capabilityVersion: capability.version,
           executionSurface: surface,
@@ -583,11 +606,19 @@ export class KeyActionBoundaryService {
           throw new ConflictException(`This action is already ${record.status.toLowerCase()}`);
         }
         const now = new Date();
+        const reasonCarriesMoney =
+          resolution === 'REJECTED' && typeof reason === 'string' && structuralTextCarriesMoney(reason);
         return tx.keyActionProposal.update({
           where: { id: actionId },
           data:
             resolution === 'REJECTED'
-              ? { status: 'REJECTED', rejectedBy: by, rejectedAt: now, rejectionReason: reason ?? null }
+              ? {
+                  status: 'REJECTED',
+                  rejectedBy: by,
+                  rejectedAt: now,
+                  rejectionReason: reason ?? null,
+                  ...(reasonCarriesMoney ? { carriesMoney: true } : {}),
+                }
               : { status: 'CANCELLED' },
         });
       });
@@ -983,7 +1014,18 @@ export class KeyActionBoundaryService {
     if (!sealed || !('actionFingerprint' in sealed)) {
       throw new BadRequestException('This action has no valid parameters and cannot be approved');
     }
-    return tx.keyActionProposal.update({ where: { id: record.id }, data: sealed as Prisma.KeyActionProposalUncheckedUpdateInput });
+    const computed = computeProposalCarriesMoney(record);
+    const carriesMoney =
+      record.carriesMoney === null
+        ? (computed ? true : null)
+        : monotonicCarriesMoney(record.carriesMoney, computed);
+    return tx.keyActionProposal.update({
+      where: { id: record.id },
+      data: {
+        ...(sealed as Prisma.KeyActionProposalUncheckedUpdateInput),
+        carriesMoney,
+      },
+    });
   }
 
   private async readPrincipal(

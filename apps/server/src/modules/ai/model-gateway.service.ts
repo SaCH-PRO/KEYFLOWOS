@@ -1351,8 +1351,19 @@ export class ModelGatewayService {
 
     const stream = await client.chat.completions.create(params);
 
+    // FU-OPENAI-FINISH-REASON (D-261): a clean close without any non-empty
+    // choice.finish_reason is a truncated stream, not a finished one.
+    let sawFinishReason = false;
+    let pendingUsage: StreamChunk['usage'] | undefined;
+
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
+      const choice = chunk.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (typeof finishReason === 'string' && finishReason.trim().length > 0) {
+        sawFinishReason = true;
+      }
+
+      const delta = choice?.delta;
 
       if (delta?.content) {
         yield { type: 'content_delta', content: delta.content };
@@ -1380,17 +1391,22 @@ export class ModelGatewayService {
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
 
-        yield {
-          type: 'usage',
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
-            costStatus: costStatusFor(model),
-          },
+        pendingUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          costStatus: costStatusFor(model),
         };
       }
+    }
+
+    if (!sawFinishReason) {
+      throw new ProviderStreamError('stream_ended_without_finish_reason', 'openai stream ended early');
+    }
+
+    if (pendingUsage) {
+      yield { type: 'usage', usage: pendingUsage };
     }
 
     yield { type: 'done' };
@@ -1651,8 +1667,17 @@ export class ModelGatewayService {
 
     const stream = await client.chat.completions.create(params);
 
+    let sawFinishReason = false;
+    let pendingUsage: StreamChunk['usage'] | undefined;
+
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
+      const choice = chunk.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (typeof finishReason === 'string' && finishReason.trim().length > 0) {
+        sawFinishReason = true;
+      }
+
+      const delta = choice?.delta;
 
       if (delta?.content) {
         yield { type: 'content_delta', content: delta.content };
@@ -1680,17 +1705,22 @@ export class ModelGatewayService {
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
 
-        yield {
-          type: 'usage',
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
-            costStatus: costStatusFor(model),
-          },
+        pendingUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          costStatus: costStatusFor(model),
         };
       }
+    }
+
+    if (!sawFinishReason) {
+      throw new ProviderStreamError('stream_ended_without_finish_reason', 'xai stream ended early');
+    }
+
+    if (pendingUsage) {
+      yield { type: 'usage', usage: pendingUsage };
     }
 
     yield { type: 'done' };
@@ -1728,8 +1758,17 @@ export class ModelGatewayService {
 
     const stream = await client.chat.completions.create(params);
 
+    let sawFinishReason = false;
+    let pendingUsage: StreamChunk['usage'] | undefined;
+
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
+      const choice = chunk.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (typeof finishReason === 'string' && finishReason.trim().length > 0) {
+        sawFinishReason = true;
+      }
+
+      const delta = choice?.delta;
 
       if (delta?.content) {
         yield { type: 'content_delta', content: delta.content };
@@ -1757,17 +1796,22 @@ export class ModelGatewayService {
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
 
-        yield {
-          type: 'usage',
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
-            costStatus: costStatusFor(model),
-          },
+        pendingUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          costStatus: costStatusFor(model),
         };
       }
+    }
+
+    if (!sawFinishReason) {
+      throw new ProviderStreamError('stream_ended_without_finish_reason', 'kimi stream ended early');
+    }
+
+    if (pendingUsage) {
+      yield { type: 'usage', usage: pendingUsage };
     }
 
     yield { type: 'done' };
@@ -1815,8 +1859,17 @@ export class ModelGatewayService {
 
     const stream = await client.chat.completions.create(params);
 
+    let sawFinishReason = false;
+    let pendingUsage: StreamChunk['usage'] | undefined;
+
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
+      const choice = chunk.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (typeof finishReason === 'string' && finishReason.trim().length > 0) {
+        sawFinishReason = true;
+      }
+
+      const delta = choice?.delta;
 
       if (delta?.content) {
         yield { type: 'content_delta', content: delta.content };
@@ -1844,17 +1897,22 @@ export class ModelGatewayService {
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
 
-        yield {
-          type: 'usage',
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
-            costStatus: costStatusFor(model),
-          },
+        pendingUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          costStatus: costStatusFor(model),
         };
       }
+    }
+
+    if (!sawFinishReason) {
+      throw new ProviderStreamError('stream_ended_without_finish_reason', 'native stream ended early');
+    }
+
+    if (pendingUsage) {
+      yield { type: 'usage', usage: pendingUsage };
     }
 
     yield { type: 'done' };
@@ -1897,8 +1955,17 @@ export class ModelGatewayService {
 
     const stream = await client.chat.completions.create(params);
 
+    let sawFinishReason = false;
+    let pendingUsage: StreamChunk['usage'] | undefined;
+
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
+      const choice = chunk.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (typeof finishReason === 'string' && finishReason.trim().length > 0) {
+        sawFinishReason = true;
+      }
+
+      const delta = choice?.delta;
 
       if (delta?.content) {
         yield { type: 'content_delta', content: delta.content };
@@ -1926,17 +1993,22 @@ export class ModelGatewayService {
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
 
-        yield {
-          type: 'usage',
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
-            costStatus: costStatusFor(model),
-          },
+        pendingUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          costStatus: costStatusFor(model),
         };
       }
+    }
+
+    if (!sawFinishReason) {
+      throw new ProviderStreamError('stream_ended_without_finish_reason', 'opensource stream ended early');
+    }
+
+    if (pendingUsage) {
+      yield { type: 'usage', usage: pendingUsage };
     }
 
     yield { type: 'done' };
@@ -2821,8 +2893,17 @@ export class ModelGatewayService {
 
     const stream = await client.chat.completions.create(params);
 
+    let sawFinishReason = false;
+    let pendingUsage: StreamChunk['usage'] | undefined;
+
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
+      const choice = chunk.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (typeof finishReason === 'string' && finishReason.trim().length > 0) {
+        sawFinishReason = true;
+      }
+
+      const delta = choice?.delta;
 
       if (delta?.content) {
         yield { type: 'content_delta', content: delta.content };
@@ -2849,17 +2930,22 @@ export class ModelGatewayService {
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
-        yield {
-          type: 'usage',
-          usage: {
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
-            costStatus: costStatusFor(model),
-          },
+        pendingUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          costStatus: costStatusFor(model),
         };
       }
+    }
+
+    if (!sawFinishReason) {
+      throw new ProviderStreamError('stream_ended_without_finish_reason', 'google stream ended early');
+    }
+
+    if (pendingUsage) {
+      yield { type: 'usage', usage: pendingUsage };
     }
 
     yield { type: 'done' };
@@ -3195,9 +3281,13 @@ export class ModelGatewayService {
         key: 'ai_preferences',
         value: JSON.stringify(toStore),
         source: 'user',
+        dataClass: 'SECRET_BEARING',
+        moduleScope: ['ai', 'settings'],
       },
       update: {
         value: JSON.stringify(toStore),
+        dataClass: 'SECRET_BEARING',
+        moduleScope: ['ai', 'settings'],
       },
     });
 
@@ -3359,9 +3449,13 @@ export class ModelGatewayService {
         key: 'routing_table',
         value: JSON.stringify(this.routingTable),
         source: 'admin',
+        dataClass: 'GENERAL',
+        moduleScope: ['ai', 'settings'],
       },
       update: {
         value: JSON.stringify(this.routingTable),
+        dataClass: 'GENERAL',
+        moduleScope: ['ai', 'settings'],
       },
     });
 

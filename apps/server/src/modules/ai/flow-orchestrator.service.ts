@@ -64,7 +64,7 @@ import {
 } from '../key-cortex/genome-read-projections';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
-import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
+import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { classifyActionIntent } from '../key-cortex/action-intent';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
@@ -198,6 +198,12 @@ export interface FlowMessage {
   toolResults?: FlowToolResult[];
   pendingConfirmations?: PendingConfirmation[];
   requiresConfirmation?: boolean;
+  /**
+   * FU-FLOW-SAVE-EXECUTED-TOOL-TURN (D-261): set when tools already ran and
+   * the follow-up model response failed. Saved with empty `content` (never
+   * partial follow-up text) so retries see the executed writes in history.
+   */
+  failed?: boolean;
   timestamp?: Date;
 }
 
@@ -272,6 +278,82 @@ export function fillToolResultSlots(slots: Array<FlowToolResult | null>, execute
   const results = slots.map((slot) => slot ?? queue.shift() ?? null).filter((r): r is FlowToolResult => r !== null);
   // anything executed beyond the slots (never today) is kept rather than dropped
   return [...results, ...queue];
+}
+
+function formatToolCallError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err === null || err === undefined) return 'unknown error';
+  if (typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  try {
+    return String(err);
+  } catch {
+    return 'unknown error';
+  }
+}
+
+/**
+ * RR-TOOL-WRITES-SEQUENTIAL (P127 / V1-72; D-261, D-262, D-17, D-73):
+ * Run a turn's governance-cleared tool calls in model order. Consecutive READ
+ * calls (`isReadOnlyTool(name) === true`) form a contiguous batch that runs in
+ * parallel; every non-READ call (including unknown, MCP-bridged, or dotted
+ * cortex names) waits for the previous call or batch to finish and runs alone
+ * before the next call or batch starts.
+ *
+ * Failure isolation: a failing call (whether it resolves to `{ success: false }`
+ * or rejects) never cancels later calls or sibling reads in a batch; the
+ * returned array always preserves exact model order with one FlowToolResult
+ * per call.
+ */
+export async function runToolCallsWithReadParallelism<
+  T extends { tc: Pick<FlowToolCall, 'id' | 'name'> },
+>(
+  calls: readonly T[],
+  run: (item: T) => Promise<FlowToolResult>,
+  isReadOnly: (toolName: string) => boolean = isReadOnlyTool,
+): Promise<FlowToolResult[]> {
+  const results: FlowToolResult[] = [];
+  const runSafe = async (item: T): Promise<FlowToolResult> => {
+    try {
+      return await run(item);
+    } catch (err: unknown) {
+      const tool = getToolByName(item.tc.name);
+      return {
+        toolCallId: item.tc.id,
+        name: item.tc.name,
+        result: null,
+        changedEntities: [],
+        followOnSuggestions: [],
+        family: tool?.family ?? 'crud',
+        riskTier: tool?.riskTier ?? 1,
+        success: false,
+        error: formatToolCallError(err),
+      };
+    }
+  };
+
+  let readBatch: T[] = [];
+  const flushReads = async (): Promise<void> => {
+    if (readBatch.length === 0) return;
+    const batch = readBatch;
+    readBatch = [];
+    const batchResults = await Promise.all(batch.map(runSafe));
+    results.push(...batchResults);
+  };
+
+  for (const item of calls) {
+    if (isReadOnly(item.tc.name)) {
+      readBatch.push(item);
+    } else {
+      await flushReads();
+      results.push(await runSafe(item));
+    }
+  }
+  await flushReads();
+
+  return results;
 }
 
 /**
@@ -1421,12 +1503,15 @@ export class FlowOrchestratorService {
    * mints a link for an invoice whose links were all revoked or expired. It was
    * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
    * leaves the email without a button (the template renders none), never a
-   * bare-id URL.
+   * bare-id URL — except on RetryableConflictException (FU-KEY-INVOICE-EMAIL-PAY-LINK,
+   * D-248 / D-134), which propagates before any mail or status flip so the plan
+   * queue retries boundedly rather than sending a button-less email.
    */
   private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
     try {
       return (await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
     } catch (e) {
+      if (e instanceof RetryableConflictException) throw e;
       Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, FlowOrchestratorService.name);
       return undefined;
     }
@@ -2397,6 +2482,57 @@ export class FlowOrchestratorService {
   }
 
   /**
+   * FU-FLOW-SAVE-EXECUTED-TOOL-TURN (D-261): when tools have already executed
+   * and the follow-up model stream or completion fails, persist the user turn
+   * and the executed tool calls + results (marked `failed: true`, with empty
+   * assistant content — never partial follow-up text) so a retry sees the
+   * writes that already ran and does not repeat them.
+   *
+   * Persistence failures are caught safely so they never mask the stream or
+   * provider error and never leak raw DB error messages/secrets.
+   */
+  private async saveFailedToolTurn(
+    businessId: string,
+    sessionId: string,
+    conversationHistory: FlowMessage[],
+    message: string,
+    enrichedMessage: string,
+    attachments: FlowAttachment[] | undefined,
+    toolCalls: FlowToolCall[],
+    toolResults: FlowToolResult[],
+    userId?: string,
+  ): Promise<void> {
+    const sessionMessages: FlowMessage[] = [...conversationHistory];
+    if (message.trim() || attachments?.length) {
+      sessionMessages.push({
+        role: 'user',
+        content: enrichedMessage,
+        attachments,
+        timestamp: new Date(),
+      });
+    }
+    sessionMessages.push({
+      role: 'assistant',
+      content: '',
+      toolCalls,
+      toolResults,
+      failed: true,
+      timestamp: new Date(),
+    });
+    try {
+      await this.saveConversationHistory(businessId, sessionId, sessionMessages, userId);
+      // Failed tool turns persist empty assistant content (no reply text), so
+      // enforceDoNotSay is a no-op while keeping every save point covered.
+      void this.enforceDoNotSay(businessId, '');
+    } catch (err: unknown) {
+      const errorKind = err instanceof Error ? err.name : 'Error';
+      this.logger.warn(
+        `Failed to persist executed tool turn for session ${sessionId} (business ${businessId}): ${errorKind}`,
+      );
+    }
+  }
+
+  /**
    * The "RELEVANT CONTEXT FROM MEMORY" section of a KEY chat turn: optional
    * enrichment, so any failure of the semantic search leaves it out and the turn
    * goes on.
@@ -2610,7 +2746,7 @@ ${triage.standingContext}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
-                content: JSON.stringify(result.result),
+                content: JSON.stringify(result.success === false ? { error: result.error ?? 'Unknown error' } : (result.result ?? null)),
               });
             }
           }
@@ -2889,35 +3025,52 @@ ${triage.standingContext}`;
         };
       }
 
-      const executedResults: FlowToolResult[] = await Promise.all(
-        governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
+      const executedResults: FlowToolResult[] = await runToolCallsWithReadParallelism(
+        governanceChecks,
+        ({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action),
       );
       const toolResults = fillToolResultSlots(slots, executedResults);
 
-      const followUpMessages: GatewayMessage[] = [
-        ...messages,
-        {
-          role: 'assistant' as const,
-          content: assistantMessage.content || null,
-          tool_calls: assistantMessage.tool_calls,
-        },
-        ...toolResults.map((result) => ({
-          role: 'tool' as const,
-          tool_call_id: result.toolCallId,
-          content: JSON.stringify(result.success ? result.result : { error: result.error }),
-        })),
-      ];
+      let followUpGateway: Awaited<ReturnType<AiUsageService['trackAndComplete']>>;
+      try {
+        const followUpMessages: GatewayMessage[] = [
+          ...messages,
+          {
+            role: 'assistant' as const,
+            content: assistantMessage.content || null,
+            tool_calls: assistantMessage.tool_calls,
+          },
+          ...toolResults.map((result) => ({
+            role: 'tool' as const,
+            tool_call_id: result.toolCallId,
+            content: JSON.stringify(result.success ? result.result : { error: result.error }),
+          })),
+        ];
 
-      const followUpGateway = await this.aiUsage.trackAndComplete(
-        businessId,
-        undefined,
-        'flow_chat',
-        {
-          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
-          maxTokens: 500,
-          temperature: 0.7,
-        },
-      );
+        followUpGateway = await this.aiUsage.trackAndComplete(
+          businessId,
+          undefined,
+          'flow_chat',
+          {
+            messages: withUntrustedContentRuleWhereFenced(followUpMessages),
+            maxTokens: 500,
+            temperature: 0.7,
+          },
+        );
+      } catch (followUpError: unknown) {
+        await this.saveFailedToolTurn(
+          businessId,
+          effectiveSessionId,
+          conversationHistory,
+          message,
+          enrichedMessage,
+          attachments,
+          announcedCalls,
+          toolResults,
+          userId,
+        );
+        throw followUpError;
+      }
 
       const finalReply = followUpGateway.content
         || 'Done! The action was completed successfully.';
@@ -3116,7 +3269,7 @@ ${triage.standingContext}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
-                content: JSON.stringify(result.result),
+                content: JSON.stringify(result.success === false ? { error: result.error ?? 'Unknown error' } : (result.result ?? null)),
               });
             }
           }
@@ -3458,56 +3611,89 @@ ${triage.standingContext}`;
         return;
       }
 
-      const executedResults: FlowToolResult[] = await Promise.all(
-        governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
+      const executedResults: FlowToolResult[] = await runToolCallsWithReadParallelism(
+        governanceChecks,
+        ({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action),
       );
       const toolResults = fillToolResultSlots(slots, executedResults);
 
-      yield { type: 'tool_results', toolResults };
+      let followUpCompleted = false;
+      try {
+        yield { type: 'tool_results', toolResults };
 
-      const onboardingCard = this.extractOnboardingCard(toolResults);
-      if (onboardingCard) {
-        yield { type: 'card', card: onboardingCard };
-      }
-
-      const followUpMessages: GatewayMessage[] = [
-        ...messages,
-        {
-          role: 'assistant' as const,
-          content: fullContent || null,
-          tool_calls: rawToolCalls,
-        },
-        ...toolResults.map((result) => ({
-          role: 'tool' as const,
-          tool_call_id: result.toolCallId,
-          content: JSON.stringify(result.success ? result.result : { error: result.error }),
-        })),
-      ];
-
-      const followUpStream = this.aiUsage.trackAndStream(
-        businessId,
-        undefined,
-        'flow_chat_stream',
-        {
-          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
-          maxTokens: 500,
-          temperature: 0.7,
-        },
-      );
-
-      for await (const chunk of followUpStream) {
-        if (chunk.type === 'content_delta' && chunk.content) {
-          followUpContent += chunk.content;
-          // Cumulative, continuing from the pre-tool text so the client
-          // can keep rendering with replace semantics.
-          const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
-          yield { type: 'content_delta', content: shown(combined) };
+        const onboardingCard = this.extractOnboardingCard(toolResults);
+        if (onboardingCard) {
+          yield { type: 'card', card: onboardingCard };
         }
-        // RR-STREAM-ERROR-NO-EFFECTS review SEC-B: as the first stream, a
-        // follow-up that ended in an error is shown as one and not saved as the answer.
-        if (chunk.type === 'error') {
-          yield { type: 'error', error: chunk.error };
-          return;
+
+        const followUpMessages: GatewayMessage[] = [
+          ...messages,
+          {
+            role: 'assistant' as const,
+            content: fullContent || null,
+            tool_calls: rawToolCalls,
+          },
+          ...toolResults.map((result) => ({
+            role: 'tool' as const,
+            tool_call_id: result.toolCallId,
+            content: JSON.stringify(result.success ? result.result : { error: result.error }),
+          })),
+        ];
+
+        const followUpStream = this.aiUsage.trackAndStream(
+          businessId,
+          undefined,
+          'flow_chat_stream',
+          {
+            messages: withUntrustedContentRuleWhereFenced(followUpMessages),
+            maxTokens: 500,
+            temperature: 0.7,
+          },
+        );
+
+        for await (const chunk of followUpStream) {
+          if (chunk.type === 'content_delta' && chunk.content) {
+            followUpContent += chunk.content;
+            // Cumulative, continuing from the pre-tool text so the client
+            // can keep rendering with replace semantics.
+            const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
+            yield { type: 'content_delta', content: shown(combined) };
+          }
+          // RR-STREAM-ERROR-NO-EFFECTS review SEC-B / FU-FLOW-SAVE-EXECUTED-TOOL-TURN (D-261):
+          // A follow-up that ended in an error is NOT finalized as an answer and
+          // never saves partial follow-up text, but DOES persist the executed tool
+          // turn (marked failed) so a retry sees the writes that already ran.
+          if (chunk.type === 'error') {
+            await this.saveFailedToolTurn(
+              businessId,
+              effectiveSessionId,
+              conversationHistory,
+              message,
+              enrichedMessage,
+              attachments,
+              announcedCalls,
+              toolResults,
+              userId,
+            );
+            followUpCompleted = true;
+            yield { type: 'error', error: chunk.error };
+            return;
+          }
+        }
+        followUpCompleted = true;
+      } finally {
+        if (!followUpCompleted) {
+          await this.saveFailedToolTurn(
+            businessId,
+            effectiveSessionId,
+            conversationHistory,
+            message,
+            enrichedMessage,
+            attachments,
+            announcedCalls,
+            toolResults,
+            userId,
+          );
         }
       }
 
@@ -8095,7 +8281,7 @@ ${triage.standingContext}`;
           where: { id: args.invoiceId, businessId },
           include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
         });
-        if (!found) throw new Error('Invoice not found');
+        if (!found) throw new NotFoundException('Invoice not found');
         // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) is emailed
         // to no one: that contact is not this business's to write to.
         const invoice = ownRelations(businessId, found, ['contact']);
@@ -8103,10 +8289,11 @@ ${triage.standingContext}`;
         // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
         // VOID -> SENT transition. Refused before any mail.
         if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
-        // FU-PAY-LINK-STATUS-GATE (D-248): KEY does not email an invoice no pay link may be
-        // issued for. (When every link is revoked or expired, automatedInvoiceUrl answers null and
-        // the email goes without a button by design, V1-46b SEC-V46B-1/2; a transient conflict is
-        // FU-KEY-INVOICE-EMAIL-PAY-LINK's.)
+        // FU-PAY-LINK-STATUS-GATE & FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): KEY does not email an
+        // invoice no pay link may be issued for. (When every link is revoked or expired,
+        // automatedInvoiceUrl answers null and the email goes without a button by design, V1-46b
+        // SEC-V46B-1/2; on a transient pay-link conflict, customerInvoiceUrl rethrows
+        // RetryableConflictException before any mail or status flip so the plan queue retries.)
         // An invoice no pay link may be issued for (PENDING, FAILED, FULLY_CREDITED, any status
         // added later) is refused here, before any mail, link or status change, as the operator's
         // send-email refuses it. A DRAFT is admitted: this send issues it. PAID is left as it was.

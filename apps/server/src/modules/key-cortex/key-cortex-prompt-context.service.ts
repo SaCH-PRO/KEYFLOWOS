@@ -559,16 +559,31 @@ function proposalIdsOf(fragment: RecordFragment): string[] {
 /** D-238: the proposal fields a record carries itself (the propose record's metadata; a genome outcome's metadata and title). */
 function proposalFieldsOfRecord(fragment: RecordFragment): ProposalFields | null {
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
   if (fragment.sourceType === 'genome_memory_event') {
     const m = isPlainObject(fragment.metadata) ? fragment.metadata : {};
-    return { actionType: str(m.actionType), module: str(m.module), toolName: str(m.toolName), title: fragment.title ?? null };
+    return {
+      carriesMoney: bool(m.carriesMoney),
+      actionType: str(m.actionType),
+      module: str(m.module),
+      toolName: str(m.toolName),
+      title: fragment.title ?? null,
+      executionResult: m.executionResult,
+    };
   }
   const payload = eventPayloadOf(fragment);
   const copied = payload?.eventType === 'GOVERNANCE_DECISION' && isPlainObject(payload.metadata) ? payload.metadata : undefined;
   const ledger = fragment.sourceType === 'business_event' && isPlainObject(fragment.metadata?.metadata) ? (fragment.metadata!.metadata as Record<string, unknown>) : undefined;
   const m = (copied ?? ledger) as Record<string, unknown> | undefined;
-  if (!m || (m.actionType === undefined && m.toolName === undefined && m.module === undefined)) return null;
-  return { actionType: str(m.actionType), module: str(m.module), toolName: str(m.toolName), title: str(m.title) };
+  if (!m || (m.actionType === undefined && m.toolName === undefined && m.module === undefined && m.carriesMoney === undefined)) return null;
+  return {
+    carriesMoney: bool(m.carriesMoney),
+    actionType: str(m.actionType),
+    module: str(m.module),
+    toolName: str(m.toolName),
+    title: str(m.title),
+    executionResult: m.executionResult,
+  };
 }
 
 /** D-238: the free text a proposal record carries itself (a rejection reason, a title, a summary). */

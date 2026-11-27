@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { SupabaseAdminService } from './supabase-admin.service';
 import { AuthGuard } from './auth.guard';
+import { AdminGuard } from './admin.guard';
 import { BusinessGuard } from './business.guard';
 import { OptionalAuthGuard } from './optional-auth.guard';
 import { ModuleScopeGuard } from './module-scope.guard';
@@ -12,6 +13,7 @@ import { ModuleScopeGuard } from './module-scope.guard';
     SupabaseAuthService,
     SupabaseAdminService,
     AuthGuard,
+    AdminGuard,
     BusinessGuard,
     OptionalAuthGuard,
     ModuleScopeGuard,
@@ -20,6 +22,7 @@ import { ModuleScopeGuard } from './module-scope.guard';
     SupabaseAuthService,
     SupabaseAdminService,
     AuthGuard,
+    AdminGuard,
     BusinessGuard,
     OptionalAuthGuard,
     ModuleScopeGuard,

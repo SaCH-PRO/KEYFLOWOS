@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isLostTransactionConflict } from '../../core/prisma/transaction-conflict';
 import { CommerceService } from '../commerce/commerce.service';
 import {
   InvoiceWorkflowService,
@@ -137,6 +138,18 @@ const TRANSIENT_TX_ABORTS = new Set(['P2028', 'P2034']);
 const PAYPAL_CAPTURE_RECORD_ATTEMPTS = 3;
 
 /**
+ * W11-TRANSIENT-CONFLICT (F-37): whether a PayPal capture recording abort is
+ * transient and worth retrying — either a Prisma transaction abort code
+ * (`P2028`, `P2034`) or a deadlock / serialization failure recognized by
+ * `isLostTransactionConflict` (including no-code `@prisma/adapter-pg` 40P01
+ * deadlocks and `P2010` raw-query wrappers).
+ */
+export function isTransientPaymentAbort(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return (typeof code === 'string' && TRANSIENT_TX_ABORTS.has(code)) || isLostTransactionConflict(err);
+}
+
+/**
  * V1-29c-REFUND-WRITE-DOOR — the payment a provider refund refunds, and the
  * refund row the door writes for it.
  */
@@ -180,6 +193,17 @@ const STRIPE_PAYMENT_EVENTS = new Set([
   'checkout.session.async_payment_succeeded',
   'charge.succeeded',
   'payment_intent.succeeded',
+]);
+/**
+ * W1F-STORE-STRIPE-R0 (D-196, D-138): the Stripe refund event types handled by
+ * the door. Platform-signed refund events never refund or mutate a storefront
+ * order; store-signed refund events verify against the store's own webhook
+ * secret and map directly to their storefront order.
+ */
+const STRIPE_REFUND_EVENTS = new Set([
+  'charge.refunded',
+  'refund.created',
+  'charge.refund.updated',
 ]);
 /**
  * R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2, as the legacy route's
@@ -903,6 +927,15 @@ export class PaymentsService {
      * verified by the platform's app, or by another store's, records nothing for it.
      */
     paypalVerifiedFor?: string | null,
+    /**
+     * W1F-STORE-STRIPE-R0 (owner ruling D-196 `storestripe`, D-138): for a Stripe
+     * payment event, the business whose own Stripe webhook secret verified the
+     * webhook, or null for the platform secret. Defense-in-depth: a storefront
+     * order is settled by Stripe ONLY for its own business.
+     */
+    stripeVerifiedFor?: string | null,
+    /** Related Stripe payment_intent / charge id stashed on Payment.reference for refund correlation. */
+    providerReference?: string | null,
   ): Promise<boolean> {
     if (!this.storeOrderService) return false;
     const order = await this.prisma.client.marketplaceOrder.findUnique({
@@ -921,6 +954,13 @@ export class PaymentsService {
       );
       return true;
     }
+    if (provider === 'stripe' && (!stripeVerifiedFor || stripeVerifiedFor !== order.businessId)) {
+      this.logger.error(
+        `Stripe payment ${providerPaymentId} for storefront order ${orderId} not recorded: the webhook was not verified ` +
+          `with that store's own Stripe account (verified for ${stripeVerifiedFor ?? 'platform'}; D-196, D-138)`,
+      );
+      return true;
+    }
     if (paid) {
       const value = Number(paid.amount);
       const matches =
@@ -936,7 +976,11 @@ export class PaymentsService {
       }
     }
     // Trial-N review (G6ML-3): the provider is the payment's (its deposit leg is PAYMENT_PROCESSOR, not CASH).
-    await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', providerPaymentId, provider);
+    if (providerReference) {
+      await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', providerPaymentId, provider, providerReference);
+    } else {
+      await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', providerPaymentId, provider);
+    }
     return true;
   }
 
@@ -1345,6 +1389,8 @@ export class PaymentsService {
       obj?.metadata?.invoiceId ||
       obj?.client_reference_id ||
       obj?.metadata?.invoice_id;
+    const candidateOrderId: string | undefined =
+      (typeof obj?.metadata?.orderId === 'string' && obj.metadata.orderId) || candidateInvoiceId;
 
     const envSecret = process.env.STRIPE_WEBHOOK_SECRET;
     let signatureOk = false;
@@ -1355,24 +1401,27 @@ export class PaymentsService {
     let signedForBusinessId: string | null = null;
     if (envSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, envSecret)) {
       signatureOk = true;
-    } else if (candidateInvoiceId) {
-      const inv = await this.prisma.client.invoice.findUnique({
-        where: { id: candidateInvoiceId },
-        include: { business: { select: { metaData: true } } },
-      }).catch(() => null);
+    } else if (signatureHeader) {
+      const inv = candidateInvoiceId
+        ? await this.prisma.client.invoice.findUnique({
+            where: { id: candidateInvoiceId },
+            include: { business: { select: { metaData: true } } },
+          }).catch(() => null)
+        : null;
       const businessSecret = (inv?.business.metaData as Record<string, any> | null)?.stripeWebhookSecret as string | undefined;
-      if (inv && businessSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, businessSecret)) {
+      if (inv && businessSecret && this.verifyStripeSignature(rawPayload, signatureHeader, businessSecret)) {
         signatureOk = true;
         signedForBusinessId = inv.businessId;
-      } else if (!inv && signatureHeader) {
-        // W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-2, OPK-COR-1; D-138): a storefront Stripe session is made on
-        // the store's own account (createStorePayment), so that account's event naming the order is verified with the
-        // store's own webhook secret, from its complete set only (storeStripeCredentials), and speaks for that store
-        // only. Another store's secret, or a store's secret beside a platform key, never verifies it.
+      } else if (!inv && candidateOrderId && typeof candidateOrderId === 'string') {
+        // W11-STORE-OWN-PAYMENT-KEYS (D-138) + W1F-STORE-STRIPE-R0 (D-196): a
+        // storefront Stripe session, PaymentIntent, or Charge (including
+        // charge.refunded carrying payment_intent_data.metadata.orderId) is on
+        // the store's own account and verified ONLY with that store's own
+        // webhook secret from its complete Stripe set (storeStripeCredentials).
         const order: { businessId: string; business: { metaData: unknown } | null } | null = await Promise.resolve()
           .then(() =>
             this.prisma.client.marketplaceOrder.findUnique({
-              where: { id: candidateInvoiceId },
+              where: { id: candidateOrderId },
               select: { businessId: true, business: { select: { metaData: true } } },
             }),
           )
@@ -1381,6 +1430,17 @@ export class PaymentsService {
         if (order && own && this.verifyStripeSignature(rawPayload, signatureHeader, own.webhookSecret)) {
           signatureOk = true;
           signedForBusinessId = order.businessId;
+        }
+      }
+      // W1F-STORE-STRIPE-R0: store-signed refund events that do not carry
+      // metadata.orderId (e.g. refund.created / charge.refund.updated) can
+      // still resolve the store's own webhook secret from the settled Stripe
+      // payment row matching their charge / payment_intent id.
+      if (!signatureOk && STRIPE_REFUND_EVENTS.has(eventType)) {
+        const matchedBusinessId = await this.verifyStoreStripeRefundSignature(rawPayload, signatureHeader, obj);
+        if (matchedBusinessId) {
+          signatureOk = true;
+          signedForBusinessId = matchedBusinessId;
         }
       }
     }
@@ -1399,8 +1459,14 @@ export class PaymentsService {
     // refused one writes nothing (no payment, no posting, no claim). The legacy
     // POST /webhooks/stripe hands its verified events here too, and since
     // R0-20d this is its only binding (its refusals keep its own label).
+    const refusedProvider = opts.refusedProvider ?? STRIPE_REFUSED_PROVIDER;
     if (STRIPE_PAYMENT_EVENTS.has(eventType)) {
-      await this.bindStripePaymentEvent(event, signedForBusinessId, opts.refusedProvider ?? STRIPE_REFUSED_PROVIDER);
+      await this.bindStripePaymentEvent(event, signedForBusinessId, refusedProvider);
+    }
+    // W1F-STORE-STRIPE-R0 (D-196, D-138): platform-signed refund events MUST
+    // NEVER refund or mutate a storefront order on either webhook endpoint.
+    if (STRIPE_REFUND_EVENTS.has(eventType)) {
+      await this.bindStripeRefundEvent(event, signedForBusinessId, refusedProvider);
     }
 
     // Provider-event-id idempotency: if Stripe re-delivers this `evt_...`,
@@ -1434,11 +1500,11 @@ export class PaymentsService {
             this.logger.log(`Stripe ${eventType} ${event.id ?? ''} is ${String(obj?.payment_status)}; nothing recorded until it is paid`);
             return { ok: true, received: true };
           }
-          await this.processStripeChargeOrSession(eventType, obj, event.id);
+          await this.processStripeChargeOrSession(eventType, obj, event.id, signedForBusinessId);
           return { ok: true, received: true, processed: eventType };
         case 'charge.succeeded':
         case 'payment_intent.succeeded':
-          await this.processStripeChargeOrSession(eventType, obj, event.id);
+          await this.processStripeChargeOrSession(eventType, obj, event.id, signedForBusinessId);
           return { ok: true, received: true, processed: eventType };
         case 'charge.refunded':
         case 'refund.created':
@@ -1449,6 +1515,129 @@ export class PaymentsService {
           return { ok: true, received: true };
       }
     });
+  }
+
+  /**
+   * Collects the charge / payment_intent identifiers carried by a Stripe
+   * refund webhook payload (charge.refunded, refund.created, charge.refund.updated).
+   */
+  private static stripeRefundLookupIds(obj: unknown): string[] {
+    const rec = (obj && typeof obj === 'object' ? obj : {}) as Record<string, unknown>;
+    const ids = new Set<string>();
+    const add = (v: unknown) => {
+      if (typeof v === 'string' && v) ids.add(v);
+    };
+    add(rec.charge);
+    add(rec.payment_intent);
+    const refundsObj = rec.refunds && typeof rec.refunds === 'object' ? (rec.refunds as Record<string, unknown>) : null;
+    const list: unknown[] = Array.isArray(refundsObj?.data) ? refundsObj.data : [];
+    if (rec.object === 'charge' || typeof rec.amount_refunded === 'number' || Array.isArray(refundsObj?.data)) {
+      add(rec.id);
+    }
+    for (const item of list) {
+      const r = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      add(r.charge);
+      add(r.payment_intent);
+    }
+    return [...ids];
+  }
+
+  /**
+   * W1F-STORE-STRIPE-R0: verifies a store-signed Stripe refund event that does
+   * not carry metadata.orderId by looking up candidate store businesses whose
+   * settled Stripe payments match the charge/payment_intent ids and checking
+   * each store's own complete Stripe webhook secret.
+   */
+  private async verifyStoreStripeRefundSignature(
+    rawPayload: string,
+    signatureHeader: string,
+    obj: unknown,
+  ): Promise<string | null> {
+    const lookupIds = PaymentsService.stripeRefundLookupIds(obj);
+    if (lookupIds.length === 0) return null;
+    const rows = await this.prisma.client.payment.findMany({
+      where: {
+        provider: 'stripe',
+        status: 'SUCCESSFUL',
+        recordedBy: null,
+        NOT: { providerPaymentId: { startsWith: MANUAL_PAYMENT_ID_PREFIX } },
+        OR: [{ providerPaymentId: { in: lookupIds } }, { reference: { in: lookupIds } }],
+      },
+      select: { businessId: true },
+    }).catch(() => []);
+    const businessIds = [...new Set(rows.map((r) => r.businessId))];
+    if (businessIds.length === 0) return null;
+    const businesses = await this.prisma.client.business.findMany({
+      where: { id: { in: businessIds } },
+      select: { id: true, metaData: true },
+    }).catch(() => []);
+    for (const biz of businesses) {
+      const own = storeStripeCredentials(biz.metaData);
+      if (own && this.verifyStripeSignature(rawPayload, signatureHeader, own.webhookSecret)) {
+        return biz.id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * W1F-STORE-STRIPE-R0 (owner ruling D-196 `storestripe`, D-138): a
+   * platform-signed Stripe refund event (signedForBusinessId === null) MUST
+   * NEVER refund or mutate a storefront order — whether it names the order via
+   * metadata.orderId or references the charge / payment_intent of a storefront
+   * order's Stripe settlement payment. Refused 400 before the dedupe claim,
+   * keeping one refusal row under `refusedProvider`.
+   */
+  private async bindStripeRefundEvent(
+    event: { id?: string; type?: string; data?: { object?: unknown } },
+    signedForBusinessId: string | null,
+    refusedProvider: StripeRefusedProvider,
+  ): Promise<void> {
+    if (signedForBusinessId !== null) return;
+    const obj = (event.data?.object ?? {}) as Record<string, unknown>;
+    const meta = obj.metadata && typeof obj.metadata === 'object' ? (obj.metadata as Record<string, unknown>) : null;
+    const namedOrderId: unknown = meta?.orderId;
+    if (typeof namedOrderId === 'string' && namedOrderId && this.prisma.client.marketplaceOrder?.findUnique) {
+      const order = await this.prisma.client.marketplaceOrder.findUnique({
+        where: { id: namedOrderId },
+        select: { id: true, businessId: true },
+      });
+      if (order) {
+        await this.refuseStripePaymentEvent(
+          event,
+          { kind: 'order', id: order.id, businessId: order.businessId },
+          'business',
+          refusedProvider,
+        );
+      }
+    }
+    const lookupIds = PaymentsService.stripeRefundLookupIds(obj);
+    if (lookupIds.length === 0 || !this.prisma.client.payment?.findMany) return;
+    const matches = await this.prisma.client.payment.findMany({
+      where: {
+        provider: 'stripe',
+        status: 'SUCCESSFUL',
+        recordedBy: null,
+        NOT: { providerPaymentId: { startsWith: MANUAL_PAYMENT_ID_PREFIX } },
+        OR: [{ providerPaymentId: { in: lookupIds } }, { reference: { in: lookupIds } }],
+      },
+      select: { providerPaymentId: true, invoiceId: true, businessId: true },
+    });
+    if (matches.length === 0) return;
+    let firstStore: { orderId: string; businessId: string } | null = null;
+    for (const match of matches) {
+      const store = await this.stripeStorefrontSettlementOf(match);
+      if (!store) return; // Matches a non-storefront invoice payment; let invoice refund path decide.
+      firstStore ??= store;
+    }
+    if (firstStore) {
+      await this.refuseStripePaymentEvent(
+        event,
+        { kind: 'order', id: firstStore.orderId, businessId: firstStore.businessId },
+        'business',
+        refusedProvider,
+      );
+    }
   }
 
   /**
@@ -1468,10 +1657,12 @@ export class PaymentsService {
    *
    * Storefront order O (createStorePayment): the door settles O for its whole
    * total, so the event must name O in metadata.orderId and O's business in
-   * metadata.businessId and carry exactly O's total in O's currency. Since
-   * W11-STORE-OWN-PAYMENT-KEYS (D-138) it must also be signed by the account
-   * O's session is made on: a store's own secret (O's store only), or, for a
-   * store with no complete Stripe set of its own, the platform's (as built).
+   * metadata.businessId and carry exactly O's total in O's currency. Under
+   * W11-STORE-OWN-PAYMENT-KEYS (D-138) and W1F-STORE-STRIPE-R0 (owner ruling
+   * D-196 `storestripe`), O settles ONLY with an event verified by O's own
+   * store's Stripe webhook secret (`signedForBusinessId === order.businessId`);
+   * the platform's STRIPE_WEBHOOK_SECRET (`signedForBusinessId === null`)
+   * NEVER settles a store order on either endpoint.
    *
    * Anything else is refused (400) before the dedupe claim, so nothing is
    * written, and the refusal is kept as one webhook_events row under
@@ -1486,7 +1677,7 @@ export class PaymentsService {
     refusedProvider: StripeRefusedProvider,
   ): Promise<void> {
     const obj = (event.data?.object ?? {}) as StripePaymentObject;
-    const id: unknown = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id;
+    const id: unknown = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id || obj.metadata?.orderId;
     if (!id || typeof id !== 'string') return;
     const amountMinor: unknown = obj.amount_total ?? obj.amount_received ?? obj.amount;
     const positiveAmount = typeof amountMinor === 'number' && Number.isFinite(amountMinor) && amountMinor > 0;
@@ -1522,18 +1713,15 @@ export class PaymentsService {
 
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id },
-      select: { id: true, businessId: true, total: true, currency: true, business: { select: { metaData: true } } },
+      select: { id: true, businessId: true, total: true, currency: true },
     });
     if (!order) return;
-    // W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-2, SEC-W11OPK-3; D-138): a delivery a store's own secret signed
-    // speaks for that store only, and a store holding its own complete Stripe set has its sessions made on its own
-    // account (createStorePayment), so a platform-signed event naming its order is not its session's. The order of a
-    // store with no Stripe of its own is still settled by a platform-signed session, as built (required Release 0
-    // case MP-06d; a deviation recorded for an owner ruling).
-    const foreignSigner =
-      signedForBusinessId !== null
-        ? signedForBusinessId !== order.businessId
-        : storeStripeCredentials(order.business?.metaData) !== null;
+    // W1F-STORE-STRIPE-R0 (owner ruling D-196 `storestripe`, D-138, SEC-W11OPK-3):
+    // a storefront order settles ONLY with an event signed by that store's own
+    // Stripe account (signedForBusinessId === order.businessId). The platform's
+    // STRIPE_WEBHOOK_SECRET (signedForBusinessId === null) NEVER settles a store
+    // order, whether the store holds Stripe credentials of its own or none.
+    const foreignSigner = signedForBusinessId !== order.businessId;
     const reason =
       obj.metadata?.orderId !== order.id
         ? 'order'
@@ -1579,15 +1767,17 @@ export class PaymentsService {
     eventType: string,
     obj: any,
     eventId: string | undefined,
+    signedForBusinessId: string | null = null,
   ): Promise<void> {
     // checkout.session.completed: invoiceId comes from session metadata or
     // client_reference_id. payment_intent.succeeded / charge.succeeded:
-    // invoiceId is on the payment_intent / charge metadata if it was set
-    // during checkout.session creation (see createStripeCheckout above).
+    // invoiceId or orderId is on the payment_intent / charge metadata when set
+    // during checkout.session creation (createStripeCheckout / createStorePayment).
     const invoiceId: string | undefined =
       obj?.metadata?.invoiceId ||
       obj?.client_reference_id ||
-      obj?.metadata?.invoice_id;
+      obj?.metadata?.invoice_id ||
+      obj?.metadata?.orderId;
     if (!invoiceId) {
       this.logger.warn(`Stripe ${eventType} has no invoiceId in metadata; ignoring`);
       return;
@@ -1599,7 +1789,20 @@ export class PaymentsService {
       where: { id: invoiceId },
     });
     if (!invoice) {
-      const completed = await this.maybeCompleteStorefrontOrder(invoiceId, providerPaymentId, 'stripe');
+      const storeReference: string | null =
+        obj.payment_intent ||
+        obj.charge ||
+        (typeof obj.latest_charge === 'string' ? obj.latest_charge : null) ||
+        null;
+      const completed = await this.maybeCompleteStorefrontOrder(
+        invoiceId,
+        providerPaymentId,
+        'stripe',
+        undefined,
+        null,
+        signedForBusinessId,
+        storeReference,
+      );
       if (completed) return;
       this.logger.warn(`Stripe ${eventType} references unknown invoice ${invoiceId}`);
       return;
@@ -1784,11 +1987,27 @@ export class PaymentsService {
           { reference: { in: lookupIds } },
         ],
       };
-      const found: RefundOriginal | null = await this.prisma.client.payment.findFirst({
+      let found: RefundOriginal | null = await this.prisma.client.payment.findFirst({
         where: originalWhere,
         orderBy: { createdAt: 'asc' },
         select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
       }).catch(() => null);
+
+      // W1F-STORE-STRIPE-R0 (D-138, D-196): when a store-signed charge.refunded
+      // carries metadata.orderId (from payment_intent_data.metadata) and the
+      // settlement payment row predates Payment.reference stashing (reference is
+      // null), map directly to that store order's checkout invoice payment.
+      if (!found && signedForBusinessId && typeof obj?.metadata?.orderId === 'string' && obj.metadata.orderId) {
+        const fallback = await this.stripeStoreOrderPaymentByOrderId(obj.metadata.orderId, signedForBusinessId, lookupIds);
+        if (fallback.unsettledOrder) {
+          // COR-W1FS-NB1: store's own webhook verified this refund for an unsettled order
+          // (checkout.session.completed not yet recorded); throw 409 so the claim is released for retry.
+          throw new ConflictException(
+            `Stripe refund ${refund.id ?? charge} targets unsettled store order ${obj.metadata.orderId}; retry after settlement`,
+          );
+        }
+        found = fallback.payment;
+      }
 
       if (!found) {
         this.logger.warn(
@@ -1830,12 +2049,31 @@ export class PaymentsService {
         }
       }
 
+      // W1F-STORE-STRIPE-R0 (D-196, D-138): defense-in-depth — a storefront
+      // order's Stripe settlement is refunded ONLY by an event verified with
+      // that store's own Stripe account, never by the platform signature.
+      const store = await this.stripeStorefrontSettlementOf(original);
+      if (store && signedForBusinessId !== store.businessId) {
+        this.logger.error(
+          `Stripe ${eventType} for charge ${charge} not recorded: it returns storefront order ${store.orderId}'s payment ` +
+            `and was not verified with that store's own Stripe account (verified for ${signedForBusinessId ?? 'platform'}; D-196, D-138)`,
+        );
+        continue;
+      }
+      if (store && !this.storeOrderService) {
+        // COR-W1FS-2: the refund of a store order is recorded with its order, or not at all (Stripe redelivers it).
+        throw new Error(
+          `Stripe refund ${refund.id ?? charge} of storefront order ${store.orderId} not recorded: the store orders are unavailable`,
+        );
+      }
+
       // The synthetic id names the payment it refunds (review SEC-V29C-3).
       const refundId = refund.cumulative
         ? `${SYNTHETIC_REFUND_ID_PREFIX}${original.id}_${charge}_${refund.amount}`
         : (refund.id as string);
       if (refund.cumulative && (await this.paymentRecorded(refundId).catch(() => false))) continue;
 
+      let flipped = false;
       const persisted = await this.createRefundWithPosting(
         original,
         {
@@ -1847,6 +2085,19 @@ export class PaymentsService {
         (tx) => this.stripeRefundToRecord(tx, original, { amountMinor: refund.amount ?? 0, charge, cumulative: refund.cumulative }),
         // Stripe refund rows written before V1-29c reference the charge id.
         [charge],
+        undefined,
+        store
+          ? async (tx, recorded) => {
+              ({ flipped } = await this.storeOrderService!.recordProviderRefundOnOrder(tx, {
+                orderId: store.orderId,
+                businessId: store.businessId,
+                invoiceId: original.invoiceId,
+                provider: 'stripe',
+                providerRefundId: refundId,
+                amount: recorded,
+              }));
+            }
+          : undefined,
       ).catch(this.refundAlreadyRecorded('Stripe', refundId));
       // Reopen the invoice if the refund moves the balance below total.
       // W5-REFUND-DOORS-KEEP (review SEC-CRP-1 / CR-REG-2; D-14, D-78): under
@@ -1863,7 +2114,100 @@ export class PaymentsService {
           this.logger.warn(`Stripe refund reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
         });
       }
+      if (persisted && flipped && store) {
+        await this.storeOrderService?.announceProviderRefund(store.orderId, store.businessId, original.invoiceId).catch((e) => {
+          this.logger.warn(`store_order.refunded for order ${store.orderId} not sent: ${e instanceof Error ? e.message : e}`);
+        });
+      }
     }
+  }
+
+  /**
+   * W1F-STORE-STRIPE-R0 (D-196, D-138): the storefront order a Stripe payment
+   * settled through StoreOrderService.completeCheckout (checkout invoice
+   * INV-<orderNumber>, order.paymentRef === payment.providerPaymentId, same
+   * business), or null for any non-storefront invoice payment.
+   */
+  private async stripeStorefrontSettlementOf(
+    payment: { providerPaymentId: string; invoiceId: string; businessId: string },
+  ): Promise<{ orderId: string; businessId: string } | null> {
+    if (!this.prisma.client.invoice?.findUnique || !this.prisma.client.marketplaceOrder?.findUnique) {
+      return null;
+    }
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: payment.invoiceId },
+      select: { businessId: true, invoiceNumber: true },
+    });
+    const invoiceNumber = invoice?.invoiceNumber;
+    if (!invoice || invoice.businessId !== payment.businessId || !invoiceNumber?.startsWith('INV-')) {
+      return null;
+    }
+    const order = await this.prisma.client.marketplaceOrder.findUnique({
+      where: { orderNumber: invoiceNumber.slice('INV-'.length) },
+      select: { id: true, businessId: true, paymentRef: true },
+    });
+    if (!order || order.businessId !== payment.businessId || order.paymentRef !== payment.providerPaymentId) {
+      return null;
+    }
+    return { orderId: order.id, businessId: order.businessId };
+  }
+
+  /**
+   * W1F-STORE-STRIPE-R0: locate a store order's settled Stripe payment by
+   * metadata.orderId within the signing store's own business when the settlement
+   * payment row carries no conflicting reference (e.g. a row settled without
+   * payment_intent stashed in reference).
+   */
+  private async stripeStoreOrderPaymentByOrderId(
+    orderId: string,
+    businessId: string,
+    lookupIds: string[],
+  ): Promise<{ payment: RefundOriginal | null; unsettledOrder: boolean }> {
+    if (
+      !this.prisma.client.marketplaceOrder?.findFirst ||
+      !this.prisma.client.invoice?.findFirst ||
+      !this.prisma.client.payment?.findFirst
+    ) {
+      return { payment: null, unsettledOrder: false };
+    }
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { orderNumber: true, paymentRef: true },
+    });
+    if (!order) return { payment: null, unsettledOrder: false };
+    if (!order.paymentRef) return { payment: null, unsettledOrder: true };
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { businessId, invoiceNumber: `INV-${order.orderNumber}` },
+      select: { id: true },
+    });
+    if (!invoice) return { payment: null, unsettledOrder: false };
+    const row = await this.prisma.client.payment.findFirst({
+      where: {
+        businessId,
+        invoiceId: invoice.id,
+        provider: 'stripe',
+        providerPaymentId: order.paymentRef,
+        status: 'SUCCESSFUL',
+        recordedBy: null,
+        NOT: { providerPaymentId: { startsWith: MANUAL_PAYMENT_ID_PREFIX } },
+      },
+      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true, reference: true },
+    });
+    if (!row) return { payment: null, unsettledOrder: false };
+    if (row.reference && lookupIds.length > 0 && !lookupIds.includes(row.reference)) {
+      return { payment: null, unsettledOrder: false };
+    }
+    return {
+      payment: {
+        id: row.id,
+        providerPaymentId: row.providerPaymentId,
+        invoiceId: row.invoiceId,
+        businessId: row.businessId,
+        currency: row.currency,
+        amount: row.amount,
+      },
+      unsettledOrder: false,
+    };
   }
 
   /**
@@ -3620,6 +3964,14 @@ export class PaymentsService {
       body.append('client_reference_id', input.orderId);
       body.append('metadata[orderId]', input.orderId);
       body.append('metadata[businessId]', business.id);
+      // W1F-STORE-STRIPE-R0 (D-138, D-196): Stripe does not copy Checkout Session
+      // metadata onto the PaymentIntent or Charge it creates. Setting
+      // payment_intent_data.metadata carries the store order identity onto the
+      // PaymentIntent and Charge so subsequent charge.refunded webhooks from the
+      // store's own Stripe account verify with the store's secret and map to the order.
+      body.append('payment_intent_data[metadata][orderId]', input.orderId);
+      body.append('payment_intent_data[metadata][businessId]', business.id);
+      body.append('payment_intent_data[metadata][type]', 'store_order');
       body.append('line_items[0][quantity]', '1');
       body.append('line_items[0][price_data][currency]', currency);
       body.append('line_items[0][price_data][unit_amount]', String(amountCents));
@@ -3811,8 +4163,7 @@ export class PaymentsService {
             recorded = 'elsewhere';
             break;
           }
-          const code = (e as { code?: string } | null)?.code;
-          if (attempt < PAYPAL_CAPTURE_RECORD_ATTEMPTS && code && TRANSIENT_TX_ABORTS.has(code)) continue;
+          if (attempt < PAYPAL_CAPTURE_RECORD_ATTEMPTS && isTransientPaymentAbort(e)) continue;
           this.logger.error(
             `PayPal captured order ${orderId} (capture ${captureId}, invoice ${invoiceId}) but it could not be recorded after ` +
               `${attempt} attempt(s): ${e instanceof Error ? e.message : e}. PayPal's PAYMENT.CAPTURE.COMPLETED delivery records it.`,

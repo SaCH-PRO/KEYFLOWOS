@@ -31,6 +31,8 @@ export interface ProposeApprovalInput {
   correlationId?: string;
   commandId?: string;
   sessionId?: string;
+  /** Internal server-only structural provenance hint (FU-PROPOSAL-MONEY-TAG). */
+  carriesMoney?: boolean;
 }
 
 export interface ApproveInput {
@@ -98,6 +100,7 @@ export class KeyCortexApprovalOrchestratorService {
         correlationId: input.correlationId,
         commandId: input.commandId,
         sessionId: input.sessionId,
+        carriesMoney: input.carriesMoney,
       },
       input.userId,
     );
@@ -121,6 +124,7 @@ export class KeyCortexApprovalOrchestratorService {
           module: input.module,
           actionType: input.actionType,
           title,
+          carriesMoney: proposal.carriesMoney,
         },
       },
       undefined,

@@ -79,13 +79,13 @@
  *           none) settles the order once through the paid door; a redelivery
  *           writes nothing; an event naming one store's order signed with
  *           another store's own secret is refused 400 and settles nothing
- *   OPK-10  (SEC-W11OPK-3, the half the Release 0 cases allow) the platform's
- *           STRIPE_WEBHOOK_SECRET does not settle the order of a store that
- *           holds its own complete Stripe set (its sessions are made on its
- *           own account): 400, the order UNPAID, nothing recorded, one
- *           refusal row; the order of a store with no Stripe of its own is
- *           still settled by a platform-signed session, as built (Release 0
- *           case MP-06d requires it; a deviation recorded for an owner ruling)
+ *   OPK-10  (SEC-W11OPK-3, closed in full by W1F-STORE-STRIPE-R0 under owner
+ *           ruling D-196 `storestripe`) the platform's STRIPE_WEBHOOK_SECRET
+ *           never settles a store order — neither a store holding its own
+ *           complete Stripe set nor a store with no Stripe of its own: 400,
+ *           the order UNPAID, nothing recorded, one refusal row (a retry adds
+ *           none); a store order settles only with its own store's Stripe
+ *           webhook secret (OPK-09)
  *
  * PR210-PAYPAL-STORE-REFUND (Codex review P1 on PR #210; D-138): PayPal's
  * PAYMENT.CAPTURE.REFUNDED / .REVERSED resource names the capture it returns
@@ -1410,7 +1410,7 @@ describe('W11-STORE-OWN-PAYMENT-KEYS (D-138): a storefront offers PayPal and Str
     expect(requests, 'no provider request at settlement (after the checkout)').toEqual([]);
   });
 
-  it("OPK-10 (review SEC-W11OPK-3, the half the Release 0 cases allow) the platform's STRIPE_WEBHOOK_SECRET does not settle the order of a store that holds its own complete Stripe set (its sessions are made on its own account): 400, the order UNPAID, nothing recorded, one refusal row (a retry adds none); the order of a store with no Stripe of its own is still settled by a platform-signed session, as built (Release 0 MP-06d)", async () => {
+  it("OPK-10 (review SEC-W11OPK-3; W1F-STORE-STRIPE-R0, owner ruling D-196 `storestripe`): the platform's STRIPE_WEBHOOK_SECRET never settles a store order — neither for a store holding its own complete Stripe set nor for a store with no Stripe of its own: 400, the order UNPAID, nothing recorded, one refusal row (a retry adds none)", async () => {
     setEnv({ ...PLATFORM_STRIPE });
 
     // (a) A store with its own complete Stripe set: a platform-signed session naming its order is refused.
@@ -1432,15 +1432,27 @@ describe('W11-STORE-OWN-PAYMENT-KEYS (D-138): a storefront offers PayPal and Str
     expect(await kept(), '(a): a retry adds no row').toHaveLength(1);
     expect(await counts(ID.bizOwn), '(a): nothing recorded but the refusal').toEqual({ ...before, webhookEvents: before.webhookEvents + 1 });
 
-    // (b) As built (Release 0 case MP-06d requires it; a deviation recorded for an owner ruling): a store with no
-    // Stripe of its own (D-138 offers it none) is still settled by a platform-signed session naming its order.
+    // (b) W1F-STORE-STRIPE-R0 (owner ruling D-196 `storestripe`, D-138): a store with no Stripe of its own is ALSO
+    // never settled by the platform's STRIPE_WEBHOOK_SECRET (400, order UNPAID, nothing recorded, one refusal row).
     const orderPlatform = await seedOrder(ID.bizPlatform, ID.prodPlatform, 'STRIPE');
-    const res2 = await stripeWebhook(
-      sessionCompleted(`${P}evt_10b`, `${P}cs_10b`, orderPlatform, ID.bizPlatform),
-      PLATFORM_STRIPE.STRIPE_WEBHOOK_SECRET,
-    );
-    expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(201);
-    expect(await orderState(orderPlatform), '(b): as built').toBe(`CONFIRMED/PAID/${P}cs_10b`);
+    const beforePlatform = await counts(ID.bizPlatform);
+    const eventB = sessionCompleted(`${P}evt_10b`, `${P}cs_10b`, orderPlatform, ID.bizPlatform);
+    const res2 = await stripeWebhook(eventB, PLATFORM_STRIPE.STRIPE_WEBHOOK_SECRET);
+    expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(400);
+    expect(res2.body, '(b)').toMatchObject({ message: 'Stripe event does not match the order' });
+    expect(await orderState(orderPlatform), '(b): not settled by platform signature').toBe('PENDING/UNPAID/');
+    const keptB = async () =>
+      (await db.webhookEvent.findMany({ where: { providerEventId: `${P}evt_10b` } })).map(
+        (w: any) => `${w.provider}:${w.eventType}@${w.businessId}`,
+      );
+    expect(await keptB(), '(b): one refusal row').toEqual([`stripe-refused:checkout.session.completed:business@${ID.bizPlatform}`]);
+    const retryB = await stripeWebhook(eventB, PLATFORM_STRIPE.STRIPE_WEBHOOK_SECRET);
+    expect(retryB.status, `(b) retry: ${JSON.stringify(retryB.body)}`).toBe(400);
+    expect(await keptB(), '(b): a retry adds no row').toHaveLength(1);
+    expect(await counts(ID.bizPlatform), '(b): nothing recorded but the refusal').toEqual({
+      ...beforePlatform,
+      webhookEvents: beforePlatform.webhookEvents + 1,
+    });
   });
 });
 

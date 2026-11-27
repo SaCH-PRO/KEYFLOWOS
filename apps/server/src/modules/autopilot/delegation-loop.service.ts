@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
+import { modulesFromIdentifiers } from '../ai/memory-classification';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { ClientMomentumService } from '../momentum/client-momentum.service';
@@ -12,6 +13,7 @@ import { CommerceService } from '../commerce/commerce.service';
 import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { schedulersDisabled } from '../../core/config/env';
+import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 
 const MOMENTUM_SWEEP_HOUR = 6;
 
@@ -134,12 +136,15 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
    * mints a link for an invoice whose links were all revoked or expired. This sent
    * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
    * leaves the email without a button (the template renders none), never a
-   * bare-id URL.
+   * bare-id URL — except on RetryableConflictException (FU-KEY-INVOICE-EMAIL-PAY-LINK,
+   * D-248), which propagates so runPaymentRecovery skips sending and leaves the
+   * task PENDING for the next sweep instead of sending a button-less reminder.
    */
   private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
     try {
       return (await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
     } catch (e) {
+      if (e instanceof RetryableConflictException) throw e;
       Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, DelegationLoopService.name);
       return undefined;
     }
@@ -485,6 +490,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           confidence: 0.9,
           source: 'pattern_analysis',
           expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          moduleScope: modulesFromIdentifiers(loop.loopType, toolName),
         }).catch(() => {});
       }
 
@@ -707,6 +713,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
+      let autoExecuted = false;
       if (!needsApproval && invoice.contact.email && window.allowed) {
         try {
           const invoiceUrl = await this.customerInvoiceUrl(invoice.id, businessId);
@@ -740,6 +747,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
             category: 'PAYMENT_RECOVERY',
             action: 'email_sent',
           });
+          autoExecuted = true;
         } catch (emailErr) {
           this.logger.warn(`Failed to auto-send payment reminder email for invoice ${invoice.invoiceNumber}: ${(emailErr as Error).message}`);
         }
@@ -755,7 +763,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         milestone: currentMilestone,
         cadence: cadenceLabel,
         priority,
-        autoExecuted: !needsApproval && !!invoice.contact.email,
+        autoExecuted,
       });
     }
   }
@@ -1608,6 +1616,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         confidence: Math.min(approvalRate, 0.95),
         source: 'pattern_analysis',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        moduleScope: modulesFromIdentifiers(loopType, toolName),
       });
 
       this.events.emit('delegation_loop.trust_elevated', {
@@ -1636,6 +1645,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         confidence: Math.min(1 - approvalRate, 0.9),
         source: 'pattern_analysis',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        moduleScope: modulesFromIdentifiers(loopType, toolName),
       });
 
       this.events.emit('delegation_loop.trust_degraded', {

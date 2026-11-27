@@ -417,6 +417,8 @@ export class KeyCortexActionsService implements OnModuleInit {
     const businessId = session?.businessId ?? 'unknown';
 
     try {
+      const resolvedToolName = this.actionTypeToToolName(action.actionType);
+      const resolvedModule = resolvedToolName.includes('.') ? resolvedToolName.split('.')[0] : 'cortex';
       const request = this.proposalService
         ? await this.proposalService.create(
             businessId,
@@ -426,8 +428,10 @@ export class KeyCortexActionsService implements OnModuleInit {
               title: action.description || `Execute ${action.actionType}`,
               summary: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
               actionType: 'EXECUTE_TOOL',
+              toolName: resolvedToolName,
+              module: resolvedModule,
               payload: {
-                toolName: this.actionTypeToToolName(action.actionType),
+                toolName: resolvedToolName,
                 originalActionType: action.actionType,
                 parameters: (action.result as Record<string, unknown>) ?? {},
                 estimatedImpact: action.estimatedImpact ?? 'unknown',

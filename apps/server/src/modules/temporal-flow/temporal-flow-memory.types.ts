@@ -1,3 +1,8 @@
+import type {
+  MemoryRowDataClass,
+  TemporalEventProvenance,
+} from '../ai/memory-classification';
+
 export type TemporalFlowMemoryEntityType = 'contact' | 'thread' | 'channel' | 'business';
 
 export type TemporalFlowMemoryType = 'summary' | 'pattern' | 'insight' | 'recommendation';
@@ -9,9 +14,12 @@ export interface CreateTemporalFlowMemoryInput {
   type: TemporalFlowMemoryType;
   content: string;
   sourceEventIds?: string[];
+  sourceEvents?: TemporalEventProvenance[];
   sourceModule: string;
   metadata?: Record<string, unknown>;
   confidence?: number;
+  dataClass?: MemoryRowDataClass;
+  moduleScope?: string[];
 }
 
 export interface TemporalFlowMemoryQuery {
@@ -32,6 +40,8 @@ export interface TemporalFlowMemoryData {
   sourceModule: string;
   metadata: unknown;
   confidence: number;
+  dataClass?: string | null;
+  moduleScope?: string[];
   createdAt: Date;
   updatedAt: Date;
 }

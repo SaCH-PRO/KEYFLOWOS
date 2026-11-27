@@ -85,6 +85,9 @@ export class KeyCortexApprovalService {
       requester: params.requester,
     };
 
+    const canonicalToolName = params.actionType.includes('.')
+      ? params.actionType
+      : `${params.actionModule}.${params.actionType}`;
     const proposal = await this.proposalService.create(
       params.businessId,
       {
@@ -93,6 +96,8 @@ export class KeyCortexApprovalService {
         title: params.description || `${params.actionModule}.${params.actionType}`,
         summary: params.rationale,
         actionType: 'EXECUTE_TOOL',
+        toolName: canonicalToolName,
+        module: params.actionModule,
         payload,
       },
       params.requesterId,
