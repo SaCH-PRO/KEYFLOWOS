@@ -13,12 +13,15 @@
  *           the order id is encoded wherever it goes into a URL
  *   RST-06  order lines with a negative, fractional or zero quantity, or a negative or infinite price, are dropped
  *   RST-07  the confirmation's order link encodes the order id (/, ? and #)
- *   RST-08  a restored line's image renders only from an http(s) or same-site URL; anything else (an object, a
- *           javascript: or data: URL, a //host URL) renders no image
+ *   RST-08  a restored line's image renders only when it is an http(s) image, any host, as the live cart renders it
+ *           (absolute, protocol-relative //host, or a path, each resolved against the page); anything else (an
+ *           object, a javascript:, JAVA\nSCRIPT: or data: URL, blank) renders no image; the src rendered is the
+ *           value checked (trimmed)
  *   RST-09  an empty or blank order number, order id or e-mail is none: the booking confirmation, no blank Order #
  *           and no blank booking reference
- *   RST-10  a quantity that is not a safe whole number up to 999 (1e21, 1e308, 1000) is dropped, and so is a line
- *           whose total overflows (a finite price times its quantity)
+ *   RST-10  a quantity that is not a safe whole number from 1 to 1,000,000 (1e21, 1e308) is dropped, a real large
+ *           order (1000) is kept, and so is the total of a line whose total would overflow dropped
+ *   RST-11  an order number, order id or e-mail made only of invisible characters is none
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ReactNode } from "react";
@@ -271,17 +274,26 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
     }
   });
 
-  it("RST-08 a restored line's image renders only from an http(s) or same-site URL", async () => {
-    const refused: unknown[] = [{ src: "x", width: 1, height: 1 }, "javascript:alert(1)", "data:image/png;base64,AAAA", "//evil.test/x.png", "  "];
+  it("RST-08 a restored line's image renders only when it is an http(s) image, and renders the value checked", async () => {
+    const refused: unknown[] = [{ src: "x", width: 1, height: 1 }, "javascript:alert(1)", "JAVA\nSCRIPT:alert(1)", "data:image/png;base64,AAAA", "  "];
     for (const imageUrl of refused) {
       await restored({ items: [{ ...ITEMS[0], imageUrl }] });
       expect(screen.getByText("RST Candle")).toBeInTheDocument();
       expect(screen.queryByRole("img", { name: "RST Candle" }), JSON.stringify(imageUrl)).toBeNull();
       cleanup();
     }
-    for (const imageUrl of ["https://cdn.rst.test/candle.png", "http://cdn.rst.test/candle.png", "/images/candle.png"]) {
+    const kept: Array<[string, string]> = [
+      ["https://cdn.rst.test/candle.png", "https://cdn.rst.test/candle.png"],
+      ["http://cdn.rst.test/candle.png", "http://cdn.rst.test/candle.png"],
+      ["/images/candle.png", "/images/candle.png"],
+      ["//cdn.rst.test/a.png", "//cdn.rst.test/a.png"],
+      // A browser resolves this to https://evil.test/x.png: an http(s) image of another host, as the live cart allows.
+      ["/\\evil.test/x.png", "/\\evil.test/x.png"],
+      ["  https://cdn.rst.test/padded.png  ", "https://cdn.rst.test/padded.png"],
+    ];
+    for (const [imageUrl, src] of kept) {
       await restored({ items: [{ ...ITEMS[0], imageUrl }] });
-      expect(screen.getByRole("img", { name: "RST Candle" }).getAttribute("src"), imageUrl).toBe(imageUrl);
+      expect(screen.getByRole("img", { name: "RST Candle" }).getAttribute("src"), imageUrl).toBe(src);
       cleanup();
     }
   });
@@ -298,16 +310,29 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
     }
   });
 
-  it("RST-10 a quantity beyond a safe whole number up to 999, or a line total that overflows, is dropped", async () => {
+  it("RST-10 a quantity beyond a safe whole number up to 1,000,000, or a line total that overflows, is dropped", async () => {
     const bad = [
       { ...ITEMS[0], id: "q1", name: "RST Huge Qty", quantity: 1e21 },
       { ...ITEMS[0], id: "q2", name: "RST Max Qty", quantity: 1e308 },
-      { ...ITEMS[0], id: "q3", name: "RST Thousand Qty", quantity: 1000 },
+      { ...ITEMS[0], id: "q3", name: "RST Million And One Qty", quantity: 1_000_001 },
       { ...ITEMS[0], id: "q4", name: "RST Overflow Total", price: 1e308, quantity: 2 },
     ];
-    await restored({ items: [...bad, { ...ITEMS[1], quantity: 999, price: 1 }] });
+    await restored({ items: [...bad, { ...ITEMS[1], quantity: 1000, price: 1 }] });
     for (const b of bad) expect(screen.queryByText(b.name), b.name).toBeNull();
-    expect(screen.getByText("RST Gift Box"), "999 is a quantity").toBeInTheDocument();
+    expect(screen.getByText("RST Gift Box"), "a real 1000-unit order keeps its line").toBeInTheDocument();
+    expect(screen.getByText("x1000")).toBeInTheDocument();
     expect(screen.queryByText(/∞/)).toBeNull();
+  });
+
+  it("RST-11 an order number, order id or e-mail made only of invisible characters is none", async () => {
+    for (const invisible of ["\u200B", "\u180E\u200C", "\u200D \u2060", "\uFEFF"]) {
+      net.gets = [];
+      window.localStorage.setItem(KEY, record({ orderNumber: invisible, orderId: invisible, customerEmail: invisible }));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 }), JSON.stringify(invisible)).toBeInTheDocument();
+      expect(screen.queryByText("Order #")).toBeNull();
+      expect(net.gets.some((p) => p.startsWith("/site/storefront/public/order/")), "no status read").toBe(false);
+      cleanup();
+    }
   });
 });
