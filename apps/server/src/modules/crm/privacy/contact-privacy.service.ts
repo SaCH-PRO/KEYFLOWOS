@@ -474,10 +474,15 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     ip?: string | null;
     userAgent?: string | null;
   }) {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: { id: input.contactId, businessId: input.businessId },
-    });
-    if (!contact) throw new NotFoundException('Contact not found');
+    // Read past softDeleteExtension so a contact already soft-deleted via the
+    // normal delete path can still be scheduled for GDPR erasure without losing
+    // its earlier deletedAt timestamp (R54 / RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE).
+    const contactRows = await this.prisma.client.$queryRaw<Array<{ id: string; deletedAt: Date | null }>>`
+      SELECT id, deleted_at AS "deletedAt"
+        FROM contacts
+       WHERE id = ${input.contactId}
+         AND business_id = ${input.businessId}`;
+    if (contactRows.length === 0) throw new NotFoundException('Contact not found');
 
     const biz = await this.prisma.client.business.findUnique({
       where: { id: input.businessId },
@@ -493,14 +498,31 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     if (existing && existing.status === 'requested') {
       return existing;
     }
+    if (existing && existing.status === 'purged') {
+      throw new BadRequestException('Contact has already been purged');
+    }
 
     const contactHash = this.audit.hashContact(input.businessId, input.contactId);
     const result = await this.prisma.client.$transaction(async (tx) => {
-      // Soft-delete the contact (recoverable until purgeAt).
-      await tx.contact.update({
-        where: { id: input.contactId },
-        data: { deletedAt: new Date() },
+      const now = new Date();
+      // Atomically soft-delete ONLY if the contact is currently live. If it was
+      // already soft-deleted before this forget request, keep the earlier
+      // deletedAt untouched and record deletedByForget=false in the audit trail.
+      const softDeleted = await tx.contact.updateMany({
+        where: { id: input.contactId, businessId: input.businessId, deletedAt: null },
+        data: { deletedAt: now },
       });
+      const deletedByForget = softDeleted.count === 1;
+      let priorDeletedAt: Date | null = null;
+      if (!deletedByForget) {
+        const currentRows = await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
+          SELECT deleted_at AS "deletedAt"
+            FROM contacts
+           WHERE id = ${input.contactId}
+             AND business_id = ${input.businessId}`;
+        priorDeletedAt = currentRows[0]?.deletedAt ?? null;
+      }
+
       const upserted = await tx.contactForgetRequest.upsert({
         where: { contactId: input.contactId },
         create: {
@@ -518,23 +540,35 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
           requestedById: input.actor?.id ?? null,
           reason,
           purgeAt,
-          requestedAt: new Date(),
+          requestedAt: now,
           purgedAt: null,
           cancelledAt: null,
         },
       });
-      return upserted;
-    });
 
-    await this.audit.write({
-      businessId: input.businessId,
-      contactId: input.contactId,
-      action: 'forget_requested',
-      actor: input.actor ?? { type: 'SYSTEM' },
-      reason,
-      ip: input.ip,
-      userAgent: input.userAgent,
-      after: { purgeAt, graceDays },
+      // Record provenance atomically inside the transaction so cancelForget
+      // can reliably know whether this forget request caused the soft delete.
+      await this.audit.write(
+        {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          action: 'forget_requested',
+          entityId: upserted.id,
+          actor: input.actor ?? { type: 'SYSTEM' },
+          reason,
+          ip: input.ip,
+          userAgent: input.userAgent,
+          after: {
+            purgeAt,
+            graceDays,
+            deletedByForget,
+            ...(priorDeletedAt ? { priorDeletedAt: priorDeletedAt.toISOString() } : {}),
+          },
+        },
+        tx,
+      );
+
+      return upserted;
     });
 
     return result;
@@ -557,8 +591,9 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException(`Forget request already ${req.status}`);
     }
 
+    let restored: boolean;
     try {
-      await this.prisma.client.$transaction(async (tx) => {
+      const outcome = await this.prisma.client.$transaction(async (tx) => {
         // Bound to the same claim the purge takes (SEC-V138-2): only a request
         // that is still 'requested' and still names this contact can be
         // cancelled. If the purge committed after the read above, nothing
@@ -571,11 +606,33 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         if (cancelled.count === 0) {
           throw new BadRequestException('Forget request is no longer open (already purged or cancelled)');
         }
-        await tx.contact.updateMany({
-          where: { id: input.contactId, businessId: input.businessId },
-          data: { deletedAt: null },
+
+        // Restore deletedAt to null ONLY when this forget request was the
+        // deletion's source (R54 / RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE).
+        const reqAudit = await tx.contactAuditEntry.findFirst({
+          where: {
+            businessId: input.businessId,
+            contactId: input.contactId,
+            action: 'forget_requested',
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          select: { after: true },
         });
+        const reqAfter =
+          reqAudit?.after && typeof reqAudit.after === 'object' && !Array.isArray(reqAudit.after)
+            ? (reqAudit.after as Record<string, unknown>)
+            : null;
+        const shouldRestore = reqAfter?.deletedByForget !== false;
+
+        if (shouldRestore) {
+          await tx.contact.updateMany({
+            where: { id: input.contactId, businessId: input.businessId },
+            data: { deletedAt: null },
+          });
+        }
+        return { restored: shouldRestore };
       });
+      restored = outcome.restored;
     } catch (err: unknown) {
       // Since D-16 a forgotten contact releases its email and phone for the
       // grace period, so another live contact may hold one of them by now; the
@@ -591,16 +648,19 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       throw err;
     }
 
+    const priorSoftDeletePreserved = !restored;
     await this.audit.write({
       businessId: input.businessId,
       contactId: input.contactId,
       action: 'forget_cancelled',
+      entityId: req.id,
       actor: input.actor ?? { type: 'SYSTEM' },
       ip: input.ip,
       userAgent: input.userAgent,
+      after: { restored, priorSoftDeletePreserved },
     });
 
-    return { ok: true };
+    return restored ? { ok: true } : { ok: true, restored: false, priorSoftDeletePreserved: true };
   }
 
   /**

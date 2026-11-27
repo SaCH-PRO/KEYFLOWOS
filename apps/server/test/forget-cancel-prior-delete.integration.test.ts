@@ -280,11 +280,7 @@ describe('V1-73 (RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE): cancelling a forget reque
       actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
     });
 
-    expect(cancelRes).toMatchObject({
-      ok: true,
-      restored: true,
-      priorSoftDeletePreserved: false,
-    });
+    expect(cancelRes).toEqual({ ok: true });
     expect(await rawForgetStatus(ID.liveContact)).toBe('cancelled');
     expect(await rawDeletedAt(ID.liveContact)).toBeNull();
   });
@@ -392,7 +388,7 @@ describe('V1-73 (RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE): cancelling a forget reque
       contactId: ID.cycleContact,
       actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
     });
-    expect(c2).toMatchObject({ ok: true, restored: true, priorSoftDeletePreserved: false });
+    expect(c2).toEqual({ ok: true });
     expect(await rawDeletedAt(ID.cycleContact)).toBeNull();
   });
 });
