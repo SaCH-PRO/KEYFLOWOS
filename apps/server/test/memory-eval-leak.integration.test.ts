@@ -102,9 +102,9 @@ const UNFIXED_TODO_REGISTRY: ReadonlyMap<string, { followUp: string; leakClasses
 ]);
 
 /**
- * Every fixed projected read symbol in `MEMORY_STORE_PATHS` (`kind === 'read'` and
- * `projection !== 'system-internal' && projection !== 'unprojected'`) mapped to the
- * active real-DB leak test section(s) that verify it.
+ * Every fixed projected read symbol in `MEMORY_STORE_PATHS` (`kind === 'read'`,
+ * `projection !== 'system-internal' && projection !== 'unprojected'`, and NOT in
+ * `UNFIXED_TODO_REGISTRY`) mapped to the active real-DB leak tests that verify it.
  */
 const ACTIVE_PROJECTED_READ_SYMBOLS: ReadonlySet<string> = new Set([
   'modules/ai/agent.controller.ts::AgentController.getDetectedPatterns',
@@ -122,10 +122,8 @@ const ACTIVE_PROJECTED_READ_SYMBOLS: ReadonlySet<string> = new Set([
   'modules/business-events/business-event.service.ts::BusinessEventService.getKpiStats',
   'modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.countRecentFailedOutcomes',
   'modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.countRecentMemoryEvents',
-  'modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.getMemoryEvent',
   'modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.listMemoryEvents',
   'modules/business-genome/key-genome/key-genome-governance.service.ts::KeyGenomeGovernanceService.summary',
-  'modules/key-cortex/key-cortex-actions.service.ts::KeyCortexActionsService.getActionHistory',
   'modules/key-cortex/key-cortex-awareness.service.ts::KeyCortexAwarenessService.getAwareness',
   'modules/key-cortex/key-cortex-context-v2.service.ts::KeyCortexContextV2Service.getTemporalContext',
   'modules/key-cortex/key-cortex-creativity.service.ts::KeyCortexCreativityService.recentWeakSignals',
@@ -136,7 +134,6 @@ const ACTIVE_PROJECTED_READ_SYMBOLS: ReadonlySet<string> = new Set([
   'modules/key-cortex/key-cortex-event.service.ts::KeyCortexEventService.getEventStats',
   'modules/key-cortex/key-cortex-immune.service.ts::KeyCortexImmuneService.load',
   'modules/key-cortex/key-cortex-learning.service.ts::KeyCortexLearningService.retrieveLessons',
-  'modules/key-cortex/key-cortex-metacognition.service.ts::KeyCortexMetacognitionService.explainConfidence',
   'modules/key-cortex/key-cortex-prompt-context.service.ts::readersOwnCognitionMemory',
   'modules/key-cortex/key-cortex-reflection.service.ts::KeyCortexReflectionService.getLastReflectionSession',
   'modules/key-cortex/key-cortex-reflection.service.ts::KeyCortexReflectionService.getWeeklySessions',
@@ -151,6 +148,12 @@ const ACTIVE_PROJECTED_READ_SYMBOLS: ReadonlySet<string> = new Set([
   'modules/temporal-flow/temporal-flow.service.ts::TemporalFlowService.visibleMemoryIds',
 ]);
 
+/** Runtime tracker proving every symbol in ACTIVE_PROJECTED_READ_SYMBOLS was actually executed against Postgres. */
+const invokedSymbols = new Set<string>();
+function markInvoked(symbolKey: string): void {
+  invokedSymbols.add(symbolKey);
+}
+
 let db: any;
 let prisma: any;
 let semantic: any;
@@ -159,6 +162,7 @@ let executionLog: any;
 let roleEngine: any;
 let proactiveSuggestions: any;
 let agentController: any;
+let aiController: any;
 let temporalMemory: any;
 let temporalFlow: any;
 let unifiedRetrieval: any;
@@ -168,13 +172,18 @@ let awarenessService: any;
 let cortexEventService: any;
 let cortexEthicsService: any;
 let cortexReflectionService: any;
+let cortexCreativityService: any;
 let cortexActionsService: any;
 let cortexSalienceService: any;
 let cortexEndocrineService: any;
 let cortexImmuneService: any;
 let businessEventService: any;
 let genomeMemoryService: any;
+let genomeGovernanceService: any;
 let cognitiveEventBus: any;
+let KeyCortexEndocrineServiceCtor: any;
+let KeyCortexImmuneServiceCtor: any;
+let KeyCortexSalienceServiceCtor: any;
 let readersOwnPromptMemoryFn: any;
 let readersOwnCognitionMemoryFn: any;
 let readersModuleSightFn: any;
@@ -182,6 +191,7 @@ let readerSearchOptionsFn: any;
 let viewerMemoryReaderContextFn: any;
 
 async function cleanup() {
+  if (!db) return;
   const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`;
   for (const sql of [
     byBiz('ai_memory_embeddings'),
@@ -203,8 +213,11 @@ async function cleanup() {
   ]) {
     try {
       await db.$executeRawUnsafe(sql);
-    } catch {
-      /* best-effort cleanup */
+    } catch (err: any) {
+      const code = err?.code ?? err?.meta?.code;
+      if (code !== '42P01') {
+        throw err;
+      }
     }
   }
 }
@@ -270,6 +283,7 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     const { RoleEngineService } = await import('../src/modules/ai/role-engine.service');
     const { ProactiveSuggestionService } = await import('../src/modules/ai/proactive-suggestion.service');
     const { AgentController } = await import('../src/modules/ai/agent.controller');
+    const { AiController } = await import('../src/modules/ai/ai.controller');
     const { TemporalFlowMemoryService } = await import('../src/modules/temporal-flow/temporal-flow-memory.service');
     const { TemporalFlowService } = await import('../src/modules/temporal-flow/temporal-flow.service');
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
@@ -279,12 +293,16 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     const { KeyCortexEventService } = await import('../src/modules/key-cortex/key-cortex-event.service');
     const { KeyCortexEthicsService } = await import('../src/modules/key-cortex/key-cortex-ethics.service');
     const { KeyCortexReflectionService } = await import('../src/modules/key-cortex/key-cortex-reflection.service');
+    const { KeyCortexCreativityService } = await import('../src/modules/key-cortex/key-cortex-creativity.service');
     const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
     const { KeyCortexSalienceService } = await import('../src/modules/key-cortex/key-cortex-salience.service');
     const { KeyCortexEndocrineService } = await import('../src/modules/key-cortex/key-cortex-endocrine.service');
     const { KeyCortexImmuneService } = await import('../src/modules/key-cortex/key-cortex-immune.service');
     const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
     const { GenomeMemoryService } = await import('../src/modules/business-genome/key-genome/genome-memory.service');
+    const { KeyGenomeGovernanceService } = await import(
+      '../src/modules/business-genome/key-genome/key-genome-governance.service'
+    );
     const { CognitiveEventBusService } = await import('../src/modules/key-cortex/cognitive-event-bus.service');
     const {
       readersOwnPromptMemory,
@@ -325,6 +343,10 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       semantic,
       prisma,
     );
+    const aiCtrlDeps: unknown[] = Array.from({ length: Math.max(AiController.length, 30) }, () => ({}));
+    aiCtrlDeps[2] = prisma;
+    aiCtrlDeps[3] = executionLog;
+    aiController = new (AiController as unknown as new (...args: unknown[]) => any)(...aiCtrlDeps);
     temporalMemory = new TemporalFlowMemoryService(prisma, semantic);
     temporalFlow = new TemporalFlowService(prisma, temporalMemory, semantic);
     unifiedRetrieval = new UnifiedMemoryRetrievalService(prisma, semantic);
@@ -345,17 +367,47 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       {} as any,
       aiUsage as any,
     );
+    cortexCreativityService = new KeyCortexCreativityService(
+      prisma,
+      {} as any,
+      aiUsage as any,
+      contextV2,
+      {} as any,
+    );
     cortexActionsService = new KeyCortexActionsService(
       prisma,
       undefined,
       {} as any,
       {} as any,
     );
+    KeyCortexEndocrineServiceCtor = KeyCortexEndocrineService;
+    KeyCortexImmuneServiceCtor = KeyCortexImmuneService;
+    KeyCortexSalienceServiceCtor = KeyCortexSalienceService;
     cortexEndocrineService = new KeyCortexEndocrineService(prisma);
     cortexSalienceService = new KeyCortexSalienceService(prisma, cortexEndocrineService);
     cortexImmuneService = new KeyCortexImmuneService(prisma, cortexEndocrineService);
     businessEventService = new BusinessEventService(prisma, events);
     genomeMemoryService = new GenomeMemoryService(prisma);
+    genomeGovernanceService = new KeyGenomeGovernanceService(
+      prisma,
+      { listSignals: async () => [] } as any,
+      { listRecommendations: async () => [] } as any,
+      { listExperiments: async () => [] } as any,
+      { getReadiness: async () => [] } as any,
+      {
+        computeFactScores: async () => [],
+        computeBusinessScore: (businessId: string) => ({
+          businessId,
+          overall: 0,
+          integrity: 0,
+          readiness: 0,
+          confidence: 0,
+          sections: [],
+          computedAt: new Date().toISOString(),
+        }),
+      } as any,
+      { listDepartments: async () => [] } as any,
+    );
     cognitiveEventBus = new CognitiveEventBusService(prisma);
 
     readersOwnPromptMemoryFn = readersOwnPromptMemory;
@@ -402,7 +454,7 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
         { id: `${P}m_owner_b`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' },
       ],
     });
-  }, 60_000);
+  }, 120_000);
 
   beforeEach(async () => {
     delete process.env.MEMORY_CLASS_READ;
@@ -444,15 +496,20 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       expect(entry.followUp && entry.followUp.trim().length > 0, registryPathKey(entry)).toBe(true);
     }
 
-    // Every fixed projected read symbol MUST be in ACTIVE_PROJECTED_READ_SYMBOLS
+    // Every fixed projected read symbol (excluding entries tracked in UNFIXED_TODO_REGISTRY) MUST be in ACTIVE_PROJECTED_READ_SYMBOLS
     const projectedReads = MEMORY_STORE_PATHS.filter(
-      (p) => p.kind === 'read' && p.projection !== 'system-internal' && p.projection !== 'unprojected',
+      (p) =>
+        p.kind === 'read' &&
+        p.projection !== 'system-internal' &&
+        p.projection !== 'unprojected' &&
+        !UNFIXED_TODO_REGISTRY.has(registryPathKey(p)),
     );
     expect(projectedReads.length).toBeGreaterThan(30);
-    const missingActive = [...new Set(projectedReads.map((p) => `${p.file}::${p.symbol}`))].filter(
-      (sym) => !ACTIVE_PROJECTED_READ_SYMBOLS.has(sym),
-    );
+    const projectedSyms = new Set(projectedReads.map((p) => `${p.file}::${p.symbol}`));
+    const missingActive = [...projectedSyms].filter((sym) => !ACTIVE_PROJECTED_READ_SYMBOLS.has(sym));
     expect(missingActive, 'Every fixed projected memory reader must be covered by MEM-EVAL-SUITE').toEqual([]);
+    const extraActive = [...ACTIVE_PROJECTED_READ_SYMBOLS].filter((sym) => !projectedSyms.has(sym));
+    expect(extraActive, 'ACTIVE_PROJECTED_READ_SYMBOLS must not double-claim UNFIXED_TODO_REGISTRY or non-projected symbols').toEqual([]);
 
     // Every remaining path (system-internal / writer-only) outside UNFIXED_TODO_REGISTRY MUST carry tenantPredicate yes | ambient-only | platform
     const internalOrWriter = MEMORY_STORE_PATHS.filter(
@@ -470,7 +527,7 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     }
   });
 
-  it('1. E-TEN: cross-tenant isolation across all 10 memory stores (Tenant A readers never receive Tenant B rows)', async () => {
+  it('1. E-TEN: cross-tenant isolation across 9 memory stores (Tenant A readers never receive Tenant B rows; CortexActionLog E-TEN tracked via it.todo #5)', async () => {
     const now = new Date();
     const future = new Date(Date.now() + 86_400_000);
     const corrShared = `${P}corr_shared`;
@@ -779,10 +836,13 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     // AiMemoryService (getAll, getByCategory, get)
     expect((await aiMemory.getAll(ID.bizA, ownerACtx)).every((r: any) => r.businessId === ID.bizA)).toBe(true);
     expect((await aiMemory.getAll(ID.bizA, ownerACtx)).map((r: any) => r.id)).not.toContain(`${P}am_b`);
+    markInvoked('modules/ai/ai-memory.service.ts::AiMemoryService.getAll');
     expect((await aiMemory.getByCategory(ID.bizA, 'business_fact', ownerACtx)).map((r: any) => r.id)).toEqual([`${P}am_a`]);
+    markInvoked('modules/ai/ai-memory.service.ts::AiMemoryService.getByCategory');
     expect(await aiMemory.get(ID.bizA, 'business_fact', 'marine_fact', ownerACtx)).toBeNull();
+    markInvoked('modules/ai/ai-memory.service.ts::AiMemoryService.get');
 
-    // SemanticMemoryService (pgvector raw SQL)
+    // SemanticMemoryService (pgvector raw SQL) + semanticHitsVisibleTo
     const semA = await semantic.search({
       businessId: ID.bizA,
       query: 'marine warehouse salon studio',
@@ -791,19 +851,27 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       visibleTo: readerSearchOptionsFn(prisma, ID.bizA, ownerACtx).visibleTo,
     });
     expect(semA.map((h: any) => h.id)).toEqual([`${P}emb_a`]);
+    markInvoked('modules/ai/semantic-memory.service.ts::SemanticMemoryService.search');
+    markInvoked('modules/ai/semantic-memory-sight.ts::semanticHitsVisibleTo');
 
     // TemporalFlowMemoryService (findMany, findById, findByEntity, getStats)
     expect((await temporalMemory.findMany(ID.bizA, { limit: 50 }, ownerACtx)).map((r: any) => r.id)).toEqual([`${P}tf_a`]);
+    markInvoked('modules/temporal-flow/temporal-flow-memory.service.ts::TemporalFlowMemoryService.findMany');
     expect(await temporalMemory.findById(ID.bizA, `${P}tf_b`, ownerACtx)).toBeNull();
+    markInvoked('modules/temporal-flow/temporal-flow-memory.service.ts::TemporalFlowMemoryService.findById');
     expect((await temporalMemory.findByEntity(ID.bizA, 'contact', `${P}c_shared`, ownerACtx)).map((r: any) => r.id)).toEqual([`${P}tf_a`]);
+    markInvoked('modules/temporal-flow/temporal-flow-memory.service.ts::TemporalFlowMemoryService.findByEntity');
     const tfStatsA = await temporalMemory.getStats(ID.bizA, ownerACtx);
     expect(tfStatsA.total).toBe(1);
+    markInvoked('modules/temporal-flow/temporal-flow-memory.service.ts::TemporalFlowMemoryService.getStats');
 
     // TemporalFlowService (listMemory, visibleMemoryById)
     const ownerATfSight = await temporalFlow.memorySight(ID.bizA, { id: ID.ownerA });
     const listA = await temporalFlow.listMemory(ID.bizA, { limit: 50 }, ownerATfSight);
     expect(listA.map((r: any) => r.id)).toEqual([`${P}tf_a`]);
+    markInvoked('modules/temporal-flow/temporal-flow.service.ts::TemporalFlowService.listMemory');
     expect(await temporalFlow.visibleMemoryById(ID.bizA, `${P}tf_b`, ownerATfSight)).toBeNull();
+    markInvoked('modules/temporal-flow/temporal-flow.service.ts::TemporalFlowService.visibleMemoryById');
 
     // UnifiedMemoryRetrievalService (all 8 structured stores + semantic)
     const unifiedA = await unifiedRetrieval.retrieveContext(ID.bizA, {
@@ -815,10 +883,12 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     });
     expect(JSON.stringify(unifiedA)).not.toContain('SECRET_B_');
     expect(unifiedA.some((f: any) => f.id === `${P}am_a`)).toBe(true);
+    markInvoked('modules/key-cortex/unified-memory-retrieval.service.ts::UnifiedMemoryRetrievalService.loadStructuredMemory');
 
     // KeyCortexContextV2Service
     const tempCtxA = await contextV2.getTemporalContext(ID.bizA, ownerACtx);
     expect(JSON.stringify(tempCtxA)).not.toContain('SECRET_B_');
+    markInvoked('modules/key-cortex/key-cortex-context-v2.service.ts::KeyCortexContextV2Service.getTemporalContext');
 
     // KeyCortexLearningService
     const lessonsA = await learningService.retrieveLessons(ID.bizA, 'schedule', {
@@ -826,6 +896,7 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       readerContext: ownerACtx,
     });
     expect(lessonsA).toEqual(['[accepted] Tenant A lesson']);
+    markInvoked('modules/key-cortex/key-cortex-learning.service.ts::KeyCortexLearningService.retrieveLessons');
 
     // KeyCortexAwarenessService
     const awarenessA = await awarenessService.getAwareness(ID.bizA, {
@@ -834,44 +905,58 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       readerContext: ownerACtx,
     });
     expect(awarenessA.items.map((i: any) => i.id)).toEqual([`${P}ws_a`]);
+    markInvoked('modules/key-cortex/key-cortex-awareness.service.ts::KeyCortexAwarenessService.getAwareness');
 
     // KeyCortexEventService (getEvents, getEventChain, getEventStats)
     const evsA = await cortexEventService.getEvents(ID.bizA, { limit: 50 }, ownerACtx);
     expect(evsA.map((e: any) => e.id)).toEqual([`${P}be_a`]);
+    markInvoked('modules/key-cortex/key-cortex-event.service.ts::KeyCortexEventService.getEvents');
     const chainA = await cortexEventService.getEventChain(ID.bizA, corrShared, ownerACtx);
     expect(chainA.map((e: any) => e.id)).toEqual([`${P}be_a`]);
+    markInvoked('modules/key-cortex/key-cortex-event.service.ts::KeyCortexEventService.getEventChain');
     const evStatsA = await cortexEventService.getEventStats(ID.bizA, 'week', ownerACtx);
     expect(evStatsA['contact.updated']).toBe(1);
+    markInvoked('modules/key-cortex/key-cortex-event.service.ts::KeyCortexEventService.getEventStats');
 
     // KeyCortexEthicsService.explainDecision (cross-tenant decisionId must not be revealed)
     const ethicsCross = await cortexEthicsService.explainDecision(`${P}be_b`, ID.bizA, ownerACtx);
     expect(ethicsCross).toContain('not found');
     expect(ethicsCross).not.toContain('SECRET_B_');
+    markInvoked('modules/key-cortex/key-cortex-ethics.service.ts::KeyCortexEthicsService.explainDecision');
 
     // BusinessEventService (getAuditTrail, getKpiStats)
     const auditA = await businessEventService.getAuditTrail(ID.bizA, { limit: 50 }, ownerACtx);
     expect(auditA.events.map((e: any) => e.id)).toEqual([`${P}be_a`]);
+    markInvoked('modules/business-events/business-event.service.ts::BusinessEventService.getAuditTrail');
     const kpiA = await businessEventService.getKpiStats(ID.bizA, 7, ownerACtx);
     expect(kpiA.totalEvents).toBe(1);
+    markInvoked('modules/business-events/business-event.service.ts::BusinessEventService.getKpiStats');
 
     // AiExecutionLogService (getHistory, getStats)
     const histA = await executionLog.getHistory(ID.bizA, {}, 50, 0, ownerACtx);
     expect(histA.logs.map((l: any) => l.id)).toEqual([`${P}ael_a`]);
+    markInvoked('modules/ai/ai-execution-log.service.ts::AiExecutionLogService.getHistory');
     const statsA = await executionLog.getStats(ID.bizA, 30, ownerACtx);
     expect(statsA.totalActions).toBe(1);
+    markInvoked('modules/ai/ai-execution-log.service.ts::AiExecutionLogService.getStats');
 
     // ProactiveSuggestionService & AgentController.getDetectedPatterns
     const sugsA = await proactiveSuggestions.getPendingSuggestions(ID.bizA, ownerACtx);
     expect(JSON.stringify(sugsA)).not.toContain('SECRET_B_');
+    markInvoked('modules/ai/proactive-suggestion.service.ts::ProactiveSuggestionService.getPendingSuggestions');
     const patsA = await agentController.getDetectedPatterns(ID.bizA, { user: { id: ID.ownerA } } as any);
     expect(JSON.stringify(patsA)).not.toContain('SECRET_B_');
+    markInvoked('modules/ai/agent.controller.ts::AgentController.getDetectedPatterns');
 
     // GenomeMemoryService (listMemoryEvents, getMemoryEvent, counts)
     const gmListA = await genomeMemoryService.listMemoryEvents(ID.bizA, { limit: 50 });
     expect(gmListA.map((g: any) => g.id)).toEqual([`${P}gm_a`]);
+    markInvoked('modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.listMemoryEvents');
     await expect(genomeMemoryService.getMemoryEvent(ID.bizA, `${P}gm_b`)).rejects.toThrow();
     expect(await genomeMemoryService.countRecentMemoryEvents(ID.bizA, 30)).toBe(1);
+    markInvoked('modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.countRecentMemoryEvents');
     expect(await genomeMemoryService.countRecentFailedOutcomes(ID.bizA, 30)).toBe(0);
+    markInvoked('modules/business-genome/key-genome/genome-memory.service.ts::GenomeMemoryService.countRecentFailedOutcomes');
 
     // CognitiveEventBusService.list
     const cogEvA = await cognitiveEventBus.list(ID.bizA, { limit: 50 });
@@ -1122,6 +1207,7 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
 
     const staffRefl = await cortexReflectionService.getLastReflectionSession(ID.bizA, staffCtx);
     expect(JSON.stringify(staffRefl ?? null)).not.toContain(revFigure);
+    markInvoked('modules/key-cortex/key-cortex-reflection.service.ts::KeyCortexReflectionService.getLastReflectionSession');
 
     // OWNER with full scopes DOES see the authorized REVENUE rows (proves test is non-vacuous)
     expect((await aiMemory.getAll(ID.bizA, ownerCtx)).map((r: any) => r.id)).toContain(`${P}am_rev_dir`);
@@ -1687,6 +1773,7 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
       { id: `${P}cog_staff2`, sourceType: 'cognition_memory' },
     ]);
     expect([...staff1OwnIds]).toEqual([`${P}cog_staff1`]);
+    markInvoked('modules/key-cortex/key-cortex-prompt-context.service.ts::readersOwnCognitionMemory');
 
     const promptKept = await readersOwnPromptMemoryFn(
       prisma,
@@ -1728,10 +1815,425 @@ describe('MEM-EVAL-SUITE (P150, V1-92): Real-DB Memory Leak Suite over MEM-CENSU
     expect(staff1Logs.logs.map((l: any) => l.id)).toEqual([`${P}ael_staff1`]);
     const staff1RoleCtx = await roleEngine.getRoleContext(ID.bizA, 'operations', staff1Ctx);
     expect(JSON.stringify(staff1RoleCtx)).not.toContain('Owner private log');
+    markInvoked('modules/ai/role-engine.service.ts::RoleEngineService.getRoleContext');
+  });
 
-    // KeyCortexEndocrineService + KeyCortexImmuneService tenant-isolated hydration/load
-    expect(cortexEndocrineService.read(ID.bizA)).toBeDefined();
-    await expect(cortexImmuneService.activeIncidents(ID.bizA)).resolves.toEqual([]);
+  it('7. Complete projected reader coverage: AiController.servedExecutionLogPage, KeyGenomeGovernanceService.summary, Creativity, WeeklyReflection, Endocrine.hydrate, Immune.load, Salience.countSignal + describeForPrompt, and TemporalFlow.visibleMemoryIds', async () => {
+    const now = new Date();
+    const weekStart = new Date(now.getTime() - 7 * 86_400_000);
+    const weekEnd = new Date(now.getTime() + 60_000);
+    const ownerCtx = viewerMemoryReaderContextFn({
+      userId: ID.ownerA,
+      businessId: ID.bizA,
+      role: 'OWNER',
+      superAdmin: false,
+      scopes: { crm: 'admin', bookings: 'admin', revenue: 'admin', expenses: 'admin', ai: 'admin' },
+      member: true,
+    });
+    const staffCtx = viewerMemoryReaderContextFn({
+      userId: ID.staffA,
+      businessId: ID.bizA,
+      role: 'STAFF',
+      superAdmin: false,
+      scopes: { crm: 'read', bookings: 'read', revenue: 'none', expenses: 'none', ai: 'none' },
+      member: true,
+    });
+
+    // 7a. AiController.servedExecutionLogPage (owner vs non-revenue staff vs foreign tenant)
+    await db.aiExecutionLog.createMany({
+      data: [
+        {
+          id: `${P}ael_ctrl_crm`,
+          businessId: ID.bizA,
+          userId: ID.staffA,
+          action: 'crm.update_contact',
+          toolName: 'crm_update_contact',
+          module: 'crm',
+          rationale: 'Staff CRM update',
+          success: true,
+          createdAt: now,
+        },
+        {
+          id: `${P}ael_ctrl_rev`,
+          businessId: ID.bizA,
+          userId: ID.ownerA,
+          action: 'commerce.create_invoice',
+          toolName: 'commerce_create_invoice',
+          module: 'revenue',
+          rationale: 'Owner invoice $84,600',
+          success: true,
+          createdAt: now,
+        },
+        {
+          id: `${P}ael_ctrl_b`,
+          businessId: ID.bizB,
+          userId: ID.ownerB,
+          action: 'crm.update_contact',
+          toolName: 'crm_update_contact',
+          module: 'crm',
+          rationale: 'Tenant B SECRET_B_CTRL_LOG',
+          success: true,
+          createdAt: now,
+        },
+      ],
+    });
+    const ownerExecPage = await aiController.getExecutionLogs(ID.bizA, { user: { id: ID.ownerA, role: 'USER' } } as any);
+    expect(ownerExecPage.logs.map((l: any) => l.id).sort()).toEqual([`${P}ael_ctrl_crm`, `${P}ael_ctrl_rev`]);
+    expect(JSON.stringify(ownerExecPage)).not.toContain('SECRET_B_CTRL_LOG');
+    const staffExecPage = await aiController.getExecutionLogs(ID.bizA, { user: { id: ID.staffA, role: 'USER' } } as any);
+    expect(staffExecPage.logs.map((l: any) => l.id)).toEqual([`${P}ael_ctrl_crm`]);
+    expect(JSON.stringify(staffExecPage)).not.toContain('$84,600');
+    const foreignExecPage = await aiController.getExecutionLogs(ID.bizA, { user: { id: ID.ownerB, role: 'USER' } } as any);
+    expect(foreignExecPage.logs).toEqual([]);
+    markInvoked('modules/ai/ai.controller.ts::AiController.servedExecutionLogPage');
+
+    // 7b. KeyGenomeGovernanceService.summary (owner vs non-revenue staff + cross-tenant)
+    await db.genomeMemoryEvent.createMany({
+      data: [
+        {
+          id: `${P}gm_gov_crm`,
+          businessId: ID.bizA,
+          sourceType: 'crm',
+          eventType: 'LESSON_LEARNED',
+          domain: 'crm',
+          section: 'CUSTOMER_MODEL',
+          title: 'CRM follow-up cadence',
+          summary: 'Clients respond well to Tuesday check-ins',
+          outcome: 'SUCCESS',
+          impactScore: 0.7,
+          occurredAt: now,
+          createdAt: now,
+        },
+        {
+          id: `${P}gm_gov_fin`,
+          businessId: ID.bizA,
+          sourceType: 'finance',
+          eventType: 'REVENUE_MILESTONE',
+          domain: 'finance',
+          section: 'FINANCIAL',
+          title: 'Q3 revenue reached $84,600',
+          summary: 'Revenue target exceeded with $84,600 gross',
+          outcome: 'SUCCESS',
+          impactScore: 0.9,
+          occurredAt: now,
+          createdAt: now,
+        },
+        {
+          id: `${P}gm_gov_b`,
+          businessId: ID.bizB,
+          sourceType: 'crm',
+          eventType: 'LESSON_LEARNED',
+          domain: 'crm',
+          section: 'CUSTOMER_MODEL',
+          title: 'Tenant B SECRET_B_GOV_EVENT',
+          summary: 'Tenant B marine note',
+          outcome: 'FAILURE',
+          impactScore: 0.8,
+          occurredAt: now,
+          createdAt: now,
+        },
+      ],
+    });
+    const ownerGov = await genomeGovernanceService.summary(ID.bizA, { readsRevenue: true });
+    expect(ownerGov.counts.memoryEventsLast7Days).toBe(2);
+    expect(JSON.stringify(ownerGov)).not.toContain('SECRET_B_GOV_EVENT');
+    const staffGov = await genomeGovernanceService.summary(ID.bizA, { readsRevenue: false });
+    expect(staffGov.counts.memoryEventsLast7Days).toBe(1);
+    expect(JSON.stringify(staffGov)).not.toContain('$84,600');
+    expect(JSON.stringify(staffGov)).not.toContain('SECRET_B_GOV_EVENT');
+    markInvoked('modules/business-genome/key-genome/key-genome-governance.service.ts::KeyGenomeGovernanceService.summary');
+
+    // 7c. KeyCortexCreativityService.recentWeakSignals (seeded bizA general/rev/personal/secret + bizB)
+    await db.keyCortexMemory.createMany({
+      data: [
+        {
+          id: `${P}kc_cr_gen`,
+          businessId: ID.bizA,
+          type: 'weak_signal',
+          key: `${P}cr_gen`,
+          userId: null,
+          value: JSON.stringify({ description: 'Tuesday booking fill rate rising' }),
+          confidence: 0.9,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_cr_rev`,
+          businessId: ID.bizA,
+          type: 'weak_signal',
+          key: `${P}cr_rev`,
+          userId: null,
+          value: JSON.stringify({ description: 'Q3 invoice revenue $84,600 spike' }),
+          confidence: 0.95,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_cr_priv`,
+          businessId: ID.bizA,
+          type: 'weak_signal',
+          key: `${P}cr_priv`,
+          userId: ID.ownerA,
+          value: JSON.stringify({ description: 'Owner private studio expansion signal' }),
+          confidence: 0.92,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_cr_b`,
+          businessId: ID.bizB,
+          type: 'weak_signal',
+          key: `${P}cr_b`,
+          userId: null,
+          value: JSON.stringify({ description: 'Tenant B SECRET_B_CREATIVITY_SIGNAL' }),
+          confidence: 0.99,
+          createdAt: now,
+        },
+      ],
+    });
+    const staffCreative = await (cortexCreativityService as any).recentWeakSignals(ID.bizA, staffCtx);
+    expect(staffCreative.map((s: any) => s.description)).toEqual(['Tuesday booking fill rate rising']);
+    expect(JSON.stringify(staffCreative)).not.toContain('SECRET_B_');
+    const ownerCreative = await (cortexCreativityService as any).recentWeakSignals(ID.bizA, ownerCtx);
+    expect(ownerCreative.length).toBe(3);
+    expect(JSON.stringify(ownerCreative)).not.toContain('SECRET_B_');
+    markInvoked('modules/key-cortex/key-cortex-creativity.service.ts::KeyCortexCreativityService.recentWeakSignals');
+
+    // 7d. KeyCortexReflectionService.getWeeklySessions (bizA revenue reflection + bizB)
+    await db.keyCortexMemory.createMany({
+      data: [
+        {
+          id: `${P}kc_wk_a`,
+          businessId: ID.bizA,
+          type: 'reflection_session',
+          key: `${P}wk_a`,
+          userId: null,
+          value: JSON.stringify({
+            type: 'reflection',
+            startedAt: now.toISOString(),
+            durationMs: 120,
+            insights: [{ id: 'i1', type: 'pattern', description: 'Weekly revenue $84,600 review', confidence: 0.9, dataPoints: [], priority: 'high' }],
+            actionsTaken: [],
+          }),
+          confidence: 0.9,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_wk_b`,
+          businessId: ID.bizB,
+          type: 'reflection_session',
+          key: `${P}wk_b`,
+          userId: null,
+          value: JSON.stringify({
+            type: 'reflection',
+            startedAt: now.toISOString(),
+            durationMs: 100,
+            insights: [{ id: 'i2', type: 'pattern', description: 'Tenant B SECRET_B_WEEKLY_REFLECTION', confidence: 0.9, dataPoints: [], priority: 'high' }],
+            actionsTaken: [],
+          }),
+          confidence: 0.9,
+          createdAt: now,
+        },
+      ],
+    });
+    const staffWeekly = await (cortexReflectionService as any).getWeeklySessions(ID.bizA, weekStart, weekEnd, staffCtx);
+    expect(staffWeekly).toEqual([]);
+    const ownerWeekly = await (cortexReflectionService as any).getWeeklySessions(ID.bizA, weekStart, weekEnd, ownerCtx);
+    expect(ownerWeekly.map((s: any) => s.id)).toEqual([`${P}wk_a`]);
+    expect(JSON.stringify(ownerWeekly)).not.toContain('SECRET_B_WEEKLY_REFLECTION');
+    markInvoked('modules/key-cortex/key-cortex-reflection.service.ts::KeyCortexReflectionService.getWeeklySessions');
+
+    // 7e. KeyCortexEndocrineService.hydrate (non-vacuous: seed real hormone rows on bizA & bizB, await hydrate)
+    await db.keyCortexMemory.createMany({
+      data: [
+        {
+          id: `${P}kc_endo_a`,
+          businessId: ID.bizA,
+          type: 'endocrine_state',
+          key: 'hormones',
+          userId: null,
+          value: JSON.stringify([
+            { name: 'cortisol', level: 0.48, reasons: ['Tenant A booking backlog'], updatedAt: now.toISOString() },
+          ]),
+          source: 'endocrine',
+          confidence: 0.9,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_endo_b`,
+          businessId: ID.bizB,
+          type: 'endocrine_state',
+          key: 'hormones',
+          userId: null,
+          value: JSON.stringify([
+            { name: 'malaise', level: 0.85, reasons: ['Tenant B SECRET_B_HORMONE'], updatedAt: now.toISOString() },
+          ]),
+          source: 'endocrine',
+          confidence: 0.9,
+          createdAt: now,
+        },
+      ],
+    });
+    const freshEndocrine = new KeyCortexEndocrineServiceCtor(prisma);
+    await freshEndocrine.hydrate(ID.bizA);
+    const endoOwner = freshEndocrine.readFor(ID.bizA, OWNER_SIGHT, now);
+    expect(endoOwner.length).toBe(1);
+    expect(endoOwner[0].name).toBe('cortisol');
+    expect(JSON.stringify(endoOwner)).not.toContain('SECRET_B_HORMONE');
+    // Hydrated levels without module provenance fail closed for restricted STAFF sight
+    expect(freshEndocrine.readFor(ID.bizA, STAFF_NO_REV_SIGHT, now)).toEqual([]);
+    markInvoked('modules/key-cortex/key-cortex-endocrine.service.ts::KeyCortexEndocrineService.hydrate');
+
+    // 7f. KeyCortexImmuneService.load (non-vacuous: seed real bizA benign + bizA secret canary + bizB incident)
+    await db.keyCortexMemory.createMany({
+      data: [
+        {
+          id: `${P}kc_imm_a`,
+          businessId: ID.bizA,
+          type: 'immune_incident',
+          key: `${P}imm_a`,
+          userId: null,
+          value: JSON.stringify({
+            anomalyType: 'burst_updates',
+            actorId: ID.staffA,
+            encounters: 2,
+            firstSeen: now.toISOString(),
+            lastSeen: now.toISOString(),
+            severity: 0.6,
+            details: { note: 'Tenant A benign anomaly' },
+          }),
+          confidence: 0.9,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_imm_sec`,
+          businessId: ID.bizA,
+          type: 'immune_incident',
+          key: `${P}imm_sec`,
+          userId: null,
+          value: JSON.stringify({
+            anomalyType: 'credential_leak',
+            actorId: ID.staffA,
+            encounters: 1,
+            firstSeen: now.toISOString(),
+            lastSeen: now.toISOString(),
+            severity: 0.9,
+            details: { raw: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2OTJhIn0.sig1234567890' },
+          }),
+          confidence: 0.9,
+          createdAt: now,
+        },
+        {
+          id: `${P}kc_imm_b`,
+          businessId: ID.bizB,
+          type: 'immune_incident',
+          key: `${P}imm_b`,
+          userId: null,
+          value: JSON.stringify({
+            anomalyType: 'burst_deletes',
+            actorId: ID.ownerB,
+            encounters: 3,
+            firstSeen: now.toISOString(),
+            lastSeen: now.toISOString(),
+            severity: 0.9,
+            details: { note: 'Tenant B SECRET_B_INCIDENT' },
+          }),
+          confidence: 0.9,
+          createdAt: now,
+        },
+      ],
+    });
+    const freshImmune = new KeyCortexImmuneServiceCtor(prisma, freshEndocrine);
+    const activeImmA = await freshImmune.activeIncidents(ID.bizA, now);
+    expect(activeImmA.length).toBe(1);
+    expect(activeImmA[0].anomalyType).toBe('burst_updates');
+    expect(JSON.stringify(activeImmA)).not.toContain('SECRET_B_INCIDENT');
+    expect(JSON.stringify(activeImmA)).not.toContain('eyJhbGci');
+    markInvoked('modules/key-cortex/key-cortex-immune.service.ts::KeyCortexImmuneService.load');
+
+    // 7g. KeyCortexSalienceService.countSignal + describeForPrompt (non-vacuous real threat/opportunity events on bizA & bizB)
+    const recentTs = new Date(now.getTime() - 5 * 60_000);
+    await db.businessEvent.createMany({
+      data: [
+        ...Array.from({ length: 5 }, (_, i) => ({
+          id: `${P}sal_a_crm_${i}`,
+          businessId: ID.bizA,
+          eventType: 'contact.created',
+          subjectType: 'contact',
+          subjectId: `${P}sc_${i}`,
+          actorType: 'human',
+          actorId: ID.ownerA,
+          action: 'create',
+          source: 'web',
+          createdAt: recentTs,
+        })),
+        ...Array.from({ length: 5 }, (_, i) => ({
+          id: `${P}sal_a_rev_${i}`,
+          businessId: ID.bizA,
+          eventType: 'invoice.paid',
+          subjectType: 'invoice',
+          subjectId: `${P}si_${i}`,
+          actorType: 'system',
+          actorId: 'system',
+          action: 'complete',
+          source: 'api',
+          createdAt: recentTs,
+        })),
+        ...Array.from({ length: 8 }, (_, i) => ({
+          id: `${P}sal_b_thr_${i}`,
+          businessId: ID.bizB,
+          eventType: 'proactive.negative_sentiment',
+          subjectType: 'message',
+          subjectId: `${P}sm_b_${i}`,
+          actorType: 'ai',
+          actorId: 'watcher',
+          action: 'detect',
+          source: 'ai',
+          createdAt: recentTs,
+        })),
+      ],
+    });
+    const freshSalience = new KeyCortexSalienceServiceCtor(prisma, freshEndocrine);
+    const concernsA = await freshSalience.appraise(ID.bizA);
+    expect(concernsA.length).toBeGreaterThanOrEqual(2);
+    expect(concernsA.map((c: any) => c.signal)).toContain('contact.created');
+    expect(concernsA.map((c: any) => c.signal)).toContain('invoice.paid');
+    expect(concernsA.map((c: any) => c.signal)).not.toContain('proactive.negative_sentiment');
+    const staffPromptSalience = freshSalience.describeForPrompt(ID.bizA, now, STAFF_NO_REV_SIGHT);
+    expect(staffPromptSalience ?? '').toMatch(/contact/i);
+    expect(staffPromptSalience ?? '').not.toMatch(/invoices?\s+paid/i);
+    expect(staffPromptSalience ?? '').not.toMatch(/negative\s+sentiment/i);
+    const ownerPromptSalience = freshSalience.describeForPrompt(ID.bizA, now, OWNER_SIGHT);
+    expect(ownerPromptSalience ?? '').toMatch(/invoices?\s+paid/i);
+    markInvoked('modules/key-cortex/key-cortex-salience.service.ts::KeyCortexSalienceService.countSignal');
+
+    // 7h. TemporalFlowService.visibleMemoryIds (explicit real-DB check with restricted staff sight)
+    await db.temporalFlowMemory.create({
+      data: {
+        id: `${P}tf_vis_rev`,
+        businessId: ID.bizA,
+        entityType: 'invoice',
+        entityId: `${P}inv_vis`,
+        type: 'summary',
+        content: 'Invoice $84,600 settled',
+        sourceModule: 'revenue',
+        sourceEventIds: [],
+        metadata: {},
+        confidence: 0.9,
+        dataClass: 'REVENUE',
+        moduleScope: ['revenue'],
+      },
+    });
+    const staffTfSight = await temporalFlow.memorySight(ID.bizA, { id: ID.staffA });
+    const visIds = await temporalFlow.visibleMemoryIds(ID.bizA, [`${P}tf_vis_rev`], staffTfSight.filter);
+    expect(visIds.has(`${P}tf_vis_rev`)).toBe(false);
+    markInvoked('modules/temporal-flow/temporal-flow.service.ts::TemporalFlowService.visibleMemoryIds');
+  });
+
+  it('8. Runtime coverage proof: every symbol in ACTIVE_PROJECTED_READ_SYMBOLS was actually invoked against real Postgres', () => {
+    expect(ACTIVE_PROJECTED_READ_SYMBOLS.size).toBeGreaterThan(30);
+    const uninvoked = [...ACTIVE_PROJECTED_READ_SYMBOLS].filter((sym) => !invokedSymbols.has(sym));
+    expect(
+      uninvoked,
+      'Every fixed projected memory reader listed in ACTIVE_PROJECTED_READ_SYMBOLS must be actively invoked at runtime',
+    ).toEqual([]);
   });
 
   // ── Explicit named it.todo cases for every genuinely unfixed path in memory-path-registry.ts ──
