@@ -19,7 +19,9 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 0. Current state: the next session starts here (2026-11-26 ~23:25 UTC)
 
-Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issue #80 and the
+**Control room moved: issue #273** ("V1 lane coordination thread (continuation of #80)", opened 2026-11-26 23:59 UTC from the owner's account). #80 hit GitHub's 2,500-comment limit and refuses comments (403); it stays the read-only archive of history and rulings. Post with `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<file>`. Wherever this file, CLAUDE.md or the agent-memory docs say "#80" for posting, read #273; owner question 69 asks whether to update CLAUDE.md and the docs to name it.
+
+Everything below is on GitHub: this file (branch `wave/v1-docs-p19`), the board (`coord/board`), issues #80 and #273 and the
 pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this session is needed.
 
 **Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y`. It took over at ~00:50 UTC from `session_01TnVBvHV3mgiWBWgin4sgAf`,
@@ -246,7 +248,7 @@ Main is at `b25d3655`. Production runs `f5d58ef7` (16 Nov), far behind main; the
 | --- | --- | --- | --- |
 | **Claude packets** | section 0.2 | Reviews, repairs, two returned | RETURNs, then the next Claude wave |
 | **Antigravity** | their claims on #80 (0.3) | Building and merging (M25 to M31 merged) | Their waves; board rows P202 to P207 |
-| **Owner** | - | - | Section 4 questions 40 to 50, 54 and 64 to 68; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
+| **Owner** | - | - | Section 4 questions 40 to 50, 54 and 64 to 69; USAGE-COUNT-SCRIPT re-run for NAV-B-HIDE; production redeploy (D-266) with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290) |
 | `wave/v1-docs-p19` | main `b25d3655` merged in | This file and V1-STATUS | Squashed into each Claude wave |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
@@ -383,6 +385,7 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 64. **Session-storage census approach** (asked; the orchestrator took the stricter default: the resolver proves only a small grammar and everything else fails closed). Overrule if you prefer patching shape by shape or accepting documented gaps.
 67. **Plan dependency for SALES-ORDERS-TAB and QUICK-SALE-WEB** (asked in this session; recorded here because the question tool was interrupted). Confirm the dependency order the plan should carry for these two web packets. (Default: as in the plan.)
 68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
+69. **Control room successor.** #80 is full (2,500 comments); lanes now post on #273. Update CLAUDE.md, AGENTS.md and the agent-memory docs to name #273 (and a rule for the next rollover), in a docs packet? (Default: yes, in the next Claude docs squash; until then this file says so.)
 66. **Trust wording on customer pages** (from CUSTOMER-PAGE-HONESTY): keep or drop "Trusted Platform", the owner-picked "Verified Business"/"Instant Booking" rails, "Instant Confirmation", "Secure Booking", "Secured by KeyFlowOS"; and published case studies have no public page now that /site redirects.
 
 **Ruled 2026-11-26 (D-298, #80 7189605548):** 63 = D-298.
