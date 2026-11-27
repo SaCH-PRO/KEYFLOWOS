@@ -100,7 +100,13 @@ beforeAll(async () => {
     controllers: [PayrollController],
     providers: [
       { provide: PrismaService, useValue: prismaStub },
-      { provide: ExpensePostingService, useValue: { onPayrollRunPaid: async () => undefined } },
+      {
+        provide: ExpensePostingService,
+        useValue: {
+          resolvePaymentCoa: async () => 'coa_cash',
+          onPayrollRunPaid: async () => undefined,
+        },
+      },
       PayrollService,
       TimelineService,
       AuthGuard,
@@ -562,8 +568,8 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140, v92n_)', () => {
     for (const actor of [ID.staffOpsOnlyA, ID.scopedOwnerNoRevA]) {
       const viewer = await timelineService.resolveViewer(ID.bizA, actor);
       const page = await timelineService.queryTimeline(ID.bizA, { limit: 100 }, viewer);
-      const ids = page.events.map((e: any) => e.id);
-      const discardedRows = page.events.filter((e: any) => e.entityType === 'payroll_run');
+      const ids = page.items.map((e: any) => e.id);
+      const discardedRows = page.items.filter((e: any) => e.entityType === 'payroll_run');
       expect(discardedRows, `payroll_run rows withheld for ${actor}`).toHaveLength(0);
       for (const hid of hiddenPayrollIds) {
         expect(ids, `${hid} withheld for ${actor}`).not.toContain(hid);
@@ -574,8 +580,8 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140, v92n_)', () => {
     for (const actor of [ID.ownerA, ID.staffOpsRevA]) {
       const viewer = await timelineService.resolveViewer(ID.bizA, actor);
       const page = await timelineService.queryTimeline(ID.bizA, { limit: 100 }, viewer);
-      const ids = page.events.map((e: any) => e.id);
-      const discardedRows = page.events.filter(
+      const ids = page.items.map((e: any) => e.id);
+      const discardedRows = page.items.filter(
         (e: any) => e.entityType === 'payroll_run' && e.entityId === ID.runDiscardA,
       );
       expect(discardedRows.length, `payroll_run.discarded visible for ${actor}`).toBeGreaterThanOrEqual(1);
