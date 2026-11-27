@@ -5,7 +5,10 @@
  *          writes nothing, and the button is usable again (extracting clears in a finally)
  *   R23-2  the same-business control: a throwing Extract says "Extraction failed" and the button is usable again
  *   R23-3  the panel's same-business control: a rejected read shows "No recurring expenses"
- *   R23-5  the page's sheet never renders for B: no instance of it is given B's id while it holds A's state
+ *   R23-5  the page's sheet never renders for B: no instance of it is given B's id while it holds A's state; a
+ *          device capture's prefill still opens it on the first business
+ *   R23-7  the page's effects, without lint disables, behave as before: the prefill opens the sheet once and the
+ *          query param is stripped once, though the router is a new object on every render
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -45,10 +48,14 @@ const client = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/client", () => ({ ...client, PAYMENT_METHODS: [{ value: "cash", label: "Cash" }] }));
+// The search params are one object until a test sets others, as in the app; the router is a new object on every
+// render (the page must not run its prefill effect again for that).
+const nav = vi.hoisted(() => ({ sp: new URLSearchParams(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: nav.replace }),
+  useSearchParams: () => nav.sp,
 }));
+beforeEach(() => { nav.sp = new URLSearchParams(); nav.replace.mockReset(); });
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
 }));
@@ -222,5 +229,19 @@ describe("R23-5: the page's sheet across a switch", () => {
     await settle();
     expect(sheetRenders, "the sheet rendered with B's id").not.toContain("biz_B");
     expect(screen.queryByPlaceholderText("What was this expense for?")).toBeNull();
+  }, 30000);
+});
+
+describe("R23-5 / R23-7: a device capture's prefill on the page", () => {
+  it("opens the sheet on the first business with the prefill, and strips the param once", async () => {
+    nav.sp = new URLSearchParams(`prefill=${encodeURIComponent(JSON.stringify({ description: "Fuel from capture", amount: 12 }))}`);
+    render(<ExpensesInboxPage />);
+    const LONG = { timeout: 10000 };
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    const desc = await screen.findByPlaceholderText("What was this expense for?", {}, LONG);
+    expect((desc as HTMLInputElement).value, "the first business closed the capture's sheet").toBe("Fuel from capture");
+    await settle();
+    expect(nav.replace, "the prefill effect ran again").toHaveBeenCalledTimes(1);
+    expect(sheetRenders.every((b) => b === "biz_A")).toBe(true);
   }, 30000);
 });
