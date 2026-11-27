@@ -34,6 +34,7 @@ const PRODUCT = {
   isActive: true, availableQuantity: null, stockStatus: "untracked", purchasable: true,
 };
 const PRODUCT_LINE = { id: PRODUCT.id, name: PRODUCT.name, description: null, price: 35, currency: "TTD", duration: null, imageUrl: null, itemType: "product", requiresBooking: false, quantity: 2 };
+const SERVICE_LINE = { id: "svc_whs2_cut", name: "Haircut", description: null, price: 120, currency: "TTD", duration: 30, imageUrl: null, itemType: "service", requiresBooking: true, quantity: 1 };
 const CART_KEY = `kf_cart_${SLUG}`;
 const ADD = /^(add to cart|pre-order)/i;
 let storefront: Record<string, unknown> | null = {};
@@ -61,6 +62,9 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     storefront = { storefront: {}, storeCheckout: true };
     render(<ProductDetailPage />);
     const buttons = await screen.findAllByRole("button", { name: ADD });
+    // The buying controls of a product on sale: the quantity stepper and the phone's fixed buy bar.
+    expect(screen.getByText("Qty:")).toBeTruthy();
+    expect(document.querySelector('[data-buy-bar]')).not.toBeNull();
     fireEvent.click(buttons[0]);
     await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id]));
   });
@@ -72,12 +76,24 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
   ] as Array<[string, Record<string, unknown> | null]>) {
     it(`WHS2-14 not offered when ${label}: no Add to Cart, and a restored product line is dropped`, async () => {
       storefront = answer;
-      window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE]));
+      window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
       render(<ProductDetailPage />);
       await screen.findAllByText(PRODUCT.name);
-      await waitFor(() => expect(storedCart()).toEqual([]));
+      await waitFor(() => expect(storedCart().map((c) => c.id)).toEqual([SERVICE_LINE.id]));
       expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
       expect(screen.queryAllByRole("button", { name: /in cart|sold out/i })).toHaveLength(0);
+      // The cart on this page counts the booking line only.
+      expect(await screen.findByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
+    });
+
+    it(`WHS2-23 not offered when ${label}: no quantity stepper, no checkout badges, no empty buy bar`, async () => {
+      storefront = answer;
+      render(<ProductDetailPage />);
+      await screen.findAllByText(PRODUCT.name);
+      expect(screen.queryByText("Qty:")).toBeNull();
+      expect(screen.queryByText("Secure Checkout")).toBeNull();
+      expect(screen.queryByText("Instant Confirmation")).toBeNull();
+      expect(document.querySelector('[data-buy-bar]')).toBeNull();
     });
   }
 });

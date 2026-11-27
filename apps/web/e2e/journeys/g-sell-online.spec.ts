@@ -138,6 +138,13 @@ const alreadySelling = new Set<string>();
  */
 async function seedPastSale(request: APIRequestContext, owner: Tenant): Promise<void> {
   if (alreadySelling.has(owner.businessId)) return;
+  // The Set lasts one worker process. A retry or another worker reads the business's orders first (the owner's read
+  // behind Sales > Orders), so the business gets one earlier sale, not one per process.
+  const earlier = rowsOf(await api(request, owner, "GET", `/site/businesses/${owner.businessId}/orders`), "orders");
+  if (earlier.length > 0) {
+    alreadySelling.add(owner.businessId);
+    return;
+  }
   const product = await api<{ id: string }>(request, owner, "POST", `/commerce/businesses/${owner.businessId}/products`, {
     name: `Earlier sale ${stamp()}`,
     price: 10,

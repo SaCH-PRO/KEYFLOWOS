@@ -46,17 +46,36 @@ describe("WEDGE-HIDE-STORE part 2: /widgets/cart/<slug>", () => {
   for (const [label, data] of [
     ["the field is missing (a server without P233)", { products: [PRODUCT] }],
     ["storeCheckout is false", { products: [PRODUCT], storeCheckout: false }],
-    ["the read failed", null],
   ] as Array<[string, unknown]>) {
-    it(`WHS2-12 not offered when ${label}: not available, no product, no Add, no order`, async () => {
+    it(`WHS2-12 not offered when ${label}: not available, no Order Now heading, no product, no Add, no order`, async () => {
       nav.query = `productId=${PRODUCT.id}`;
-      answer = { data, error: data ? null : "Request failed" };
+      answer = { data, error: null };
       render(<CartWidgetPage />);
-      expect(await screen.findByText(/not available/i)).toBeTruthy();
+      expect(await screen.findByText("Online orders are not available from this business.")).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: /order now|checkout/i })).toBeNull();
       expect(screen.queryByText(PRODUCT.name)).toBeNull();
       expect(screen.queryByRole("button", { name: /^(add|checkout|try again)$/i })).toBeNull();
       expect(screen.queryByText(/^Cart \(/)).toBeNull();
       expect(api.apiPost).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const [label, fail] of [
+    ["the read answers an error", () => api.apiGet.mockImplementationOnce(async () => ({ data: null, error: "Request failed" }))],
+    ["the read rejects", () => api.apiGet.mockImplementationOnce(async () => { throw new Error("network down"); })],
+  ] as Array<[string, () => void]>) {
+    it(`WHS2-24 when ${label}: 'Unable to load', not 'not available'; Try again reads again and the widget sells`, async () => {
+      nav.query = `productId=${PRODUCT.id}`;
+      answer = { data: { products: [PRODUCT], storeCheckout: true }, error: null };
+      fail();
+      render(<CartWidgetPage />);
+      expect(await screen.findByText(/unable to load/i)).toBeTruthy();
+      expect(screen.queryByText("Online orders are not available from this business.")).toBeNull();
+      expect(screen.queryByText(PRODUCT.name)).toBeNull();
+      expect(screen.queryByText(/^Cart \(/)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(await screen.findByText(PRODUCT.name)).toBeTruthy();
+      expect(api.apiGet).toHaveBeenCalledTimes(2);
     });
   }
 });

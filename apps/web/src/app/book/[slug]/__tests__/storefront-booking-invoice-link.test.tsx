@@ -57,6 +57,8 @@ const net = vi.hoisted(() => ({
   /** What POST /site/storefront/public/:slug/checkout (the store order) answers. */
   orderAnswer: null as Record<string, unknown> | null,
   posts: [] as Array<{ path: string; body: unknown }>,
+  /** WEDGE-HIDE-STORE part 2: what the storefront read answers for storeCheckout (false: a business that does not sell). */
+  storeCheckout: false,
 }));
 /** Who fills in the checkout form, and how they pay (reset to the default customer before each case). */
 const form = vi.hoisted(() => ({ firstName: "", lastName: "", email: "", phone: "", paymentMethod: "" }));
@@ -78,8 +80,9 @@ vi.mock("@/lib/api", () => ({
   apiGet: async (path: string) => {
     if (path === `/identity/businesses/slug/${SLUG}`) return { data: BUSINESS, error: null };
     if (path.endsWith("/services") || path.endsWith("/staff") || path.endsWith("/products")) return { data: [], error: null };
-    // WEDGE-HIDE-STORE part 2 (D-263): this cart sells a product, so its business is one whose store checkout is offered.
-    if (path === `/site/storefront/public/${SLUG}`) return { data: { storeCheckout: true }, error: null };
+    // WEDGE-HIDE-STORE part 2 (D-263): only the mixed-cart cases (SEC-W9WCN-1) are a business whose store checkout
+    // is offered. The service-only cases (CR-V28-3) run with it NOT offered: bookings do not depend on it.
+    if (path === `/site/storefront/public/${SLUG}`) return { data: { storeCheckout: net.storeCheckout }, error: null };
     return { data: null, error: null };
   },
   apiPost: async ({ path, body }: { path: string; body: unknown }) => {
@@ -164,6 +167,7 @@ beforeEach(() => {
   net.posts = [];
   net.bookingAnswer = {};
   net.orderAnswer = null;
+  net.storeCheckout = false;
   Object.assign(form, DEFAULT_FORM);
   window.localStorage.clear();
   window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE]));
@@ -271,6 +275,9 @@ async function alphaChecksOutTheMixedCart(payment: Record<string, unknown>) {
 }
 
 describe("SEC-W9WCN-1: a checkout's booking token link never reaches the next customer's checkout (W9-WEB-COMMERCE-NAV review, D-07)", () => {
+  // A mixed cart sells a product: this business's store checkout is offered.
+  beforeEach(() => { net.storeCheckout = true; });
+
   it("SEC-W9WCN-1: after a mixed cart's product payment fails, Back to Shop and another customer's service checkout books that customer's own service and opens only their own token link (W9-WEB-COMMERCE-NAV)", async () => {
     await alphaChecksOutTheMixedCart({ status: "FAILED" });
     await screen.findByRole("heading", { name: "Payment Failed" }, { timeout: 3000 });
