@@ -165,7 +165,7 @@ beforeAll(async () => {
       { provide: SafeToSpendService, useValue: { calculate: async () => ({ safeToSpend: 0 }) } },
       { provide: ReadyToSendService, useValue: { listDue: async () => ({ items: [] }) } },
       { provide: KeyActionProposalService, useValue: keyAutonomyStub },
-      { provide: CommerceService, useValue: { listPaymentClaims: async () => ({ items: [] }) } },
+      { provide: CommerceService, useValue: { listPaymentClaims: async () => [] } },
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
