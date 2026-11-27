@@ -94,9 +94,9 @@ beforeAll(async () => {
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
   const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
   const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
-  const { PublicEventsService } = await import('../src/modules/site/public-events.service');
-  const { RevenueAttributionService } = await import('../src/modules/analytics/revenue-attribution.service');
-  const { TransactionalEmailService } = await import('../src/core/email/transactional-email.service');
+  const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
+  const { RevenueAttributionService } = await import('../src/modules/commerce/revenue-attribution.service');
+  const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
 
   const prismaStub = { client: db };
