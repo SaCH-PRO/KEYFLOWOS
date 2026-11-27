@@ -1,6 +1,98 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta, type BusinessMetaTx } from '../../core/prisma/business-meta';
+import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { LEVEL_RANK, rankOf } from '../../core/authority/module-vocabulary';
+
+const REVENUE_OR_PAID_ORDER_METRIC_KEYS = [
+  'recentRevenue',
+  'priorRevenue',
+  'revenueGrowthPct',
+  'recentOrders',
+  'priorOrders',
+  'orderGrowthPct',
+  'topProduct',
+] as const;
+
+const REVENUE_HEADLINE_PATTERN = /\b(?:revenue|online orders)\b/i;
+
+const GENERATED_HEADLINE_RE =
+  /^(.*?) ((?:grew online orders \d+%|grew revenue \d+%|grew bookings \d+%|completed \d+ online orders|booked \d+ appointments)(?: and (?:grew online orders \d+%|grew revenue \d+%|grew bookings \d+%|completed \d+ online orders|booked \d+ appointments))*) in (\d+) days$/i;
+
+const PAID_ORDER_OR_REVENUE_CLAUSE_RE =
+  /^(?:grew revenue \d+%|grew online orders \d+%|completed \d+ online orders)$/i;
+
+/**
+ * Whether a stored case study carries revenue or paid-order metrics/copy.
+ * Used to preserve owner-generated revenue snapshots on non-revenue refresh
+ * and to refuse publishing revenue-bearing drafts without `revenue:read`.
+ */
+export function hasRevenueMetrics(study: CaseStudy): boolean {
+  const m = study.metrics as Record<string, unknown> | undefined;
+  if (m) {
+    for (const key of REVENUE_OR_PAID_ORDER_METRIC_KEYS) {
+      if (m[key] !== undefined) return true;
+    }
+  }
+  return typeof study.headline === 'string' && REVENUE_HEADLINE_PATTERN.test(study.headline);
+}
+
+/**
+ * Strips paid-order and revenue growth clauses from a case-study headline for
+ * callers below `revenue:read`, preserving non-money booking copy cleanly.
+ */
+export function sanitizeHeadlineForNonRevenueReader(headline: string, metrics: CaseStudyMetrics): string {
+  if (!REVENUE_HEADLINE_PATTERN.test(headline)) return headline;
+
+  const fallbackClause =
+    metrics.recentBookings > 0
+      ? `booked ${metrics.recentBookings} appointments`
+      : 'recorded storefront activity';
+
+  const generatedMatch = GENERATED_HEADLINE_RE.exec(headline);
+  if (generatedMatch) {
+    const [, prefix, clausesRaw, days] = generatedMatch;
+    const kept = clausesRaw
+      .split(/ and /i)
+      .filter((clause) => !PAID_ORDER_OR_REVENUE_CLAUSE_RE.test(clause.trim()));
+    const summary = kept.length > 0 ? kept.join(' and ') : fallbackClause;
+    return `${prefix} ${summary} in ${days} days`;
+  }
+
+  const cleaned = headline
+    .replace(/(?:\band\s+)?(?:grew revenue \d+%|grew online orders \d+%|completed \d+ online orders)(?:\s+and\b)?/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (cleaned.length > 0 && !REVENUE_HEADLINE_PATTERN.test(cleaned)) {
+    return cleaned;
+  }
+  return `${fallbackClause} in ${metrics.windowDays} days`;
+}
+
+/**
+ * FU-CASE-STUDY-REVENUE (P139, D-100/D-234): allow-list projection of a case
+ * study for callers below `revenue:read`. Withholds `recentRevenue`,
+ * `priorRevenue`, `revenueGrowthPct`, `recentOrders`, `priorOrders`,
+ * `orderGrowthPct`, `topProduct` (keys absent, never zero), and strips
+ * revenue/paid-order clauses from `headline` while keeping `currency` and all
+ * non-money booking/study fields intact.
+ */
+export function redactCaseStudyForNonRevenueReader(study: CaseStudy): CaseStudy {
+  const m = study.metrics;
+  const redactedMetrics: CaseStudyMetrics = {
+    windowDays: m.windowDays,
+    currency: m.currency,
+    recentBookings: m.recentBookings,
+    priorBookings: m.priorBookings,
+    bookingGrowthPct: m.bookingGrowthPct,
+    topService: m.topService,
+  };
+  return {
+    ...study,
+    headline: sanitizeHeadlineForNonRevenueReader(study.headline, redactedMetrics),
+    metrics: redactedMetrics,
+  };
+}
 
 /**
  * Consent-gated case-study generator (S5).
@@ -18,6 +110,16 @@ import { lockBusinessMeta, type BusinessMetaTx } from '../../core/prisma/busines
 @Injectable()
 export class CaseStudyService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  /**
+   * Canonical `revenue:read` check matching ModuleScopeGuard's reading
+   * (`memberModuleLevel`): fails closed when `actor` is missing/null, has no
+   * membership in `businessId`, has JSON array scopes `[]`, or has explicit
+   * `revenue: 'none'` (including OWNER per D-114/D-140).
+   */
+  async readsRevenue(businessId: string, actor: ModuleLevelActor): Promise<boolean> {
+    return rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
+  }
 
   private async loadMeta(businessId: string): Promise<{ caseStudies: CaseStudy[]; meta: Record<string, unknown> }> {
     const business = await this.prisma.client.business.findUnique({
@@ -62,11 +164,19 @@ export class CaseStudyService {
    * Generates (or refreshes) a case-study draft from real platform
    * data over the trailing 60-day window. Returns the draft for
    * review; nothing is published until `publish()` is called.
+   *
+   * FU-CASE-STUDY-REVENUE (P139, D-100/D-234): when the acting member lacks
+   * `revenue:read` (or `actor` is missing/null — fail closed), all paid-order
+   * queries are skipped, revenue/paid-order fields are withheld from the
+   * response, and any pre-existing owner-generated revenue fields on the
+   * persisted study are preserved rather than wiped out.
    */
-  async generateDraft(businessId: string) {
+  async generateDraft(businessId: string, actor?: ModuleLevelActor) {
+    const readsRevenue = await this.readsRevenue(businessId, actor);
+
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { id: true, name: true, city: true, country: true, industry: true, slug: true },
+      select: { id: true, name: true, city: true, country: true, industry: true, slug: true, currency: true },
     });
     if (!business) throw new NotFoundException('Business not found');
 
@@ -74,16 +184,20 @@ export class CaseStudyService {
     const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
     const priorWindowStart = new Date(now.getTime() - 120 * 24 * 60 * 60 * 1000);
 
-    // Real platform metrics — we pull counts and totals directly.
+    // Real platform metrics — paid-order queries run ONLY when the caller holds revenue:read.
     const [recentOrders, priorOrdersList, recentBookings, priorBookings, topService, topProduct] = await Promise.all([
-      this.prisma.client.marketplaceOrder.findMany({
-        where: { businessId, createdAt: { gte: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } },
-        select: { total: true, currency: true },
-      }),
-      this.prisma.client.marketplaceOrder.findMany({
-        where: { businessId, createdAt: { gte: priorWindowStart, lt: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } },
-        select: { total: true },
-      }),
+      readsRevenue
+        ? this.prisma.client.marketplaceOrder.findMany({
+            where: { businessId, createdAt: { gte: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } },
+            select: { total: true, currency: true },
+          })
+        : Promise.resolve([] as Array<{ total: number | null; currency: string | null }>),
+      readsRevenue
+        ? this.prisma.client.marketplaceOrder.findMany({
+            where: { businessId, createdAt: { gte: priorWindowStart, lt: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } },
+            select: { total: true },
+          })
+        : Promise.resolve([] as Array<{ total: number | null }>),
       this.prisma.client.booking.count({
         where: { businessId, createdAt: { gte: sixtyDaysAgo }, status: { in: ['CONFIRMED', 'COMPLETED'] } },
       }),
@@ -97,58 +211,59 @@ export class CaseStudyService {
         orderBy: { _count: { serviceId: 'desc' } },
         take: 1,
       }).catch(() => [] as Array<{ serviceId: string; _count: { _all: number } }>),
-      this.prisma.client.marketplaceOrderItem.groupBy({
-        by: ['productId'],
-        where: { order: { businessId, createdAt: { gte: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } } },
-        _sum: { quantity: true },
-        orderBy: { _sum: { quantity: 'desc' } },
-        take: 1,
-      }).catch(() => [] as Array<{ productId: string; _sum: { quantity: number | null } }>),
+      readsRevenue
+        ? this.prisma.client.marketplaceOrderItem.groupBy({
+            by: ['productId'],
+            where: { order: { businessId, createdAt: { gte: sixtyDaysAgo }, paymentStatus: { in: ['PAID', 'COMPLETED'] } } },
+            _sum: { quantity: true },
+            orderBy: { _sum: { quantity: 'desc' } },
+            take: 1,
+          }).catch(() => [] as Array<{ productId: string; _sum: { quantity: number | null } }>)
+        : Promise.resolve([] as Array<{ productId: string; _sum: { quantity: number | null } }>),
     ]);
 
-    const recentRevenue = recentOrders.reduce((s, o) => s + (o.total ?? 0), 0);
-    const priorRevenue = priorOrdersList.reduce((s, o) => s + (o.total ?? 0), 0);
-    const priorOrders = priorOrdersList.length;
-    const currency = recentOrders[0]?.currency ?? 'TTD';
-    const recentOrderCount = recentOrders.length;
-    const orderGrowth = priorOrders > 0 ? Math.round(((recentOrderCount - priorOrders) / priorOrders) * 100) : null;
-    const revenueGrowth = priorRevenue > 0 ? Math.round(((recentRevenue - priorRevenue) / priorRevenue) * 100) : null;
     const bookingGrowth = priorBookings > 0 ? Math.round(((recentBookings - priorBookings) / priorBookings) * 100) : null;
+    const currency = (readsRevenue ? recentOrders[0]?.currency : null) ?? business.currency ?? 'TTD';
 
     const [topServiceName, topProductName] = await Promise.all([
       topService[0]?.serviceId
         ? this.prisma.client.service.findUnique({ where: { id: topService[0].serviceId }, select: { name: true } }).then((s) => s?.name ?? null)
         : Promise.resolve(null),
-      topProduct[0]?.productId
+      readsRevenue && topProduct[0]?.productId
         ? this.prisma.client.product.findUnique({ where: { id: topProduct[0].productId }, select: { name: true } }).then((p) => p?.name ?? null)
         : Promise.resolve(null),
     ]);
 
+    const recentOrderCount = recentOrders.length;
+
     // We refuse to generate a case study with no underlying activity —
     // synthetic narratives are explicitly out of scope.
-    if (recentOrderCount === 0 && recentBookings === 0) {
+    if (readsRevenue ? (recentOrderCount === 0 && recentBookings === 0) : recentBookings === 0) {
       throw new BadRequestException(
-        'No completed orders or confirmed bookings in the last 60 days. Case studies must be backed by real platform activity.',
+        readsRevenue
+          ? 'No completed orders or confirmed bookings in the last 60 days. Case studies must be backed by real platform activity.'
+          : 'No confirmed bookings in the last 60 days. Case studies must be backed by real platform activity.',
       );
     }
 
-    const headlineParts: string[] = [];
-    if (orderGrowth !== null && orderGrowth > 0) headlineParts.push(`grew online orders ${orderGrowth}%`);
-    if (revenueGrowth !== null && revenueGrowth > 0) headlineParts.push(`grew revenue ${revenueGrowth}%`);
-    if (bookingGrowth !== null && bookingGrowth > 0) headlineParts.push(`grew bookings ${bookingGrowth}%`);
-    if (headlineParts.length === 0 && recentOrderCount > 0) headlineParts.push(`completed ${recentOrderCount} online orders`);
-    if (headlineParts.length === 0 && recentBookings > 0) headlineParts.push(`booked ${recentBookings} appointments`);
-
     const location = [business.city, business.country].filter(Boolean).join(', ');
-    const headline = `${business.name}${location ? ` (${location})` : ''} ${headlineParts.join(' and ')} in 60 days`;
+    const headlineParts: string[] = [];
+    let metrics: CaseStudyMetrics;
 
-    const draft: CaseStudy = {
-      id: `cs_${sixtyDaysAgo.getFullYear()}_${sixtyDaysAgo.getMonth() + 1}`,
-      businessId,
-      headline,
-      location,
-      industry: business.industry ?? null,
-      metrics: {
+    if (readsRevenue) {
+      const recentRevenue = recentOrders.reduce((s, o) => s + (o.total ?? 0), 0);
+      const priorRevenue = priorOrdersList.reduce((s, o) => s + (o.total ?? 0), 0);
+      const priorOrders = priorOrdersList.length;
+      const orderGrowth = priorOrders > 0 ? Math.round(((recentOrderCount - priorOrders) / priorOrders) * 100) : null;
+      const revenueGrowth = priorRevenue > 0 ? Math.round(((recentRevenue - priorRevenue) / priorRevenue) * 100) : null;
+
+      if (orderGrowth !== null && orderGrowth > 0) headlineParts.push(`grew online orders ${orderGrowth}%`);
+      if (revenueGrowth !== null && revenueGrowth > 0) headlineParts.push(`grew revenue ${revenueGrowth}%`);
+      if (bookingGrowth !== null && bookingGrowth > 0) headlineParts.push(`grew bookings ${bookingGrowth}%`);
+      if (headlineParts.length === 0 && recentOrderCount > 0) headlineParts.push(`completed ${recentOrderCount} online orders`);
+      if (headlineParts.length === 0 && recentBookings > 0) headlineParts.push(`booked ${recentBookings} appointments`);
+
+      metrics = {
         windowDays: 60,
         recentOrders: recentOrderCount,
         priorOrders,
@@ -162,7 +277,30 @@ export class CaseStudyService {
         bookingGrowthPct: bookingGrowth,
         topService: topServiceName,
         topProduct: topProductName,
-      },
+      };
+    } else {
+      if (bookingGrowth !== null && bookingGrowth > 0) headlineParts.push(`grew bookings ${bookingGrowth}%`);
+      if (headlineParts.length === 0 && recentBookings > 0) headlineParts.push(`booked ${recentBookings} appointments`);
+
+      metrics = {
+        windowDays: 60,
+        currency,
+        recentBookings,
+        priorBookings,
+        bookingGrowthPct: bookingGrowth,
+        topService: topServiceName,
+      };
+    }
+
+    const headline = `${business.name}${location ? ` (${location})` : ''} ${headlineParts.join(' and ')} in 60 days`;
+
+    const draft: CaseStudy = {
+      id: `cs_${sixtyDaysAgo.getFullYear()}_${sixtyDaysAgo.getMonth() + 1}`,
+      businessId,
+      headline,
+      location,
+      industry: business.industry ?? null,
+      metrics,
       status: 'draft',
       consent: false,
       consentedAt: null,
@@ -171,27 +309,50 @@ export class CaseStudyService {
       publishedAt: null,
     };
 
-    return this.changeCaseStudies(businessId, (caseStudies) => {
+    const saved = await this.changeCaseStudies(businessId, (caseStudies) => {
       const idx = caseStudies.findIndex((c) => c.id === draft.id);
       if (idx >= 0) {
+        const existing = caseStudies[idx];
         // Preserve consent state if a previous version was already approved
         // by the business owner — re-generation keeps the publication live.
-        draft.consent = caseStudies[idx].consent ?? false;
-        draft.consentedAt = caseStudies[idx].consentedAt ?? null;
-        draft.consentedBy = caseStudies[idx].consentedBy ?? null;
-        draft.status = caseStudies[idx].status === 'published' ? 'published' : 'draft';
-        draft.publishedAt = caseStudies[idx].publishedAt ?? null;
+        draft.consent = existing.consent ?? false;
+        draft.consentedAt = existing.consentedAt ?? null;
+        draft.consentedBy = existing.consentedBy ?? null;
+        draft.status = existing.status === 'published' ? 'published' : 'draft';
+        draft.publishedAt = existing.publishedAt ?? null;
+
+        if (!readsRevenue && hasRevenueMetrics(existing)) {
+          // Do not clobber existing owner-generated revenue metrics when a
+          // non-revenue member refreshes booking stats on the same period id.
+          const merged: CaseStudy = {
+            ...draft,
+            headline: existing.headline,
+            metrics: {
+              ...existing.metrics,
+              windowDays: draft.metrics.windowDays,
+              recentBookings: draft.metrics.recentBookings,
+              priorBookings: draft.metrics.priorBookings,
+              bookingGrowthPct: draft.metrics.bookingGrowthPct,
+              topService: draft.metrics.topService,
+            },
+          };
+          caseStudies[idx] = merged;
+          return merged;
+        }
         caseStudies[idx] = draft;
       } else {
         caseStudies.push(draft);
       }
       return draft;
     });
+
+    return readsRevenue ? saved : redactCaseStudyForNonRevenueReader(saved);
   }
 
-  async list(businessId: string) {
+  async list(businessId: string, actor?: ModuleLevelActor) {
+    const readsRevenue = await this.readsRevenue(businessId, actor);
     const { caseStudies } = await this.loadMeta(businessId);
-    return caseStudies;
+    return readsRevenue ? caseStudies : caseStudies.map(redactCaseStudyForNonRevenueReader);
   }
 
   async publish(businessId: string, caseStudyId: string, opts: { consent: boolean; userId?: string }) {
@@ -213,13 +374,52 @@ export class CaseStudyService {
     });
   }
 
-  async unpublish(businessId: string, caseStudyId: string) {
-    return this.changeCaseStudies(businessId, (caseStudies) => {
+  /**
+   * Reader-scoped publish for HTTP callers (`SiteController.publishCaseStudy`).
+   * Refuses publishing a revenue-bearing draft without `revenue:read` (403) so
+   * a `revenue:none` member cannot leak private revenue numbers onto the
+   * unauthenticated public storefront, and withholds revenue fields in the
+   * response below `revenue:read`.
+   */
+  async publishForReader(
+    businessId: string,
+    caseStudyId: string,
+    opts: { consent: boolean; actor: ModuleLevelActor },
+  ) {
+    if (!opts.consent) {
+      throw new ForbiddenException('Explicit consent is required before publishing a case study.');
+    }
+    const readsRevenue = await this.readsRevenue(businessId, opts.actor);
+    const updated = await this.changeCaseStudies(businessId, (caseStudies) => {
+      const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
+      if (idx < 0) throw new NotFoundException('Case study not found');
+      if (!readsRevenue && hasRevenueMetrics(caseStudies[idx])) {
+        throw new ForbiddenException(
+          'Insufficient permissions: publishing a case study with revenue metrics requires revenue read access',
+        );
+      }
+      caseStudies[idx] = {
+        ...caseStudies[idx],
+        consent: true,
+        consentedAt: new Date().toISOString(),
+        consentedBy: opts.actor?.id ?? null,
+        status: 'published',
+        publishedAt: new Date().toISOString(),
+      };
+      return caseStudies[idx];
+    });
+    return readsRevenue ? updated : redactCaseStudyForNonRevenueReader(updated);
+  }
+
+  async unpublish(businessId: string, caseStudyId: string, actor?: ModuleLevelActor) {
+    const readsRevenue = await this.readsRevenue(businessId, actor);
+    const updated = await this.changeCaseStudies(businessId, (caseStudies) => {
       const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
       if (idx < 0) throw new NotFoundException('Case study not found');
       caseStudies[idx] = { ...caseStudies[idx], status: 'draft', publishedAt: null };
       return caseStudies[idx];
     });
+    return readsRevenue ? updated : redactCaseStudyForNonRevenueReader(updated);
   }
 
   /** Public surface — only published, consent-approved studies are returned. */
@@ -235,27 +435,29 @@ export class CaseStudyService {
   }
 }
 
+export type CaseStudyMetrics = {
+  windowDays: number;
+  recentOrders?: number;
+  priorOrders?: number;
+  recentRevenue?: number;
+  priorRevenue?: number;
+  currency: string;
+  recentBookings: number;
+  priorBookings: number;
+  orderGrowthPct?: number | null;
+  revenueGrowthPct?: number | null;
+  bookingGrowthPct: number | null;
+  topService: string | null;
+  topProduct?: string | null;
+};
+
 export type CaseStudy = {
   id: string;
   businessId: string;
   headline: string;
   location: string;
   industry: string | null;
-  metrics: {
-    windowDays: number;
-    recentOrders: number;
-    priorOrders: number;
-    recentRevenue: number;
-    priorRevenue: number;
-    currency: string;
-    recentBookings: number;
-    priorBookings: number;
-    orderGrowthPct: number | null;
-    revenueGrowthPct: number | null;
-    bookingGrowthPct: number | null;
-    topService: string | null;
-    topProduct: string | null;
-  };
+  metrics: CaseStudyMetrics;
   status: 'draft' | 'published';
   consent: boolean;
   consentedAt: string | null;
