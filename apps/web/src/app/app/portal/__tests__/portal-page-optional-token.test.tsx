@@ -22,6 +22,11 @@
  *   POT-08  an enabled access past its expiry shows as expired, with no URL, to an editor too
  *   POT-09  while the new business's read is pending after a switch, the previous business's accesses are not shown
  *   POT-10  an answer for a business no longer selected, arriving late, never replaces the current business's list
+ *   POT-11  a Grant form opened in one business is not shown in another
+ *   POT-12  Loading never sticks: a Grant finishing after a switch, or a switch to no business while a read runs
+ *   POT-13  for the same business, only the latest read applies (A, B, A with the answers arriving newest first)
+ *   POT-14  the Grant form starts empty: its Contact ID and error are cleared by Cancel, by reopening and by a switch
+ *   POT-15  a Grant or a Revoke that succeeds reads the list again
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -44,12 +49,14 @@ vi.mock("@/hooks/use-app-layout", () => ({
 
 import PortalPage from "../page";
 
-const base = { expiresAt: "2027-01-01T00:00:00.000Z", settings: { invoices: true }, lastAccessedAt: null, accessCount: 3, createdAt: "2026-11-01T00:00:00.000Z" };
+/** Far in the future, so an access is unexpired whatever the day the suite runs (expiry pins use explicit dates). */
+const base = { expiresAt: "2099-01-01T00:00:00.000Z", settings: { invoices: true }, lastAccessedAt: null, accessCount: 3, createdAt: "2026-11-01T00:00:00.000Z" };
 const revokeButtons = (container: HTMLElement) => container.querySelectorAll('button [class*="lucide-trash"]');
 
 beforeEach(() => {
   portal.list.mockReset();
   portal.create.mockReset();
+  portal.revoke.mockReset();
   member.levels = null;
   member.businessId = "biz_pot";
 });
@@ -250,5 +257,131 @@ describe("P232: the Client Portal page without the portal token", () => {
     await act(async () => pendingA[0](accessOf("biz_a")));
     expect(screen.getByText("contact_of_biz_b"), "biz_b's list stays").toBeInTheDocument();
     expect(screen.queryByText("contact_of_biz_a")).toBeNull();
+  });
+
+  it("POT-11 a Grant form opened in one business is not shown in another", async () => {
+    member.levels = { crm: "write" };
+    portal.list.mockImplementation(async (business: string) => accessOf(business));
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_a");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    expect(screen.getByPlaceholderText("Contact ID")).toBeInTheDocument();
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    await screen.findByText("contact_of_biz_b");
+    expect(screen.queryByPlaceholderText("Contact ID")).toBeNull();
+  });
+
+  it("POT-12 Loading never sticks after a Grant that finishes after a switch, or a switch to no business", async () => {
+    member.levels = { crm: "write" };
+    let finishGrant: (v: unknown) => void = () => undefined;
+    portal.create.mockImplementation(() => new Promise((resolve) => (finishGrant = resolve)));
+    portal.list.mockImplementation(async (business: string) => accessOf(business));
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_a");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    fireEvent.change(screen.getByPlaceholderText("Contact ID"), { target: { value: "contact_new" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Grant$/ }));
+
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    await screen.findByText("contact_of_biz_b");
+    await act(async () => finishGrant({ data: { id: "pa_new" }, error: null }));
+    expect(screen.queryByText("Loading...")).toBeNull();
+    expect(screen.getByText("contact_of_biz_b")).toBeInTheDocument();
+    cleanup();
+
+    // A switch to no business while a read runs.
+    const pending: Array<(v: unknown) => void> = [];
+    portal.list.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    member.businessId = "biz_a";
+    const again = render(<PortalPage />);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    member.businessId = "";
+    again.rerender(<PortalPage />);
+    await act(async () => pending[0](accessOf("biz_a")));
+    expect(screen.queryByText("Loading...")).toBeNull();
+    expect(screen.queryByText("contact_of_biz_a")).toBeNull();
+  });
+
+  it("POT-13 for the same business only the latest read applies", async () => {
+    member.levels = { crm: "write" };
+    const pending: Array<{ business: string; resolve: (v: unknown) => void }> = [];
+    portal.list.mockImplementation((business: string) => new Promise((resolve) => pending.push({ business, resolve })));
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    member.businessId = "biz_a";
+    view.rerender(<PortalPage />);
+    await waitFor(() => expect(pending).toHaveLength(3));
+
+    const newer = { data: [{ ...base, id: "pa_new", contactId: "contact_newer_read", token: "tok_newer", enabled: true }], error: null };
+    const older = { data: [{ ...base, id: "pa_old", contactId: "contact_older_read", token: "tok_older", enabled: true }], error: null };
+    await act(async () => pending[2].resolve(newer));
+    await act(async () => pending[1].resolve(accessOf("biz_b")));
+    await act(async () => pending[0].resolve(older));
+    expect(screen.getByText("contact_newer_read")).toBeInTheDocument();
+    expect(screen.queryByText("contact_older_read"), "the older read does not overwrite the newer").toBeNull();
+  });
+
+  it("POT-14 the Grant form starts empty: Cancel, reopening and a switch clear its Contact ID and error", async () => {
+    member.levels = { crm: "write" };
+    portal.list.mockImplementation(async (business: string) => accessOf(business));
+    portal.create.mockResolvedValue({ data: null, error: "Insufficient permissions", status: 403 });
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_a");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    fireEvent.change(screen.getByPlaceholderText("Contact ID"), { target: { value: "contact_typed" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Grant$/ })));
+    expect(await screen.findByText("You can't grant portal access.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    expect((screen.getByPlaceholderText("Contact ID") as HTMLInputElement).value, "reopened after Cancel").toBe("");
+    expect(screen.queryByText("You can't grant portal access.")).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("Contact ID"), { target: { value: "contact_typed_again" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Grant$/ })));
+    await screen.findByText("You can't grant portal access.");
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    await screen.findByText("contact_of_biz_b");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    expect((screen.getByPlaceholderText("Contact ID") as HTMLInputElement).value, "another business").toBe("");
+    expect(screen.queryByText("You can't grant portal access.")).toBeNull();
+  });
+
+  it("POT-15 a Grant or a Revoke that succeeds reads the list again", async () => {
+    member.levels = { crm: "write" };
+    portal.list.mockResolvedValueOnce(accessOf("biz_pot")).mockResolvedValue({
+      data: [...accessOf("biz_pot").data, { ...base, id: "pa_granted", contactId: "contact_granted", token: "tok_granted", enabled: true }],
+      error: null,
+    });
+    portal.create.mockResolvedValue({ data: { id: "pa_granted" }, error: null });
+    const { container } = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_pot");
+    fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
+    fireEvent.change(screen.getByPlaceholderText("Contact ID"), { target: { value: "contact_granted" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Grant$/ })));
+    expect(await screen.findByText("contact_granted")).toBeInTheDocument();
+    const readsAfterGrant = portal.list.mock.calls.length;
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      portal.revoke.mockResolvedValue({ data: { id: "pa_granted" }, error: null });
+      portal.list.mockResolvedValue(accessOf("biz_pot"));
+      const revoke = container.querySelectorAll('button [class*="lucide-trash"]')[1].closest("button") as HTMLButtonElement;
+      await act(async () => fireEvent.click(revoke));
+      await waitFor(() => expect(portal.list.mock.calls.length).toBe(readsAfterGrant + 1));
+      await waitFor(() => expect(screen.queryByText("contact_granted")).toBeNull());
+    } finally {
+      confirmSpy.mockRestore();
+    }
   });
 });
