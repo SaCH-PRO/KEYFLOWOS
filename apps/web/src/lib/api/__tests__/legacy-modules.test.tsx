@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
-import { selectBusiness } from "@/lib/workspace";
+import { clearStoredBusinessId, selectBusiness } from "@/lib/workspace";
 
 const BIZ = "biz_whs_x";
 const BIZ_Y = "biz_whs_y";
@@ -150,5 +150,92 @@ describe("WEDGE-HIDE-STORE: the legacy-modules helper (fail closed, per business
     await new Promise((r) => setTimeout(r, 50));
     expect(probe()).toBe("not-legacy");
     expect(api.paths).toEqual([]);
+  });
+});
+
+/** A session token whose payload names `sub` (lib/business-settings.ts actingMember reads the claim). */
+function tokenFor(sub: string): string {
+  const b64 = (v: unknown) => btoa(JSON.stringify(v)).replace(/=+$/, "");
+  return `${b64({ alg: "none" })}.${b64({ sub })}.sig`;
+}
+
+/** Mounts the probe and hands back a way to render it again (a render with no announcement, as any parent update is). */
+async function mountRerenderable(key = "store") {
+  const { useLegacyModule } = await import("@/lib/api/legacy-modules");
+  function Probe() {
+    const { has, known } = useLegacyModule(key);
+    return <p data-testid="probe">{known ? (has ? "legacy" : "not-legacy") : "unknown"}</p>;
+  }
+  const view = render(<Probe />);
+  return { again: () => view.rerender(<Probe />) };
+}
+
+describe("WEDGE-HIDE-STORE repair round 1 (acceptance reviews at d781c4e9): the helper follows the business and the member while mounted", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("kf_token", tokenFor("user_a"));
+  });
+
+  it("[WHS-W07] RED-BEFORE: a stored business changed with no announcement (refreshWorkspace's correction, a first business bootstrapped) is picked up on the next render: X's 'store' is not kept for Y", async () => {
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] }, [BIZ_Y]: { status: 200, body: [] } });
+    const view = await mountRerenderable();
+    await waitFor(() => expect(probe()).toBe("legacy"));
+    window.localStorage.setItem("kf_business_id", BIZ_Y);
+    view.again();
+    expect(probe()).not.toBe("legacy");
+    await waitFor(() => expect(probe()).toBe("not-legacy"));
+    expect(api.paths).toContain(`/identity/businesses/${BIZ_Y}/legacy-modules`);
+  });
+
+  it("[WHS-W08] RED-BEFORE: another tab's switch arrives as a storage event: the hook reads Y and X's 'store' is not kept", async () => {
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] }, [BIZ_Y]: { status: 200, body: [] } });
+    await mountRerenderable();
+    await waitFor(() => expect(probe()).toBe("legacy"));
+    act(() => {
+      window.localStorage.setItem("kf_business_id", BIZ_Y);
+      window.dispatchEvent(new StorageEvent("storage", { key: "kf_business_id", newValue: BIZ_Y }));
+    });
+    expect(probe()).not.toBe("legacy");
+    await waitFor(() => expect(probe()).toBe("not-legacy"));
+    expect(api.paths).toContain(`/identity/businesses/${BIZ_Y}/legacy-modules`);
+  });
+
+  it("[WHS-W09] RED-BEFORE: sign-out while mounted (clearStoredBusinessId) leaves nothing legacy", async () => {
+    serve({ [BIZ]: { status: 200, body: ["store"] } });
+    const view = await mountRerenderable();
+    await waitFor(() => expect(probe()).toBe("legacy"));
+    act(() => clearStoredBusinessId());
+    view.again();
+    expect(probe()).toBe("not-legacy");
+  });
+
+  it("[WHS-W10] RED-BEFORE: a different user signing in on the same tab, to the same business, is not given the previous user's answer: it is read again, and a refusal is not legacy", async () => {
+    let refuse = false;
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] } });
+    const answering = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      refuse ? jsonResponse(403, { statusCode: 403, message: "No access to this business" }) : answering(input, init)));
+    const view = await mountRerenderable();
+    await waitFor(() => expect(probe()).toBe("legacy"));
+    // Sign-out, then user B signs in on this tab and lands on the same business id.
+    act(() => clearStoredBusinessId());
+    refuse = true;
+    window.localStorage.setItem("kf_token", tokenFor("user_b"));
+    window.localStorage.setItem("kf_business_id", BIZ);
+    view.again();
+    expect(probe()).not.toBe("legacy");
+    await waitFor(() => expect(probe()).toBe("not-legacy"));
+    expect(api.paths.length).toBeGreaterThan(0);
+  });
+
+  it("[WHS-W11] RED-BEFORE (MINOR 1): a business that appears after mount (none stored at first) is read, and its 'store' is honoured", async () => {
+    window.localStorage.removeItem("kf_business_id");
+    window.localStorage.removeItem("activeBusinessId");
+    const api = serve({ [BIZ]: { status: 200, body: ["store"] } });
+    const view = await mountRerenderable();
+    expect(probe()).toBe("not-legacy");
+    expect(api.paths).toEqual([]);
+    window.localStorage.setItem("kf_business_id", BIZ);
+    view.again();
+    await waitFor(() => expect(probe()).toBe("legacy"));
   });
 });
