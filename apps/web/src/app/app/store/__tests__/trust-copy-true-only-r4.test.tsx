@@ -34,7 +34,9 @@ const text = () => (document.body.textContent ?? "").replace(/\s+/g, " ");
 const SENTIMENT = /Happy Customers|satisfied customers|Real results|keep coming back/i;
 /** Operational facts the product cannot know about the merchant. */
 const INVENTED_FACTS = /7 days|1 business day|3[–-]5 business days|24 hours/i;
-const PLACEHOLDERS = ["[your refund window]", "[your response time]", "[your delivery time]", "[your cancellation notice]"];
+// r6: the refund and cancellation answers are the merchant's whole policy, not a window or a notice inside a policy
+// the product does not know the store has.
+const PLACEHOLDERS = ["[your refund policy]", "[your response time]", "[your delivery time]", "[your reschedule and cancellation policy]"];
 
 async function generate(label: string, waiting: RegExp) {
   fireEvent.click(screen.getByText(label));

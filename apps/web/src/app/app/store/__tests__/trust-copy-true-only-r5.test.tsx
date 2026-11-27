@@ -29,6 +29,7 @@ vi.mock("next/navigation", () => ({
 
 import { AiContentPanel } from "../components/ai-content-panel";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
+import { ALLOWED, norm, strings } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -58,92 +59,8 @@ const store = (products: number, services: number, testimonials = 0) => ({
 const run = async (id: string, data: ReturnType<typeof store>) => hubTool(id).execute({ businessId: "biz_1", customData: data });
 const COPY_TOOLS = ["faq-generator", "seo-generator", "launch-campaign-generator", "hero-copy-generator", "trust-copy-generator"];
 
-/** Every string an output holds, line by line, with the name, numbers and [placeholders] taken out. */
-const norm = (t: string) => t.replace(/pepper co/gi, "{name}").replace(/\[[^\]]*\]/g, "[…]").replace(/\d+/g, "{n}").replace(/\s+/g, " ").trim();
-function strings(v: unknown, out: string[]) {
-  if (typeof v === "string") v.split("\n").forEach((l) => l.trim() && out.push(norm(l)));
-  else if (Array.isArray(v)) v.forEach((x) => strings(x, out));
-  else if (v && typeof v === "object") Object.values(v).forEach((x) => strings(x, out));
-}
+/** r6: the allowlist (and its normalisation) is shared with the round-6 spec, which runs it over non-empty stores. */
 
-/** The fixed strings the generators may say to an empty store (UI labels, owner instructions, and neutral copy). */
-const ALLOWED = new Set<string>([
-  "AI Content Intelligence",
-  "About",
-  "Add All to FAQ",
-  "Add testimonials under Social Proof first; trust copy is then suggested from them.",
-  "Apply SEO Settings",
-  "Apply the recommended meta title and description in Merchandising → SEO section. Choose options that best describe your business.",
-  "Badges and social proof from your testimonials",
-  "Big News from {name} — Visit Us Online",
-  "Big news — {name} is now online! 🚀 Check it out and let me know what you think!",
-  "Big news! 🎉 {name} just launched online. Drop a comment if you want the link! 👇",
-  "Click 'Add All to FAQ', then fill in the […] parts with your own policies in the FAQ Manager, and save.",
-  "Copy these FAQs into your FAQ Manager in the Merchandising tab, then fill in the […] parts with your own policies there before you save.",
-  "Craft optimized meta title & description",
-  "Create FAQ entries for your store",
-  "Discover {name} online.",
-  "Email Subject Lines",
-  "Fill in the […] part in the FAQ Manager.",
-  "Generate FAQ",
-  "Generate FAQ, SEO, trust copy, and launch campaign",
-  "Generate SEO",
-  "Generated SEO metadata for \"{name}\".",
-  "Generated launch campaign materials for \"{name}\": {n} social posts, {n} WhatsApp messages, and a launch email.",
-  "Generated {n} FAQ entries for \"{name}\" covering about, support, refunds.",
-  "Generated {n} headline options, {n} subheadlines, {n} ribbon options, and {n} CTAs for {name}.",
-  "Get Started",
-  "Hero Image",
-  "Hi […],",
-  "Hi! Just wanted to let you know that {name} is now live online! 🎉 Would love to see you there! 😊",
-  "Hi! Just wanted to let you know that {name} is now live online! 🎉 You can find us at […]. Would love to see you there! 😊",
-  "How can I contact you?",
-  "Launch Posts",
-  "Meta Description",
-  "Meta Title",
-  "No OG image set for social sharing",
-  "No trust copy for \"{name}\" yet: add testimonials, and the copy suggested will point to them.",
-  "No trust copy yet. Add testimonials under Social Proof, and the copy suggested here will point to them.",
-  "Reach us through the contact section on our storefront. We respond within […].",
-  "Refunds",
-  "Select the title and description that best represents your store, then click Apply.",
-  "Social Media Posts",
-  "Social media & WhatsApp launch copy",
-  "Some answers have […] parts: fill them in before your customers see them.",
-  "Support",
-  "Take a look at our store.",
-  "Thank you for reading.",
-  "Trust Copy",
-  "Upload a {n}×{n}px image to improve social share previews.",
-  "Use the recommended combination for maximum impact, or mix and match from the options above. Update these in Design → Appearance → Hero section.",
-  "Use these across your channels in the {n}-{n} hours around your launch for maximum impact. Personalize with your actual store link before sending.",
-  "Visit {name} online.",
-  "Warmly,",
-  "We offer refunds within […] of purchase.",
-  "We offer refunds within […] of purchase. Please contact us to initiate a refund.",
-  "We're Live! {name} Is Now Online",
-  "We're just getting started.",
-  "We're thrilled to announce that {name} is now live online!",
-  "We've been working hard behind the scenes, and it's finally here. {name} is now live online. Come take a look! 🛍️",
-  "What is your refund policy?",
-  "What makes {name} different?",
-  "WhatsApp Messages",
-  "You can reach us through the contact section on our storefront, or message us directly via the contact details listed on our page. We respond within […].",
-  "[…]",
-  "{name}",
-  "{name} Just Launched — Come Check It Out",
-  "{name} Online",
-  "{name} is now online.",
-  "{name} | Online",
-  "{name} — Now Online",
-  "{name} — now online.",
-  "{name}, now online.",
-  "{name}. Now online.",
-  "✨ […]",
-  "🎉 Now Open Online",
-  "🔥 […]",
-  "🚀 We're officially live! {name} is now open online. Link in bio! ✨",
-]);
 
 describe("R5-1: nothing the product does not know", () => {
   it("the panel's SEO and launch copy, for a store with products and services, carries none of the unchecked phrases", async () => {
@@ -199,8 +116,7 @@ describe("R5-2: an empty store is told only its name, real counts, placeholders 
 
   it("the hub's FAQ, SEO, launch, hero and trust generators", async () => {
     for (const id of COPY_TOOLS) {
-      const out: string[] = [];
-      strings(await run(id, store(0, 0, 0)), out);
+      const out = strings(await run(id, store(0, 0, 0)));
       expect(out.filter((s) => !ALLOWED.has(s)), id).toEqual([]);
     }
   });
