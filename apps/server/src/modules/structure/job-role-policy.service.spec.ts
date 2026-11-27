@@ -235,8 +235,7 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     // contracts_acknowledge_alert / inbox_mark_resolved are tier 1, but their routes need operations:write
     // inbox_brief: GET brief generates only on a cache miss; POST brief/generate needs write (review 7 DRV-BRIEF)
     write: [
-      // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
-      'approval_create_request',
+      // P206 (FU-TODAY-APPROVALS-STAFF, D-298): ApprovalController.create moved to per-requestType assertMayCreateApprovalRequest
       'contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief',
       'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
       // FOLLOW3-D15: ProcurementService writes the request where { id, businessId }, so the three vendor

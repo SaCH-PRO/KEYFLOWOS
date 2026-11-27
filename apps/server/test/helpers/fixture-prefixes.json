@@ -583,6 +583,11 @@
       "packet": "V1-63 (TOF-KNOWLEDGE-UPLOAD)"
     },
     {
+      "prefix": "v67a_",
+      "owner": "apps/server/test/paged-order-ties.integration.test.ts",
+      "packet": "V1-67 (W11-PAGING-TOTAL-ORDER-A)"
+    },
+    {
       "prefix": "v70b_",
       "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
       "packet": "V1-70 (W1F-MEMORY-COPIES)"
@@ -836,6 +841,11 @@
       "prefix": "v92f_",
       "owner": "apps/server/test/connect-sync-actor.integration.test.ts",
       "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
+    },
+    {
+      "prefix": "v92h_",
+      "owner": "apps/server/test/expense-receipt-read.integration.test.ts",
+      "packet": "V1-92 (FU-RECEIPT-READ-ROUTE, P222)"
     },
     {
       "prefix": "v93a_",
@@ -1652,6 +1662,11 @@
       "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
     },
     {
+      "prefix": "v72r_",
+      "owner": "apps/server/test/authority-shadow-parity.integration.test.ts",
+      "packet": "V1-72 (RR-AUTHORITY-SHADOW-PARITY)"
+    },
+    {
       "prefix": "v91n_",
       "owner": "apps/server/test/secret-reads-portal-integration.integration.test.ts",
       "packet": "V1-91 (FU-SECRET-READS-PORTAL-INTEGRATION, P145)"
@@ -1680,6 +1695,26 @@
       "prefix": "v92g_",
       "owner": "apps/server/test/storefront-checkout-gate.integration.test.ts",
       "packet": "V1-92 (WEDGE-HIDE-STORE-SERVER, P233, D-263/D-300/D-304/D-305: storeCheckout flag and server-side checkout POST refusal)"
+    },
+    {
+      "prefix": "v92c_",
+      "owner": "apps/server/test/pricing-service.integration.test.ts",
+      "packet": "V1-92 (TOF-TIER-PRICING-SCHEMA, P156)"
+    },
+    {
+      "prefix": "v66a_",
+      "owner": "apps/server/test/tier-pricing.integration.test.ts",
+      "packet": "V1-66 (TOF-TIER-PRICING-ROUTES)"
+    },
+    {
+      "prefix": "v92i_",
+      "owner": "apps/server/test/today-orders-premise.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-ORDERS-PREMISE, P205)"
+    },
+    {
+      "prefix": "v92j_",
+      "owner": "apps/server/test/today-approvals-staff.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-APPROVALS-STAFF, P206)"
     }
   ],
   "pendingRenames": [],

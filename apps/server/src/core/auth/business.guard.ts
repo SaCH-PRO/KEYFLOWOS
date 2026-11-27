@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveRequestBusinessId } from './request-business-id';
+import { securitySignals } from '../observability/security-signals';
 import type { TenantBearingRequest } from './request-business-id';
 
 const tenantScopeLogger = new Logger('TenantScope');
@@ -136,6 +137,7 @@ export class BusinessGuard implements CanActivate {
 
     try {
       if (!(await userCanAccessBusiness(this.prisma, user.id, businessId))) {
+        securitySignals.record('cross_business_refusal', 'business_guard');
         throw new ForbiddenException('No access to this business');
       }
     } catch (err: any) {

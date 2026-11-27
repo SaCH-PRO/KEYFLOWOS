@@ -1,8 +1,27 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, Logger, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { NON_MONEY_APPROVAL_REQUEST_TYPES } from '../key-autonomy/proposal-money-tag';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
+
+/**
+ * P206 (FU-TODAY-APPROVALS-STAFF, D-298 / D-71 / D-96): lowercase allowlist
+ * mapping ApprovalRequest.requestType to the module write scope required to
+ * create that request (in addition to `operations:write`, which can create
+ * any approval request). Unknown request types fail closed to `operations`.
+ */
+const APPROVAL_CREATE_MODULE_BY_TYPE: Readonly<Record<string, 'expenses' | 'revenue' | 'content' | 'operations'>> = {
+  expense: 'expenses',
+  po: 'expenses',
+  quote_discount: 'revenue',
+  refund: 'revenue',
+  content_delivery: 'content',
+  task_completion: 'operations',
+  evidence_verification: 'operations',
+  time_off: 'operations',
+  general: 'operations',
+};
 
 export interface CreateApprovalRequestInput {
   businessId: string;
@@ -13,6 +32,13 @@ export interface CreateApprovalRequestInput {
   payload?: Record<string, unknown>;
   threshold?: number;
   steps: { stepOrder: number; approverId: string }[];
+  /**
+   * P206 security guard: callers without `operations:write` may submit a
+   * pending approval request for their own module, never self-auto-approve
+   * it by supplying a high client `threshold`. Defaults to `true` for
+   * trusted internal service callers; HTTP `POST /approvals` passes `canDecide`.
+   */
+  allowAutoApprove?: boolean;
 }
 
 export interface DecideStepInput {
@@ -37,8 +63,59 @@ export class ApprovalRequestService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
     @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService))
-    @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService)) private readonly proposalOrchestrator?: KeyCortexApprovalOrchestratorService,
+    private readonly proposalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {}
+
+  /**
+   * P206 (D-298 / D-71 / D-96): enforce per-`requestType` write scope on
+   * `POST /businesses/:businessId/approvals`.
+   *
+   * A member may submit an approval request when they hold `operations:write`
+   * OR the write scope for the request's domain module (`expenses:write` for
+   * `expense`/`po`, `revenue:write` for `quote_discount`/`refund`,
+   * `content:write` for `content_delivery`). Unknown request types fail closed
+   * and require `operations:write`.
+   */
+  async assertMayCreateApprovalRequest(
+    businessId: string,
+    requesterId: string,
+    requestType: string | undefined,
+    userRole?: string,
+  ): Promise<{ canDecide: boolean }> {
+    if (userRole === 'SUPER_ADMIN') {
+      return { canDecide: true };
+    }
+
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: requesterId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) {
+      throw new ForbiddenException('Not a member of this business');
+    }
+
+    // D-140: evaluate canonical memberModuleLevel for every role (including
+    // OWNER), so an unscoped OWNER (permissionScopes: null) resolves
+    // operations:admin while an explicitly scoped OWNER is bound by its map.
+    const hasWrite = (mod: string) => rankOf(memberModuleLevel(membership, mod)) >= LEVEL_RANK.write;
+    const hasOpsWrite = hasWrite('operations');
+    if (hasOpsWrite) {
+      return { canDecide: true };
+    }
+
+    const normalizedType = typeof requestType === 'string' ? requestType.trim().toLowerCase() : '';
+    const requiredModule = Object.prototype.hasOwnProperty.call(APPROVAL_CREATE_MODULE_BY_TYPE, normalizedType)
+      ? APPROVAL_CREATE_MODULE_BY_TYPE[normalizedType]
+      : 'operations';
+
+    if (requiredModule !== 'operations' && hasWrite(requiredModule)) {
+      return { canDecide: false };
+    }
+
+    throw new ForbiddenException(
+      `Creating ${normalizedType || 'this'} approval requests requires ${requiredModule}:write or operations:write`,
+    );
+  }
 
   async createRequest(input: CreateApprovalRequestInput) {
     if (!input.steps || input.steps.length === 0) {
@@ -46,8 +123,16 @@ export class ApprovalRequestService {
     }
 
     const sortedSteps = [...input.steps].sort((a, b) => a.stepOrder - b.stepOrder);
+    const seenOrders = new Set<number>();
+    for (const s of sortedSteps) {
+      if (seenOrders.has(s.stepOrder)) {
+        throw new BadRequestException(`Duplicate stepOrder (${s.stepOrder}) in approval steps`);
+      }
+      seenOrders.add(s.stepOrder);
+    }
     const amount = this.extractAmount(input.payload);
-    if (input.threshold !== undefined && amount !== undefined && amount <= input.threshold) {
+    const canAutoApprove = input.allowAutoApprove !== false;
+    if (canAutoApprove && input.threshold !== undefined && amount !== undefined && amount <= input.threshold) {
       const request = await this.prisma.client.approvalRequest.create({
         data: {
           businessId: input.businessId,
@@ -79,6 +164,7 @@ export class ApprovalRequestService {
       return request;
     }
 
+    const initialStepOrder = sortedSteps[0].stepOrder;
     const request = await this.prisma.client.approvalRequest.create({
       data: {
         businessId: input.businessId,
@@ -89,7 +175,7 @@ export class ApprovalRequestService {
         payload: (input.payload ?? null) as any,
         threshold: input.threshold ?? null,
         status: 'pending',
-        currentStep: 0,
+        currentStep: initialStepOrder,
         steps: {
           create: sortedSteps.map((s) => ({
             stepOrder: s.stepOrder,
@@ -131,7 +217,9 @@ export class ApprovalRequestService {
       throw new BadRequestException('You are not authorized to decide this step');
     }
 
-    const nextStep = request.steps.find((s) => s.stepOrder === request.currentStep + 1);
+    const nextStep = request.steps.find(
+      (s) => s.stepOrder > request.currentStep && s.status === 'pending',
+    );
 
     await this.prisma.client.$transaction(async (tx) => {
       await tx.approvalStep.update({
@@ -262,7 +350,7 @@ export class ApprovalRequestService {
       this.prisma.client.approvalRequest.findMany({
         where,
         include: { steps: { orderBy: { stepOrder: 'asc' } } },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: options?.offset ?? 0,
         take: options?.limit ?? 50,
       }),

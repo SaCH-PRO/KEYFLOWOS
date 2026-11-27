@@ -218,8 +218,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   },
   analytics: {},
   operations: {
-    // SWP-CENSUS-V1-B (P90): ApprovalController.create requires operations write
-    approval_create_request: 'write',
+    // P206 (FU-TODAY-APPROVALS-STAFF, D-298): ApprovalController.create moved from static
+    // operations:write to per-requestType assertMayCreateApprovalRequest; approval_create_request
+    // is no longer derived as a static operations:write tool.
     // command_* and procurement_*: the command-centre item and procurement routes require
     // operations (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
     command_discharge_obligation: 'write', command_list_due_obligations: 'read',

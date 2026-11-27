@@ -1421,34 +1421,7 @@ export class ModelGatewayService {
     const apiKey = byokKey || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('Anthropic API key not configured');
 
-    let systemPrompt = '';
-    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
-      } else if (msg.role === 'tool') {
-        nonSystemMessages.push({
-          role: 'user',
-          content: `[Tool result for ${msg.tool_call_id}]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
-        });
-      } else {
-        nonSystemMessages.push({
-          role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: this.toAnthropicContent(msg.content),
-        });
-      }
-    }
-
-    if (nonSystemMessages.length === 0) {
-      nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
-    }
-
-    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
-
-    if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
-      mergedMessages.unshift({ role: 'user', content: 'Continue.' });
-    }
+    const { systemPrompt, messages: mergedMessages } = this.buildAnthropicMessages(messages);
 
     const body: Record<string, unknown> = {
       model,
@@ -1465,8 +1438,9 @@ export class ModelGatewayService {
     // Mirrors callAnthropic. Without this the streaming path — which is the one
     // the live chat uses — sent no tools at all, so any failover to Anthropic
     // quietly turned KEY into a chatbot that could describe an action and never
-    // take one.
-    if (request.tools && request.tools.length > 0) {
+    // take one. Under anthropic-version 2023-06-01, omitting `tools` and
+    // `tool_choice` when toolChoice === 'none' guarantees no tool invocation.
+    if (request.tools && request.tools.length > 0 && request.toolChoice !== 'none') {
       body.tools = request.tools.map((t) => ({
         name: t.function.name,
         description: t.function.description || '',
@@ -2447,6 +2421,177 @@ export class ModelGatewayService {
     return blocks;
   }
 
+  private sanitizeAnthropicToolObject(value: unknown, depth = 0): unknown {
+    if (depth > 32 || value === null || typeof value !== 'object') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeAnthropicToolObject(item, depth + 1));
+    }
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') {
+        continue;
+      }
+      clean[k] = this.sanitizeAnthropicToolObject(v, depth + 1);
+    }
+    return clean;
+  }
+
+  private formatUnparseableToolArgs(raw: string): string {
+    const MAX_LEN = 8_192;
+    const bounded = raw.length > MAX_LEN ? `${raw.slice(0, MAX_LEN)}...[truncated]` : raw;
+    return `[Unparseable tool arguments]: ${bounded}`;
+  }
+
+  private parseAnthropicToolArguments(rawArgs: unknown): {
+    input: Record<string, unknown>;
+    unparseableRaw: string | null;
+  } {
+    if (rawArgs == null) {
+      return { input: {}, unparseableRaw: null };
+    }
+    if (typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+      return {
+        input: this.sanitizeAnthropicToolObject(rawArgs) as Record<string, unknown>,
+        unparseableRaw: null,
+      };
+    }
+    if (typeof rawArgs !== 'string') {
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(rawArgs);
+      } catch {
+        serialized = String(rawArgs);
+      }
+      return { input: {}, unparseableRaw: this.formatUnparseableToolArgs(serialized) };
+    }
+    const trimmed = rawArgs.trim();
+    if (!trimmed) {
+      return { input: {}, unparseableRaw: null };
+    }
+    try {
+      const parsed: unknown = JSON.parse(rawArgs, (key, val) =>
+        key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : val,
+      );
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return {
+          input: this.sanitizeAnthropicToolObject(parsed) as Record<string, unknown>,
+          unparseableRaw: null,
+        };
+      }
+      return { input: {}, unparseableRaw: this.formatUnparseableToolArgs(rawArgs) };
+    } catch {
+      return { input: {}, unparseableRaw: this.formatUnparseableToolArgs(rawArgs) };
+    }
+  }
+
+  private buildAnthropicMessages(messages: GatewayMessage[]): {
+    systemPrompt: string;
+    messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>;
+  } {
+    let systemPrompt = '';
+    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
+      } else if (msg.role === 'tool') {
+        const toolContent =
+          typeof msg.content === 'string'
+            ? msg.content
+            : msg.content == null
+              ? ''
+              : JSON.stringify(msg.content);
+        const toolUseId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id.trim() : '';
+        if (!toolUseId) {
+          // SEC-P157-1: Anthropic rejects tool_result blocks with empty tool_use_id; degrade safely to text.
+          nonSystemMessages.push({
+            role: 'user',
+            content: [{ type: 'text', text: toolContent || '[Tool result]' }],
+          });
+        } else {
+          nonSystemMessages.push({
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: toolUseId,
+                content: toolContent,
+              },
+            ],
+          });
+        }
+      } else if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        const blocks: Array<Record<string, unknown>> = [];
+        if (typeof msg.content === 'string') {
+          if (msg.content.length > 0) {
+            blocks.push({ type: 'text', text: msg.content });
+          }
+        } else if (Array.isArray(msg.content)) {
+          const mapped = this.toAnthropicContent(msg.content);
+          if (Array.isArray(mapped)) {
+            blocks.push(...mapped);
+          } else if (mapped.length > 0) {
+            blocks.push({ type: 'text', text: mapped });
+          }
+        }
+
+        const usedIds = new Set<string>();
+        let synthSeq = 0;
+        for (const tc of msg.tool_calls) {
+          if (!tc || !tc.function || typeof tc.function.name !== 'string' || !tc.function.name.trim()) {
+            continue;
+          }
+          const rawId = typeof tc.id === 'string' ? tc.id.trim() : '';
+          let toolUseId = rawId;
+          if (!toolUseId || usedIds.has(toolUseId)) {
+            do {
+              synthSeq += 1;
+              toolUseId = rawId ? `${rawId}_dedup_${synthSeq}` : `call_synth_${synthSeq}`;
+            } while (usedIds.has(toolUseId));
+          }
+          usedIds.add(toolUseId);
+
+          const { input, unparseableRaw } = this.parseAnthropicToolArguments(tc.function.arguments ?? '');
+          blocks.push({
+            type: 'tool_use',
+            id: toolUseId,
+            name: tc.function.name,
+            input,
+          });
+          if (unparseableRaw !== null) {
+            blocks.push({ type: 'text', text: unparseableRaw });
+          }
+        }
+
+        if (blocks.length > 0) {
+          nonSystemMessages.push({
+            role: 'assistant',
+            content: blocks,
+          });
+        }
+      } else {
+        nonSystemMessages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: this.toAnthropicContent(msg.content),
+        });
+      }
+    }
+
+    if (nonSystemMessages.length === 0) {
+      nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
+    }
+
+    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
+
+    if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
+      mergedMessages.unshift({ role: 'user', content: 'Continue.' });
+    }
+
+    return { systemPrompt, messages: mergedMessages };
+  }
+
   private mergeAnthropicMessages(
     messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
   ): Array<{ role: string; content: string | Array<Record<string, unknown>> }> {
@@ -2458,13 +2603,37 @@ export class ModelGatewayService {
           last.content += '\n\n' + msg.content;
         } else if (Array.isArray(last.content) && Array.isArray(msg.content)) {
           last.content = [...last.content, ...msg.content];
-        } else {
-          merged.push({ ...msg });
+        } else if (typeof last.content === 'string' && Array.isArray(msg.content)) {
+          last.content =
+            last.content.length > 0
+              ? [{ type: 'text', text: last.content }, ...msg.content]
+              : [...msg.content];
+        } else if (Array.isArray(last.content) && typeof msg.content === 'string') {
+          last.content =
+            msg.content.length > 0
+              ? [...last.content, { type: 'text', text: msg.content }]
+              : [...last.content];
         }
       } else {
-        merged.push({ ...msg });
+        merged.push({
+          role: msg.role,
+          content: Array.isArray(msg.content) ? [...msg.content] : msg.content,
+        });
       }
     }
+
+    // SEC-P157-2: Anthropic requires tool_result blocks in a user message to precede any text/other blocks.
+    for (const msg of merged) {
+      if (msg.role === 'user' && Array.isArray(msg.content)) {
+        const hasToolResult = msg.content.some((b) => b.type === 'tool_result');
+        if (hasToolResult) {
+          const toolResults = msg.content.filter((b) => b.type === 'tool_result');
+          const others = msg.content.filter((b) => b.type !== 'tool_result');
+          msg.content = [...toolResults, ...others];
+        }
+      }
+    }
+
     return merged;
   }
 
@@ -2536,34 +2705,7 @@ export class ModelGatewayService {
     const apiKey = byokKey || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('Anthropic API key not configured');
 
-    let systemPrompt = '';
-    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
-      } else if (msg.role === 'tool') {
-        nonSystemMessages.push({
-          role: 'user',
-          content: `[Tool result for ${msg.tool_call_id}]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
-        });
-      } else {
-        nonSystemMessages.push({
-          role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: this.toAnthropicContent(msg.content),
-        });
-      }
-    }
-
-    if (nonSystemMessages.length === 0) {
-      nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
-    }
-
-    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
-
-    if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
-      mergedMessages.unshift({ role: 'user', content: 'Continue.' });
-    }
+    const { systemPrompt, messages: mergedMessages } = this.buildAnthropicMessages(messages);
 
     const body: Record<string, unknown> = {
       model,
@@ -2576,7 +2718,7 @@ export class ModelGatewayService {
       body.system = systemPrompt;
     }
 
-    if (request.tools && request.tools.length > 0) {
+    if (request.tools && request.tools.length > 0 && request.toolChoice !== 'none') {
       body.tools = request.tools.map(t => ({
         name: t.function.name,
         description: t.function.description || '',
