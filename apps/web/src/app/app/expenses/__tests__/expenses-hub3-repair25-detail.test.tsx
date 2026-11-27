@@ -170,3 +170,18 @@ describe("R25-3: the expense read itself", () => {
     expect(screen.queryByText(/Couldn't load this expense/)).toBeNull();
   });
 });
+
+describe("R25-1: the page's own category note", () => {
+  it("the page's category Retry reads only the categories", async () => {
+    client.fetchExpenseCategories.mockResolvedValue(refusedAnswer());
+    await mount({ status: "PAID", categoryId: "cat_1" });
+    const note = (await screen.findAllByText(/Couldn't load the category:/)).map((n) => n.closest('[role="status"]')).find(Boolean)!;
+    const reads = client.getExpense.mock.calls.length;
+    const catReads = client.fetchExpenseCategories.mock.calls.length;
+    client.fetchExpenseCategories.mockResolvedValue(ok([CAT]));
+    fireEvent.click(retryIn(note));
+    await waitFor(() => expect(client.fetchExpenseCategories.mock.calls.length).toBeGreaterThan(catReads));
+    expect((await screen.findAllByText(/Supplies/)).length).toBeGreaterThan(0);
+    expect(client.getExpense.mock.calls.length, "the expense was read again").toBe(reads);
+  });
+});

@@ -95,10 +95,6 @@ export default function ExpenseDetailPage() {
   const [expRead, setExpRead] = useState<BlockRead | { kind: "not-found" }>({ kind: "loading" });
   const [readAgain, setReadAgain] = useState(0);
   const retryExpense = useCallback(() => setReadAgain((n) => n + 1), []);
-  // R25-1: each block's read has a generation, so a Retry (which reads only that block, leaving the page and an
-  // open edit sheet mounted) and the page's own read never land over a newer one.
-  const catGen = useRef(0);
-  const budGen = useRef(0);
   const [loading, setLoading] = useState(true);
   const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [showEdit, setShowEdit] = useState(false);
@@ -147,8 +143,6 @@ export default function ExpenseDetailPage() {
     // R16-1: a read that lands after this page has gone (unmounted, or the read replaced) does nothing, and above
     // all navigates nowhere: the user may be on another page by then.
     let active = true;
-    const cat = ++catGen.current;
-    const bud = ++budGen.current;
     (async () => {
       setLoading(true);
       setExpRead({ kind: "loading" });
@@ -171,21 +165,17 @@ export default function ExpenseDetailPage() {
         }
         setExpense(expRes.data);
         setExpRead({ kind: "ok" });
-        if (cat === catGen.current) {
-          const catState = readState(catRes, { what: "the category" });
-          setCatRead(catState);
-          setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
-        }
+        const catState = readState(catRes, { what: "the category" });
+        setCatRead(catState);
+        setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
         // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
         const { month, year } = expenseMonth(expRes.data.date, businessId);
         const budRes = await fetchExpenseBudgets(businessId, month, year);
         if (!active) return;
         if (!isCurrentBusiness(businessId)) { leave(); return; }
-        if (bud === budGen.current) {
-          const budState = readState(budRes, { what: "this category's budget" });
-          setBudRead(budState);
-          setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
-        }
+        const budState = readState(budRes, { what: "this category's budget" });
+        setBudRead(budState);
+        setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
       } catch {
         // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
         if (active && canStartFor(businessId, isCurrentBusiness)) {
@@ -202,37 +192,36 @@ export default function ExpenseDetailPage() {
   }, [businessId, expenseId, isCurrentBusiness, leave, readAgain]);
 
   // R25-1: a Retry of the categories read reads only the categories: no loading state, no expense read, so the page
-  // and an open edit sheet (with its unsaved edits) stay mounted.
+  // and an open edit sheet (with its unsaved edits) stay mounted. One read of a block is out at a time: its Retry is
+  // offered only while the block shows failed, and a Retry sets it loading, which hides every note offering it.
   const retryCategories = useCallback(async () => {
     if (!businessId) return;
-    const gen = ++catGen.current;
     setCatRead({ kind: "loading" });
     try {
       const res = await fetchExpenseCategories(businessId);
-      if (gen !== catGen.current || leftRef.current) return;
+      if (leftRef.current) return;
       if (!isCurrentBusiness(businessId)) { leave(); return; }
       const st = readState(res, { what: "the category" });
       setCatRead(st);
       setCategories(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
-      if (gen === catGen.current && canStartFor(businessId, isCurrentBusiness)) setCatRead({ kind: "failed", message: "Couldn't load the category." });
+      if (canStartFor(businessId, isCurrentBusiness)) setCatRead({ kind: "failed", message: "Couldn't load the category." });
     }
   }, [businessId, isCurrentBusiness, leave]);
   // R25-1: and a Retry of the budgets read reads only the budgets of the expense's own month.
   const retryBudgets = useCallback(async () => {
     if (!businessId || !expense) return;
-    const gen = ++budGen.current;
     setBudRead({ kind: "loading" });
     try {
       const { month, year } = expenseMonth(expense.date, businessId);
       const res = await fetchExpenseBudgets(businessId, month, year);
-      if (gen !== budGen.current || leftRef.current) return;
+      if (leftRef.current) return;
       if (!isCurrentBusiness(businessId)) { leave(); return; }
       const st = readState(res, { what: "this category's budget" });
       setBudRead(st);
       setBudgets(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
-      if (gen === budGen.current && canStartFor(businessId, isCurrentBusiness)) setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
+      if (canStartFor(businessId, isCurrentBusiness)) setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
     }
   }, [businessId, expense, isCurrentBusiness, leave]);
 

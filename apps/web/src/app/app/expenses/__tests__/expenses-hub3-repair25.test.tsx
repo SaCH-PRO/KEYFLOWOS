@@ -364,3 +364,32 @@ describe("R25-7: two smaller items", () => {
     expect(await screen.findByRole("button", { name: /^add category$/i }, LONG)).toBeTruthy();
   }, 30000);
 });
+
+describe("R25-2 / R25-4: the switch reset and the thrown picker read's generation", () => {
+  it("a panel re-rendered A -> B does not show A's failed list while B's read is out", async () => {
+    client.fetchRecurringExpenses.mockImplementation((b: string) => (b === "biz_A" ? Promise.resolve(refusedAnswer()) : new Promise(() => {})));
+    const el = (b: string) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={0} />;
+    const view = render(el("biz_A"));
+    expect(await screen.findByText(/Couldn't load recurring expenses/)).toBeTruthy();
+    ws.bid = "biz_B";
+    view.rerender(el("biz_B"));
+    expect(screen.queryByText(/Couldn't load recurring expenses/), "A's failure said on B").toBeNull();
+  });
+  it("an older picker read that throws never lands over a newer success", async () => {
+    client.fetchProjects.mockResolvedValue(refusedAnswer());
+    const { result } = renderHook(() => useExpensesData());
+    await waitFor(() => expect(result.current.pickersRead?.kind).toBe("failed"));
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    client.fetchProjects.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    act(() => { result.current.retryPickers(); });
+    await waitFor(() => expect(client.fetchProjects).toHaveBeenCalledTimes(2));
+    act(() => { result.current.retryPickers(); });
+    await waitFor(() => expect(client.fetchProjects).toHaveBeenCalledTimes(3));
+    await act(async () => { second.resolve(ok([])); });
+    await waitFor(() => expect(result.current.pickersRead.kind).toBe("ok"));
+    await act(async () => { first.reject(new TypeError("Failed to fetch")); });
+    await settle();
+    expect(result.current.pickersRead.kind, "the older throw landed over the newer success").toBe("ok");
+  });
+});
