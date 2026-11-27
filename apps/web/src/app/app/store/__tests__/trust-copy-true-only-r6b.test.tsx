@@ -22,7 +22,7 @@ vi.mock("next/navigation", () => ({
 
 import { liveProducts, bookableServices } from "../storefront-counts";
 import { DesignMode } from "../components/design-mode";
-import { AiContentPanel } from "../components/ai-content-panel";
+import { AiContentPanel, HAS_PLACEHOLDER } from "../components/ai-content-panel";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
 
 afterEach(() => cleanup());
@@ -117,5 +117,13 @@ describe("R6B-3: products only, with listing service rows, never says 'Book'", (
     await generate("Launch Posts");
     expect(text()).not.toMatch(/\bbook/i);
     expect(text()).toMatch(/Browse our 2 items\./);
+  });
+});
+
+describe("R6B-4: the panel's placeholder detector matches any [bracketed] part", () => {
+  it("not only '[your …]' and '[what makes …]': '[Your Store Link]', '[First Name]' too; and not text without one", () => {
+    expect(HAS_PLACEHOLDER).toBeInstanceOf(RegExp);
+    for (const t of ["[your refund policy]", "[what makes your business different]", "Find us at [Your Store Link].", "Hi [First Name],"]) expect(HAS_PLACEHOLDER.test(t), t).toBe(true);
+    for (const t of ["We are closed on Sundays.", "Within 14 days [", "a ] b"]) expect(HAS_PLACEHOLDER.test(t), t).toBe(false);
   });
 });
