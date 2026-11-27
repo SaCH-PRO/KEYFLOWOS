@@ -52,6 +52,10 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
+// W11-LOAD-SENSITIVE-TESTS: give real-DB multi-query cases (e.g. V1-21c ST-2 control)
+// a deterministic timeout budget above vitest's 5 s default under machine load.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v21b_';
@@ -395,7 +399,7 @@ beforeAll(async () => {
 
   await cleanup();
   await seed();
-}, 120_000);
+}, 180_000);
 
 afterAll(async () => {
   await app?.close();

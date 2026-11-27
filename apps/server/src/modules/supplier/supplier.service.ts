@@ -4,6 +4,25 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ProductNormalizationService } from './product-normalization.service';
 import { encryptCredentials, decryptCredentials } from './credentials.util';
 
+/**
+ * Explicit non-secret scalar projection for SupplierConnection (FU-NESTED-CREDENTIAL-READS, P149).
+ * `credentials` MUST NEVER appear here or in any HTTP response; only internal adapter
+ * execution (`getDecryptedCredentials`) may select `credentials`.
+ */
+export const SUPPLIER_CONNECTION_PUBLIC_SELECT = {
+  id: true,
+  businessId: true,
+  providerType: true,
+  displayName: true,
+  accountMeta: true,
+  connectionHealth: true,
+  syncCapabilities: true,
+  lastSyncAt: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} as const satisfies Prisma.SupplierConnectionSelect;
+
 @Injectable()
 export class SupplierService {
   constructor(
@@ -34,6 +53,7 @@ export class SupplierService {
         syncCapabilities: data.syncCapabilities ?? [],
         connectionHealth: 'unknown',
       },
+      select: SUPPLIER_CONNECTION_PUBLIC_SELECT,
     });
   }
 
@@ -48,21 +68,27 @@ export class SupplierService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { _count: { select: { supplierProducts: true } } },
+        select: {
+          ...SUPPLIER_CONNECTION_PUBLIC_SELECT,
+          _count: { select: { supplierProducts: true } },
+        },
       }),
       this.prisma.client.supplierConnection.count({ where }),
     ]);
 
-    return { data: data.map(c => ({ ...c, credentials: undefined })), total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async getSupplierConnection(businessId: string, connectionId: string) {
     const connection = await this.prisma.client.supplierConnection.findFirst({
       where: { id: connectionId, businessId },
-      include: { _count: { select: { supplierProducts: true } } },
+      select: {
+        ...SUPPLIER_CONNECTION_PUBLIC_SELECT,
+        _count: { select: { supplierProducts: true } },
+      },
     });
     if (!connection) throw new NotFoundException('Supplier connection not found');
-    return { ...connection, credentials: undefined };
+    return connection;
   }
 
   async updateSupplierConnection(businessId: string, connectionId: string, data: {
@@ -75,6 +101,7 @@ export class SupplierService {
   }) {
     const existing = await this.prisma.client.supplierConnection.findFirst({
       where: { id: connectionId, businessId },
+      select: { id: true },
     });
     if (!existing) throw new NotFoundException('Supplier connection not found');
 
@@ -90,16 +117,17 @@ export class SupplierService {
     if (data.connectionHealth !== undefined) updateData.connectionHealth = data.connectionHealth;
     if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
-    const updated = await this.prisma.client.supplierConnection.update({
+    return this.prisma.client.supplierConnection.update({
       where: { id: connectionId },
       data: updateData,
+      select: SUPPLIER_CONNECTION_PUBLIC_SELECT,
     });
-    return { ...updated, credentials: undefined };
   }
 
   async deleteSupplierConnection(businessId: string, connectionId: string) {
     const connection = await this.prisma.client.supplierConnection.findFirst({
       where: { id: connectionId, businessId },
+      select: { id: true },
     });
     if (!connection) throw new NotFoundException('Supplier connection not found');
 
@@ -126,6 +154,7 @@ export class SupplierService {
   }) {
     const connection = await this.prisma.client.supplierConnection.findFirst({
       where: { id: data.supplierConnectionId, businessId },
+      select: { id: true },
     });
     if (!connection) throw new NotFoundException('Supplier connection not found');
 
@@ -154,6 +183,7 @@ export class SupplierService {
   ) {
     const connection = await this.prisma.client.supplierConnection.findFirst({
       where: { id: supplierConnectionId, businessId },
+      select: { id: true },
     });
     if (!connection) throw new NotFoundException('Supplier connection not found');
 
@@ -181,7 +211,7 @@ export class SupplierService {
     const supplierProduct = await this.prisma.client.supplierProduct.findUnique({
       where: { id: supplierProductId },
       include: {
-        supplierConnection: true,
+        supplierConnection: { select: SUPPLIER_CONNECTION_PUBLIC_SELECT },
         variants: true,
         sourceLinks: { include: { product: true } },
       },
@@ -380,7 +410,11 @@ export class SupplierService {
 
     return this.prisma.client.productSourceLink.findMany({
       where: { productId, isActive: true },
-      include: { supplierProduct: { include: { supplierConnection: true } } },
+      include: {
+        supplierProduct: {
+          include: { supplierConnection: { select: SUPPLIER_CONNECTION_PUBLIC_SELECT } },
+        },
+      },
       orderBy: { priority: 'asc' },
     });
   }
@@ -553,6 +587,7 @@ export class SupplierService {
   ) {
     const connection = await this.prisma.client.supplierConnection.findFirst({
       where: { id: supplierConnectionId, businessId },
+      select: { id: true },
     });
     if (!connection) throw new NotFoundException('Supplier connection not found');
 
@@ -573,6 +608,7 @@ export class SupplierService {
   async getDecryptedCredentials(businessId: string, connectionId: string): Promise<Record<string, unknown>> {
     const connection = await this.prisma.client.supplierConnection.findFirst({
       where: { id: connectionId, businessId },
+      select: { credentials: true },
     });
     if (!connection) throw new NotFoundException('Supplier connection not found');
 
