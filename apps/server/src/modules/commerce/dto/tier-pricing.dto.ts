@@ -10,7 +10,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { MAX_DOCUMENT_AMOUNT } from '../money';
+import { MAX_DOCUMENT_AMOUNT } from './document-line-item.dto';
 import { PRICING_TIERS } from '../pricing.service';
 
 export class TierPriceEntryDto {

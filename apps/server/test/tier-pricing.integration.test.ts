@@ -702,14 +702,25 @@ describe('V1-66 (TOF-TIER-PRICING-ROUTES): tiered pricing HTTP routes on Postgre
     expect(blankContactPrice.status).toBe(200);
     expect(blankContactPrice.body).toMatchObject({ effectivePrice: 100, contactId: null, source: 'BASE' });
 
-    // Invalid tier / negative price / duplicate tier / missing array / non-object entries / oversized array -> 400
+    // Invalid tier / negative price / > MAX_DOCUMENT_AMOUNT / duplicate tier / missing or non-array / non-object entries / oversized array -> 400
     for (const badBody of [
+      {},
       { tierPrices: [{ tier: 'SUPER_SECRET', price: 10 }] },
       { tierPrices: [{ tier: 'WHOLESALE', price: -5 }] },
+      { tierPrices: [{ tier: 'WHOLESALE', price: 1e15 }] },
       {
         tierPrices: [
           { tier: 'WHOLESALE', price: 80 },
           { tier: 'wholesale', price: 75 },
+        ],
+      },
+      {
+        tierPrices: [
+          { tier: 'RETAIL', price: 100 },
+          { tier: 'WHOLESALE', price: 80 },
+          { tier: 'VIP', price: 70 },
+          { tier: 'DISTRIBUTOR', price: 60 },
+          { tier: 'RETAIL', price: 99 },
         ],
       },
       { tierPrices: 'not-an-array' },
