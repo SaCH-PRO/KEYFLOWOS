@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { stripDestinationSecrets } from './channel-secret-redaction';
 
 @Injectable()
 export class OutboundContentService {
@@ -33,7 +34,13 @@ export class OutboundContentService {
       },
     });
     if (!content) throw new NotFoundException('Content not found');
-    return content;
+    return {
+      ...content,
+      deliveries: content.deliveries.map((delivery) => ({
+        ...delivery,
+        destination: delivery.destination ? stripDestinationSecrets(delivery.destination) : delivery.destination,
+      })),
+    };
   }
 
   async create(businessId: string, data: {

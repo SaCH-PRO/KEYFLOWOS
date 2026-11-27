@@ -1,5 +1,8 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
+import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { portalAccessView } from './portal-access-view';
 import { randomBytes } from 'crypto';
 
 @Injectable()
@@ -64,11 +67,38 @@ export class PortalService {
     });
   }
 
-  async list(businessId: string) {
-    return this.prisma.client.portalAccess.findMany({
+  /**
+   * Lists portal grants for a business.
+   *
+   * FU-SECRET-READS-PORTAL-INTEGRATION (P145): bearer `token` values are live
+   * unauthenticated customer credentials and are returned ONLY to callers
+   * holding `crm:write` (or higher, e.g. OWNER / SUPER_ADMIN). Callers holding
+   * only `crm:read`, or internal calls without an actor, fail closed and
+   * receive `portalAccessView` projections without selecting or returning `token`.
+   */
+  async list(businessId: string, actor?: ModuleLevelActor) {
+    const crmLevel = await memberModuleLevel(this.prisma, businessId, actor, 'crm');
+    if (LEVEL_RANK[crmLevel] >= LEVEL_RANK.write) {
+      return this.prisma.client.portalAccess.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+    const rows = await this.prisma.client.portalAccess.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        contactId: true,
+        enabled: true,
+        settings: true,
+        expiresAt: true,
+        lastAccessedAt: true,
+        accessCount: true,
+        createdAt: true,
+      },
     });
+    return rows.map((row) => portalAccessView(row));
   }
 
   async findByToken(token: string) {

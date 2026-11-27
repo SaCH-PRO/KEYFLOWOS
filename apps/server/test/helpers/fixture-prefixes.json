@@ -608,6 +608,11 @@
       "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
     },
     {
+      "prefix": "v72p_",
+      "owner": "apps/server/test/job-tenant-context.integration.test.ts",
+      "packet": "V1-72 (RR-JOB-TENANT-CONTEXT)"
+    },
+    {
       "prefix": "v80m_",
       "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
       "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
@@ -1620,6 +1625,41 @@
       "prefix": "v91h_",
       "owner": "apps/server/test/public-booking-grid.integration.test.ts",
       "packet": "V1-91 (FU-PUBLIC-BOOKING-GRID, P226)"
+    },
+    {
+      "prefix": "v91j_",
+      "owner": "apps/server/test/cash-label-sanitiser.integration.test.ts",
+      "packet": "V1-91 (FU-CASH-LABEL-SANITISER, P138)"
+    },
+    {
+      "prefix": "v91k_",
+      "owner": "apps/server/test/case-study-revenue-scope.integration.test.ts",
+      "packet": "V1-91 (FU-CASE-STUDY-REVENUE, P139)"
+    },
+    {
+      "prefix": "v91m_",
+      "owner": "apps/server/test/memory-class-read.integration.test.ts",
+      "packet": "V1-91 (MEM-CLASS-READ, P137)"
+    },
+    {
+      "prefix": "v72z_",
+      "owner": "apps/server/test/privacy-deleted-contact.integration.test.ts",
+      "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
+    },
+    {
+      "prefix": "v91n_",
+      "owner": "apps/server/test/secret-reads-portal-integration.integration.test.ts",
+      "packet": "V1-91 (FU-SECRET-READS-PORTAL-INTEGRATION, P145)"
+    },
+    {
+      "prefix": "v91p_",
+      "owner": "apps/server/test/coa-seeder-input.integration.test.ts",
+      "packet": "V1-91 (FU-COA-SEEDER-AND-INPUT, P146)"
+    },
+    {
+      "prefix": "v91q_",
+      "owner": "apps/server/test/nested-credential-reads.integration.test.ts",
+      "packet": "V1-91 (FU-NESTED-CREDENTIAL-READS, P149)"
     }
   ],
   "pendingRenames": [],

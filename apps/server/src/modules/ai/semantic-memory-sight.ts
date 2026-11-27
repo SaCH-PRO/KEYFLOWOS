@@ -8,6 +8,15 @@ import {
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import {
+  classifyAiMemoryForRead,
+  classifyEmbeddingForRead,
+  classifyTemporalMemoryForRead,
+  evaluateMemoryClassAccess,
+  getMemoryClassReadMode,
+  logMemoryClassShadowDiff,
+  type MemoryClassShadowDiffEntry,
+} from '../key-cortex/memory-class-read-projection';
 import { AI_MEMORY_COPY_SOURCE_TYPE, DOCUMENT_EXTRACTION_CATEGORY, type SemanticMemory } from './semantic-memory.service';
 import type { SemanticSight } from '../key-cortex/unified-memory.types';
 
@@ -61,6 +70,8 @@ interface TemporalRow {
   sourceModule: string;
   sourceEventIds: string[];
   content: string;
+  dataClass?: string | null;
+  moduleScope?: string[] | null;
 }
 /** The copy TemporalFlowMemoryService.createMemory embeds of a row: `<entityType>:<type> — <content>`. */
 export function temporalCopyOf(row: Pick<TemporalRow, 'entityType' | 'type' | 'content'>): string {
@@ -81,7 +92,7 @@ interface SourceEvent {
 /**
  * MEM-SEMANTIC-SIGHT (design 8.2 taint propagation): the modules a reader needs to see a temporal-memory summary: those
  * its entity type and source module name, the union of those every source event names (its module, type, source and
- * entity type), and revenue when a source event is money (a KEY proposal's event, money or sales in its type, module
+ * entity type), and revenue when a source event is money (a KEY proposal's event, money or sales in its type, module,
  * or source, or money in its title, summary or description), when the row's own entity type, type or source module
  * names money, or when the summary's own text (or its copy's) states money. A source event that is gone, or that names no
  * module, needs every module (D-227: unclassified fails closed); so does a summary that names none at all, and (review)
@@ -128,15 +139,7 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
   return [...modules];
 }
 
-/**
- * MEM-SEMANTIC-SIGHT, shared by MEM-PATTERNS-SIGHT (D-234, D-100, D-146): whether `who` may be handed an AiMemory row
- * (or its semantic copy, `copyContent`). A document extraction (DOCUMENT_EXTRACTION_CATEGORY), and a row whose
- * category, key or value states money, or whose copy does (a pattern totalling overdue invoices, a revenue goal), only
- * to a member reader with revenue read (readsDocumentExtractions); a row stating an expense only to a member reader with
- * expenses read (and revenue read too when it also states money, as "expense: rent TTD 4,000" does); any other row
- * business-wide, as readersOwnPromptMemory serves AiMemory rows.
- */
-export function aiMemoryRowVisibleTo(
+function legacyAiMemoryRowVisibleTo(
   row: { category: string; key: string; value: string },
   who: SemanticReader,
   copyContent?: string,
@@ -154,26 +157,69 @@ export function aiMemoryRowVisibleTo(
 }
 
 /**
- * MEM-SEMANTIC-SIGHT: for each hit, whether `who` may be handed it, by its source's own rule (sourceType, sourceId,
- * always within `businessId`):
- * - an AiMemory copy ('memory') as its row: a document extraction (DOCUMENT_EXTRACTION_CATEGORY), and (re-review, D-234
- *   "authorization follows the data's meaning", D-100) a row whose category, key or value states money, or whose copy
- *   does (a pattern totalling overdue invoices, a revenue goal), only to a member reader with revenue read
- *   (readsDocumentExtractions); any other row business-wide, as readersOwnPromptMemory serves AiMemory rows;
- * - a temporal-memory summary ('temporal_memory') when the copy holds what the row holds now (its writer's form,
- *   `<entityType>:<type> — <content>`; a row is rewritten in place and keeps its old copies, whose provenance the row no
- *   longer records: review) and the reader may read every module temporalMemoryModulesOf names;
- * - a knowledge-source chunk ('document'): its KnowledgeSource carries no classification (a statement, a vendor bill or
- *   a menu alike), so only a member reader with revenue and expenses read, as an unclassified document event needs
- *   (MONEY_DOCUMENT_WORDS; D-234 fail closed);
- * - any other source type, or a source not found in the business: nobody (an unresolvable source fails closed).
- * A read that fails raises (re-review): the search then answers nothing, rather than paging on to lower-ranked hits.
+ * MEM-SEMANTIC-SIGHT / MEM-CLASS-READ (D-234, D-100, D-146, D-257): whether `who` may be handed an AiMemory row
+ * (or its semantic copy, `copyContent`). Under `MEMORY_CLASS_READ=ACTIVE`, decides via the unified `data_class` +
+ * `module_scope` projection with fail-closed word-heuristic backstop.
+ */
+export function aiMemoryRowVisibleTo(
+  row: {
+    id?: string;
+    category: string;
+    key: string;
+    value: string;
+    source?: string | null;
+    dataClass?: string | null;
+    moduleScope?: readonly string[] | null;
+  },
+  who: SemanticReader,
+  copyContent?: string,
+): boolean {
+  const mode = getMemoryClassReadMode();
+  const legacyAllowed = legacyAiMemoryRowVisibleTo(row, who, copyContent);
+  if (mode === 'OFF' || mode === 'SHADOW') {
+    return legacyAllowed;
+  }
+  const classified = classifyAiMemoryForRead(row);
+  const decision = evaluateMemoryClassAccess(
+    {
+      dataClass: classified.dataClass,
+      moduleScope: classified.moduleScope,
+      invalidDataClass: classified.invalidDataClass,
+      invalidModuleScope: classified.invalidModuleScope,
+      hasOwnerColumn: false,
+      backstopTexts: [row.category, row.key, row.value, copyContent],
+      skipExpenseBackstop: row.category === DOCUMENT_EXTRACTION_CATEGORY,
+    },
+    who,
+  );
+  return decision.allowed && legacyAllowed;
+}
+
+/**
+ * MEM-SEMANTIC-SIGHT / MEM-CLASS-READ: for each hit, whether `who` may be handed it, by its source's own rule
+ * (sourceType, sourceId, always within `businessId`) and the unified `data_class` / `module_scope` projection:
+ * - an AiMemory copy ('memory') inherits the most restrictive `data_class` & union `module_scope` across the
+ *   embedding copy and its live `AiMemory` row;
+ * - a temporal-memory summary ('temporal_memory') must hold what the row holds now (`temporalCopyOf(row)`), and
+ *   inherits the most restrictive `data_class` & union `module_scope` across the copy, the `TemporalFlowMemory` row,
+ *   and (for legacy `data_class IS NULL` rows) its source events;
+ * - a knowledge-source chunk ('document') requires a member reader with `revenue` and `expenses` read (D-234 fail closed)
+ *   and inherits any stricter embedding `data_class` / `module_scope` (e.g. `SECRET_BEARING`);
+ * - any other source type, or a source not found in the business: nobody (fail closed).
+ * A read that fails raises: the search then answers nothing, rather than paging on to lower-ranked hits.
  */
 export async function semanticHitsVisibleTo(
   prisma: PrismaService,
   businessId: string,
   who: SemanticReader,
-  hits: ReadonlyArray<Pick<SemanticMemory, 'sourceType' | 'sourceId' | 'content'>>,
+  hits: ReadonlyArray<
+    Pick<SemanticMemory, 'sourceType' | 'sourceId' | 'content'> & {
+      id?: string;
+      metadata?: Record<string, unknown> | null;
+      dataClass?: string | null;
+      moduleScope?: readonly string[] | null;
+    }
+  >,
   logger?: Pick<Logger, 'warn'>,
 ): Promise<boolean[]> {
   try {
@@ -184,12 +230,34 @@ export async function semanticHitsVisibleTo(
 
     const [memoryRows, temporalRows, knowledgeRows] = await Promise.all([
       memoryIds.length
-        ? prisma.client.aiMemory.findMany({ where: { businessId, id: { in: memoryIds } }, select: { id: true, category: true, key: true, value: true } })
+        ? prisma.client.aiMemory.findMany({
+            where: { businessId, id: { in: memoryIds } },
+            select: {
+              id: true,
+              category: true,
+              key: true,
+              value: true,
+              source: true,
+              dataClass: true,
+              moduleScope: true,
+            },
+          })
         : [],
       temporalIds.length
         ? prisma.client.temporalFlowMemory.findMany({
             where: { businessId, id: { in: temporalIds } },
-            select: { id: true, entityType: true, entityId: true, type: true, metadata: true, sourceModule: true, sourceEventIds: true, content: true },
+            select: {
+              id: true,
+              entityType: true,
+              entityId: true,
+              type: true,
+              metadata: true,
+              sourceModule: true,
+              sourceEventIds: true,
+              content: true,
+              dataClass: true,
+              moduleScope: true,
+            },
           })
         : [],
       knowledgeIds.length
@@ -208,17 +276,28 @@ export async function semanticHitsVisibleTo(
       );
     }
 
-    const memoryRowsById = new Map((memoryRows as Array<{ id: string; category: string; key: string; value: string }>).map((row) => [row.id, row]));
+    type AiMemorySourceRow = {
+      id: string;
+      category: string;
+      key: string;
+      value: string;
+      source?: string | null;
+      dataClass?: string | null;
+      moduleScope?: string[] | null;
+    };
+    const memoryRowsById = new Map((memoryRows as AiMemorySourceRow[]).map((row) => [row.id, row]));
     const temporal = new Map((temporalRows as TemporalRow[]).map((row) => [row.id, row]));
     const knowledge = new Set((knowledgeRows as Array<{ id: string }>).map((row) => row.id));
     const events = new Map(eventRows.map((event) => [event.id, event]));
     const memberWithRevenue = readsDocumentExtractions(who.sight, who.reader);
 
-    return hits.map((hit) => {
+    const mode = getMemoryClassReadMode();
+
+    const evalLegacy = (hit: (typeof hits)[number]): boolean => {
       switch (hit.sourceType) {
         case AI_MEMORY_COPY_SOURCE_TYPE: {
           const row = memoryRowsById.get(hit.sourceId);
-          return row !== undefined && aiMemoryRowVisibleTo(row, who, hit.content);
+          return row !== undefined && legacyAiMemoryRowVisibleTo(row, who, hit.content);
         }
         case TEMPORAL_MEMORY_SOURCE_TYPE: {
           const row = temporal.get(hit.sourceId);
@@ -230,7 +309,119 @@ export async function semanticHitsVisibleTo(
         default:
           return false;
       }
-    });
+    };
+
+    if (mode === 'OFF') {
+      return hits.map(evalLegacy);
+    }
+
+    const evalProjected = (hit: (typeof hits)[number]) => {
+      switch (hit.sourceType) {
+        case AI_MEMORY_COPY_SOURCE_TYPE: {
+          const row = memoryRowsById.get(hit.sourceId);
+          if (!row) {
+            return { allowed: false, reason: 'missing_source', effectiveDataClass: 'UNCLASSIFIED' as const, effectiveModuleScope: [] as CanonicalModule[] };
+          }
+          const sourceClass = classifyAiMemoryForRead(row);
+          const merged = classifyEmbeddingForRead(hit, sourceClass);
+          const decision = evaluateMemoryClassAccess(
+            {
+              dataClass: merged.dataClass,
+              moduleScope: merged.moduleScope,
+              invalidDataClass: merged.invalidDataClass,
+              invalidModuleScope: merged.invalidModuleScope,
+              hasOwnerColumn: false,
+              backstopTexts: [row.category, row.key, row.value, hit.content],
+              skipExpenseBackstop: row.category === DOCUMENT_EXTRACTION_CATEGORY,
+            },
+            who,
+          );
+          return decision;
+        }
+        case TEMPORAL_MEMORY_SOURCE_TYPE: {
+          const row = temporal.get(hit.sourceId);
+          if (!row || hit.content !== temporalCopyOf(row)) {
+            return { allowed: false, reason: 'stale_or_missing_temporal', effectiveDataClass: 'UNCLASSIFIED' as const, effectiveModuleScope: [] as CanonicalModule[] };
+          }
+          const sourceClass = classifyTemporalMemoryForRead(row, events);
+          const merged = classifyEmbeddingForRead(hit, sourceClass);
+          const legacyMods = temporalMemoryModulesOf(row, events, hit.content);
+          const decision = evaluateMemoryClassAccess(
+            {
+              dataClass: merged.dataClass,
+              moduleScope: [...new Set([...merged.moduleScope, ...legacyMods])],
+              invalidDataClass: merged.invalidDataClass,
+              invalidModuleScope: merged.invalidModuleScope,
+              hasOwnerColumn: false,
+              backstopTexts: [row.entityType, row.type, row.sourceModule, row.content, hit.content],
+              unclassifiedRequiresAllModules: true,
+            },
+            who,
+          );
+          return decision;
+        }
+        case KNOWLEDGE_CHUNK_SOURCE_TYPE: {
+          if (!knowledge.has(knowledgeSourceIdOf(hit.sourceId))) {
+            return { allowed: false, reason: 'missing_knowledge_source', effectiveDataClass: 'UNCLASSIFIED' as const, effectiveModuleScope: ['expenses', 'revenue'] as CanonicalModule[] };
+          }
+          const merged = classifyEmbeddingForRead(hit, {
+            dataClass: 'UNCLASSIFIED',
+            moduleScope: ['expenses', 'revenue'],
+          });
+          return evaluateMemoryClassAccess(
+            {
+              dataClass: merged.dataClass,
+              moduleScope: merged.moduleScope,
+              invalidDataClass: merged.invalidDataClass,
+              invalidModuleScope: merged.invalidModuleScope,
+              hasOwnerColumn: false,
+              backstopTexts: [hit.content],
+            },
+            who,
+          );
+        }
+        default:
+          return { allowed: false, reason: 'unknown_source_type', effectiveDataClass: 'UNCLASSIFIED' as const, effectiveModuleScope: [] as CanonicalModule[] };
+      }
+    };
+
+    if (mode === 'SHADOW') {
+      const legacyResults = hits.map(evalLegacy);
+      try {
+        let projectedCount = 0;
+        const diffs: MemoryClassShadowDiffEntry[] = [];
+        hits.forEach((hit, i) => {
+          const legacyAllowed = legacyResults[i];
+          const decision = evalProjected(hit);
+          if (decision.allowed) projectedCount += 1;
+          if (legacyAllowed !== decision.allowed) {
+            diffs.push({
+              id: hit.id ?? 'unknown',
+              store: 'ai_memory_embedding',
+              dataClass: decision.effectiveDataClass,
+              moduleScope: decision.effectiveModuleScope,
+              legacyAllowed,
+              projectedAllowed: decision.allowed,
+              reason: decision.reason,
+            });
+          }
+        });
+        logMemoryClassShadowDiff(logger ? { warn: (m) => logger.warn(m), log: (m) => logger.warn(m) } : undefined, {
+          path: 'semanticHitsVisibleTo',
+          businessId,
+          readerPresent: who.reader !== null,
+          totalCandidates: hits.length,
+          legacyCount: legacyResults.filter(Boolean).length,
+          projectedCount,
+          diffs,
+        });
+      } catch {
+        // Crash-isolated: shadow failure never impacts live semantic search.
+      }
+      return legacyResults;
+    }
+
+    return hits.map((hit) => evalProjected(hit).allowed);
   } catch (err: unknown) {
     logger?.warn(`[semanticSight][${businessId}] source read failed, no semantic hit served: ${err instanceof Error ? err.message : String(err)}`);
     throw err;

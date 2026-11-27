@@ -6,6 +6,10 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { normalizeModuleScope } from '../ai/memory-classification';
+import {
+  buildDbMemoryClassPreFilter,
+  getMemoryClassReadMode,
+} from '../key-cortex/memory-class-read-projection';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import type { SemanticReader } from '../ai/semantic-memory-sight';
 
@@ -491,7 +495,11 @@ export class TemporalFlowService {
     if (query.entityId !== undefined && query.entityId !== null && typeof query.entityId !== 'string') return [];
     const asked = Number(query.limit);
     const limit = Number.isInteger(asked) && asked > 0 ? asked : 100;
-    const where = this.scoped(
+    const classFilter =
+      getMemoryClassReadMode() === 'ACTIVE'
+        ? buildDbMemoryClassPreFilter(ms.who)
+        : undefined;
+    const baseWhere = this.scoped(
       {
         businessId,
         ...(query.entityType ? { entityType: String(query.entityType) } : {}),
@@ -500,6 +508,7 @@ export class TemporalFlowService {
       },
       ms.filter,
     );
+    const where = this.scoped(baseWhere, classFilter);
     const wanted = Math.min(limit, MEMORY_PAGE_CAP);
     // Review round 1: pages grow (fewer reads past many withheld rows) up to the client's cap; a row seen on an earlier
     // page (a summary rewritten in place while the scan runs moves up the order) is not answered twice.

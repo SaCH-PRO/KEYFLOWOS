@@ -268,8 +268,8 @@ export const hubNav: HubNavItem[] = [
       // Its overview (unscoped on the server) answers the business's paid invoice and order revenue, so it needs
       // revenue as well as the hub's storefront (security review; server follow-up: project kpis.revenue).
       { label: "Presence", href: "/app/presence", icon: Globe, module: ["storefront", "revenue"] },
-      // What a client sees when you share work with them.
-      { label: "Client portal", href: "/app/portal", icon: Globe },
+      // What a client sees when you share work with them; GET businesses/:businessId/access requires crm:read (P145).
+      { label: "Client portal", href: "/app/portal", icon: Globe, module: ["storefront", "crm"] },
     ],
   },
   {

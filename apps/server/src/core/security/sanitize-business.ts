@@ -117,12 +117,21 @@ function isStoredWipaySandboxKey(value: unknown): boolean {
   return false;
 }
 
-/** metaData with its whatsapp entry, payment secrets and SEO connections masked; any other value is returned as it is. */
+/**
+ * metaData with its whatsapp entry, payment secrets and SEO connections masked,
+ * and `caseStudies` omitted (FU-CASE-STUDY-REVENUE, P139, D-100: case-study
+ * snapshots carry `recentRevenue` and are served exclusively via the
+ * revenue-scoped `/site/businesses/:businessId/case-studies` endpoints); any
+ * other value is returned as it is.
+ */
 function maskMetaData(metaData: unknown): unknown {
   if (metaData === null || typeof metaData !== 'object' || Array.isArray(metaData)) return metaData;
   const has = (key: string) => Object.prototype.hasOwnProperty.call(metaData, key);
-  if (!has('whatsapp') && !MASKED_SECRET_META_KEYS.some(has)) return metaData;
+  if (!has('whatsapp') && !has('caseStudies') && !MASKED_SECRET_META_KEYS.some(has)) return metaData;
   const meta: Record<string, unknown> = { ...(metaData as Record<string, unknown>) };
+  if (has('caseStudies')) {
+    delete meta.caseStudies;
+  }
   if (has('whatsapp')) {
     const whatsapp: MaskedWhatsAppMeta = { configured: Boolean(meta.whatsapp) };
     meta.whatsapp = whatsapp;
@@ -144,10 +153,11 @@ function maskMetaData(metaData: unknown): unknown {
 /**
  * Return a shallow copy of a Business record with all secret token columns
  * removed, metaData.whatsapp masked (MaskedWhatsAppMeta; R0-SEC2b), each
- * metaData payment secret masked (MaskedSecretMeta; R0-SEC2c) and each SEO
- * connection entry masked (MaskedSecretMeta; W3-D12b, D12-ST-2). The input is
- * not modified, so a caller that writes the row back writes what it read from
- * the database. Preserves every other field (non-breaking for legitimate
+ * metaData payment secret masked (MaskedSecretMeta; R0-SEC2c), each SEO
+ * connection entry masked (MaskedSecretMeta; W3-D12b, D12-ST-2), and
+ * metaData.caseStudies omitted (FU-CASE-STUDY-REVENUE, P139, D-100). The input
+ * is not modified, so a caller that writes the row back writes what it read
+ * from the database. Preserves every other field (non-breaking for legitimate
  * consumers). Passes through null/undefined so it can wrap optional lookups
  * directly.
  */

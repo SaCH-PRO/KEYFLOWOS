@@ -280,7 +280,7 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Its overview (unscoped) answers kpis.revenue: every PAID invoice in the period plus store orders (security review
   // round 2), so it needs revenue as well as the hub's storefront.
   "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts#GET businesses/:businessId/overview", "data:modules/site/presence/presence-overview.service.ts:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page", "tracked:modules/site/presence/presence-overview.service.ts:revenue invoicesRevenue FU-PRESENCE-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100 (also the leads tab contact email and phone)"] },
-  "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts#GET businesses/:businessId/access", "hub:page"] },
+  "/app/portal": { modules: ["storefront", "crm"], cite: [SRV("portal/portal.controller.ts", "GET businesses/:businessId/access"), "hub:page"] },
   // Settings
   "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId", "hub:settings"] },
   "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts#GET recommendations", "hub:settings"] },
@@ -854,11 +854,16 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     expect(moreSections.flatMap((s) => s.items.map((i) => i.href))).not.toContain("/app/change-orders");
   });
 
-  it("NMS-18 a member with storefront read and no revenue is not offered Presence (its overview answers paid invoice revenue)", () => {
-    const { hubSections } = menuSectionsFor("both", levels({ storefront: "read" }));
-    const shown = hubSections.flatMap((s) => s.items.map((i) => i.href));
-    expect(shown).not.toContain("/app/presence");
-    expect(shown).toContain("/app/portal");
+  it("NMS-18 a member with storefront read and no revenue/crm is not offered Presence or Client portal; adding crm read offers Client portal only", () => {
+    const storefrontOnly = menuSectionsFor("both", levels({ storefront: "read" }))
+      .hubSections.flatMap((s) => s.items.map((i) => i.href));
+    expect(storefrontOnly).not.toContain("/app/presence");
+    expect(storefrontOnly).not.toContain("/app/portal");
+
+    const withCrm = menuSectionsFor("both", levels({ storefront: "read", crm: "read" }))
+      .hubSections.flatMap((s) => s.items.map((i) => i.href));
+    expect(withCrm).not.toContain("/app/presence");
+    expect(withCrm).toContain("/app/portal");
   });
 
   it("NMS-18 a member with customers read and no revenue is not offered Rep performance (its read answers revenue per rep)", () => {

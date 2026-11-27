@@ -1,8 +1,39 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { roundMoney } from '../commerce/money';
+import { roundMoney, sumMoney } from '../commerce/money';
 import { normalizeCurrency } from './posting.service';
+
+/**
+ * FU-CASH-LABEL-SANITISER (D-135, SEC-W10LR-1, SEC-W11RL-1): strict 3-letter
+ * uppercase ASCII alphabetic currency code pattern shared by structured
+ * other-currency cash lists and prose runway notes.
+ */
+export const ISO_CURRENCY_CODE_RE = /^[A-Z]{3}$/;
+
+/**
+ * FU-CASH-LABEL-SANITISER (D-135): generic label for the aggregated uncoded
+ * cash bucket when one or more balances are held under non-code free text.
+ * Intentionally does NOT match ISO_CURRENCY_CODE_RE (length != 3) so every
+ * code-only reader (web CashFlowForecastView, notCountedCash, runway prose)
+ * keeps treating it as uncoded rather than an ISO currency code.
+ */
+export const UNCODED_CURRENCY_LABEL = 'UNCODED';
+
+const ASCII_CURRENCY_INPUT_RE = /^[A-Za-z]{3}$/;
+
+/**
+ * FU-CASH-LABEL-SANITISER (D-135, R1-SEC-02): validate strictly 3 ASCII letters
+ * BEFORE uppercasing so Unicode confusables/ligatures (e.g. 'u\u017Fd',
+ * '\uFB03', 'u\u00DF', 't\u0131d') cannot expand/fold into ISO codes, and
+ * return null for any non-string, free text, symbol, HTML/XSS, non-ASCII,
+ * digit, or wrong-length value.
+ */
+export function sanitizeCurrencyCode(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return ASCII_CURRENCY_INPUT_RE.test(trimmed) ? trimmed.toUpperCase() : null;
+}
 
 /**
  * The chart-of-account system keys that hold cash: cash on hand, bank, and
@@ -105,17 +136,89 @@ export interface CashPosition {
 export interface OtherCurrencyCash {
   currency: string;
   amount: number;
+  /**
+   * FU-CASH-LABEL-SANITISER (D-135): present only on the generic aggregated
+   * uncoded bucket (`currency === UNCODED_CURRENCY_LABEL`), recording how many
+   * non-code currency entries were collapsed into it without echoing any label.
+   */
+  count?: number;
 }
 
 /**
- * V1-37c: the non-zero cash a position holds outside its business currency,
- * by currency code; what a reader of cashBalance says is held apart.
+ * FU-CASH-LABEL-SANITISER (D-135): one shared code-only currency label
+ * sanitiser for every structured `otherCurrencyCash` list.
+ *
+ *  - Valid 3-letter ASCII alphabetic ISO codes (`^[A-Z]{3}$` after trim+upper)
+ *    are grouped by code, summed cent-safely, and returned sorted in code order
+ *    as `{ currency, amount }` (zero-net codes omitted).
+ *  - Anything else (free text, symbols, HTML/XSS, whitespace, non-ASCII,
+ *    wrong length, digits, or an already-aggregated `UNCODED` bucket) is NEVER
+ *    echoed: its balance is aggregated into a single generic bucket
+ *    `{ currency: UNCODED_CURRENCY_LABEL, amount, count }` placed after coded
+ *    entries, preserving exact cent-safe totals and the entry count.
+ *  - Idempotent: passing already-sanitised output through again yields the
+ *    exact same array.
+ */
+export function sanitizeOtherCurrencyCash(entries: ReadonlyArray<OtherCurrencyCash>): OtherCurrencyCash[] {
+  const codedParts = new Map<string, number[]>();
+  const uncodedParts: number[] = [];
+  let uncodedCount = 0;
+
+  for (const entry of entries) {
+    const isAggregatedUncoded =
+      entry?.currency === UNCODED_CURRENCY_LABEL
+      && typeof entry.count === 'number'
+      && Number.isInteger(entry.count)
+      && entry.count > 0;
+    if (!entry || !Number.isFinite(entry.amount) || (entry.amount === 0 && !isAggregatedUncoded)) continue;
+    const code = sanitizeCurrencyCode(entry.currency);
+    if (code) {
+      const bucket = codedParts.get(code);
+      if (bucket) bucket.push(entry.amount);
+      else codedParts.set(code, [entry.amount]);
+    } else {
+      uncodedParts.push(entry.amount);
+      uncodedCount += isAggregatedUncoded ? entry.count! : 1;
+    }
+  }
+
+  const result: OtherCurrencyCash[] = [...codedParts.entries()]
+    .map(([currency, parts]) => ({ currency, amount: sumMoney(parts) }))
+    .filter((entry) => entry.amount !== 0)
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+
+  if (uncodedCount > 0) {
+    result.push({
+      currency: UNCODED_CURRENCY_LABEL,
+      amount: sumMoney(uncodedParts),
+      count: uncodedCount,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * V1-37c + FU-CASH-LABEL-SANITISER (D-135, R1-SEC-04): the non-zero cash a
+ * position holds outside its business currency (compared normalized, and by
+ * sanitized code when both are valid ISO codes, so unnormalized keys like
+ * `' ttd '` never leak home cash), sanitised through `sanitizeOtherCurrencyCash`
+ * so valid 3-letter codes remain intact and non-code free-text labels are never
+ * echoed (aggregated into a single counted `UNCODED` bucket).
  */
 export function otherCurrencyCash(position: Pick<CashPosition, 'currency' | 'byCurrency'>): OtherCurrencyCash[] {
-  return Object.entries(position.byCurrency ?? {})
-    .filter(([code, amount]) => code !== position.currency && amount !== 0)
-    .sort(([a], [b]) => a.localeCompare(b))
+  const homeNorm = normalizeCurrency(position.currency);
+  const homeCode = sanitizeCurrencyCode(position.currency);
+  const raw = Object.entries(position.byCurrency ?? {})
+    .filter(([code, amount]) => {
+      if (amount === 0) return false;
+      if (normalizeCurrency(code) === homeNorm) return false;
+      const entryCode = sanitizeCurrencyCode(code);
+      if (homeCode && entryCode && entryCode === homeCode) return false;
+      return true;
+    })
     .map(([currency, amount]) => ({ currency, amount }));
+  return sanitizeOtherCurrencyCash(raw);
 }
 
 const D = Prisma.Decimal;

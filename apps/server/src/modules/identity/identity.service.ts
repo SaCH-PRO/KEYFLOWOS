@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { skipTenantIsolation } from '@keyflow/db';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isLostTransactionConflict } from '../../core/prisma/transaction-conflict';
 import {
   BUSINESS_SETTING_INVALID,
   advancedSettingsChanges,
@@ -132,8 +133,12 @@ const roleRank = (role: string) => ROLE_RANK[role] ?? 0;
  * connectors disconnected, while the read went on answering configured.
  * business-meta-writers.spec.ts ([D12b-R1]) keeps this list a superset of
  * BUSINESS_META_SEO_CONNECTION_KEYS.
+ *
+ * FU-CASE-STUDY-REVENUE (P139, D-100): caseStudies is omitted from every
+ * Business projection (sanitizeBusiness) and written exclusively by
+ * CaseStudyService, so the profile PATCH refuses it as well.
  */
-export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp', 'ga4', 'gsc'] as const;
+export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp', 'ga4', 'gsc', 'caseStudies'] as const;
 
 /** The 400 code updateBusiness answers a metaData bag naming a reserved key with. */
 export const BUSINESS_METADATA_KEY_RESERVED = 'BUSINESS_METADATA_KEY_RESERVED';
@@ -2215,8 +2220,7 @@ export class IdentityService {
    * shapes are matched rather than trusting one.
    */
   private static isWriteConflict(err: unknown): boolean {
-    const code = (err as { code?: unknown })?.code;
-    return code === 'P2034' || code === '40001' || code === '40P01';
+    return isLostTransactionConflict(err);
   }
 
   /**

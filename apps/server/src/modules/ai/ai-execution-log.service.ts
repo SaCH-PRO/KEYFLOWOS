@@ -1,5 +1,11 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  filterOutSecretRows,
+  getMemoryClassReadMode,
+  projectEpisodicLogRowsForReader,
+  type MemoryReaderContext,
+} from '../key-cortex/memory-class-read-projection';
 
 export interface LogEntry {
   businessId: string;
@@ -101,8 +107,20 @@ export class AiExecutionLogService {
     });
   }
 
-  async getHistory(businessId: string, filter?: LogFilter, limit = 50, offset = 0) {
+  async getHistory(
+    businessId: string,
+    filter?: LogFilter,
+    limit = 50,
+    offset = 0,
+    readerContext?: MemoryReaderContext,
+  ) {
+    const mode = getMemoryClassReadMode();
+    const activeScoped = Boolean(readerContext) && mode === 'ACTIVE';
+    if (activeScoped && readerContext?.reader === null) {
+      return { logs: [], total: 0, limit, offset };
+    }
     const where: any = { businessId };
+    if (activeScoped && readerContext?.reader) where.userId = readerContext.reader;
     if (filter?.module) where.module = filter.module;
     if (filter?.toolName) where.toolName = filter.toolName;
     if (filter?.success !== undefined) where.success = filter.success;
@@ -113,41 +131,94 @@ export class AiExecutionLogService {
       if (filter.endDate) where.createdAt.lte = filter.endDate;
     }
 
-    const [logs, total] = await Promise.all([
+    const [rawLogs, rawTotal] = await Promise.all([
       this.prisma.client.aiExecutionLog.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset,
+        take: activeScoped ? Math.min(limit + offset + 100, 500) : limit,
+        skip: activeScoped ? 0 : offset,
       }),
       this.prisma.client.aiExecutionLog.count({ where }),
     ]);
 
-    return { logs, total, limit, offset };
+    const projected = readerContext
+      ? projectEpisodicLogRowsForReader(rawLogs, readerContext, {
+          businessId,
+          store: 'ai_execution_log',
+          path: 'AiExecutionLogService.getHistory',
+          logger: this.logger,
+        })
+      : filterOutSecretRows(rawLogs, (l) => ({
+          dataClass: null,
+          texts: [l.action, l.toolName, l.module, l.rationale, l.errorMessage],
+        }));
+
+    if (activeScoped) {
+      return {
+        logs: projected.slice(offset, offset + limit),
+        total: projected.length,
+        limit,
+        offset,
+      };
+    }
+
+    return { logs: projected, total: rawTotal, limit, offset };
   }
 
-  async getStats(businessId: string, days = 30) {
+  async getStats(businessId: string, days = 30, readerContext?: MemoryReaderContext) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const mode = getMemoryClassReadMode();
+    const activeScoped = Boolean(readerContext) && mode === 'ACTIVE';
+    if (activeScoped && readerContext?.reader === null) {
+      return {
+        period: { days, since },
+        totalActions: 0,
+        successRate: 100,
+        byModule: [],
+        byMode: [],
+      };
+    }
+    const baseWhere: any = {
+      businessId,
+      createdAt: { gte: since },
+      ...(activeScoped && readerContext?.reader ? { userId: readerContext.reader } : {}),
+    };
     const [totalCount, successCount, byModule, byMode] = await Promise.all([
-      this.prisma.client.aiExecutionLog.count({ where: { businessId, createdAt: { gte: since } } }),
-      this.prisma.client.aiExecutionLog.count({ where: { businessId, createdAt: { gte: since }, success: true } }),
+      this.prisma.client.aiExecutionLog.count({ where: baseWhere }),
+      this.prisma.client.aiExecutionLog.count({ where: { ...baseWhere, success: true } }),
       this.prisma.client.aiExecutionLog.groupBy({
         by: ['module'],
-        where: { businessId, createdAt: { gte: since } },
+        where: baseWhere,
         _count: true,
       }),
       this.prisma.client.aiExecutionLog.groupBy({
         by: ['mode'],
-        where: { businessId, createdAt: { gte: since } },
+        where: baseWhere,
         _count: true,
       }),
     ]);
 
+    const visibleByModule =
+      activeScoped && readerContext
+        ? byModule.filter((m) => !m.module || projectEpisodicLogRowsForReader(
+            [{ userId: readerContext.reader, module: m.module }],
+            readerContext,
+            { businessId, store: 'ai_execution_log', path: 'AiExecutionLogService.getStats' },
+          ).length > 0)
+        : byModule;
+
+    const effectiveTotal = activeScoped
+      ? visibleByModule.reduce(
+          (sum, m) => sum + (typeof m._count === 'number' ? m._count : (m._count as Record<string, number>)?._all ?? 0),
+          0,
+        )
+      : totalCount;
+
     return {
       period: { days, since },
-      totalActions: totalCount,
+      totalActions: effectiveTotal,
       successRate: totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 100,
-      byModule: byModule.map(m => ({ module: m.module ?? 'unknown', count: typeof m._count === 'number' ? m._count : (m._count as Record<string, number>)?._all ?? 0 })),
+      byModule: visibleByModule.map(m => ({ module: m.module ?? 'unknown', count: typeof m._count === 'number' ? m._count : (m._count as Record<string, number>)?._all ?? 0 })),
       byMode: byMode.map(m => ({ mode: m.mode, count: typeof m._count === 'number' ? m._count : (m._count as Record<string, number>)?._all ?? 0 })),
     };
   }

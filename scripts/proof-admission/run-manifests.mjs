@@ -56,13 +56,18 @@
  *                          apps/server/src file)
  *   --vitest-arg <arg>     pass one more argument to vitest (repeatable),
  *                          e.g. --vitest-arg --no-file-parallelism
+ *   --max-report-age-seconds <n>
+ *                          raise a manifest's maxReportAgeSeconds up to 7200 s
+ *                          for slow serial runs (e.g. --no-file-parallelism);
+ *                          also read from KF_PROOF_MAX_REPORT_AGE_SECONDS.
+ *                          Does not weaken exact-head binding.
  *   --plan                 print the manifests, their types and suites and the
  *                          union as JSON; run nothing. Exit 2 if a manifest is
  *                          unbound, of unknown type, or names a missing file.
  *   --skip-file-check      with --plan, do not require the suite files to exist
  *
  * The environment (DATABASE_URL, REDIS_URL, ...) is the caller's: this script
- * reads none of it and prints none of it.
+ * reads only KF_PROOF_MAX_REPORT_AGE_SECONDS (when set) and prints none of it.
  */
 import { spawnSync } from 'node:child_process';
 import {
@@ -80,7 +85,13 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { manifestSuites, sourceHead, sourceTreeState } from './evaluate.mjs';
+import {
+  MAX_REPORT_AGE_SECONDS_LIMIT,
+  manifestSuites,
+  parseMaxReportAgeSeconds,
+  sourceHead,
+  sourceTreeState,
+} from './evaluate.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -95,7 +106,15 @@ const EXIT = Object.freeze({ SATISFIED: 0, REJECTED: 2, INCOMPLETE: 3 });
 function parseArgs(argv) {
   const args = { vitestArgs: [] };
   const flags = new Set(['--skip-build', '--plan', '--skip-file-check']);
-  const valued = new Set(['--only', '--manifests-dir', '--report', '--out', '--vitest-arg', '--keep-report']);
+  const valued = new Set([
+    '--only',
+    '--manifests-dir',
+    '--report',
+    '--out',
+    '--vitest-arg',
+    '--keep-report',
+    '--max-report-age-seconds',
+  ]);
   for (let i = 0; i < argv.length; i += 1) {
     const raw = argv[i];
     if (raw === '--') continue; // pnpm <script> -- <args> may pass the separator through
@@ -333,6 +352,22 @@ function main() {
     console.error('run-manifests: --keep-report keeps the report this run produces; --report and --plan produce none');
     process.exit(EXIT.REJECTED);
   }
+  const rawMaxAge =
+    args['max-report-age-seconds'] !== undefined
+      ? args['max-report-age-seconds']
+      : process.env.KF_PROOF_MAX_REPORT_AGE_SECONDS !== undefined && process.env.KF_PROOF_MAX_REPORT_AGE_SECONDS !== ''
+        ? process.env.KF_PROOF_MAX_REPORT_AGE_SECONDS
+        : undefined;
+  let maxReportAgeSeconds;
+  if (rawMaxAge !== undefined) {
+    maxReportAgeSeconds = parseMaxReportAgeSeconds(rawMaxAge);
+    if (maxReportAgeSeconds === null) {
+      console.error(
+        `run-manifests: --max-report-age-seconds / KF_PROOF_MAX_REPORT_AGE_SECONDS must be a positive number up to ${MAX_REPORT_AGE_SECONDS_LIMIT}`,
+      );
+      process.exit(EXIT.REJECTED);
+    }
+  }
   const dir = resolve(args['manifests-dir'] ?? DEFAULT_MANIFESTS);
   const only = args.only ? args.only.split(',').map((s) => s.trim()).filter(Boolean) : null;
   // vitest silently drops a filter that names no file, so before a run every
@@ -379,7 +414,7 @@ function main() {
   const work = mkdtempSync(join(tmpdir(), 'kf-run-manifests-'));
   let code;
   try {
-    code = runAndJudge({ args, dir, entries, runnable, union, needsDist, head, work });
+    code = runAndJudge({ args, dir, entries, runnable, union, needsDist, head, work, maxReportAgeSeconds });
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -387,7 +422,7 @@ function main() {
 }
 
 /** Build if needed, run the union once (unless --report), judge every manifest; returns the exit code. */
-function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, work }) {
+function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, work, maxReportAgeSeconds }) {
   const reportPath = args.report ? resolve(args.report) : join(work, 'vitest-report.json');
   let vitestExit = null;
 
@@ -451,9 +486,13 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
         manifestPath = join(derivedDir, entry.file);
         writeFileSync(manifestPath, JSON.stringify(entry.evaluated));
       }
+      const evalArgs = [EVALUATOR, '--manifest', manifestPath, '--report', reportPath, '--expect-head', head];
+      if (maxReportAgeSeconds !== undefined) {
+        evalArgs.push('--max-report-age-seconds', String(maxReportAgeSeconds));
+      }
       const child = spawnSync(
         process.execPath,
-        [EVALUATOR, '--manifest', manifestPath, '--report', reportPath, '--expect-head', head],
+        evalArgs,
         { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: process.env },
       );
       try {

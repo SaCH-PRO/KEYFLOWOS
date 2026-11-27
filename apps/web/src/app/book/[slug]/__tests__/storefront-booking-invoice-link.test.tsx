@@ -136,7 +136,7 @@ vi.mock("../components/checkout-flow", () => ({
       onClick={() => {
         void onSubmit({
           serviceBookings: Object.fromEntries(
-            cart.map((c) => [`${c.id}_${c.itemType}`, { serviceId: c.id, serviceName: "v95q Consultation", staffId: "", date: "2026-12-01", time: "10:00" }]),
+            cart.map((c) => [`${c.id}_${c.itemType}`, { serviceId: c.id, serviceName: "v95q Consultation", staffId: "", date: "2026-12-01", time: "10:00", startIso: "2026-12-01T14:00:00.000Z" }]),
           ),
           firstName: form.firstName,
           lastName: form.lastName,

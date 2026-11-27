@@ -457,3 +457,81 @@ describe('IdentityService.reconcileUserId (never for an account; bootstrap uses 
     expect(state.sessions[0].userId).toBe('new-supabase-id');
   });
 });
+
+describe('IdentityService.bootstrapUser — transient deadlock retry (W11-TRANSIENT-CONFLICT, F-37)', () => {
+  it('retries once when $transaction throws a no-code 40P01 PostgresError message and succeeds with one business and one OWNER membership', async () => {
+    const { prisma, state } = makePrismaMock();
+    const client = (prisma as any).client;
+    client.$transaction.mockImplementationOnce(async () => {
+      throw new Error(
+        'Invalid `tx.business.create()` invocation:\n\nConnectorError(ConnectorError { kind: QueryError(PostgresError { code: "40P01", message: "deadlock detected", severity: "ERROR" }) })',
+      );
+    });
+    const service = new IdentityService(prisma, blueprintMock);
+
+    const result = await service.bootstrapUser({
+      userId: 'deadlock-user-1',
+      email: 'deadlock1@test.local',
+      firstName: 'Dana',
+    });
+
+    expect(client.$transaction).toHaveBeenCalledTimes(2);
+    expect(result.isNewBusiness).toBe(true);
+    expect(result.business.ownerId).toBe('deadlock-user-1');
+    expect(state.businesses).toHaveLength(1);
+    expect(state.memberships).toEqual([
+      expect.objectContaining({
+        userId: 'deadlock-user-1',
+        businessId: result.business.id,
+        role: 'OWNER',
+      }),
+    ]);
+  });
+
+  it('retries once when $transaction throws a P2010 raw-query error wrapping 40P01 and succeeds with one business and one OWNER membership', async () => {
+    const { prisma, state } = makePrismaMock();
+    const client = (prisma as any).client;
+    client.$transaction.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Raw query failed. Code: `40P01`. Message: `deadlock detected`'), {
+        code: 'P2010',
+      });
+    });
+    const service = new IdentityService(prisma, blueprintMock);
+
+    const result = await service.bootstrapUser({
+      userId: 'deadlock-user-2',
+      email: 'deadlock2@test.local',
+      firstName: 'Devon',
+    });
+
+    expect(client.$transaction).toHaveBeenCalledTimes(2);
+    expect(result.isNewBusiness).toBe(true);
+    expect(result.business.ownerId).toBe('deadlock-user-2');
+    expect(state.businesses).toHaveLength(1);
+    expect(state.memberships).toEqual([
+      expect.objectContaining({
+        userId: 'deadlock-user-2',
+        businessId: result.business.id,
+        role: 'OWNER',
+      }),
+    ]);
+  });
+
+  it('does not retry a non-conflict error (P2002) and rethrows immediately', async () => {
+    const { prisma } = makePrismaMock();
+    const client = (prisma as any).client;
+    client.$transaction.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+    });
+    const service = new IdentityService(prisma, blueprintMock);
+
+    await expect(
+      service.bootstrapUser({
+        userId: 'deadlock-user-3',
+        email: 'deadlock3@test.local',
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    expect(client.$transaction).toHaveBeenCalledTimes(1);
+  });
+});
+

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Calendar,
   Clock,
@@ -33,10 +33,14 @@ import type {
   DeliveryAddress,
   PaymentMethod,
   ShippingZone,
+  HeldSlot,
 } from "./types";
 import {
-  getAvailableSlots,
+  bookingReuseKey,
+  fetchAvailableSlotTimes,
+  heldSlotsOf,
   isDayClosed,
+  type SlotTime,
   calculateDiscount,
   loadCheckoutDetails,
   saveCheckoutDetails,
@@ -68,6 +72,11 @@ type Props = {
     shippingZoneId: string | null;
     termsAccepted: boolean;
   }) => Promise<void>;
+  /**
+   * SWP-BOOKING-SLOTS: the reuse key of the bookings kept for this checkout after a failed or abandoned payment
+   * (SEC-W9WCN-1), null when none are kept. Their slots are offered and kept only while the whole key still matches.
+   */
+  heldReuseKey?: string | null;
 };
 
 const paymentMethods: { id: PaymentMethod; name: string; description: string; icon: typeof CreditCard }[] = [
@@ -99,6 +108,69 @@ function paymentMethodsFor(currency: string, gateways: StorefrontGateways | null
   const takesWipay = gateways?.wipay === true && (currency ?? "").trim().toUpperCase() === "TTD";
   const takesPaypal = gateways === null || gateways.paypal;
   return paymentMethods.filter((pm) => (pm.id !== "wipay" || takesWipay) && (pm.id !== "paypal" || takesPaypal));
+}
+
+/** SWP-BOOKING-SLOTS: what a schedule row asks the public slots route: the service, date and staff member chosen. */
+type SlotRequest = { serviceId: string; date: string; staffId: string };
+const slotRequestKey = (r: SlotRequest) => JSON.stringify([r.serviceId, r.date, r.staffId]);
+
+/**
+ * SWP-BOOKING-SLOTS (BUG-122): the times each schedule row offers, as the server's public slots route answers them
+ * (fetchAvailableSlotTimes), kept by the (service, date, staff) asked. A row shows only the answer for its current
+ * request: undefined while it is pending, null when it failed; an answer for an older request never reaches it.
+ */
+export function useSlotAnswers(businessId: string, timeZone: string | null | undefined, requests: SlotRequest[]) {
+  const [answers, setAnswers] = useState<Record<string, SlotTime[] | null>>({});
+  // Bumped to ask again: by retry (a failed row's Try again) and forget (a refused Place Order).
+  const [generation, setGeneration] = useState(0);
+  const asked = useRef(new Set<string>());
+  // The latest ask of each request: only its answer is kept, so an older answer still in flight never lands.
+  const latest = useRef(new Map<string, number>());
+  const idOf = (key: string) => `${businessId}|${timeZone ?? ""}|${key}`;
+  const signature = JSON.stringify(requests.map(slotRequestKey).sort());
+  useEffect(() => {
+    for (const key of JSON.parse(signature) as string[]) {
+      const id = `${businessId}|${timeZone ?? ""}|${key}`;
+      if (asked.current.has(id)) continue;
+      asked.current.add(id);
+      // A request asked again after a failure shows "Loading times…" while it runs, not the old failure.
+      setAnswers((prev) => {
+        if (prev[id] !== null) return prev;
+        const { [id]: _failed, ...rest } = prev;
+        return rest;
+      });
+      const ask = (latest.current.get(id) ?? 0) + 1;
+      latest.current.set(id, ask);
+      const [serviceId, date, staffId] = JSON.parse(key) as [string, string, string];
+      void fetchAvailableSlotTimes({ businessId, serviceId, date, staffId: staffId || undefined, timeZone })
+        .catch(() => null)
+        .then((slots) => {
+          if (latest.current.get(id) !== ask || !asked.current.has(id)) return;
+          // A failed read is asked again the next time a row asks for it.
+          if (slots === null) asked.current.delete(id);
+          setAnswers((prev) => ({ ...prev, [id]: slots }));
+        });
+    }
+  }, [businessId, timeZone, signature, generation]);
+  return {
+    answerFor: (r: SlotRequest): SlotTime[] | null | undefined => answers[idOf(slotRequestKey(r))],
+    /** COR-3: ask a failed request again (its Try again). */
+    retry: (r: SlotRequest) => {
+      const id = idOf(slotRequestKey(r));
+      asked.current.delete(id);
+      setAnswers((prev) => {
+        const { [id]: _old, ...rest } = prev;
+        return rest;
+      });
+      setGeneration((g) => g + 1);
+    },
+    /** COR-2: forget every answer (a refused Place Order: a time shown free may since have been taken). */
+    forget: () => {
+      asked.current.clear();
+      setAnswers({});
+      setGeneration((g) => g + 1);
+    },
+  };
 }
 
 /** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
@@ -147,9 +219,12 @@ export function CheckoutFlow({
   onBack,
   onUpdateQuantity: _onUpdateQuantity,
   onSubmit,
+  heldReuseKey = null,
 }: Props) {
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>({});
+  /** The rows the kept bookings filled (cleared again if the customer turns out to be someone else). */
+  const filledFromHold = useRef(new Set<string>());
 
   const savedDetails = loadCheckoutDetails();
   const [firstName, setFirstName] = useState(savedDetails.firstName);
@@ -184,6 +259,78 @@ export function CheckoutFlow({
   const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
 
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
+  // SWP-BOOKING-SLOTS: each row's request to the public slots route, once a date is picked on a day not closed.
+  const slotRequestOf = (si: CartItem): SlotRequest | null => {
+    const bd = serviceBookings[`${si.id}_${si.itemType}`];
+    if (!bd?.date || isDayClosed(bd.date, business.businessHours)) return null;
+    return { serviceId: bd.serviceId || si.sourceServiceId || si.id, date: bd.date, staffId: bd.staffId || "" };
+  };
+  const slotAnswers = useSlotAnswers(
+    business.id,
+    business.timezone,
+    serviceItemsInCart.map(slotRequestOf).filter((r): r is SlotRequest => r !== null),
+  );
+  // SEC-W9WCN-1: the kept bookings are reused only when the whole checkout matches their reuse key (the page books
+  // every line afresh otherwise, and the server refuses a held time, which the customer's own PENDING booking still
+  // takes). So their slots are this checkout's only while the key still matches: same customer, same service lines
+  // with the same quantity, date, time, staff, location and instant. Another customer is neither handed nor told.
+  const heldSlots = heldSlotsOf(heldReuseKey);
+  const customerNow = [firstName.trim(), lastName.trim(), emailInput.trim().toLowerCase(), phoneInput.trim()];
+  const heldForThisCustomer = heldSlots.length > 0
+    && heldSlots[0].customer.length === customerNow.length
+    && heldSlots[0].customer.every((c, i) => c === customerNow[i]);
+  // Every service row has a line here, empty while unscheduled, as it will once each is booked: a cart that gained a
+  // service never matches a key kept without it.
+  const reuseKeyOf = (bookings: Record<string, ServiceBookingData>) => {
+    const everyRow: Record<string, ServiceBookingData> = {};
+    for (const si of serviceItemsInCart) {
+      const key = `${si.id}_${si.itemType}`;
+      everyRow[key] = bookings[key] ?? { serviceId: si.sourceServiceId || si.id, serviceName: si.name, staffId: "", date: "", time: "" };
+    }
+    return bookingReuseKey({ firstName, lastName, email: emailInput, phone: phoneInput, serviceBookings: everyRow }, serviceItemsInCart);
+  };
+  const heldKeyMatches = heldForThisCustomer && reuseKeyOf(serviceBookings) === heldReuseKey;
+  /** The customer's own hold no longer matches what they are booking: its times are released. */
+  const heldReleased = heldForThisCustomer && !heldKeyMatches;
+  /** The slot a kept booking holds for this request's service, while the whole key matches (so its date and staff too). */
+  const heldFor = (r: SlotRequest): HeldSlot | undefined =>
+    heldKeyMatches ? heldSlots.find((h) => h.serviceId === r.serviceId) : undefined;
+  /** A row's offered times: its current answer, with a slot its kept booking holds (the server counts it as taken). */
+  const offeredFor = (r: SlotRequest): SlotTime[] | null | undefined => {
+    const answer = slotAnswers.answerFor(r);
+    const held = heldFor(r);
+    if (!Array.isArray(answer) || !held || answer.some((s) => s.startIso === held.startIso)) return answer;
+    return [...answer, { time: held.time, startIso: held.startIso }].sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  };
+  // COR-2: a row is scheduled only by a time its current answer offers, by the server's own instant, or by the
+  // slot its kept booking holds.
+  const isRowScheduled = (si: CartItem): boolean => {
+    const bd = serviceBookings[`${si.id}_${si.itemType}`];
+    const request = slotRequestOf(si);
+    if (!bd?.date || !bd.time || !bd.startIso || !request) return false;
+    if (heldFor(request)?.startIso === bd.startIso) return true;
+    return (slotAnswers.answerFor(request) ?? []).some((s) => s.startIso === bd.startIso);
+  };
+  /**
+   * What the review step says about rows not scheduled: still reading their times, could not read them, or a fresh
+   * answer no longer offers the time chosen. Null when every row is scheduled.
+   */
+  const unscheduledState = ((): "checking" | "failed" | "gone" | null => {
+    const states = serviceItemsInCart.filter((si) => !isRowScheduled(si)).map((si) => {
+      const request = slotRequestOf(si);
+      const answer = request ? slotAnswers.answerFor(request) : [];
+      return answer === undefined ? "checking" : answer === null ? "failed" : "gone";
+    });
+    if (states.length === 0) return null;
+    return states.includes("checking") ? "checking" : states.includes("failed") ? "failed" : "gone";
+  })();
+  const retryFailedRows = () => {
+    for (const si of serviceItemsInCart) {
+      const request = slotRequestOf(si);
+      if (request && slotAnswers.answerFor(request) === null) slotAnswers.retry(request);
+    }
+  };
+  const allRowsScheduled = serviceItemsInCart.every(isRowScheduled);
   const hasPhysicalProducts = cart.some((c) => c.itemType === "product");
   const hasServicesOnly = serviceItemsInCart.length > 0 && !hasPhysicalProducts;
 
@@ -222,10 +369,7 @@ export function CheckoutFlow({
     }
     if (stepKey === "delivery") {
       if (serviceItemsInCart.length > 0) {
-        const allBooked = serviceItemsInCart.every((si) => {
-          const bd = serviceBookings[`${si.id}_${si.itemType}`];
-          return bd && bd.date && bd.time;
-        });
+        const allBooked = serviceItemsInCart.every(isRowScheduled);
         if (!allBooked) return false;
       }
       if (hasPhysicalProducts) {
@@ -236,7 +380,8 @@ export function CheckoutFlow({
       return true;
     }
     if (stepKey === "payment") {
-      return termsAccepted;
+      // A refused order forgets the rows' times (COR-2): it is placed again only once each row has a fresh one.
+      return termsAccepted && allRowsScheduled;
     }
     return true;
   })();
@@ -257,6 +402,8 @@ export function CheckoutFlow({
         termsAccepted,
       });
     } catch (e: unknown) {
+      // COR-2: a refused order may be a time taken since it was shown: every row reads its times afresh.
+      slotAnswers.forget();
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
       setSubmitting(false);
     }
@@ -272,6 +419,36 @@ export function CheckoutFlow({
         email: emailInput.trim(),
         phone: phoneInput.trim(),
       });
+      // This customer's kept bookings fill the rows not yet scheduled with their slots, only when the checkout so
+      // filled matches their whole reuse key (so the page reuses them). For another customer, rows filled earlier
+      // are cleared: they never keep someone else's date, time or location.
+      if (heldForThisCustomer) {
+        const filled = { ...serviceBookings };
+        for (const si of serviceItemsInCart) {
+          const key = `${si.id}_${si.itemType}`;
+          if (filled[key]?.date) continue;
+          const serviceId = si.sourceServiceId || si.id;
+          const held = heldSlots.find((h) => h.serviceId === serviceId);
+          if (!held) continue;
+          filled[key] = {
+            serviceId,
+            serviceName: si.name,
+            staffId: held.staffId,
+            date: held.date,
+            time: held.time,
+            startIso: held.startIso,
+            ...(held.location ? { location: held.location } : {}),
+          };
+        }
+        if (reuseKeyOf(filled) === heldReuseKey) {
+          filledFromHold.current = new Set(Object.keys(filled).filter((k) => !serviceBookings[k]?.date));
+          setServiceBookings(filled);
+        }
+      } else if (filledFromHold.current.size > 0) {
+        const cleared = filledFromHold.current;
+        filledFromHold.current = new Set();
+        setServiceBookings((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !cleared.has(k))));
+      }
     }
     setCheckoutStep((s) => s + 1);
   };
@@ -632,6 +809,14 @@ export function CheckoutFlow({
                     </div>
                   </div>
 
+                  {heldReleased && (
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
+                      <Clock className="w-4 h-4 flex-shrink-0" />
+                      Changing your booking releases the times we were holding; pick times again. To keep your
+                      earlier times, go back to the shop and open checkout again.
+                    </div>
+                  )}
+
                   {serviceItemsInCart.map((si) => {
                     const key = `${si.id}_${si.itemType}`;
                     const bd = serviceBookings[key] || {
@@ -641,13 +826,16 @@ export function CheckoutFlow({
                       date: "",
                       time: "",
                     };
-                    const slots = getAvailableSlots(bd.date, business.businessHours);
                     const closed = isDayClosed(bd.date, business.businessHours);
+                    const slotRequest = slotRequestOf(si);
+                    // undefined: still loading; null: the route could not be read. Neither offers a time.
+                    const slotAnswer = slotRequest ? offeredFor(slotRequest) : undefined;
+                    const slots: SlotTime[] = slotAnswer ?? [];
                     const updateBd = (patch: Partial<ServiceBookingData>) => {
                       setServiceBookings((prev) => ({ ...prev, [key]: { ...bd, ...patch } }));
                     };
 
-                    const isScheduled = bd.date && bd.time;
+                    const isScheduled = isRowScheduled(si);
 
                     return (
                       <div
@@ -685,7 +873,7 @@ export function CheckoutFlow({
                               <div className="flex gap-2 flex-wrap">
                                 <button
                                   type="button"
-                                  onClick={() => updateBd({ staffId: "" })}
+                                  onClick={() => updateBd({ staffId: "", time: "", startIso: undefined })}
                                   className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-all duration-200 min-h-[44px]"
                                   style={{
                                     borderColor: !bd.staffId ? `${primaryColor}40` : "rgba(0,0,0,0.04)",
@@ -699,7 +887,7 @@ export function CheckoutFlow({
                                   <button
                                     key={s.id}
                                     type="button"
-                                    onClick={() => updateBd({ staffId: s.id })}
+                                    onClick={() => updateBd({ staffId: s.id, time: "", startIso: undefined })}
                                     className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-all duration-200 min-h-[44px]"
                                     style={{
                                       borderColor: bd.staffId === s.id ? `${secondaryColor}40` : "rgba(0,0,0,0.04)",
@@ -727,7 +915,7 @@ export function CheckoutFlow({
                             <input
                               type="date"
                               value={bd.date}
-                              onChange={(e) => updateBd({ date: e.target.value, time: "" })}
+                              onChange={(e) => updateBd({ date: e.target.value, time: "", startIso: undefined })}
                               min={new Date().toISOString().split("T")[0]}
                               className="w-full rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-900 focus:outline-none transition-all duration-200 min-h-[44px]"
                               style={{
@@ -745,6 +933,27 @@ export function CheckoutFlow({
                             </div>
                           )}
 
+                          {bd.date && !closed && slotAnswer === undefined && (
+                            <div className="rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-400 text-center flex items-center justify-center gap-2">
+                              <Clock className="w-4 h-4" />
+                              Loading times…
+                            </div>
+                          )}
+
+                          {bd.date && !closed && slotAnswer === null && (
+                            <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                              <span className="flex-1">Couldn&apos;t load times</span>
+                              <button
+                                type="button"
+                                onClick={() => slotRequest && slotAnswers.retry(slotRequest)}
+                                className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium min-h-[44px]"
+                              >
+                                Try again
+                              </button>
+                            </div>
+                          )}
+
                           {bd.date && !closed && slots.length > 0 && (
                             <div className="space-y-2.5">
                               <label className="text-[10px] uppercase tracking-widest text-gray-400 flex items-center gap-1.5 font-medium">
@@ -756,12 +965,12 @@ export function CheckoutFlow({
                               >
                                 {slots.map((slot) => (
                                   <button
-                                    key={slot}
+                                    key={slot.startIso}
                                     type="button"
-                                    onClick={() => updateBd({ time: slot })}
+                                    onClick={() => updateBd({ time: slot.time, startIso: slot.startIso })}
                                     className="px-2 py-2.5 rounded-lg text-xs font-medium border transition-all duration-200 active:scale-95 min-h-[44px]"
                                     style={
-                                      bd.time === slot
+                                      bd.startIso === slot.startIso
                                         ? {
                                             backgroundColor: primaryColor,
                                             borderColor: primaryColor,
@@ -775,14 +984,14 @@ export function CheckoutFlow({
                                           }
                                     }
                                   >
-                                    {slot}
+                                    {slot.time}
                                   </button>
                                 ))}
                               </div>
                             </div>
                           )}
 
-                          {bd.date && !closed && slots.length === 0 && (
+                          {bd.date && !closed && slotAnswer && slotAnswer.length === 0 && (
                             <div className="rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-400 text-center">
                               No time slots available for this date.
                             </div>
@@ -1097,6 +1306,31 @@ export function CheckoutFlow({
                 <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                   {error}
+                </div>
+              )}
+              {unscheduledState === "checking" && (
+                <div className="rounded-xl border border-gray-200 bg-white/[0.02] px-4 py-3 text-sm text-gray-400 flex items-center gap-2">
+                  <Clock className="w-4 h-4 flex-shrink-0" />
+                  Checking times…
+                </div>
+              )}
+              {unscheduledState === "failed" && (
+                <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  <span className="flex-1">Couldn&apos;t load times</span>
+                  <button
+                    type="button"
+                    onClick={retryFailedRows}
+                    className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium min-h-[44px]"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {unscheduledState === "gone" && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
+                  <Clock className="w-4 h-4 flex-shrink-0" />
+                  A time you chose is no longer available. Go back to pick another.
                 </div>
               )}
             </div>
