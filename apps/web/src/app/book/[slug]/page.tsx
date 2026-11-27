@@ -436,12 +436,12 @@ function PublicBookingPageInner() {
       // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
       const pending = parsed as ReturnType<typeof JSON.parse>;
       // SWP-BOOKING-SLOTS (round 6): the strings the confirmation shows or puts into a URL, only when they are strings.
-      // Invisible characters (format, combining, space, control and default-ignorable characters, and the Hangul and
-      // Braille blanks) are stripped for the blank check only: a field of only those is none; any other value is kept
-      // as it is.
+      // Invisible and unreadable characters (format, combining, space, control, default-ignorable, unassigned,
+      // private-use and lone-surrogate code points, and the Hangul and Braille blanks) are stripped for the blank check
+      // only: a field of only those is none; any other value is kept as it is.
       const text = (v: unknown): string | null =>
         typeof v === "string"
-        && v.replace(/[\p{Cf}\p{Mn}\p{Zs}\p{Cc}\p{Default_Ignorable_Code_Point}\u115F\u1160\u3164\uFFA0\u2800]/gu, "").trim() !== ""
+        && v.replace(/[\p{Cf}\p{Mn}\p{Zs}\p{Cc}\p{Cn}\p{Co}\p{Cs}\p{Default_Ignorable_Code_Point}\u115F\u1160\u3164\uFFA0\u2800]/gu, "").trim() !== ""
           ? v
           : null;
       const orderNumber = text(pending.orderNumber);
