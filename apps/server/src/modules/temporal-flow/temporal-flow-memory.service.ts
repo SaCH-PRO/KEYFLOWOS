@@ -301,13 +301,18 @@ export class TemporalFlowMemoryService {
       ...(query.type ? { type: query.type } : {}),
       ...(preFilter ? { AND: [preFilter] } : {}),
     };
-    const fetchPage = (skip: number, take: number) =>
-      this.prisma.client.temporalFlowMemory.findMany({
+    const fetchPage = (skip: number, take: number) => {
+      const finiteTake =
+        typeof take === 'number' && Number.isFinite(take) && take >= 0
+          ? Math.floor(take)
+          : undefined;
+      return this.prisma.client.temporalFlowMemory.findMany({
         where,
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         ...(skip > 0 ? { skip } : {}),
-        take,
+        ...(finiteTake !== undefined ? { take: finiteTake } : {}),
       });
+    };
 
     if (!readerContext) {
       const rows = await fetchPage(0, limit);
@@ -325,12 +330,12 @@ export class TemporalFlowMemoryService {
         readerContext,
         'TemporalFlowMemoryService.findMany',
       );
-      return projected.slice(0, limit);
+      return Number.isFinite(limit) ? projected.slice(0, Math.max(Math.floor(limit), 0)) : projected;
     }
 
     return fetchProjectedBatch<TemporalFlowMemoryData>({
       targetCount: limit,
-      batchSize: Math.max(limit, 50),
+      batchSize: Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 50), 500) : 200,
       fetchPage,
       projectPage: (page) =>
         this.projectRowsForReader(businessId, page, readerContext, 'TemporalFlowMemoryService.findMany'),
