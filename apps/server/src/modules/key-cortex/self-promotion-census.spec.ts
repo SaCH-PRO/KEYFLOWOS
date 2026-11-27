@@ -200,6 +200,7 @@ function isAllowlistedUpdatePreferencesAccess(
   if (
     file === 'modules/key-cortex/adapters/notifications-adapter.service.ts' &&
     className === 'NotificationsAdapterService' &&
+    methodName === 'execute' &&
     node.expression.kind === ts.SyntaxKind.ThisKeyword
   ) {
     return true;
@@ -211,8 +212,41 @@ function isAllowlistedUpdatePreferencesAccess(
 function declarationName(name: ts.PropertyName | ts.Identifier | undefined): string | null {
   if (!name) return null;
   if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  if (ts.isComputedPropertyName(name)) return evalStaticString(name.expression);
   return null;
 }
+
+function isInsideAssignmentLhs(node: ts.Node): boolean {
+  let cur: ts.Node | undefined = node;
+  while (cur && cur.parent) {
+    const parent = cur.parent;
+    if (
+      ts.isBinaryExpression(parent) &&
+      parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      parent.left === cur
+    ) {
+      return true;
+    }
+    if (
+      ts.isObjectLiteralExpression(parent) ||
+      ts.isArrayLiteralExpression(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isShorthandPropertyAssignment(parent) ||
+      ts.isSpreadAssignment(parent) ||
+      ts.isParenthesizedExpression(parent)
+    ) {
+      cur = parent;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
+const ALLOWED_CLASSIFICATION_IMPORTS = new Set([
+  '../../core/authority/module-vocabulary',
+  '../business-genome/key-genome/genome-finance-scope',
+]);
 
 export function scanSelfPromotionViolations(
   sources: readonly VirtualSource[] = loadServerSources(),
@@ -223,7 +257,8 @@ export function scanSelfPromotionViolations(
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
 
     const visit = (node: ts.Node): void => {
-      // 1. Fail-closed check for EVERY `updatePreferences` access / bracket / destructuring
+      // 1. Fail-closed check for EVERY `updatePreferences` access / bracket / destructuring /
+      //    assignment-LHS destructuring (`({ updatePreferences: fn } = gw)`).
       if (ts.isPropertyAccessExpression(node) && node.name.text === 'updatePreferences') {
         if (!isAllowlistedUpdatePreferencesAccess(file, node)) {
           violations.push({
@@ -244,7 +279,11 @@ export function scanSelfPromotionViolations(
           });
         }
       } else if (ts.isBindingElement(node)) {
-        const propName = node.propertyName ? declarationName(node.propertyName) : declarationName(node.name as ts.Identifier);
+        const propName = node.propertyName
+          ? declarationName(node.propertyName)
+          : ts.isIdentifier(node.name)
+            ? node.name.text
+            : null;
         if (propName === 'updatePreferences' && !isAllowlistedUpdatePreferencesAccess(file, node)) {
           violations.push({
             file,
@@ -253,12 +292,26 @@ export function scanSelfPromotionViolations(
             detail: `Unallowlisted destructuring of updatePreferences: ${node.getText(sf)}`,
           });
         }
+      } else if (
+        (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+        isInsideAssignmentLhs(node)
+      ) {
+        const propName = declarationName(node.name);
+        if (propName === 'updatePreferences') {
+          violations.push({
+            file,
+            line: lineOf(sf, node.getStart(sf)),
+            kind: 'updatePreferences',
+            detail: `Unallowlisted assignment-LHS destructuring of updatePreferences: ${node.getText(sf)}`,
+          });
+        }
       }
 
-      // 2. Fail-closed check for `'key_self_tuning'` (banned everywhere) and
-      //    `'evolution_tuning'` (banned everywhere outside read-only memory-classification.ts).
-      //    Skip parent nodes whose child already produced the same string? No: only evaluate
-      //    maximal constant string expressions (not child parts of an outer BinaryExpression/TemplateExpression).
+      // 2. Fail-closed check for maximal constant string expressions:
+      //    - `'updatePreferences'` (banned as any static string literal/concat/template —
+      //      catches Reflect.get(gw, 'updatePreferences'), const k = 'updatePreferences'; gw[k], etc.)
+      //    - `'key_self_tuning'` (banned everywhere)
+      //    - `'evolution_tuning'` (banned everywhere outside read-only memory-classification.ts)
       const isPartOfOuterStaticString =
         Boolean(node.parent) &&
         ((ts.isBinaryExpression(node.parent) &&
@@ -268,7 +321,14 @@ export function scanSelfPromotionViolations(
 
       if (!isPartOfOuterStaticString) {
         const strVal = evalStaticString(node);
-        if (strVal === 'key_self_tuning') {
+        if (strVal === 'updatePreferences') {
+          violations.push({
+            file,
+            line: lineOf(sf, node.getStart(sf)),
+            kind: 'updatePreferences',
+            detail: `Static string 'updatePreferences' is forbidden in production sources: ${node.getText(sf)}`,
+          });
+        } else if (strVal === 'key_self_tuning') {
           violations.push({
             file,
             line: lineOf(sf, node.getStart(sf)),
@@ -285,27 +345,47 @@ export function scanSelfPromotionViolations(
         }
       }
 
-      // 2b. Ensure memory-classification.ts stays purely read-only (no Prisma / AiMemory writes)
-      if (file === MEMORY_CLASSIFICATION_FILE && ts.isCallExpression(node)) {
-        const callee = node.expression.getText(sf);
-        if (
-          /\baiMemory\b|upsertAiMemory|\bprisma\b|memoryService|memoryWriter/i.test(callee)
-        ) {
-          violations.push({
-            file,
-            line: lineOf(sf, node.getStart(sf)),
-            kind: 'classification_writer',
-            detail: `${MEMORY_CLASSIFICATION_FILE} must stay read-only; found ${callee}`,
-          });
+      // 2b. Ensure memory-classification.ts stays a pure read-only leaf module:
+      //     pin its imports to the pure leaf allowlist AND forbid Prisma / AiMemory / writer calls.
+      if (file === MEMORY_CLASSIFICATION_FILE) {
+        if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+          const spec = node.moduleSpecifier.text;
+          if (!ALLOWED_CLASSIFICATION_IMPORTS.has(spec)) {
+            violations.push({
+              file,
+              line: lineOf(sf, node.getStart(sf)),
+              kind: 'classification_writer',
+              detail: `${MEMORY_CLASSIFICATION_FILE} may only import pure leaf modules; found '${spec}'`,
+            });
+          }
+        }
+        if (ts.isCallExpression(node)) {
+          const callee = node.expression.getText(sf);
+          if (/\baiMemory\b|upsertAiMemory|\bprisma\b|memoryService|memoryWriter/i.test(callee)) {
+            violations.push({
+              file,
+              line: lineOf(sf, node.getStart(sf)),
+              kind: 'classification_writer',
+              detail: `${MEMORY_CLASSIFICATION_FILE} must stay read-only; found ${callee}`,
+            });
+          }
         }
       }
 
-      // 3. Deleted self-tuning methods in KeyCortexEvolutionService (method, property field, or function)
+      // 3. Deleted self-tuning symbols in KeyCortexEvolutionService (method, property, accessor,
+      //    function, or variable declaration — including computed string property names).
       if (file === EVOLUTION_SERVICE_FILE) {
         let name: string | null = null;
-        if (ts.isMethodDeclaration(node) || ts.isPropertyDeclaration(node)) {
+        if (
+          ts.isMethodDeclaration(node) ||
+          ts.isPropertyDeclaration(node) ||
+          ts.isGetAccessorDeclaration(node) ||
+          ts.isSetAccessorDeclaration(node)
+        ) {
           name = declarationName(node.name);
         } else if (ts.isFunctionDeclaration(node) && node.name) {
+          name = node.name.text;
+        } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
           name = node.name.text;
         }
         if (name && FORBIDDEN_SELF_TUNE_NAMES.has(name)) {
@@ -336,7 +416,7 @@ describe('RR-SELFTUNE-CANDIDATE-ONLY — fail-closed self-promotion census (REC-
     ).toEqual([]);
   });
 
-  it('pins via AST that AiController.updateAiPreferences is the sole updatePreferences call in ai.controller.ts and retains @Put, @RequireModuleScope(settings, admin), and assertBusinessOwnerMember', () => {
+  it('pins via AST that AiController.updateAiPreferences is the sole updatePreferences call in ai.controller.ts and retains @UseGuards, @Put, @RequireModuleScope(settings, admin), and a real CallExpression to assertBusinessOwnerMember', () => {
     const aiController = loadServerSources().find((s) => s.file === AI_CONTROLLER_FILE);
     expect(aiController).toBeDefined();
     const sf = ts.createSourceFile(aiController!.file, aiController!.text, ts.ScriptTarget.Latest, true);
@@ -357,15 +437,31 @@ describe('RR-SELFTUNE-CANDIDATE-ONLY — fail-closed self-promotion census (REC-
 
     expect(callMethods).toEqual([ALLOWED_AI_PREFERENCES_METHOD]);
     expect(updateMethod).toBeDefined();
-    const decoratorsText = (ts.canHaveDecorators(updateMethod!) ? ts.getDecorators(updateMethod!) ?? [] : [])
-      .map((d) => d.getText(sf))
-      .join('\n');
+
+    const decorators = ts.canHaveDecorators(updateMethod!) ? ts.getDecorators(updateMethod!) ?? [] : [];
+    const decoratorsText = decorators.map((d) => d.getText(sf)).join('\n');
+    expect(decoratorsText).toContain('@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)');
     expect(decoratorsText).toContain("@Put('businesses/:businessId/ai/preferences')");
     expect(decoratorsText).toContain("@RequireModuleScope('settings', 'admin')");
-    expect(updateMethod!.body?.getText(sf)).toContain('assertBusinessOwnerMember(');
+
+    let foundOwnerAssertCall = false;
+    const walkBody = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const expr = node.expression;
+        if (
+          (ts.isIdentifier(expr) && expr.text === 'assertBusinessOwnerMember') ||
+          (ts.isPropertyAccessExpression(expr) && expr.name.text === 'assertBusinessOwnerMember')
+        ) {
+          foundOwnerAssertCall = true;
+        }
+      }
+      ts.forEachChild(node, walkBody);
+    };
+    if (updateMethod!.body) walkBody(updateMethod!.body);
+    expect(foundOwnerAssertCall).toBe(true);
   });
 
-  it('negative controls: catches EVERY updatePreferences indirection (ModuleRef, local alias, @Inject any, import alias, (this as any), optional chaining, .call/.apply/.bind, destructuring, internal this, and another ai.controller.ts route)', () => {
+  it('negative controls: catches EVERY updatePreferences indirection (ModuleRef, local alias, @Inject any, (this as any), optional chaining, .call/.apply/.bind, destructuring, computed destructuring, assignment-LHS destructuring, Reflect.get / static key, internal this, wrong NotificationsAdapterService method, and another ai.controller.ts route)', () => {
     const bypassSamples: Array<[string, VirtualSource]> = [
       [
         'direct key-cortex call',
@@ -448,6 +544,35 @@ describe('RR-SELFTUNE-CANDIDATE-ONLY — fail-closed self-promotion census (REC-
         },
       ],
       [
+        'computed destructuring and assignment-LHS destructuring',
+        {
+          file: 'modules/key-cortex/destr.service.ts',
+          text: `
+            export class DestrService {
+              async run(gw: any, b: string) {
+                let fn: any;
+                ({ updatePreferences: fn } = gw);
+                await fn(b, {});
+              }
+            }
+          `,
+        },
+      ],
+      [
+        'Reflect.get / indirect const key',
+        {
+          file: 'modules/key-cortex/refl.service.ts',
+          text: `
+            export class ReflService {
+              async run(gw: any, b: string) {
+                const k = 'update' + 'Preferences';
+                await Reflect.get(gw, k).call(gw, b, {});
+              }
+            }
+          `,
+        },
+      ],
+      [
         'bracket access with constant concatenation',
         {
           file: 'modules/key-cortex/br.service.ts',
@@ -472,6 +597,17 @@ describe('RR-SELFTUNE-CANDIDATE-ONLY — fail-closed self-promotion census (REC-
           `,
         },
       ],
+      [
+        'non-execute method inside NotificationsAdapterService',
+        {
+          file: 'modules/key-cortex/adapters/notifications-adapter.service.ts',
+          text: `
+            export class NotificationsAdapterService {
+              async rogue(b: string) { return this.updatePreferences(b); }
+            }
+          `,
+        },
+      ],
     ];
 
     for (const [label, source] of bypassSamples) {
@@ -480,7 +616,7 @@ describe('RR-SELFTUNE-CANDIDATE-ONLY — fail-closed self-promotion census (REC-
     }
   });
 
-  it('negative controls: catches EVERY evolution_tuning / key_self_tuning bypass (positional store, upsertMany, extracted variable, optional chain, template/concat) and property-field selfTune', () => {
+  it('negative controls: catches EVERY evolution_tuning / key_self_tuning bypass, memory-classification writer/import drift, and property/accessor/variable selfTune', () => {
     const samples: VirtualSource[] = [
       {
         file: 'modules/key-cortex/rogue-positional.service.ts',
@@ -495,18 +631,41 @@ describe('RR-SELFTUNE-CANDIDATE-ONLY — fail-closed self-promotion census (REC-
         text: "export class C { async run(memory: any, b: string) { await memory.upsertMany(b, [{ category: `evolution_${'tuning'}`, source: `key_self_${'tuning'}` }]); } }",
       },
       {
+        file: MEMORY_CLASSIFICATION_FILE,
+        text: `
+          import { PrismaService } from '../../core/prisma/prisma.service';
+          export async function sneaky(prisma: PrismaService) {
+            return prisma.client.aiMemory.create({ data: { category: 'evolution_tuning' } });
+          }
+        `,
+      },
+      {
         file: EVOLUTION_SERVICE_FILE,
-        text: `export class KeyCortexEvolutionService { selfTune = async () => {}; }`,
+        text: `
+          export class KeyCortexEvolutionService {
+            selfTune = async () => {};
+            get ['applyTuning' + 'Adjustment']() { return null; }
+          }
+          const buildTuningPrompt = () => '';
+        `,
       },
     ];
     const violations = scanSelfPromotionViolations(samples);
     expect(violations.map((v) => v.kind)).toEqual(
-      expect.arrayContaining(['evolution_tuning_literal', 'key_self_tuning_source', 'self_tune_method']),
+      expect.arrayContaining([
+        'evolution_tuning_literal',
+        'key_self_tuning_source',
+        'classification_writer',
+        'self_tune_method',
+      ]),
     );
     expect(violations.filter((v) => v.file === 'modules/key-cortex/rogue-positional.service.ts')).toHaveLength(1);
     expect(violations.filter((v) => v.file === 'modules/key-cortex/rogue-extracted.service.ts')).toHaveLength(1);
     expect(violations.filter((v) => v.file === 'modules/key-cortex/rogue-upsert-many.service.ts')).toHaveLength(2);
-    expect(violations.filter((v) => v.file === EVOLUTION_SERVICE_FILE)).toHaveLength(1);
+    expect(
+      violations.filter((v) => v.file === MEMORY_CLASSIFICATION_FILE && v.kind === 'classification_writer'),
+    ).toHaveLength(2);
+    expect(violations.filter((v) => v.file === EVOLUTION_SERVICE_FILE)).toHaveLength(3);
   });
 
   it('negative control: allowlisted notification preferences updatePreferences is not falsely flagged', () => {
