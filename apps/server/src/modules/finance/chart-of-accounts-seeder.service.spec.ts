@@ -96,7 +96,27 @@ function makeStub(
     return row;
   };
 
-  const client = {
+  const executedSql: string[] = [];
+
+  const abortedTxError = () =>
+    new Prisma.PrismaClientKnownRequestError(
+      'Raw query failed. Code: `25P02`. Message: `current transaction is aborted, commands ignored until end of transaction block`',
+      { code: 'P2010', clientVersion: 'test', meta: { code: '25P02' } },
+    );
+
+  const client: any = {
+    $executeRaw: vi.fn(async (strings: TemplateStringsArray) => {
+      executedSql.push(strings.join('?').trim());
+      return 1;
+    }),
+    $queryRaw: vi.fn(async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      // Matches the seeder's active-coded-accounts query:
+      // SELECT id, name, lower(btrim(code, $1)) AS norm_code FROM chart_of_accounts WHERE business_id = $2 ...
+      const tenant = values[1] as string | undefined;
+      return Array.from(coa.values())
+        .filter((r: any) => (!tenant || r.businessId === tenant) && r.isActive !== false && typeof r.code === 'string' && r.code.trim() !== '')
+        .map((r: any) => ({ id: r.id, name: r.name, norm_code: r.code.trim().toLowerCase() }));
+    }),
     chartOfAccount: {
       findMany: vi.fn(async (args: any) => {
         const businessId = tenantOf(args.where.businessId);
@@ -171,7 +191,70 @@ function makeStub(
     },
   };
 
-  return { prisma: { client } as any, state: { coa, expenseCategories, get callCount() {
+  // Simulate Postgres transaction abort state (SQLSTATE 25P02): once any query
+  // throws inside $transaction, every subsequent statement in that tx fails
+  // with 25P02 unless a SAVEPOINT was created and ROLLBACK TO SAVEPOINT runs.
+  client.$transaction = vi.fn(async (fn: (tx: any) => Promise<unknown>) => {
+    let aborted = false;
+    const savepoints: string[] = [];
+
+    const runStatement = async <T>(work: () => Promise<T>): Promise<T> => {
+      if (aborted) throw abortedTxError();
+      try {
+        return await work();
+      } catch (err) {
+        aborted = true;
+        throw err;
+      }
+    };
+
+    const tx = {
+      $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings.join('?').trim();
+        executedSql.push(sql);
+
+        const savepointMatch = /^SAVEPOINT\s+(\w+)$/i.exec(sql);
+        if (savepointMatch) {
+          if (aborted) throw abortedTxError();
+          savepoints.push(savepointMatch[1]);
+          return 0;
+        }
+        const rollbackMatch = /^ROLLBACK\s+TO\s+SAVEPOINT\s+(\w+)$/i.exec(sql);
+        if (rollbackMatch) {
+          const idx = savepoints.lastIndexOf(rollbackMatch[1]);
+          if (idx === -1) throw new Error(`savepoint "${rollbackMatch[1]}" does not exist`);
+          savepoints.splice(idx + 1);
+          aborted = false;
+          return 0;
+        }
+        const releaseMatch = /^RELEASE\s+SAVEPOINT\s+(\w+)$/i.exec(sql);
+        if (releaseMatch) {
+          if (aborted) throw abortedTxError();
+          const idx = savepoints.lastIndexOf(releaseMatch[1]);
+          if (idx === -1) throw new Error(`savepoint "${releaseMatch[1]}" does not exist`);
+          savepoints.splice(idx);
+          return 0;
+        }
+        return runStatement(() => client.$executeRaw(strings, ...values));
+      },
+      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) =>
+        runStatement(() => client.$queryRaw(strings, ...values)),
+      chartOfAccount: {
+        findMany: (args: any) => runStatement(() => client.chartOfAccount.findMany(args)),
+        findUnique: (args: any) => runStatement(() => client.chartOfAccount.findUnique(args)),
+        upsert: (args: any) => runStatement(() => client.chartOfAccount.upsert(args)),
+        update: (args: any) => runStatement(() => client.chartOfAccount.update(args)),
+      },
+      expenseCategory: {
+        findMany: (args: any) => runStatement(() => client.expenseCategory.findMany(args)),
+        update: (args: any) => runStatement(() => client.expenseCategory.update(args)),
+      },
+    };
+
+    return fn(tx);
+  });
+
+  return { prisma: { client } as any, state: { coa, expenseCategories, executedSql, client, get callCount() {
     return (client.chartOfAccount.upsert as any).mock.calls.length;
   }, get p2002Thrown() {
     return p2002Thrown;
@@ -441,3 +524,70 @@ describe('ChartOfAccountsSeederService every caller runs its own ExpenseCategory
     expect(stub.state.expenseCategories.get('ec_new')!.chartOfAccountId).toBe(marketingId);
   });
 });
+
+describe('ChartOfAccountsSeederService R1 review closures (P146)', () => {
+  it('BLOCKER-1: wraps upsertSystemAccount in SAVEPOINT sp_coa_seed and rolls back to savepoint on P2002 so the fallback findUnique never hits Postgres 25P02', async () => {
+    const stub = makeStub([], { foreignInsertOn: ['CASH', 'REVENUE_SERVICE'] });
+    const svc = new ChartOfAccountsSeederService(stub.prisma);
+
+    await expect(svc.ensureDefaults('biz_1')).resolves.toBeUndefined();
+
+    expect(stub.state.p2002Thrown).toBe(2);
+    expect(stub.state.executedSql.filter((s) => s === 'SAVEPOINT sp_coa_seed')).toHaveLength(SYSTEM_COA.length);
+    expect(stub.state.executedSql.filter((s) => s === 'ROLLBACK TO SAVEPOINT sp_coa_seed')).toHaveLength(2);
+    expect(stub.state.executedSql.filter((s) => s === 'RELEASE SAVEPOINT sp_coa_seed')).toHaveLength(SYSTEM_COA.length);
+    const rows = rowsOf(stub, 'biz_1');
+    expect(rows.size).toBe(SYSTEM_COA.length);
+    expect(rows.get('REVENUE_SERVICE')!.parentId).toBe(rows.get('REVENUE')!.id);
+  });
+
+  it('BLOCKER-2: uses effectiveTenant (ALS biz-als) consistently across preCheck, existing, upsert, and P2002 fallback findUnique when argument is biz-arg', async () => {
+    const stub = makeStub([], { foreignInsertOn: ['CASH'] });
+    const svc = new ChartOfAccountsSeederService(stub.prisma);
+
+    await runWithTenant('biz-als', 'u_1', () => svc.ensureDefaults('biz-arg'));
+
+    // preCheck and inside-tx existing findMany calls must both target biz-als, never biz-arg.
+    const findManyCalls = (stub.state.client.chartOfAccount.findMany as any).mock.calls;
+    expect(findManyCalls.length).toBeGreaterThanOrEqual(2);
+    for (const [args] of findManyCalls) {
+      expect(args.where.businessId).toBe('biz-als');
+    }
+
+    // Every upsert must target biz-als in both where and create.
+    const upsertCalls = (stub.state.client.chartOfAccount.upsert as any).mock.calls;
+    expect(upsertCalls).toHaveLength(SYSTEM_COA.length);
+    for (const [args] of upsertCalls) {
+      expect(args.where.businessId_systemKey.businessId).toBe('biz-als');
+      expect(args.create.businessId).toBe('biz-als');
+    }
+
+    // The P2002 fallback findUnique must also query biz-als, never biz-arg.
+    const findUniqueCalls = (stub.state.client.chartOfAccount.findUnique as any).mock.calls;
+    expect(findUniqueCalls).toHaveLength(1);
+    expect(findUniqueCalls[0][0].where.businessId_systemKey).toEqual({
+      businessId: 'biz-als',
+      systemKey: 'CASH',
+    });
+
+    expect(rowsOf(stub, 'biz-als').size).toBe(SYSTEM_COA.length);
+    expect(rowsOf(stub, 'biz-arg').size).toBe(0);
+  });
+
+  it('MINOR-1: maps Prisma P2010 with Postgres SQLSTATE 55P03 (lock_timeout) to 503 COA_CODE_BUSY', async () => {
+    const { ServiceUnavailableException } = await import('@nestjs/common');
+    const lockTimeoutErr = new Prisma.PrismaClientKnownRequestError(
+      'Raw query failed. Code: `55P03`. Message: `canceling statement due to lock timeout`',
+      { code: 'P2010', clientVersion: 'test', meta: { code: '55P03' } },
+    );
+    const stub = makeStub([], { failOnceWith: lockTimeoutErr });
+    const svc = new ChartOfAccountsSeederService(stub.prisma);
+
+    const err = await svc.ensureDefaults('biz_1').then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect((err as any).getStatus()).toBe(503);
+    expect((err as any).getResponse()).toMatchObject({ code: 'COA_CODE_BUSY' });
+    expect((err as Error).cause).toBe(lockTimeoutErr);
+  });
+});
+

@@ -306,6 +306,8 @@ const KNOWN_GENERAL_AI_MEMORY_CATEGORIES = new Set<string>([
   'preferences',
   'execution_patterns',
   'role_activity',
+  'fact',
+  'facts',
   'business_fact',
   'past_decision',
   'failed_attempt',
@@ -612,9 +614,12 @@ export function classifyEmbeddingWrite(
     input.explicitDataClass,
   ];
   const meta = input.metadata ?? {};
+  const isDocExtractionCopy =
+    input.sourceType === 'memory' &&
+    (meta.category === 'document_extraction' || meta.type === 'document_extraction');
 
   const moneyTaint = textStatesMoney(input.content);
-  const expenseTaint = textStatesExpense(input.content);
+  const expenseTaint = !isDocExtractionCopy && textStatesExpense(input.content);
   if (moneyTaint) {
     scopes.add('revenue');
     classes.push('REVENUE');
@@ -649,13 +654,14 @@ export function classifyEmbeddingWrite(
       break;
     }
     case 'temporal_memory': {
+      const hasExplicitEntityType = typeof meta.entityType === 'string';
       const hasMetaProvenance =
-        typeof meta.entityType === 'string' ||
+        hasExplicitEntityType ||
         typeof meta.entityId === 'string' ||
         typeof meta.sourceModule === 'string';
-      if (hasMetaProvenance) {
+      if (hasMetaProvenance && (hasExplicitEntityType || !isMemoryRowDataClass(input.sourceDataClass))) {
         const derived = classifyTemporalMemoryWrite({
-          entityType: typeof meta.entityType === 'string' ? meta.entityType : 'business',
+          entityType: hasExplicitEntityType ? (meta.entityType as string) : 'business',
           entityId: typeof meta.entityId === 'string' ? meta.entityId : null,
           type: typeof meta.type === 'string' ? meta.type : null,
           sourceModule: typeof meta.sourceModule === 'string' ? meta.sourceModule : null,

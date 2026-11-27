@@ -1,13 +1,22 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, Query, UseGuards, Inject,
+  Body, Param, Query, Req, UseGuards, Inject,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import type { ModuleLevelActor } from '../../core/auth/member-module-level';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { PortalService } from './portal.service';
 import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
+
+/** Authenticated caller attached by AuthMiddleware, or null so downstream checks fail closed. */
+function requestActor(req: { user?: { id?: unknown; role?: unknown } } | undefined): ModuleLevelActor {
+  const user = req?.user;
+  if (typeof user?.id !== 'string' || !user.id) return null;
+  return { id: user.id, role: typeof user.role === 'string' ? user.role : undefined };
+}
 
 @HiddenModuleWrites('portal', 'crm')
 @Controller('portal')
@@ -27,10 +36,14 @@ export class PortalController {
   }
 
   @Get('businesses/:businessId/access')
-  @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, RateLimitGuard)
+  @RequireModuleScope('crm', 'read')
   @RateLimit(60, 60_000)
-  async listAccess(@Param('businessId') businessId: string) {
-    return this.service.list(businessId);
+  async listAccess(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: unknown; role?: unknown } },
+  ) {
+    return this.service.list(businessId, requestActor(req));
   }
 
   @Patch('businesses/:businessId/access/:id')

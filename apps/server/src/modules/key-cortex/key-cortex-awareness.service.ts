@@ -16,6 +16,16 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  classifyKeyCortexMemoryForRead,
+  evaluateMemoryClassAccess,
+  fetchProjectedBatch,
+  getMemoryClassReadMode,
+  isRowUnconditionallySecret,
+  logMemoryClassShadowDiff,
+  type MemoryClassShadowDiffEntry,
+  type MemoryReaderContext,
+} from './memory-class-read-projection';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
@@ -96,9 +106,17 @@ export class KeyCortexAwarenessService {
     businessId: string,
     // D-235: readsRevenue false (or left out: fails closed) withholds every item whose content states money (an idea or
     // a hypothesis made from finance DNA, a concern about receivables); the counts are of what is served.
-    opts: { kinds?: Array<keyof typeof AWARENESS_TYPES>; sinceDays?: number; readsRevenue?: boolean } = {},
+    opts: {
+      kinds?: Array<keyof typeof AWARENESS_TYPES>;
+      sinceDays?: number;
+      readsRevenue?: boolean;
+      readerContext?: MemoryReaderContext;
+    } = {},
   ): Promise<AwarenessSummary> {
-    const readsRevenue = opts.readsRevenue === true;
+    const readerCtx = opts.readerContext;
+    const readsRevenue =
+      opts.readsRevenue === true ||
+      (opts.readsRevenue === undefined && Boolean(readerCtx?.reader && readerCtx.sight('revenue')));
     // Round 2 (security MAJOR-1/2, D-234 provenance): ideas, hypotheses and reflections are made from the unprojected
     // business context and integration rows are the finance module's statement sweep, so a reader without revenue read
     // is served none of them; the other kinds are judged by their values (not their key names: correctness minor 4).
@@ -125,23 +143,176 @@ export class KeyCortexAwarenessService {
     ) as Record<keyof typeof AWARENESS_TYPES, number>;
 
     const items: AwarenessItem[] = [];
+    const mode = getMemoryClassReadMode();
+    const activeClassMode = Boolean(readerCtx) && mode === 'ACTIVE';
+    const shadowClassMode = Boolean(readerCtx) && mode === 'SHADOW';
+    const shadowDiffs: MemoryClassShadowDiffEntry[] = [];
+    let shadowTotalCandidates = 0;
+    let shadowLegacyCount = 0;
+    let shadowProjectedCount = 0;
+
+    type AwarenessRow = {
+      id?: string;
+      key: string;
+      userId?: string | null;
+      value: string;
+      confidence: number;
+      createdAt: Date;
+    };
 
     for (const kind of kinds) {
       if (!readsRevenue && revenueOnly.has(kind)) continue;
-      let rows: Array<{ key: string; value: string; confidence: number; createdAt: Date }>;
-      try {
-        rows = await this.prisma.client.keyCortexMemory.findMany({
-          where: {
-            businessId,
-            type: AWARENESS_TYPES[kind],
-            ...(since ? { createdAt: { gte: since } } : {}),
-          },
-          select: { key: true, value: true, confidence: true, createdAt: true },
+
+      const whereClause: Record<string, unknown> = {
+        businessId,
+        type: AWARENESS_TYPES[kind],
+        ...(since ? { createdAt: { gte: since } } : {}),
+        // R1 Blocker 4: SQL-level personal ownership filter so foreign personal rows cannot exhaust PER_KIND_HEADROOM.
+        ...(activeClassMode && readerCtx
+          ? readerCtx.reader
+            ? { OR: [{ userId: null }, { userId: readerCtx.reader }] }
+            : { userId: null }
+          : {}),
+      };
+
+      const fetchPage = (skip: number, take: number) =>
+        this.prisma.client.keyCortexMemory.findMany({
+          where: whereClause,
+          select: { id: true, key: true, userId: true, value: true, confidence: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
-          // Round 6 (security MINOR-2): a reader without revenue read is read with headroom, so what is served (and
-          // counted) is not what is left of the newest rows.
-          take: readsRevenue ? PER_KIND_LIMIT : PER_KIND_HEADROOM,
-        });
+          ...(skip > 0 ? { skip } : {}),
+          take,
+        }) as Promise<AwarenessRow[]>;
+
+      let served = 0;
+      let totalReadUnfiltered = 0;
+
+      try {
+        if (activeClassMode && readerCtx) {
+          // R1 Blocker 5: paginate past withheld rows so fixed take never starves allowed awareness items.
+          const acceptedRows = await fetchProjectedBatch<AwarenessRow>({
+            targetCount: PER_KIND_LIMIT,
+            batchSize: PER_KIND_HEADROOM,
+            idOf: (row) => row.id ?? row.key,
+            fetchPage,
+            projectPage: (rawPage) =>
+              rawPage.filter((row) => {
+                try {
+                  const parsed = JSON.parse(row.value) as Record<string, unknown>;
+                  const parsedValues = valuesOf(parsed);
+                  const accessInput = classifyKeyCortexMemoryForRead(
+                    {
+                      id: row.id,
+                      key: row.key,
+                      type: kind,
+                      userId: row.userId ?? null,
+                      value: row.value,
+                    },
+                    { revenueOnlyTypes: revenueOnly },
+                  );
+                  const decision = evaluateMemoryClassAccess(
+                    {
+                      ...accessInput,
+                      backstopTexts: [...parsedValues, row.value],
+                    },
+                    readerCtx,
+                  );
+                  if (!decision.allowed) return false;
+                  if (!readsRevenue && parsedValues.some((t) => proposalTextStatesMoney(t) || isMoneyLabel(t))) {
+                    return false;
+                  }
+                  return true;
+                } catch {
+                  this.logger.debug(`[Awareness] Skipping unparseable ${kind} ${row.key}`);
+                  return false;
+                }
+              }),
+          });
+          for (const row of acceptedRows) {
+            try {
+              const parsed = JSON.parse(row.value) as Record<string, unknown>;
+              served += 1;
+              items.push({
+                id: row.key,
+                kind,
+                headline: this.headlineFor(kind, parsed),
+                suggestedAction: this.actionFor(kind, parsed),
+                confidence: row.confidence,
+                noticedAt: row.createdAt,
+                detail: parsed,
+              });
+            } catch {
+              this.logger.debug(`[Awareness] Skipping unparseable ${kind} ${row.key}`);
+            }
+          }
+        } else {
+          const rows = await fetchPage(0, readsRevenue ? PER_KIND_LIMIT : PER_KIND_HEADROOM);
+          totalReadUnfiltered = rows.length;
+          for (const row of rows) {
+            if (served >= PER_KIND_LIMIT) break;
+            try {
+              const parsed = JSON.parse(row.value) as Record<string, unknown>;
+              const parsedValues = valuesOf(parsed);
+              // Unconditional secret-pattern defense even without readerContext (unless OFF).
+              if (mode !== 'OFF' && isRowUnconditionallySecret(null, [...parsedValues, row.value])) {
+                continue;
+              }
+              const legacyAllowed =
+                readsRevenue || !parsedValues.some((t) => proposalTextStatesMoney(t) || isMoneyLabel(t));
+              if (shadowClassMode && readerCtx) {
+                shadowTotalCandidates += 1;
+                if (legacyAllowed) shadowLegacyCount += 1;
+                try {
+                  const accessInput = classifyKeyCortexMemoryForRead(
+                    {
+                      id: row.id,
+                      key: row.key,
+                      type: kind,
+                      userId: row.userId ?? null,
+                      value: row.value,
+                    },
+                    { revenueOnlyTypes: revenueOnly },
+                  );
+                  const decision = evaluateMemoryClassAccess(
+                    {
+                      ...accessInput,
+                      backstopTexts: [...parsedValues, row.value],
+                    },
+                    readerCtx,
+                  );
+                  const projectedAllowed = legacyAllowed && decision.allowed;
+                  if (projectedAllowed) shadowProjectedCount += 1;
+                  if (legacyAllowed !== projectedAllowed) {
+                    shadowDiffs.push({
+                      id: row.id ?? 'unknown',
+                      store: 'key_cortex_memory',
+                      dataClass: decision.effectiveDataClass,
+                      moduleScope: decision.effectiveModuleScope,
+                      legacyAllowed,
+                      projectedAllowed,
+                      reason: decision.reason,
+                    });
+                  }
+                } catch {
+                  // Crash-isolated shadow evaluation
+                }
+              }
+              if (!legacyAllowed) continue;
+              served += 1;
+              items.push({
+                id: row.key,
+                kind,
+                headline: this.headlineFor(kind, parsed),
+                suggestedAction: this.actionFor(kind, parsed),
+                confidence: row.confidence,
+                noticedAt: row.createdAt,
+                detail: parsed,
+              });
+            } catch {
+              this.logger.debug(`[Awareness] Skipping unparseable ${kind} ${row.key}`);
+            }
+          }
+        }
       } catch (error: unknown) {
         this.logger.warn(
           `[Awareness] Could not read ${kind}: ` +
@@ -150,29 +321,20 @@ export class KeyCortexAwarenessService {
         continue;
       }
 
-      let served = 0;
-      for (const row of rows) {
-        if (served >= PER_KIND_LIMIT) break;
-        // One malformed row must not lose the rest of the feed.
-        try {
-          const parsed = JSON.parse(row.value) as Record<string, unknown>;
-          if (!readsRevenue && valuesOf(parsed).some((t) => proposalTextStatesMoney(t) || isMoneyLabel(t))) continue;
-          served += 1;
-          items.push({
-            id: row.key,
-            kind,
-            headline: this.headlineFor(kind, parsed),
-            suggestedAction: this.actionFor(kind, parsed),
-            confidence: row.confidence,
-            noticedAt: row.createdAt,
-            detail: parsed,
-          });
-        } catch {
-          this.logger.debug(`[Awareness] Skipping unparseable ${kind} ${row.key}`);
-        }
-      }
-      // A revenue reader's counts are as before (every row read); anyone else's are of what is served (D-235).
-      counts[kind] = readsRevenue ? rows.length : served;
+      // A revenue reader's counts are as before (every row read); anyone else's (or active class projection) are of what is served (D-235, design 6.1).
+      counts[kind] = readsRevenue && !activeClassMode ? totalReadUnfiltered : served;
+    }
+
+    if (shadowClassMode && readerCtx && shadowDiffs.length > 0) {
+      logMemoryClassShadowDiff(this.logger, {
+        path: 'KeyCortexAwarenessService.getAwareness',
+        businessId,
+        readerPresent: readerCtx.reader !== null,
+        totalCandidates: shadowTotalCandidates,
+        legacyCount: shadowLegacyCount,
+        projectedCount: shadowProjectedCount,
+        diffs: shadowDiffs,
+      });
     }
 
     items.sort((a, b) => b.noticedAt.getTime() - a.noticedAt.getTime());
