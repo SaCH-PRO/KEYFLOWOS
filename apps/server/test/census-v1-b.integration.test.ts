@@ -472,7 +472,20 @@ beforeAll(async () => {
       RateLimitGuard,
       PublicRateLimitGuard,
       { provide: REDIS_CLIENT, useValue: redisClient },
-      { provide: ApprovalRequestService, useValue: makeRecorder('ApprovalRequestService') },
+      {
+        provide: ApprovalRequestService,
+        useValue: new Proxy(makeRecorder('ApprovalRequestService'), {
+          get(target, prop) {
+            if (prop === 'getById') {
+              return async (id: string) => {
+                serviceCalls.push('ApprovalRequestService.getById');
+                return { id, businessId: ID.bizA, status: 'pending' };
+              };
+            }
+            return target[prop as string];
+          },
+        }),
+      },
       { provide: ConnectorRegistryService, useValue: makeRecorder('ConnectorRegistryService') },
       { provide: ConnectorActivityService, useValue: makeRecorder('ConnectorActivityService') },
       { provide: ConnectorHealthMonitorService, useValue: makeRecorder('ConnectorHealthMonitorService') },
@@ -592,8 +605,8 @@ describe('P90 — SWP-CENSUS-V1-B (8 controllers / 46 open rows)', () => {
     }
   });
 
-  it('[CV1B-06] Exhaustive metadata & guard-order verification across all 46 open V1-B rows', () => {
-    expect(EXPECTED_OPEN_SCOPES).toHaveLength(46);
+  it('[CV1B-06] Exhaustive metadata & guard-order verification across all 45 applied V1-B rows (ApprovalController.create moved to exempt-check in P206)', () => {
+    expect(EXPECTED_OPEN_SCOPES).toHaveLength(45);
 
     for (const row of EXPECTED_OPEN_SCOPES) {
       const ControllerCls = controllersMap[row.controller];
