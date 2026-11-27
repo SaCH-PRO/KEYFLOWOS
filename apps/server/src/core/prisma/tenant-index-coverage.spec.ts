@@ -44,12 +44,17 @@ const ACKNOWLEDGED_UNINDEXED: Record<string, string> = {
     'Only declares @@index([sessionId, createdAt]); missing businessId-led index (deferred to owner-approved migration, D-167).',
 };
 
+/** Strips block (`/* ... *\/`) and line (`// ...`) comments in a single pass so `// /*` cannot swallow lines. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+}
+
 function readBusinessIdModels(clientSrc: string): string[] {
   const at = clientSrc.indexOf('const BUSINESS_ID_MODELS = new Set([');
   if (at < 0) throw new Error('BUSINESS_ID_MODELS not found in packages/db/src/client.ts');
   const end = clientSrc.indexOf(']);', at);
   if (end < 0) throw new Error('BUSINESS_ID_MODELS closing ]); not found');
-  const body = clientSrc.slice(at, end);
+  const body = stripComments(clientSrc.slice(at, end));
   return [...body.matchAll(/'([A-Za-z][A-Za-z0-9_]*)'/g)].map((m) => m[1]);
 }
 
@@ -67,35 +72,53 @@ function parseSchemaModelBlocks(schemaSrc: string): Map<string, string> {
   return map;
 }
 
-/** Strips single-line `//` comments from a Prisma model body before parsing attributes. */
-function stripLineComments(block: string): string {
-  return block
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, ''))
-    .join('\n');
+/** Extracts balanced argument text inside `(...)` starting at `openParenIdx`. */
+function extractBalancedParens(src: string, openParenIdx: number): string {
+  let depth = 0;
+  let inString = false;
+  for (let i = openParenIdx; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '"' && src[i - 1] !== '\\') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return src.slice(openParenIdx + 1, i);
+    }
+  }
+  return '';
 }
 
 /**
  * True iff the Prisma model block declares:
- *   - field-level `businessId String ... @unique` or `@id`, OR
+ *   - field-level `businessId String(?) ... @unique` or `@id`, OR
  *   - `@@index([businessId, ...])`, `@@unique([businessId, ...])`, or `@@id([businessId, ...])`
- *     where `businessId` is the FIRST indexed column (with optional sort/length/ops qualifiers).
+ *     (positional or named `fields:` in any argument order) where `businessId` is the FIRST column.
  */
 function hasLeadingBusinessIdIndex(rawBlock: string): boolean {
-  const block = stripLineComments(rawBlock);
+  const block = stripComments(rawBlock);
 
-  // Field-level @unique or @id on businessId
+  // Field-level @unique or @id on businessId (stripping quoted string literals like @map("..."))
   for (const line of block.split('\n')) {
-    if (/^\s*businessId\s+String\b/.test(line) && /@(?:unique|id)\b/.test(line)) {
-      return true;
+    if (/^\s*businessId\s+String\b/.test(line)) {
+      const withoutStrings = line.replace(/"(?:\\.|[^"\\])*"/g, '""');
+      if (/(?:^|\s)@(?:unique|id)\b/.test(withoutStrings)) {
+        return true;
+      }
     }
   }
 
   // Model-level @@index / @@unique / @@id with businessId as first element of [...]
-  const attrRe = /@@(?:index|unique|id)\s*\(\s*(?:fields\s*:\s*)?\[\s*([A-Za-z][A-Za-z0-9_]*)/g;
+  const attrRe = /@@(?:index|unique|id)\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = attrRe.exec(block))) {
-    if (m[1] === 'businessId') return true;
+    const args = extractBalancedParens(block, m.index + m[0].length - 1);
+    const argsWithoutStrings = args.replace(/"(?:\\.|[^"\\])*"/g, '""');
+    const fieldsMatch = /(?:^|,)\s*(?:fields\s*:\s*)?\[\s*([A-Za-z][A-Za-z0-9_]*)/.exec(argsWithoutStrings);
+    if (fieldsMatch && fieldsMatch[1] === 'businessId') return true;
   }
 
   return false;
@@ -155,7 +178,7 @@ function auditTenantIndexCoverage(
 }
 
 describe('RR-INDEX-COVERAGE-REPORT: every BUSINESS_ID_MODELS table has a businessId-led index or shrink-only acknowledgement', () => {
-  it('RED-BEFORE: real schema.prisma against BUSINESS_ID_MODELS has zero unacknowledged unindexed models, zero stale entries, and zero ghosts', () => {
+  it('real schema.prisma against BUSINESS_ID_MODELS has zero unacknowledged unindexed models, zero stale entries, and zero ghosts', () => {
     const clientSrc = fs.readFileSync(CLIENT_PATH, 'utf8');
     const schemaSrc = fs.readFileSync(SCHEMA_PATH, 'utf8');
     const models = readBusinessIdModels(clientSrc);
@@ -169,7 +192,7 @@ describe('RR-INDEX-COVERAGE-REPORT: every BUSINESS_ID_MODELS table has a busines
     expect(audit.emptyReasons, 'acknowledged entries with missing/short reasons').toEqual([]);
   });
 
-  it('NEGATIVE CONTROLS: scanner enforces leading businessId index, accepts @@unique/@@index/@unique, catches stale acks and missing schema models', () => {
+  it('NEGATIVE CONTROLS: scanner enforces leading businessId index, strips line/block comments, handles Prisma syntax variants, and enforces shrink-only rules', () => {
     const fixtureSchema = `
 model IndexedByCreatedOnly {
   id         String   @id
@@ -193,8 +216,22 @@ model IndexedComposite {
 }
 
 model UniqueField {
+  id         String  @id
+  businessId String? @unique
+}
+
+model MultilineAndQualified {
   id         String @id
-  businessId String @unique
+  businessId String
+  @@index(
+    [businessId(sort: Desc)]
+  )
+}
+
+model NamedMapBeforeFields {
+  id         String @id
+  businessId String
+  @@index(map: "idx_named_biz", fields: [businessId])
 }
 
 model TrailingBusinessIdOnly {
@@ -203,18 +240,48 @@ model TrailingBusinessIdOnly {
   businessId String
   @@index([postId, businessId])
 }
+
+model PrefixCollisionOnly {
+  id             String @id
+  businessId     String
+  businessIdHash String
+  @@index([businessIdHash])
+}
+
+model LineCommentedIndex {
+  id         String @id
+  businessId String // @unique
+  // @@index([businessId])
+}
+
+model BlockCommentedIndex {
+  id         String @id
+  businessId String /* @unique */
+  /*
+    @@index([businessId])
+  */
+}
+
+model MapStringWithAtId {
+  id         String @id
+  businessId String @map("biz_@id")
+}
 `;
-    // Model with only [createdAt] or trailing [postId, businessId] fails when unacknowledged
-    const r1 = auditTenantIndexCoverage(
-      ['IndexedByCreatedOnly', 'UniqueCompound', 'IndexedComposite', 'UniqueField', 'TrailingBusinessIdOnly'],
-      fixtureSchema,
-      {},
-    );
-    expect(r1.unacknowledgedUnindexed).toEqual(['IndexedByCreatedOnly', 'TrailingBusinessIdOnly']);
+    const failingModels = [
+      'BlockCommentedIndex',
+      'IndexedByCreatedOnly',
+      'LineCommentedIndex',
+      'MapStringWithAtId',
+      'PrefixCollisionOnly',
+      'TrailingBusinessIdOnly',
+    ];
+    const passingModels = ['UniqueCompound', 'IndexedComposite', 'UniqueField', 'MultilineAndQualified', 'NamedMapBeforeFields'];
+
+    const r1 = auditTenantIndexCoverage([...failingModels, ...passingModels], fixtureSchema, {});
+    expect(r1.unacknowledgedUnindexed).toEqual(failingModels);
     expect(r1.missingFromSchema).toEqual([]);
 
-    // @@unique([businessId, code]), @@index([businessId, deletedAt]), and field @unique pass cleanly
-    const r2 = auditTenantIndexCoverage(['UniqueCompound', 'IndexedComposite', 'UniqueField'], fixtureSchema, {});
+    const r2 = auditTenantIndexCoverage(passingModels, fixtureSchema, {});
     expect(r2).toEqual({
       missingFromSchema: [],
       unacknowledgedUnindexed: [],
@@ -223,14 +290,32 @@ model TrailingBusinessIdOnly {
       emptyReasons: [],
     });
 
-    // An acknowledged model that gains a businessId-led index fails until removed (shrink-only)
+    // Shrink-only: acknowledged model that gains a businessId-led index fails until removed
     const r3 = auditTenantIndexCoverage(['IndexedComposite'], fixtureSchema, {
       IndexedComposite: 'Legacy missing index before migration',
     });
     expect(r3.staleAcknowledged).toEqual(['IndexedComposite']);
 
-    // A BUSINESS_ID_MODELS entry missing from schema.prisma fails
+    // Missing from schema.prisma fails
     const r4 = auditTenantIndexCoverage(['GhostTenantModel'], fixtureSchema, {});
     expect(r4.missingFromSchema).toEqual(['GhostTenantModel']);
+
+    // Ghost acknowledged model and empty/short reason fail
+    const r5 = auditTenantIndexCoverage(['IndexedByCreatedOnly'], fixtureSchema, {
+      IndexedByCreatedOnly: 'short',
+      NotInList: 'Should fail as a ghost acknowledgement entry',
+    });
+    expect(r5.emptyReasons).toEqual(['IndexedByCreatedOnly']);
+    expect(r5.ghostAcknowledged).toEqual(['NotInList']);
+
+    // Commented-out entry in BUSINESS_ID_MODELS is ignored by readBusinessIdModels
+    const commentedClient = `
+      const BUSINESS_ID_MODELS = new Set([
+        'RealModel',
+        // 'CommentedOutModel',
+        /* 'BlockCommentedModel', */
+      ]);
+    `;
+    expect(readBusinessIdModels(commentedClient)).toEqual(['RealModel']);
   });
 });
