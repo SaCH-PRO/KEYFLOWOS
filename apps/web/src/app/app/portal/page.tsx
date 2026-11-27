@@ -36,12 +36,14 @@ export default function PortalPage() {
     error: "refused" | "failed" | null;
     readAt: number;
   } | null>(null);
-  const [loading, setLoading] = useState(false);
-  // The business a Grant form was opened for: it is shown only there.
-  const [formFor, setFormFor] = useState<string | null>(null);
-  const [contactId, setContactId] = useState("");
-  const [grantError, setGrantError] = useState<string | null>(null);
-  // The business the page is showing: an answer read for any other (a switch while a read ran) is dropped.
+  // P232 round 2: the read in flight that the page waits for (the latest read for the selected business). Only it
+  // shows Loading and only its answer lands: an older read, or one for a business no longer selected, never does.
+  const [pending, setPending] = useState<{ businessId: string; read: number } | null>(null);
+  const latestRead = useRef(0);
+  // The Grant form, tied to the business it was opened for, with what was typed and why a Grant failed. Opening it,
+  // Cancel and a switch to another business all start it afresh.
+  const [form, setForm] = useState<{ businessId: string; contactId: string; error: string | null } | null>(null);
+  // The business the page is showing: a read for any other (a switch while it ran) is neither started nor applied.
   const currentBusiness = useRef(businessId);
   useEffect(() => {
     currentBusiness.current = businessId;
@@ -50,22 +52,28 @@ export default function PortalPage() {
   const current = listed && listed.businessId === businessId ? listed : null;
   const accessList = current?.list ?? [];
   const loadError = current?.error ?? null;
-  const showForm = !!businessId && formFor === businessId;
-  const setShowForm = (open: boolean) => setFormFor(open ? businessId ?? null : null);
+  const loading = !!businessId && pending?.businessId === businessId;
+  const openForm = form && !!businessId && form.businessId === businessId ? form : null;
+  const showForm = openForm !== null;
+  const contactId = openForm?.contactId ?? "";
+  const grantError = openForm?.error ?? null;
+  const setShowForm = (open: boolean) => setForm(open && businessId ? { businessId, contactId: "", error: null } : null);
+  const setContactId = (value: string) => setForm((f) => (f ? { ...f, contactId: value } : f));
 
   async function loadData() {
-    if (!businessId) return;
     const askedFor = businessId;
-    setLoading(true);
+    if (!askedFor || currentBusiness.current !== askedFor) return;
+    const read = ++latestRead.current;
+    setPending({ businessId: askedFor, read });
     const res = await listPortalAccess(askedFor);
-    if (currentBusiness.current !== askedFor) return;
+    if (read !== latestRead.current || currentBusiness.current !== askedFor) return;
     // A read that fails keeps nothing of an earlier answer: no stale accesses under a refusal or an error.
     setListed(
       res.data
         ? { businessId: askedFor, list: res.data, error: null, readAt: Date.now() }
         : { businessId: askedFor, list: [], error: res.status === 403 ? "refused" : "failed", readAt: Date.now() },
     );
-    setLoading(false);
+    setPending(null);
   }
 
   useEffect(() => {
@@ -75,19 +83,19 @@ export default function PortalPage() {
 
   async function handleCreate() {
     if (!businessId || !contactId) return;
-    const res = await createPortalAccess(businessId, contactId, {
+    const askedFor = businessId;
+    const res = await createPortalAccess(askedFor, contactId, {
       invoices: true,
       projects: true,
       documents: false,
       bookings: true,
     });
     if (res.data) {
-      setShowForm(false);
-      setContactId("");
-      setGrantError(null);
+      setForm((f) => (f?.businessId === askedFor ? null : f));
       loadData();
     } else {
-      setGrantError(res.status === 403 ? "You can't grant portal access." : "Couldn't grant portal access. Try again.");
+      const error = res.status === 403 ? "You can't grant portal access." : "Couldn't grant portal access. Try again.";
+      setForm((f) => (f?.businessId === askedFor ? { ...f, error } : f));
     }
   }
 
