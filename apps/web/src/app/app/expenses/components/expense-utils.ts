@@ -289,6 +289,9 @@ function exportSlug(text: string): string {
     .replace(/[\uFE00-\uFE0F\u20E3\u{E0100}-\u{E01EF}]/gu, "")
     // R19-4: enclosing marks (a keycap, a circle) belong to no word.
     .replace(/\p{Me}/gu, "")
+    // R20-7: nor do invisible letters: every default-ignorable code point, which takes in the Hangul fillers (U+3164,
+    // U+1160, U+115F, U+FFA0), the grapheme joiner, zero-width spaces and joiners, word joiners and the like.
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
     .normalize("NFKD")
     // R17-4: combining marks are dropped only after a Latin letter (accents: "Café Ñandú" is cafe-nandu). In other
     // scripts they are part of the word (Devanagari vowel signs, Japanese voicing, Thai tone marks, Arabic harakat).

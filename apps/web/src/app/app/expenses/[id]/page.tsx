@@ -172,8 +172,12 @@ export default function ExpenseDetailPage() {
   // door answers the row as it now stands; a refusal is said in the server's words (FAILURE-KIT).
   const runVoid = async (action: "reject" | "void", success: string) => {
     if (!businessId || !expense) return;
-    // R19-3: a refused start says why (another business chosen, or the choice could not be read).
-    if (refusedStart(businessId, isCurrentBusiness)) return;
+    // R19-3: a refused start says why (another business chosen, or the choice could not be read); R20-5: and its
+    // confirm closes, as Pay's dialog does.
+    if (refusedStart(businessId, isCurrentBusiness)) {
+      setConfirmVoid(false);
+      return;
+    }
     setActionLoading(action);
     try {
       const res = await voidBill(businessId, expense.id);
@@ -200,7 +204,10 @@ export default function ExpenseDetailPage() {
   // the answer: "Expense deleted" only when it went through.
   const handleDelete = async () => {
     if (!businessId || !expense) return;
-    if (refusedStart(businessId, isCurrentBusiness)) return;
+    if (refusedStart(businessId, isCurrentBusiness)) {
+      setConfirmDelete(false);
+      return;
+    }
     setActionLoading("delete");
     try {
       const res = await deleteExpense(businessId, expense.id);

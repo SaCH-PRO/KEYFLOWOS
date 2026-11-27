@@ -59,6 +59,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     // Not observable on its own (every path that opens the builder sets `editing` first, and only the builder
     // saves): kept so no state of the old business outlives the switch. R15's mutation table lists it as equivalent.
     setEditing(null);
+    // R20-4: and none of the old business's schedules stays listed (or can be run) while the new one's read is out.
+    setRecurring([]);
   }
 
   const load = useCallback(async () => {

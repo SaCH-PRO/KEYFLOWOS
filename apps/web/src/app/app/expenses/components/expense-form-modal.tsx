@@ -42,7 +42,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   const live = () => canStartFor(businessId, isCurrentBusiness);
   const { uploadFile, isUploading: uploading } = useUpload();
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
-  const [currency] = useState(() => businessCurrency(businessId));
+  const [currency, setCurrency] = useState(() => businessCurrency(businessId));
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
       return {
@@ -64,9 +64,14 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   // R19-1: a form opened for one business keeps nothing of it when the modal shows another: the fields clear, and an
   // edit of the old business's expense is no longer an edit (React's reset-on-prop-change, during render).
   const [formFor, setFormFor] = useState(businessId);
-  const [editingFor] = useState(businessId); // the business the edit (if any) was opened for
+  // R20-2: once a switch has reset the form, the edit is over for good: back on its own business, the modal is an Add
+  // form, never an Update that would overwrite that expense with blank or newly typed fields.
+  const [editEnded, setEditEnded] = useState(false);
   if (formFor !== businessId) {
     setFormFor(businessId);
+    setEditEnded(true);
+    // R20-3: the currency the form names is the business it now shows.
+    setCurrency(businessCurrency(businessId));
     setFormData({
         // BUG-028: today in Trinidad (the business's zone), not the UTC date.
         description: "", amount: "", date: todayInBusinessZone(new Date(), businessId),
@@ -75,7 +80,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         projectId: "", contactId: "", serviceId: "",
       });
   }
-  const editing = editingFor === businessId ? editingExpense : null;
+  const editing = editEnded ? null : editingExpense;
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;

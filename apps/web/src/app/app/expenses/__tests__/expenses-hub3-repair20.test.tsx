@@ -236,6 +236,12 @@ const SITES: Site[] = [
     outcomes: ["answers"],
   },
   {
+    name: "the modal's save", call: () => client.createExpense,
+    mount: () => modal(),
+    go: async () => { fill(); fireEvent.click(screen.getByRole("button", { name: "Add Expense" })); },
+    answer: () => ok({ id: "exp_A_new" }),
+  },
+  {
     name: "the modal's schedule", call: () => client.createRecurringExpense,
     mount: () => { client.createExpense.mockResolvedValue(ok({ id: "exp_A_new" })); return modal(); },
     go: async () => {

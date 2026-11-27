@@ -46,6 +46,10 @@ describe("R20-7: invisible letters and the oversized first cluster", () => {
     expect(slugOf(fileFor(name))).toBe("biz-a");
   });
 
+  it("a default-ignorable mark after a letter of another script is dropped: '\u6771\u034F\u4EAC' is \u6771\u4EAC", () => {
+    expect(slugOf(fileFor("\u6771\u034F\u4EAC"))).toBe("\u6771\u4EAC");
+  });
+
   it("'Shop' with a filler inside is shop", () => {
     expect(slugOf(fileFor("Sh\u3164op"))).toBe("shop");
   });
