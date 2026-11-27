@@ -1685,6 +1685,11 @@
       "prefix": "v92b_",
       "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
+    },
+    {
+      "prefix": "v92l_",
+      "owner": "apps/server/test/slots-overnight-hours.integration.test.ts",
+      "packet": "V1-92 (FU-SLOTS-OVERNIGHT-HOURS, P229)"
     }
   ],
   "pendingRenames": [],
