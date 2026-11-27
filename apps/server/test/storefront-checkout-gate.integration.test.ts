@@ -24,6 +24,12 @@
  *            and bizCancelled succeeds (201) and creates the order
  *   WHS-S06  CONTROL: storeEnabled=false (even with prior order) and unknown slug return 404 on GET & POST
  *   WHS-S07  CONTROL: GET /bookings/public/businesses/:id/services for bizNone is untouched
+ *   WHS-S08  RED-BEFORE (P248): legacy-modules failure (async rejection, sync throw, null-prototype
+ *            rejection, or non-array return) is caught locally, logged safely with DSN/secret
+ *            redaction, fails closed to storeCheckout: false, and never 500s GET, /gateways,
+ *            /validate-promo, or /checkout (403 STORE_CHECKOUT_NOT_OFFERED, zero writes)
+ *   WHS-S09  PIN (P248): POST /site/storefront/public/:slug/checkout returns 404 before 400 for
+ *            unknown or closed slug with an unsupported payment method (400 control on live store)
  *
  * FIXTURES: prefix `v92g_` (test/helpers/fixture-prefixes.json), cleaned by raw SQL in beforeAll and afterAll.
  */
@@ -540,15 +546,82 @@ describe('P233 WEDGE-HIDE-STORE-SERVER: storeCheckout flag and server-side check
         expect(checkoutRes.status, `${mode} POST /checkout: ${checkoutRes.text}`).toBe(403);
         expect(checkoutRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
 
-        // Logger recorded the caught failure with the business id (and not silently swallowed).
+        // Logger recorded the caught failure for both businesses without leaking raw DSN/SQL.
         expect(warnSpy).toHaveBeenCalled();
         expect(
           warnSpy.mock.calls.some((args) => String(args[0]).includes(ID.bizNone) && String(args[0]).includes('legacy read')),
-          `${mode}: warn log must identify the failed business and error`,
+          `${mode}: warn log must identify bizNone and error`,
+        ).toBe(true);
+        expect(
+          warnSpy.mock.calls.some((args) => String(args[0]).includes(ID.bizStore) && String(args[0]).includes('legacy read')),
+          `${mode}: warn log must identify bizStore and error`,
         ).toBe(true);
       } finally {
         legacySpy.mockRestore();
         warnSpy.mockRestore();
+      }
+    }
+
+    // 6. Redaction & multi-line SQL stripping: DSN credentials and SQL snippets never reach logger.warn.
+    {
+      const secretToken = ['s3cr3t', 'dbpass', '991'].join('_');
+      const dsnErr = new Error(
+        `Invalid \`prisma.$queryRawUnsafe()\` invocation:\nSELECT * FROM businesses\nCan't reach database at postgres://dbuser:${secretToken}@db.internal:5432/keyflow`,
+      );
+      const legacySpy = vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(dsnErr);
+      const warnSpy = vi.spyOn((siteService as any).logger, 'warn').mockImplementation(() => undefined);
+      try {
+        const res = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.none)}`);
+        expect(res.status, res.text).toBe(200);
+        expect(res.body.storeCheckout).toBe(false);
+        expect(warnSpy).toHaveBeenCalled();
+        const logged = String(warnSpy.mock.calls[0]?.[0] ?? '');
+        expect(logged).toContain(ID.bizNone);
+        expect(logged).not.toContain(secretToken);
+        expect(logged).not.toContain('dbuser:');
+        expect(logged).not.toContain('\n');
+        expect(logged).not.toContain('SELECT * FROM');
+      } finally {
+        legacySpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    }
+
+    // 7. Throw-safe catch: null-prototype rejection & throwing logger still fail closed (200, storeCheckout=false).
+    {
+      const legacySpy = vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(Object.create(null));
+      const warnSpy = vi.spyOn((siteService as any).logger, 'warn').mockImplementation(() => {
+        throw new Error('logger sink unavailable');
+      });
+      try {
+        const res = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.none)}`);
+        expect(res.status, res.text).toBe(200);
+        expect(res.body.storeCheckout).toBe(false);
+      } finally {
+        legacySpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    }
+
+    // 8. Non-array returns ('store' string, null) fail closed to storeCheckout: false and 403 on checkout.
+    for (const badValue of ['store', null] as unknown[]) {
+      const legacySpy = vi.spyOn(legacyModulesService, 'getLegacyModules').mockResolvedValue(badValue as any);
+      try {
+        const getRes = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.store)}`);
+        expect(getRes.status, `non-array ${String(badValue)} GET: ${getRes.text}`).toBe(200);
+        expect(getRes.body.storeCheckout, `non-array ${String(badValue)} must fail closed`).toBe(false);
+
+        const postRes = await agent()
+          .post(`/site/storefront/public/${encodeURIComponent(SLUG.store)}/checkout`)
+          .send({
+            items: [{ productId: ID.prodStore, quantity: 1 }],
+            customer: { name: 'NonArray Buyer', email: `${P}nonarray@v92g.test.local` },
+            paymentMethod: 'CASH',
+          });
+        expect(postRes.status, `non-array ${String(badValue)} POST: ${postRes.text}`).toBe(403);
+        expect(postRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+      } finally {
+        legacySpy.mockRestore();
       }
     }
 

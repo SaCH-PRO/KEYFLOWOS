@@ -6,6 +6,7 @@ import { LegacyModulesService } from '../identity/legacy-modules.service';
 import { PUBLIC_PRODUCT_SELECT, PUBLIC_SERVICE_SELECT } from '../catalog/catalog.service';
 import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
 import { LEVEL_RANK, rankOf } from '../../core/authority/module-vocabulary';
+import { redactSensitiveText } from '../../core/security/redaction';
 
 interface StorefrontEvent {
   type: string;
@@ -211,10 +212,36 @@ export class SiteService {
       Promise.resolve()
         .then(() => this.resolveLegacyModules().getLegacyModules(business.id))
         .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `Legacy modules read failed for public storefront business=${business.id}; failing closed to storeCheckout=false: ${message}`,
-          );
+          try {
+            const errObj = err && typeof err === 'object' ? (err as { name?: unknown; code?: unknown; message?: unknown }) : null;
+            const errName = err instanceof Error && typeof err.name === 'string' && err.name ? err.name : 'Error';
+            const errCode =
+              errObj && typeof errObj.code === 'string' && /^[A-Za-z0-9_.-]{1,32}$/.test(errObj.code)
+                ? ` code=${errObj.code}`
+                : '';
+            const rawMsg =
+              err instanceof Error && typeof err.message === 'string'
+                ? err.message
+                : typeof err === 'string'
+                  ? err
+                  : '';
+            // Take only the last non-empty summary line (skips Prisma multi-line
+            // `$queryRawUnsafe` invocation/SQL headers), redact credentials & DSNs,
+            // collapse control chars/newlines, and cap length.
+            const lines = rawMsg.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+            const summaryLine = lines.length > 0 ? lines[lines.length - 1] : '';
+            const sanitized = redactSensitiveText(
+              summaryLine.replace(/([a-z][a-z0-9+.-]*:\/\/)([^/\s@]+)@/gi, '$1***@'),
+            )
+              .replace(/[\r\n\t]+/g, ' ')
+              .slice(0, 200);
+            const suffix = sanitized ? `: ${sanitized}` : '';
+            this.logger.warn(
+              `Legacy modules read failed for public storefront business=${business.id} (${errName}${errCode}); failing closed to storeCheckout=false${suffix}`,
+            );
+          } catch {
+            // Observability formatting/logging must never turn a caught failure back into a 500.
+          }
           return [] as string[];
         }),
     ]);
