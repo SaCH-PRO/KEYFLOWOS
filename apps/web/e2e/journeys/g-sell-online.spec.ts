@@ -126,8 +126,41 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** A cuid-like id (the API's row ids), which a customer-facing message must never carry. */
 const ROW_ID = /\bc[a-z0-9]{20,}\b/;
 
-/** The business's store: its slug, and the store switched on. */
+const alreadySelling = new Set<string>();
+
+/**
+ * WEDGE-HIDE-STORE part 2 (P225; owner rulings D-263, D-304, D-305): journey G is about a business that ALREADY
+ * sells. The store checkout is offered only to a business with an earlier order (the `store` legacy answer,
+ * `storeCheckout` on GET /site/storefront/public/:slug, server row P233), so G's business gets one before it opens
+ * its store: a cash counter sale of an untracked product, made as + New > Quick sale makes it (once per tenant).
+ * A brand-new business is not offered the store checkout at all; that case is pinned in the web unit tests
+ * (store-checkout-gate.test.tsx), not here.
+ */
+async function seedPastSale(request: APIRequestContext, owner: Tenant): Promise<void> {
+  if (alreadySelling.has(owner.businessId)) return;
+  // The Set lasts one worker process. A retry or another worker reads the business's orders first (the owner's read
+  // behind Sales > Orders), so the business gets one earlier sale, not one per process.
+  const earlier = rowsOf(await api(request, owner, "GET", `/site/businesses/${owner.businessId}/orders`), "orders");
+  if (earlier.length > 0) {
+    alreadySelling.add(owner.businessId);
+    return;
+  }
+  const product = await api<{ id: string }>(request, owner, "POST", `/commerce/businesses/${owner.businessId}/products`, {
+    name: `Earlier sale ${stamp()}`,
+    price: 10,
+    currency: owner.currency,
+    category: "PRODUCT",
+  });
+  await api(request, owner, "POST", `/marketplace/businesses/${owner.businessId}/quick-sales`, {
+    items: [{ productId: product.id, quantity: 1 }],
+    paymentMethod: "cash",
+  });
+  alreadySelling.add(owner.businessId);
+}
+
+/** The business's store: a business that already sells (seedPastSale), its slug, and the store switched on. */
 async function seedStore(request: APIRequestContext, owner: Tenant, label: string): Promise<string> {
+  await seedPastSale(request, owner);
   const slug = `${RUN.replace(/_/g, "-")}-${label}-${stamp()}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
   await api(request, owner, "PATCH", `/identity/businesses/${owner.businessId}`, { slug, storeEnabled: true });
   return slug;
