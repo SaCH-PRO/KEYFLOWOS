@@ -243,7 +243,7 @@ describe("R5-5: singular forms", () => {
     const hero = JSON.stringify(await run("hero-copy-generator", store(1, 0)));
     expect(hero).toMatch(/1 item, online\./);
     expect(hero).not.toMatch(/1 items/i);
-    expect(JSON.stringify(await run("seo-generator", { ...store(1, 0), products: [{ id: "p0" }] }))).toMatch(/Pepper Co \| 1 Item"/);
+    expect(JSON.stringify(await run("seo-generator", { ...store(1, 0), products: [{ id: "p0" }] as never }))).toMatch(/Pepper Co \| 1 Item"/);
   });
 
   it("the panel: 'Browse our 1 item' and '1 Item'", async () => {
