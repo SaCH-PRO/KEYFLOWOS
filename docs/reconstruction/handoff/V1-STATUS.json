@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "58002cb0954d6cac2c361dd94bd44dad8f9675c6",
-  "main_commit_date": "2026-11-27T01:52:17+00:00",
+  "main_sha": "d54b3e15a2073cde6de1510ea6cff24d83874b18",
+  "main_commit_date": "2026-11-27T03:21:14+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 231,
-    "points": 347.5,
-    "pct_by_points": 60.9
+    "packets": 235,
+    "points": 352.5,
+    "pct_by_points": 61.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 165,
-    "points": 223,
-    "pct_by_points": 39.1
+    "packets": 161,
+    "points": 218,
+    "pct_by_points": 38.2
    }
   },
   "by_step": {
@@ -78,21 +78,21 @@
     "total": 53
    },
    "5": {
-    "done": 60,
+    "done": 62,
     "in-progress": 0,
-    "todo": 32,
+    "todo": 30,
     "total": 92
    },
    "6": {
-    "done": 25,
+    "done": 26,
     "in-progress": 0,
-    "todo": 15,
+    "todo": 14,
     "total": 40
    },
    "7": {
-    "done": 4,
+    "done": 5,
     "in-progress": 0,
-    "todo": 30,
+    "todo": 29,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 141,
+    "done": 145,
     "in-progress": 0,
-    "todo": 114,
+    "todo": 110,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 82,
+   "prior-status-file": 80,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 95,
+   "code-commit-subject": 99,
    "compacted-commit": 87,
-   "no-evidence": 102,
+   "no-evidence": 100,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -165,9 +165,11 @@
    "SWP-CENSUS-OPEN-WRITES",
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
+   "SWP-QUERY-CORS-HEADERS",
    "SWP-CENSUS-V1-A",
    "SWP-CENSUS-V1-B",
    "NAV-B-LEGACY-SERVER",
+   "W11-TRANSIENT-CONFLICT",
    "W1F-ORDER-TRANSITIONS",
    "W1F-SETTLE-NO-STOCK",
    "W1F-STORE-STRIPE-R0",
@@ -185,6 +187,7 @@
    "FU-MARKETPLACE-PAID-PAYMENT-ROW",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
+   "FU-CASH-LABEL-SANITISER",
    "FU-DOC-FETCH-BODY-CAP",
    "MEM-CENSUS",
    "MEM-EXPIRED-NOT-SERVED",
@@ -193,6 +196,7 @@
    "FU-KEY-OVERDUE-SENT-ONLY",
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
+   "FU-CASE-STUDY-REVENUE",
    "RR-MODEL-LIFECYCLE-GUARD",
    "RR-UNKNOWN-COST-NOT-ZERO",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
@@ -227,8 +231,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 96,
-  "todo_with_dependencies_met_launch": 64
+  "todo_with_dependencies_met": 94,
+  "todo_with_dependencies_met_launch": 61
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -279,7 +283,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 44
+   "unblocks": 43
   },
   {
    "id": "SWP-UI-COPY",
@@ -290,16 +294,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 18
-  },
-  {
-   "id": "W11-TRANSIENT-CONFLICT",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 11
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -332,6 +326,16 @@
    "unblocks": 10
   },
   {
+   "id": "W11-LOAD-SENSITIVE-TESTS",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
@@ -347,16 +351,6 @@
    "priority": "P1",
    "size": "L",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8
-  },
-  {
-   "id": "SWP-QUERY-CORS-HEADERS",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
@@ -577,26 +571,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASE-STUDY-REVENUE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASH-LABEL-SANITISER",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -878,6 +852,16 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W11-ORDER-METADATA-WRITERS",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1241,7 +1225,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 44
+   "unblocks": 43
   },
   {
    "id": "SWP-UI-COPY",
@@ -1252,16 +1236,6 @@
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 18
-  },
-  {
-   "id": "W11-TRANSIENT-CONFLICT",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 11
   },
   {
    "id": "EXPENSES-HUB-3",
@@ -1294,6 +1268,16 @@
    "unblocks": 10
   },
   {
+   "id": "W11-LOAD-SENSITIVE-TESTS",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
@@ -1309,16 +1293,6 @@
    "priority": "P1",
    "size": "L",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8
-  },
-  {
-   "id": "SWP-QUERY-CORS-HEADERS",
-   "step": 6,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 8
@@ -1519,26 +1493,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASE-STUDY-REVENUE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-CASH-LABEL-SANITISER",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -4526,15 +4480,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "fb9744d4"
+   ],
    "depends_on": [
     "W11-QUERY-DTO-COERCION"
    ],
    "title": "Public visitor/cart/checkout events pass CORS (X-Visitor-Id, X-Session-Id allowed)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-ORDER-METADATA-WRITERS",
@@ -4551,7 +4507,7 @@
     "SWP-QUERY-CORS-HEADERS"
    ],
    "title": "Abandoned-checkout flag and Shopify order sync write order metadata in one statement (F-27)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-READ-SCOPE-CENSUS",
@@ -4854,10 +4810,12 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "747205c2"
+   ],
    "depends_on": [
     "W11-SHIP-STOCK-DECREMENT",
     "W11-STORE-OWN-PAYMENT-KEYS",
@@ -4865,7 +4823,7 @@
     "VAT-BASICS"
    ],
    "title": "Share isLostTransactionConflict with identity bootstrap, PayPal capture recording and the KEY action boundary (F-37)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-LOAD-SENSITIVE-TESTS",
@@ -4882,7 +4840,7 @@
     "W11-TRANSIENT-CONFLICT"
    ],
    "title": "Three suites that fail only under machine load get deterministic budgets (MW-06 pool, ST-2 5s, EE-08/MR-02 waits)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-PAGING-TOTAL-ORDER-A",
@@ -5954,15 +5912,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e4fd193c"
+   ],
    "depends_on": [
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "One code-only currency label sanitiser for every structured other-currency cash list",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-DOC-FETCH-BODY-CAP",
@@ -6397,13 +6357,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "599b7ea5"
+   ],
    "depends_on": [],
    "title": "Case-study metrics withhold recent revenue without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-PAY-LINK-STATUS-GATE",
