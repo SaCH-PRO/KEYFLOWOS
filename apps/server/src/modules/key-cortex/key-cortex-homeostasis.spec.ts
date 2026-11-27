@@ -23,6 +23,7 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { KeyCortexHomeostasisService } from './key-cortex-homeostasis.service';
+import { getCurrentBusinessId, getCurrentUserId } from '../../core/tenant/tenant-context';
 
 // V1-24b: this file calls a @Cron handler directly. Under NODE_ENV=test the
 // handlers return first (keyCronsDisabled() includes schedulersDisabled()),
@@ -250,5 +251,49 @@ describe('reads are bounded', () => {
       expect(q.take, 'unbounded read').toBeGreaterThan(0);
       expect(q.where?.createdAt, 'no time window').toBeDefined();
     }
+  });
+});
+
+describe('scheduledHomeostasis tenant context and kill switch (P148)', () => {
+  it('wraps each business in runForTenant(businessId, ...) with no user attribution', async () => {
+    const { svc, prisma, intero } = make();
+    prisma.client.business.findMany = vi.fn(() =>
+      Promise.resolve([{ id: 'biz_alpha' }, { id: 'biz_beta' }]),
+    );
+
+    const seenInSense: Array<{
+      arg: string;
+      ambientBusinessId: string | undefined;
+      ambientUserId: string | undefined;
+    }> = [];
+    intero.senseBody = vi.fn(async (businessId: string) => {
+      seenInSense.push({
+        arg: businessId,
+        ambientBusinessId: getCurrentBusinessId(),
+        ambientUserId: getCurrentUserId(),
+      });
+      return null;
+    });
+
+    await svc.scheduledHomeostasis();
+
+    expect(seenInSense).toEqual([
+      { arg: 'biz_alpha', ambientBusinessId: 'biz_alpha', ambientUserId: undefined },
+      { arg: 'biz_beta', ambientBusinessId: 'biz_beta', ambientUserId: undefined },
+    ]);
+    expect(getCurrentBusinessId()).toBeUndefined();
+    expect(getCurrentUserId()).toBeUndefined();
+  });
+
+  it('KEY_DISABLED=1 stops scheduledHomeostasis before any database read (D-17)', async () => {
+    vi.stubEnv('KEY_DISABLED', '1');
+    const { svc, prisma, endocrine, intero } = make();
+
+    await svc.scheduledHomeostasis();
+
+    expect(prisma.client.business.findMany).not.toHaveBeenCalled();
+    expect(prisma.client.aiExecutionLog.findMany).not.toHaveBeenCalled();
+    expect(intero.senseBody).not.toHaveBeenCalled();
+    expect(endocrine.release).not.toHaveBeenCalled();
   });
 });

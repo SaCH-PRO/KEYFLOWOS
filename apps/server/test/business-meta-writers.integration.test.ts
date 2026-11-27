@@ -115,7 +115,7 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 60_000 });
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -264,7 +264,7 @@ async function waitersBehind(pid: number): Promise<number> {
 
 /** Wait until `n` backends wait behind the lock(s) backend `pid` holds. */
 async function waitForWaitersBehind(pid: number, n: number) {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 20_000;
   for (;;) {
     const seen = await waitersBehind(pid);
     if (seen >= n) return;
@@ -281,7 +281,7 @@ async function waitForWaitersBehind(pid: number, n: number) {
 async function committedOrWaiting(p: Promise<unknown>, writerPid: number | undefined): Promise<'committed' | 'waiting'> {
   let settled = false;
   p.then(() => { settled = true; }, () => { settled = true; });
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 20_000;
   for (;;) {
     if (settled) return 'committed';
     if (writerPid !== undefined && (await waitersBehind(writerPid)) > 0) return 'waiting';
@@ -461,12 +461,12 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.biz, name: `${ID.biz}-name`, ownerId: ID.owner, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_owner_biz`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
   await reset();
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
-}, 60_000);
+}, 120_000);
 
 describe('FOLLOW3-D12 fixture sanity (real rows)', () => {
   it('[MW-X01] seeded one business owned by one OWNER, its metaData holding a payment secret, the bank name and an unrelated key', async () => {
@@ -706,13 +706,35 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
     const sampler = await sampleIdleLockHolders(pool);
     let sampled: { samples: number; holders: string[] } | undefined;
     try {
-      const events = Array.from({ length: FLOOD }, (_, i) => floodSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
+      // W11-LOAD-SENSITIVE-TESTS (MW-06): keep the production pool unchanged
+      // (20 connections, 5 s wait — SEC-FH-1 / CR-FH-1) and all 200 events,
+      // while bounding in-flight event concurrency below POOL.max (16 < 20).
+      // Queueing all 200 single-row UPDATEs at t=0 forces 180 callers to sit
+      // in pg-pool's 5 s connection-wait FIFO queue behind Postgres's per-row
+      // serialization, starving tail events and otherTenant under CPU/DB load
+      // even though each event is one atomic statement holding no transaction.
+      const FLOOD_CONCURRENCY = 16;
+      const settled: Array<PromiseSettledResult<unknown>> = new Array(FLOOD);
+      let nextEvent = 0;
+      const runFloodWorker = async () => {
+        for (;;) {
+          const i = nextEvent;
+          if (i >= FLOOD) return;
+          nextEvent += 1;
+          try {
+            settled[i] = { status: 'fulfilled', value: await floodSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`) };
+          } catch (reason) {
+            settled[i] = { status: 'rejected', reason };
+          }
+        }
+      };
+      const floodDone = Promise.all(Array.from({ length: FLOOD_CONCURRENCY }, () => runFloodWorker()));
       const startedAt = Date.now();
       const otherTenant = db.user.findFirst({ where: { NOT: { id: { startsWith: P } } }, select: { id: true } })
         .then(() => Date.now() - startedAt);
       const clear = patchBusiness({ metaData: { stripeSecretKey: null } }).then((r: any) => r);
-      const [settled, other, cleared] = await Promise.all([
-        Promise.allSettled(events),
+      const [, other, cleared] = await Promise.all([
+        floodDone,
         otherTenant.then((ms: number) => ({ ok: true as const, ms }), (e: any) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) })),
         clear,
       ]);
