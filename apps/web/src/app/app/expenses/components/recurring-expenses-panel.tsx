@@ -61,6 +61,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     setEditing(null);
     // R20-4: and none of the old business's schedules stays listed (or can be run) while the new one's read is out.
     setRecurring([]);
+    // R21-3: and the new business's read is out, so no "No recurring expenses" shows before it answers.
+    setLoading(true);
   }
 
   const load = useCallback(async () => {

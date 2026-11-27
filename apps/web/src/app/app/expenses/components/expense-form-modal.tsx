@@ -66,10 +66,16 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   const [formFor, setFormFor] = useState(businessId);
   // R20-2: once a switch has reset the form, the edit is over for good: back on its own business, the modal is an Add
   // form, never an Update that would overwrite that expense with blank or newly typed fields.
-  const [editEnded, setEditEnded] = useState(false);
+  // R21-4: only the edit open at the switch ends; a fresh edit passed afterwards is the modal's own and updates.
+  // The edit open at the switch is the one shown before it (the switch's own render may already carry a fresh one).
+  const [endedEditIds, setEndedEditIds] = useState<string[]>([]);
+  const [openEditId, setOpenEditId] = useState<string | null>(editingExpense?.id ?? null);
+  const [extracting, setExtracting] = useState(false);
   if (formFor !== businessId) {
     setFormFor(businessId);
-    setEditEnded(true);
+    if (openEditId && !endedEditIds.includes(openEditId)) setEndedEditIds([...endedEditIds, openEditId]);
+    // R21-5: an Extract dropped at the switch leaves the new business's Extract enabled.
+    setExtracting(false);
     // R20-3: the currency the form names is the business it now shows.
     setCurrency(businessCurrency(businessId));
     setFormData({
@@ -80,7 +86,8 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
         projectId: "", contactId: "", serviceId: "",
       });
   }
-  const editing = editEnded ? null : editingExpense;
+  if ((editingExpense?.id ?? null) !== openEditId) setOpenEditId(editingExpense?.id ?? null);
+  const editing = editingExpense && !endedEditIds.includes(editingExpense.id) ? editingExpense : null;
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
@@ -153,7 +160,6 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
     }
   };
 
-  const [extracting, setExtracting] = useState(false);
 
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
