@@ -1409,6 +1409,11 @@ const UNGRANTED: Record<string, string> = {
   bookings_list_waitlist: 'BookingWaitlistService.listWaitlist is reached by bookings.controller GET, which is unscoped',
   bookings_offer_waitlist_slot: 'BookingWaitlistService.offerSlot finds the waitlist entry by its bare id (GOVERNED_UNGRANTED, AMBIENT-BOUND; bookings:write is only a floor)',
   calendar_check_conflicts: 'reads Prisma directly; no service call (baseline read for every position)',
+  commerce_summarize_revenue: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES revenue:read + KEY_BOOKS_MEMBERSHIP_READ_TOOLS)',
+  crm_create_reminder: 'reads Prisma directly; no service call (P160: writes ContactTask with required contactId; governed by GRAPH_ACTION_EXTRA_SCOPES crm:write)',
+  crm_recommend_follow_ups: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES crm:read + GRAPH_ACTION_CONTACT_READ_TOOLS)',
+  finance_create_invoice_reminder_draft: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES revenue:write + KEY_BOOKS_MEMBERSHIP_READ_TOOLS)',
+  finance_list_overdue_invoices: 'reads Prisma directly; no service call (P160: governed by GRAPH_ACTION_EXTRA_SCOPES revenue:read + KEY_BOOKS_MEMBERSHIP_READ_TOOLS)',
   commerce_send_invoice:
     "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), with a pay link from CommerceService.automatedInvoiceUrl, which backs no route (V1-46b), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
   // commerce_create_product / commerce_update_product: granted (revenue write) since SWP-CENSUS-V1-A (P87) gated CatalogController product writes
@@ -1720,6 +1725,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         // P206 (FU-TODAY-APPROVALS-STAFF, D-298): ApprovalController.create moved to per-requestType assertMayCreateApprovalRequest
         // command_* and procurement_*: D-40 put the command-centre item and procurement routes
         // under operations (R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
+        command_create_item: 'write',
         command_discharge_obligation: 'write',
         command_list_due_obligations: 'read',
         contract_create_tag: 'write',

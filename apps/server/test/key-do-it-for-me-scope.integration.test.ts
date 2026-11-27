@@ -235,7 +235,7 @@ beforeAll(async () => {
         provide: KeyCommandService,
         // No 'ask' runs here: the registries, oversight and the kill switch are not reached.
         useFactory: (prisma: any, commands: any) =>
-          new KeyCommandService(prisma, recorder as any, undefined, commands, undefined, undefined, undefined),
+          new KeyCommandService(prisma, recorder as any, commands, undefined, undefined, undefined),
         inject: [PrismaService, CommandService],
       },
     ],

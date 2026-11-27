@@ -132,9 +132,9 @@ const PACKET_WRITERS = [
  * this baseline.
  */
 const LEGACY_DIALECT_READERS: Record<string, { hits: number; why: string }> = {
-  'modules/ai/key-tool-registry.service.ts': {
+  'modules/ai/legacy-promoted-tools.helper.ts': {
     hits: 1,
-    why: "status: { not: 'DORMANT' } filter: excludes a row the CSV/link import or a playbook's update_status action wrote as DORMANT before D-92 (neither writes it since); D-92 reads such a row as CLIENT, so this KEY tool filter is a residual outside W4-D92-DORMANT-AS-CLIENT",
+    why: "status: { not: 'DORMANT' } filter moved from retired key-tool-registry.service.ts in P160 (RR-LEGACY-FALLBACK-REMOVE): excludes a row the CSV/link import or a playbook's update_status action wrote as DORMANT before D-92 (neither writes it since); D-92 reads such a row as CLIENT, so this KEY tool filter is a residual outside W4-D92-DORMANT-AS-CLIENT",
   },
   'modules/ai/flow-orchestrator.service.ts': { hits: 1, why: "an Automation's ACTIVE/INACTIVE, not Contact.status (scanner false positive)" },
 };

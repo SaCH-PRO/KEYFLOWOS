@@ -30,10 +30,13 @@ export class DataInboxService {
     } = query;
 
     const take = Math.min(Math.max(Number(limit) || 25, 1), 100);
-    const orderBy: Prisma.IngestionItemOrderByWithRelationInput = {
-      [sortBy === 'confidence' ? 'confidence' : sortBy === 'updatedAt' ? 'updatedAt' : 'createdAt']:
-        sortOrder,
-    };
+    const orderBy: Prisma.IngestionItemOrderByWithRelationInput[] = [
+      {
+        [sortBy === 'confidence' ? 'confidence' : sortBy === 'updatedAt' ? 'updatedAt' : 'createdAt']:
+          sortOrder,
+      },
+      { id: sortOrder },
+    ];
 
     const where: Prisma.IngestionItemWhereInput = { businessId };
     if (status) where.status = status;

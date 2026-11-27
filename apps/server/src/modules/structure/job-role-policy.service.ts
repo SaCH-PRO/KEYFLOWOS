@@ -223,7 +223,7 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // is no longer derived as a static operations:write tool.
     // command_* and procurement_*: the command-centre item and procurement routes require
     // operations (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
-    command_discharge_obligation: 'write', command_list_due_obligations: 'read',
+    command_create_item: 'write', command_discharge_obligation: 'write', command_list_due_obligations: 'read',
     contract_create_tag: 'write', contract_extract_terms: 'write', contract_list_tags: 'read',
     contracts_acknowledge_alert: 'write', contracts_create: 'write', contracts_delete: 'write',
     contracts_get: 'read', contracts_list: 'read', contracts_stats: 'read',
@@ -353,10 +353,25 @@ function matches(patterns: readonly string[], toolName: string): boolean {
 const CANONICAL_BY_KEY: Readonly<Record<string, Readonly<Record<string, GrantLevel>>>> =
   CANONICAL_MODULE_TOOLS;
 
-/** Every registry tool some route governs: reached only through its governing module. */
+/**
+ * Promoted Prisma-backed tools governed via GRAPH_ACTION_EXTRA_SCOPES rather than
+ * a controller route handler (P160 R1 Security MAJOR-1): keeping them in GOVERNED
+ * guarantees legacy/canonical family wildcards (`crm_*`, `finance_*`, `commerce_*`)
+ * on STAFF_BRIDGE can never bypass their explicit scope/visibility gates.
+ */
+export const EXTRA_SCOPED_GOVERNED_TOOLS: ReadonlySet<string> = new Set([
+  'finance_list_overdue_invoices',
+  'finance_create_invoice_reminder_draft',
+  'commerce_summarize_revenue',
+  'crm_recommend_follow_ups',
+  'crm_create_reminder',
+]);
+
+/** Every registry tool some route or explicit scope gate governs: reached only through its governing module. */
 const GOVERNED: ReadonlySet<string> = new Set([
   ...Object.values(CANONICAL_MODULE_TOOLS).flatMap((tools) => Object.keys(tools)),
   ...Object.keys(GOVERNED_UNGRANTED),
+  ...EXTRA_SCOPED_GOVERNED_TOOLS,
 ]);
 
 interface Grant {

@@ -7,6 +7,7 @@ import {
   isOnSlotGrid,
   isStrictIsoDateTimeWithTz,
   parseTimeToMinutes,
+  readBusinessDateWindows,
   readBusinessDayHours,
 } from './business-hours.util';
 
@@ -128,7 +129,7 @@ describe('readBusinessDayHours', () => {
     });
   });
 
-  it('returns null for null/undefined/malformed inputs, absent days, or invalid/inverted ranges', () => {
+  it('returns null for null/undefined/malformed inputs, absent days, or zero-length ranges', () => {
     expect(readBusinessDayHours(null, 1)).toBeNull();
     expect(readBusinessDayHours(undefined, 1)).toBeNull();
     expect(readBusinessDayHours('invalid', 1)).toBeNull();
@@ -136,13 +137,37 @@ describe('readBusinessDayHours', () => {
     expect(readBusinessDayHours({}, 1)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: '09:00', close: '17:00' } }, 2)).toBeNull();
     expect(readBusinessDayHours({ mon: { closed: false } }, 1)).toBeNull();
-    expect(readBusinessDayHours({ mon: { open: '17:00', close: '09:00', closed: false } }, 1)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: '10:00', close: '10:00', closed: false } }, 1)).toBeNull();
+    expect(readBusinessDayHours({ mon: { open: '00:00', close: '00:00', closed: false } }, 1)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: 'bad', close: '17:00', closed: false } }, 1)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: '09:00', close: '17:00', closed: 'true' } }, 1)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: '09:00', close: '17:00' } }, -1)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: '09:00', close: '17:00' } }, 7)).toBeNull();
     expect(readBusinessDayHours({ mon: { open: '09:00', close: '17:00' } }, 1.5)).toBeNull();
+  });
+
+  it('parses overnight spans (open > close) with closeMin past midnight (D-311 / P229)', () => {
+    expect(readBusinessDayHours({ fri: { open: '18:00', close: '02:00', closed: false } }, 5)).toEqual({
+      closed: false,
+      openMin: 18 * 60,
+      closeMin: 26 * 60,
+      open: '18:00',
+      close: '02:00',
+    });
+    expect(readBusinessDayHours({ mon: { open: '17:00', close: '09:00', closed: false } }, 1)).toEqual({
+      closed: false,
+      openMin: 17 * 60,
+      closeMin: 33 * 60,
+      open: '17:00',
+      close: '09:00',
+    });
+    expect(readBusinessDayHours({ fri: { open: '18:00', close: '00:00', closed: false } }, 5)).toEqual({
+      closed: false,
+      openMin: 18 * 60,
+      closeMin: 24 * 60,
+      open: '18:00',
+      close: '00:00',
+    });
   });
 
   it('ignores prototype properties safely on both outer map and inner day entries', () => {
@@ -216,6 +241,11 @@ describe('isOnSlotGrid', () => {
     // Negative delta wrapping (e.g. 00:00 on unconfigured 09:00 default anchor)
     expect(isOnSlotGrid(new Date('2030-01-07T00:00:00.000Z'), 0, DEFAULT_BUSINESS_OPEN_MIN)).toBe(true);
     expect(isOnSlotGrid(new Date('2030-01-07T00:30:00.000Z'), 30, DEFAULT_BUSINESS_OPEN_MIN)).toBe(true);
+    // Negative gridAnchorMin for previous-day offset overnight spillover (18:15 -> anchor -345 -> :15/:45)
+    expect(isOnSlotGrid(new Date('2030-01-07T00:15:00.000Z'), 15, 18 * 60 + 15 - 1440)).toBe(true);
+    expect(isOnSlotGrid(new Date('2030-01-07T00:45:00.000Z'), 45, 18 * 60 + 15 - 1440)).toBe(true);
+    expect(isOnSlotGrid(new Date('2030-01-07T00:00:00.000Z'), 0, 18 * 60 + 15 - 1440)).toBe(false);
+    expect(isOnSlotGrid(new Date('2030-01-07T00:30:00.000Z'), 30, 18 * 60 + 15 - 1440)).toBe(false);
   });
 
   it('rejects off-grid minutes, non-zero seconds, non-zero milliseconds, and invalid dates', () => {
@@ -226,6 +256,71 @@ describe('isOnSlotGrid', () => {
     expect(isOnSlotGrid(new Date('2030-01-07T09:00:00.500Z'), 9 * 60, 9 * 60)).toBe(false);
     expect(isOnSlotGrid(new Date('not-a-date'), 9 * 60, 9 * 60)).toBe(false);
     expect(isOnSlotGrid(new Date('2030-01-07T00:15:00.000Z'), 15, DEFAULT_BUSINESS_OPEN_MIN)).toBe(false);
+  });
+});
+
+describe('readBusinessDateWindows (D-311 / P229)', () => {
+  it('returns spillover window on a closed next day when previous day crosses midnight', () => {
+    const hours = {
+      fri: { open: '18:00', close: '02:00', closed: false },
+      sat: { closed: true },
+    };
+    expect(readBusinessDateWindows(hours, 5)).toEqual({
+      status: 'open',
+      windows: [
+        { openMin: 1080, closeMin: 1560, gridAnchorMin: 1080, open: '18:00', close: '02:00', spillover: false },
+      ],
+    });
+    expect(readBusinessDateWindows(hours, 6)).toEqual({
+      status: 'open',
+      windows: [
+        { openMin: 0, closeMin: 120, gridAnchorMin: -360, open: '18:00', close: '02:00', spillover: true },
+      ],
+    });
+  });
+
+  it('wraps Sunday (0) spillover from Saturday (6) overnight shift and does not spill 18:00-00:00', () => {
+    expect(
+      readBusinessDateWindows(
+        { sat: { open: '20:15', close: '01:15', closed: false }, sun: { closed: true } },
+        0,
+      ),
+    ).toEqual({
+      status: 'open',
+      windows: [
+        { openMin: 0, closeMin: 75, gridAnchorMin: 20 * 60 + 15 - 1440, open: '20:15', close: '01:15', spillover: true },
+      ],
+    });
+    expect(
+      readBusinessDateWindows(
+        { fri: { open: '18:00', close: '00:00', closed: false }, sat: { closed: true } },
+        6,
+      ),
+    ).toEqual({ status: 'closed', windows: [] });
+  });
+
+  it('combines previous-day spillover and same-day shift when both are open, and preserves unconfigured status', () => {
+    expect(
+      readBusinessDateWindows(
+        {
+          fri: { open: '18:00', close: '02:00', closed: false },
+          sat: { open: '18:00', close: '02:00', closed: false },
+        },
+        6,
+      ),
+    ).toEqual({
+      status: 'open',
+      windows: [
+        { openMin: 0, closeMin: 120, gridAnchorMin: -360, open: '18:00', close: '02:00', spillover: true },
+        { openMin: 1080, closeMin: 1560, gridAnchorMin: 1080, open: '18:00', close: '02:00', spillover: false },
+      ],
+    });
+    expect(readBusinessDateWindows({ fri: { open: '18:00', close: '02:00', closed: false } }, 6)).toEqual({
+      status: 'unconfigured',
+      windows: [
+        { openMin: 0, closeMin: 120, gridAnchorMin: -360, open: '18:00', close: '02:00', spillover: true },
+      ],
+    });
   });
 });
 

@@ -110,17 +110,17 @@ const HEADER = 'x-v61a-user';
  */
 const V1_KEY_TOOLS = new Set([
   // Today: approvals, obligations and the read-outs behind its blocks.
-  'approval_create_request', 'approval_decide_step', 'approval_list', 'command_discharge_obligation', 'command_list_due_obligations',
+  'approval_create_request', 'approval_decide_step', 'approval_list', 'command_create_item', 'command_discharge_obligation', 'command_list_due_obligations',
   'fetch_business_summary', 'fetch_client_health', 'fetch_expense_pressure', 'fetch_revenue_risk', 'fetch_schedule_health',
   'fetch_storefront_quality',
   // Customers: contacts, notes and tasks on them, follow-ups, segments, tags, messages to a contact.
-  'crm_add_note', 'crm_add_task', 'crm_create_contact', 'crm_delete_contact', 'crm_find_duplicates', 'crm_list_contacts',
-  'crm_merge_execute', 'crm_merge_preview', 'crm_search_contacts', 'crm_update_contact', 'create_followup_queue', 'create_task',
+  'crm_add_note', 'crm_add_task', 'crm_create_contact', 'crm_create_reminder', 'crm_delete_contact', 'crm_find_duplicates', 'crm_list_contacts',
+  'crm_merge_execute', 'crm_merge_preview', 'crm_recommend_follow_ups', 'crm_search_contacts', 'crm_update_contact', 'create_followup_queue', 'create_task',
   'draft_followup_message', 'keyflow_create_note', 'segment_contacts', 'send_message_with_approval', 'tag_contact',
   'update_status_with_confirmation',
   // Sales: quotes, invoices, products, store orders and listings, stock (warehouses stay a tab of a v1 hub).
   'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_product', 'commerce_create_quote', 'commerce_delete_invoice',
-  'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice', 'commerce_update_invoice', 'commerce_update_product',
+  'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice', 'commerce_summarize_revenue', 'commerce_update_invoice', 'commerce_update_product',
   'draft_payment_reminder', 'marketplace_list_listings', 'marketplace_list_orders', 'store_list_products', 'store_list_recent_orders',
   'inventory_adjust_stock', 'inventory_list_movements', 'inventory_list_stock', 'inventory_list_warehouses', 'inventory_low_stock_alerts',
   'inventory_summary', 'inventory_transfer_stock',
@@ -130,8 +130,8 @@ const V1_KEY_TOOLS = new Set([
   // Money: expenses, Books, Getting paid, reconciliation, reports.
   'expenses_create', 'expenses_list',
   'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_cashflow_forecast', 'finance_create_bill', 'finance_create_coa_account',
-  'finance_customer_balance', 'finance_expense_breakdown', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
-  'finance_list_coa', 'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown',
+  'finance_create_invoice_reminder_draft', 'finance_customer_balance', 'finance_expense_breakdown', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
+  'finance_list_coa', 'finance_list_overdue_invoices', 'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown',
   'finance_safe_to_spend', 'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
   'payments_create_link', 'payments_list_gateways', 'payments_list_links', 'payments_list_transactions', 'payments_refund_charge',
   'payments_revoke_link', 'payments_search_transactions',

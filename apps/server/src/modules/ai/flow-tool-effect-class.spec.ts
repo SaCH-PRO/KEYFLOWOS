@@ -153,14 +153,16 @@ describe('RR-TOOL-EFFECT-CLASS: every FLOW_TOOLS entry declares an effect class'
 
   it('R0 KEEP: no tool changed name, family, riskTier or route; getToolByName still resolves every tool; the count is unchanged', () => {
     // +3 canonical finance intelligence READ tools (TOF-FINANCE-CANONICAL-TOOLS, P44)
-    expect(FLOW_TOOLS).toHaveLength(289);
+    // +6 promoted legacy tools (RR-LEGACY-FALLBACK-REMOVE, P160)
+    expect(FLOW_TOOLS).toHaveLength(295);
     for (const tool of FLOW_TOOLS) {
       expect(getToolByName(tool.name)).toBe(tool);
       expect(['read', 'draft', 'organize', 'execute', 'crud']).toContain(tool.family);
       expect(typeof tool.manualEquivalentRoute).toBe('string');
     }
     const readFamily = FLOW_TOOLS.filter((t) => t.family === 'read');
-    expect(readFamily).toHaveLength(120);
-    expect(readFamily.filter((t) => !t.changedEntities || t.changedEntities.length === 0)).toHaveLength(118);
+    // +3 promoted read-family tools in P160 (finance_list_overdue_invoices, crm_recommend_follow_ups, commerce_summarize_revenue)
+    expect(readFamily).toHaveLength(123);
+    expect(readFamily.filter((t) => !t.changedEntities || t.changedEntities.length === 0)).toHaveLength(121);
   });
 });

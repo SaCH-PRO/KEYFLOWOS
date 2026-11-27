@@ -61,27 +61,6 @@ const UNIQUE_ORDER_KEYS: Record<string, ReadonlySet<string>> = {
  * suffix for `$queryRaw` / `Prisma.sql` sites) — never by line numbers.
  */
 const ALLOW_LISTED: Readonly<Record<string, string>> = {
-  // --- W11-PAGING-TOTAL-ORDER-B (18 sites: 17 findMany + 1 Prisma.sql) ---
-  'modules/ai/ai-approvals.service.ts::AiApprovalsService.listItems': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/ai/ai-execution-log.service.ts::AiExecutionLogService.getHistory': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/ai/ai-usage.service.ts::AiUsageService.getUsageHistory': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/ai/unified-inbox.service.ts::UnifiedInboxService.getInbox': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/business-genesis/genome-chat.service.ts::GenomeChatService.getMessages': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/business-genome/key-genome/genome-recommendation-outcome.service.ts::GenomeRecommendationOutcomeService.listOutcomes':
-    'W11-PAGING-TOTAL-ORDER-B',
-  'modules/command/command.service.ts::CommandService.findMany': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/command/command.service.ts::CommandService.findMany#raw': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/communications/omnichannel.controller.ts::OmnichannelController.listIntents': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/communications/omnichannel.controller.ts::OmnichannelController.unifiedInbox': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/communications/response-draft.service.ts::ResponseDraftService.listDrafts': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/content-ops/content-request.service.ts::ContentRequestService.listForBusiness': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/flow-signal/flow-signal.service.ts::FlowSignalService.list': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/flow/flow-engine.service.ts::FlowEngineService.findMany': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/flow/flow-runner.service.ts::FlowRunnerService.findRuns': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/google-drive/generated-document.service.ts::GeneratedDocumentService.list': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/ingestion/data-inbox.service.ts::DataInboxService.listItems': 'W11-PAGING-TOTAL-ORDER-B',
-  'modules/key-inbox/key-inbox.service.ts::KeyInboxService.listThreads': 'W11-PAGING-TOTAL-ORDER-B',
-
   // --- W11-PAGING-TOTAL-ORDER-C (13 sites) ---
   'modules/admin-analytics/admin-analytics.service.ts::AdminAnalyticsService.getFeedbackInbox':
     'W11-PAGING-TOTAL-ORDER-C',
