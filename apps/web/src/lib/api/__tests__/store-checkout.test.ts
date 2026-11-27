@@ -37,8 +37,10 @@ describe("WEDGE-HIDE-STORE part 2: storeCheckoutOffered", () => {
   });
 
   it("WHS2-18 withoutStoreLines keeps only booking lines: a line with no requiresBooking (an older stored cart) is a store line", () => {
-    const booking = { id: "svc", requiresBooking: true };
-    expect(withoutStoreLines([{ id: "prod", requiresBooking: false }, booking, { id: "legacy" }, { id: "odd", requiresBooking: "true" as unknown as boolean }])).toEqual([booking]);
-    expect(withoutStoreLines([])).toEqual([]);
+    type Line = { id: string; requiresBooking?: boolean };
+    const booking: Line = { id: "svc", requiresBooking: true };
+    const lines: Line[] = [{ id: "prod", requiresBooking: false }, booking, { id: "legacy" }, { id: "odd", requiresBooking: "true" as unknown as boolean }];
+    expect(withoutStoreLines(lines)).toEqual([booking]);
+    expect(withoutStoreLines<Line>([])).toEqual([]);
   });
 });
