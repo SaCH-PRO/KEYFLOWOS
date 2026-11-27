@@ -522,3 +522,27 @@ SELECT 'ai_memory_embeddings', data_class, count(*) FROM ai_memory_embeddings GR
 ORDER BY 1, 2;
 ```
 
+---
+
+## Production Background Scheduler Flags (`KEY-CRONS-FLAGS`, ruling `crons`)
+
+> [!IMPORTANT]
+> **Never set `DISABLE_SCHEDULERS=1` (or `KF_DISABLE_SCHEDULERS=1`) in production.**
+> Those global kill switches also stop core operational schedulers — invoice overdue
+> transitions (`InvoiceOverdueScheduler`), booking reminders (`BookingsService`),
+> recurring invoices (`RecurringInvoiceService`), and recurring expenses
+> (`RecurringExpenseService`).
+
+Set the five narrow producer flags below in `.env.production` for the next permitted
+deploy so KEY cortex crons and non-essential analytical / intelligence background
+producers stay silenced while all core operational schedulers keep running:
+
+```bash
+KEY_CRONS_DISABLED=1
+GROWTH_INTELLIGENCE_SCHEDULER_DISABLED=1
+MOMENTUM_SCHEDULER_DISABLED=1
+ANALYTICS_SCHEDULER_DISABLED=1
+INTELLIGENCE_SCANS_DISABLED=1
+```
+
+
