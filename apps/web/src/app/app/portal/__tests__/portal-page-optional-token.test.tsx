@@ -20,6 +20,8 @@
  *           screen; a refusal and a failure each say so
  *   POT-07  a refused Grant says so, instead of leaving the form open in silence
  *   POT-08  an enabled access past its expiry shows as expired, with no URL, to an editor too
+ *   POT-09  while the new business's read is pending after a switch, the previous business's accesses are not shown
+ *   POT-10  an answer for a business no longer selected, arriving late, never replaces the current business's list
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -203,5 +205,50 @@ describe("P232: the Client Portal page without the portal token", () => {
     expect(container.textContent).not.toContain("tok_expired_xyz");
     expect(screen.getByText("Link expired")).toBeInTheDocument();
     expect(screen.getByText(`${window.location.origin}/portal/tok_live_abc`)).toBeInTheDocument();
+  });
+
+  const accessOf = (business: string) => ({
+    data: [{ ...base, id: `pa_${business}`, contactId: `contact_of_${business}`, token: `tok_of_${business}`, enabled: true }],
+    error: null,
+  });
+
+  it("POT-09 while the new business's read is pending after a switch, the previous business's accesses are not shown", async () => {
+    member.levels = { crm: "write" };
+    const pending: Array<(v: unknown) => void> = [];
+    portal.list.mockImplementation((business: string) =>
+      business === "biz_a" ? Promise.resolve(accessOf("biz_a")) : new Promise((resolve) => pending.push(resolve)),
+    );
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_a");
+
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    // The very render of the switch, before biz_b's read has even started.
+    expect(screen.queryByText("contact_of_biz_a"), "biz_a's access is not shown in the switch's render").toBeNull();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    expect(screen.queryByText("contact_of_biz_a"), "biz_a's access is not shown under biz_b").toBeNull();
+    expect(view.container.textContent).not.toContain("tok_of_biz_a");
+    await act(async () => pending[0](accessOf("biz_b")));
+    expect(await screen.findByText("contact_of_biz_b")).toBeInTheDocument();
+  });
+
+  it("POT-10 a late answer for a business no longer selected never replaces the current business's list", async () => {
+    member.levels = { crm: "write" };
+    const pendingA: Array<(v: unknown) => void> = [];
+    portal.list.mockImplementation((business: string) =>
+      business === "biz_a" ? new Promise((resolve) => pendingA.push(resolve)) : Promise.resolve(accessOf("biz_b")),
+    );
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await waitFor(() => expect(pendingA).toHaveLength(1));
+
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    expect(await screen.findByText("contact_of_biz_b")).toBeInTheDocument();
+
+    await act(async () => pendingA[0](accessOf("biz_a")));
+    expect(screen.getByText("contact_of_biz_b"), "biz_b's list stays").toBeInTheDocument();
+    expect(screen.queryByText("contact_of_biz_a")).toBeNull();
   });
 });
