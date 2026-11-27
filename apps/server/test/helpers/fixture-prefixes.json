@@ -1710,6 +1710,11 @@
       "prefix": "v92k_",
       "owner": "apps/server/test/public-booking-rebook-release.integration.test.ts",
       "packet": "V1-92 (P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK)"
+    },
+    {
+      "prefix": "v92l_",
+      "owner": "apps/server/test/slots-overnight-hours.integration.test.ts",
+      "packet": "V1-92 (FU-SLOTS-OVERNIGHT-HOURS, P229)"
     }
   ],
   "pendingRenames": [],
