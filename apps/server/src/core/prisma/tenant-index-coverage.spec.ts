@@ -44,9 +44,11 @@ const ACKNOWLEDGED_UNINDEXED: Record<string, string> = {
     'Only declares @@index([sessionId, createdAt]); missing businessId-led index (deferred to owner-approved migration, D-167).',
 };
 
-/** Strips block (`/* ... *\/`) and line (`// ...`) comments in a single pass so `// /*` cannot swallow lines. */
+/** Strips block (`/* ... *\/`) and line (`// ...`) comments while preserving double-quoted string literals. */
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  return src.replace(/"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (match) =>
+    match.startsWith('"') ? match : '',
+  );
 }
 
 function readBusinessIdModels(clientSrc: string): string[] {
@@ -78,11 +80,18 @@ function extractBalancedParens(src: string, openParenIdx: number): string {
   let inString = false;
   for (let i = openParenIdx; i < src.length; i++) {
     const ch = src[i];
-    if (ch === '"' && src[i - 1] !== '\\') {
-      inString = !inString;
+    if (inString) {
+      if (ch === '\\') {
+        i++; // skip escaped character (handles both \" and \\)
+      } else if (ch === '"') {
+        inString = false;
+      }
       continue;
     }
-    if (inString) continue;
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
     if (ch === '(') depth++;
     else if (ch === ')') {
       depth--;
@@ -111,8 +120,8 @@ function hasLeadingBusinessIdIndex(rawBlock: string): boolean {
     }
   }
 
-  // Model-level @@index / @@unique / @@id with businessId as first element of [...]
-  const attrRe = /@@(?:index|unique|id)\s*\(/g;
+  // Model-level @@index / @@unique / @@id anchored at line start with businessId as first element of [...]
+  const attrRe = /^\s*@@(?:index|unique|id)\s*\(/gm;
   let m: RegExpExecArray | null;
   while ((m = attrRe.exec(block))) {
     const args = extractBalancedParens(block, m.index + m[0].length - 1);
@@ -234,6 +243,17 @@ model NamedMapBeforeFields {
   @@index(map: "idx_named_biz", fields: [businessId])
 }
 
+model EscapedBackslashMapBeforeFields {
+  id         String @id
+  businessId String
+  @@index(map: "idx_escaped\\\\", fields: [businessId])
+}
+
+model UrlDefaultWithUniqueField {
+  id         String @id
+  businessId String @default("https://example.com") @unique
+}
+
 model TrailingBusinessIdOnly {
   id         String @id
   postId     String
@@ -266,6 +286,12 @@ model MapStringWithAtId {
   id         String @id
   businessId String @map("biz_@id")
 }
+
+model StringLiteralFakeModelIndex {
+  id         String @id
+  businessId String
+  note       String @default("@@index([businessId])")
+}
 `;
     const failingModels = [
       'BlockCommentedIndex',
@@ -273,9 +299,18 @@ model MapStringWithAtId {
       'LineCommentedIndex',
       'MapStringWithAtId',
       'PrefixCollisionOnly',
+      'StringLiteralFakeModelIndex',
       'TrailingBusinessIdOnly',
     ];
-    const passingModels = ['UniqueCompound', 'IndexedComposite', 'UniqueField', 'MultilineAndQualified', 'NamedMapBeforeFields'];
+    const passingModels = [
+      'UniqueCompound',
+      'IndexedComposite',
+      'UniqueField',
+      'MultilineAndQualified',
+      'NamedMapBeforeFields',
+      'EscapedBackslashMapBeforeFields',
+      'UrlDefaultWithUniqueField',
+    ];
 
     const r1 = auditTenantIndexCoverage([...failingModels, ...passingModels], fixtureSchema, {});
     expect(r1.unacknowledgedUnindexed).toEqual(failingModels);
