@@ -142,7 +142,7 @@ export const REVIEWED_NATURAL_MONEY_GUARDS: readonly ReviewedNaturalMoneyGuard[]
   {
     tool: 'finance_pay_bill',
     guardFile: 'apps/server/src/modules/expenses/expenses.service.ts',
-    guardLine: 459,
+    guardLine: 693,
     reason: 'ExpensesService.markBillPaid locks the expense row FOR UPDATE and returns { newlyPaid: false } without posting when status is already PAID',
   },
 ];

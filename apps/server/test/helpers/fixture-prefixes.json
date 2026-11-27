@@ -843,6 +843,11 @@
       "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
     },
     {
+      "prefix": "v92h_",
+      "owner": "apps/server/test/expense-receipt-read.integration.test.ts",
+      "packet": "V1-92 (FU-RECEIPT-READ-ROUTE, P222)"
+    },
+    {
       "prefix": "v93a_",
       "owner": "apps/server/test/key-connector-authority.integration.test.ts",
       "packet": "V1-93 (W7-KEY-CONNECTOR-TENANT)"
@@ -1655,6 +1660,11 @@
       "prefix": "v72z_",
       "owner": "apps/server/test/privacy-deleted-contact.integration.test.ts",
       "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
+    },
+    {
+      "prefix": "v72r_",
+      "owner": "apps/server/test/authority-shadow-parity.integration.test.ts",
+      "packet": "V1-72 (RR-AUTHORITY-SHADOW-PARITY)"
     },
     {
       "prefix": "v91n_",

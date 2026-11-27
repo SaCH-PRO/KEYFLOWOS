@@ -132,6 +132,24 @@ export class ExpensesController {
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('expenses', 'read')
+  @Header('Cache-Control', 'no-store')
+  @Get('businesses/:businessId/expenses/:expenseId/receipt')
+  getExpenseReceipt(
+    @Param('businessId') businessId: string,
+    @Param('expenseId') expenseId: string,
+    @Query('download') download?: string,
+    @Query('expiresIn') expiresIn?: string,
+  ) {
+    const parsedTtl =
+      typeof expiresIn === 'string' && expiresIn.trim() !== '' ? Number(expiresIn) : undefined;
+    return this.expenses.getExpenseReceiptReadUrl(businessId, expenseId, {
+      download: download === '1' || download === 'true',
+      expiresIn: parsedTtl !== undefined && Number.isFinite(parsedTtl) ? parsedTtl : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('businesses/:businessId/expenses/:expenseId')
   getExpense(
     @Param('businessId') businessId: string,
@@ -153,7 +171,7 @@ export class ExpensesController {
       currency?: string;
       date?: string;
       vendor?: string;
-      receiptUrl?: string;
+      receiptUrl?: string | null;
       notes?: string;
       paymentMethod?: string;
       tags?: string[];
@@ -183,7 +201,7 @@ export class ExpensesController {
       currency?: string;
       date?: string;
       vendor?: string;
-      receiptUrl?: string;
+      receiptUrl?: string | null;
       notes?: string;
       paymentMethod?: string;
       tags?: string[];

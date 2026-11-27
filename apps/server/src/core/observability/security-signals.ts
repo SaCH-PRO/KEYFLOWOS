@@ -1,9 +1,10 @@
 /**
- * RR-SECURITY-SIGNAL-COUNTERS (P158; D-261, D-262):
- * Bounded in-process runtime counters for security-relevant refusals:
+ * RR-SECURITY-SIGNAL-COUNTERS (P158; D-261, D-262) & RR-AUTHORITY-SHADOW-PARITY:
+ * Bounded in-process runtime counters for security-relevant refusals & shadow mismatches:
  *   - bearer_verification_failed
  *   - cross_business_refusal
  *   - webhook_signature_failed
+ *   - authority_shadow_mismatch
  *
  * Design invariants (matching ErrorRegistry):
  *   - Fixed label cardinality cap per signal (MAX_LABELS_PER_SIGNAL); excess labels roll into OVERFLOW_LABEL.
@@ -16,12 +17,14 @@
 export type SecuritySignalType =
   | 'bearer_verification_failed'
   | 'cross_business_refusal'
-  | 'webhook_signature_failed';
+  | 'webhook_signature_failed'
+  | 'authority_shadow_mismatch';
 
 export const SECURITY_SIGNAL_TYPES: readonly SecuritySignalType[] = [
   'bearer_verification_failed',
   'cross_business_refusal',
   'webhook_signature_failed',
+  'authority_shadow_mismatch',
 ] as const;
 
 export const MAX_LABELS_PER_SIGNAL = 64;
@@ -53,6 +56,7 @@ function emptyCounts(): SecuritySignalCounts {
     bearer_verification_failed: 0,
     cross_business_refusal: 0,
     webhook_signature_failed: 0,
+    authority_shadow_mismatch: 0,
   };
 }
 
@@ -93,6 +97,7 @@ export class SecuritySignals {
       bearer_verification_failed: new Map<string, number>(),
       cross_business_refusal: new Map<string, number>(),
       webhook_signature_failed: new Map<string, number>(),
+      authority_shadow_mismatch: new Map<string, number>(),
     };
     this.hourlyBuckets = new Map<number, SecuritySignalCounts>();
   }
@@ -153,6 +158,7 @@ export class SecuritySignals {
       bearer_verification_failed: {},
       cross_business_refusal: {},
       webhook_signature_failed: {},
+      authority_shadow_mismatch: {},
     };
 
     for (const signal of SECURITY_SIGNAL_TYPES) {
@@ -178,6 +184,7 @@ export class SecuritySignals {
           bearer_verification_failed: b.bearer_verification_failed,
           cross_business_refusal: b.cross_business_refusal,
           webhook_signature_failed: b.webhook_signature_failed,
+          authority_shadow_mismatch: b.authority_shadow_mismatch,
         },
       });
     }
@@ -188,6 +195,7 @@ export class SecuritySignals {
         bearer_verification_failed: this.totals.bearer_verification_failed,
         cross_business_refusal: this.totals.cross_business_refusal,
         webhook_signature_failed: this.totals.webhook_signature_failed,
+        authority_shadow_mismatch: this.totals.authority_shadow_mismatch,
       },
       byLabel,
       hourly,
