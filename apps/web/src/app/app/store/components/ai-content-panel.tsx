@@ -117,15 +117,15 @@ export function AiContentPanel({
         faqs.push({ question: "Can I reschedule or cancel?", answer: "Yes — you can reschedule or cancel up to [your cancellation notice] before your appointment. Contact us directly for any last-minute changes.", category: "Bookings" });
       }
       if (productsCount > 0) {
-        faqs.push({ question: "What payment methods do you accept?", answer: "We accept all major credit and debit cards. All payments are processed at checkout.", category: "Payments" });
+        faqs.push({ question: "What payment methods do you accept?", answer: "We accept [your payment methods]. All payments are processed at checkout.", category: "Payments" });
       }
       if (hasDelivery) {
-        faqs.push({ question: "How long does delivery take?", answer: "Delivery takes [your delivery time]. Express options may be available at checkout depending on your location.", category: "Delivery" });
-        faqs.push({ question: "Do you offer local pickup?", answer: "Yes! Select local pickup at checkout and we'll notify you when your order is ready to collect.", category: "Delivery" });
+        // P231 r4b: no "Express options" or "local pickup" the product does not know the merchant offers.
+        faqs.push({ question: "How long does delivery take?", answer: "Delivery takes [your delivery time]. Delivery options are shown at checkout.", category: "Delivery" });
       }
-      faqs.push({ question: `What makes ${name} different?`, answer: `We're committed to quality and customer satisfaction in everything we offer. Every item is carefully selected and every service is delivered with care.`, category: "About" });
+      faqs.push({ question: `What makes ${name} different?`, answer: "[what makes your business different]", category: "About" });
       faqs.push({ question: "How can I contact you?", answer: "Reach us through the contact section on our storefront. We respond within [your response time].", category: "Support" });
-      faqs.push({ question: "What is your refund policy?", answer: "We offer refunds within [your refund window] of purchase for items in original condition. Services can be cancelled up to [your cancellation notice] in advance.", category: "Refunds" });
+      faqs.push({ question: "What is your refund policy?", answer: "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] in advance.", category: "Refunds" });
       setFaqResult({ faqs, instruction: "Fill in the [bracketed] parts with your own policies, then click 'Add All to FAQ' to apply them to your FAQ Manager, and save." });
     }
 
@@ -137,8 +137,9 @@ export function AiContentPanel({
         `Buy ${name} Products Online`.slice(0, 60),
       ];
       const metaDescOptions = [
-        `Browse ${totalItems > 0 ? totalItems : ""} products and services at ${name}. Order online and get fast delivery.`.slice(0, 160),
-        `${name} — ${tagline || "quality products and services available online"}. Book or buy instantly.`.slice(0, 160),
+        // P231 r4b: no "fast delivery", "instantly" or "quality" the product does not check.
+        `Browse ${totalItems > 0 ? totalItems : ""} products and services at ${name}. Order or book online.`.slice(0, 160),
+        `${name} — ${tagline || "products and services available online"}. Book or buy online.`.slice(0, 160),
         `Discover everything ${name} has to offer. ${businessDescription ? businessDescription.slice(0, 80) + "..." : "Shop our curated catalog online today."}`.slice(0, 160),
       ];
       setSeoResult({
@@ -157,13 +158,14 @@ export function AiContentPanel({
     if (action === "launch") {
       setLaunchResult({
         socialPosts: [
-          `🚀 We're officially live! ${name} is now open online. Browse our ${totalItems > 0 ? `${totalItems}+ items` : "products and services"} and place your first order today. Link in bio! ✨`,
+          // P231 r4b: the store's own item count (not "N+"), and no "fast response" below.
+          `🚀 We're officially live! ${name} is now open online. Browse our ${totalItems > 0 ? `${totalItems} item${totalItems === 1 ? "" : "s"}` : "products and services"} and place your first order today. Link in bio! ✨`,
           `Big news! 🎉 ${name} just launched online. Shop, book, and explore — all in one place. Drop a comment if you want the link! 👇`,
           `We've been working hard behind the scenes, and it's finally here. ${name} is now live online. Come shop with us! 🛍️`,
         ],
         whatsappMessages: [
           `Hi! Just wanted to let you know that ${name} is now live online! 🎉 You can browse and shop directly at our store. Would love to see you there! 😊`,
-          `Big news — ${name} is now online! 🚀 Easy ordering, fast response. Check it out and let me know what you think!`,
+          `Big news — ${name} is now online! 🚀 Check it out and let me know what you think!`,
         ],
         emailSubjectLines: [
           `We're Live! ${name} Is Now Online`,

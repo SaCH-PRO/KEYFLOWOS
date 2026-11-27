@@ -448,19 +448,20 @@ function buildStoreTools(): AiTool[] {
         const categoryStr = categories.length > 0 ? categories.join(", ") : "products and services";
 
         const headlines = [
-          `${storeName} — ${tagline || "Where Quality Meets Convenience"}`,
+          // P231 r4b (D-303): no quality, speed, delivery or offer the product does not know the merchant has.
+          `${storeName} — ${tagline || "Now Online"}`,
           `Discover ${categoryStr} from ${storeName}`,
           `Your go-to for ${categoryStr}`,
         ];
         const subheadlines = [
-          description || `Browse ${totalItems} curated ${categoryStr}. Book or buy online in seconds.`,
+          description || `Browse ${totalItems} ${categoryStr}. Book or buy online.`,
           `${totalItems > 0 ? `${totalItems} items` : "Everything you need"} — available online, anytime.`,
-          `Premium ${categoryStr} delivered to you. No fuss, just results.`,
+          `${categoryStr.charAt(0).toUpperCase() + categoryStr.slice(1)} from ${storeName}, online.`,
         ];
         const offerRibbons = [
           "🎉 Now Open Online — Shop Today",
-          "✨ New Arrivals Just Added",
-          "🔥 Limited Time: Free Consultation on First Order",
+          "✨ [your latest news]",
+          "🔥 [your offer]",
         ];
         const ctas = [
           "Shop Now",
@@ -704,7 +705,7 @@ function buildStoreTools(): AiTool[] {
         if (products.length > 0) {
           faqs.push({
             question: "What payment methods do you accept?",
-            answer: "We accept all major credit and debit cards, as well as online payment methods. Payment is processed at checkout.",
+            answer: "We accept [your payment methods]. Payment is processed at checkout.",
             category: "Payments",
           });
         }
@@ -712,19 +713,15 @@ function buildStoreTools(): AiTool[] {
         if (activeDelivery > 0) {
           faqs.push({
             question: "How long does delivery take?",
-            answer: "Delivery times vary by location and method. Delivery takes [your delivery time]. Express options may be available at checkout.",
-            category: "Delivery",
-          });
-          faqs.push({
-            question: "Do you offer local pickup?",
-            answer: "Yes, local pickup is available. Select this option at checkout and we'll let you know when your order is ready.",
+            // P231 r4b: no "Express options" or "local pickup" the product does not know the merchant offers.
+            answer: "Delivery times vary by location and method. Delivery takes [your delivery time]. Delivery options are shown at checkout.",
             category: "Delivery",
           });
         }
 
         faqs.push({
           question: `What makes ${storeName} different?`,
-          answer: `We pride ourselves on quality and customer satisfaction. Every item in our catalog is carefully selected and we're committed to providing an excellent experience from browsing to delivery.`,
+          answer: "[what makes your business different]",
           category: "About",
         });
 
@@ -736,7 +733,7 @@ function buildStoreTools(): AiTool[] {
 
         faqs.push({
           question: "What is your refund policy?",
-          answer: "We offer refunds within [your refund window] of purchase for items in their original condition. Services can be cancelled up to [your cancellation notice] before the scheduled time. Please contact us to initiate a refund.",
+          answer: "We offer refunds within [your refund window] of purchase. Services can be cancelled up to [your cancellation notice] before the scheduled time. Please contact us to initiate a refund.",
           category: "Refunds",
         });
 
@@ -779,9 +776,10 @@ function buildStoreTools(): AiTool[] {
         ].map((t) => t.slice(0, 60));
 
         const metaDescOptions = [
-          `Browse ${totalItems > 0 ? totalItems : ""} ${primaryCategory} at ${storeName}. Book online, buy instantly, delivered to you.`.slice(0, 160),
+          // P231 r4b: no "instantly", "delivered to you" or "quality" the product does not check.
+          `Browse ${totalItems > 0 ? totalItems : ""} ${primaryCategory} at ${storeName}. Book or buy online.`.slice(0, 160),
           `${storeName} offers ${categories.join(", ") || primaryCategory}. Discover our catalog and order online today.`.slice(0, 160),
-          `Shop ${primaryCategory} from ${storeName}. ${tagline || "Quality products and services available online."}`.slice(0, 160),
+          `Shop ${primaryCategory} from ${storeName}. ${tagline || "Products and services available online."}`.slice(0, 160),
         ];
 
         const keywords = [
@@ -868,14 +866,15 @@ function buildStoreTools(): AiTool[] {
         const totalItems = products.length + services.length;
 
         const socialPosts = [
-          `🚀 We're officially live! ${storeName} is now open online. Browse our ${totalItems > 0 ? `${totalItems}+ items` : "products and services"} and place your first order today. Link in bio! ✨`,
+          // P231 r4b: the store's own item count (not "N+"), no "fast response", no "more coming soon".
+          `🚀 We're officially live! ${storeName} is now open online. Browse our ${totalItems > 0 ? `${totalItems} item${totalItems === 1 ? "" : "s"}` : "products and services"} and place your first order today. Link in bio! ✨`,
           `Big news! 🎉 ${storeName} just launched online. Shop, book, and explore — all in one place. Drop a comment if you want the link! 👇`,
           `We've been working hard behind the scenes, and it's finally here. ${storeName} is now live online. Come shop with us! 🛍️`,
         ];
 
         const whatsappMessages = [
           `Hi! Just wanted to let you know that ${storeName} is now live online! 🎉 You can browse and shop directly at ${d.storeName ? "[your store link]" : "our store"}. Would love to see you there! 😊`,
-          `Big news — ${storeName} is now online! 🚀 Easy ordering, fast response. Check it out and let me know what you think!`,
+          `Big news — ${storeName} is now online! 🚀 Check it out and let me know what you think!`,
         ];
 
         const emailSubjectLines = [
@@ -890,7 +889,7 @@ We're thrilled to announce that ${storeName} is now live online!
 
 You can now browse our full catalog, book services, and place orders directly from our store — anytime, anywhere.
 
-${totalItems > 0 ? `We have ${totalItems} items available, with more coming soon.` : "We're just getting started and have exciting things coming."}
+${totalItems > 0 ? `We have ${totalItems} item${totalItems === 1 ? "" : "s"} available.` : "We're just getting started."}
 
 [Your Store Link]
 
