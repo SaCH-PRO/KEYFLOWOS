@@ -679,7 +679,7 @@ export class CatalogService {
           sourceProductId,
           deletedAt: null,
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
       if (existingListing) {
         return { service: existingListing, created: false };
@@ -803,13 +803,18 @@ export class CatalogService {
   /** Restore this business's trashed service (the trash's restore, D-95); see restoreProduct. */
   async restoreService(businessId: string, serviceId: string, tx?: TransactionClient) {
     const runRestore = async (txClient: TransactionClient) => {
-      const rows = await txClient.$queryRaw<Array<{ source_product_id: string | null }>>`
-        SELECT source_product_id
+      const rows = await txClient.$queryRaw<
+        Array<{ source_product_id: string | null; deleted_at: Date | null }>
+      >`
+        SELECT source_product_id, deleted_at
         FROM services
         WHERE id = ${serviceId} AND business_id = ${businessId}
         LIMIT 1
       `;
-      const sourceProductId = this.normalizeSourceProductId(rows[0]?.source_product_id ?? null);
+      if (rows.length === 0 || rows[0].deleted_at === null) {
+        throw new NotFoundException('Service not found');
+      }
+      const sourceProductId = this.normalizeSourceProductId(rows[0].source_product_id);
       if (sourceProductId) {
         await this.lockStoreListing(txClient, businessId, sourceProductId);
         await this.assertLiveBusinessProduct(txClient, businessId, sourceProductId);
