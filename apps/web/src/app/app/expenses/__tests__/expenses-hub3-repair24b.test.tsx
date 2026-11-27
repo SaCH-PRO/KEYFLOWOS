@@ -232,3 +232,35 @@ describe("R24b: the page says a refused categories read where categories show", 
     expect(dialog.textContent).not.toMatch(/Couldn't load/);
   }, 30000);
 });
+
+describe("R24b: the secondary blocks' states, around the main read and a switch", () => {
+  it("a thrown picker read is a failed block too", async () => {
+    client.fetchContacts.mockRejectedValue(new TypeError("Failed to fetch"));
+    const { result } = renderHook(() => useExpensesData());
+    await waitFor(() => expect(result.current.pickersRead?.kind).toBe("failed"));
+  });
+  it("Retry of a refused picker read reads it again", async () => {
+    client.fetchProjects.mockResolvedValue(refusedAnswer());
+    const { result } = renderHook(() => useExpensesData());
+    await waitFor(() => expect(result.current.pickersRead?.kind).toBe("failed"));
+    const before = client.fetchProjects.mock.calls.length;
+    client.fetchProjects.mockResolvedValue(ok([]));
+    act(() => { result.current.retryPickers(); });
+    await waitFor(() => expect(client.fetchProjects.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(result.current.pickersRead.kind).toBe("ok"));
+  });
+  it("when the whole read is refused, the secondary blocks failed with it (never loading for good)", async () => {
+    client.fetchExpenses.mockResolvedValue(refusedAnswer());
+    const { result } = renderHook(() => useExpensesData());
+    await waitFor(() => expect(result.current.categoriesRead?.kind).toBe("failed"));
+  });
+  it("a switch to B forgets A's refused block while B's read is out", async () => {
+    client.fetchExpenseCategories.mockImplementation((b: string) => (b === "biz_A" ? Promise.resolve(refusedAnswer()) : new Promise(() => {})));
+    const { result } = renderHook(() => useExpensesData());
+    await waitFor(() => expect(result.current.categoriesRead?.kind).toBe("failed"));
+    ws.bid = "biz_B";
+    act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } })); });
+    await waitFor(() => expect(client.fetchExpenseCategories).toHaveBeenCalledWith("biz_B"));
+    expect(result.current.categoriesRead.kind, "A's refusal said on B").toBe("loading");
+  });
+});
