@@ -42,6 +42,9 @@ type Props = {
   packagesCount?: number;
   /** SERVICE-category products: services /book sells (bought, not booked). */
   orderableServicesCount?: number;
+  /** P231 r11: whether what is on the store is known (false: the store graph or the storefront config was not read). */
+  productsKnown?: boolean;
+  servicesKnown?: boolean;
   onApply?: (fields: { headline?: string; subheadline?: string; ctaText?: string; ribbonText?: string }) => void;
 };
 
@@ -143,6 +146,8 @@ export function AiHeroCopyPanel({
   servicesCount = 0,
   packagesCount = 0,
   orderableServicesCount = 0,
+  productsKnown = true,
+  servicesKnown = true,
   onApply,
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -161,7 +166,7 @@ export function AiHeroCopyPanel({
     const name = storeName || "Your Store";
     const tagline = businessTagline || "";
     const description = businessDescription || "";
-    const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount });
+    const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount, productsKnown, servicesKnown });
 
     // P231 r6 (D-303): no quality ("Quality You Can Trust", "Premium"), speed ("in seconds"), delivery ("delivered to
     // you"), "curated", "N+ Items", "all in one place", "New Arrivals Just Added" or "First-Time Customer Special" the
@@ -173,7 +178,8 @@ export function AiHeroCopyPanel({
     ];
     const subheadlines = [
       ...(description ? [clip(description, 100)] : offer.total > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
-      ...(offer.total > 0 ? [`${offer.items}, online.`] : []),
+      // r11: no total when not everything on the store is known.
+      ...(offer.total > 0 && !offer.partial ? [`${offer.items}, online.`] : []),
     ];
     if (subheadlines.length === 0) subheadlines.push(`${name}, now online.`);
     const offerRibbons = [

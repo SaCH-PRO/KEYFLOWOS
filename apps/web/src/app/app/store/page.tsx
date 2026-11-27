@@ -81,12 +81,16 @@ export default function StorePage() {
   const deliveryCount = s.activeDeliveryMethodsCount ?? 0;
   // P231 r7 (D-303): what the storefront shows, for the hub's copy tools (its analysis tools read the whole catalog),
   // and a key of it, so the context follows a product added, removed, switched off or hidden.
-  // r10: without the store graph (not read yet, failed, or refused: liveProductIds is then empty) what is live is not
-  // known: null, so the hub says nothing about what is on the store, and its copy counts no product.
+  // r10-r11: without the store graph (not read yet, failed, or refused: liveProductIds is then empty) what is live is
+  // not known; without the storefront config (not read: it is emptyStorefront) what it hides is not known. Not known
+  // is null, so the hub says nothing about what is on the store, and the copy (the hub's and the panels') states no
+  // total, only what is known.
   const graphRead = s.storeGraph != null;
-  const storeServices = bookableServices(s.services, s.storefrontConfig);
-  const storeProducts = graphRead ? liveProducts(s.commerceProducts, s.liveProductIds, { services: s.services, stock: s.stockByProduct, storefrontConfig: s.storefrontConfig }) : null;
-  const storeKey = `${storeProducts ? storeProducts.map((p) => p.id).join(",") : "?"}|${storeServices.map((sv) => sv.id).join(",")}`;
+  const configRead = s.storefrontConfigRead !== false;
+  const storeView = { productsKnown: graphRead && configRead, servicesKnown: configRead };
+  const storeServices = storeView.servicesKnown ? bookableServices(s.services, s.storefrontConfig) : null;
+  const storeProducts = storeView.productsKnown ? liveProducts(s.commerceProducts, s.liveProductIds, { services: s.services, stock: s.stockByProduct, storefrontConfig: s.storefrontConfig }) : null;
+  const storeKey = `${storeProducts ? storeProducts.map((p) => p.id).join(",") : "?"}|${storeServices ? storeServices.map((sv) => sv.id).join(",") : "?"}`;
 
   useEffect(() => {
     if (!s.businessId) return;
@@ -317,6 +321,7 @@ export default function StorePage() {
                 commerceProducts={s.commerceProducts}
                 liveProductIds={s.liveProductIds}
                 stockByProduct={s.stockByProduct}
+                storeView={storeView}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}
@@ -331,6 +336,7 @@ export default function StorePage() {
                 commerceProducts={s.commerceProducts}
                 liveProductIds={s.liveProductIds}
                 stockByProduct={s.stockByProduct}
+                storeView={storeView}
                 storefrontConfig={cfg}
                 onConfigChange={s.handleConfigChange}
                 onSaveConfig={s.handleSaveConfig}

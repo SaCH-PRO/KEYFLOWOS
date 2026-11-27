@@ -156,13 +156,14 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
       actionLabel: "Add items",
       actionKey: "switch_tab:catalog",
     });
-  } else if (Array.isArray(data.storeProducts) && storeOffer(data).total === 0) {
+  } else if (Array.isArray(data.storeProducts) && data.storeServices !== null && storeOffer(data).total === 0) {
     // P231 r7-r10: the catalog has items, but none is on the store (only said when what is on the store is known: r10,
     // not when the store graph was not read). Say what to do, in the number each part counts:
     // - active products not listed: add them;
     // - otherwise, every product switched off (and no hidden service): switch them on, and add the ones not listed;
-    // - otherwise, what is listed and on is not showing: a product out of stock or hidden, a bookable service the
-    //   storefront hides (r10: unhide it, as a hidden product is told, not "add it").
+    // - otherwise, what is listed and on is not showing: r11, for any of its causes (out of stock, hidden by the
+    //   storefront, a category /book does not draw, a mapping not live, a service of the same name), so the words
+    //   name none of them as the cause; a bookable service the storefront hides is told to unhide it (r10).
     const listed = new Set(services.map((s) => s.sourceProductId).filter(Boolean));
     const shown = new Set(((data.storeServices ?? []) as Record<string, unknown>[]).map((s) => s.id));
     const active = products.filter((p) => p.isActive !== false);
@@ -180,7 +181,7 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
           ? [`Your catalog has ${counted(off, "item")}, but ${off === 1 ? "it is" : "every one is"} switched off. Switch ${pron(off)} on${addUnlisted} so visitors have something to browse and buy.`, `Switch ${pron(off)} on`]
           : active.length === 0
             ? [`${counted(hiddenServices, "service")} ${hiddenServices === 1 ? "is" : "are"} on your store but hidden. Unhide ${pron(hiddenServices)} in the catalog so visitors can book ${pron(hiddenServices)}.`, `Unhide ${pron(hiddenServices)}`]
-            : [`${counted(notShowing, "item")} ${notShowing === 1 ? "is" : "are"} on your store but not showing: ${notShowing === 1 ? "it is" : "they are"} out of stock or hidden. Check ${notShowing === 1 ? "its" : "their"} stock and visibility in the catalog.`, "Check the catalog"];
+            : [`${counted(notShowing, "item")} ${notShowing === 1 ? "is" : "are"} set up for your store but not showing on it. Check ${notShowing === 1 ? "its" : "their"} status, category, stock and visibility in the catalog.`, "Check the catalog"];
     suggestions.push({
       id: `nothing-on-store-${Date.now()}`,
       type: "risk",
@@ -473,10 +474,13 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
  * counted the way /book draws them (storefront-counts.ts). The analysis tools keep reading the whole catalog.
  */
 function storeOffer(d: StoreCustomData) {
-  // r10: null is "not known": no product is counted (an under-claim, never a false one).
-  const products = (d.storeProducts === null ? [] : (d.storeProducts ?? d.products ?? [])) as Record<string, unknown>[];
-  const services = bookableServices((d.storeServices ?? d.services ?? []) as Record<string, unknown>[]);
-  return offerWords(offerOf(products, services));
+  // r10-r11: null is "not known" (products: the store graph or the storefront config was not read; services: the
+  // config was not read): it is not counted, and the offer is partial, so the copy states no total.
+  const productsKnown = d.storeProducts !== null;
+  const servicesKnown = d.storeServices !== null;
+  const products = (productsKnown ? (d.storeProducts ?? d.products ?? []) : []) as Record<string, unknown>[];
+  const services = bookableServices((servicesKnown ? (d.storeServices ?? d.services ?? []) : []) as Record<string, unknown>[]);
+  return offerWords({ ...offerOf(products, services), productsKnown, servicesKnown });
 }
 
 function buildStoreTools(): AiTool[] {
@@ -508,7 +512,8 @@ function buildStoreTools(): AiTool[] {
         ];
         const subheadlines = [
           ...(description ? [description] : totalItems > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
-          ...(totalItems > 0 ? [`${offer.items}, online.`] : []),
+          // r11: no total when not everything on the store is known.
+          ...(totalItems > 0 && !offer.partial ? [`${offer.items}, online.`] : []),
         ];
         // A store with no description and nothing yet still gets one true subheadline.
         if (subheadlines.length === 0) subheadlines.push(`${storeName}, now online.`);
@@ -823,9 +828,10 @@ function buildStoreTools(): AiTool[] {
         // noun it counts, and the verb chosen by what is offered. (A commerce product's `category` is its type code,
         // PRODUCT, SERVICE or PACKAGE, not a category name, so none is put in the copy.)
         const metaTitleOptions = [
-          offer.Noun ? `${storeName} — ${offer.Noun} Online` : `${storeName} — Now Online`,
+          // r11: a title naming the whole offer by its nouns, and a total, only when the whole offer is known.
+          offer.Noun && !offer.partial ? `${storeName} — ${offer.Noun} Online` : `${storeName} — Now Online`,
           offer.shops && offer.books ? `${storeName} | Shop & Book Online` : offer.shops ? `${storeName} | Shop Online` : offer.books ? `${storeName} | Book Online` : `${storeName} Online`,
-          tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? offer.Items : "Online"}`,
+          tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 && !offer.partial ? offer.Items : "Online"}`,
         ].map((t) => clip(t, 60));
 
         const metaDescOptions = [
@@ -849,7 +855,7 @@ function buildStoreTools(): AiTool[] {
         }
 
         return {
-          summary: offer.noun ? `Generated SEO metadata for "${storeName}" targeting its ${offer.noun}.` : `Generated SEO metadata for "${storeName}".`,
+          summary: offer.noun && !offer.partial ? `Generated SEO metadata for "${storeName}" targeting its ${offer.noun}.` : `Generated SEO metadata for "${storeName}".`,
           metaTitleOptions,
           metaDescOptions,
           recommendation: {
@@ -917,8 +923,9 @@ function buildStoreTools(): AiTool[] {
         // store really offers (its counts), and no existing customer base it may not have ("As always … amazing
         // customers like you").
         const socialPosts = [
+          // r11: when not everything on the store is known, only what is (the counted services), never a total.
           totalItems > 0
-            ? `🚀 We're officially live! ${storeName} is now open online. Browse our ${offer.items}. Link in bio! ✨`
+            ? `🚀 We're officially live! ${storeName} is now open online. Browse our ${offer.partial ? offer.counted : offer.items}. Link in bio! ✨`
             : `🚀 We're officially live! ${storeName} is now open online. Link in bio! ✨`,
           `Big news! 🎉 ${storeName} just launched online.${offer.action ? ` ${offer.action}` : ""} Drop a comment if you want the link! 👇`,
           `We've been working hard behind the scenes, and it's finally here. ${storeName} is now live online. Come take a look! 🛍️`,
@@ -935,15 +942,17 @@ function buildStoreTools(): AiTool[] {
           `${storeName} Just Launched — Come Check It Out`,
         ];
 
+        // r11: a total, or "just getting started", only when the whole offer is known; when it is not, only the
+        // counted services, or nothing.
+        const catalogLine =
+          totalItems > 0 ? `We have ${offer.partial ? offer.counted : offer.items} available.\n\n` : offer.partial ? "" : "We're just getting started.\n\n";
         const emailBody = `Hi [First Name],
 
 We're thrilled to announce that ${storeName} is now live online!
 
 ${offer.buys && offer.books ? "You can now buy and book directly from our store." : offer.buys ? "You can now order directly from our store." : offer.books ? "You can now book directly from our store." : "Take a look at our store."}
 
-${totalItems > 0 ? `We have ${offer.items} available.` : "We're just getting started."}
-
-[Your Store Link]
+${catalogLine}[Your Store Link]
 
 Thank you for reading.
 

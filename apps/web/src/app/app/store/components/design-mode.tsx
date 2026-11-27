@@ -28,6 +28,8 @@ type Props = {
   liveProductIds?: ReadonlySet<string>;
   /** P231 r7: the store's stock, so the panel leaves out what the stock hides on /book. */
   stockByProduct?: StockByProduct | null;
+  /** P231 r11: what is known about the store (absent: everything): see storefront-counts.ts StorefrontOffer. */
+  storeView?: { productsKnown: boolean; servicesKnown: boolean };
   storefrontConfig: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
@@ -41,6 +43,7 @@ export function DesignMode({
   commerceProducts,
   liveProductIds,
   stockByProduct,
+  storeView,
   storefrontConfig,
   onConfigChange,
   onSaveConfig,
@@ -137,6 +140,8 @@ export function DesignMode({
             servicesCount={storeOffer.services}
             packagesCount={storeOffer.packages}
             orderableServicesCount={storeOffer.orderableServices}
+            productsKnown={storeView?.productsKnown ?? true}
+            servicesKnown={storeView?.servicesKnown ?? true}
             onApply={handleApplyHeroCopy}
           />
         </AccordionSection>

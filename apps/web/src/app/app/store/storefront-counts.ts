@@ -75,6 +75,13 @@ export function liveProducts<P extends ProductLike>(
 
 /** What the store offers, by the kind /book names it. */
 export type StorefrontOffer = {
+  /**
+   * P231 r11: whether the products on the store are known (the store graph and the storefront config were read), and
+   * whether the bookable services are (the config was read: what it hides). When one is not, its counts are 0 and
+   * the copy states no total and nothing that would need it (offerWords().partial). Absent means known.
+   */
+  productsKnown?: boolean;
+  servicesKnown?: boolean;
   /** PRODUCT-category products, bought. */
   products: number;
   /** PACKAGE-category products, bought. */
@@ -129,10 +136,13 @@ const list = (parts: string[]) => (parts.length <= 1 ? parts.join("") : `${parts
  * singular for one; the nouns /book uses (product, package, service).
  */
 export function offerWords(o: Partial<StorefrontOffer>) {
-  const products = count(o.products);
-  const packages = count(o.packages);
-  const booked = count(o.services);
-  const orderable = count(o.orderableServices);
+  // r11: what is not known is not counted, and the copy says the offer is partial.
+  const productsKnown = o.productsKnown !== false;
+  const servicesKnown = o.servicesKnown !== false;
+  const products = productsKnown ? count(o.products) : 0;
+  const packages = productsKnown ? count(o.packages) : 0;
+  const booked = servicesKnown ? count(o.services) : 0;
+  const orderable = productsKnown ? count(o.orderableServices) : 0;
   const services = booked + orderable;
   const shops = products + packages > 0;
   const books = booked > 0;
@@ -142,6 +152,12 @@ export function offerWords(o: Partial<StorefrontOffer>) {
   const present = kinds.filter(([n]) => n > 0);
   const noun = list(present.map(([n, w]) => plural(n, w)));
   return {
+    /**
+     * r11: not everything on the store is known (the store graph or the storefront config was not read): the copy
+     * states only what is known (the counted services, with their nouns), and no total ("N items"), no title that
+     * names the whole offer by its nouns, and no "just getting started".
+     */
+    partial: !productsKnown || !servicesKnown,
     /** Products or packages to shop ("Shop Now", "Explore Collection", "Shop Online"). */
     shops,
     /** A bookable service. */
@@ -165,27 +181,36 @@ const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.
 const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
 
 /**
- * P231 r9-r10: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
- * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text:
- * - the cut is at the last whitespace (any: a space, a tab, a no-break space) inside the room left for the "...";
- *   a word that ends exactly where the room ends is kept whole;
- * - leading whitespace is not a break (a break needs a word before it), so the cut is never a bare "...";
+ * P231 r9-r11: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
+ * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text, and never
+ * "..." alone:
+ * - the cut is at the last whitespace (any: a space, a tab, a no-break space, an ideographic space) inside the room
+ *   left for the "..."; a word that ends exactly where the room ends is kept whole;
+ * - leading whitespace is not a break (a break needs a word before it);
  * - a single word longer than the room is cut hard, then "...";
- * - trailing whitespace and punctuation before the "..." are dropped;
- * - with `max` under 3 there is no room for "...": the text's first `max` characters.
+ * - trailing whitespace and punctuation before the "..." are dropped; when that would leave nothing (the kept part is
+ *   all whitespace or punctuation), the text's first non-whitespace characters are cut hard instead, then "...";
+ * - with `max` of 3 or less there is no room for "..." and a character: the text's first `max` characters;
+ * - a text of whitespace only, longer than `max`, gives "".
  */
 export function clip(text: string, max: number): string {
   const g = graphemes(text);
   if (g.length <= max) return text;
-  if (max < 3) return g.slice(0, Math.max(0, max)).join("");
+  if (max <= 3) return g.slice(0, Math.max(0, max)).join("");
   const room = g.slice(0, max - 3);
   let end = room.length;
   if (!isSpace(g[room.length])) {
     let i = room.length - 1;
     while (i >= 0 && !isSpace(room[i])) i--;
+    // i < 0: no whitespace in the room (a single long word): cut hard. Not redundant: room.slice(0, -1) would drop
+    // the room's last character. (At i = 0 the prefix is empty, so `i > 0` and `i >= 0` agree there.)
     if (i > 0 && room.slice(0, i).join("").trim() !== "") end = i;
   }
-  return `${room.slice(0, end).join("").replace(/[\s.,;:!?—–-]+$/u, "")}...`;
+  const kept = room.slice(0, end).join("").replace(/[\s\p{P}]+$/u, "");
+  if (kept.trim() !== "") return `${kept}...`;
+  const start = g.findIndex((c) => !isSpace(c));
+  if (start < 0) return "";
+  return `${g.slice(start, start + max - 3).join("")}...`;
 }
 
 /** `n thing(s)`, for any count-bearing string. */

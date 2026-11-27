@@ -40,6 +40,9 @@ type Props = {
   packagesCount?: number;
   /** SERVICE-category products: services /book sells (bought, not booked). */
   orderableServicesCount?: number;
+  /** P231 r11: whether what is on the store is known (false: the store graph or the storefront config was not read). */
+  productsKnown?: boolean;
+  servicesKnown?: boolean;
   hasDelivery?: boolean;
   testimonialCount?: number;
   onApplyFaq?: (faqs: GeneratedFaq[]) => void;
@@ -93,6 +96,8 @@ export function AiContentPanel({
   servicesCount = 0,
   packagesCount = 0,
   orderableServicesCount = 0,
+  productsKnown = true,
+  servicesKnown = true,
   hasDelivery = false,
   testimonialCount = 0,
   onApplyFaq,
@@ -114,7 +119,7 @@ export function AiContentPanel({
   const [selectedSeoDesc, setSelectedSeoDesc] = useState("");
 
   const name = storeName || "Your Store";
-  const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount });
+  const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount, productsKnown, servicesKnown });
   const totalItems = offer.total;
   const trustResult = trustRequested ? trustCopyFor(testimonialCount) : null;
 
@@ -156,7 +161,8 @@ export function AiContentPanel({
       const metaTitleOptions = [
         // r9: cut at a word, with "...", never mid-word (clip).
         clip(`${name} — ${offer.shops ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`, 60),
-        clip(tagline ? `${name} | ${tagline}` : `${name} | ${totalItems > 0 ? offer.Items : "Online"}`, 60),
+        // r11: a total only when the whole offer is known.
+        clip(tagline ? `${name} | ${tagline}` : `${name} | ${totalItems > 0 && !offer.partial ? offer.Items : "Online"}`, 60),
         clip(`${name} Online`, 60),
       ];
       const metaDescOptions = [
@@ -182,7 +188,7 @@ export function AiContentPanel({
         socialPosts: [
           // P231 r4b-r5: the store's own item count (not "N+"), no "fast response", and only what it really offers.
           totalItems > 0
-            ? `🚀 We're officially live! ${name} is now open online. Browse our ${offer.items}. Link in bio! ✨`
+            ? `🚀 We're officially live! ${name} is now open online. Browse our ${offer.partial ? offer.counted : offer.items}. Link in bio! ✨`
             : `🚀 We're officially live! ${name} is now open online. Link in bio! ✨`,
           `Big news! 🎉 ${name} just launched online.${offer.action ? ` ${offer.action}` : ""} Drop a comment if you want the link! 👇`,
           `We've been working hard behind the scenes, and it's finally here. ${name} is now live online. Come take a look! 🛍️`,
