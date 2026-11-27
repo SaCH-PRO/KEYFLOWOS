@@ -14,7 +14,6 @@ import {
   CalendarDays,
   UserCircle,
   ShieldCheck,
-  Lock,
   CreditCard,
   Truck,
   MapPin,
@@ -644,10 +643,7 @@ export function CheckoutFlow({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-[10px] text-gray-900/25 pt-1">
-                  <Lock className="w-3 h-3" />
-                  <span>Your information is kept private and secure</span>
-                </div>
+                {/* P231 r1 (D-303): no 'Your information is kept private and secure'; the checkout verifies neither. */}
               </div>
             </div>
           )}
@@ -1271,20 +1267,7 @@ export function CheckoutFlow({
                 </div>
               )}
 
-              <div
-                className="rounded-2xl border border-gray-200 p-4 flex items-center justify-between gap-3"
-                style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.03) 0%, rgba(16,185,129,0.01) 100%)" }}
-              >
-                {[
-                  { icon: ShieldCheck, label: "Secure Checkout" },
-                  { icon: Lock, label: "Encrypted" },
-                ].map(({ icon: Icon, label }) => (
-                  <div key={label} className="flex items-center gap-1.5 text-[11px] text-emerald-400/60">
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{label}</span>
-                  </div>
-                ))}
-              </div>
+              {/* P231 r1 (D-303): no 'Secure Checkout' and no 'Encrypted' badges on the payment step. */}
 
               {(business.whatsapp || business.email) && (
                 <div className="flex items-center justify-center">
@@ -1401,9 +1384,9 @@ export function CheckoutFlow({
           </span>
         </div>
 
+        {/* P231 r1 (D-303): 'Powered by KeyFlowOS' only, no '· Secure Checkout'. */}
         <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300 pb-4">
-          <Lock className="w-3 h-3" />
-          <span>Powered by KeyFlowOS · Secure Checkout</span>
+          <span>Powered by KeyFlowOS</span>
         </div>
       </div>
 

@@ -80,7 +80,7 @@ describe("the checkout", () => {
     await waitFor(() => expect(screen.getByText(/I agree to the terms of service/)).toBeTruthy());
     expect(text()).toMatch(/WiPay/); // the payment step, with the connected gateway
     expect(text()).not.toMatch(/Secure Checkout/i);
-    expect(text()).not.toMatch(/\bEncrypted\b/i);
+    expect(text()).not.toMatch(/Encrypted/i); // no word boundary: textContent runs "…applied.EncryptedBack" together
     expect(text()).toMatch(/Powered by KeyFlowOS/);
   });
 });
