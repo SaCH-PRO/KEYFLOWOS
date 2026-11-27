@@ -654,13 +654,14 @@ export function classifyEmbeddingWrite(
       break;
     }
     case 'temporal_memory': {
+      const hasExplicitEntityType = typeof meta.entityType === 'string';
       const hasMetaProvenance =
-        typeof meta.entityType === 'string' ||
+        hasExplicitEntityType ||
         typeof meta.entityId === 'string' ||
         typeof meta.sourceModule === 'string';
-      if (hasMetaProvenance) {
+      if (hasMetaProvenance && (hasExplicitEntityType || !isMemoryRowDataClass(input.sourceDataClass))) {
         const derived = classifyTemporalMemoryWrite({
-          entityType: typeof meta.entityType === 'string' ? meta.entityType : 'business',
+          entityType: hasExplicitEntityType ? (meta.entityType as string) : 'business',
           entityId: typeof meta.entityId === 'string' ? meta.entityId : null,
           type: typeof meta.type === 'string' ? meta.type : null,
           sourceModule: typeof meta.sourceModule === 'string' ? meta.sourceModule : null,

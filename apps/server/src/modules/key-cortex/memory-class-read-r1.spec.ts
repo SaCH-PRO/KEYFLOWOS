@@ -684,6 +684,26 @@ describe('MEM-CLASS-READ R1 Hardening Suite', () => {
         expect(Number.isInteger(call.take)).toBe(true);
       }
     });
+
+    it('preserves authoritative GENERAL sourceClassification on temporal_memory embeddings when metadata omits entityType', () => {
+      const classified = classifyEmbeddingForRead(
+        {
+          id: 'emb_temporal_inbox',
+          sourceType: 'temporal_memory',
+          content: 'thread:summary — Latest: Analysis: customer asked about appointment.',
+          metadata: { sourceModule: 'key_inbox' },
+          dataClass: null,
+          moduleScope: [],
+        },
+        {
+          dataClass: 'GENERAL',
+          moduleScope: ['operations'],
+        },
+      );
+      expect(classified.dataClass).toBe('GENERAL');
+      expect(classified.moduleScope).toEqual(['operations']);
+    });
   });
 });
+
 
