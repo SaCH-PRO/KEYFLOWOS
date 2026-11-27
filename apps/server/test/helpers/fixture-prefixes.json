@@ -1700,6 +1700,11 @@
       "prefix": "v92i_",
       "owner": "apps/server/test/today-orders-premise.integration.test.ts",
       "packet": "V1-92 (FU-TODAY-ORDERS-PREMISE, P205)"
+    },
+    {
+      "prefix": "v92j_",
+      "owner": "apps/server/test/today-approvals-staff.integration.test.ts",
+      "packet": "V1-92 (FU-TODAY-APPROVALS-STAFF, P206)"
     }
   ],
   "pendingRenames": [],
