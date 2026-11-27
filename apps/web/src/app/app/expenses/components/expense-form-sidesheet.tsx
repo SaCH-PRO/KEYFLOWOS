@@ -26,11 +26,10 @@ import {
 } from "@/lib/client";
 import { createBill, type CreateBillBody } from "@/lib/api/finance";
 import { formatCurrency as formatMoney } from "@/lib/currency";
-import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness } from "./expense-utils";
+import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
-import { getStoredBusinessId } from "@/lib/workspace";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 import { motion, AnimatePresence } from "framer-motion";
@@ -320,8 +319,8 @@ export function ExpenseFormSideSheet({
     if (!formData.description.trim() || !formData.amount) return;
     // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
     // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
-    if (!live() || getStoredBusinessId() !== businessId) {
-      toast.error("The business changed in another tab. Close this sheet and reload, then save.");
+    if (!canStartFor(businessId, isCurrentBusiness)) {
+      toast.error(BUSINESS_CHANGED_ELSEWHERE);
       return;
     }
     const tags = formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
@@ -359,11 +358,13 @@ export function ExpenseFormSideSheet({
           contactId: formData.contactId || undefined,
         };
         const res = await createBill(businessId, billBody);
-        if (!live()) return;
         if (res?.error || !res?.data) {
-          toast.error(res?.error || "Failed to record bill");
+          if (live()) toast.error(res?.error || "Failed to record bill");
           return;
         }
+        // R17-1: the first write has landed for this business. The rest of this save (the bill's extra fields, its
+        // schedule, its Drive copy) completes for it even if the business shown changes now, so a bill is never left
+        // without its schedule; nothing of it is said, closed or reloaded on another business (the checks below).
         expenseId = res.data.id;
         // The bill door takes no receipt, tags, project or service: they are written onto the bill it created.
         const extra: Partial<Expense> = {};
@@ -383,12 +384,12 @@ export function ExpenseFormSideSheet({
         const res = editingExpense
           ? await updateExpense(businessId, editingExpense.id, payload)
           : await createExpense(businessId, payload);
-        if (!live()) return;
         // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
         if (res?.error) {
-          toast.error(res.error);
+          if (live()) toast.error(res.error);
           return;
         }
+        // R17-1: the first write has landed; the schedule and Drive copy below still complete for this business.
         if (!editingExpense && res.data) expenseId = res.data.id;
       }
 
@@ -453,8 +454,9 @@ export function ExpenseFormSideSheet({
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // S-m3: the presign is sent for the stored business (hooks/use-upload.ts); a sheet for another one refuses first.
-    if (getStoredBusinessId() !== businessId) {
+    // S-m3 / R17-2: the presign is sent for the stored business (hooks/use-upload.ts); a sheet for another one, or one
+    // no longer shown, refuses first.
+    if (!canStartFor(businessId, isCurrentBusiness)) {
       toast.error("The business changed in another tab. Close this sheet and reload, then add the receipt.");
       return;
     }
@@ -489,6 +491,7 @@ export function ExpenseFormSideSheet({
 
   const handleExtractReceipt = async () => {
     if (!formData.receiptUrl) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     setExtracting(true);
     setScanError(null);
     try {

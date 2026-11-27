@@ -189,6 +189,52 @@ describe("R17-1: a save whose first write has landed completes for A, silently",
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("(a') a recurring bill whose createBill answers after B is announced: the extra update and the schedule are still sent for A", async () => {
+    const bill = deferred<unknown>();
+    finance.createBill.mockReturnValue(bill.promise);
+    client.updateExpense.mockResolvedValue(ok(expense({ id: "exp_A_bill" })));
+    client.createRecurringExpense.mockResolvedValue(ok({ id: "rec_A_new" }));
+    const onSaved = vi.fn();
+    const view = render(sheet("biz_A", { initialKind: "bill", onSaved }));
+    fill("A supplier", "300");
+    fireEvent.change(screen.getByPlaceholderText("tag1, tag2, ..."), { target: { value: "supplies" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Record bill" }));
+    await waitFor(() => expect(finance.createBill).toHaveBeenCalledWith("biz_A", expect.anything()));
+    ws.bid = "biz_B";
+    view.rerender(sheet("biz_B", { initialKind: "bill", onSaved }));
+    await act(async () => { bill.resolve(ok({ id: "exp_A_bill" })); });
+    await settle();
+    expect(client.updateExpense).toHaveBeenCalledWith("biz_A", "exp_A_bill", expect.objectContaining({ tags: ["supplies"] }));
+    expect(client.createRecurringExpense).toHaveBeenCalledWith("biz_A", expect.anything());
+    noToast2();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("(b') a recurring expense whose create answers after B is announced: the schedule and the Drive copy are still made for A", async () => {
+    const create = deferred<unknown>();
+    client.createExpense.mockReturnValue(create.promise);
+    client.createRecurringExpense.mockResolvedValue(ok({ id: "rec_A_new" }));
+    drive.uploadToDrive.mockResolvedValue(true);
+    const file = new File(["x"], "r.jpg", { type: "image/jpeg" });
+    Object.defineProperty(file, "arrayBuffer", { value: async () => new ArrayBuffer(1) });
+    const prefill = { receiptUrl: "http://api.test/objects/uploads/biz_A/obj_1", receiptFile: file };
+    const onSaved = vi.fn();
+    const view = render(sheet("biz_A", { prefill, onSaved }));
+    fill();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
+    await waitFor(() => expect(client.createExpense).toHaveBeenCalledWith("biz_A", expect.anything()));
+    ws.bid = "biz_B";
+    view.rerender(sheet("biz_B", { prefill, onSaved }));
+    await act(async () => { create.resolve(ok({ id: "exp_A_new" })); });
+    await settle();
+    expect(client.createRecurringExpense).toHaveBeenCalledWith("biz_A", expect.anything());
+    expect(drive.uploadToDrive).toHaveBeenCalledWith(expect.objectContaining({ businessId: "biz_A", entityId: "exp_A_new" }));
+    noToast2();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
   it("a save that has not sent its first write does not start (the R16 start check)", async () => {
     render(sheet("biz_A"));
     fill();
@@ -315,6 +361,19 @@ const STARTS: Start[] = [
     go: async () => { fireEvent.click((await screen.findAllByRole("button", { name: new RegExp(`^${label}$`, "i") }))[0]); },
   })),
 ];
+
+describe("R17-2b: the start check consults the check it is given", () => {
+  it("a supplied check that says A is no longer shown starts nothing, though the stored id is still A", async () => {
+    client.runRecurringExpenseNow.mockResolvedValue(ok(null));
+    let shown = true;
+    render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} isCurrentBusiness={() => shown} />);
+    const run = await screen.findByRole("button", { name: /Run Now/i });
+    shown = false; // the parent's check has moved on (the stored id has not yet)
+    fireEvent.click(run);
+    await settle();
+    expect(client.runRecurringExpenseNow).not.toHaveBeenCalled();
+  });
+});
 
 describe("R17-2: every write checks the stored business before sending", () => {
   for (const s of STARTS) {

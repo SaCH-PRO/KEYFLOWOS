@@ -12,7 +12,7 @@ import { FileText } from "lucide-react";
 import type { Expense, ExpenseCategory, ExpenseSummary } from "@/lib/client";
 import { deleteExpense, updateExpense } from "@/lib/client";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
-import { useShownBusiness } from "./expense-utils";
+import { BUSINESS_CHANGED_ELSEWHERE, canStartFor, useShownBusiness } from "./expense-utils";
 
 interface ExpensePipelineProps {
   businessId: string | null;
@@ -137,6 +137,7 @@ export function ExpensePipeline({
 
   const handleMarkPaid = async (expense: Expense) => {
     if (!businessId) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
     try {
       await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
@@ -153,6 +154,7 @@ export function ExpensePipeline({
 
   const handleDelete = async (expense: Expense) => {
     if (!businessId) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     if (!window.confirm("Delete this expense?")) return;
     setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: true }));
     try {

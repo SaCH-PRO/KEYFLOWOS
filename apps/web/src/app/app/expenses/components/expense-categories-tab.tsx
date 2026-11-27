@@ -6,7 +6,7 @@ import { Plus, Palette, X, Receipt, Target } from "lucide-react";
 import { toast } from "sonner";
 import { ExpenseCategory, ExpenseBudget, ExpenseSummary, createExpenseCategory, deleteExpenseCategory } from "@/lib/client";
 import { useRefusal } from "@/lib/failure-kit";
-import { CATEGORY_COLORS, formatCurrency } from "./expense-utils";
+import { CATEGORY_COLORS, formatCurrency, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
 
 interface ExpenseCategoriesTabProps {
   businessId: string;
@@ -50,6 +50,7 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
 
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     try {
       const res = await createExpenseCategory(businessId, { name: newCatName.trim(), color: newCatColor });
       // R11-1: answered after a switch to another business: nothing is added there and nothing is said.
@@ -63,6 +64,7 @@ export function ExpenseCategoriesTab({ businessId, categories, isCurrentBusiness
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     try {
       const res = await deleteExpenseCategory(businessId, categoryId);
       // R11-2: answered after a switch to another business: nothing is removed there and nothing is said.

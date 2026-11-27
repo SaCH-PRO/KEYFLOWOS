@@ -28,13 +28,12 @@ import {
   ExpenseBudget,
 } from "@/lib/client";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
-import { getStoredBusinessId } from "@/lib/workspace";
 import { useUpload } from "@/hooks/use-upload";
 import { useExpensesData } from "./components/use-expenses-data";
 import { ExpenseFormSideSheet, ExpensePrefill, isOwnUploadPath } from "./components/expense-form-sidesheet";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
 import RecurringExpensesPanel from "./components/recurring-expenses-panel";
-import { PERIODS, formatCurrency, formatDate, expenseExportFileName } from "./components/expense-utils";
+import { PERIODS, formatCurrency, formatDate, expenseExportFileName, canStartFor } from "./components/expense-utils";
 import { NoAccessState } from "@/components/ui/no-access-state";
 
 /* ───────────────────────────────────────────
@@ -373,7 +372,7 @@ export default function ExpensesInboxPage() {
     e.target.value = "";
     if (!file) return;
     const bid = d.businessId;
-    if (!bid || getStoredBusinessId() !== bid) {
+    if (!canStartFor(bid, d.isCurrentBusiness)) {
       toast.error("The business changed in another tab. Reload this page, then upload the receipt.");
       return;
     }

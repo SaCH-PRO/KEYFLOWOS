@@ -13,7 +13,7 @@ import {
   extractReceipt,
   createRecurringExpense,
 } from "@/lib/client";
-import { businessCurrency, recurringScheduleBody, todayInBusinessZone, useShownBusiness } from "./expense-utils";
+import { businessCurrency, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { API_BASE } from "@/lib/api";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
@@ -63,6 +63,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
       description: formData.description.trim(), amount: parseFloat(formData.amount),
@@ -133,6 +134,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     try {
       const uploaded = await uploadFile(file);
       if (!live()) return;
@@ -155,6 +157,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
   const handleExtractReceipt = async () => {
     if (!formData.receiptUrl) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     setExtracting(true);
     try {
       const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });

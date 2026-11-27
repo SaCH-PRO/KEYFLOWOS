@@ -28,7 +28,7 @@ import {
 } from "@/lib/client";
 import { voidBill } from "@/lib/api/finance";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
-import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate } from "../components/expense-utils";
+import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate, canStartFor } from "../components/expense-utils";
 import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, RECEIPT_UNAVAILABLE_NOTE, receiptKind } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { refusalMessage } from "@/lib/failure-kit";
@@ -169,7 +169,7 @@ export default function ExpenseDetailPage() {
   // at once from Cash; it opens Pay, which asks the account and the method (components/bill-pay-dialog.tsx). Each
   // door answers the row as it now stands; a refusal is said in the server's words (FAILURE-KIT).
   const runVoid = async (action: "reject" | "void", success: string) => {
-    if (!businessId || !expense || !isCurrentBusiness(businessId)) return;
+    if (!businessId || !expense || !canStartFor(businessId, isCurrentBusiness)) return;
     setActionLoading(action);
     try {
       const res = await voidBill(businessId, expense.id);
@@ -195,7 +195,7 @@ export default function ExpenseDetailPage() {
   // EXPENSES-HUB-1 (BUG-031): deleteExpense answers a refusal as { error } and does not throw, so the page reads
   // the answer: "Expense deleted" only when it went through.
   const handleDelete = async () => {
-    if (!businessId || !expense || !isCurrentBusiness(businessId)) return;
+    if (!businessId || !expense || !canStartFor(businessId, isCurrentBusiness)) return;
     setActionLoading("delete");
     try {
       const res = await deleteExpense(businessId, expense.id);

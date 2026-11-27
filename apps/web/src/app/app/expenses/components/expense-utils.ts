@@ -262,7 +262,13 @@ export const EXPENSES_BUSINESS_ID_KEY = "kf_business_id";
  * export that arrives after a switch cannot pass for the other business's: expenses-<business>-<YYYY-MM-DD>.csv.
  */
 export function expenseExportFileName(businessId: string, now: Date = new Date()): string {
-  const cached = getCachedBusiness();
+  // R17-7: storage that is blocked (getCachedBusiness throws) names the file after the business id.
+  let cached: { id?: string; name?: string } | null = null;
+  try {
+    cached = getCachedBusiness();
+  } catch {
+    cached = null;
+  }
   // R16-5: only this business's cache entry names it; another's never does.
   const name = cached?.id === businessId && typeof cached.name === "string" ? cached.name : "";
   // R16-4: letters and digits of any script (NFKD drops accents: "Café Ñandú" is "cafe-nandu"); a name with none
@@ -274,12 +280,39 @@ export function expenseExportFileName(businessId: string, now: Date = new Date()
 
 const EXPORT_SLUG_MAX = 60;
 function exportSlug(text: string): string {
-  return text
+  const kept = text
     .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
+    // R17-4: combining marks are dropped only after a Latin letter (accents: "Café Ñandú" is cafe-nandu). In other
+    // scripts they are part of the word (Devanagari vowel signs, Japanese voicing, Thai tone marks, Arabic harakat).
+    .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, EXPORT_SLUG_MAX)
-    .replace(/-+$/g, "");
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  // R17-3: the cap counts code points, so a name is never cut inside a surrogate pair.
+  return Array.from(kept).slice(0, EXPORT_SLUG_MAX).join("").replace(/-+$/g, "");
+}
+
+/** EXPENSES-HUB-3 R17: what a write that will not start says. */
+export const BUSINESS_CHANGED_ELSEWHERE = "The business changed in another tab. Reload this page, then try again.";
+
+/**
+ * EXPENSES-HUB-3 R17: the one start check of every write in this folder. A write starts only for the business the
+ * workspace has chosen (the stored id, which another tab can change before its storage event reaches this tab), and,
+ * when a check is given (the data hook's, or the component's own), only while that check still shows it.
+ *
+ * Two exceptions, both deliberate: an export that arrives after a switch still downloads (the owner asked for it,
+ * and its file names the business it is for: expenseExportFileName); and a save whose first write has landed
+ * completes its remaining steps (extra fields, schedule, Drive copy) for the same business, silently
+ * (expense-form-sidesheet.tsx), so a bill is never left without its schedule or a schedule without its receipt.
+ */
+export function canStartFor(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): boolean {
+  if (!businessId) return false;
+  let stored: string | null = null;
+  try {
+    stored = getStoredBusinessId();
+  } catch {
+    return false;
+  }
+  return stored === businessId && (isCurrent ? isCurrent(businessId) : true);
 }

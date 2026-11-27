@@ -6,7 +6,7 @@ import { Plus, Trash2, Target, AlertTriangle, X, TrendingUp, TrendingDown, Calen
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { ExpenseBudget, ExpenseCategory, ExpenseSummary, Expense, upsertExpenseBudget, deleteExpenseBudget } from "@/lib/client";
-import { businessCurrency, formatCurrency, useShownBusiness } from "./expense-utils";
+import { businessCurrency, formatCurrency, useShownBusiness, canStartFor, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
 
 interface ExpenseBudgetsTabProps {
   businessId: string;
@@ -43,6 +43,7 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
 
   const handleSaveBudget = async () => {
     if (!budgetForm.amount) return;
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     const now = new Date();
     try {
       await upsertExpenseBudget(businessId, {
@@ -61,6 +62,7 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
   };
 
   const handleDeleteBudget = async (budgetId: string) => {
+    if (!canStartFor(businessId, isCurrentBusiness)) { toast.error(BUSINESS_CHANGED_ELSEWHERE); return; }
     try {
       await deleteExpenseBudget(businessId, budgetId);
       if (!isCurrentBusiness(businessId)) return;

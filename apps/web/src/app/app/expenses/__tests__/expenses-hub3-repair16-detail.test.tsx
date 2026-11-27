@@ -139,7 +139,7 @@ describe("R16-2: a real switch leaves once", () => {
 });
 
 describe("R16-3: the edit sheet's Save checks before sending", () => {
-  it("with the stored id already B, Update sends no updateExpense for A and says nothing", async () => {
+  it("with the stored id already B, Update sends no updateExpense for A, reports no save and says the business changed", async () => {
     await mount();
     fireEvent.click(screen.getByRole("button", { name: /Edit expense/ }));
     const update = await screen.findByRole("button", { name: "Update Expense" });
@@ -148,6 +148,7 @@ describe("R16-3: the edit sheet's Save checks before sending", () => {
     await settle();
     expect(client.updateExpense).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/business changed in another tab/i));
   });
 });
 
