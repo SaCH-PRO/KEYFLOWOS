@@ -1615,6 +1615,11 @@
       "prefix": "v91g_",
       "owner": "apps/server/test/store-add-idempotent.integration.test.ts",
       "packet": "V1-91 (FU-STORE-ADD-IDEMPOTENT, P204)"
+    },
+    {
+      "prefix": "v91k_",
+      "owner": "apps/server/test/case-study-revenue-scope.integration.test.ts",
+      "packet": "V1-91 (FU-CASE-STUDY-REVENUE, P139)"
     }
   ],
   "pendingRenames": [],
