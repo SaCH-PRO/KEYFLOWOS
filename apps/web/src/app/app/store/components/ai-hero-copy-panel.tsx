@@ -1,6 +1,6 @@
 "use client";
 
-import { offerWords } from "../storefront-counts";
+import { clip, offerWords } from "../storefront-counts";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -172,7 +172,7 @@ export function AiHeroCopyPanel({
       ...(offer.total > 0 ? [`Discover ${offer.counted} from ${name}`] : []),
     ];
     const subheadlines = [
-      ...(description ? [description.slice(0, 100)] : offer.total > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
+      ...(description ? [clip(description, 100)] : offer.total > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
       ...(offer.total > 0 ? [`${offer.items}, online.`] : []),
     ];
     if (subheadlines.length === 0) subheadlines.push(`${name}, now online.`);

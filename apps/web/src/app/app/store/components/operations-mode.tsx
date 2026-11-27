@@ -567,8 +567,9 @@ export function OperationsMode({
 
   return (
     <div className="space-y-4">
-      {/* P231 r8: the store status, delivery and contact saves write the whole storefront config, FAQ entries included. */}
-      <FaqPlaceholderWarning entries={storefrontConfig.faqEntries} where="elsewhere" />
+      {/* P231 r8-r9: the store status, delivery and contact saves write the whole storefront config, FAQ entries
+          included (the Hours save does not). */}
+      <FaqPlaceholderWarning entries={storefrontConfig.faqEntries} where="elsewhere" saves="the store status, delivery and contact saves here save" />
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <WorkspaceMetricStrip items={metrics} columns={4} compact />
       </motion.div>

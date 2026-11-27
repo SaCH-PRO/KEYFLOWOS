@@ -158,6 +158,17 @@ export function offerWords(o: Partial<StorefrontOffer>) {
   };
 }
 
+/**
+ * P231 r9: `text` cut to at most `max` characters at a word boundary, with "..." whenever anything is dropped (never a
+ * word cut in half, never a cut without "...", never "..." after a whole text).
+ */
+export function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const room = text.slice(0, Math.max(0, max - 3));
+  const at = room.lastIndexOf(" ");
+  return `${(at > 0 ? room.slice(0, at) : room).replace(/[\s.,;:!?—–-]+$/u, "")}...`;
+}
+
 /** `n thing(s)`, for any count-bearing string. */
 export const counted = (n: number, word: string, pluralWord = `${word}s`) => `${n} ${n === 1 ? word : pluralWord}`;
 

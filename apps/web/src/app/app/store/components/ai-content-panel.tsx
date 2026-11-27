@@ -1,6 +1,6 @@
 "use client";
 
-import { HAS_PLACEHOLDER, offerWords } from "../storefront-counts";
+import { HAS_PLACEHOLDER, clip, offerWords } from "../storefront-counts";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -20,7 +20,6 @@ type SeoResult = {
   metaTitleOptions: string[];
   metaDescOptions: string[];
   recommendation: { metaTitle: string; metaDescription: string };
-  keywords: string[];
   instruction?: string;
 };
 type FaqResult = {
@@ -155,21 +154,21 @@ export function AiContentPanel({
       // P231 r4b-r5: no "fast delivery", "instantly", "quality" or "curated" the product does not check, and only what
       // the store really offers (from its counts): no "buy" without products, no "book" without services.
       const metaTitleOptions = [
-        `${name} — ${offer.shops ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`.slice(0, 60),
-        tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? offer.Items : "Online"}`.slice(0, 60),
-        `${name} Online`.slice(0, 60),
+        // r9: cut at a word, with "...", never mid-word (clip).
+        clip(`${name} — ${offer.shops ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`, 60),
+        clip(tagline ? `${name} | ${tagline}` : `${name} | ${totalItems > 0 ? offer.Items : "Online"}`, 60),
+        clip(`${name} Online`, 60),
       ];
       const metaDescOptions = [
         // r6: the count goes with the noun it counts.
-        (totalItems > 0 ? `Browse ${offer.counted} at ${name}. ${offer.action}` : `Visit ${name} online.`).slice(0, 160),
-        `${name} — ${tagline || (offer.counted ? `${offer.counted} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`.slice(0, 160),
-        `Discover ${name} online.${businessDescription ? ` ${businessDescription.length > 80 ? `${businessDescription.slice(0, 80)}...` : businessDescription}` : ""}`.slice(0, 160),
+        clip(totalItems > 0 ? `Browse ${offer.counted} at ${name}. ${offer.action}` : `Visit ${name} online.`, 160),
+        clip(`${name} — ${tagline || (offer.counted ? `${offer.counted} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`, 160),
+        clip(`Discover ${name} online.${businessDescription ? ` ${clip(businessDescription, 80)}` : ""}`, 160),
       ];
       setSeoResult({
         metaTitleOptions,
         metaDescOptions,
         recommendation: { metaTitle: metaTitleOptions[0], metaDescription: metaDescOptions[0] },
-        keywords: [name.toLowerCase(), ...(offer.buys ? ["buy online"] : []), ...(offer.books ? ["book online"] : [])],
         instruction: "Select the title and description that best represents your store, then click Apply.",
       });
       setSelectedSeoTitle(metaTitleOptions[0]);

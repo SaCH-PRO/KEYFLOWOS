@@ -360,6 +360,7 @@ export default function StorePage() {
                 itemOverrides={s.storefrontConfig.catalog?.itemOverrides}
                 onItemOverrideChange={s.handleItemOverrideChange}
                 categoryEmphasis={s.storefrontConfig.catalog?.categoryEmphasis}
+                faqEntries={s.storefrontConfig.faqEntries}
                 onCategoryEmphasisChange={s.handleCategoryEmphasisChange}
               />
             )}

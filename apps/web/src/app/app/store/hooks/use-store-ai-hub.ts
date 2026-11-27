@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useModuleAi, type ModuleContext, type AiSuggestion, type AiTool } from "@/hooks/use-module-ai";
 // P231 r6-r7: the copy tools count and name the storefront the way the panels and /book do.
-import { bookableServices, counted, offerOf, offerWords } from "../storefront-counts";
+import { bookableServices, clip, counted, offerOf, offerWords } from "../storefront-counts";
 
 type StoreCustomData = {
   /** The whole catalog (the analysis tools). */
@@ -138,7 +138,10 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
     });
   }
 
-  if (products.length === 0 && services.length === 0) {
+  // P231 r9: the catalog's items are its products and bookable services; a listing row alone (a deleted product's)
+  // is not one, so a catalog of listing rows only is empty.
+  const bookable = bookableServices(services);
+  if (products.length + bookable.length === 0) {
     suggestions.push({
       id: `no-catalog-${Date.now()}`,
       type: "risk",
@@ -150,21 +153,31 @@ export async function generateStoreSuggestions(context: ModuleContext): Promise<
       actionKey: "switch_tab:catalog",
     });
   } else if (data.storeProducts !== undefined && storeOffer(data).total === 0) {
-    // P231 r7-r8: the catalog has items, but none is on the store: the store is empty, the catalog is not. The items
-    // are the products and the bookable services (a product's listing row is not a second item); when none is
-    // switched on, that is what to do first.
-    const items = counted(products.length + bookableServices(services).length, "item");
-    const switchedOff = products.every((p) => p.isActive === false) && bookableServices(services).length === 0;
+    // P231 r7-r9: the catalog has items, but none is on the store. Say what to do for the items that are: those not on
+    // it yet are to be added (a bookable service the storefront hides too); with none of those, switched-off products
+    // are to be switched on (and added, if they are not listed); with neither, the listed products are out of stock or
+    // hidden. Every word agrees with its count.
+    const listed = new Set(services.map((s) => s.sourceProductId).filter(Boolean));
+    const shown = new Set(((data.storeServices ?? []) as Record<string, unknown>[]).map((s) => s.id));
+    const active = products.filter((p) => p.isActive !== false);
+    const toAdd = active.filter((p) => !listed.has(p.id)).length + bookable.filter((s) => !shown.has(s.id)).length;
+    const off = products.length - active.length;
+    const offUnlisted = products.filter((p) => p.isActive === false && !listed.has(p.id)).length;
+    const pron = (n: number) => (n === 1 ? "it" : "them");
+    const [description, actionLabel] =
+      toAdd > 0
+        ? [`${counted(toAdd, "item")} in your catalog ${toAdd === 1 ? "is" : "are"} not on your store yet. Add ${pron(toAdd)} to your store so visitors have something to browse and buy.`, `Add ${pron(toAdd)} to your store`]
+        : active.length === 0
+          ? [`Your catalog has ${counted(off, "item")}, but ${off === 1 ? "it is" : "every one is"} switched off. Switch ${pron(off)} on${offUnlisted > 0 ? `, then add ${pron(off)} to your store` : ""} so visitors have something to browse and buy.`, `Switch ${pron(off)} on`]
+          : [`${counted(active.length, "item")} ${active.length === 1 ? "is" : "are"} on your store but not showing: ${active.length === 1 ? "it is" : "they are"} out of stock or hidden. Check ${active.length === 1 ? "its" : "their"} stock and visibility in the catalog.`, "Check the catalog"];
     suggestions.push({
       id: `nothing-on-store-${Date.now()}`,
       type: "risk",
       title: "Nothing on Your Store Yet",
-      description: switchedOff
-        ? `Your catalog has ${items}, but every one is switched off. Switch them on, then add them to your store so visitors have something to browse and buy.`
-        : `Your catalog has ${items}, but none is on your store yet. Add them to your store so visitors have something to browse and buy.`,
+      description,
       explanation: "Visitors only see what is on your store.",
       priority: "high",
-      actionLabel: switchedOff ? "Switch them on" : "Add them to your store",
+      actionLabel,
       actionKey: "switch_tab:catalog",
     });
   }
@@ -801,12 +814,12 @@ function buildStoreTools(): AiTool[] {
           offer.Noun ? `${storeName} — ${offer.Noun} Online` : `${storeName} — Now Online`,
           offer.shops && offer.books ? `${storeName} | Shop & Book Online` : offer.shops ? `${storeName} | Shop Online` : offer.books ? `${storeName} | Book Online` : `${storeName} Online`,
           tagline ? `${storeName} — ${tagline}` : `${storeName} | ${totalItems > 0 ? offer.Items : "Online"}`,
-        ].map((t) => t.slice(0, 60));
+        ].map((t) => clip(t, 60));
 
         const metaDescOptions = [
-          (totalItems > 0 ? `Browse ${offer.counted} at ${storeName}. ${offer.action}` : `Visit ${storeName} online.`).slice(0, 160),
-          (totalItems > 0 ? `${storeName} offers ${offer.counted} online.${offer.action ? ` ${offer.action}` : ""}` : `${storeName} is now online.`).slice(0, 160),
-          `${storeName}${offer.counted ? ` — ${offer.counted}` : ""}. ${tagline || "Now online."}`.slice(0, 160),
+          clip(totalItems > 0 ? `Browse ${offer.counted} at ${storeName}. ${offer.action}` : `Visit ${storeName} online.`, 160),
+          clip(totalItems > 0 ? `${storeName} offers ${offer.counted} online.${offer.action ? ` ${offer.action}` : ""}` : `${storeName} is now online.`, 160),
+          clip(`${storeName}${offer.counted ? ` — ${offer.counted}` : ""}. ${tagline || "Now online."}`, 160),
         ];
 
         const keywords = [
