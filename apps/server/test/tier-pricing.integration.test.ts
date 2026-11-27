@@ -130,7 +130,7 @@ beforeAll(async () => {
   app.use((req: any, _res: any, next: () => void) => {
     const uid = req.headers[HEADER];
     if (typeof uid === 'string' && uid.trim().length > 0) {
-      req.user = { id: uid.trim(), role: 'USER', email: `${uid.trim()}@v66a.test.local` };
+      req.user = { id: uid.trim(), role: 'USER', email: `${P}${uid.trim()}@test.local` };
     }
     next();
   });
@@ -145,11 +145,11 @@ beforeAll(async () => {
 
   await db.user.createMany({
     data: [
-      { id: ID.ownerA, email: `${ID.ownerA}@v66a.test.local`, name: 'Owner A' },
-      { id: ID.revReadA, email: `${ID.revReadA}@v66a.test.local`, name: 'RevRead A' },
-      { id: ID.revWriteOwnedCrmA, email: `${ID.revWriteOwnedCrmA}@v66a.test.local`, name: 'RevWriteOwned A' },
-      { id: ID.noRevA, email: `${ID.noRevA}@v66a.test.local`, name: 'NoRev A' },
-      { id: ID.ownerB, email: `${ID.ownerB}@v66a.test.local`, name: 'Owner B' },
+      { id: ID.ownerA, email: `${P}owner_a@test.local`, name: 'Owner A' },
+      { id: ID.revReadA, email: `${P}rev_read_a@test.local`, name: 'RevRead A' },
+      { id: ID.revWriteOwnedCrmA, email: `${P}rev_write_own_a@test.local`, name: 'RevWriteOwned A' },
+      { id: ID.noRevA, email: `${P}no_rev_a@test.local`, name: 'NoRev A' },
+      { id: ID.ownerB, email: `${P}owner_b@test.local`, name: 'Owner B' },
     ],
   });
 
