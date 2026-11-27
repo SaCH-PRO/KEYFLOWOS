@@ -74,7 +74,9 @@ describe("R9-1: '..' never pops the root segment", () => {
 describe("R9-2: a filter change while on page 2 ends on page 1 with the new filter", () => {
   it("the final rows come from {cat_X, page 1}; the stale page-2 read's reply is never applied; at most 2 reads", async () => {
     let releasePage2: () => void = () => {};
-    const applied: string[] = [];
+    // Every rows state the hook renders, from the filter change on (not only the final one).
+    const applied: string[][] = [];
+    let recording = false;
     client.fetchExpenses.mockImplementation((_b: string, params: { categoryId?: string; page?: number }) => {
       const id = `${params.categoryId ?? "all"}_p${params.page}`;
       const answer = ok({ data: [expense(id)], total: 45, page: params.page ?? 1, limit: 20 });
@@ -82,23 +84,35 @@ describe("R9-2: a filter change while on page 2 ends on page 1 with the new filt
       if (params.categoryId === "cat_X" && params.page === 2) return new Promise((r) => { releasePage2 = () => r(answer); });
       return Promise.resolve(answer);
     });
-    const { result } = renderHook(() => useExpensesData());
+    const { result } = renderHook(() => {
+      const d = useExpensesData();
+      if (recording) applied.push(d.expenses.map((e) => e.id));
+      return d;
+    });
     await waitFor(() => expect(result.current.expenses.map((e) => e.id)).toEqual(["all_p1"]));
     act(() => result.current.setPage(2));
     await waitFor(() => expect(result.current.expenses.map((e) => e.id)).toEqual(["all_p2"]));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     const before = client.fetchExpenses.mock.calls.length;
+    recording = true;
     act(() => result.current.setFilterCategory("cat_X"));
     await waitFor(() => expect(result.current.expenses.map((e) => e.id)).toEqual(["cat_X_p1"]));
     await act(async () => { releasePage2(); });
     await new Promise((r) => setTimeout(r, 30));
-    applied.push(...result.current.expenses.map((e) => e.id));
-    expect(applied, "the stale page-2 reply is never applied").toEqual(["cat_X_p1"]);
+    recording = false;
+    const everyRow = applied.flat();
+    expect(everyRow, `no rendered state holds the stale page-2 reply (states: ${JSON.stringify(applied)})`).not.toContain("cat_X_p2");
+    expect(applied.at(-1)).toEqual(["cat_X_p1"]);
     expect(result.current.page).toBe(1);
     expect(result.current.loading).toBe(false);
     const reads = client.fetchExpenses.mock.calls.slice(before).map((c) => c[1] as { categoryId?: string; page?: number });
     expect(reads.length, `reads after the filter change: ${JSON.stringify(reads)}`).toBeLessThanOrEqual(2);
+    // The stale read is really issued, before the page-1 one: otherwise "never applied" would test nothing.
+    const stale = reads.findIndex((r) => r.categoryId === "cat_X" && r.page === 2);
+    const fresh = reads.findIndex((r) => r.categoryId === "cat_X" && r.page === 1);
+    expect(stale, `the stale {cat_X, page 2} read is issued (reads: ${JSON.stringify(reads)})`).toBeGreaterThanOrEqual(0);
+    expect(fresh).toBeGreaterThan(stale);
     expect(reads.at(-1)).toMatchObject({ categoryId: "cat_X", page: 1 });
   });
 });
