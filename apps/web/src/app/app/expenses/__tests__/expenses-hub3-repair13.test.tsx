@@ -268,9 +268,16 @@ describe("R13-1c control: with no switch, each still says so", () => {
     it(`${c.name}: success, then failure`, async () => {
       client[c.call].mockResolvedValue(ok(null) as never);
       const { reload } = c.mount("biz_A");
+      // R14-5: the recurring panel's own reload is a schedules read: once after the save, not zero and not twice.
+      if (c.reloadCalls) await waitFor(() => expect(c.reloadCalls!()).toBe(1));
       await c.act();
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith(c.success));
       if (reload) expect(reload).toHaveBeenCalled();
+      if (c.reloadCalls) {
+        await waitFor(() => expect(c.reloadCalls!(), "the schedules are read again once after the save").toBe(2));
+        await settle();
+        expect(c.reloadCalls()).toBe(2);
+      }
       cleanup();
       vi.mocked(toast.error).mockReset();
       client[c.call].mockRejectedValue(new TypeError("Failed to fetch"));
