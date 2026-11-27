@@ -2421,22 +2421,68 @@ export class ModelGatewayService {
     return blocks;
   }
 
-  private parseAnthropicToolArguments(rawArgs: string): {
+  private sanitizeAnthropicToolObject(value: unknown, depth = 0): unknown {
+    if (depth > 32 || value === null || typeof value !== 'object') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeAnthropicToolObject(item, depth + 1));
+    }
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') {
+        continue;
+      }
+      clean[k] = this.sanitizeAnthropicToolObject(v, depth + 1);
+    }
+    return clean;
+  }
+
+  private formatUnparseableToolArgs(raw: string): string {
+    const MAX_LEN = 8_192;
+    const bounded = raw.length > MAX_LEN ? `${raw.slice(0, MAX_LEN)}...[truncated]` : raw;
+    return `[Unparseable tool arguments]: ${bounded}`;
+  }
+
+  private parseAnthropicToolArguments(rawArgs: unknown): {
     input: Record<string, unknown>;
     unparseableRaw: string | null;
   } {
+    if (rawArgs == null) {
+      return { input: {}, unparseableRaw: null };
+    }
+    if (typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+      return {
+        input: this.sanitizeAnthropicToolObject(rawArgs) as Record<string, unknown>,
+        unparseableRaw: null,
+      };
+    }
+    if (typeof rawArgs !== 'string') {
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(rawArgs);
+      } catch {
+        serialized = String(rawArgs);
+      }
+      return { input: {}, unparseableRaw: this.formatUnparseableToolArgs(serialized) };
+    }
     const trimmed = rawArgs.trim();
     if (!trimmed) {
       return { input: {}, unparseableRaw: null };
     }
     try {
-      const parsed: unknown = JSON.parse(rawArgs);
+      const parsed: unknown = JSON.parse(rawArgs, (key, val) =>
+        key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : val,
+      );
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        return { input: parsed as Record<string, unknown>, unparseableRaw: null };
+        return {
+          input: this.sanitizeAnthropicToolObject(parsed) as Record<string, unknown>,
+          unparseableRaw: null,
+        };
       }
-      return { input: {}, unparseableRaw: rawArgs };
+      return { input: {}, unparseableRaw: this.formatUnparseableToolArgs(rawArgs) };
     } catch {
-      return { input: {}, unparseableRaw: rawArgs };
+      return { input: {}, unparseableRaw: this.formatUnparseableToolArgs(rawArgs) };
     }
   }
 
@@ -2457,16 +2503,25 @@ export class ModelGatewayService {
             : msg.content == null
               ? ''
               : JSON.stringify(msg.content);
-        nonSystemMessages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: msg.tool_call_id ?? '',
-              content: toolContent,
-            },
-          ],
-        });
+        const toolUseId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id.trim() : '';
+        if (!toolUseId) {
+          // SEC-P157-1: Anthropic rejects tool_result blocks with empty tool_use_id; degrade safely to text.
+          nonSystemMessages.push({
+            role: 'user',
+            content: [{ type: 'text', text: toolContent || '[Tool result]' }],
+          });
+        } else {
+          nonSystemMessages.push({
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: toolUseId,
+                content: toolContent,
+              },
+            ],
+          });
+        }
       } else if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
         const blocks: Array<Record<string, unknown>> = [];
         if (typeof msg.content === 'string') {
@@ -2482,11 +2537,26 @@ export class ModelGatewayService {
           }
         }
 
+        const usedIds = new Set<string>();
+        let synthSeq = 0;
         for (const tc of msg.tool_calls) {
+          if (!tc || !tc.function || typeof tc.function.name !== 'string' || !tc.function.name.trim()) {
+            continue;
+          }
+          const rawId = typeof tc.id === 'string' ? tc.id.trim() : '';
+          let toolUseId = rawId;
+          if (!toolUseId || usedIds.has(toolUseId)) {
+            do {
+              synthSeq += 1;
+              toolUseId = rawId ? `${rawId}_dedup_${synthSeq}` : `call_synth_${synthSeq}`;
+            } while (usedIds.has(toolUseId));
+          }
+          usedIds.add(toolUseId);
+
           const { input, unparseableRaw } = this.parseAnthropicToolArguments(tc.function.arguments ?? '');
           blocks.push({
             type: 'tool_use',
-            id: tc.id,
+            id: toolUseId,
             name: tc.function.name,
             input,
           });
@@ -2495,10 +2565,12 @@ export class ModelGatewayService {
           }
         }
 
-        nonSystemMessages.push({
-          role: 'assistant',
-          content: blocks,
-        });
+        if (blocks.length > 0) {
+          nonSystemMessages.push({
+            role: 'assistant',
+            content: blocks,
+          });
+        }
       } else {
         nonSystemMessages.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
@@ -2549,6 +2621,19 @@ export class ModelGatewayService {
         });
       }
     }
+
+    // SEC-P157-2: Anthropic requires tool_result blocks in a user message to precede any text/other blocks.
+    for (const msg of merged) {
+      if (msg.role === 'user' && Array.isArray(msg.content)) {
+        const hasToolResult = msg.content.some((b) => b.type === 'tool_result');
+        if (hasToolResult) {
+          const toolResults = msg.content.filter((b) => b.type === 'tool_result');
+          const others = msg.content.filter((b) => b.type !== 'tool_result');
+          msg.content = [...toolResults, ...others];
+        }
+      }
+    }
+
     return merged;
   }
 
