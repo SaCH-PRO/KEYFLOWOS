@@ -180,7 +180,7 @@ beforeAll(async () => {
   app.use((req: any, _res: any, next: () => void) => {
     const uid = req.headers[HEADER];
     if (typeof uid === 'string' && uid.trim().length > 0) {
-      req.user = { id: uid.trim(), role: 'USER', email: `${uid.trim()}@v92j.test.local` };
+      req.user = { id: uid.trim(), role: 'USER', email: `${P}${uid.trim()}@test.local` };
     }
     next();
   });
@@ -193,12 +193,12 @@ beforeAll(async () => {
 
   await db.user.createMany({
     data: [
-      { id: ID.ownerA, email: `${ID.ownerA}@v92j.test.local`, name: 'Owner A' },
-      { id: ID.staffFrontDeskA, email: `${ID.staffFrontDeskA}@v92j.test.local`, name: 'Front Desk A' },
-      { id: ID.staffExpReadOnlyA, email: `${ID.staffExpReadOnlyA}@v92j.test.local`, name: 'Exp ReadOnly A' },
-      { id: ID.staffBookingsOnlyA, email: `${ID.staffBookingsOnlyA}@v92j.test.local`, name: 'Bookings Only A' },
-      { id: ID.staffRevWriteA, email: `${ID.staffRevWriteA}@v92j.test.local`, name: 'Rev Write A' },
-      { id: ID.ownerB, email: `${ID.ownerB}@v92j.test.local`, name: 'Owner B' },
+      { id: ID.ownerA, email: `${P}owner_a@test.local`, name: 'Owner A' },
+      { id: ID.staffFrontDeskA, email: `${P}staff_front_a@test.local`, name: 'Front Desk A' },
+      { id: ID.staffExpReadOnlyA, email: `${P}staff_exp_ro_a@test.local`, name: 'Exp ReadOnly A' },
+      { id: ID.staffBookingsOnlyA, email: `${P}staff_bk_a@test.local`, name: 'Bookings Only A' },
+      { id: ID.staffRevWriteA, email: `${P}staff_rev_w_a@test.local`, name: 'Rev Write A' },
+      { id: ID.ownerB, email: `${P}owner_b@test.local`, name: 'Owner B' },
     ],
   });
 
@@ -340,8 +340,8 @@ describe('P206 FU-TODAY-APPROVALS-STAFF (D-298, Journey I2)', () => {
       })
       .expect(403);
 
-    // expenses:write cannot create refund (needs revenue:write), general, or unknown requestType
-    for (const requestType of ['refund', 'quote_discount', 'general', 'time_off', 'custom_unlisted']) {
+    // expenses:write cannot create refund (needs revenue:write), quote_discount, general, or time_off -> 403
+    for (const requestType of ['refund', 'quote_discount', 'general', 'time_off']) {
       await request(app.getHttpServer())
         .post(`/businesses/${ID.bizA}/approvals`)
         .set(HEADER, ID.staffFrontDeskA)
@@ -352,6 +352,31 @@ describe('P206 FU-TODAY-APPROVALS-STAFF (D-298, Journey I2)', () => {
         })
         .expect(403);
     }
+
+    // Unknown requestType fails closed (DTO validation 400 or guard 403)
+    const unknownRes = await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals`)
+      .set(HEADER, ID.staffFrontDeskA)
+      .send({
+        requestType: 'custom_unlisted',
+        title: 'Unauthorized custom_unlisted',
+        steps: [{ stepOrder: 1, approverId: ID.ownerA }],
+      });
+    expect([400, 403]).toContain(unknownRes.status);
+
+    // STAFF without operations:write cannot self-auto-approve via high client threshold
+    const selfAutoAttempt = await request(app.getHttpServer())
+      .post(`/businesses/${ID.bizA}/approvals`)
+      .set(HEADER, ID.staffFrontDeskA)
+      .send({
+        requestType: 'expense',
+        title: 'Self-auto-approve bypass attempt',
+        payload: { amount: 50 },
+        threshold: 999999,
+        steps: [{ stepOrder: 1, approverId: ID.ownerA }],
+      })
+      .expect(201);
+    expect(selfAutoAttempt.body.status).toBe('pending');
 
     // revenue:write CAN create quote_discount with 0-indexed stepOrder: 0, and owner can approve it
     const quoteAppr = await request(app.getHttpServer())
