@@ -277,8 +277,6 @@ const customerB = {
 };
 
 describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
-  let activeBookingAId = '';
-
   it('[PBR-01] RED-BEFORE: rebooking at a new time with replaceBookingId cancels the earlier unpaid PENDING hold, withdraws its draft invoice, and frees the old slot', async () => {
     const first = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
@@ -290,7 +288,7 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(201);
 
-    const firstId = first.body.id as string;
+    const firstId = first.body.bookingId as string;
     const firstInvId = first.body.invoiceId as string;
     expect(firstId).toBeTruthy();
     expect(firstInvId).toBeTruthy();
@@ -314,10 +312,9 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(201);
 
-    const secondId = second.body.id as string;
+    const secondId = second.body.bookingId as string;
     expect(secondId).toBeTruthy();
     expect(secondId).not.toBe(firstId);
-    activeBookingAId = secondId;
 
     // Earlier booking cancelled & its draft invoice soft-deleted
     const oldBooking = await db.booking.findUnique({ where: { id: firstId } });
@@ -335,26 +332,45 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
   });
 
   it('[PBR-02] RED-BEFORE: retrying the SAME slot with replaceBookingId succeeds without colliding with the customer own PENDING booking', async () => {
-    const prevId = activeBookingAId;
+    const initial = await request(app.getHttpServer())
+      .post(`/bookings/public/businesses/${ID.bizA}`)
+      .send({
+        serviceId: ID.serviceA2,
+        startTime: slotIso('10:00'),
+        ...customerA,
+        paymentMethod: 'CASH',
+      })
+      .expect(201);
+    const prevId = initial.body.bookingId as string;
+
     const retry = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
-        serviceId: ID.serviceA1,
-        startTime: slotIso('11:00'),
+        serviceId: ID.serviceA2,
+        startTime: slotIso('10:00'),
         ...customerA,
         paymentMethod: 'CASH',
         replaceBookingId: prevId,
       });
 
     expect(retry.status).toBe(201);
-    expect(retry.body.id).not.toBe(prevId);
-    activeBookingAId = retry.body.id as string;
+    expect(retry.body.bookingId).not.toBe(prevId);
 
     const prevRow = await db.booking.findUnique({ where: { id: prevId } });
     expect(prevRow?.status).toBe('CANCELLED');
   });
 
   it('[PBR-03] RED-BEFORE: multi-service rebook releases multiple earlier unpaid PENDING holds via releaseBookingIds', async () => {
+    const hold1 = await request(app.getHttpServer())
+      .post(`/bookings/public/businesses/${ID.bizA}`)
+      .send({
+        serviceId: ID.serviceA1,
+        startTime: slotIso('12:00'),
+        ...customerA,
+        paymentMethod: 'CASH',
+      })
+      .expect(201);
+
     const hold2 = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
@@ -365,8 +381,8 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       })
       .expect(201);
 
-    const prev1 = activeBookingAId;
-    const prev2 = hold2.body.id as string;
+    const prev1 = hold1.body.bookingId as string;
+    const prev2 = hold2.body.bookingId as string;
 
     const rebook = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
@@ -379,52 +395,63 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
       });
 
     expect(rebook.status).toBe(201);
-    activeBookingAId = rebook.body.id as string;
 
     const rows = await db.booking.findMany({ where: { id: { in: [prev1, prev2] } } });
+    expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.status === 'CANCELLED')).toBe(true);
   });
 
   it('[PBR-04] RED-BEFORE (security & atomicity): cannot release another customer booking, a foreign business booking, or a CONFIRMED/PAID booking; failed rebook rolls back', async () => {
+    const aBooking = await request(app.getHttpServer())
+      .post(`/bookings/public/businesses/${ID.bizA}`)
+      .send({
+        serviceId: ID.serviceA2,
+        startTime: slotIso('14:00'),
+        ...customerA,
+        paymentMethod: 'CASH',
+      })
+      .expect(201);
+    const aBookingId = aBooking.body.bookingId as string;
+
     // Customer B tries to hijack Customer A's 14:00 slot by passing Customer A's booking id
     const hijack = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
-        serviceId: ID.serviceA1,
+        serviceId: ID.serviceA2,
         startTime: slotIso('14:00'),
         ...customerB,
         paymentMethod: 'CASH',
-        replaceBookingId: activeBookingAId,
+        replaceBookingId: aBookingId,
       });
     expect(hijack.status).toBe(400);
 
     // Customer A's booking is still PENDING
-    expect((await db.booking.findUnique({ where: { id: activeBookingAId } }))?.status).toBe('PENDING');
+    expect((await db.booking.findUnique({ where: { id: aBookingId } }))?.status).toBe('PENDING');
 
     // Customer B books 15:00 legitimately
     const bBooking = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
-        serviceId: ID.serviceA1,
+        serviceId: ID.serviceA2,
         startTime: slotIso('15:00'),
         ...customerB,
         paymentMethod: 'CASH',
       })
       .expect(201);
-    expect(bBooking.body.id).toBeTruthy();
+    expect(bBooking.body.bookingId).toBeTruthy();
 
     // Customer A tries to rebook into Customer B's taken 15:00 slot -> 400 and Customer A's 14:00 hold is NOT lost
     const clash = await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
-        serviceId: ID.serviceA1,
+        serviceId: ID.serviceA2,
         startTime: slotIso('15:00'),
         ...customerA,
         paymentMethod: 'CASH',
-        replaceBookingId: activeBookingAId,
+        replaceBookingId: aBookingId,
       });
     expect(clash.status).toBe(400);
-    expect((await db.booking.findUnique({ where: { id: activeBookingAId } }))?.status).toBe('PENDING');
+    expect((await db.booking.findUnique({ where: { id: aBookingId } }))?.status).toBe('PENDING');
 
     // Foreign business booking cannot be released cross-tenant
     const bizBBooking = await request(app.getHttpServer())
@@ -440,30 +467,30 @@ describe('P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK (v92k_)', () => {
     await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
-        serviceId: ID.serviceA1,
+        serviceId: ID.serviceA2,
         startTime: slotIso('13:00'),
         ...customerA,
         paymentMethod: 'CASH',
-        replaceBookingId: bizBBooking.body.id,
+        replaceBookingId: bizBBooking.body.bookingId,
       })
       .expect(201);
-    expect((await db.booking.findUnique({ where: { id: bizBBooking.body.id } }))?.status).toBe('PENDING');
+    expect((await db.booking.findUnique({ where: { id: bizBBooking.body.bookingId } }))?.status).toBe('PENDING');
 
     // CONFIRMED booking cannot be cancelled via replaceBookingId
     await db.booking.update({
-      where: { id: activeBookingAId },
+      where: { id: aBookingId },
       data: { status: 'CONFIRMED' },
     });
     await request(app.getHttpServer())
       .post(`/bookings/public/businesses/${ID.bizA}`)
       .send({
-        serviceId: ID.serviceA1,
+        serviceId: ID.serviceA2,
         startTime: slotIso('09:00'),
         ...customerA,
         paymentMethod: 'CASH',
-        replaceBookingId: activeBookingAId,
+        replaceBookingId: aBookingId,
       })
       .expect(201);
-    expect((await db.booking.findUnique({ where: { id: activeBookingAId } }))?.status).toBe('CONFIRMED');
+    expect((await db.booking.findUnique({ where: { id: aBookingId } }))?.status).toBe('CONFIRMED');
   });
 });
