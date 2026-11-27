@@ -24,6 +24,8 @@
  *   RST-11  an order number, order id or e-mail made only of invisible characters (format, combining, space,
  *           control, filler, blank-pattern and default-ignorable characters) is none; an accented value with real
  *           letters is kept as it is
+ *   RST-11c an order field made only of unassigned, private-use or lone-surrogate code points is none
+ *   RST-11d real values in any script are kept as they are: accented, CJK, Arabic, an emoji with ZWJ, a flag
  *   RST-12  an image URL holding a control character anywhere renders no image
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -141,6 +143,9 @@ vi.mock("../components/checkout-flow", () => ({
 }));
 
 import PublicBookingPage from "../page";
+
+/** Cases that mount the whole storefront page many times over: under CPU load they can pass 5s. */
+const HEAVY_PAGE_TIMEOUT = 30_000;
 import { formatPrice } from "@/lib/format";
 
 const KEY = `kf_pending_checkout_${SLUG}`;
@@ -343,7 +348,7 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
       expect(net.gets.some((p) => p.startsWith("/site/storefront/public/order/")), "no status read").toBe(false);
       cleanup();
     }
-  });
+  }, HEAVY_PAGE_TIMEOUT);
 
   it("RST-11b an accented e-mail with real letters is kept as it is (combining marks are not stripped from it)", async () => {
     const email = "jose\u0301@example.test";
@@ -361,4 +366,27 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
       cleanup();
     }
   });
+
+  it("RST-11c an order field made only of unassigned, private-use or lone-surrogate code points is none", async () => {
+    for (const unreadable of ["\u0378", "\uE000", "\ud800", "\u0378\uE000\ud800"]) {
+      net.gets = [];
+      window.localStorage.setItem(KEY, record({ orderNumber: unreadable, orderId: unreadable, customerEmail: unreadable }));
+      render(<PublicBookingPage />);
+      expect(await screen.findByRole("heading", { name: "Booking Confirmed!" }, { timeout: 3000 }), JSON.stringify(unreadable)).toBeInTheDocument();
+      expect(screen.queryByText("Order #")).toBeNull();
+      expect(net.gets.some((p) => p.startsWith("/site/storefront/public/order/")), "no status read").toBe(false);
+      cleanup();
+    }
+  }, HEAVY_PAGE_TIMEOUT);
+
+  it("RST-11d real values in any script are kept as they are", async () => {
+    for (const orderNumber of ["ORD-Jos\u00E9-1", "ORD-\u65E5\u672C-2", "\u0637\u0644\u0628-\u0667", "\u{1F469}\u200D\u{1F4BB}", "\u{1F1F9}\u{1F1F9}"]) {
+      net.gets = [];
+      await restored({ orderNumber, customerEmail: "jose\u0301@example.test" });
+      // Shown as the order number (and, without the ORD- prefix, as a booking reference too).
+      expect(screen.getAllByText(orderNumber).length, JSON.stringify(orderNumber)).toBeGreaterThanOrEqual(1);
+      expect(net.gets.some((p) => p.endsWith(`?email=${encodeURIComponent("jose\u0301@example.test")}`))).toBe(true);
+      cleanup();
+    }
+  }, HEAVY_PAGE_TIMEOUT);
 });
