@@ -250,7 +250,18 @@ async function runOn(fn: (...args: unknown[]) => unknown, self: object): Promise
 // env discipline
 // ---------------------------------------------------------------------------
 
-const SWITCHES = ['DISABLE_SCHEDULERS', 'KF_DISABLE_SCHEDULERS', 'KEY_DISABLED', 'NODE_ENV', 'ENABLE_SCHEDULERS_IN_TEST'] as const;
+const SWITCHES = [
+  'DISABLE_SCHEDULERS',
+  'KF_DISABLE_SCHEDULERS',
+  'KEY_DISABLED',
+  'KEY_CRONS_DISABLED',
+  'GROWTH_INTELLIGENCE_SCHEDULER_DISABLED',
+  'MOMENTUM_SCHEDULER_DISABLED',
+  'ANALYTICS_SCHEDULER_DISABLED',
+  'INTELLIGENCE_SCANS_DISABLED',
+  'NODE_ENV',
+  'ENABLE_SCHEDULERS_IN_TEST',
+] as const;
 let saved: Record<string, string | undefined>;
 
 function setSwitches(next: Partial<Record<(typeof SWITCHES)[number], string>>) {
@@ -1043,5 +1054,204 @@ describe('KEY_DISABLED coverage: every direct AI provider path outside the gatew
     const paths = voiceAgentModelPaths();
     expect(paths.map((p) => p.file), 'gate-vacuity: the scan sees the worker entry').toContain('apps/voice-agent/src/main.ts');
     expect(paths.filter((p) => !p.gated).map((p) => p.file)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KEY-CRONS-FLAGS (P1 launch-track, ruling `crons`):
+// KEY_CRONS_DISABLED plus four narrow per-producer flags so production never
+// sets DISABLE_SCHEDULERS (which would stop overdue transitions, booking
+// reminders, recurring invoices and recurring expenses).
+// ---------------------------------------------------------------------------
+
+describe('KEY-CRONS-FLAGS: KEY_CRONS_DISABLED and narrow per-producer flags isolate background producers without stopping core operational schedulers', () => {
+  const env = envModule as unknown as Record<string, ((...a: unknown[]) => boolean) | undefined>;
+  const ALL_FIVE_FLAGS = {
+    NODE_ENV: 'production',
+    KEY_CRONS_DISABLED: '1',
+    GROWTH_INTELLIGENCE_SCHEDULER_DISABLED: '1',
+    MOMENTUM_SCHEDULER_DISABLED: '1',
+    ANALYTICS_SCHEDULER_DISABLED: '1',
+    INTELLIGENCE_SCANS_DISABLED: '1',
+  } as const;
+
+  const CORE_OPERATIONAL_SCHEDULERS = [
+    'src/modules/commerce/invoice-overdue.scheduler.ts',
+    'src/modules/bookings/bookings.service.ts',
+    'src/modules/commerce/recurring-invoice.service.ts',
+    'src/modules/expenses/recurring-expense.service.ts',
+  ] as const;
+
+  const GROWTH_FILE = 'src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts';
+  const MOMENTUM_FILE = 'src/modules/momentum/momentum-scheduler.service.ts';
+  const ANALYTICS_FILE = 'src/modules/analytics/analytics-scheduler.service.ts';
+  const SCANS_FILE = 'src/modules/intelligence/scheduled-scans.service.ts';
+
+  const ANALYTICS_CRON_METHODS = [
+    'generateDailySnapshots',
+    'generateWeeklySnapshots',
+    'generateMonthlySnapshots',
+    'generateProjections',
+    'generateInsights',
+    'assessMaturity',
+  ] as const;
+
+  it('KEY_CRONS_DISABLED alone turns keyCronsDisabled() on (1 / true / TRUE) without affecting keyDisabled() or schedulersDisabled()', () => {
+    const keyCronsOff = env.keyCronsDisabled!;
+    const keyOff = env.keyDisabled!;
+    const schedOff = env.schedulersDisabled!;
+
+    setSwitches({ NODE_ENV: 'production' });
+    expect(keyCronsOff()).toBe(false);
+
+    for (const val of ['1', 'true', 'TRUE', ' 1 ']) {
+      setSwitches({ NODE_ENV: 'production', KEY_CRONS_DISABLED: val });
+      expect(keyCronsOff(), `KEY_CRONS_DISABLED=${JSON.stringify(val)} must disable KEY crons`).toBe(true);
+      expect(keyOff(), 'KEY_CRONS_DISABLED must not set keyDisabled()').toBe(false);
+      expect(schedOff(), 'KEY_CRONS_DISABLED must not set schedulersDisabled()').toBe(false);
+    }
+
+    setSwitches({ NODE_ENV: 'production', KEY_CRONS_DISABLED: '0' });
+    expect(keyCronsOff()).toBe(false);
+
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1', KEY_CRONS_DISABLED: '1' });
+    expect(keyCronsOff()).toBe(true);
+  });
+
+  it('KEY_CRONS_DISABLED=1 alone stops every key-cortex @Cron handler (0 dependency reads)', async () => {
+    const handlers = cortexCronHandlers();
+    expect(handlers.length).toBeGreaterThanOrEqual(16);
+    const fns = await handlerFns(handlers);
+    expect((await readsUnder(fns, { NODE_ENV: 'production', KEY_CRONS_DISABLED: '1' })).touched).toEqual([]);
+    expect(
+      (await readsUnder(fns, { NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1', KEY_CRONS_DISABLED: '1' })).touched,
+    ).toEqual([]);
+  }, 60_000);
+
+  it('GROWTH_INTELLIGENCE_SCHEDULER_DISABLED=1 stops only GrowthIntelligenceSchedulerService (0 timers, 0 reads) while Momentum still arms', async () => {
+    const growthCls = await exportedClassWith(join(SERVER_ROOT, GROWTH_FILE), 'onModuleInit');
+    const momentumCls = await exportedClassWith(join(SERVER_ROOT, MOMENTUM_FILE), 'onModuleInit');
+    expect(growthCls).toBeDefined();
+    expect(momentumCls).toBeDefined();
+
+    // Control: both arm with no flags in production
+    setSwitches({ NODE_ENV: 'production' });
+    expect((await initRun(growthCls!.prototype, 'permissive')).armed).toBeGreaterThan(0);
+    expect((await initRun(momentumCls!.prototype, 'permissive')).armed).toBeGreaterThan(0);
+
+    // Narrow flag stops GrowthIntelligence only
+    setSwitches({ NODE_ENV: 'production', GROWTH_INTELLIGENCE_SCHEDULER_DISABLED: '1' });
+    const growthRun = await initRun(growthCls!.prototype, 'strict');
+    expect(growthRun.armed).toBe(0);
+    expect(growthRun.reads).toEqual([]);
+
+    const momentumRun = await initRun(momentumCls!.prototype, 'permissive');
+    expect(momentumRun.armed).toBeGreaterThan(0);
+  });
+
+  it('MOMENTUM_SCHEDULER_DISABLED=1 stops only MomentumSchedulerService (0 timers, 0 reads) while GrowthIntelligence still arms', async () => {
+    const growthCls = await exportedClassWith(join(SERVER_ROOT, GROWTH_FILE), 'onModuleInit');
+    const momentumCls = await exportedClassWith(join(SERVER_ROOT, MOMENTUM_FILE), 'onModuleInit');
+    expect(growthCls).toBeDefined();
+    expect(momentumCls).toBeDefined();
+
+    setSwitches({ NODE_ENV: 'production', MOMENTUM_SCHEDULER_DISABLED: '1' });
+    const momentumRun = await initRun(momentumCls!.prototype, 'strict');
+    expect(momentumRun.armed).toBe(0);
+    expect(momentumRun.reads).toEqual([]);
+
+    const growthRun = await initRun(growthCls!.prototype, 'permissive');
+    expect(growthRun.armed).toBeGreaterThan(0);
+  });
+
+  it('ANALYTICS_SCHEDULER_DISABLED=1 stops all 6 AnalyticsSchedulerService @Cron handlers (0 reads) while ScheduledScansService still runs', async () => {
+    const analyticsCls = await exportedClassWith(join(SERVER_ROOT, ANALYTICS_FILE), 'generateDailySnapshots');
+    const scansCls = await exportedClassWith(join(SERVER_ROOT, SCANS_FILE), 'runAllScansTick');
+    expect(analyticsCls).toBeDefined();
+    expect(scansCls).toBeDefined();
+
+    const analyticsFns = ANALYTICS_CRON_METHODS.map((method) => ({
+      id: `${ANALYTICS_FILE}#${method}`,
+      fn: analyticsCls!.prototype[method] as (...a: unknown[]) => unknown,
+    }));
+    const scansFns = [
+      { id: `${SCANS_FILE}#runAllScansTick`, fn: scansCls!.prototype.runAllScansTick as (...a: unknown[]) => unknown },
+    ];
+
+    // Control: all 6 analytics handlers and scans handler read their dependencies with no flag
+    expect((await readsUnder(analyticsFns, { NODE_ENV: 'production' })).silent).toEqual([]);
+    expect((await readsUnder(scansFns, { NODE_ENV: 'production' })).silent).toEqual([]);
+
+    // Narrow flag stops all 6 analytics handlers and leaves ScheduledScansService active
+    expect(
+      (await readsUnder(analyticsFns, { NODE_ENV: 'production', ANALYTICS_SCHEDULER_DISABLED: '1' })).touched,
+    ).toEqual([]);
+    expect(
+      (await readsUnder(scansFns, { NODE_ENV: 'production', ANALYTICS_SCHEDULER_DISABLED: '1' })).silent,
+    ).toEqual([]);
+  });
+
+  it('INTELLIGENCE_SCANS_DISABLED=1 stops only ScheduledScansService.runAllScansTick (0 reads) while AnalyticsSchedulerService still runs', async () => {
+    const analyticsCls = await exportedClassWith(join(SERVER_ROOT, ANALYTICS_FILE), 'generateDailySnapshots');
+    const scansCls = await exportedClassWith(join(SERVER_ROOT, SCANS_FILE), 'runAllScansTick');
+    expect(analyticsCls).toBeDefined();
+    expect(scansCls).toBeDefined();
+
+    const analyticsFns = ANALYTICS_CRON_METHODS.map((method) => ({
+      id: `${ANALYTICS_FILE}#${method}`,
+      fn: analyticsCls!.prototype[method] as (...a: unknown[]) => unknown,
+    }));
+    const scansFns = [
+      { id: `${SCANS_FILE}#runAllScansTick`, fn: scansCls!.prototype.runAllScansTick as (...a: unknown[]) => unknown },
+    ];
+
+    expect(
+      (await readsUnder(scansFns, { NODE_ENV: 'production', INTELLIGENCE_SCANS_DISABLED: '1' })).touched,
+    ).toEqual([]);
+    expect(
+      (await readsUnder(analyticsFns, { NODE_ENV: 'production', INTELLIGENCE_SCANS_DISABLED: '1' })).silent,
+    ).toEqual([]);
+  });
+
+  it('with ALL FIVE flags on in production (and DISABLE_SCHEDULERS unset), overdue transitions, booking reminders, recurring invoices and recurring expenses still arm and never read the five flags', async () => {
+    const forbiddenFlagNames = [
+      'KEY_CRONS_DISABLED',
+      'GROWTH_INTELLIGENCE_SCHEDULER_DISABLED',
+      'MOMENTUM_SCHEDULER_DISABLED',
+      'ANALYTICS_SCHEDULER_DISABLED',
+      'INTELLIGENCE_SCANS_DISABLED',
+      'keyCronsDisabled',
+      'growthIntelligenceSchedulerDisabled',
+      'momentumSchedulerDisabled',
+      'analyticsSchedulerDisabled',
+      'intelligenceScansDisabled',
+    ];
+
+    for (const rel of CORE_OPERATIONAL_SCHEDULERS) {
+      const src = readFileSync(join(SERVER_ROOT, rel), 'utf8');
+      for (const token of forbiddenFlagNames) {
+        expect(src, `${rel} must never read ${token}`).not.toContain(token);
+      }
+
+      const cls = await exportedClassWith(join(SERVER_ROOT, rel), 'onModuleInit');
+      expect(cls, `${rel}: no exported class with onModuleInit`).toBeDefined();
+      setSwitches(ALL_FIVE_FLAGS);
+      const run = await initRun(cls!.prototype, 'permissive');
+      expect(run.armed, `${rel} must still arm its timer with all five narrow flags on`).toBeGreaterThan(0);
+    }
+  });
+
+  it('docs/DEPLOY_RUNBOOK.md lists all five production flags (=1) and warns against DISABLE_SCHEDULERS in production', () => {
+    const runbook = readFileSync(join(SERVER_ROOT, '..', '..', 'docs', 'DEPLOY_RUNBOOK.md'), 'utf8');
+    for (const flag of [
+      'KEY_CRONS_DISABLED=1',
+      'GROWTH_INTELLIGENCE_SCHEDULER_DISABLED=1',
+      'MOMENTUM_SCHEDULER_DISABLED=1',
+      'ANALYTICS_SCHEDULER_DISABLED=1',
+      'INTELLIGENCE_SCANS_DISABLED=1',
+    ]) {
+      expect(runbook, `docs/DEPLOY_RUNBOOK.md must list ${flag}`).toContain(flag);
+    }
+    expect(runbook).toContain('DISABLE_SCHEDULERS');
   });
 });
