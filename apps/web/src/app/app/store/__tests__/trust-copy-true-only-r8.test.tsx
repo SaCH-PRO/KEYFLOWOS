@@ -29,6 +29,7 @@ import { MerchandisingMode } from "../components/merchandising-mode";
 import { FaqManager } from "../components/faq-manager";
 import { PolicyEditor } from "../components/policy-editor";
 import { useStoreAiHub, generateStoreSuggestions } from "../hooks/use-store-ai-hub";
+import { onStore } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -192,7 +193,7 @@ describe("R8-5: a store with only bought services", () => {
   it("the hub's SEO keywords say 'buy online', and not 'book online'", async () => {
     const { result } = renderHook(() => useStoreAiHub());
     const tool = result.current.tools.find((t) => t.id === "seo-generator")!;
-    const out = (await tool.execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", products: [{ id: "v0", name: "Massage", category: "SERVICE" }, { id: "v1", name: "Facial", category: "SERVICE" }] } })) as { keywords: string[] };
+    const out = (await tool.execute({ businessId: "biz_1", customData: onStore({ storeName: "Pepper Co", products: [{ id: "v0", name: "Massage", category: "SERVICE" }, { id: "v1", name: "Facial", category: "SERVICE" }] }) })) as { keywords: string[] };
     expect(out.keywords).toContain("buy online");
     expect(out.keywords).not.toContain("book online");
   });

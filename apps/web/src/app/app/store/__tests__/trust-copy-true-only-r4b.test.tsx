@@ -25,6 +25,7 @@ vi.mock("next/navigation", () => ({
 
 import { AiContentPanel } from "../components/ai-content-panel";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
+import { onStore } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -70,7 +71,7 @@ function hubTool(id: string) {
 }
 
 // r7: a commerce product's category is the kind /book draws it as (PRODUCT, PACKAGE or SERVICE), not "Sauces".
-const FULL = { storeName: "Pepper Co", products: [{ id: "p1", category: "PRODUCT" }], services: [{ id: "s1", category: "Tasting" }], activeDeliveryCount: 1 };
+const FULL = onStore({ storeName: "Pepper Co", products: [{ id: "p1", category: "PRODUCT" }], services: [{ id: "s1", category: "Tasting" }], activeDeliveryCount: 1 });
 const PANEL_PROPS = { storeName: "Pepper Co", productsCount: 2, servicesCount: 1, hasDelivery: true } as const;
 
 describe("R4B-1: the three claims noticed in round 4", () => {

@@ -271,3 +271,17 @@ export const ALLOWED = new Set<string>([
   "🚀 We're officially live! {name} is now open online. Browse our {n} items. Link in bio! ✨",
   "🚀 We're officially live! {name} is now open online. Link in bio! ✨",
 ]);
+
+/**
+ * P231 r12: the hub's copy tools write only from the store's view (storeProducts, storeServices, from the store page);
+ * absent is "not known", as null is, never the whole catalog. A spec's store with all of its catalog on the store:
+ * the view is the lists given (a view the spec gives itself, null included, is kept).
+ */
+export function onStore<D extends { products?: unknown[]; services?: unknown[] }>(d: D): D & { storeProducts: unknown; storeServices: unknown } {
+  const v = d as D & { storeProducts?: unknown; storeServices?: unknown };
+  return {
+    ...d,
+    storeProducts: "storeProducts" in v ? v.storeProducts : (d.products ?? []),
+    storeServices: "storeServices" in v ? v.storeServices : (d.services ?? []),
+  };
+}

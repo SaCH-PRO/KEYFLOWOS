@@ -29,7 +29,7 @@ vi.mock("next/navigation", () => ({
 
 import { AiContentPanel } from "../components/ai-content-panel";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
-import { ALLOWED, norm, strings } from "./trust-copy-allowlist";
+import { ALLOWED, onStore, norm, strings } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -57,7 +57,7 @@ const store = (products: number, services: number, testimonials = 0) => ({
   services: Array.from({ length: services }, (_, i) => ({ id: `s${i}`, category: "Tasting" })),
   testimonials: Array.from({ length: testimonials }, (_, i) => ({ id: `t${i}` })),
 });
-const run = async (id: string, data: ReturnType<typeof store>) => hubTool(id).execute({ businessId: "biz_1", customData: data });
+const run = async (id: string, data: ReturnType<typeof store>) => hubTool(id).execute({ businessId: "biz_1", customData: onStore(data) });
 const COPY_TOOLS = ["faq-generator", "seo-generator", "launch-campaign-generator", "hero-copy-generator", "trust-copy-generator"];
 
 /** r6: the allowlist (and its normalisation) is shared with the round-6 spec, which runs it over non-empty stores. */

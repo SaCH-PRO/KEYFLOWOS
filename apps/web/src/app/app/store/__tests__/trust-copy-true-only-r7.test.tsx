@@ -35,7 +35,7 @@ import { DesignMode } from "../components/design-mode";
 import { FaqManager } from "../components/faq-manager";
 import { MerchandisingMode } from "../components/merchandising-mode";
 import { useStoreAiHub, generateStoreSuggestions } from "../hooks/use-store-ai-hub";
-import { ALLOWED, strings, textNodes } from "./trust-copy-allowlist";
+import { ALLOWED, onStore, strings, textNodes } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -54,7 +54,7 @@ function hubTool(id: string) {
   return tool;
 }
 type Data = Record<string, unknown>;
-const hub = async (id: string, data: Data) => hubTool(id).execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", ...data } });
+const hub = async (id: string, data: Data) => hubTool(id).execute({ businessId: "biz_1", customData: onStore({ storeName: "Pepper Co", ...data }) });
 const hubText = async (id: string, data: Data) => JSON.stringify(await hub(id, data));
 const products = (n: number, category?: string, prefix = "p") => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, name: `${prefix} item ${i}`, price: 10, ...(category ? { category } : {}) }));
 const bookable = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${i}`, name: `Session ${i}`, price: 20 }));

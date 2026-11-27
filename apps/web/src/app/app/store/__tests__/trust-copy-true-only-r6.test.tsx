@@ -33,7 +33,7 @@ import { AiHeroCopyPanel } from "../components/ai-hero-copy-panel";
 import { FaqManager } from "../components/faq-manager";
 import { MerchandisingMode } from "../components/merchandising-mode";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
-import { ALLOWED, strings, textNodes } from "./trust-copy-allowlist";
+import { ALLOWED, onStore, strings, textNodes } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -69,7 +69,7 @@ const store = (products: number, services: number, extra: Data = {}): Data => ({
   services: Array.from({ length: services }, (_, i) => ({ id: `s${i}`, category: "Tasting" })),
   ...extra,
 });
-const run = async (id: string, data: Data) => JSON.stringify(await hubTool(id).execute({ businessId: "biz_1", customData: data }));
+const run = async (id: string, data: Data) => JSON.stringify(await hubTool(id).execute({ businessId: "biz_1", customData: onStore(data) }));
 const COPY_TOOLS = ["faq-generator", "seo-generator", "launch-campaign-generator", "hero-copy-generator", "trust-copy-generator"];
 
 describe("R6-1: a count goes with the noun it counts", () => {
@@ -298,7 +298,7 @@ describe("R6-7: every generator, for stores that are not empty, says only the al
   it("the hub's copy generators", async () => {
     for (const sh of SHAPES) {
       const data = { ...store(sh.p, sh.s), testimonials: Array.from({ length: sh.t }, (_, i) => ({ id: `t${i}` })), activeDeliveryCount: sh.delivery ? 1 : 0 };
-      for (const id of COPY_TOOLS) expect(unknown(strings(await hubTool(id).execute({ businessId: "biz_1", customData: data }))), `${sh.name} ${id}`).toEqual([]);
+      for (const id of COPY_TOOLS) expect(unknown(strings(await hubTool(id).execute({ businessId: "biz_1", customData: onStore(data) }))), `${sh.name} ${id}`).toEqual([]);
     }
   });
 

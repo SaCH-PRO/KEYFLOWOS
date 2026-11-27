@@ -59,10 +59,10 @@ describe("R11-M: what is on the store not known: no total, only what is known", 
       expect(out, id).not.toMatch(TOTAL);
       expect(out, id).not.toMatch(/Pepper Co \| 1 Item|Browse our 1 item/);
     }
-    expect(JSON.stringify(await hubTool("seo-generator").execute({ businessId: "biz_1", customData: REFUSED }))).toMatch(/Browse 1 service at Pepper Co\. Book online\./);
-    expect(JSON.stringify(await hubTool("launch-campaign-generator").execute({ businessId: "biz_1", customData: REFUSED }))).toMatch(/Browse our 1 service\./);
+    expect(JSON.stringify(await hubTool("seo-generator").execute({ businessId: "biz_1", customData: REFUSED }))).toMatch(/Browse 1 service to book at Pepper Co\. Book online\./);
+    expect(JSON.stringify(await hubTool("launch-campaign-generator").execute({ businessId: "biz_1", customData: REFUSED }))).toMatch(/Browse our 1 service to book\./);
     const email = ((await hubTool("launch-campaign-generator").execute({ businessId: "biz_1", customData: REFUSED })) as { emailBody: string }).emailBody;
-    expect(email).toMatch(/We have 1 service available\./);
+    expect(email).toMatch(/We have 1 service to book available\./);
     expect(email).not.toMatch(/\n\n\n/);
   });
 
@@ -93,7 +93,7 @@ describe("R11-M: what is on the store not known: no total, only what is known", 
     }
     render(<AiContentPanel storeName="Pepper Co" servicesCount={1} productsKnown={false} />);
     await generate("Launch Posts");
-    expect(text()).toMatch(/Browse our 1 service\./);
+    expect(text()).toMatch(/Browse our 1 service to book\./);
   }, 30_000);
 
   it("the AI Hero Copy panel, products not known: no total", async () => {
@@ -102,7 +102,7 @@ describe("R11-M: what is on the store not known: no total, only what is known", 
     for (const b of screen.queryAllByText(/^\d+ options?$/)) fireEvent.click(b);
     await new Promise((r) => setTimeout(r, 300));
     expect(text()).not.toMatch(TOTAL);
-    expect(text()).toMatch(/Discover 1 service from Pepper Co/);
+    expect(text()).toMatch(/Discover 1 service to book from Pepper Co/);
   });
 
   it("the Merchandising tab, given the store view not known, passes it to the AI panel", async () => {
@@ -125,7 +125,7 @@ describe("R11-M: what is on the store not known: no total, only what is known", 
     await generate("Generate SEO");
     const panel = (screen.getByText("Generate FAQ").closest(".rounded-2xl")?.textContent ?? "").replace(/\s+/g, " ");
     expect(panel).not.toMatch(TOTAL);
-    expect(panel).toMatch(/Browse 1 service at Pepper Co\./);
+    expect(panel).toMatch(/Browse 1 service to book at Pepper Co\./);
   });
   it("the Design tab, given the store view not known, passes it to the AI Hero Copy panel", async () => {
     render(
@@ -145,7 +145,7 @@ describe("R11-M: what is on the store not known: no total, only what is known", 
     fireEvent.click(screen.getByText("AI Hero Copy"));
     await generate("Generate");
     expect(text()).not.toMatch(TOTAL);
-    expect(text()).toMatch(/Browse 1 service\. Book online\./);
+    expect(text()).toMatch(/Browse 1 service to book\. Book online\./);
   });
 });
 
@@ -153,11 +153,11 @@ describe("R11-M: offerWords counts only what is known", () => {
   const ALL = { products: 2, packages: 1, services: 3, orderableServices: 4 };
   it("products not known: no product, package or bought service is counted", () => {
     const w = offerWords({ ...ALL, productsKnown: false });
-    expect([w.partial, w.total, w.counted, w.shops, w.buys, w.books]).toEqual([true, 3, "3 services", false, false, true]);
+    expect([w.partial, w.total, w.counted, w.shops, w.buys, w.books]).toEqual([true, 3, "3 services to book", false, false, true]);
   });
   it("services not known: no booked service is counted", () => {
     const w = offerWords({ ...ALL, servicesKnown: false });
-    expect([w.partial, w.total, w.counted, w.books, w.buys]).toEqual([true, 7, "2 products, 1 package and 4 services", false, true]);
+    expect([w.partial, w.total, w.counted, w.books, w.buys]).toEqual([true, 7, "2 products, 1 package and 4 services to buy", false, true]);
   });
   it("neither known: nothing counted; both known: everything (control)", () => {
     const none = offerWords({ ...ALL, productsKnown: false, servicesKnown: false });
@@ -203,6 +203,8 @@ describe("R11-c: clip()", () => {
   it("never '...' alone", () => {
     expect(clip("—— Supercalifragilistic", 10)).toBe("—— Supe...");
     expect(clip("!!!!!!!!!!!!", 5)).toBe("!!...");
+    // r12: punctuation only where the text has more is not kept either: its first letter, digit or symbol on
+    expect(clip("— a—!!", 5)).toBe("a...");
     expect(clip("          ", 5)).toBe("");
   });
 

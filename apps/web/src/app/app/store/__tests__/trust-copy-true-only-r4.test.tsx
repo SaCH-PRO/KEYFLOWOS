@@ -26,6 +26,7 @@ vi.mock("next/navigation", () => ({
 import { AiContentPanel } from "../components/ai-content-panel";
 import { MerchandisingMode } from "../components/merchandising-mode";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
+import { onStore } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -115,7 +116,7 @@ describe("R4-2: no unchecked copy", () => {
   it("the hub's FAQ Generator does the same", async () => {
     const out = await hubTool("faq-generator").execute({
       businessId: "biz_1",
-      customData: { storeName: "Pepper Co", products: [{ id: "p1" }], services: [{ id: "s1" }], activeDeliveryCount: 1 },
+      customData: onStore({ storeName: "Pepper Co", products: [{ id: "p1" }], services: [{ id: "s1" }], activeDeliveryCount: 1 }),
     });
     const all = JSON.stringify(out);
     expect(all).not.toMatch(INVENTED_FACTS);

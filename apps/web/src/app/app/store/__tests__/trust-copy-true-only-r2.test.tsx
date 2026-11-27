@@ -28,6 +28,7 @@ import { StorefrontPreview } from "../components/storefront-preview";
 import { AiContentPanel } from "../components/ai-content-panel";
 import { SocialProofPanel } from "../components/social-proof-panel";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
+import { onStore } from "./trust-copy-allowlist";
 
 afterEach(() => cleanup());
 
@@ -57,7 +58,7 @@ describe("R2-2: FAQ suggestions", () => {
   });
 
   it("the store AI hub's FAQ Generator does not say 'securely'", async () => {
-    const out = await hubTool("faq-generator").execute({ businessId: "biz_1", customData: { storeName: "Pepper Co", products: [{ id: "p1" }] } });
+    const out = await hubTool("faq-generator").execute({ businessId: "biz_1", customData: onStore({ storeName: "Pepper Co", products: [{ id: "p1" }] }) });
     const json = JSON.stringify(out);
     expect(json).toMatch(/What payment methods do you accept\?/);
     expect(json).not.toMatch(/processed at checkout/);
