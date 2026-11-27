@@ -1,9 +1,11 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, Res, SetMetadata, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Put, Query, Req, Res, ServiceUnavailableException, SetMetadata, UnauthorizedException, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
 import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT, createEventClaim } from './commerce.service';
+import { PricingService } from './pricing.service';
+import { SetContactPricingTierDto, SetProductTierPricesDto } from './dto/tier-pricing.dto';
 import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
@@ -67,6 +69,13 @@ const CONVERT_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform:
  * wherever the controller runs.
  */
 const CONFIRM_PENDING_PAYMENT_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: ConfirmPendingPaymentDto });
+
+/**
+ * V1-66 (TOF-TIER-PRICING-ROUTES): explicit ValidationPipe instances so tier
+ * pricing DTO validation holds identically under esbuild/vitest and tsc.
+ */
+const SET_PRODUCT_TIER_PRICES_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: SetProductTierPricesDto });
+const SET_CONTACT_PRICING_TIER_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: SetContactPricingTierDto });
 
 type OperatorQuoteContactKey = keyof typeof OPERATOR_QUOTE_CONTACT_SELECT;
 
@@ -221,7 +230,19 @@ export class CommerceController {
     // Optional only so the test modules that compose this controller for its
     // other routes keep resolving; the route fails closed without it.
     @Optional() @Inject(FinanceSettingsService) private readonly profileOwners?: FinanceSettingsService,
+    // V1-66 (TOF-TIER-PRICING-ROUTES): CommerceModule always provides
+    // PricingService; @Optional() keeps existing test modules that compose
+    // CommerceController for unrelated routes resolving while the 4 tier
+    // pricing routes fail closed if it is absent.
+    @Optional() @Inject(PricingService) private readonly pricing?: PricingService,
   ) {}
+
+  private requirePricing(): PricingService {
+    if (!this.pricing) {
+      throw new ServiceUnavailableException('Pricing service unavailable');
+    }
+    return this.pricing;
+  }
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
     // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
@@ -357,6 +378,90 @@ export class CommerceController {
     @Param('productId') productId: string,
   ) {
     return this.commerce.deleteProduct(businessId, productId);
+  }
+
+  /**
+   * V1-66 (TOF-TIER-PRICING-ROUTES): list all configured tier prices for a
+   * product owned by `businessId` (`revenue:read`).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/products/:productId/tier-prices')
+  listProductTierPrices(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.requirePricing().listProductTierPrices(businessId, productId);
+  }
+
+  /**
+   * V1-66 (TOF-TIER-PRICING-ROUTES): atomically replace all tier prices for a
+   * product owned by `businessId` (`revenue:write` + TeamAuditInterceptor).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'product_tier_prices_updated', 'product')
+  @Put('businesses/:businessId/products/:productId/tier-prices')
+  setProductTierPrices(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+    @Body(SET_PRODUCT_TIER_PRICES_BODY_PIPE) body: SetProductTierPricesDto,
+  ) {
+    return this.requirePricing().setProductTierPrices(businessId, productId, body.tierPrices);
+  }
+
+  /**
+   * V1-66 (TOF-TIER-PRICING-ROUTES): resolve effective unit price for a
+   * product, optionally applying a visible contact's pricingTier (`revenue:read`,
+   * D-133 contact visibility enforced via `actorUserId`).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/products/:productId/price')
+  resolveProductPrice(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+    @Query('contactId') contactId: unknown,
+    @Req() req: Request & { user?: { id?: string }; query?: Record<string, unknown> },
+  ) {
+    const rawQuery = (req?.query ?? {}) as Record<string, unknown>;
+    if (
+      (contactId !== undefined && typeof contactId !== 'string') ||
+      Object.keys(rawQuery).some((key) => key.startsWith('contactId['))
+    ) {
+      throw new BadRequestException('contactId must be a single string');
+    }
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.requirePricing().resolveProductPrice(businessId, productId, contactId, actorUserId);
+  }
+
+  /**
+   * V1-66 (TOF-TIER-PRICING-ROUTES): set or clear a contact's pricingTier
+   * (`revenue:write` + TeamAuditInterceptor, D-133 contact visibility).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'contact_pricing_tier_updated', 'contact')
+  @Put('businesses/:businessId/contacts/:contactId/pricing-tier')
+  setContactPricingTier(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body(SET_CONTACT_PRICING_TIER_BODY_PIPE) body: SetContactPricingTierDto,
+    @Req() req: Request & { user?: { id?: string } },
+  ) {
+    if (body.pricingTier === undefined) {
+      throw new BadRequestException('pricingTier must be a valid tier string or null');
+    }
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.requirePricing().setContactPricingTier(businessId, contactId, body.pricingTier, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
