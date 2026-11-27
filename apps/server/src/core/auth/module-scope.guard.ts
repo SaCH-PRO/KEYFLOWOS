@@ -19,7 +19,7 @@ export const RequireModuleScope = (module: string, minLevel: 'read' | 'write' | 
 
 /**
  * Declares an alternative module scope (OR semantics) alongside `@RequireModuleScope`.
- * Kept as a separate decorator so static censuses scanning `@RequireModuleScope('mod', 'lvl')`
+ * Kept as a separate decorator so static censuses scanning `@RequireModuleScope(<module>, <level>)`
  * (e.g., `job-role-tool-families.spec.ts`) keep parsing every guarded route unchanged.
  * Multiple `@RequireAlternativeModuleScope` decorators on one handler compose additively.
  */
