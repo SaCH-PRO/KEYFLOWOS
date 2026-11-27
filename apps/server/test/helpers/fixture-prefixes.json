@@ -1650,6 +1650,11 @@
       "prefix": "v91p_",
       "owner": "apps/server/test/coa-seeder-input.integration.test.ts",
       "packet": "V1-91 (FU-COA-SEEDER-AND-INPUT, P146)"
+    },
+    {
+      "prefix": "v92b_",
+      "owner": "apps/server/test/key-send-invoice-paid-refuse.integration.test.ts",
+      "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
     }
   ],
   "pendingRenames": [],
