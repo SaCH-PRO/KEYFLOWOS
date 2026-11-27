@@ -143,4 +143,72 @@ describe('MEM-EVAL-SUITE R1 hardening (MINOR-1..4)', () => {
     expect(report.eConfFalseAnswerRate).toBe(0.05);
     expect(report.passed).toBe(false);
   });
+
+  it('R2 concurrency: overlapping Promise.all runSuite("memory-task-suite") calls isolate their cached reports (Run A GREEN, Run B FAIL, 50 calls each, 100 total)', async () => {
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    const runMode = new AsyncLocalStorage<'clean' | 'leaky'>();
+    let cleanCalls = 0;
+    let leakyCalls = 0;
+
+    const delayedRunner: MemoryTaskEvalRunner = {
+      mode: 'deterministic-ci-stub',
+      modelName: 'concurrent-isolation-stub',
+      answer: async (input) => {
+        const mode = runMode.getStore();
+        if (mode === 'clean') cleanCalls++;
+        else leakyCalls++;
+        // Interleave Run A and Run B across event-loop ticks
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        if (mode === 'leaky' && input.task.leakClass === 'E-TEN') {
+          return {
+            answer: `Leaked in concurrent run B: ${input.task.forbiddenTokens.join(', ')}`,
+            abstained: false,
+          };
+        }
+        return baseline.answer(input);
+      },
+    };
+
+    const harness = new EvalHarnessService(undefined, undefined, undefined, undefined, delayedRunner);
+
+    const [resA, resB] = await Promise.all([
+      runMode.run('clean', () => harness.runSuite(MEMORY_TASK_SUITE_NAME)),
+      runMode.run('leaky', () => harness.runSuite(MEMORY_TASK_SUITE_NAME)),
+    ]);
+
+    // Each concurrent run evaluated all 50 questions exactly once (zero sharing, zero 4x re-eval)
+    expect(cleanCalls).toBe(50);
+    expect(leakyCalls).toBe(50);
+    // Run A stayed GREEN while overlapping Run B FAILED — zero cross-run contamination
+    expect(resA.green).toBe(true);
+    expect(resA.passed).toBe(4);
+    expect(resA.failed).toBe(0);
+    expect(resB.green).toBe(false);
+    expect(resB.failed).toBeGreaterThan(0);
+  });
+
+  it('R2 error recovery: a throwing runSuite("memory-task-suite") does not poison a subsequent runSuite call', async () => {
+    let shouldFail = true;
+    const flakyRunner: MemoryTaskEvalRunner = {
+      mode: 'deterministic-ci-stub',
+      modelName: 'flaky-error-stub',
+      answer: async (input) => {
+        if (shouldFail) {
+          throw new Error('simulated transient runner failure');
+        }
+        return baseline.answer(input);
+      },
+    };
+
+    const harness = new EvalHarnessService(undefined, undefined, undefined, undefined, flakyRunner);
+    const failedRun = await harness.runSuite(MEMORY_TASK_SUITE_NAME);
+    expect(failedRun.green).toBe(false);
+    expect(failedRun.errors).toBe(4);
+
+    shouldFail = false;
+    const recoveredRun = await harness.runSuite(MEMORY_TASK_SUITE_NAME);
+    expect(recoveredRun.green).toBe(true);
+    expect(recoveredRun.passed).toBe(4);
+    expect(recoveredRun.errors).toBe(0);
+  });
 });

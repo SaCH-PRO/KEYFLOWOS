@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { ConstitutionValuesService } from '../key-autonomy/constitution-values.service';
@@ -146,7 +147,9 @@ function isInvoiceSendStep(step: unknown): boolean {
 export class EvalHarnessService {
   private readonly logger = new Logger(EvalHarnessService.name);
   private readonly suites = new Map<string, EvalSuite>();
-  private activeSuiteMemoryTaskReport: Promise<MemoryTaskSuiteReport> | null = null;
+  private readonly activeSuiteMemoryTaskStore = new AsyncLocalStorage<{
+    report?: Promise<MemoryTaskSuiteReport>;
+  }>();
 
   constructor(
     @Optional() @Inject(AutonomyOrchestratorService) private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
@@ -171,13 +174,14 @@ export class EvalHarnessService {
   }
 
   private evaluateMemoryTaskSuiteForActiveRun(): Promise<MemoryTaskSuiteReport> {
-    if (!this.memoryTaskRunner) {
-      return Promise.reject(new EvalNotRunError('MemoryTaskEvalRunner'));
+    const slot = this.activeSuiteMemoryTaskStore.getStore();
+    if (!slot) {
+      return this.evaluateMemoryTaskSuite();
     }
-    if (!this.activeSuiteMemoryTaskReport) {
-      this.activeSuiteMemoryTaskReport = scoreMemoryTaskSuite(this.memoryTaskRunner);
+    if (!slot.report) {
+      slot.report = this.evaluateMemoryTaskSuite();
     }
-    return this.activeSuiteMemoryTaskReport;
+    return slot.report;
   }
 
   registerSuite(suite: EvalSuite): void {
@@ -194,14 +198,10 @@ export class EvalHarnessService {
       throw new Error(`Eval suite "${name}" not found`);
     }
 
-    const suiteStart = Date.now();
-    const assertionResults: EvalAssertionResult[] = [];
-    const usesMemoryTaskCache = name === MEMORY_TASK_SUITE_NAME;
-    if (usesMemoryTaskCache) {
-      this.activeSuiteMemoryTaskReport = null;
-    }
+    return this.activeSuiteMemoryTaskStore.run({}, async () => {
+      const suiteStart = Date.now();
+      const assertionResults: EvalAssertionResult[] = [];
 
-    try {
       for (const assertion of suite.assertions) {
         const start = Date.now();
         try {
@@ -226,34 +226,30 @@ export class EvalHarnessService {
           });
         }
       }
-    } finally {
-      if (usesMemoryTaskCache) {
-        this.activeSuiteMemoryTaskReport = null;
-      }
-    }
 
-    const count = (status: EvalAssertionStatus) => assertionResults.filter((a) => a.status === status).length;
-    const result: EvalSuiteResult = {
-      name: suite.name,
-      description: suite.description,
-      ...(suite.version ? { suiteVersion: suite.version } : {}),
-      ...(suite.definitionHash ? { definitionHash: suite.definitionHash } : {}),
-      passed: count('PASS'),
-      failed: count('FAIL'),
-      notRun: count('NOT_RUN'),
-      indeterminate: count('INDETERMINATE'),
-      errors: count('ERROR'),
-      total: assertionResults.length,
-      green: assertionResults.length > 0 && assertionResults.every((a) => a.status === 'PASS'),
-      durationMs: Date.now() - suiteStart,
-      assertions: assertionResults,
-    };
+      const count = (status: EvalAssertionStatus) => assertionResults.filter((a) => a.status === status).length;
+      const result: EvalSuiteResult = {
+        name: suite.name,
+        description: suite.description,
+        ...(suite.version ? { suiteVersion: suite.version } : {}),
+        ...(suite.definitionHash ? { definitionHash: suite.definitionHash } : {}),
+        passed: count('PASS'),
+        failed: count('FAIL'),
+        notRun: count('NOT_RUN'),
+        indeterminate: count('INDETERMINATE'),
+        errors: count('ERROR'),
+        total: assertionResults.length,
+        green: assertionResults.length > 0 && assertionResults.every((a) => a.status === 'PASS'),
+        durationMs: Date.now() - suiteStart,
+        assertions: assertionResults,
+      };
 
-    this.logger.log(
-      `[runSuite] ${result.name}: ${result.green ? 'GREEN' : 'NOT GREEN'} ${result.passed}/${result.total} passed, ${result.failed} failed, ${result.notRun} not run, ${result.indeterminate} indeterminate, ${result.errors} errors, in ${result.durationMs}ms`,
-    );
+      this.logger.log(
+        `[runSuite] ${result.name}: ${result.green ? 'GREEN' : 'NOT GREEN'} ${result.passed}/${result.total} passed, ${result.failed} failed, ${result.notRun} not run, ${result.indeterminate} indeterminate, ${result.errors} errors, in ${result.durationMs}ms`,
+      );
 
-    return result;
+      return result;
+    });
   }
 
   async runAll(): Promise<EvalSuiteResult[]> {
