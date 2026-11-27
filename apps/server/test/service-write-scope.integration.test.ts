@@ -317,4 +317,110 @@ describe('P234 (FU-SERVICE-WRITE-SCOPE, D-317 Option B): service, price and depo
       .send({ name: `${P}unauth`, duration: 30, price: 10 });
     expect(unauth.status).toBe(401);
   });
+
+  it('[V92O-04] R1 security closure: KEY Cortex direct commands, plan steps, and TrashController service restore/permanentDelete enforce storefront:write OR bookings:admin', async () => {
+    const { cortexCommandRefusal } = await import('../src/modules/key-cortex/key-cortex.controller');
+    const { memberPlanStepScopeRefusal } = await import('../src/modules/key-cortex/key-cortex-plan-authority');
+    const { ROLE_DEFAULT_SCOPES } = await import('../src/core/authority/module-vocabulary');
+
+    const staffScopes = ROLE_DEFAULT_SCOPES.STAFF as Record<string, string>;
+    const adminScopes = ROLE_DEFAULT_SCOPES.ADMIN as Record<string, string>;
+    const ownerScopes = ROLE_DEFAULT_SCOPES.OWNER as Record<string, string>;
+
+    for (const action of ['add_service', 'update_service'] as const) {
+      // Default STAFF (bookings:write, storefront:read) refused on BOTH direct command and plan step
+      expect(
+        cortexCommandRefusal(
+          { userId: ID.staffDefault, businessId: ID.biz, role: 'STAFF', superAdmin: false, scopes: staffScopes, member: true },
+          'bookings',
+          action,
+        ),
+      ).toContain('storefront write or bookings admin');
+      expect(memberPlanStepScopeRefusal('bookings', action, staffScopes)).toContain(
+        'storefront write or bookings admin',
+      );
+
+      // D-140 restricted OWNER (explicit bookings:write, storefront:read) refused
+      expect(
+        cortexCommandRefusal(
+          {
+            userId: ID.ownerRestricted,
+            businessId: ID.biz,
+            role: 'OWNER',
+            superAdmin: false,
+            scopes: { storefront: 'read', bookings: 'write' },
+            member: true,
+          },
+          'bookings',
+          action,
+        ),
+      ).toContain('storefront write or bookings admin');
+
+      // Explicit storefront:write OR bookings:admin, plus default OWNER & ADMIN -> allowed (null)
+      for (const scopes of [
+        { storefront: 'write', bookings: 'none' },
+        { storefront: 'none', bookings: 'admin' },
+        adminScopes,
+        ownerScopes,
+      ]) {
+        expect(
+          cortexCommandRefusal(
+            { userId: ID.staffStorefrontWrite, businessId: ID.biz, role: 'STAFF', superAdmin: false, scopes, member: true },
+            'bookings',
+            action,
+          ),
+        ).toBeNull();
+        expect(memberPlanStepScopeRefusal('bookings', action, scopes)).toBeNull();
+      }
+    }
+
+    // Regular booking action (non-service write) stays bookings:write for default STAFF
+    expect(
+      cortexCommandRefusal(
+        { userId: ID.staffDefault, businessId: ID.biz, role: 'STAFF', superAdmin: false, scopes: staffScopes, member: true },
+        'bookings',
+        'create_booking',
+      ),
+    ).toBeNull();
+    expect(memberPlanStepScopeRefusal('bookings', 'create_booking', staffScopes)).toBeNull();
+
+    // Real-DB TrashController service restore & bulk-restore enforce storefront:write OR bookings:admin
+    const { TrashController } = await import('../src/modules/trash/trash.controller');
+    const trash = new TrashController(
+      app.get(PrismaService),
+      app.get(CatalogService),
+    );
+    const trashed = await db.service.create({
+      data: {
+        id: `${P}svc_trashed`,
+        businessId: ID.biz,
+        name: `${P}Trashed Service`,
+        duration: 30,
+        price: 100,
+        deletedAt: new Date(),
+      },
+    });
+    for (const deniedUser of [ID.staffDefault, ID.staffExplicitBookingsWrite, ID.ownerRestricted]) {
+      const reqObj = { user: { id: deniedUser, role: 'USER' } } as any;
+      await expect(trash.restore(ID.biz, 'service', trashed.id, reqObj)).rejects.toThrow(
+        /storefront write or bookings admin/,
+      );
+      await expect(trash.bulkRestore(ID.biz, 'service', { ids: [trashed.id] }, reqObj)).rejects.toThrow(
+        /storefront write or bookings admin/,
+      );
+    }
+    const rawStillDeleted = await db.$queryRaw<Array<{ deleted_at: Date | null }>>`
+      SELECT deleted_at FROM services WHERE id = ${trashed.id}
+    `;
+    expect(rawStillDeleted).toHaveLength(1);
+    expect(rawStillDeleted[0]!.deleted_at).not.toBeNull();
+
+    // Explicit storefront:write restores cleanly; soft-delete again and explicit bookings:admin restores too
+    await trash.restore(ID.biz, 'service', trashed.id, { user: { id: ID.staffStorefrontWrite, role: 'USER' } } as any);
+    expect((await db.service.findUniqueOrThrow({ where: { id: trashed.id } })).deletedAt).toBeNull();
+
+    await db.service.update({ where: { id: trashed.id }, data: { deletedAt: new Date() } });
+    await trash.restore(ID.biz, 'service', trashed.id, { user: { id: ID.staffBookingsAdmin, role: 'USER' } } as any);
+    expect((await db.service.findUniqueOrThrow({ where: { id: trashed.id } })).deletedAt).toBeNull();
+  }, 30_000);
 });

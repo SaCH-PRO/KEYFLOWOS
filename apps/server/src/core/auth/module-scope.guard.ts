@@ -85,8 +85,11 @@ export class ModuleScopeGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const primary = this.reflector.get<ModuleScopeRequirement>(MODULE_SCOPE_KEY, context.getHandler());
-    const alternatives =
-      this.reflector.get<ModuleScopeRequirement[]>(MODULE_SCOPE_ALTERNATIVES_KEY, context.getHandler()) ?? [];
+    const rawAlternatives = this.reflector.get<ModuleScopeRequirement[]>(
+      MODULE_SCOPE_ALTERNATIVES_KEY,
+      context.getHandler(),
+    );
+    const alternatives = Array.isArray(rawAlternatives) ? rawAlternatives : [];
     const requirements: ModuleScopeRequirement[] = primary ? [primary, ...alternatives] : alternatives;
     if (requirements.length === 0) return true;
 
@@ -175,10 +178,11 @@ export class ModuleScopeGuard implements CanActivate {
 
       if (resolverAllows === legacyAllows) return;
 
-      const primary = resolverEntries[0];
+      const focal =
+        resolverEntries.find((entry, idx) => entry.allows !== evaluated[idx].allows) ?? resolverEntries[0];
       const reason =
-        typeof primary.decision.reason === 'string' && primary.decision.reason ? primary.decision.reason : 'unknown';
-      securitySignals.record('authority_shadow_mismatch', `${primary.requirement.module}:${reason}`);
+        typeof focal.decision.reason === 'string' && focal.decision.reason ? focal.decision.reason : 'unknown';
+      securitySignals.record('authority_shadow_mismatch', `${focal.requirement.module}:${reason}`);
 
       this.logger.warn(
         `[authority-shadow] MISMATCH business=${businessId} user=${userId} ` +
@@ -186,7 +190,7 @@ export class ModuleScopeGuard implements CanActivate {
           `min=${evaluated.map((e) => e.requirement.minLevel).join('|')} ` +
           `legacy=${legacyAllows ? 'ALLOW' : 'DENY'}(${evaluated.map((e) => e.memberLevel).join('|')}) ` +
           `resolver=${resolverAllows ? 'ALLOW' : 'DENY'}(${resolverEntries.map((e) => e.decision.level).join('|')}) ` +
-          `reason=${reason} explicitDeny=${primary.decision.explicitDeny} ` +
+          `reason=${reason} explicitDeny=${focal.decision.explicitDeny} ` +
           `positions=${result.positions.length} truncated=${result.validity.truncated}`,
       );
     } catch (err) {
