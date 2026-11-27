@@ -103,7 +103,7 @@ function offerWords(productCount: number, serviceCount: number) {
 }
 
 /** P231 r5-r6: text still holding a [bracketed] part for the merchant to fill in (any bracketed part). */
-const HAS_PLACEHOLDER = /\[[^\]]+\]/;
+export const HAS_PLACEHOLDER = /\[[^\]]+\]/;
 
 export function AiContentPanel({
   storeName,
