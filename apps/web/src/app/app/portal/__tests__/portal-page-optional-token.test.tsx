@@ -35,6 +35,8 @@
  *   POT-19  a refused Grant keeps what was typed
  *   POT-20  Grant Access pressed again while the form is open keeps what was typed and its error
  *   POT-21  a Grant that succeeds in A after a switch never closes the form open in B
+ *   POT-22  a Grant still running when its form is cancelled and reopened never reaches the new form: its refusal
+ *           shows no error there, and its success does not close it
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -503,5 +505,26 @@ describe("P232: the Client Portal page without the portal token", () => {
     await openAndType("contact_b");
     await act(async () => succeed({ data: { id: "pa_new" }, error: null }));
     expect((screen.getByPlaceholderText("Contact ID") as HTMLInputElement).value, "B's form stays open").toBe("contact_b");
+  });
+
+  it("POT-22 a Grant from a form cancelled and reopened never reaches the new form", async () => {
+    for (const answer of [
+      { data: null, error: "Insufficient permissions", status: 403 },
+      { data: { id: "pa_new" }, error: null },
+    ]) {
+      portal.list.mockResolvedValue({ data: [], error: null });
+      let finish: (v: unknown) => void = () => undefined;
+      portal.create.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+      render(<PortalPage />);
+      await screen.findByText("No portal access granted yet");
+      await openAndType("contact_first");
+      fireEvent.click(screen.getByRole("button", { name: /^Grant$/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+      await openAndType("contact_second");
+      await act(async () => finish(answer));
+      expect((screen.getByPlaceholderText("Contact ID") as HTMLInputElement).value, JSON.stringify(answer)).toBe("contact_second");
+      expect(screen.queryByText("You can't grant portal access.")).toBeNull();
+      cleanup();
+    }
   });
 });
