@@ -1,7 +1,8 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, Optional, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { LegacyModulesService } from '../identity/legacy-modules.service';
 import { PUBLIC_PRODUCT_SELECT, PUBLIC_SERVICE_SELECT } from '../catalog/catalog.service';
 import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
 import { LEVEL_RANK, rankOf } from '../../core/authority/module-vocabulary';
@@ -69,7 +70,12 @@ export class SiteService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly ai: AiUsageService,
+    @Optional() @Inject(LegacyModulesService) private readonly legacyModules?: LegacyModulesService,
   ) {}
+
+  private resolveLegacyModules(): LegacyModulesService {
+    return this.legacyModules ?? new LegacyModulesService(this.prisma);
+  }
 
   async getStorefrontConfig(businessId: string) {
     const business = await this.prisma.client.business.findFirst({
@@ -170,7 +176,10 @@ export class SiteService {
     // SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public services
     // exclude product listing rows (sourceProductId = null); public products
     // include only active products with a live listing Service for this store.
-    const [services, listings, shippingZones] = await Promise.all([
+    // WEDGE-HIDE-STORE-SERVER (P233; D-263, D-300, D-304): storeCheckout is true
+    // only when the business is on part 1's unfiltered `store` legacy list
+    // (marketplace_orders, quick sales and cancelled orders included).
+    const [services, listings, shippingZones, legacyModules] = await Promise.all([
       this.prisma.client.service.findMany({
         where: { businessId: business.id, deletedAt: null, sourceProductId: null },
         orderBy: { createdAt: 'desc' },
@@ -196,7 +205,10 @@ export class SiteService {
           carrier: true,
         },
       }),
+      this.resolveLegacyModules().getLegacyModules(business.id),
     ]);
+
+    const storeCheckout = legacyModules.includes('store');
 
     const listedProductIds = listings
       .map((l) => l.sourceProductId)
@@ -218,6 +230,7 @@ export class SiteService {
       products,
       shippingZones,
       completedOrdersCount,
+      storeCheckout,
     };
   }
 

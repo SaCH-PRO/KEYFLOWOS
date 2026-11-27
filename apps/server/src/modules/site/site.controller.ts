@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { SiteService } from './site.service';
@@ -184,6 +184,18 @@ export class SiteController {
     },
     @Req() req: Request,
   ) {
+    // WEDGE-HIDE-STORE-SERVER (P233; D-263, D-300, D-304): refuse public store
+    // checkout before any write (order, idempotency slot, promo use, stock,
+    // contact, or payment session) unless the business is on the unfiltered
+    // `store` legacy list. Closed/unknown slugs still 404 from getPublicStorefront.
+    const storefront = await this.siteService.getPublicStorefront(slug);
+    if (storefront.storeCheckout !== true) {
+      throw new ForbiddenException({
+        code: 'STORE_CHECKOUT_NOT_OFFERED',
+        message: 'Online store checkout is not available for this business',
+      });
+    }
+
     // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106, D-18): the method, read
     // once, trimmed and upper-cased. Only no method, CASH, MANUAL, WIPAY,
     // PAYPAL or STRIPE is taken; anything else is refused here, before an
@@ -197,7 +209,6 @@ export class SiteController {
       throw new BadRequestException(storefrontMethodUnsupported(body.paymentMethod as string));
     }
 
-    const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
     const cookieVid = readVisitorIdFromRequest(req);
     const resolvedVid =
