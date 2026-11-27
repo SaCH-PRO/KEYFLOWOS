@@ -292,13 +292,16 @@ describe("R7-4: singular and plural for every count-bearing string", () => {
     }
   }, LONG);
 
+  // r8: the warning is the tab's (Design here), not PolicyEditor's, and no longer reads "Fill it in in".
   it("the save warning outside the FAQ Manager, 1 and 2", () => {
     const entries = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `f${i}`, question: `Q${i}?`, answer: "[your refund policy]", order: i }));
-    render(<PolicyEditor config={{ faqEntries: entries(1) } as never} onConfigChange={vi.fn()} onSave={vi.fn(async () => {})} saving={false} />);
-    expect(screen.getByRole("alert").textContent).toBe("1 FAQ entry still has a [bracketed] part: saving here saves it as it is. Fill it in in the FAQ Manager (Merchandising → FAQ & Policies).");
+    const design = (n: number) =>
+      render(<DesignMode businessData={{ name: "Pepper Co" }} services={[]} commerceProducts={[]} storefrontConfig={{ faqEntries: entries(n) } as never} onConfigChange={vi.fn()} onSaveConfig={vi.fn(async () => {})} configSaving={false} slug="pepper-co" />);
+    design(1);
+    expect(screen.getByRole("alert").textContent).toBe("1 FAQ entry still has a [bracketed] part: saving here saves it as it is. Fill it in under Merchandising → FAQ & Policies.");
     cleanup();
-    render(<PolicyEditor config={{ faqEntries: entries(2) } as never} onConfigChange={vi.fn()} onSave={vi.fn(async () => {})} saving={false} />);
-    expect(screen.getByRole("alert").textContent).toBe("2 FAQ entries still have a [bracketed] part: saving here saves them as they are. Fill them in in the FAQ Manager (Merchandising → FAQ & Policies).");
+    design(2);
+    expect(screen.getByRole("alert").textContent).toBe("2 FAQ entries still have a [bracketed] part: saving here saves them as they are. Fill them in under Merchandising → FAQ & Policies.");
   });
 });
 
@@ -495,12 +498,15 @@ describe("R7-9: the write paths", () => {
     expect(written.map((e) => [e.question, e.answer])).toEqual(faqs.map((f) => [f.question, f.answer]));
   }, LONG);
 
+  // r8: Save Policies is warned for by the Merchandising tab's one warning (PolicyEditor has none of its own).
   it("Save Policies warns while FAQ entries hold a placeholder, and still saves", () => {
-    const onSave = vi.fn(async () => {});
-    render(<PolicyEditor config={{ faqEntries: [{ id: "a", question: "Refunds?", answer: "[your refund policy]", order: 0 }, { id: "b", question: "Open?", answer: "Yes.", order: 1 }] } as never} onConfigChange={vi.fn()} onSave={onSave} saving={false} />);
+    const onSaveConfig = vi.fn(async () => {});
+    const faqEntries = [{ id: "a", question: "Refunds?", answer: "[your refund policy]", order: 0 }, { id: "b", question: "Open?", answer: "Yes.", order: 1 }];
+    render(<MerchandisingMode businessData={{ name: "Pepper Co" }} services={[]} commerceProducts={[]} liveProductIds={new Set()} storefrontConfig={{ faqEntries } as never} onConfigChange={vi.fn()} onSaveConfig={onSaveConfig} configSaving={false} publicUrl="https://example.test/book/pepper-co" hasTestimonials={false} />);
+    fireEvent.click(screen.getByText("FAQ & Policies"));
     expect(screen.getByRole("alert").textContent).toMatch(/^1 FAQ entry still has a \[bracketed\] part/);
     fireEvent.click(screen.getByText("Save Policies"));
-    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSaveConfig).toHaveBeenCalledTimes(1);
     cleanup();
     render(<PolicyEditor config={{ faqEntries: [{ id: "b", question: "Open?", answer: "Yes.", order: 1 }] } as never} onConfigChange={vi.fn()} onSave={vi.fn(async () => {})} saving={false} />);
     expect(screen.queryByRole("alert")).toBeNull();
@@ -540,7 +546,7 @@ describe("R7-10: pins for three mutants the round-7 table left alive", () => {
   });
 
   it("the save warning counts a placeholder in the question too", () => {
-    render(<PolicyEditor config={{ faqEntries: [{ id: "q", question: "What is [Product Name]?", answer: "Our sauce.", order: 0 }] } as never} onConfigChange={vi.fn()} onSave={vi.fn(async () => {})} saving={false} />);
+    render(<DesignMode businessData={{ name: "Pepper Co" }} services={[]} commerceProducts={[]} storefrontConfig={{ faqEntries: [{ id: "q", question: "What is [Product Name]?", answer: "Our sauce.", order: 0 }] } as never} onConfigChange={vi.fn()} onSaveConfig={vi.fn(async () => {})} configSaving={false} slug="pepper-co" />);
     expect(screen.getByRole("alert").textContent).toMatch(/^1 FAQ entry still has a \[bracketed\] part/);
   });
 });

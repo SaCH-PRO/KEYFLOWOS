@@ -88,7 +88,7 @@ export const ALLOWED = new Set<string>([
   "Delivery",
   "Delivery takes […]. Delivery options are shown at checkout.",
   "Discover {name} online.",
-  "Discover {name} online. Small-batch hot sauces....",
+  "Discover {name} online. Small-batch hot sauces.",
   "Discover {n} package from {name}",
   "Discover {n} packages from {name}",
   "Discover {n} product and {n} service from {name}",
