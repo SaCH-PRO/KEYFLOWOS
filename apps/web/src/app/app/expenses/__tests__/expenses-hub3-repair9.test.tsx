@@ -2,8 +2,8 @@
  * EXPENSES-HUB-3 repair round 9 (round-8 confirmations at ac1085b), absolute API base ("http://api.test").
  *
  *   R9-1 "..%2Fobjects" straight under the root is still an object path: ".." never pops the root segment
- *   R9-2 a filter change while on page 2 costs exactly one read, on page 1 with the new filter: no read with the
- *        stale page, none with an old filter, none more
+ *   R9-2 a filter change while on page 2 ends on page 1 with the new filter, and no reply of the stale page-2 read
+ *        is ever applied (repair round 10: at most 2 reads; the skip that made it exactly 1 could starve reads)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, cleanup, waitFor, act } from "@testing-library/react";
@@ -71,11 +71,17 @@ describe("R9-1: '..' never pops the root segment", () => {
   });
 });
 
-describe("R9-2: a filter change while on page 2 costs exactly one read", () => {
-  it("one read, on page 1 with the new filter; none with the stale page", async () => {
-    client.fetchExpenses.mockImplementation(async (_b: string, params: { categoryId?: string; page?: number }) =>
-      ok({ data: [expense(`${params.categoryId ?? "all"}_p${params.page}`)], total: 45, page: params.page ?? 1, limit: 20 }),
-    );
+describe("R9-2: a filter change while on page 2 ends on page 1 with the new filter", () => {
+  it("the final rows come from {cat_X, page 1}; the stale page-2 read's reply is never applied; at most 2 reads", async () => {
+    let releasePage2: () => void = () => {};
+    const applied: string[] = [];
+    client.fetchExpenses.mockImplementation((_b: string, params: { categoryId?: string; page?: number }) => {
+      const id = `${params.categoryId ?? "all"}_p${params.page}`;
+      const answer = ok({ data: [expense(id)], total: 45, page: params.page ?? 1, limit: 20 });
+      // The page-2 read with the new filter answers last, after the page-1 read: it must never be applied.
+      if (params.categoryId === "cat_X" && params.page === 2) return new Promise((r) => { releasePage2 = () => r(answer); });
+      return Promise.resolve(answer);
+    });
     const { result } = renderHook(() => useExpensesData());
     await waitFor(() => expect(result.current.expenses.map((e) => e.id)).toEqual(["all_p1"]));
     act(() => result.current.setPage(2));
@@ -85,11 +91,14 @@ describe("R9-2: a filter change while on page 2 costs exactly one read", () => {
     const before = client.fetchExpenses.mock.calls.length;
     act(() => result.current.setFilterCategory("cat_X"));
     await waitFor(() => expect(result.current.expenses.map((e) => e.id)).toEqual(["cat_X_p1"]));
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { releasePage2(); });
     await new Promise((r) => setTimeout(r, 30));
-    const reads = client.fetchExpenses.mock.calls.slice(before).map((c) => c[1] as { categoryId?: string; page?: number });
-    expect(reads, `reads after the filter change: ${JSON.stringify(reads)}`).toHaveLength(1);
-    expect(reads[0]).toMatchObject({ categoryId: "cat_X", page: 1 });
+    applied.push(...result.current.expenses.map((e) => e.id));
+    expect(applied, "the stale page-2 reply is never applied").toEqual(["cat_X_p1"]);
     expect(result.current.page).toBe(1);
+    expect(result.current.loading).toBe(false);
+    const reads = client.fetchExpenses.mock.calls.slice(before).map((c) => c[1] as { categoryId?: string; page?: number });
+    expect(reads.length, `reads after the filter change: ${JSON.stringify(reads)}`).toBeLessThanOrEqual(2);
+    expect(reads.at(-1)).toMatchObject({ categoryId: "cat_X", page: 1 });
   });
 });
