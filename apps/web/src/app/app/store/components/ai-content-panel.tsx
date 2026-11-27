@@ -61,6 +61,21 @@ const ACTIONS: { id: ActionType; icon: React.ElementType; label: string; desc: s
   { id: "launch", icon: Megaphone, label: "Launch Posts", desc: "Social media & WhatsApp launch copy", color: "hsl(var(--kf-warning))" },
 ];
 
+/**
+ * P231 (D-303) Trust Copy: only what the testimonials show. No guarantee or service claim the product does not check
+ * (r1-r3: "100% Satisfaction Guarantee", "Secure, Encrypted Checkout", "Verified Business", "Secure Payments",
+ * "Quality Guaranteed", "Fast, Reliable Service", "Real Human Support"); with none, nothing (r2-r3). r4: how many
+ * reviews there are, true at any rating, never that the customers are happy or satisfied or keep coming back.
+ */
+function trustCopyFor(testimonialCount: number): { trustBadges: string[]; socialProofCopy: string[] } {
+  if (testimonialCount <= 0) return { trustBadges: [], socialProofCopy: [] };
+  const reviews = testimonialCount === 1 ? "review" : "reviews";
+  return {
+    trustBadges: [`${testimonialCount} customer ${reviews}`],
+    socialProofCopy: [`Read ${testimonialCount} ${reviews} from our customers.`],
+  };
+}
+
 export function AiContentPanel({
   storeName,
   businessDescription,
@@ -76,7 +91,9 @@ export function AiContentPanel({
   const [loading, setLoading] = useState(false);
   const [faqResult, setFaqResult] = useState<FaqResult | null>(null);
   const [seoResult, setSeoResult] = useState<SeoResult | null>(null);
-  const [trustResult, setTrustResult] = useState<{ guarantees: string[]; trustBadges: string[]; socialProofCopy: string[] } | null>(null);
+  // P231 r4: Trust Copy is worked out from the testimonial count each render once it was asked for, so it follows the
+  // count (testimonials removed or added after generating) and never shows a stale "N customer reviews".
+  const [trustRequested, setTrustRequested] = useState(false);
   const [launchResult, setLaunchResult] = useState<{ socialPosts: string[]; whatsappMessages: string[]; emailSubjectLines: string[] } | null>(null);
   const [appliedFaq, setAppliedFaq] = useState(false);
   const [appliedSeo, setAppliedSeo] = useState(false);
@@ -85,6 +102,7 @@ export function AiContentPanel({
 
   const name = storeName || "Your Store";
   const totalItems = productsCount + servicesCount;
+  const trustResult = trustRequested ? trustCopyFor(testimonialCount) : null;
 
   async function generate(action: ActionType) {
     setActiveAction(action);
@@ -95,19 +113,20 @@ export function AiContentPanel({
       const faqs: GeneratedFaq[] = [];
       if (servicesCount > 0) {
         faqs.push({ question: "How do I book a service?", answer: `Simply browse our services and click "Book Now" on the one you want. You'll choose your preferred time and complete your booking in just a few steps.`, category: "Bookings" });
-        faqs.push({ question: "Can I reschedule or cancel?", answer: "Yes — you can reschedule or cancel up to 24 hours before your appointment. Contact us directly for any last-minute changes.", category: "Bookings" });
+        // P231 r4 (D-303): the merchant's own policies are left as marked placeholders, never invented.
+        faqs.push({ question: "Can I reschedule or cancel?", answer: "Yes — you can reschedule or cancel up to [your cancellation notice] before your appointment. Contact us directly for any last-minute changes.", category: "Bookings" });
       }
       if (productsCount > 0) {
         faqs.push({ question: "What payment methods do you accept?", answer: "We accept all major credit and debit cards. All payments are processed at checkout.", category: "Payments" });
       }
       if (hasDelivery) {
-        faqs.push({ question: "How long does delivery take?", answer: "Standard delivery is 3–5 business days. Express options may be available at checkout depending on your location.", category: "Delivery" });
+        faqs.push({ question: "How long does delivery take?", answer: "Delivery takes [your delivery time]. Express options may be available at checkout depending on your location.", category: "Delivery" });
         faqs.push({ question: "Do you offer local pickup?", answer: "Yes! Select local pickup at checkout and we'll notify you when your order is ready to collect.", category: "Delivery" });
       }
       faqs.push({ question: `What makes ${name} different?`, answer: `We're committed to quality and customer satisfaction in everything we offer. Every item is carefully selected and every service is delivered with care.`, category: "About" });
-      faqs.push({ question: "How can I contact you?", answer: "Reach us through the contact section on our storefront. We typically respond within 1 business day.", category: "Support" });
-      faqs.push({ question: "What is your refund policy?", answer: "We offer refunds within 7 days of purchase for items in original condition. Services can be cancelled up to 24 hours in advance.", category: "Refunds" });
-      setFaqResult({ faqs, instruction: "These FAQs are ready to use. Click 'Add All to FAQ' to apply them to your FAQ Manager, then save." });
+      faqs.push({ question: "How can I contact you?", answer: "Reach us through the contact section on our storefront. We respond within [your response time].", category: "Support" });
+      faqs.push({ question: "What is your refund policy?", answer: "We offer refunds within [your refund window] of purchase for items in original condition. Services can be cancelled up to [your cancellation notice] in advance.", category: "Refunds" });
+      setFaqResult({ faqs, instruction: "Fill in the [bracketed] parts with your own policies, then click 'Add All to FAQ' to apply them to your FAQ Manager, and save." });
     }
 
     if (action === "seo") {
@@ -133,23 +152,7 @@ export function AiContentPanel({
       setSelectedSeoDesc(metaDescOptions[0]);
     }
 
-    if (action === "trust") {
-      setTrustResult({
-        // P231 r1-r3 (D-303): no guarantee or service claim the product does not check ("100% Satisfaction
-        // Guarantee", "Secure, Encrypted Checkout", "Verified Business", "Secure Payments", "Quality Guaranteed",
-        // "Fast, Reliable Service", "Real Human Support").
-        guarantees: [],
-        // P231 r2-r3: praise only with testimonials to point to, and only what they show (no "across the region");
-        // a store without them is suggested none.
-        trustBadges: testimonialCount > 0 ? [`${testimonialCount}+ Happy Customers`] : [],
-        socialProofCopy: testimonialCount > 0
-          ? [
-              `Join ${testimonialCount}+ satisfied customers who trust ${name}.`,
-              "Real results, real reviews — see why customers keep coming back.",
-            ]
-          : [],
-      });
-    }
+    if (action === "trust") setTrustRequested(true);
 
     if (action === "launch") {
       setLaunchResult({

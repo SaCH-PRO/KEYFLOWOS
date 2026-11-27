@@ -695,7 +695,8 @@ function buildStoreTools(): AiTool[] {
           });
           faqs.push({
             question: "Can I reschedule or cancel my booking?",
-            answer: "Yes, you can reschedule or cancel your booking up to 24 hours before your appointment. Please contact us directly for last-minute changes.",
+            // P231 r4 (D-303): the merchant's own policies are left as marked placeholders, never invented.
+            answer: "Yes, you can reschedule or cancel your booking up to [your cancellation notice] before your appointment. Please contact us directly for last-minute changes.",
             category: "Bookings",
           });
         }
@@ -711,7 +712,7 @@ function buildStoreTools(): AiTool[] {
         if (activeDelivery > 0) {
           faqs.push({
             question: "How long does delivery take?",
-            answer: "Delivery times vary by location and method. Standard delivery typically takes 3-5 business days. Express options may be available at checkout.",
+            answer: "Delivery times vary by location and method. Delivery takes [your delivery time]. Express options may be available at checkout.",
             category: "Delivery",
           });
           faqs.push({
@@ -729,20 +730,20 @@ function buildStoreTools(): AiTool[] {
 
         faqs.push({
           question: "How can I contact you?",
-          answer: "You can reach us through the contact section on our storefront, or message us directly via the contact details listed on our page. We typically respond within 1 business day.",
+          answer: "You can reach us through the contact section on our storefront, or message us directly via the contact details listed on our page. We respond within [your response time].",
           category: "Support",
         });
 
         faqs.push({
           question: "What is your refund policy?",
-          answer: "We offer refunds within 7 days of purchase for items in their original condition. Services can be cancelled up to 24 hours before the scheduled time. Please contact us to initiate a refund.",
+          answer: "We offer refunds within [your refund window] of purchase for items in their original condition. Services can be cancelled up to [your cancellation notice] before the scheduled time. Please contact us to initiate a refund.",
           category: "Refunds",
         });
 
         return {
           summary: `Generated ${faqs.length} FAQ entries for "${storeName}" covering bookings, payments, delivery, and support.`,
           faqs,
-          instruction: "Copy these FAQs into your FAQ Manager in the Merchandising tab. You can edit and customize each answer to match your specific policies.",
+          instruction: "Copy these FAQs into your FAQ Manager in the Merchandising tab, filling in the [bracketed] parts with your own policies. You can edit and customize each answer.",
         };
       },
     },
@@ -831,18 +832,12 @@ function buildStoreTools(): AiTool[] {
         // "Fast, Reliable Service", "Real Human Support").
         const guarantees: string[] = [];
 
-        // P231 r2-r3: praise only with testimonials to point to, and only what they show (no "across the region");
-        // a store without them is suggested none.
-        const trustBadges = testimonials.length > 0 ? [`${testimonials.length}+ Happy Customers`] : [];
-
-        const socialProofCopy = testimonials.length > 0
-          ? [
-              `Join ${testimonials.length}+ satisfied customers who trust ${storeName}.`,
-              `Real results, real reviews — see why customers keep coming back.`,
-            ]
-          : [];
-
-        const aboutCopy = `${storeName} is committed to delivering quality ${d.businessDescription ? "— " + d.businessDescription : "products and services"}.`;
+        // P231 r2-r4: only what the testimonials show, and none without them. r4: how many reviews there are, true at
+        // any rating, never that the customers are happy or satisfied or keep coming back; and no "is committed to
+        // delivering quality" about copy, which the product does not check.
+        const reviews = testimonials.length === 1 ? "review" : "reviews";
+        const trustBadges = testimonials.length > 0 ? [`${testimonials.length} customer ${reviews}`] : [];
+        const socialProofCopy = testimonials.length > 0 ? [`Read ${testimonials.length} ${reviews} from our customers.`] : [];
 
         return {
           summary: testimonials.length > 0
@@ -851,7 +846,6 @@ function buildStoreTools(): AiTool[] {
           guarantees,
           trustBadges,
           socialProofCopy,
-          aboutCopy,
           instruction: "Add trust badges to your description, and social proof copy near your testimonials section.",
         };
       },
