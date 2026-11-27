@@ -17,7 +17,7 @@
  * an allowlist, not a delete, so a future column named `secret` or
  * `signingKey` is not answered either. Pure (no Nest, no Prisma).
  */
-export interface PortalAccessView {
+export type PortalAccessView = {
   id: unknown;
   contactId: unknown;
   enabled: unknown;
@@ -28,7 +28,7 @@ export interface PortalAccessView {
   /** The grant is enabled and not yet expired: its link opens the portal now. */
   hasLiveLink: boolean;
   createdAt: unknown;
-}
+};
 
 export function portalAccessView(row: Record<string, unknown>): PortalAccessView {
   const expiresAt = row.expiresAt instanceof Date ? row.expiresAt : new Date(String(row.expiresAt));
