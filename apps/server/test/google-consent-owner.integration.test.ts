@@ -65,9 +65,9 @@
  * POST /connect/businesses/:b/contacts/sync (control [V94D-J01]; the five
  * STAFF-started Google Contacts cases of connect-sync-actor.integration.test.ts
  * are re-pointed at the owner, or at the Outlook source, in the same change),
- * [V94D-T06] POST /drive/businesses/:b/sync (DriveIntakeController.sync) and the
- * KEY tool connect.scanDrive (KeyToolRegistryService: the driving member must be
- * the owner, else a refusal envelope and nothing run; control [V94D-J02]), and
+ * [V94D-T06] POST /drive/businesses/:b/sync (DriveIntakeController.sync; the
+ * legacy KEY tool connect.scanDrive was retired as OBSOLETE in P160
+ * RR-LEGACY-FALLBACK-REMOVE; control [V94D-J02]), and
  * [V94D-T07] POST /calendar/businesses/:b/sync/google/temporal-flow (control
  * [V94D-J03]). Its review repair (SEC-W10GDR-1; D-99, D-111) gates the Google
  * Calendar sync settings writes, PATCH /calendar/businesses/:b/sync/settings
@@ -75,9 +75,8 @@
  * control [V94D-J04]; the reads stay a member's). For these cases the
  * Drive pull (ConnectorIntelligenceService.syncGoogleDrive) and the calendar
  * pull (GoogleCalendarTemporalSyncService.syncBusiness) are recording
- * stand-ins, the KEY tool registry is the real KeyToolRegistryService with
- * stand-ins for the services no case here reaches, and DriveIntakeController is
- * mounted as the commerce module mounts it.
+ * stand-ins, and DriveIntakeController is mounted as the commerce module
+ * mounts it.
  *
  * For these cases the connector registry behind ConnectorController is a
  * stand-in recording what reaches it, its credential store is the real
@@ -239,10 +238,8 @@ const driveIntelligence = {
 const temporalSync = {
   syncBusiness: vi.fn(async (_businessId: string) => ({ synced: 0, skipped: 0 })),
 };
-/** W10-GOOGLE-DOORS-REST: the KEY tool registry's audit log, a recording stand-in. */
-const keyToolAudit = { logToolExecution: vi.fn(async () => 'v94d_audit') };
-/** W10-GOOGLE-DOORS-REST: the real KeyToolRegistryService (resolved in beforeAll). */
-let keyTools: any;
+/** P160 (RR-LEGACY-FALLBACK-REMOVE): connect.scanDrive is retired as OBSOLETE in legacy-tool-equivalence. */
+let getLegacyToolEquivalenceFn: (key: string) => { disposition: string; reason: string } | undefined;
 
 /**
  * W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): the Gmail and Drive transports behind the real
@@ -423,19 +420,16 @@ beforeAll(async () => {
   const { ConnectorFormMappingService } = await import('../src/modules/connect/connector-form-mapping.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
   const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
-  // W10-GOOGLE-DOORS-REST: the Drive intake sync door and the KEY tool registry.
+  // W10-GOOGLE-DOORS-REST: the Drive intake sync door (P160 retired legacy KeyToolRegistryService).
   const { DriveIntakeController } = await import('../src/modules/commerce/drive-intake.controller');
   const { DriveIntakeOrchestrator } = await import('../src/modules/commerce/drive-intake-orchestrator.service');
   const { ConnectorIntelligenceService } = await import('../src/modules/ai/connector-intelligence.service');
-  const { KeyToolRegistryService } = await import('../src/modules/ai/key-tool-registry.service');
-  const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+  ({ getLegacyToolEquivalence: getLegacyToolEquivalenceFn } = await import('../src/modules/ai/legacy-tool-equivalence'));
   const { SafeToSpendService } = await import('../src/modules/finance/safe-to-spend.service');
   const { CashflowForecastService } = await import('../src/modules/finance/cashflow-forecast.service');
   const { MoneyMovesService } = await import('../src/modules/finance/money-moves.service');
   const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
   const { FinanceOverviewService } = await import('../src/modules/finance/finance-overview.service');
-  const { CommandService } = await import('../src/modules/command/command.service');
-  const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): the statement-source doors, with the real
   // StatementSourceService; FinanceController's other collaborators, which no case here reaches.
   const { FinanceController } = await import('../src/modules/finance/finance.controller');
@@ -537,21 +531,14 @@ beforeAll(async () => {
       { provide: GoogleBusinessProfileService, useValue: {} },
       { provide: ConnectorFormMappingService, useValue: {} },
       // W10-GOOGLE-DOORS-REST ([V94D-T06]): DriveIntakeController's Drive pull
-      // (recording, shared with the KEY tool) and its plan orchestrator, which
-      // no case here reaches; the real KeyToolRegistryService over the real
-      // PrismaService, with stand-ins for the services connect.scanDrive does
-      // not use and a recording audit log.
+      // (recording) and its plan orchestrator, which no case here reaches.
       { provide: ConnectorIntelligenceService, useValue: driveIntelligence },
       { provide: DriveIntakeOrchestrator, useValue: {} },
-      KeyToolRegistryService,
-      { provide: AiExecutionLogService, useValue: keyToolAudit },
       { provide: SafeToSpendService, useValue: {} },
       { provide: CashflowForecastService, useValue: {} },
       { provide: MoneyMovesService, useValue: {} },
       { provide: ReceivablesService, useValue: {} },
       { provide: FinanceOverviewService, useValue: {} },
-      { provide: CommandService, useValue: {} },
-      { provide: TimelineService, useValue: {} },
       // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): the real StatementSourceService over the real
       // PrismaService, its Gmail and Drive transports and bank import the recording stand-ins above.
       {
@@ -582,7 +569,6 @@ beforeAll(async () => {
   googleContactsSync = vi
     .spyOn(app.get(GoogleContactsSyncService), 'sync')
     .mockImplementation(async () => ({ imported: 0, updated: 0, matched: 0, created: 0, skipped: 0, appliedRules: false }));
-  keyTools = app.get(KeyToolRegistryService);
 
   await cleanup(); // in case a prior run aborted
 
@@ -1219,18 +1205,8 @@ const temporalFlowSync = (businessId: string, actor: string | undefined) =>
   as(agent().post(`/calendar/businesses/${businessId}/sync/google/temporal-flow`), actor).send({});
 const patchSyncSettings = (businessId: string, actor: string | undefined, body: Record<string, unknown>) =>
   as(agent().patch(`/calendar/businesses/${businessId}/sync/settings`), actor).send(body);
-/**
- * The KEY tool connect.scanDrive, run as KeyCommandService.executeApprovedPlan
- * runs a legacy tool: INTERNAL_EXEC (2), the driving member as userId.
- */
-const scanDrive = (businessId: string, userId: string | undefined): Promise<any> =>
-  keyTools.execute('connect', 'scanDrive', { businessId, userId, commandId: `${P}cmd`, autonomyLevel: 2 }, {});
-/** A KEY refusal under D-99 (the shape of the other KEY refusals): nothing run, no data, the code named. */
-function expectKeyGoogleOwnerOnly(result: any, who: string) {
-  expect(result, `${who} ${JSON.stringify(result)}`).toMatchObject({ success: false, notExecuted: true });
-  expect(String(result.error), who).toContain('GOOGLE_CONNECT_OWNER_ONLY');
-  expect(result.data, who).toBeUndefined();
-}
+/** P160 (RR-LEGACY-FALLBACK-REMOVE): connect.scanDrive was retired as OBSOLETE (hidden v1 module D-152). */
+const scanDriveEquivalence = () => getLegacyToolEquivalenceFn('connect.scanDrive');
 /** The arms of the owner rule, each on a business it owns: the owner, a co-owner, the distinguished owner, a SUPER_ADMIN. */
 const OWNER_ARMS: Array<[string, string]> = [[ID.biz, ID.owner], [ID.biz, ID.coOwner], [ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]];
 
@@ -1273,30 +1249,22 @@ describe('W10-GOOGLE-DOORS-REST: starting a Google Contacts sync is the business
   });
 });
 
-describe('W10-GOOGLE-DOORS-REST: starting a Google Drive sync, at the Drive intake door or through the KEY tool, is the business owner\'s (D-99)', () => {
-  it('[V94D-T06] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /drive/businesses/:b/sync (DriveIntakeController.sync, the Drive sync the web starts: key-connect handleSync and the Drive intake queue) and the KEY tool connect.scanDrive (review CRR-W9GD-1) both run ConnectorIntelligenceService.syncGoogleDrive (the Drive API pull that writes intake rows); for an ADMIN, a STAFF member and the owner of another business who is STAFF here the door answers 403 GOOGLE_CONNECT_OWNER_ONLY and the KEY tool returns a refusal envelope (success false, notExecuted, GOOGLE_CONNECT_OWNER_ONLY, no data), as it does for a run with no driving member, one driven by a user with no membership and one by the owner of another business; syncGoogleDrive is not called', async () => {
+describe('W10-GOOGLE-DOORS-REST: starting a Google Drive sync, at the Drive intake door, is the business owner\'s (D-99) and legacy connect.scanDrive is retired OBSOLETE (P160)', () => {
+  it('[V94D-T06] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /drive/businesses/:b/sync (DriveIntakeController.sync, the Drive sync the web starts: key-connect handleSync and the Drive intake queue) runs ConnectorIntelligenceService.syncGoogleDrive; for an ADMIN, a STAFF member and the owner of another business who is STAFF here the door answers 403 GOOGLE_CONNECT_OWNER_ONLY, and legacy KEY tool connect.scanDrive is retired OBSOLETE (P160, D-152); syncGoogleDrive is not called', async () => {
     driveIntelligence.syncGoogleDrive.mockClear();
     for (const member of REFUSED) {
       expectGoogleOwnerOnly(await driveSync(ID.biz, member), `${member} drive sync`);
-      expectKeyGoogleOwnerOnly(await scanDrive(ID.biz, member), `${member} connect.scanDrive`);
     }
-    expectKeyGoogleOwnerOnly(await scanDrive(ID.biz, undefined), 'no driving member');
-    expectKeyGoogleOwnerOnly(await scanDrive(ID.biz, ID.stranger), 'stranger');
-    expectKeyGoogleOwnerOnly(await scanDrive(ID.bizOther, ID.owner), 'the owner of biz on bizOther');
+    expect(scanDriveEquivalence()).toMatchObject({ disposition: 'OBSOLETE' });
     expect(driveIntelligence.syncGoogleDrive).not.toHaveBeenCalled();
   });
 
-  it('[V94D-J02] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN with no membership start the Drive sync at the door (201, success with the pull\'s counts) and through the KEY tool connect.scanDrive (success, the pull\'s counts), and syncGoogleDrive runs once for the route\'s business each time; a user with no membership is refused the door by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing run', async () => {
+  it('[V94D-J02] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN with no membership start the Drive sync at the door (201, success with the pull\'s counts), and syncGoogleDrive runs once for the route\'s business each time; a user with no membership is refused the door by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing run', async () => {
     for (const [businessId, actor] of OWNER_ARMS) {
       driveIntelligence.syncGoogleDrive.mockClear();
       const res = await driveSync(businessId, actor);
       expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
       expect(res.body).toEqual({ success: true, scanned: 0, newFiles: 0 });
-      expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledTimes(1);
-      expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledWith(businessId);
-
-      driveIntelligence.syncGoogleDrive.mockClear();
-      expect(await scanDrive(businessId, actor), `${actor} connect.scanDrive`).toEqual({ success: true, data: { scanned: 0, newFiles: 0 } });
       expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledTimes(1);
       expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledWith(businessId);
     }

@@ -5193,6 +5193,185 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
     },
   },
+  // P160 (RR-LEGACY-FALLBACK-REMOVE): v1-kept legacy KeyToolRegistryService tools promoted to canonical FLOW_TOOLS.
+  {
+    name: 'finance_list_overdue_invoices',
+    description:
+      'List past-due sent open invoices (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) with credit-aware remaining balances and per-currency totals (D-260).',
+    family: 'read',
+    effectClass: 'READ',
+    idempotency: 'NATURAL',
+    reversibility: 'REVERSIBLE',
+    contractVersion: 1,
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Maximum invoices to return (1–100, default 10)' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Sent-only overdue invoices and currency-separated totals',
+      fields: {
+        invoices: { type: 'array', description: 'Past-due sent open invoices ordered by days overdue' },
+        total: { type: 'number', description: 'Overdue total in business home currency' },
+        currency: { type: 'string', description: 'Business home currency' },
+        totalsByCurrency: { type: 'object', description: 'Overdue totals separated by currency' },
+      },
+    },
+  },
+  {
+    name: 'finance_create_invoice_reminder_draft',
+    description:
+      'Draft a deterministic payment reminder template for a past-due sent open invoice (SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) with credit-aware remaining balance (D-260).',
+    family: 'draft',
+    effectClass: 'INTERNAL_WRITE',
+    idempotency: 'NATURAL',
+    reversibility: 'REVERSIBLE',
+    contractVersion: 1,
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
+    parameters: {
+      type: 'object',
+      properties: {
+        invoiceId: { type: 'string', description: 'ID of the overdue sent invoice to draft a reminder for' },
+        tone: {
+          type: 'string',
+          description: 'Reminder tone (default friendly)',
+          enum: ['friendly', 'firm', 'urgent'],
+        },
+      },
+      required: ['invoiceId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Drafted reminder text',
+      fields: {
+        draft: { type: 'string', description: 'Draft payment reminder message' },
+        invoiceId: { type: 'string', description: 'Target invoice ID' },
+      },
+    },
+  },
+  {
+    name: 'crm_recommend_follow_ups',
+    description:
+      'Find non-dormant contacts who have not been reached recently, bounded by the caller CRM visibility scope (D-37).',
+    family: 'read',
+    effectClass: 'READ',
+    idempotency: 'NATURAL',
+    reversibility: 'REVERSIBLE',
+    contractVersion: 1,
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/contacts',
+    parameters: {
+      type: 'object',
+      properties: {
+        daysStale: { type: 'number', description: 'Minimum days since last interaction (default 14)' },
+        limit: { type: 'number', description: 'Maximum contacts to return (1–100, default 10)' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Stale contacts needing follow-up',
+      fields: {
+        contacts: { type: 'array', description: 'Contacts past the staleness cutoff' },
+        count: { type: 'number', description: 'Number of returned contacts' },
+      },
+    },
+  },
+  {
+    name: 'command_create_item',
+    description: 'Create a command item in the universal command queue.',
+    family: 'organize',
+    effectClass: 'INTERNAL_WRITE',
+    idempotency: 'NONE',
+    reversibility: 'COMPENSABLE',
+    contractVersion: 1,
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/command-center',
+    changedEntities: ['commandItem'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Command item title' },
+        description: { type: 'string', description: 'Optional item description' },
+        category: {
+          type: 'string',
+          description: 'Universal queue category (default PEOPLE)',
+          enum: ['MONEY', 'TIME', 'PEOPLE', 'WORK', 'SALES', 'MARKETING', 'GOVERNANCE', 'STRATEGY', 'SYSTEM'],
+        },
+        contactId: { type: 'string', description: 'Optional associated contact ID' },
+        dueAt: { type: 'string', description: 'Optional ISO due timestamp' },
+      },
+      required: ['title'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Created command item',
+      fields: {
+        commandItemId: { type: 'string', description: 'ID of the created command item' },
+      },
+    },
+  },
+  {
+    name: 'commerce_summarize_revenue',
+    description: 'Summarize total paid invoice revenue and paid invoice count for the business.',
+    family: 'read',
+    effectClass: 'READ',
+    idempotency: 'NATURAL',
+    reversibility: 'REVERSIBLE',
+    contractVersion: 1,
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Paid invoice revenue summary',
+      fields: {
+        totalRevenue: { type: 'number', description: 'Sum of PAID invoice totals' },
+        paidInvoiceCount: { type: 'number', description: 'Count of PAID invoices' },
+        currency: { type: 'string', description: 'Currency code' },
+      },
+    },
+  },
+  {
+    name: 'crm_create_reminder',
+    description: 'Create a reminder or follow-up ContactTask for an associated contact.',
+    family: 'crud',
+    effectClass: 'INTERNAL_WRITE',
+    idempotency: 'NONE',
+    reversibility: 'COMPENSABLE',
+    contractVersion: 1,
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/contacts',
+    changedEntities: ['contactTask'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Reminder title' },
+        contactId: { type: 'string', description: 'Contact ID to associate the reminder with' },
+        dueDate: { type: 'string', description: 'Optional ISO due date' },
+      },
+      required: ['title', 'contactId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Created reminder',
+      fields: {
+        reminderId: { type: 'string', description: 'ID of the created reminder task' },
+      },
+    },
+  },
   {
     name: 'finance_balance_sheet',
     description:

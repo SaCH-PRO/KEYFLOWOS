@@ -131,11 +131,10 @@ function harness() {
     resolve: vi.fn().mockResolvedValue({ level: 4, mode: 'pro_auto', maxAutoRiskTier: 4, label: 't' }),
   };
   const eventBus = { emit: vi.fn() };
-  // Positionally, as Nest constructs it: prisma, tool registry, command service,
+  // Positionally, as Nest constructs it: prisma, command service,
   // canonical registry, proposals, orchestrator, autonomy level, event bus, safe database.
   const service = new ActionsService(
     prisma,
-    undefined,
     { enqueue: vi.fn() } as any,
     keyCortexToolRegistry as any,
     proposalService as any,

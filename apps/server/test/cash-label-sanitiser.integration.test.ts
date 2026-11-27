@@ -86,7 +86,7 @@ let FinanceOverviewService: typeof import('../src/modules/finance/finance-overvi
 let CashflowForecastService: typeof import('../src/modules/finance/cashflow-forecast.service').CashflowForecastService;
 let ChartOfAccountsSeederService: typeof import('../src/modules/finance/chart-of-accounts-seeder.service').ChartOfAccountsSeederService;
 let OsService: typeof import('../src/modules/os/os.service').OsService;
-let KeyToolRegistryService: typeof import('../src/modules/ai/key-tool-registry.service').KeyToolRegistryService;
+let FlowOrchestratorService: typeof import('../src/modules/ai/flow-orchestrator.service').FlowOrchestratorService;
 let AiAdvisorService: typeof import('../src/modules/ai/ai-advisor.service').AiAdvisorService;
 
 let cashPosition: InstanceType<typeof CashPositionService>;
@@ -94,7 +94,7 @@ let safeToSpend: InstanceType<typeof SafeToSpendService>;
 let financeOverview: InstanceType<typeof FinanceOverviewService>;
 let cashflowForecast: InstanceType<typeof CashflowForecastService>;
 let osService: InstanceType<typeof OsService>;
-let keyTools: InstanceType<typeof KeyToolRegistryService>;
+let flowOrchestrator: InstanceType<typeof FlowOrchestratorService>;
 let aiAdvisor: InstanceType<typeof AiAdvisorService>;
 let redisStore: Map<string, unknown>;
 
@@ -122,7 +122,7 @@ describe('V1-91 (FU-CASH-LABEL-SANITISER): shared code-only currency sanitiser a
     ({ CashflowForecastService } = await import('../src/modules/finance/cashflow-forecast.service'));
     ({ ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service'));
     ({ OsService } = await import('../src/modules/os/os.service'));
-    ({ KeyToolRegistryService } = await import('../src/modules/ai/key-tool-registry.service'));
+    ({ FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service'));
     ({ AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service'));
 
     await cleanup();
@@ -344,18 +344,21 @@ describe('V1-91 (FU-CASH-LABEL-SANITISER): shared code-only currency sanitiser a
       } as any,
       cashPosition,
     );
-    keyTools = new KeyToolRegistryService(
-      prismaStub,
-      safeToSpend,
-      cashflowForecast,
-      {} as any,
-      {} as any,
-      financeOverview,
-      {} as any,
-      {} as any,
-      {} as any,
-      { logToolExecution: async () => undefined } as any,
-    );
+    flowOrchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma: prismaStub,
+      governance: { getToolTier: () => 1 },
+      executionLog: { logToolExecution: async () => 'log' },
+      businessGraph: { invalidateCache() {} },
+      attributeExecutionLog: async () => undefined,
+      moduleRef: {
+        get: (tok: unknown) =>
+          tok === SafeToSpendService
+            ? safeToSpend
+            : tok === CashflowForecastService
+              ? cashflowForecast
+              : undefined,
+      },
+    }) as FlowOrchestratorService;
     aiAdvisor = new AiAdvisorService(prismaStub, {} as any, {} as any, {} as any, cashPosition);
   }, 60_000);
 
@@ -373,18 +376,17 @@ describe('V1-91 (FU-CASH-LABEL-SANITISER): shared code-only currency sanitiser a
     expect(JSON.stringify(other)).not.toMatch(RAW_LEAK_A);
   });
 
-  it('[CLS-02] SafeToSpendService and KEY tool finance.calculateSafeToSpend never echo non-code labels in otherCurrencyCash or explanation', async () => {
+  it('[CLS-02] SafeToSpendService and canonical KEY tool finance_safe_to_spend never echo non-code labels in otherCurrencyCash or explanation', async () => {
     const dto = await safeToSpend.calculate(ID.bizA);
     expect(dto.currency).toBe('TTD');
     expect(dto.cashBalance).toBe(1000);
     expect(dto.otherCurrencyCash).toEqual(EXPECTED_OTHER_A);
     expect(JSON.stringify(dto)).not.toMatch(RAW_LEAK_A);
 
-    const toolRes = await keyTools.executeTool('finance.calculateSafeToSpend', {}, ID.bizA);
-    expect(toolRes.success).toBe(true);
-    expect(toolRes.data.cashBalance).toBe(1000);
-    expect(toolRes.data.otherCurrencyCash).toEqual(EXPECTED_OTHER_A);
-    expect(JSON.stringify(toolRes.data)).not.toMatch(RAW_LEAK_A);
+    const toolData: any = await flowOrchestrator.executeToolAction(ID.bizA, 'finance_safe_to_spend', {});
+    expect(toolData.cashBalance).toBe(1000);
+    expect(toolData.otherCurrencyCash).toEqual(EXPECTED_OTHER_A);
+    expect(JSON.stringify(toolData)).not.toMatch(RAW_LEAK_A);
   });
 
   it('[CLS-03] FinanceOverviewService returns sanitized otherCurrencyCash, invalidates stale cached raw labels, and serves sanitized list on cache hit', async () => {
@@ -429,18 +431,17 @@ describe('V1-91 (FU-CASH-LABEL-SANITISER): shared code-only currency sanitiser a
     expect(JSON.stringify(cached)).not.toMatch(RAW_LEAK_A);
   });
 
-  it('[CLS-04] CashflowForecastService and KEY tool finance.cashflowForecast return sanitized otherCurrencyCash without echoing non-code labels', async () => {
+  it('[CLS-04] CashflowForecastService and canonical KEY tool finance_cashflow_forecast return sanitized otherCurrencyCash without echoing non-code labels', async () => {
     const forecast = await cashflowForecast.forecast(ID.bizA, 90);
     expect(forecast.currency).toBe('TTD');
     expect(forecast.openingCash).toBe(1000);
     expect(forecast.otherCurrencyCash).toEqual(EXPECTED_OTHER_A);
     expect(JSON.stringify(forecast)).not.toMatch(RAW_LEAK_A);
 
-    const toolRes = await keyTools.executeTool('finance.cashflowForecast', { horizonDays: 90 }, ID.bizA);
-    expect(toolRes.success).toBe(true);
-    expect(toolRes.data.openingCash).toBe(1000);
-    expect(toolRes.data.otherCurrencyCash).toEqual(EXPECTED_OTHER_A);
-    expect(JSON.stringify(toolRes.data)).not.toMatch(RAW_LEAK_A);
+    const toolData: any = await flowOrchestrator.executeToolAction(ID.bizA, 'finance_cashflow_forecast', { horizonDays: 90 });
+    expect(toolData.openingCash).toBe(1000);
+    expect(toolData.otherCurrencyCash).toEqual(EXPECTED_OTHER_A);
+    expect(JSON.stringify(toolData)).not.toMatch(RAW_LEAK_A);
   });
 
   it('[CLS-05] OsService command center and AiAdvisorService.predictCashFlow never echo non-code labels and preserve exact uncoded count', async () => {

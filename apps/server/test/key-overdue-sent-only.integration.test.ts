@@ -8,7 +8,8 @@
  * `PENDING` invoices under D-256.
  *
  * REAL Postgres via PrismaService + REAL ReceivablesService + REAL
- * ChartOfAccountsSeederService + REAL KeyToolRegistryService.
+ * ChartOfAccountsSeederService + REAL FlowOrchestratorService (canonical
+ * `finance_list_overdue_invoices` and `finance_create_invoice_reminder_draft`).
  *
  * Fixtures: prefix `v81o_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted via raw SQL (`sqlLikePrefix`) in beforeAll and afterAll.
@@ -72,26 +73,35 @@ beforeAll(async () => {
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
-  const { KeyToolRegistryService } = await import('../src/modules/ai/key-tool-registry.service');
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  const { getLegacyToolEquivalence } = await import('../src/modules/ai/legacy-tool-equivalence');
 
   prisma = new PrismaService();
 
   const coaSeeder = new ChartOfAccountsSeederService(prisma);
   receivables = new ReceivablesService(prisma, coaSeeder);
-  const auditLogStub = { logToolExecution: async () => undefined };
 
-  toolRegistry = new KeyToolRegistryService(
+  // P160 (RR-LEGACY-FALLBACK-REMOVE): execute through the canonical FLOW_TOOLS dispatcher
+  // (`finance_list_overdue_invoices` and `finance_create_invoice_reminder_draft`).
+  const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     prisma,
-    {} as any,
-    {} as any,
-    {} as any,
-    receivables,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    auditLogStub as any,
-  );
+    governance: { getToolTier: () => 1 },
+    executionLog: { logToolExecution: async () => 'log' },
+    businessGraph: { invalidateCache() {} },
+    attributeExecutionLog: async () => undefined,
+    moduleRef: { get: () => undefined },
+  });
+  toolRegistry = {
+    executeTool: async (legacyKey: string, input: Record<string, unknown>, ctx: { businessId: string }) => {
+      const canonicalTool = getLegacyToolEquivalence(legacyKey)?.canonicalTool ?? legacyKey;
+      try {
+        const data = await orchestrator.executeToolAction(ctx.businessId, canonicalTool, input);
+        return { success: true, data };
+      } catch (err) {
+        return { success: false, error: (err as Error).message };
+      }
+    },
+  };
 
   await cleanup();
 
@@ -721,9 +731,6 @@ describe('P113 (FU-KEY-OVERDUE-SENT-ONLY, D-260 / D-256)', () => {
       expect(res.error).toMatch(/limit/i);
     }
 
-    const tool = toolRegistry.getTool('finance', 'listOverdueInvoices');
-    expect(tool.validateInput({ limit: 500 })).toEqual({ valid: true, parsed: { limit: 100 } });
-
     const cappedRes = await toolRegistry.executeTool(
       'finance.listOverdueInvoices',
       { limit: 500 },
@@ -745,16 +752,15 @@ describe('P113 (FU-KEY-OVERDUE-SENT-ONLY, D-260 / D-256)', () => {
       expect(res.error).toMatch(/tone/i);
     }
 
-    // Defense-in-depth: direct execute call bypassing validateInput still returns a string, never a function.
-    const tool = toolRegistry.getTool('finance', 'createInvoiceReminderDraft');
-    const directRes = await tool.execute(
+    // Default omitted tone falls back cleanly to friendly string template.
+    const defaultRes = await toolRegistry.executeTool(
+      'finance.createInvoiceReminderDraft',
+      { invoiceId: ID.invSent },
       { businessId: ID.bizA, userId: ID.ownerA, autonomyLevel: 4 },
-      { invoiceId: ID.invSent, tone: 'toString' as any },
-      { prisma } as any,
     );
-    expect(directRes.success).toBe(true);
-    expect(typeof directRes.data.draft).toBe('string');
-    expect(directRes.data.draft).toContain('Hi Nadia,');
+    expect(defaultRes.success).toBe(true);
+    expect(typeof defaultRes.data.draft).toBe('string');
+    expect(defaultRes.data.draft).toContain('Hi Nadia,');
   });
 
   it('KO-12 (R1-COR-03): OVERDUE invoice with no dueDate (0 daysOverdue) never emits "0 days overdue" in friendly, firm, or urgent drafts', async () => {
