@@ -478,11 +478,11 @@ beforeAll(async () => {
           get(target, prop) {
             if (prop === 'getById') {
               return async (id: string) => {
-                serviceCalls.push('ApprovalRequestService.getById');
+                serviceCalls.push({ service: 'ApprovalRequestService', op: 'getById' });
                 return { id, businessId: ID.bizA, status: 'pending' };
               };
             }
-            return target[prop as string];
+            return (target as Record<string, unknown>)[prop as string];
           },
         }),
       },
