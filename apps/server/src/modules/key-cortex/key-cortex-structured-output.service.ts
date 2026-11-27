@@ -143,11 +143,17 @@ export interface ParsedStructuredCortexResponse {
 
 export function parseStructuredConfidence(raw?: string): number | null {
   if (!raw) return null;
-  const match = raw.match(/(\d{1,3})/);
+  const match = raw.match(/(?:^|[^\d.])(-?\d+(?:\.\d+)?)\s*(%?)/);
   if (!match) return null;
-  const value = parseInt(match[1], 10);
-  if (!Number.isFinite(value)) return null;
-  return Math.min(Math.max(value, 0), 100);
+  const rawValue = Number(match[1]);
+  if (!Number.isFinite(rawValue) || rawValue < 0 || rawValue > 100) {
+    return null;
+  }
+  const hasPercent = match[2] === '%';
+  if (!hasPercent && rawValue > 0 && rawValue < 1) {
+    return Math.round(rawValue * 10000) / 100;
+  }
+  return rawValue;
 }
 
 export function parseStructuredCortexResponse(
@@ -188,7 +194,7 @@ export function parseStructuredCortexResponse(
   ): { labelStart: number; contentStart: number } | undefined => {
     const patterns = [
       new RegExp(`\\*\\*${label}:?\\*\\*[\\s:]*`, 'i'),
-      new RegExp(`(?:^|\\n)[ \\t]*(?:\\d+\\.\\s*|[-*•]\\s*)?${label}:[\\s]*`, 'i'),
+      new RegExp(`(?:^|\\n)[ \\t]*(?:\\d{1,3}\\.\\s*|[-*•]\\s*)?${label}:[\\s]*`, 'i'),
     ];
     for (const pattern of patterns) {
       const match = normalized.match(pattern);
@@ -235,7 +241,7 @@ export function parseStructuredCortexResponse(
   const parseList = (raw?: string): string[] => {
     if (!raw) return [];
     return raw
-      .split(/\n|•|-\s*|\d+\.\s*/)
+      .split(/\n|•|-\s*|\d{1,3}\.\s*/)
       .map((s) => s.replace(/^[-•]\s*/, '').trim())
       .filter((s) => s.length > 0);
   };
