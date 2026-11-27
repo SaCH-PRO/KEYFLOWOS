@@ -94,14 +94,17 @@ describe("R8-2: 'Nothing on Your Store Yet'", () => {
     (await generateStoreSuggestions({ businessId: "biz_1", activeView: "catalog", customData: { storeEnabled: true, hasHeroHeadline: true, hasHeroCta: true, storeProducts: [], storeServices: [], ...data } } as never)).find((s) => s.title === "Nothing on Your Store Yet");
   const products = (n: number, off = 0) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, category: "PRODUCT", isActive: i >= off }));
 
-  it("counts the products, not their listing rows a second time", async () => {
-    const out = await suggest({ products: products(3), services: [{ id: "s_l0", sourceProductId: "p0" }, { id: "s_l1", sourceProductId: "p1" }] });
-    expect(out?.description).toBe("Your catalog has 3 items, but none is on your store yet. Add them to your store so visitors have something to browse and buy.");
+  // r9: the count is of the items to add; a listing row (here a deleted product's) is not an item.
+  it("counts the products, not listing rows", async () => {
+    const out = await suggest({ products: products(3), services: [{ id: "s_lx", sourceProductId: "gone_1" }, { id: "s_ly", sourceProductId: "gone_2" }] });
+    expect(out?.description).toBe("3 items in your catalog are not on your store yet. Add them to your store so visitors have something to browse and buy.");
     expect(out?.actionLabel).toBe("Add them to your store");
   });
 
   it("1 item, singular", async () => {
-    expect((await suggest({ products: products(1), services: [] }))?.description).toMatch(/^Your catalog has 1 item, but none/);
+    const out = await suggest({ products: products(1), services: [] });
+    expect(out?.description).toBe("1 item in your catalog is not on your store yet. Add it to your store so visitors have something to browse and buy.");
+    expect(out?.actionLabel).toBe("Add it to your store");
   });
 
   it("every one switched off: says to switch them on", async () => {
@@ -173,7 +176,8 @@ describe("R8-4: '...' only when the description was cut", () => {
     const long = "We make small-batch hot sauces from peppers we grow ourselves, in five heat levels, mild to wild, every week.";
     render(<AiContentPanel storeName="Pepper Co" businessDescription={long} />);
     await generate("Generate SEO");
-    expect(text()).toContain(`Discover Pepper Co online. ${long.slice(0, 80)}...`);
+    // r9: cut at a word boundary, at most 80 characters with the "...".
+    expect(text()).toContain("Discover Pepper Co online. We make small-batch hot sauces from peppers we grow ourselves, in five heat...");
   });
 });
 

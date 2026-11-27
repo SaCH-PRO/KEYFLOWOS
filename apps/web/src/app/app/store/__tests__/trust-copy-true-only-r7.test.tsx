@@ -34,7 +34,6 @@ import { AiHeroCopyPanel } from "../components/ai-hero-copy-panel";
 import { DesignMode } from "../components/design-mode";
 import { FaqManager } from "../components/faq-manager";
 import { MerchandisingMode } from "../components/merchandising-mode";
-import { PolicyEditor } from "../components/policy-editor";
 import { useStoreAiHub, generateStoreSuggestions } from "../hooks/use-store-ai-hub";
 import { ALLOWED, strings, textNodes } from "./trust-copy-allowlist";
 
@@ -223,7 +222,7 @@ describe("R7-3: the analysis reads the whole catalog", () => {
     const some = await suggest({ products: products(3, "PRODUCT"), services: [], storeProducts: [], storeServices: [] });
     expect(some.map((s) => s.title)).not.toContain("Empty Catalog");
     const none = some.find((s) => s.title === "Nothing on Your Store Yet");
-    expect(none?.description).toMatch(/Your catalog has 3 items, but none is on your store yet\. Add them to your store/);
+    expect(none?.description).toMatch(/^3 items in your catalog are not on your store yet\. Add them to your store/);
     expect(none?.actionLabel).toBe("Add them to your store");
   });
 
@@ -508,7 +507,10 @@ describe("R7-9: the write paths", () => {
     fireEvent.click(screen.getByText("Save Policies"));
     expect(onSaveConfig).toHaveBeenCalledTimes(1);
     cleanup();
-    render(<PolicyEditor config={{ faqEntries: [{ id: "b", question: "Open?", answer: "Yes.", order: 1 }] } as never} onConfigChange={vi.fn()} onSave={vi.fn(async () => {})} saving={false} />);
+    // r9: not the trivially true "PolicyEditor has no alert" (it has none of its own): the tab, without placeholders.
+    render(<MerchandisingMode businessData={{ name: "Pepper Co" }} services={[]} commerceProducts={[]} liveProductIds={new Set()} storefrontConfig={{ faqEntries: faqEntries.slice(1) } as never} onConfigChange={vi.fn()} onSaveConfig={vi.fn(async () => {})} configSaving={false} publicUrl="https://example.test/book/pepper-co" hasTestimonials={false} />);
+    fireEvent.click(screen.getByText("FAQ & Policies"));
+    expect(screen.getByText("Save Policies")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 

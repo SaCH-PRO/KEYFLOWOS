@@ -41,7 +41,8 @@ describe("R8-3: the Operations tab warns by its saves", () => {
   it("with FAQ entries holding a placeholder: one warning", () => {
     ops([{ id: "a", question: "Refunds?", answer: "[your refund policy]", order: 0 }]);
     expect(screen.getAllByRole("alert")).toHaveLength(1);
-    expect(screen.getByRole("alert").textContent).toBe("1 FAQ entry still has a [bracketed] part: saving here saves it as it is. Fill it in under Merchandising → FAQ & Policies.");
+    // r9: only the saves that write the config (the Hours save does not).
+    expect(screen.getByRole("alert").textContent).toBe("1 FAQ entry still has a [bracketed] part: the store status, delivery and contact saves here save it as it is. Fill it in under Merchandising → FAQ & Policies.");
   });
 
   it("with none: no warning", () => {
