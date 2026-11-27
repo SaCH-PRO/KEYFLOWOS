@@ -87,7 +87,7 @@ function scanCronHandlersInSource(file: string, src: string): ScannedCron[] {
       }
       break;
     }
-    const sig = /^(?:public\s+)?(?:async\s+)?([A-Za-z0-9_]+)\s*\(/.exec(src.slice(i));
+    const sig = /^(?:(?:public|private|protected)\s+)?(?:async\s+)?([A-Za-z0-9_]+)\s*\(/.exec(src.slice(i));
     if (!sig) continue;
     const paramsOpen = i + sig[0].length - 1;
     const paramsClose = closeParen(src, paramsOpen);

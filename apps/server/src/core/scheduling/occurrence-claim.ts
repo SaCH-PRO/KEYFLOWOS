@@ -20,9 +20,43 @@ export interface ClaimOccurrenceOptions {
 }
 
 const DEFAULT_HOLDER = `pid:${process.pid}`;
+const SAFE_KEY_SEGMENT = /^[A-Za-z0-9._-]+$/;
+const MAX_ERROR_MESSAGE_LEN = 300;
+
+function assertValidKeySegment(label: string, value: string): void {
+  if (typeof value !== 'string' || value.length === 0 || !SAFE_KEY_SEGMENT.test(value)) {
+    throw new RangeError(`Invalid occurrence ${label} segment: must match ${SAFE_KEY_SEGMENT.source}`);
+  }
+}
+
+/**
+ * Redacts connection-string credentials (including `rediss://`) and auth tokens
+ * before creating a sanitized Error so neither `ErrorRegistry` nor Sentry ever
+ * receives raw secrets.
+ */
+function sanitizeClaimError(err: unknown): Error {
+  const raw = err instanceof Error ? err.message : String(err ?? 'unknown error');
+  const redacted = (raw || 'unknown error')
+    .replace(/((?:postgres|postgresql|rediss?|mongodb|amqp|https?):\/\/)[^\s@/]+@/gi, '$1***@')
+    .replace(/\b(AUTH\s+)[^\s"',}]+/gi, '$1***')
+    .replace(/\b(bearer\s+)[A-Za-z0-9._~+/-]{12,}=*/gi, '$1***')
+    .replace(/\b((?:api[-_]?key|token|secret|password)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, '$1***')
+    .slice(0, MAX_ERROR_MESSAGE_LEN);
+  return new Error(redacted);
+}
+
+function recordSafely(registry: ErrorRegistry, label: string, err: Error): void {
+  try {
+    registry.record('background', label, err);
+  } catch {
+    /* fail-open observability must never throw */
+  }
+}
 
 /** Canonical Redis key for a scheduled occurrence claim. */
 export function occurrenceRedisKey(job: string, occurrenceKey: string): string {
+  assertValidKeySegment('job', job);
+  assertValidKeySegment('occurrenceKey', occurrenceKey);
   return `kf:cron:occ:${job}:${occurrenceKey}`;
 }
 
@@ -38,6 +72,9 @@ export function utcHourSlot(now: Date = new Date()): string {
 
 /** UTC fixed-interval bucket (`Math.floor(ms / intervalMs)`) for sub-hourly / multi-hour jobs. */
 export function utcIntervalSlot(intervalMs: number, now: Date = new Date()): string {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    throw new RangeError(`utcIntervalSlot requires a finite positive intervalMs (received ${String(intervalMs)})`);
+  }
   const safeInterval = Math.max(1000, Math.floor(intervalMs));
   return String(Math.floor(now.getTime() / safeInterval));
 }
@@ -59,7 +96,7 @@ export function utcMonthSlot(now: Date = new Date()): string {
  * Claim a single scheduled occurrence across replicas and restarts.
  *
  * Returns `true` if this process owns the slot (or failed open because Redis
- * is unavailable/errored, recording the event in `errorRegistry`), or `false`
+ * is unavailable/errored, recording a sanitized event in `errorRegistry`), or `false`
  * if another replica or earlier run already claimed this slot.
  */
 export async function claimOccurrence(
@@ -69,26 +106,26 @@ export async function claimOccurrence(
   ttlMs: number,
   options?: ClaimOccurrenceOptions,
 ): Promise<boolean> {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new RangeError(`claimOccurrence requires a finite positive ttlMs (received ${String(ttlMs)})`);
+  }
+  const key = occurrenceRedisKey(job, occurrenceKey);
   const registry = options?.registry ?? errorRegistry;
   const label = `occurrence-claim:${job}`;
 
   if (!redis || typeof redis.setNx !== 'function') {
-    registry.record(
-      'background',
-      label,
-      new Error(`Redis unavailable for occurrence claim (${job}/${occurrenceKey}); failing open`),
-    );
+    // Constant message (no rotating occurrenceKey) so repeat ticks collapse into 1 ErrorRegistry entry.
+    recordSafely(registry, label, new Error('Redis unavailable for occurrence claim; failing open'));
     return true;
   }
 
   const safeTtlMs = Math.max(1000, Math.floor(ttlMs));
-  const key = occurrenceRedisKey(job, occurrenceKey);
   const value = options?.holderId ?? DEFAULT_HOLDER;
 
   try {
     return await redis.setNx(key, value, safeTtlMs);
   } catch (err: unknown) {
-    registry.record('background', label, err);
+    recordSafely(registry, label, sanitizeClaimError(err));
     return true;
   }
 }
@@ -109,7 +146,8 @@ export const CRON_OCCURRENCE_CENSUS: Record<string, CronOccurrenceCensusEntry> =
   },
   'src/modules/analytics/analytics-scheduler.service.ts#generateDailySnapshots': {
     mode: 'IDEMPOTENT',
-    reason: 'AnalyticsEngineService.generateDailySnapshots uses businessSnapshot.upsert keyed by (businessId, period, date).',
+    reason:
+      'AnalyticsEngineService.generateDailySnapshots uses businessSnapshot.upsert keyed by (businessId, snapshotType, snapshotDate).',
   },
   'src/modules/analytics/analytics-scheduler.service.ts#generateInsights': {
     mode: 'CLAIMED',
@@ -117,7 +155,8 @@ export const CRON_OCCURRENCE_CENSUS: Record<string, CronOccurrenceCensusEntry> =
   },
   'src/modules/analytics/analytics-scheduler.service.ts#generateMonthlySnapshots': {
     mode: 'IDEMPOTENT',
-    reason: 'AnalyticsEngineService.generateMonthlySnapshots uses businessSnapshot.upsert keyed by (businessId, period, date).',
+    reason:
+      'AnalyticsEngineService.generateMonthlySnapshots uses businessSnapshot.upsert keyed by (businessId, snapshotType, snapshotDate).',
   },
   'src/modules/analytics/analytics-scheduler.service.ts#generateProjections': {
     mode: 'CLAIMED',
@@ -125,7 +164,8 @@ export const CRON_OCCURRENCE_CENSUS: Record<string, CronOccurrenceCensusEntry> =
   },
   'src/modules/analytics/analytics-scheduler.service.ts#generateWeeklySnapshots': {
     mode: 'IDEMPOTENT',
-    reason: 'AnalyticsEngineService.generateWeeklySnapshots uses businessSnapshot.upsert keyed by (businessId, period, date).',
+    reason:
+      'AnalyticsEngineService.generateWeeklySnapshots uses businessSnapshot.upsert keyed by (businessId, snapshotType, snapshotDate).',
   },
   'src/modules/business-genome/key-genome/genome-decay.service.ts#markStaleFacts': {
     mode: 'IDEMPOTENT',
@@ -140,8 +180,8 @@ export const CRON_OCCURRENCE_CENSUS: Record<string, CronOccurrenceCensusEntry> =
     job: 'statement-source-sweep',
   },
   'src/modules/key-cortex/key-bi-engine.service.ts#refreshAll': {
-    mode: 'IDEMPOTENT',
-    reason: 'Recomputes and overwrites cached per-business mental models in Redis with no duplicate side effects.',
+    mode: 'CLAIMED',
+    job: 'key-bi-refresh',
   },
   'src/modules/key-cortex/key-cortex-cerebellum.service.ts#scheduledConsolidation': {
     mode: 'CLAIMED',

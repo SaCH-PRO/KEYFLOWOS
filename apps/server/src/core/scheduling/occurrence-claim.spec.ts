@@ -180,4 +180,62 @@ describe('RR-CRON-OCCURRENCE-LOCK: claimOccurrence & RedisService.setNx', () => 
     expect(disabledRedis.setNx).not.toHaveBeenCalled();
     expect(disabledEvents.emit).not.toHaveBeenCalled();
   });
+
+  it('R1 hardening: validates finite positive TTLs/intervals, key segments, rediss:// credential redaction before record(), constant ErrorRegistry cardinality, and throw-safe registry', async () => {
+    const { utcIntervalSlot } = await import('./occurrence-claim');
+
+    // M-2: non-finite / non-positive TTLs and intervals throw RangeError loudly
+    const svc = new RedisService({ set: vi.fn() } as any);
+    for (const bad of [NaN, Infinity, -Infinity, 0, -500]) {
+      await expect(svc.setNx('k', '1', bad)).rejects.toThrow(RangeError);
+      await expect(claimOccurrence(makeNxRedisDouble(), 'contract-renewal', '2026-11-22', bad)).rejects.toThrow(
+        RangeError,
+      );
+      expect(() => utcIntervalSlot(bad)).toThrow(RangeError);
+    }
+
+    // m-1: delimiter / empty / glob segments rejected
+    for (const badSeg of ['', 'a:b', 'has space', 'glob*', 'wild?', 'brack[1]']) {
+      expect(() => occurrenceRedisKey(badSeg, '2026-11-22')).toThrow(RangeError);
+      expect(() => occurrenceRedisKey('contract-renewal', badSeg)).toThrow(RangeError);
+    }
+
+    // M-3: unavailable Redis across rotating slots collapses to 1 ErrorRegistry entry (count === 2)
+    const reg = new ErrorRegistry();
+    await claimOccurrence(undefined, 'contract-renewal', '2026-11-22', 60_000, { registry: reg });
+    await claimOccurrence(undefined, 'contract-renewal', '2026-11-23', 60_000, { registry: reg });
+    expect(reg.snapshot().distinct).toBe(1);
+    expect(reg.snapshot().entries[0].count).toBe(2);
+
+    // M-4: rediss:// credentials are redacted BEFORE registry.record() receives the Error (protects Sentry too)
+    const recordedArgs: unknown[] = [];
+    const spyRegistry = {
+      record: vi.fn((_source: string, _label: string, err: unknown) => {
+        recordedArgs.push(err);
+      }),
+    } as unknown as ErrorRegistry;
+    const tlsBroken = {
+      setNx: vi.fn(async () => {
+        throw new Error('ECONNREFUSED rediss://default:topsecretpass@redis.prod:6380 AUTH mypass');
+      }),
+    };
+    expect(await claimOccurrence(tlsBroken, 'contract-renewal', '2026-11-22', 60_000, { registry: spyRegistry })).toBe(
+      true,
+    );
+    expect(recordedArgs).toHaveLength(1);
+    const passedMsg = (recordedArgs[0] as Error).message;
+    expect(passedMsg).not.toContain('topsecretpass');
+    expect(passedMsg).not.toContain('mypass');
+    expect(passedMsg).toContain('rediss://***@redis.prod:6380');
+
+    // m-2: throwing custom registry still fails open without rejecting
+    const throwingRegistry = {
+      record: () => {
+        throw new Error('registry exploded');
+      },
+    } as unknown as ErrorRegistry;
+    await expect(
+      claimOccurrence(undefined, 'contract-renewal', '2026-11-22', 60_000, { registry: throwingRegistry }),
+    ).resolves.toBe(true);
+  });
 });
