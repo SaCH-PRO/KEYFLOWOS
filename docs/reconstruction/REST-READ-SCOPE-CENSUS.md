@@ -22,8 +22,11 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 
 ## High-Priority Non-Secret Findings
 
+- **`AiIntelligenceController.getCrossBusinessIntelligence` (`GET /ai/intelligence/cross-business`)** — queries `membership.findMany` across ALL businesses where the caller holds any membership and returns `totalRevenue`, `totalOverdueAmount`, `dealValue`, invoice/contact/booking counts, and dollar-amount insights with **zero per-business module-scope check** (recommended: enforce per-business `revenue:read` / `ai:read` filtering).
+- **`SeoController` (all 12 GET routes)** — `SeoAdminGuard` (`modules/seo/seo-admin.guard.ts`) is only a `comingSoon` feature-flag rollout gate (`if (!status.exists || !status.comingSoon) return true;`), NOT a role or module-authority guard; once live, all 12 routes — including `getRevenueAttribution` (`revenue:read`) — are membership-only.
 - **`KeyCortexAuditController` (`auditDecisions`, `auditValues`, `auditAssessment`, `auditAcceptance`)** — BUG-065 class: all 4 audit GET routes run only `AuthGuard` + `BusinessGuard` (recommended: `settings:admin`).
 - **`KeystoreAdminController` (`getStats`, `getAllOrders`, `getOrder`)** — admin-prefixed controller mounted at `/keystore/admin/*` with only `AuthGuard` + `BusinessGuard` (no `AdminGuard`, no `ModuleScopeGuard`; recommended: `settings:admin`).
+- **`FlowController.universalSearch` (`GET /flow/businesses/:businessId/search`)** — enforces `revenue:read` on invoices via `memberModuleLevel`, but still queries contacts, bookings, and projects without checking `crm:read`, `bookings:read`, or `projects:read`.
 - **`PresenceController.getDraft` (`GET /site/presence/businesses/:businessId/draft`)** — returns `SitePageDraft.previewToken` to any business member without `content:read`.
 - **`TrashController.listTrashed`** — carries an inert `@RequireModuleScope('settings')` (no `ModuleScopeGuard`), though its handler honestly enforces per-model module scope via `readAccess` + `readRefusal` (D-95).
 
@@ -40,14 +43,14 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | applied | 3 |
 | exempt-admin | 25 |
 | exempt-check | 75 |
-| exempt-guard | 18 |
+| exempt-guard | 6 |
 | exempt-membership | 1 |
-| exempt-own | 13 |
+| exempt-own | 12 |
 | exempt-owner | 1 |
 | exempt-public | 4 |
 | exempt-system | 10 |
-| open | 433 |
-| secret-read | 24 |
+| open | 443 |
+| secret-read | 27 |
 
 ## Expected V1 Plan Rows & Pinned Applied Reads
 
@@ -65,6 +68,7 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `AiController.getAiProviders` | GET | `/ai/businesses/:businessId/ai/providers` | secret-read | reads preferences internally (`service-check:listSelectableProviders`) and returns only `usingOwnKey: boolean` and provider availability metadata; no key leaves the handler |
 | `ApiKeysController.list` | GET | `/api/businesses/:businessId/api-keys` | secret-read | `settings:read` — name, prefix, and scopes only (raw key hashed and returned once at create) |
 | `CommunicationsController.getConnection` | GET | `/communications/businesses/:businessId/connections/:id` | secret-read | `service-check:stripSecrets` removes tokens (SWEEP-P0 reviewed); follow-up should gate on `content:read` |
+| `CommunicationsController.healthSummary` | GET | `/communications/businesses/:businessId/connections/health-summary` | secret-read | reads `channelConnection.findMany` (`service-check:getHealthSummary`) and maps to an explicit non-secret allowlist (`id`, `provider`, `label`, `healthState`, `healthMessage`, `lastCheckedAt`, destination counts); no tokens leave the handler; follow-up should gate on `content:read` |
 | `CommunicationsController.listConnections` | GET | `/communications/businesses/:businessId/connections` | secret-read | `service-check:stripSecrets` removes tokens on every row (SWEEP-P0 reviewed); follow-up should gate on `content:read` |
 | `CommunicationsController.listDestinations` | GET | `/communications/businesses/:businessId/destinations` | secret-read | `service-check:stripSecretsFromDestination` removes page access tokens and credential keys from `destinationMeta` (SWEEP-P0 CW-2); follow-up should gate on `content:read` |
 | `ConnectorController.getCredentials` | GET | `/connectors/businesses/:businessId/credentials/:type` | secret-read | secret fields answered masked (`check:getMaskedCredentials`, last 4 chars only); form schema stays readable by members (SWEEP-P0 reviewed) |
@@ -80,8 +84,10 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `PresenceController.getDraft` | GET | `/site/presence/businesses/:businessId/draft` | secret-read | returns `SitePageDraft.previewToken` (app-issued unpublished site draft preview link token) to any business member without scope; follow-up should gate on `content:read` |
 | `SocialController.listConnections` | GET | `/social/businesses/:businessId/connections` | secret-read | OAuth `token` and `refreshToken` stripped from every row (`service-check:listConnections`; SWEEP-P0 `CEN-SOC-01`) |
 | `SocialController.oauthAvailability` | GET | `/social/businesses/:businessId/connections/oauth-availability` | secret-read | reads `getPlatformCredentials` internally and returns only `Record<platform, boolean>` availability flags; no secret leaves the handler |
+| `SocialController.recentPosts` | GET | `/social/businesses/:businessId/recent-posts` | secret-read | reads `socialConnection.findMany` internally (`service-check:fetchRecentExternalPosts`) to fetch recent external posts and returns only external post summaries; no OAuth token leaves the handler; follow-up should gate on `content:read` |
 | `SupplierController.getConnection` | GET | `/supplier/businesses/:businessId/connections/:connectionId` | secret-read | credentials stripped (`service-check:getSupplierConnection`; SWEEP-P0 reviewed); follow-up should gate on `storefront:read` |
 | `SupplierController.getConnections` | GET | `/supplier/businesses/:businessId/connections` | secret-read | credentials stripped from every row (`service-check:getSupplierConnections`; SWEEP-P0 reviewed); follow-up should gate on `storefront:read` |
+| `SupplierController.getSupplierProducts` | GET | `/supplier/businesses/:businessId/connections/:connectionId/products` | secret-read | reads `supplierConnection.findFirst` solely to verify tenant ownership (`service-check:getSupplierProducts`) before querying `supplierProduct`; no supplier credentials leave the handler; follow-up should gate on `storefront:read` |
 | `WebhooksController.deliveries` | GET | `/webhooks/businesses/:businessId/webhooks/:webhookId/deliveries` | secret-read | `settings:read` — receiver URL origin-only below `settings:write` (SEC-3) or for readers who may not receive the webhook's events (SV-5) |
 | `WebhooksController.list` | GET | `/webhooks/businesses/:businessId/webhooks` | secret-read | `settings:read` — signing secret selected for settings admin only (CR-5) and per-webhook event-read check (SV-5); receiver URL origin-only below `settings:write` (SEC-3) |
 | `WhatsAppController.getConfig` | GET | `/whatsapp/businesses/:businessId/config` | secret-read | tokens masked via `WhatsAppService.getConfigView` with `check:isConfigOwner` (R0-SEC2, `whatsapp-config-authority`) |
@@ -150,7 +156,7 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `AiIntelligenceController.getCrossBusinessIntelligence` | GET | `/ai/intelligence/cross-business` | exempt-own | caller's own cross-business aggregate scoped strictly to `req.user.id` |
+| `AiIntelligenceController.getCrossBusinessIntelligence` | GET | `/ai/intelligence/cross-business` | open | follow-up: `revenue:read` and `ai:read` (HIGH-PRIORITY: queries `membership.findMany` across ALL businesses where caller holds any membership and returns `totalRevenue`, `totalOverdueAmount`, `dealValue`, invoice/contact/booking counts, and dollar-amount insights with zero per-business module-scope check) |
 
 ### `modules/ai/ai-usage-admin.controller.ts` (6)
 
@@ -453,7 +459,7 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | --- | --- | --- | --- | --- |
 | `DocumentTemplateController.list` | GET | `/commerce/document-templates/businesses/:businessId` | open | follow-up: `settings:read` (membership-only read; no enforced module scope) |
 
-### `modules/communications/communications.controller.ts` (7)
+### `modules/communications/communications.controller.ts` (6)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
@@ -461,7 +467,6 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `CommunicationsController.deliveryEvents` | GET | `/communications/businesses/:businessId/deliveries/:deliveryId/events` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.deliverySummary` | GET | `/communications/businesses/:businessId/content/:id/delivery-summary` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.getContent` | GET | `/communications/businesses/:businessId/content/:id` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
-| `CommunicationsController.healthSummary` | GET | `/communications/businesses/:businessId/connections/health-summary` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.listContent` | GET | `/communications/businesses/:businessId/content` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `CommunicationsController.listDeliveries` | GET | `/communications/businesses/:businessId/deliveries` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 
@@ -738,7 +743,7 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `FlowController.getActivityFeed` | GET | `/api/flows/businesses/:businessId/activity` | exempt-check | check:resolveTimelineViewer filters legacy activity feed by the caller's module scopes (V1-84) |
 | `FlowController.getCockpitSummary` | GET | `/api/flows/businesses/:businessId/cockpit` | open | follow-up: `operations:read` (legacy cockpit summary currently membership-only) |
 | `FlowController.listCrossModuleWorkflows` | GET | `/api/flows/businesses/:businessId/cross-module-workflows` | open | follow-up: `automations:read` (cross-module workflow configs currently membership-only) |
-| `FlowController.universalSearch` | GET | `/api/flows/businesses/:businessId/search` | exempt-check | check:memberModuleLevel enforces `revenue:read` on invoice results (D-100); note follow-up should also scope contacts/bookings/projects results |
+| `FlowController.universalSearch` | GET | `/api/flows/businesses/:businessId/search` | exempt-check | check:memberModuleLevel enforces `revenue:read` on invoice results (D-100); follow-up should also enforce `crm:read`, `bookings:read`, and `projects:read` on the remaining search buckets |
 
 ### `modules/gamification/gamification.controller.ts` (1)
 
@@ -1034,18 +1039,18 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `SeoController.getContentBriefDetail` | GET | `/seo/businesses/:businessId/briefs/:briefId` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getContentBriefs` | GET | `/seo/businesses/:businessId/briefs` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getContentGaps` | GET | `/seo/businesses/:businessId/content-gaps` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getDashboard` | GET | `/seo/businesses/:businessId/dashboard` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getGa4Status` | GET | `/seo/businesses/:businessId/connectors/ga4` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getGscStatus` | GET | `/seo/businesses/:businessId/connectors/gsc` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getIssues` | GET | `/seo/businesses/:businessId/issues` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getKeywordHistory` | GET | `/seo/businesses/:businessId/keywords/:keywordId/history` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getKeywords` | GET | `/seo/businesses/:businessId/keywords` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getPageDetail` | GET | `/seo/businesses/:businessId/pages/:pageId` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getPages` | GET | `/seo/businesses/:businessId/pages` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
-| `SeoController.getRevenueAttribution` | GET | `/seo/businesses/:businessId/revenue-attribution` | exempt-guard | guard:SeoAdminGuard (dedicated SEO authority guard) |
+| `SeoController.getContentBriefDetail` | GET | `/seo/businesses/:businessId/briefs/:briefId` | open | follow-up: `content:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getContentBriefs` | GET | `/seo/businesses/:businessId/briefs` | open | follow-up: `content:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getContentGaps` | GET | `/seo/businesses/:businessId/content-gaps` | open | follow-up: `content:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getDashboard` | GET | `/seo/businesses/:businessId/dashboard` | open | follow-up: `analytics:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getGa4Status` | GET | `/seo/businesses/:businessId/connectors/ga4` | open | follow-up: `analytics:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getGscStatus` | GET | `/seo/businesses/:businessId/connectors/gsc` | open | follow-up: `analytics:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getIssues` | GET | `/seo/businesses/:businessId/issues` | open | follow-up: `analytics:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getKeywordHistory` | GET | `/seo/businesses/:businessId/keywords/:keywordId/history` | open | follow-up: `analytics:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getKeywords` | GET | `/seo/businesses/:businessId/keywords` | open | follow-up: `analytics:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getPageDetail` | GET | `/seo/businesses/:businessId/pages/:pageId` | open | follow-up: `content:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getPages` | GET | `/seo/businesses/:businessId/pages` | open | follow-up: `content:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority) |
+| `SeoController.getRevenueAttribution` | GET | `/seo/businesses/:businessId/revenue-attribution` | open | follow-up: `revenue:read` (`SeoAdminGuard` only enforces a `comingSoon` feature-flag rollout gate, not tenant role or module authority; returns SEO revenue attribution to any business member once live) |
 
 ### `modules/shopify/shopify.controller.ts` (1)
 
@@ -1087,14 +1092,13 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `SiteController.listOrders` | GET | `/site/businesses/:businessId/orders` | exempt-check | check:readsRevenue withholds financial/revenue sections or figures below `revenue:read` |
 | `SiteController.listPromoCodes` | GET | `/site/businesses/:businessId/promo-codes` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 
-### `modules/social/social.controller.ts` (4)
+### `modules/social/social.controller.ts` (3)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `SocialController.getAccountMetrics` | GET | `/social/businesses/:businessId/account-metrics` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `SocialController.getAnalytics` | GET | `/social/businesses/:businessId/analytics` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 | `SocialController.listPosts` | GET | `/social/businesses/:businessId/posts` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
-| `SocialController.recentPosts` | GET | `/social/businesses/:businessId/recent-posts` | open | follow-up: `content:read` (membership-only read; no enforced module scope) |
 
 ### `modules/sop/sop.controller.ts` (2)
 
@@ -1113,7 +1117,7 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `SubscriptionsController.getHistory` | GET | `/subscriptions/businesses/:businessId/history` | open | follow-up: `revenue:read` (membership-only read; no enforced module scope) |
 | `SubscriptionsController.getPaymentHistory` | GET | `/subscriptions/businesses/:businessId/payments` | open | follow-up: `revenue:read` (membership-only read; no enforced module scope) |
 
-### `modules/supplier/supplier.controller.ts` (6)
+### `modules/supplier/supplier.controller.ts` (5)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
@@ -1122,7 +1126,6 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | `SupplierController.getProductSourceLinks` | GET | `/supplier/businesses/:businessId/products/:productId/source-links` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 | `SupplierController.getProductVariants` | GET | `/supplier/businesses/:businessId/products/:productId/variants` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 | `SupplierController.getSupplierProduct` | GET | `/supplier/businesses/:businessId/supplier-products/:supplierProductId` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
-| `SupplierController.getSupplierProducts` | GET | `/supplier/businesses/:businessId/connections/:connectionId/products` | open | follow-up: `storefront:read` (membership-only read; no enforced module scope) |
 
 ### `modules/task-assignments/task-assignment.controller.ts` (3)
 
