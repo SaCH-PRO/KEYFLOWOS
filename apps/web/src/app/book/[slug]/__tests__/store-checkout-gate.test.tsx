@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from "@testing-library/react";
 
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
 
@@ -54,6 +54,12 @@ let paymentStatus = "FAILED";
 
 const ADD = /^(add|pre-order|add to cart)$/i;
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
+/**
+ * Lets React finish what the last update started: its commit and the passive effects after it (the stored cart is
+ * rewritten in one). A "nothing was deleted" check is only worth anything after this, never inside the waitFor that
+ * saw the update, which passes on the first commit, before those effects have run.
+ */
+const settle = () => act(async () => { await Promise.resolve(); });
 /** The stored cart as written: null when the page never wrote one, "[]" when it wrote an empty cart. */
 const storedCartRaw = (): string | null => window.localStorage.getItem(CART_KEY);
 const checkoutPosts = () => api.apiPost.mock.calls.filter(([arg]) => String((arg as { path?: string })?.path ?? "").endsWith("/checkout"));
@@ -211,6 +217,7 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
     render(<PublicBookingPage />);
     await screen.findAllByText(SERVICE.name, { exact: true });
     expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
   });
 
@@ -279,6 +286,7 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
     storefront = { storefront: {}, storeCheckout: true };
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
     expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
   });
@@ -309,13 +317,16 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
     render(<PublicBookingPage />);
     const reads = () => api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`).length;
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-    // The second read was made and has answered (Try again is enabled again): then the notice and the lines are still there.
+    // The signal: the second read was made and has answered (Try again is enabled again).
     await waitFor(() => {
       expect(reads()).toBe(2);
       expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
-      expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
-      expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
     });
+    // Then let the effects of that answer run, and only then look: the notice and the stored lines are still there.
+    await settle();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
+    expect(screen.getByRole("button", { name: "Open cart with 1 items" })).toBeTruthy();
   });
 
   it("WHS2-28 the storefront read failed: a kept failed order sends no store order, and promises no retry that is not there", async () => {
@@ -500,6 +511,7 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug> offers the store checkout only o
       release(null);
     }
     expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE.id]);
   });
 

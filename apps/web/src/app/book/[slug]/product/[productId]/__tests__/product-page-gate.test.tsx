@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 
 const api = vi.hoisted(() => ({ apiGet: vi.fn() }));
 /** The item this page is for (the product by default; WHS2-40 opens a bookable service). */
@@ -42,6 +42,11 @@ const CART_KEY = `kf_cart_${SLUG}`;
 const ADD = /^(add to cart|pre-order)/i;
 const COULD_NOT_CHECK = /couldn.t check online ordering/i;
 let storefront: Record<string, unknown> | null = {};
+/**
+ * Lets React finish what the last update started: its commit and the passive effects after it (the stored cart is
+ * rewritten in one). A "nothing was deleted" check comes after this, never inside the waitFor that saw the update.
+ */
+const settle = () => act(async () => { await Promise.resolve(); });
 const storedCart = (): Array<{ id: string }> => JSON.parse(window.localStorage.getItem(CART_KEY) ?? "[]");
 
 beforeEach(() => {
@@ -119,6 +124,7 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     storefront = { storefront: {}, storeCheckout: true };
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "Open cart with 3 items" })).toBeTruthy();
+    await settle();
     expect(screen.queryByText(COULD_NOT_CHECK)).toBeNull();
     expect(screen.getByText("Qty:")).toBeTruthy();
     expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
@@ -156,14 +162,16 @@ describe("WEDGE-HIDE-STORE part 2: /book/<slug>/product/<id>", () => {
     window.localStorage.setItem(CART_KEY, JSON.stringify([PRODUCT_LINE, SERVICE_LINE]));
     render(<ProductDetailPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-    // The second read was made and has answered (Try again is enabled again): then everything is still there.
+    // The signal: the second read was made and has answered (Try again is enabled again).
     await waitFor(() => {
       expect(api.apiGet.mock.calls.filter(([path]) => path === `/site/storefront/public/${SLUG}`)).toHaveLength(2);
       expect((screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement).disabled).toBe(false);
-      expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
-      expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
-      expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
     });
+    // Then let the effects of that answer run, and only then look: everything is still there.
+    await settle();
+    expect(screen.getByText(COULD_NOT_CHECK)).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: ADD })).toHaveLength(0);
+    expect(storedCart().map((c) => c.id)).toEqual([PRODUCT.id, SERVICE_LINE.id]);
   });
 
   it("WHS2-41 Try again is disabled while its read is out", async () => {

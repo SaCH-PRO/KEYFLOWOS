@@ -21,7 +21,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import type { ReactNode } from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 
 const { SLUG, BUSINESS, nothing, passthrough } = vi.hoisted(() => ({
   SLUG: "v95q-shop",
@@ -409,6 +409,8 @@ describe("WEDGE-HIDE-STORE part 2: a booking checkout keeps the store lines it d
     net.storeCheckout = true;
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
+    // Let the effects of that answer run before looking: a "nothing was deleted" check is worth nothing before them.
+    await act(async () => { await Promise.resolve(); });
     expect(storedIds()).toEqual([PRODUCT.id]);
     expect(orderPosts()).toHaveLength(0);
   });
