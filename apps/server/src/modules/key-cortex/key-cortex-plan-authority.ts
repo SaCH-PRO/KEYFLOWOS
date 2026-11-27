@@ -156,6 +156,16 @@ export function noMemberPlanStepRefusal(module: string | null, action: string): 
  */
 export function memberPlanStepScopeRefusal(module: string | null, action: string, scopes: Record<string, string>): string | null {
   const m = module ?? 'general';
+  // P234 (FU-SERVICE-WRITE-SCOPE, D-309 / D-317 Option B): service, price, and deposit writes
+  // require storefront:write OR bookings:admin on every door (HTTP, direct cortex commands, and plans).
+  if (m === 'bookings' && (action === 'add_service' || action === 'update_service')) {
+    const storefrontLevel = scopes.storefront || 'none';
+    const bookingsLevel = scopes.bookings || 'none';
+    if (rankOf(storefrontLevel) < LEVEL_RANK.write && rankOf(bookingsLevel) < LEVEL_RANK.admin) {
+      return `Insufficient permissions: requires storefront write or bookings admin access (you have storefront:${storefrontLevel}, bookings:${bookingsLevel}); plan step "${m}.${action}" is not run (D-317)`;
+    }
+    return null;
+  }
   const scope = Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, m) ? KEY_PLAN_MODULE_SCOPES[m] : undefined;
   if (!scope) return `Plan step "${m}.${action}": module "${m}" is mapped to no module scope, so it is not run for this member (D-71)`;
   if (scope === 'adapter') return null;

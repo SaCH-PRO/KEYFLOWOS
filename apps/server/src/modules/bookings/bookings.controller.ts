@@ -8,7 +8,7 @@ import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } 
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireAlternativeModuleScope, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
@@ -443,7 +443,8 @@ export class BookingsController {
    * V1-64: a body the catalog cannot store is a 400 (assertServiceCreateBody), not a 500.
    */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
@@ -474,7 +475,8 @@ export class BookingsController {
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.updateService. */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Patch('businesses/:businessId/services/:serviceId')
   async updateService(
     @Param('businessId') businessId: string,
@@ -496,7 +498,8 @@ export class BookingsController {
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.deleteService. */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Delete('businesses/:businessId/services/:serviceId')
   async deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
     await this.catalog.deleteService(businessId, serviceId);
@@ -505,7 +508,8 @@ export class BookingsController {
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.batchServices. */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('bookings', 'write')
+  @RequireModuleScope('storefront', 'write')
+  @RequireAlternativeModuleScope('bookings', 'admin')
   @Post('businesses/:businessId/services/batch')
   async batchServices(
     @Param('businessId') businessId: string,

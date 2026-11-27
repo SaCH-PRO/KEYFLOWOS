@@ -42,7 +42,7 @@ import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, defaultScopesForRole, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { MEMBERLESS_CONTACT_ANSWER, memberlessKeyToolRefusal } from './memberless-key-tools';
 import { PayrollService, canReadPayrollMoney } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
@@ -52,11 +52,11 @@ import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.ser
 import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
-import {
-  genomeReaderReadsRevenue,
-  isMoneyLabel,
-  proposalTextStatesMoney,
-} from '../business-genome/key-genome/genome-finance-scope';
+// P160 (RR-LEGACY-FALLBACK-REMOVE): compact imports preserve existing executeTool case line numbers
+// for flow-tool-effect-metadata REVIEWED_NON_READ_FAMILY_READ_TOOLS citations.
+import { genomeReaderReadsRevenue, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { createReminderTask, createSentOverdueInvoiceReminderDraft, listSentOverdueInvoices, recommendStaleFollowUps, summarizePaidRevenue } from './legacy-promoted-tools.helper';
+// (5 lines total matching original block)
 import {
   blueprintForReader,
   genomeFactsForReader,
@@ -7634,6 +7634,64 @@ ${triage.standingContext}`;
         return { moves };
       }
 
+      case 'finance_list_overdue_invoices':
+        return listSentOverdueInvoices(this.prisma, businessId, args.limit);
+
+      case 'finance_create_invoice_reminder_draft':
+        return createSentOverdueInvoiceReminderDraft(this.prisma, businessId, args.invoiceId, args.tone);
+
+      case 'commerce_summarize_revenue':
+        return summarizePaidRevenue(this.prisma, businessId);
+
+      case 'crm_recommend_follow_ups': {
+        const visClause = await this.resolvePromotedContactScope(businessId, action);
+        return recommendStaleFollowUps(this.prisma, businessId, args.daysStale, args.limit, visClause);
+      }
+
+      case 'command_create_item': {
+        const title = typeof args.title === 'string' ? args.title.trim() : '';
+        if (!title) throw new Error('title is required');
+        const validCategories = ['MONEY', 'TIME', 'PEOPLE', 'WORK', 'SALES', 'MARKETING', 'GOVERNANCE', 'STRATEGY', 'SYSTEM'] as const;
+        const category =
+          typeof args.category === 'string' && args.category.trim().length > 0 ? args.category.trim() : 'PEOPLE';
+        if (!(validCategories as readonly string[]).includes(category)) {
+          throw new Error(`category must be one of: ${validCategories.join(', ')}`);
+        }
+        let dueAt: Date | undefined;
+        if (args.dueAt !== undefined && args.dueAt !== null && args.dueAt !== '') {
+          const parsed = new Date(String(args.dueAt));
+          if (Number.isNaN(parsed.getTime())) throw new Error('dueAt is not a valid date');
+          dueAt = parsed;
+        }
+        const contactId =
+          typeof args.contactId === 'string' && args.contactId.trim().length > 0 ? args.contactId.trim() : undefined;
+        if (contactId) {
+          const visClause = await this.resolvePromotedContactScope(businessId, action, { requireCrmRead: true });
+          const contact = await this.prisma.client.contact.findFirst({
+            where: { id: contactId, businessId, deletedAt: null, ...(visClause ? { AND: [visClause] } : {}) },
+            select: { id: true },
+          });
+          if (!contact) throw new Error('Contact not found');
+        }
+        const item = await this.getCommandService().create(businessId, {
+          title,
+          description: typeof args.description === 'string' ? args.description : undefined,
+          category: category as any,
+          actionType: 'KEY_CREATED',
+          sourceModule: 'KEY_AI',
+          sourceType: 'command',
+          ownerId: contactId,
+          ownerType: contactId ? 'CONTACT' : undefined,
+          dueAt,
+        });
+        return { commandItemId: item.id };
+      }
+
+      case 'crm_create_reminder': {
+        const visClause = await this.resolvePromotedContactScope(businessId, action);
+        return createReminderTask(this.prisma, businessId, args.title, args.contactId, args.dueDate, visClause);
+      }
+
       case 'finance_balance_sheet': {
         const asOf = args.asOfDate ? new Date(args.asOfDate) : new Date();
         if (Number.isNaN(asOf.getTime())) {
@@ -9467,5 +9525,44 @@ ${triage.standingContext}`;
       if (memberId) await logged;
       return { success: false, error: (error as Error).message };
     }
+  }
+
+  /**
+   * P160 (RR-LEGACY-FALLBACK-REMOVE) R1 MAJOR-2 & MAJOR-3 (D-37, D-73, D-140):
+   * Resolve the acting member via `contactBindMember` (supporting chat, HTTP,
+   * CORTEX_BRIDGE, and PLAN_QUEUE), fail closed when no actor can be resolved,
+   * optionally enforce `crm:read` via `memberModuleLevel` (respecting D-140
+   * explicit maps on OWNER memberships), and delegate to `contactReadAccess`
+   * so static visibility census (`graph-action-visibility-bound.spec.ts`)
+   * covers every caller automatically.
+   */
+  private async resolvePromotedContactScope(
+    businessId: string,
+    action: KeyDispatchAction | undefined,
+    options: { requireCrmRead?: boolean } = {},
+  ): Promise<Prisma.ContactWhereInput | null> {
+    const actorId = await this.contactBindMember(businessId, action);
+    if (!actorId) {
+      throw new ForbiddenException('This contact-scoped tool requires an authenticated member context');
+    }
+    if (options.requireCrmRead) {
+      const [user, membership] = await Promise.all([
+        this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } }),
+        this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: actorId, businessId } },
+          select: { role: true, permissionScopes: true },
+        }),
+      ]);
+      const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+      if (!isSuperAdmin) {
+        const level = membership ? memberModuleLevel(membership, 'crm') : 'none';
+        if (level === 'none') {
+          throw new ForbiddenException('You do not have crm:read permission to bind a contact');
+        }
+      }
+    }
+    const boundAction: ActionContext = { ...(action ?? {}), surface: action?.surface ?? 'UNDECLARED', principalUserId: actorId };
+    const scope = await this.contactReadAccess(businessId, boundAction);
+    return scope?.clause ?? null;
   }
 }

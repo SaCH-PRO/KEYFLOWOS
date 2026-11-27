@@ -60,52 +60,7 @@ const UNIQUE_ORDER_KEYS: Record<string, ReadonlySet<string>> = {
  * Keyed by `<path relative to apps/server/src>::<Class.method>` (plus `#raw`
  * suffix for `$queryRaw` / `Prisma.sql` sites) — never by line numbers.
  */
-const ALLOW_LISTED: Readonly<Record<string, string>> = {
-  // --- W11-PAGING-TOTAL-ORDER-C (13 sites) ---
-  'modules/admin-analytics/admin-analytics.service.ts::AdminAnalyticsService.getFeedbackInbox':
-    'W11-PAGING-TOTAL-ORDER-C',
-  'modules/admin-platform/admin-business.controller.ts::AdminBusinessController.listBusinesses':
-    'W11-PAGING-TOTAL-ORDER-C',
-  'modules/admin-platform/admin-event.controller.ts::AdminEventController.listEvents': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/analytics/growth-insight-generator.service.ts::GrowthInsightGeneratorService.getInsights':
-    'W11-PAGING-TOTAL-ORDER-C',
-  'modules/business-events/business-event.service.ts::BusinessEventService.getAuditTrail': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/device/device.service.ts::DeviceService.listCaptures': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/device/device.service.ts::DeviceService.listVisualIntakes': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/device/device.service.ts::DeviceService.listVoiceSessions': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/identity/identity.service.ts::IdentityService.getTeamActivityFeed': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/intelligence/signals.service.ts::SignalsService.listSignals': 'W11-PAGING-TOTAL-ORDER-C',
-  'modules/product-analytics/product-analytics.service.ts::ProductAnalyticsService.listFeedback':
-    'W11-PAGING-TOTAL-ORDER-C',
-  'modules/product-analytics/product-analytics.service.ts::ProductAnalyticsService.listAiQualitySignals':
-    'W11-PAGING-TOTAL-ORDER-C',
-  'modules/product-analytics/product-analytics.service.ts::ProductAnalyticsService.listEvents':
-    'W11-PAGING-TOTAL-ORDER-C',
-
-  // --- Other pre-existing non-Group-A sites on 178ef400 (19 sites; retire in B/C or follow-up) ---
-  'modules/ai/ai-usage-admin.controller.ts::AiUsageAdminController.platformAlerts': 'pre-existing-non-group-a',
-  'modules/communications/delivery-queue.service.ts::DeliveryQueueService.listDeliveries': 'pre-existing-non-group-a',
-  'modules/community/community.service.ts::CommunityService.listPosts': 'pre-existing-non-group-a',
-  'modules/community/community.service.ts::CommunityService.searchDirectory': 'pre-existing-non-group-a',
-  'modules/community/community.service.ts::CommunityService.listDirectory': 'pre-existing-non-group-a',
-  'modules/community/community.service.ts::CommunityService.getConversationMessages': 'pre-existing-non-group-a',
-  'modules/community/community.service.ts::CommunityService.getNotifications': 'pre-existing-non-group-a',
-  'modules/community/network-activity.service.ts::NetworkActivityService.listFeed': 'pre-existing-non-group-a',
-  'modules/community/opportunity.service.ts::OpportunityService.list': 'pre-existing-non-group-a',
-  'modules/community/resource-marketplace.service.ts::ResourceMarketplaceService.list': 'pre-existing-non-group-a',
-  'modules/crm/crm-accounts.service.ts::CrmAccountsService.listAccounts': 'pre-existing-non-group-a',
-  'modules/crm/crm-deals.service.ts::CrmDealsService.listDeals': 'pre-existing-non-group-a',
-  'modules/crm/crm.service.ts::CrmService.listContactRows': 'pre-existing-non-group-a',
-  'modules/events/events.service.ts::EventsService.listEvents': 'pre-existing-non-group-a',
-  'modules/expenses/expenses.service.ts::ExpensesService.listExpenses': 'pre-existing-non-group-a',
-  'modules/key-cortex/key-cortex-awareness.service.ts::KeyCortexAwarenessService.getAwareness>fetchPage':
-    'pre-existing-non-group-a',
-  'modules/key-cortex/knowledge-ingestion.service.ts::KnowledgeIngestionService.listSources': 'pre-existing-non-group-a',
-  'modules/key-cortex/unified-memory-retrieval.service.ts::UnifiedMemoryRetrievalService.loadStructuredMemory>loadAiMemories>fetchPage':
-    'pre-existing-non-group-a',
-  'modules/key-cortex/unified-memory-retrieval.service.ts::UnifiedMemoryRetrievalService.loadStructuredMemory>loadTemporalMemories>fetchPage':
-    'pre-existing-non-group-a',
-};
+const ALLOW_LISTED: Readonly<Record<string, string>> = {};
 
 type FindingKind = 'findMany' | 'raw-sql';
 
@@ -472,7 +427,11 @@ describe('V1-67 paged-order census (W11-PAGING-TOTAL-ORDER-A)', () => {
     ).toEqual([]);
   });
 
-  it('strictly shrinking ratchet: every ALLOW_LISTED entry still exists and still offends', () => {
+  it('strictly shrinking ratchet: ALLOW_LISTED is empty and every entry still exists and still offends', () => {
+    expect(
+      Object.keys(ALLOW_LISTED),
+      'ALLOW_LISTED must remain empty now that all paged queries carry an id tie-breaker (W11-PAGING-TOTAL-ORDER-C)',
+    ).toEqual([]);
     expect(
       ratchet.staleAllowList,
       'Remove fixed or deleted sites from ALLOW_LISTED so the ratchet only shrinks',

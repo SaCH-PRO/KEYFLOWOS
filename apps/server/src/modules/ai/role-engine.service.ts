@@ -225,6 +225,7 @@ const ROLE_BASELINE_TOOLS = new Set<string>([
   // file where scope is answered.
   'command_list_due_obligations',
   'command_discharge_obligation',
+  'command_create_item',
   'inbox_read_thread',
   // Record: never destructive, always attributable
   'keyflow_create_note',

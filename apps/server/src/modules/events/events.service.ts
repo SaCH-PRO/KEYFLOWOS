@@ -27,7 +27,7 @@ export class EventsService {
     const [items, total] = await Promise.all([
       this.prisma.client.event.findMany({
         where,
-        orderBy: { startsAt: 'desc' },
+        orderBy: [{ startsAt: 'desc' }, { id: 'desc' }],
         skip,
         take,
         include: {

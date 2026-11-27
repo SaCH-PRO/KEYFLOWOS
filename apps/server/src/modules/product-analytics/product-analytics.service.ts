@@ -94,7 +94,7 @@ export class ProductAnalyticsService {
     const [items, total] = await Promise.all([
       this.prisma.client.userFeedback.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 50,
         skip: filters.offset ?? 0,
       }),
@@ -143,7 +143,7 @@ export class ProductAnalyticsService {
     const [items, total] = await Promise.all([
       this.prisma.client.aiQualitySignal.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 50,
         skip: filters.offset ?? 0,
       }),
@@ -168,7 +168,7 @@ export class ProductAnalyticsService {
     const [items, total] = await Promise.all([
       this.prisma.client.productEvent.findMany({
         where,
-        orderBy: { occurredAt: 'desc' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 50,
         skip: filters.offset ?? 0,
       }),

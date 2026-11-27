@@ -423,6 +423,18 @@ export class TrashController {
         user?.role === 'SUPER_ADMIN' && subject ? `Not authorized to update this ${subject}` : 'Not a member of this business',
       );
     }
+    // P234 (FU-SERVICE-WRITE-SCOPE, D-309 / D-317 Option B): restoring or permanently deleting
+    // a service requires storefront:write OR bookings:admin, matching CatalogController / BookingsController.
+    if (model === 'service') {
+      const storefrontLevel = scopes.storefront || 'none';
+      const bookingsLevel = scopes.bookings || 'none';
+      if (rankOf(storefrontLevel) < LEVEL_RANK.write && rankOf(bookingsLevel) < LEVEL_RANK.admin) {
+        throw new ForbiddenException(
+          `Insufficient permissions: requires storefront write or bookings admin access (you have storefront:${storefrontLevel}, bookings:${bookingsLevel})`,
+        );
+      }
+      return;
+    }
     const level = scopes[module] || 'none';
     if (rankOf(level) < LEVEL_RANK.write) {
       throw new ForbiddenException(`Insufficient permissions: ${module} requires write access (you have ${level})`);

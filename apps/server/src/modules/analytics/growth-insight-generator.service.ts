@@ -177,7 +177,7 @@ export class GrowthInsightGeneratorService {
     const [items, total] = await Promise.all([
       this.prisma.client.growthInsight.findMany({
         where,
-        orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         take: filters.limit ?? 25,
         skip: filters.offset ?? 0,
       }),

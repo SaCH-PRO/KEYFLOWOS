@@ -2805,18 +2805,4 @@ export const DORMANT_MEMORY_PATHS: readonly DormantMemoryPathEntry[] = [
     reason: 'Passes session.userId into KeyCortexMemoryService.store (AiMemory) for communication_style messages; AiMemory has no userId column.',
     followUp: 'MEM-CLASS-COLUMNS, D-130',
   },
-  {
-    file: 'modules/key-cortex/key-cortex-evolution.service.ts',
-    className: 'KeyCortexEvolutionService',
-    methodName: 'selfTune',
-    reason: 'Self-tunes KEY parameters and writes tuning settings into AiMemory without owner approval or live callers; guarded against accidental activation.',
-    followUp: 'MEM-CLASS-COLUMNS, D-257',
-  },
-  {
-    file: 'modules/key-cortex/key-cortex-evolution.service.ts',
-    className: 'KeyCortexEvolutionService',
-    methodName: 'applyTuningAdjustment',
-    reason: 'Private helper invoked only by dormant selfTune; writes self-tuning parameters directly into AiMemory via upsertAiMemoryDroppingStaleCopies.',
-    followUp: 'MEM-CLASS-COLUMNS, D-257',
-  },
 ];

@@ -1673,7 +1673,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const deliveries = await this.prisma.client.outboundDelivery.findMany({
       where: fullWhere,
       include: includeRelations,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
       skip,
     });

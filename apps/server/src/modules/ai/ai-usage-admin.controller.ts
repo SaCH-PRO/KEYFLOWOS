@@ -152,7 +152,7 @@ export class AiUsageAdminController {
     const [alerts, total] = await Promise.all([
       this.prisma.client.aiUsageAlert.findMany({
         where: { notified: false },
-        orderBy: { triggeredAt: 'desc' },
+        orderBy: [{ triggeredAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
       }),

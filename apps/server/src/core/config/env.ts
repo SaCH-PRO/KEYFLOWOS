@@ -317,7 +317,31 @@ export function keyDisabled(): boolean {
  * directly opts in with ENABLE_SCHEDULERS_IN_TEST.
  */
 export function keyCronsDisabled(): boolean {
-  return keyDisabled() || schedulersDisabled();
+  return keyDisabled() || schedulersDisabled() || envFlagOn(process.env.KEY_CRONS_DISABLED);
+}
+
+/**
+ * Narrow per-producer kill switches (KEY-CRONS-FLAGS, ruling `crons`).
+ *
+ * Production MUST NOT set DISABLE_SCHEDULERS (which would stop overdue invoice
+ * transitions, booking reminders, recurring invoices, and recurring expenses).
+ * Instead, operators silence non-essential analytical / intelligence producers
+ * individually via these four flags alongside KEY_CRONS_DISABLED.
+ */
+export function growthIntelligenceSchedulerDisabled(): boolean {
+  return envFlagOn(process.env.GROWTH_INTELLIGENCE_SCHEDULER_DISABLED);
+}
+
+export function momentumSchedulerDisabled(): boolean {
+  return envFlagOn(process.env.MOMENTUM_SCHEDULER_DISABLED);
+}
+
+export function analyticsSchedulerDisabled(): boolean {
+  return envFlagOn(process.env.ANALYTICS_SCHEDULER_DISABLED);
+}
+
+export function intelligenceScansDisabled(): boolean {
+  return envFlagOn(process.env.INTELLIGENCE_SCANS_DISABLED);
 }
 
 /**

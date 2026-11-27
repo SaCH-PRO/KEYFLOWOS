@@ -1509,7 +1509,7 @@ export class IdentityService {
     const [items, total] = await Promise.all([
       this.prisma.client.teamActivityLog.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: opts.limit || 50,
         skip: opts.offset || 0,
       }),
