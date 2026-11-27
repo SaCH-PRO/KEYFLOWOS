@@ -31,6 +31,7 @@ import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
 import { createCheckoutKeyring, postStorefrontCheckout } from "./components/checkout-request";
+import { storeCheckoutOffered, withoutStoreLines, STORE_CHECKOUT_NOT_OFFERED, STORE_CHECK_FAILED, STORE_CHECK_FAILED_NO_RETRY } from "@/lib/api/store-checkout";
 import { TrustBar, SecurityFooter } from "./components/trust-bar";
 import { StoreSectionWrapper } from "./components/store-section-wrapper";
 import { OrderConfirmation } from "./components/order-confirmation";
@@ -162,7 +163,16 @@ function PublicBookingPageInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // WEDGE-HIDE-STORE part 2 (P225, D-263): whether the store checkout is offered, as the storefront read answers it
+  // (lib/api/store-checkout.ts). null while that read is out. Only `true` sells: until then, and on false, a missing
+  // field or a failed read, no product goes in the cart, the cart shows no product line and no store order is sent.
+  const [storeOffered, setStoreOffered] = useState<boolean | null>(null);
+  // The storefront read failed: not an answer. storeOffered stays null (nothing is sold, nothing is deleted from the
+  // stored cart) and the page offers Try again, which reads again (retryStoreCheck).
+  const [storeCheckFailed, setStoreCheckFailed] = useState(false);
+  const [storeCheckRetrying, setStoreCheckRetrying] = useState(false);
+  const [storedCart, setCart] = useState<CartItem[]>([]);
+  const cart = useMemo(() => (storeOffered === true ? storedCart : withoutStoreLines(storedCart)), [storeOffered, storedCart]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutMode, setCheckoutMode] = useState(false);
   const [promoCode, setPromoCode] = useState<PromoCode | null>(null);
@@ -226,9 +236,21 @@ function PublicBookingPageInner() {
     [slug]
   );
 
+  // WEDGE-HIDE-STORE part 2: a finished checkout clears the lines it checked out (`cart`), not the product lines the
+  // gate was hiding from it. Those stay stored until a definite "not offered" answer drops them (the effect below),
+  // so a booking made while the storefront read had failed costs a selling business's customer no cart.
+  const clearCheckedOutCart = useCallback(() => {
+    setCart((prev) => {
+      const next = prev.filter((line) => !cart.includes(line));
+      saveCart(slug, next);
+      return next;
+    });
+  }, [cart, slug]);
+
   const addToCart = useCallback(
     (item: CatalogItem) => {
       if (item.purchasable === false) return;
+      if (!item.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === item.id && c.itemType === item.itemType);
         let next: CartItem[];
@@ -245,7 +267,7 @@ function PublicBookingPageInner() {
       });
       if (business?.id) trackStoreEvent(business.id, 'add_to_cart', item.id);
     },
-    [slug, business]
+    [slug, business, storeOffered]
   );
 
   const removeFromCart = useCallback(
@@ -346,6 +368,31 @@ function PublicBookingPageInner() {
     savePromoCode(slug, null);
   }, [slug]);
 
+  // The storefront read: its settings, and whether the store checkout is offered. Used by the first load and by Try
+  // again after a failed read.
+  const readStorefront = useCallback(async () => {
+    const sfRes = await apiGet<{ storefront?: StorefrontConfig; storefrontConfig?: StorefrontConfig; shippingZones?: ShippingZone[]; completedOrdersCount?: number }>(`/site/storefront/public/${encodeURIComponent(slug)}`);
+    if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
+    else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+    if (sfRes.data?.shippingZones) setShippingZones(sfRes.data.shippingZones);
+    if (typeof sfRes.data?.completedOrdersCount === 'number') setCompletedOrdersCount(sfRes.data.completedOrdersCount);
+    if (sfRes.error) {
+      setStoreCheckFailed(true);
+      return;
+    }
+    setStoreCheckFailed(false);
+    setStoreOffered(storeCheckoutOffered(sfRes.data));
+  }, [slug]);
+
+  const retryStoreCheck = useCallback(async () => {
+    setStoreCheckRetrying(true);
+    try {
+      await readStorefront();
+    } finally {
+      setStoreCheckRetrying(false);
+    }
+  }, [readStorefront]);
+
   useEffect(() => {
     const loadBusiness = async () => {
       setLoading(true);
@@ -365,11 +412,7 @@ function PublicBookingPageInner() {
       }
       setBusiness(res.data);
 
-      const sfRes = await apiGet<{ storefront?: StorefrontConfig; storefrontConfig?: StorefrontConfig; shippingZones?: ShippingZone[]; completedOrdersCount?: number }>(`/site/storefront/public/${encodeURIComponent(slug)}`);
-      if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
-      else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
-      if (sfRes.data?.shippingZones) setShippingZones(sfRes.data.shippingZones);
-      if (typeof sfRes.data?.completedOrdersCount === 'number') setCompletedOrdersCount(sfRes.data.completedOrdersCount);
+      await readStorefront();
 
       if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
@@ -393,7 +436,7 @@ function PublicBookingPageInner() {
       }).catch(() => {});
     };
     loadBusiness();
-  }, [slug]);
+  }, [slug, readStorefront]);
 
   useEffect(() => {
     if (slug) {
@@ -402,6 +445,16 @@ function PublicBookingPageInner() {
       setPromoCode(loadPromoCode(slug));
     }
   }, [slug]);
+
+  // WEDGE-HIDE-STORE part 2: `cart` above is what the page shows and checks out; it never holds a product line
+  // unless the store checkout is offered. Only a definite answer that is not `true` (storeOffered === false) drops
+  // the product lines from the stored cart. While the answer is out, or its read failed, the stored cart is left
+  // alone, so a late answer or a network error costs a selling business no cart.
+  useEffect(() => {
+    if (storeOffered !== false) return;
+    const kept = withoutStoreLines(storedCart);
+    if (kept.length !== storedCart.length) saveCart(slug, kept);
+  }, [storeOffered, slug, storedCart]);
 
   useEffect(() => {
     if (!fontPairing || fontPairing.id === "inter-inter") return;
@@ -586,6 +639,7 @@ function PublicBookingPageInner() {
         availableQuantity: p.availableQuantity,
         stockStatus: p.stockStatus,
         purchasable: p.purchasable,
+        notForSale: storeOffered !== true,
       };
       if (p.category === "PRODUCT") {
         items.push({
@@ -702,9 +756,13 @@ function PublicBookingPageInner() {
     returnUrl?: string;
   }, opts?: { newAttempt?: boolean }): Promise<StoreOrderResponse | null> => {
     // An explicit payment retry after the provider failed is a new checkout attempt (a new order), as before.
+    // WEDGE-HIDE-STORE part 2 (D-263): no store order leaves this page unless the store checkout is offered.
+    // Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-05, WHS2-06, WHS2-06b, WHS2-19,
+    // WHS2-28); kept until the server refusal (P233) is on main.
+    if (storeOffered !== true) throw new Error(STORE_CHECKOUT_NOT_OFFERED);
     if (opts?.newAttempt) checkoutKeyring.reset();
     return postStorefrontCheckout(slug, payload, checkoutKeyring.keyFor(payload));
-  }, [slug, checkoutKeyring]);
+  }, [slug, checkoutKeyring, storeOffered]);
 
   const handleStoreOrderResult = useCallback((
     storeOrder: StoreOrderResponse | null,
@@ -798,11 +856,11 @@ function PublicBookingPageInner() {
     setCompletedBookingResults([]);
     setCompletedBookingKey(null);
     setFailedOrderPayload(null);
-    updateCart([]);
+    clearCheckedOutCart();
     handleRemovePromo();
     if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
     return false;
-  }, [cart, cartTotal, shippingZones, business?.id, updateCart, handleRemovePromo, slug]);
+  }, [cart, cartTotal, shippingZones, business?.id, clearCheckedOutCart, handleRemovePromo, slug]);
 
   const handleCheckoutSubmit = async (data: {
     serviceBookings: Record<string, ServiceBookingData>;
@@ -966,7 +1024,7 @@ function PublicBookingPageInner() {
       setCompletedBookingResults([]);
       setCompletedBookingKey(null);
       setFailedOrderPayload(null);
-      updateCart([]);
+      clearCheckedOutCart();
       handleRemovePromo();
       if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
     }
@@ -995,6 +1053,11 @@ function PublicBookingPageInner() {
       setPaymentFailed(true);
     }
   }, [failedOrderPayload, completedBookingResults, completedBookingKey, confirmedPaymentMethod, confirmedDetails, handleStoreOrderResult, submitStoreOrder]);
+
+  // WEDGE-HIDE-STORE part 2: a kept store order (back from a payment provider), failed or still pending, cannot be
+  // paid again unless the store checkout is offered. The confirmation says why (not offered, or the check failed)
+  // and draws no Retry; Back to Shop leaves it behind.
+  const storeRetryBlocked = storeOffered !== true && (paymentFailed || paymentPending);
 
   if (loading) {
     return (
@@ -1145,7 +1208,8 @@ function PublicBookingPageInner() {
             // method, is not booked twice; nobody else's checkout reuses them.
             setFailedOrderPayload(null);
           }}
-          onRetryPayment={handleRetryPayment}
+          onRetryPayment={storeRetryBlocked ? undefined : handleRetryPayment}
+          retryUnavailableMessage={storeRetryBlocked ? (storeCheckFailed ? (paymentPending ? STORE_CHECK_FAILED : STORE_CHECK_FAILED_NO_RETRY) : STORE_CHECKOUT_NOT_OFFERED) : undefined}
           formatDate={formatDate}
           formatTime={formatTime}
         />
@@ -1290,6 +1354,21 @@ function PublicBookingPageInner() {
                 </h2>
               </div>
             )}
+            {/* Shown only when it concerns this page: a product is listed for sale, or the stored cart holds a product
+                line that is not being shown. */}
+            {storeCheckFailed && (catalogItems.some((i) => i.notForSale) || storedCart.length !== cart.length) && (
+              <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span>{STORE_CHECK_FAILED}</span>
+                <button
+                  type="button"
+                  onClick={retryStoreCheck}
+                  disabled={storeCheckRetrying}
+                  className="min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 text-sm font-medium disabled:opacity-60"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
             <CatalogGrid
               catalogItems={filteredCatalogItems}
               primaryColor={primaryColor}
@@ -1432,7 +1511,10 @@ function PublicBookingPageInner() {
           </div>
         )}
 
-        {showGuidedSelector && !guidedIntake && (
+        {/* WEDGE-HIDE-STORE part 2. Defence in depth for this block and the intake below: unreachable while the
+            buttons are hidden (only Find Your Match opens them; pinned by WHS2-16, WHS2-25); kept until the server
+            refusal (P233) is on main. */}
+        {storeOffered === true && showGuidedSelector && !guidedIntake && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
             <GuidedSelector
               slug={slug}
@@ -1453,7 +1535,7 @@ function PublicBookingPageInner() {
           </div>
         )}
 
-        {guidedIntake && (
+        {storeOffered === true && guidedIntake && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 backdrop-blur-sm p-6 shadow-lg">
             <AssetIntake
               journeyId={guidedIntake.journeyId}
@@ -1595,7 +1677,9 @@ function PublicBookingPageInner() {
       </div>
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-2">
-        {!showGuidedSelector && !guidedIntake && !checkoutMode && !success && (
+        {/* WEDGE-HIDE-STORE part 2: Find Your Match recommends packages to buy, so it is drawn only when the store
+            checkout is offered. */}
+        {storeOffered === true && !showGuidedSelector && !guidedIntake && !checkoutMode && !success && (
           <button
             onClick={() => setShowGuidedSelector(true)}
             className="pointer-events-auto inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[11px] font-medium text-white backdrop-blur-xl shadow-lg transition-all hover:shadow-xl hover:scale-105 active:scale-95"
@@ -1649,7 +1733,7 @@ function PublicBookingPageInner() {
         onClose={() => setWishlistOpen(false)}
         items={wishlist.items}
         onRemove={wishlist.remove}
-        onAddToCart={addToCart}
+        onAddToCart={storeOffered === true ? addToCart : undefined}
         primaryColor={primaryColor}
       />
 
