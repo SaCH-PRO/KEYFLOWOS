@@ -9,13 +9,16 @@
  *   - `cancelForget` closes the forget request (`status = 'cancelled'`) while leaving
  *     the earlier `deletedAt` untouched and reporting `{ ok: true, restored: false, priorSoftDeletePreserved: true }`.
  *   - Negative control: a live contact that undergoes `requestForget` -> `cancelForget`
- *     comes back live (`deletedAt: null`) with `{ ok: true, restored: true, priorSoftDeletePreserved: false }`.
+ *     comes back live (`deletedAt: null`) with `{ ok: true }`.
  *   - D-16 identity reuse: cancelling a forget request on an already soft-deleted contact
  *     whose email was taken by a new live contact succeeds without 409 because it does not
  *     un-delete the contact.
  *   - Re-forget after deliberate restore: once a human deliberately restores the contact,
  *     a subsequent `requestForget` -> `cancelForget` restores it to live.
- *   - Cross-tenant isolation: bizB cannot request or cancel forget on bizA's soft-deleted contact.
+ *   - Concurrent `requestForget` on a live contact, already-purged refusal (`contactId: null` +
+ *     `contactHash`), merged-duplicate refusal (`mergedIntoId != null`), cross-tenant isolation
+ *     on both `requestForget` and `cancelForget`, STAFF visibility/delete-scope on soft-deleted
+ *     contacts, and `forget_requested`/`forget_cancelled` audit payload verification.
  *
  * Fixtures: prefix `v73a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted via raw SQL + sqlLikePrefix() in beforeAll and afterAll.
@@ -36,6 +39,8 @@ const P = 'v73a_';
 const ID = {
   ownerA: `${P}ownerA`,
   ownerB: `${P}ownerB`,
+  staffDelNone: `${P}staffDelNone`,
+  staffDelOwned: `${P}staffDelOwned`,
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   priorDeleted: `${P}priorDeleted`,
@@ -44,16 +49,29 @@ const ID = {
   reusedDeleted: `${P}reusedDeleted`,
   reusedLive: `${P}reusedLive`,
   cycleContact: `${P}cycleContact`,
+  concurrentLive: `${P}concurrentLive`,
+  purgedContact: `${P}purgedContact`,
+  mergedPrimary: `${P}mergedPrimary`,
+  mergedDup: `${P}mergedDup`,
+  staffPrivateDeleted: `${P}staffPrivDel`,
+  staffTeamDeleted: `${P}staffTeamDel`,
 };
 
 const EMAIL = {
   ownerA: `${P}ownerA@test.local`,
   ownerB: `${P}ownerB@test.local`,
+  staffDelNone: `${P}staffDelNone@test.local`,
+  staffDelOwned: `${P}staffDelOwned@test.local`,
   priorDeleted: `${P}prior-deleted@test.local`,
   priorDeletedHttp: `${P}prior-deleted-http@test.local`,
   liveContact: `${P}live-contact@test.local`,
   reused: `${P}reused@test.local`,
   cycleContact: `${P}cycle-contact@test.local`,
+  concurrentLive: `${P}concurrent-live@test.local`,
+  mergedPrimary: `${P}merged-primary@test.local`,
+  mergedDup: `${P}merged-dup@test.local`,
+  staffPrivateDeleted: `${P}staff-priv-del@test.local`,
+  staffTeamDeleted: `${P}staff-team-del@test.local`,
 };
 
 let db: any;
@@ -144,6 +162,8 @@ beforeAll(async () => {
     data: [
       { id: ID.ownerA, email: EMAIL.ownerA, name: 'Owner A', role: 'USER' },
       { id: ID.ownerB, email: EMAIL.ownerB, name: 'Owner B', role: 'USER' },
+      { id: ID.staffDelNone, email: EMAIL.staffDelNone, name: 'Staff Del None', role: 'USER' },
+      { id: ID.staffDelOwned, email: EMAIL.staffDelOwned, name: 'Staff Del Owned', role: 'USER' },
     ],
   });
   await db.business.createMany({
@@ -156,6 +176,18 @@ beforeAll(async () => {
     data: [
       { userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' },
       { userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' },
+      {
+        userId: ID.staffDelNone,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { crm: 'write', crm_view: 'all', crm_delete: 'none' },
+      },
+      {
+        userId: ID.staffDelOwned,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { crm: 'write', crm_view: 'all', crm_delete: 'owned' },
+      },
     ],
   });
 }, 60_000);
@@ -390,5 +422,224 @@ describe('V1-73 (RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE): cancelling a forget reque
     });
     expect(c2).toEqual({ ok: true });
     expect(await rawDeletedAt(ID.cycleContact)).toBeNull();
+  });
+
+  it('[V73A-06] R1 MAJOR-1: concurrent requestForget calls on a live contact write one deletedByForget=true audit row and cancelForget restores the contact to live', async () => {
+    await db.contact.create({
+      data: {
+        id: ID.concurrentLive,
+        businessId: ID.bizA,
+        ownerId: ID.ownerA,
+        visibility: 'TEAM',
+        firstName: 'Concurrent',
+        lastName: 'Live',
+        email: EMAIL.concurrentLive,
+        emailNormalized: EMAIL.concurrentLive,
+      },
+    });
+
+    const [r1, r2] = await Promise.all([
+      privacy.requestForget({
+        businessId: ID.bizA,
+        contactId: ID.concurrentLive,
+        reason: 'Call 1',
+        actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+      }),
+      privacy.requestForget({
+        businessId: ID.bizA,
+        contactId: ID.concurrentLive,
+        reason: 'Call 2',
+        actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+      }),
+    ]);
+    expect(r1.id).toBe(r2.id);
+
+    const audits = await db.contactAuditEntry.findMany({
+      where: { businessId: ID.bizA, contactId: ID.concurrentLive, action: 'forget_requested' },
+    });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].entityId).toBe(r1.id);
+    expect(audits[0].after).toMatchObject({ deletedByForget: true });
+
+    const cancelled = await privacy.cancelForget({
+      businessId: ID.bizA,
+      contactId: ID.concurrentLive,
+      actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+    });
+    expect(cancelled).toEqual({ ok: true });
+    expect(await rawDeletedAt(ID.concurrentLive)).toBeNull();
+  });
+
+  it('[V73A-07] R1 MAJOR-2: already-purged contact (contactForgetRequest.contactId=null, status=purged) is refused on both service and HTTP forget', async () => {
+    const purgedAt = new Date('2026-01-01T00:00:00.000Z');
+    await db.contact.create({
+      data: {
+        id: ID.purgedContact,
+        businessId: ID.bizA,
+        ownerId: ID.ownerA,
+        visibility: 'TEAM',
+        firstName: 'Deleted',
+        lastName: 'Contact',
+        deletedAt: purgedAt,
+      },
+    });
+    const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+    const auditSvc = new ContactAuditService({ client: db } as any);
+    await db.contactForgetRequest.create({
+      data: {
+        businessId: ID.bizA,
+        contactId: null,
+        contactHash: auditSvc.hashContact(ID.bizA, ID.purgedContact),
+        status: 'purged',
+        purgeAt: purgedAt,
+        purgedAt,
+      },
+    });
+
+    await expect(
+      privacy.requestForget({
+        businessId: ID.bizA,
+        contactId: ID.purgedContact,
+        actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+      }),
+    ).rejects.toThrow(/already been purged/i);
+
+    await request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/contacts/${ID.purgedContact}/forget`)
+      .set('x-test-user', ID.ownerA)
+      .send({ reason: 'Should fail' })
+      .expect(400);
+
+    expect(await rawForgetStatus(ID.purgedContact)).toBeNull();
+  });
+
+  it('[V73A-08] R1 MAJOR-3: merged duplicate (mergedIntoId != null) cannot be independently forgotten via service or HTTP', async () => {
+    await db.contact.create({
+      data: {
+        id: ID.mergedPrimary,
+        businessId: ID.bizA,
+        ownerId: ID.ownerA,
+        visibility: 'TEAM',
+        firstName: 'Primary',
+        lastName: 'Row',
+        email: EMAIL.mergedPrimary,
+        emailNormalized: EMAIL.mergedPrimary,
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: ID.mergedDup,
+        businessId: ID.bizA,
+        ownerId: ID.ownerA,
+        visibility: 'TEAM',
+        firstName: 'Duplicate',
+        lastName: 'Row',
+        email: EMAIL.mergedDup,
+        emailNormalized: EMAIL.mergedDup,
+        mergedIntoId: ID.mergedPrimary,
+        deletedAt: new Date('2026-02-01T00:00:00.000Z'),
+      },
+    });
+
+    await expect(
+      privacy.requestForget({
+        businessId: ID.bizA,
+        contactId: ID.mergedDup,
+        actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+      }),
+    ).rejects.toThrow(/Contact not found/i);
+
+    await request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/contacts/${ID.mergedDup}/forget`)
+      .set('x-test-user', ID.ownerA)
+      .send({})
+      .expect(404);
+  });
+
+  it('[V73A-09] R1 MINOR-4/5: cross-tenant cancelForget refused 404, STAFF visibility & delete-scope hold on soft-deleted contacts, and audit entries carry provenance', async () => {
+    const priorDeletedAt = new Date('2026-03-15T10:00:00.000Z');
+    await db.contact.createMany({
+      data: [
+        {
+          id: ID.staffPrivateDeleted,
+          businessId: ID.bizA,
+          ownerId: ID.ownerA,
+          visibility: 'PRIVATE',
+          firstName: 'Hidden',
+          lastName: 'Deleted',
+          email: EMAIL.staffPrivateDeleted,
+          emailNormalized: EMAIL.staffPrivateDeleted,
+          deletedAt: priorDeletedAt,
+        },
+        {
+          id: ID.staffTeamDeleted,
+          businessId: ID.bizA,
+          ownerId: ID.ownerA,
+          visibility: 'TEAM',
+          firstName: 'Team',
+          lastName: 'Deleted',
+          email: EMAIL.staffTeamDeleted,
+          emailNormalized: EMAIL.staffTeamDeleted,
+          deletedAt: priorDeletedAt,
+        },
+      ],
+    });
+
+    // Hidden soft-deleted PRIVATE contact -> 404 for STAFF (no existence oracle)
+    await request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/contacts/${ID.staffPrivateDeleted}/forget`)
+      .set('x-test-user', ID.staffDelOwned)
+      .send({})
+      .expect(404);
+
+    // Visible soft-deleted TEAM contact -> 403 for crm_delete='none' and crm_delete='owned' (owned by ownerA)
+    await request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/contacts/${ID.staffTeamDeleted}/forget`)
+      .set('x-test-user', ID.staffDelNone)
+      .send({})
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/contacts/${ID.staffTeamDeleted}/forget`)
+      .set('x-test-user', ID.staffDelOwned)
+      .send({})
+      .expect(403);
+
+    // Owner opens forget -> cross-tenant bizB cancelForget refused 404 -> owner cancels and audit trail carries full provenance
+    const reqRow = await privacy.requestForget({
+      businessId: ID.bizA,
+      contactId: ID.staffTeamDeleted,
+      actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+    });
+    await expect(
+      privacy.cancelForget({
+        businessId: ID.bizB,
+        contactId: ID.staffTeamDeleted,
+        actor: { type: 'USER', id: ID.ownerB, label: EMAIL.ownerB },
+      }),
+    ).rejects.toThrow(/Forget request not found/i);
+
+    const cancelRes = await privacy.cancelForget({
+      businessId: ID.bizA,
+      contactId: ID.staffTeamDeleted,
+      actor: { type: 'USER', id: ID.ownerA, label: EMAIL.ownerA },
+    });
+    expect(cancelRes).toEqual({ ok: true, restored: false, priorSoftDeletePreserved: true });
+
+    const reqAudit = await db.contactAuditEntry.findFirst({
+      where: { businessId: ID.bizA, contactId: ID.staffTeamDeleted, action: 'forget_requested' },
+    });
+    expect(reqAudit?.entityId).toBe(reqRow.id);
+    expect(reqAudit?.after).toMatchObject({
+      deletedByForget: false,
+      priorDeletedAt: priorDeletedAt.toISOString(),
+    });
+    const cancelAudit = await db.contactAuditEntry.findFirst({
+      where: { businessId: ID.bizA, contactId: ID.staffTeamDeleted, action: 'forget_cancelled' },
+    });
+    expect(cancelAudit?.entityId).toBe(reqRow.id);
+    expect(cancelAudit?.after).toMatchObject({
+      restored: false,
+      priorSoftDeletePreserved: true,
+    });
   });
 });
