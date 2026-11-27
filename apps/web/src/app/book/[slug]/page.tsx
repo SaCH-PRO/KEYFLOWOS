@@ -100,7 +100,8 @@ function confirmedDetailsOf(raw: unknown): ConfirmedDetails | null {
  */
 function httpImageOf(raw: string): string | null {
   const value = raw.trim();
-  if (value === "") return null;
+  // A control character anywhere (trim leaves them) is no image URL.
+  if (value === "" || /[\u0000-\u001F\u007F]/.test(value)) return null;
   try {
     const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
     const { protocol } = new URL(value, base);
@@ -435,9 +436,10 @@ function PublicBookingPageInner() {
       // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
       const pending = parsed as ReturnType<typeof JSON.parse>;
       // SWP-BOOKING-SLOTS (round 6): the strings the confirmation shows or puts into a URL, only when they are strings.
-      // Zero-width and other invisible characters are stripped before the blank check: a field of only those is none.
+      // Invisible characters (format, combining, space and control characters, and the Hangul and Braille blanks)
+      // are stripped for the blank check only: a field of only those is none; any other value is kept as it is.
       const text = (v: unknown): string | null =>
-        typeof v === "string" && v.replace(/[\u180E\u200B-\u200D\u2060\uFEFF]/g, "").trim() !== "" ? v : null;
+        typeof v === "string" && v.replace(/[\p{Cf}\p{Mn}\p{Zs}\p{Cc}\u115F\u1160\u3164\uFFA0\u2800]/gu, "").trim() !== "" ? v : null;
       const orderNumber = text(pending.orderNumber);
       const orderId = text(pending.orderId);
       const customerEmail = text(pending.customerEmail);
