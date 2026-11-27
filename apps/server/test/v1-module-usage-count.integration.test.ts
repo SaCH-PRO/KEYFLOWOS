@@ -66,6 +66,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeAll, afterAll, vi, onTestFinished } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { V1_KEY_TOOLS } from '../src/modules/ai/v1-tool-allowlist';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
@@ -102,47 +103,8 @@ const OUR_BUSINESSES = [ID.bizA, ID.bizB, ID.bizGone, ID.bizNone];
 /** The identity header V61-07's test app reads (seeded v61a_ users only). */
 const HEADER = 'x-v61a-user';
 
-/**
- * Every FLOW tool that is NOT in a hidden module's `keyTools`, reviewed one by
- * one against the audit's v1 hubs (review SEC-V61-3). A FLOW tool in neither
- * fails V61-01, so a new tool, or one acting in a hidden module, is classified
- * before KEY-TOOL-ALLOWLIST / KEY-TOOL-DOMAIN-HIDE read the list.
- */
-const V1_KEY_TOOLS = new Set([
-  // Today: approvals, obligations and the read-outs behind its blocks.
-  'approval_create_request', 'approval_decide_step', 'approval_list', 'command_create_item', 'command_discharge_obligation', 'command_list_due_obligations',
-  'fetch_business_summary', 'fetch_client_health', 'fetch_expense_pressure', 'fetch_revenue_risk', 'fetch_schedule_health',
-  'fetch_storefront_quality',
-  // Customers: contacts, notes and tasks on them, follow-ups, segments, tags, messages to a contact.
-  'crm_add_note', 'crm_add_task', 'crm_create_contact', 'crm_create_reminder', 'crm_delete_contact', 'crm_find_duplicates', 'crm_list_contacts',
-  'crm_merge_execute', 'crm_merge_preview', 'crm_recommend_follow_ups', 'crm_search_contacts', 'crm_update_contact', 'create_followup_queue', 'create_task',
-  'draft_followup_message', 'keyflow_create_note', 'segment_contacts', 'send_message_with_approval', 'tag_contact',
-  'update_status_with_confirmation',
-  // Sales: quotes, invoices, products, store orders and listings, stock (warehouses stay a tab of a v1 hub).
-  'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_product', 'commerce_create_quote', 'commerce_delete_invoice',
-  'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice', 'commerce_summarize_revenue', 'commerce_update_invoice', 'commerce_update_product',
-  'draft_payment_reminder', 'marketplace_list_listings', 'marketplace_list_orders', 'store_list_products', 'store_list_recent_orders',
-  'inventory_adjust_stock', 'inventory_list_movements', 'inventory_list_stock', 'inventory_list_warehouses', 'inventory_low_stock_alerts',
-  'inventory_summary', 'inventory_transfer_stock',
-  // Schedule: bookings and the calendar.
-  'bookings_cancel_booking', 'bookings_create_booking', 'bookings_list_bookings', 'bookings_list_services', 'bookings_mark_no_show',
-  'bookings_reschedule_booking', 'calendar_check_conflicts', 'calendar_create_event', 'calendar_list_events',
-  // Money: expenses, Books, Getting paid, reconciliation, reports.
-  'expenses_create', 'expenses_list',
-  'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_cashflow_forecast', 'finance_create_bill', 'finance_create_coa_account',
-  'finance_create_invoice_reminder_draft', 'finance_customer_balance', 'finance_expense_breakdown', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
-  'finance_list_coa', 'finance_list_overdue_invoices', 'finance_money_moves', 'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown',
-  'finance_safe_to_spend', 'finance_tax_summary', 'finance_view_payables', 'finance_view_receivables',
-  'payments_create_link', 'payments_list_gateways', 'payments_list_links', 'payments_list_transactions', 'payments_refund_charge',
-  'payments_revoke_link', 'payments_search_transactions',
-  'reconcile_connect_statement_source', 'reconcile_list_statement_sources', 'reconcile_list_unmatched', 'reconcile_match_line',
-  'reconcile_run_auto_match', 'reconcile_sweep_statements', 'reports_generate',
-  // Your page.
-  'apply_storefront_recommendation', 'draft_storefront_copy',
-  // Settings: the team, the business profile and its documents, onboarding.
-  'people_assign_task', 'people_list', 'people_recommend_assignee', 'people_workload', 'update_business_blueprint', 'documents_list',
-  'documents_search', 'present_onboarding_card', 'save_onboarding_step',
-]);
+// V1_KEY_TOOLS is imported from apps/server/src/modules/ai/v1-tool-allowlist.ts
+// (moved there by KEY-TOOL-ALLOWLIST per review SEC-V61-3 so there is one source of truth).
 
 /** Canaries: seeded into names, emails, titles, amounts and credentials; never in the report. */
 const CANARY = {

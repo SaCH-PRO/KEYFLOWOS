@@ -56,7 +56,7 @@ import { GenomeFactService } from '../business-genome/key-genome/genome-fact.ser
 // for flow-tool-effect-metadata REVIEWED_NON_READ_FAMILY_READ_TOOLS citations.
 import { genomeReaderReadsRevenue, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 import { createReminderTask, createSentOverdueInvoiceReminderDraft, listSentOverdueInvoices, recommendStaleFollowUps, summarizePaidRevenue } from './legacy-promoted-tools.helper';
-// (5 lines total matching original block)
+import { isToolAllowedInV1, v1ToolRefusalReason } from './v1-tool-allowlist';
 import {
   blueprintForReader,
   genomeFactsForReader,
@@ -2213,7 +2213,7 @@ export class FlowOrchestratorService {
     /** The member whose chat turn this is (member chat only; the staff bridge passes none). */
     principalUserId?: string | null,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
-    const all = getOpenAiToolDefinitions();
+    const all = getOpenAiToolDefinitions().filter((t) => isToolAllowedInV1(t.function.name));
     let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
     if (envelope) {
       // Position-scoped: the envelope's patterns decide, not department roles.
@@ -4663,10 +4663,10 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     action?: KeyDispatchAction,
   ): Promise<unknown> {
-    // PR195-KEY-GATES (review SEC-P195BW-1): this door reaches the dispatcher without executeTool (the phone stream's
-    // receptionist, an execute_custom_logic snippet's inner call), so a turn that names no member is held to the
-    // customer-safe allowlist here too, before anything is read or written. A member's inner call was held before it
-    // got here, with its outer turn's context (execute_custom_logic: withinMemberScope).
+    // PR195-KEY-GATES (SEC-P195BW-1) + KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): refuse v1-removed tools
+    // before memberlessKeyTurn/executeToolAction; otherwise hold memberless turns to the customer-safe allowlist.
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) throw new ForbiddenException(v1Refusal);
     if (memberlessKeyTurn(action)) {
       const refusal = memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
       if (refusal) throw new ForbiddenException(refusal);
@@ -4703,8 +4703,9 @@ ${triage.standingContext}`;
     action?: KeyDispatchAction,
     args?: unknown,
   ): Promise<string | null> {
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) return v1Refusal;
     if (memberlessKeyTurn(action)) return memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
-    // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
     const { memberToolScopeRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
     const memberId = memberRevenueGateMember(action);
     if (memberId) return memberToolScopeRefusal(this.prisma, businessId, memberId, toolName, args);
@@ -4987,8 +4988,8 @@ ${triage.standingContext}`;
     // that passes nothing arrives there undeclared and is refused.
     action?: KeyDispatchAction,
   ): Promise<any> {
-    // Bridged MCP tools route to the allowlisted remote server, for this business only
-    // (RR-MCP-TENANT-BOUND): a server not bound to it refuses before connecting.
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) throw new ForbiddenException(v1Refusal);
     if (isMcpToolName(toolName)) {
       return this.getMcp().callTool(businessId, toolName, args);
     }
@@ -9779,11 +9780,14 @@ ${triage.standingContext}`;
     // human, so the action boundary still sends a write it adopted to a human for approval.
     // Refused before anything runs, and recorded. (Imported at call time: plan-step-authority imports
     // graph-actions.controller, which imports this file.)
+    const v1Refusal = v1ToolRefusalReason(toolName);
     const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
     const memberId = options.memberId || undefined;
-    const refusal = memberId
-      ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
-      : noMemberToolRefusal(toolName);
+    const refusal =
+      v1Refusal ??
+      (memberId
+        ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
+        : noMemberToolRefusal(toolName));
     if (refusal) {
       await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${refusal}`, false, 0, {
         riskTier: this.governance.getToolTier(toolName),

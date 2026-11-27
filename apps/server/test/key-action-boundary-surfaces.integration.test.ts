@@ -138,28 +138,48 @@ describe('P7 — no surface reaches the ticket write around the boundary', () =>
     });
 
     it('execute_custom_logic’s inner executor', async () => {
-      // The orchestrator hands the sandbox a closure; this is that closure.
-      let inner: any;
-      vi.spyOn(orchestrator, 'getCodeExecutor' as any).mockReturnValue({
-        execute: async (opts: any) => {
-          inner = opts.innerToolExecutor;
-          return settle(inner(ID.bizA, TOOL, { ...ARGS }));
-        },
+      // D-318 Option 1 (KEY-TOOL-ALLOWLIST, V1-63): execute_custom_logic is unconditionally
+      // removed in v1 and refused at dispatch on every surface (including CUSTOM_LOGIC) with
+      // 'not available in this version', zero sandbox execution, and zero writes.
+      const sandboxExecute = vi.fn(async () => ({ success: true }));
+      const getCodeExecutorSpy = vi.spyOn(orchestrator, 'getCodeExecutor' as any).mockReturnValue({
+        execute: sandboxExecute,
       });
-      // PR195-KEY-GATES (review SEC-P195BW-1): a snippet run for no one is a turn that names no member, which runs only
-      // the customer-safe allowlist: the snippet itself is refused before it runs (memberless-key-tools.ts), so its
-      // inner call never reaches the boundary.
-      await expect(
-        orchestrator.executeToolByName(ID.bizA, 'execute_custom_logic', { code: '/* calls the tool */', inputs: {} }, { surface: 'CUSTOM_LOGIC' }),
-      ).rejects.toThrow(/names no member it runs for, so KEY does not run it \(D-73\)/);
+
+      for (const action of [
+        { surface: 'CUSTOM_LOGIC' },
+        { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.owner },
+        { surface: 'MEMBER_CHAT', principalUserId: ID.owner },
+      ]) {
+        await expect(
+          orchestrator.executeToolByName(ID.bizA, 'execute_custom_logic', { code: '/* calls the tool */', inputs: {} }, action),
+        ).rejects.toThrow(/not available in this version/i);
+      }
+
+      const direct = await orchestrator.executeToolDirect(
+        ID.bizA,
+        'execute_custom_logic',
+        { code: '/* calls the tool */', inputs: {} },
+        undefined,
+        undefined,
+        { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.owner },
+      );
+      expect(direct.success).toBe(false);
+      expect(String(direct.error ?? '')).toMatch(/not available in this version/i);
+
+      const autoMon = await orchestrator.autoExecuteToolForMonitoring(
+        ID.bizA,
+        'execute_custom_logic',
+        { code: '/* calls the tool */', inputs: {} },
+        { memberId: ID.owner },
+      );
+      expect(autoMon.success).toBe(false);
+      expect(String(autoMon.error ?? '')).toMatch(/not available in this version/i);
+
+      expect(getCodeExecutorSpy).not.toHaveBeenCalled();
+      expect(sandboxExecute).not.toHaveBeenCalled();
       await noTickets();
       expect(await fx.actions(ID.bizA)).toHaveLength(0);
-      // Run for a member (the outer turn's), the inner call still reaches the boundary requested by nobody.
-      const outcome = await orchestrator.executeToolByName(ID.bizA, 'execute_custom_logic', { code: '/* calls the tool */', inputs: {} }, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.owner });
-      expect(outcome.err).toBeInstanceOf(fx.errors.ActionNotClearedError);
-      expect(outcome.err.disposition).toBe('AWAITING_APPROVAL');
-      await noTickets();
-      expect((await fx.actions(ID.bizA))[0]).toMatchObject({ execution_surface: 'CUSTOM_LOGIC', requested_by: null });
     });
   });
 

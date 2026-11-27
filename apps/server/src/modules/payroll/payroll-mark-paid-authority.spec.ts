@@ -118,24 +118,20 @@ describe('payroll mark-paid authority is unchanged by the port (PR195-PORT)', ()
     });
   });
 
-  it('PA-05 KEY: posts as KEY\'s system actor for the member the turn runs for', async () => {
+  it('PA-05 KEY: payroll_mark_paid is unconditionally refused in v1 (KEY-TOOL-ALLOWLIST) before PayrollService is called', async () => {
     const markRunPaid = vi.fn(async () => ({ id: 'run_1', status: 'PAID' }));
     const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
       getPayroll: () => ({ markRunPaid }),
     });
-    const result = await (orchestrator as any).executeToolAction(
-      'biz_1',
-      'payroll_mark_paid',
-      { runId: 'run_1', paymentMethod: 'cash', actorId: 'forged' },
-      { surface: 'CHAT', principalUserId: 'u_admin' },
-    );
-    expect(result).toEqual({ id: 'run_1', status: 'PAID' });
-    expect(markRunPaid).toHaveBeenCalledWith('biz_1', 'run_1', {
-      paymentAccountId: undefined,
-      paymentMethod: 'cash',
-      actorId: KEY_SYSTEM_ACTOR_ID,
-      initiatedBy: 'u_admin',
-    });
+    await expect(
+      (orchestrator as any).executeToolAction(
+        'biz_1',
+        'payroll_mark_paid',
+        { runId: 'run_1', paymentMethod: 'cash', actorId: 'forged' },
+        { surface: 'CHAT', principalUserId: 'u_admin' },
+      ),
+    ).rejects.toThrow(/not available in this version/);
+    expect(markRunPaid).not.toHaveBeenCalled();
   });
 
   it('PA-06 finance_post_journal_entry points at the General Journal page', () => {
