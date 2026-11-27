@@ -34,6 +34,7 @@
  *   POT-18  a Grant's error stays with the business it was asked for: it never shows in another business's form
  *   POT-19  a refused Grant keeps what was typed
  *   POT-20  Grant Access pressed again while the form is open keeps what was typed and its error
+ *   POT-21  a Grant that succeeds in A after a switch never closes the form open in B
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -483,5 +484,24 @@ describe("P232: the Client Portal page without the portal token", () => {
     fireEvent.click(screen.getByRole("button", { name: /Grant Access/ }));
     expect((screen.getByPlaceholderText("Contact ID") as HTMLInputElement).value).toBe("contact_kept");
     expect(screen.getByText("You can't grant portal access.")).toBeInTheDocument();
+  });
+
+  it("POT-21 a Grant that succeeds in A after a switch never closes the form open in B", async () => {
+    member.levels = { crm: "write" };
+    portal.list.mockImplementation(async (business: string) => accessOf(business));
+    let succeed: (v: unknown) => void = () => undefined;
+    portal.create.mockImplementation(() => new Promise((resolve) => (succeed = resolve)));
+    member.businessId = "biz_a";
+    const view = render(<PortalPage />);
+    await screen.findByText("contact_of_biz_a");
+    await openAndType("contact_a");
+    fireEvent.click(screen.getByRole("button", { name: /^Grant$/ }));
+
+    member.businessId = "biz_b";
+    view.rerender(<PortalPage />);
+    await screen.findByText("contact_of_biz_b");
+    await openAndType("contact_b");
+    await act(async () => succeed({ data: { id: "pa_new" }, error: null }));
+    expect((screen.getByPlaceholderText("Contact ID") as HTMLInputElement).value, "B's form stays open").toBe("contact_b");
   });
 });
