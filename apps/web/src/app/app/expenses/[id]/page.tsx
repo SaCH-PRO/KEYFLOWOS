@@ -144,16 +144,20 @@ export default function ExpenseDetailPage() {
         // R15-5: a read that lands for a business no longer stored writes nothing and leaves the page at once
         // (another tab's switch can reach the stored id before its storage event reaches this tab).
         if (!isCurrentBusiness(businessId)) { leave(); return; }
-        if (expRes.data) setExpense(expRes.data);
+        // R24-1: the client answers a failed read as { data: null, error } (it does not throw): said, as a throw is.
+        if (expRes.error || !expRes.data) {
+          toast.error("Failed to load expense");
+          setLoading(false);
+          return;
+        }
+        setExpense(expRes.data);
         if (catRes.data) setCategories(catRes.data);
         // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
-        if (expRes.data) {
-          const { month, year } = expenseMonth(expRes.data.date, businessId);
-          const budRes = await fetchExpenseBudgets(businessId, month, year);
-          if (!active) return;
-          if (!isCurrentBusiness(businessId)) { leave(); return; }
-          if (budRes.data) setBudgets(budRes.data);
-        }
+        const { month, year } = expenseMonth(expRes.data.date, businessId);
+        const budRes = await fetchExpenseBudgets(businessId, month, year);
+        if (!active) return;
+        if (!isCurrentBusiness(businessId)) { leave(); return; }
+        if (budRes.data) setBudgets(budRes.data);
       } catch {
         // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
         if (active && canStartFor(businessId, isCurrentBusiness)) toast.error("Failed to load expense");
@@ -543,7 +547,13 @@ export default function ExpenseDetailPage() {
             // R23-4: the saved expense is read again for this page only; a failed refresh is said, never thrown.
             try {
               const res = await getExpense(businessId, expenseId);
-              if (res.data && live(businessId)) setExpense(res.data);
+              if (!live(businessId)) return;
+              // R24-1: a refused refresh ({ error }, or no row) is said, as a thrown one is.
+              if (res.error || !res.data) {
+                toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
+                return;
+              }
+              setExpense(res.data);
             } catch {
               if (live(businessId)) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
             }

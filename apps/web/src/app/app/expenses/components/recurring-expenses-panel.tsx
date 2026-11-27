@@ -21,7 +21,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, refusedStart, canStartFor } from "./expense-utils";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, refusedStart, canStartFor, writeFailure } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -146,8 +146,11 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     // R18-1: the confirm blocked this tab: a switch made while it was open is seen only now.
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await cancelRecurringExpense(businessId, id);
+      const res = await cancelRecurringExpense(businessId, id);
       if (!live()) return;
+      // R24-1: the client answers a refusal as { error }; it is said, never reported as cancelled.
+      const failure = writeFailure(res, "cancel this recurring expense");
+      if (failure) { toast.error(failure); return; }
       toast.success("Cancelled");
       void load();
     } catch {
@@ -159,8 +162,10 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     if (!businessId) return;
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await runRecurringExpenseNow(businessId, id);
+      const res = await runRecurringExpenseNow(businessId, id);
       if (!live()) return;
+      const failure = writeFailure(res, "run this recurring expense");
+      if (failure) { toast.error(failure); return; }
       toast.success("Expense generated");
       void load();
     } catch {

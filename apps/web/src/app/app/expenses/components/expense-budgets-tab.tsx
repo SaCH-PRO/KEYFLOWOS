@@ -6,7 +6,7 @@ import { Plus, Trash2, Target, AlertTriangle, X, TrendingUp, TrendingDown, Calen
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { ExpenseBudget, ExpenseCategory, ExpenseSummary, Expense, upsertExpenseBudget, deleteExpenseBudget } from "@/lib/client";
-import { businessCurrency, formatCurrency, useShownBusiness, refusedStart, canStartFor } from "./expense-utils";
+import { businessCurrency, formatCurrency, useShownBusiness, refusedStart, canStartFor, writeFailure } from "./expense-utils";
 
 interface ExpenseBudgetsTabProps {
   businessId: string;
@@ -48,7 +48,7 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
     if (refusedStart(businessId, isCurrentBusiness)) return;
     const now = new Date();
     try {
-      await upsertExpenseBudget(businessId, {
+      const res = await upsertExpenseBudget(businessId, {
         categoryId: budgetForm.categoryId || undefined,
         amount: parseFloat(budgetForm.amount),
         month: now.getMonth() + 1, year: now.getFullYear(),
@@ -56,6 +56,9 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
       });
       // R12: answered after a switch to another business: nothing is said or reloaded there.
       if (!live()) return;
+      // R24-1: a refused save is said and the form stays open.
+      const failure = writeFailure(res, "save this budget");
+      if (failure) { toast.error(failure); return; }
       setShowBudgetModal(false);
       setBudgetForm({ categoryId: "", amount: "", alertAt: "80" });
       toast.success("Budget saved");
@@ -66,8 +69,10 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, expenses: _
   const handleDeleteBudget = async (budgetId: string) => {
     if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await deleteExpenseBudget(businessId, budgetId);
+      const res = await deleteExpenseBudget(businessId, budgetId);
       if (!live()) return;
+      const failure = writeFailure(res, "delete this budget");
+      if (failure) { toast.error(failure); return; }
       toast.success("Budget deleted");
       onReload();
     } catch { if (live()) toast.error("Failed to delete budget"); }

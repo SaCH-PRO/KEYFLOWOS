@@ -207,6 +207,26 @@ const WRITES: W[] = [
   { name: "budgets delete", call: () => client.deleteExpenseBudget, reloads: true,
     mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[BUDGET]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={onReload} isCurrentBusiness={always} />); },
     go: async () => { fireEvent.click(document.querySelector("button svg.lucide-trash-2, button svg.lucide-trash2")!.closest("button")!); } },
+  { name: "categories Add", call: () => client.createExpenseCategory,
+    mount: () => { render(<ExpenseCategoriesTab businessId="biz_A" categories={CATS.biz_A} isCurrentBusiness={always} addCategory={() => true} removeCategory={() => true} summary={null} budgets={[]} />); },
+    go: async () => {
+      fireEvent.change(screen.getByPlaceholderText(/category name/i), { target: { value: "Supplies" } });
+      fireEvent.click(screen.getByRole("button", { name: /^add category$/i }));
+    } },
+  { name: "categories delete", call: () => client.deleteExpenseCategory,
+    mount: () => { render(<ExpenseCategoriesTab businessId="biz_A" categories={CATS.biz_A} isCurrentBusiness={always} addCategory={() => true} removeCategory={() => true} summary={null} budgets={[]} />); },
+    go: async () => { fireEvent.click(screen.getByRole("button", { name: "Delete category Fuel A" })); } },
+  { name: "Pay", call: () => finance.payBill,
+    mount: () => {
+      client.fetchFinanceAccounts.mockResolvedValue(ok({ items: [] }));
+      render(<BillPayDialog businessId="biz_A" bill={expense()} onClose={vi.fn()} onPaid={onReload} isCurrentBusiness={always} />);
+    },
+    reloads: true,
+    go: async () => {
+      const pay = await screen.findByRole("button", { name: /^Pay$/ });
+      await waitFor(() => expect((pay as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(pay);
+    } },
   { name: "recurring Cancel", call: () => client.cancelRecurringExpense, mount: () => { render(panelEl()); },
     go: async () => { fireEvent.click(await screen.findByRole("button", { name: /^Cancel$/i })); } },
   { name: "recurring Run Now", call: () => client.runRecurringExpenseNow, mount: () => { render(panelEl()); },
@@ -220,7 +240,8 @@ describe("R24-1: a write the server refuses, in the client's real shape ({ data:
       w.mount();
       await w.go();
       await waitFor(() => expect(w.call()).toHaveBeenCalled());
-      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining(WORDS)));
+      // The refusal's words lead the toast (a failure-kit refusal adds its toast options).
+      await waitFor(() => expect(vi.mocked(toast.error).mock.calls.some(([m]) => String(m).includes(WORDS))).toBe(true));
       expect(toast.success, `${w.name} said it went through`).not.toHaveBeenCalled();
       if (w.reloads) expect(onReload, "reloaded as if it went through").not.toHaveBeenCalled();
     });

@@ -12,7 +12,7 @@ import { FileText } from "lucide-react";
 import type { Expense, ExpenseCategory, ExpenseSummary } from "@/lib/client";
 import { deleteExpense, updateExpense } from "@/lib/client";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
-import { refusedStart, useShownBusiness, canStartFor } from "./expense-utils";
+import { refusedStart, useShownBusiness, canStartFor, writeFailure } from "./expense-utils";
 
 interface ExpensePipelineProps {
   businessId: string | null;
@@ -142,16 +142,19 @@ export function ExpensePipeline({
     if (refusedStart(businessId, isCurrentBusiness)) return;
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
     try {
-      await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
+      const res = await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
       // R12: answered after a switch to another business: nothing is said or reloaded there.
-      if (live()) {
-        toast.success("Bill marked as paid");
-        onReload();
-      }
+      if (!live()) return;
+      // R24-1: the client answers a refusal as { error }; it is said, never reported as paid.
+      const failure = writeFailure(res, "mark this bill paid");
+      if (failure) { toast.error(failure); return; }
+      toast.success("Bill marked as paid");
+      onReload();
     } catch {
       if (live()) toast.error("Failed to mark as paid");
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
     }
-    setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
   };
 
   const handleDelete = async (expense: Expense) => {
@@ -162,15 +165,17 @@ export function ExpensePipeline({
     if (refusedStart(businessId, isCurrentBusiness)) return;
     setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: true }));
     try {
-      await deleteExpense(businessId, expense.id);
-      if (live()) {
-        toast.success("Expense deleted");
-        onReload();
-      }
+      const res = await deleteExpense(businessId, expense.id);
+      if (!live()) return;
+      const failure = writeFailure(res, "delete this expense");
+      if (failure) { toast.error(failure); return; }
+      toast.success("Expense deleted");
+      onReload();
     } catch {
       if (live()) toast.error("Failed to delete");
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: false }));
     }
-    setActionLoading((prev) => ({ ...prev, [`delete-${expense.id}`]: false }));
   };
 
   const hasSelection = selectedIds.size > 0;

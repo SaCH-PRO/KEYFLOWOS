@@ -26,7 +26,7 @@ import {
 } from "@/lib/client";
 import { createBill, type CreateBillBody } from "@/lib/api/finance";
 import { formatCurrency as formatMoney } from "@/lib/currency";
-import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, refusedStart, startRefusal, BUSINESS_CHANGED_ELSEWHERE } from "./expense-utils";
+import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, refusedStart, startRefusal, BUSINESS_CHANGED_ELSEWHERE, writeFailure } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
@@ -311,7 +311,8 @@ export function ExpenseFormSideSheet({
     }, businessId, zone);
     try {
       const res = await createRecurringExpense(businessId, body);
-      return res?.error ? res.error : null;
+      // R24-1: a schedule that answers no row was not created either.
+      return writeFailure(res, "create the schedule", true);
     } catch (err) {
       return err instanceof Error ? err.message : "the request failed";
     }
@@ -379,7 +380,8 @@ export function ExpenseFormSideSheet({
         if (formData.serviceId) extra.serviceId = formData.serviceId;
         if (Object.keys(extra).length) {
           const patched = await updateExpense(businessId, res.data.id, extra);
-          if (patched?.error) notices.push(`its receipt and tags were not saved: ${patched.error}`);
+          const notSaved = writeFailure(patched, "save its receipt and tags", true);
+          if (notSaved) notices.push(`its receipt and tags were not saved: ${notSaved}`);
         }
       } else {
         const res = editingExpense
@@ -388,6 +390,11 @@ export function ExpenseFormSideSheet({
         // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
         if (res?.error) {
           if (live()) toast.error(res.error);
+          return;
+        }
+        // R24-1: a create or an update that answers no row did not save.
+        if (!res?.data) {
+          if (live()) toast.error("Failed to save expense");
           return;
         }
         // R17-1: the first write has landed; the schedule and Drive copy below still complete for this business.
@@ -420,7 +427,10 @@ export function ExpenseFormSideSheet({
           contentFormat: "binary",
           silent: true,
         }).then((ok) => {
-          if (ok && live()) toast.success("Receipt saved to Drive");
+          if (!live()) return;
+          // R24-1: the Drive hook answers its failure as false (it does not throw): said, as a throw is.
+          if (ok) toast.success("Receipt saved to Drive");
+          else toast.error("Expense saved, but its Drive copy was not made");
         }).catch(() => { if (live()) toast.error("Expense saved, but its Drive copy was not made"); });
       }
 

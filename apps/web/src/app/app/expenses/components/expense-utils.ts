@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { formatCurrency as formatMoney } from "@/lib/currency";
 import { getCachedBusiness, getStoredBusinessId } from "@/lib/workspace";
 import type { RecurringExpense } from "@/lib/client";
+import { refusalMessage, type ApiAnswer } from "@/lib/failure-kit";
 
 export const CATEGORY_COLORS = [
   "#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e",
@@ -368,4 +369,18 @@ export function refusedStart(businessId: string | null | undefined, isCurrent?: 
   const refusal = startRefusal(businessId, isCurrent);
   if (refusal) toast.error(refusal);
   return refusal !== null;
+}
+
+/**
+ * R24-1: what a write's answer says went wrong, in the owner's words, or null when it went through. The client
+ * (lib/api.ts) does not throw for a refusal or a network failure: it answers { data: null, error }, so a reply is read,
+ * never assumed. A write failed when it carries an error (said in the server's words, FAILURE-KIT), when no answer came
+ * back, or, for a write whose success is the row it returns (a create or an update), when no row came back.
+ */
+export function writeFailure(res: ApiAnswer, what: string, needsRow = false): string | null {
+  if (!res) return `Couldn't ${what}.`;
+  const refusal = refusalMessage(res, { what });
+  if (refusal !== null) return refusal;
+  if (needsRow && (res.data === null || res.data === undefined)) return `Couldn't ${what}.`;
+  return null;
 }

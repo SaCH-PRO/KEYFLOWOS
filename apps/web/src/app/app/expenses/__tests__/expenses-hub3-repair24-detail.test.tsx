@@ -102,14 +102,6 @@ const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30
 
 
 
-function trapUnhandled() {
-  const seen: unknown[] = [];
-  const onWin = (e: PromiseRejectionEvent) => { seen.push(e.reason); e.preventDefault(); };
-  const onNode = (r: unknown) => { seen.push(r); };
-  window.addEventListener("unhandledrejection", onWin);
-  process.on("unhandledRejection", onNode);
-  return { seen, stop: () => { window.removeEventListener("unhandledrejection", onWin); process.off("unhandledRejection", onNode); } };
-}
 async function openEditAndSave() {
   fireEvent.click(screen.getByRole("button", { name: /Edit expense/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Update Expense" }));
