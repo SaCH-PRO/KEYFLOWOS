@@ -21,37 +21,46 @@ export class PayrollController {
 
   @Get('rates')
   @RequireModuleScope('operations', 'read')
-  listRates(@Param('businessId') businessId: string) {
-    return this.payroll.listRates(businessId);
+  async listRates(
+    @Param('businessId') businessId: string,
+    @Req() req?: { user?: { id?: string } },
+  ) {
+    return this.payroll.listRates(businessId, { viewerUserId: req?.user?.id ?? null });
   }
 
   @Get('runs')
   @RequireModuleScope('operations', 'read')
-  listRuns(
+  async listRuns(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
+    @Req() req?: { user?: { id?: string } },
   ) {
     return this.payroll.listRuns(businessId, {
       status,
       limit: limit ? Number(limit) : undefined,
+      viewerUserId: req?.user?.id ?? null,
     });
   }
 
   @Get('runs/:runId')
   @RequireModuleScope('operations', 'read')
-  getRun(@Param('businessId') businessId: string, @Param('runId') runId: string) {
-    return this.payroll.getRun(businessId, runId);
+  async getRun(
+    @Param('businessId') businessId: string,
+    @Param('runId') runId: string,
+    @Req() req?: { user?: { id?: string } },
+  ) {
+    return this.payroll.getRun(businessId, runId, { viewerUserId: req?.user?.id ?? null });
   }
 
   @Post('runs/:runId/approve')
   @RequireModuleScope('operations', 'write')
-  approveRun(
+  async approveRun(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.payroll.approveRun(businessId, runId, req.user?.id);
+    return this.payroll.approveRun(businessId, runId, req?.user?.id);
   }
 
   /**
@@ -66,7 +75,7 @@ export class PayrollController {
    */
   @Post('runs/:runId/mark-paid')
   @RequireModuleScope('operations', 'write')
-  markRunPaid(
+  async markRunPaid(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
     @Body() body: { paymentAccountId?: string; paymentMethod?: string } | undefined,
@@ -88,7 +97,7 @@ export class PayrollController {
    */
   @Post('runs/:runId/discard')
   @RequireModuleScope('operations', 'write')
-  discardRun(
+  async discardRun(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
     @Body() body: { reason?: unknown } | undefined,

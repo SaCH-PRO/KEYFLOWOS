@@ -1705,6 +1705,21 @@
       "prefix": "v92j_",
       "owner": "apps/server/test/today-approvals-staff.integration.test.ts",
       "packet": "V1-92 (FU-TODAY-APPROVALS-STAFF, P206)"
+    },
+    {
+      "prefix": "v92k_",
+      "owner": "apps/server/test/public-booking-rebook-release.integration.test.ts",
+      "packet": "V1-92 (P228 FU-PUBLIC-BOOKING-RELEASE-ON-REBOOK)"
+    },
+    {
+      "prefix": "v92l_",
+      "owner": "apps/server/test/slots-overnight-hours.integration.test.ts",
+      "packet": "V1-92 (FU-SLOTS-OVERNIGHT-HOURS, P229)"
+    },
+    {
+      "prefix": "v92n_",
+      "owner": "apps/server/test/payroll-is-money.integration.test.ts",
+      "packet": "V1-92 (FU-PAYROLL-IS-MONEY, P235)"
     }
   ],
   "pendingRenames": [],

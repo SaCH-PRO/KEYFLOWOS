@@ -108,7 +108,14 @@ describe('DataInboxService', () => {
             intentType: expect.objectContaining({ contains: 'invoice' }),
             OR: expect.any(Array),
           }),
-          orderBy: { confidence: 'desc' },
+          orderBy: [{ confidence: 'desc' }, { id: 'desc' }],
+        }),
+      );
+
+      await service.listItems('biz_1', { sortBy: 'confidence', sortOrder: 'asc' });
+      expect(prisma.client.ingestionItem.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          orderBy: [{ confidence: 'asc' }, { id: 'asc' }],
         }),
       );
     });

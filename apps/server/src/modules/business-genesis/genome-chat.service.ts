@@ -72,7 +72,7 @@ export class GenomeChatService {
       where: { businessId },
       ...(readsRevenue ? { take: limit } : {}),
       cursor: options.cursor ? { id: options.cursor } : undefined,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     const mapped: GenomeChatMessage[] = rows.map((row) => ({

@@ -100,7 +100,7 @@ export class FlowSignalService {
     const [items, total] = await Promise.all([
       this.prisma.client.flowSignal.findMany({
         where,
-        orderBy: { occurredAt: 'desc' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         take: query.limit ?? 100,
         skip: query.offset ?? 0,
       }),

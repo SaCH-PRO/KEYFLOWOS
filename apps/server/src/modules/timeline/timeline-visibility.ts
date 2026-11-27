@@ -132,6 +132,48 @@ export const MONEY_DATA_FIELDS: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * P235 (FU-PAYROLL-IS-MONEY, D-310 / D-100): payroll money fields on Activity.data.
+ */
+export const PAYROLL_MONEY_DATA_FIELDS: readonly string[] = Object.freeze([
+  'totalGross',
+  'grossPay',
+  'total_gross',
+  'gross_pay',
+  'payRate',
+  'pay_rate',
+  'hourlyRate',
+  'hourly_rate',
+]);
+
+const PAYROLL_ENTITY_TYPES: ReadonlySet<string> = new Set([
+  'payrollrun',
+  'payrollitem',
+  'payrate',
+  'payroll',
+]);
+
+const PAYROLL_TAG_PREFIXES: readonly string[] = Object.freeze([
+  'payroll_run.',
+  'payroll_item.',
+  'pay_rate.',
+  'payroll.',
+  'payroll_',
+]);
+
+function parseActivityDataObject(data: unknown): Record<string, unknown> | null {
+  let fields: unknown = data;
+  if (typeof fields === 'string') {
+    try {
+      fields = JSON.parse(fields);
+    } catch {
+      return null;
+    }
+  }
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return null;
+  return fields as Record<string, unknown>;
+}
+
+/**
  * Whether a stored row's data carries an amount (a MONEY_DATA_FIELDS field set
  * to anything but null). W5-FEED-CATEGORIES (SEC-FCC-1, D-90 / D-63): rows
  * already stored before V55-13 / D-90 keep the category they were written
@@ -142,17 +184,33 @@ export const MONEY_DATA_FIELDS: readonly string[] = Object.freeze([
  * crm-scope rows only (crmRowCarriesMoney; review SEC-W5FC-2 / CR-W5FC-1).
  */
 export function dataCarriesMoney(data: unknown): boolean {
-  let fields: unknown = data;
-  if (typeof fields === 'string') {
-    try {
-      fields = JSON.parse(fields);
-    } catch {
-      return false;
+  const record = parseActivityDataObject(data);
+  if (!record) return false;
+  return MONEY_DATA_FIELDS.some((key) => record[key] !== null && record[key] !== undefined);
+}
+
+/**
+ * P235 (FU-PAYROLL-IS-MONEY, D-310 / D-100): payroll amounts count as money
+ * under D-100 and require `revenue:read`. Covers Activity rows written for
+ * payroll runs/items/rates (snake_case, camelCase, or PascalCase `entityType`,
+ * `module: 'payroll'`, `payroll.*`/`payroll_*`/`pay_rate.*` type/action tags)
+ * and any row whose `data` carries payroll amount/rate fields (object or JSON string).
+ */
+export function payrollRowCarriesMoney(row: ActivityRowLike): boolean {
+  const entityType =
+    typeof row.entityType === 'string' ? row.entityType.trim().toLowerCase().replace(/[_-]/g, '') : '';
+  if (PAYROLL_ENTITY_TYPES.has(entityType)) return true;
+  const mod = typeof row.module === 'string' ? row.module.trim().toLowerCase() : '';
+  if (mod === 'payroll') return true;
+  for (const tag of [row.type, row.action]) {
+    if (typeof tag === 'string') {
+      const normalized = tag.trim().toLowerCase();
+      if (PAYROLL_TAG_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
     }
   }
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return false;
-  const record = fields as Record<string, unknown>;
-  return MONEY_DATA_FIELDS.some((key) => record[key] !== null && record[key] !== undefined);
+  const record = parseActivityDataObject(row.data);
+  if (!record) return false;
+  return PAYROLL_MONEY_DATA_FIELDS.some((key) => record[key] !== null && record[key] !== undefined);
 }
 
 /**
@@ -386,7 +444,10 @@ export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike)
   }
   const category = typeof row.category === 'string' ? row.category.trim().toLowerCase() : '';
   const carriesMoney =
-    REVENUE_CATEGORIES.has(category) || (row.revenueImpact !== null && row.revenueImpact !== undefined) || crmRowCarriesMoney(row);
+    REVENUE_CATEGORIES.has(category) ||
+    (row.revenueImpact !== null && row.revenueImpact !== undefined) ||
+    crmRowCarriesMoney(row) ||
+    payrollRowCarriesMoney(row);
   if (carriesMoney && !viewer.readable.has('revenue')) return false;
   if (namedContacts(row).length > 0 && !viewer.readable.has('crm')) return false;
   return true;
