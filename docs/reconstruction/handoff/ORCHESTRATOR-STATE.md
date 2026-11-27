@@ -383,9 +383,9 @@ Questions 32 to 35 were ruled as D-277, D-276, D-278/D-279 and D-275 (section 2)
 68. **Who builds P227 FU-SLOTS-HOURS-READER** (the server slots reader that P224 SWP-BOOKING-SLOTS waits on). Antigravity has since built and returned it (#80 7204856722); confirm that, or reassign. (Default: Antigravity's return stands.)
 70. **Overnight opening hours.** The web pins hours past midnight (18:00-02:00) as real (store-hours MIN-3, CUSTOMER-PAGE-HONESTY); the server's P227 reader rejects close-before-open and falls back to 09:00-17:00, so such a business is shown its hours but offered 09:00-17:00 slots. Support overnight hours (server row P229 teaches the reader), or rule them unsupported (a follow-up then changes the web and MIN-3)? (Default: a recorded divergence until you rule; P229 proposed.)
 69. **Control room successor.** #80 is full (2,500 comments); lanes now post on #273. Update CLAUDE.md, AGENTS.md and the agent-memory docs to name #273 (and a rule for the next rollover), in a docs packet? (Default: yes, in the next Claude docs squash; until then this file says so.)
-66. **Trust wording on customer pages** (from CUSTOMER-PAGE-HONESTY): keep or drop "Trusted Platform", the owner-picked "Verified Business"/"Instant Booking" rails, "Instant Confirmation", "Secure Booking", "Secured by KeyFlowOS"; and published case studies have no public page now that /site redirects.
+66. **Published case studies have no public page** now that /site redirects to /book (second half of the old trust-wording question; the first half is D-303). Add a case-study section to /book, or leave them unpublished at launch? (Default: unpublished.)
 
-**Ruled 2026-11-27 (D-299 to D-302, #273 7208594106):** 65 = D-299, 67 (store gate) = D-300, 42 = D-301, 54 = D-302.
+**Ruled 2026-11-27 (D-299 to D-303, #273 7208594106 and 7209041016):** 65 = D-299, 67 (store gate) = D-300, 42 = D-301, 54 = D-302, 66 first half = D-303.
 
 **Ruled 2026-11-26 (D-298, #80 7189605548):** 63 = D-298.
 
