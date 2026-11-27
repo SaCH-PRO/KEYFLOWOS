@@ -1657,6 +1657,11 @@
       "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
     },
     {
+      "prefix": "v72r_",
+      "owner": "apps/server/test/authority-shadow-parity.integration.test.ts",
+      "packet": "V1-72 (RR-AUTHORITY-SHADOW-PARITY)"
+    },
+    {
       "prefix": "v91n_",
       "owner": "apps/server/test/secret-reads-portal-integration.integration.test.ts",
       "packet": "V1-91 (FU-SECRET-READS-PORTAL-INTEGRATION, P145)"

@@ -180,6 +180,55 @@ describe('shadow/compare is observation only', () => {
     expect(logged).not.toMatch(/secret_flag/);
     expect(logged).not.toMatch(/crm/);
   });
+
+  it('a mismatch is counted', async () => {
+    const { securitySignals } = await import('../observability/security-signals');
+    securitySignals.reset();
+
+    const prisma = prismaWith({ id: 'mem_1', role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 });
+    const resolver = {
+      resolve: vi.fn(async () => ({
+        modules: { operations: { module: 'operations', level: 'none', reason: 'explicit_deny', explicitDeny: true, sources: [] } },
+        positions: [],
+        validity: { truncated: false },
+      })),
+    } as unknown as EffectiveAuthorityResolver;
+
+    const warn = vi.fn();
+    const guard = new ModuleScopeGuard(prisma, new Reflector(), resolver);
+    (guard as any).logger = { warn, debug: vi.fn(), error: vi.fn() };
+
+    const r = await run(guard, Shadowed.prototype.handler);
+
+    expect(r.allowed).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    const snap = securitySignals.snapshot();
+    expect((snap.counts as Record<string, number>).authority_shadow_mismatch).toBe(1);
+    const labels = (snap.byLabel as Record<string, Record<string, number>>).authority_shadow_mismatch ?? {};
+    expect(labels['operations:explicit_deny']).toBe(1);
+
+    const serialized = JSON.stringify(snap);
+    expect(serialized).not.toContain(BUSINESS);
+    expect(serialized).not.toContain('user_1');
+    expect(serialized).not.toContain('mem_1');
+  });
+
+  it('does not increment authority_shadow_mismatch when legacy and resolver agree', async () => {
+    const { securitySignals } = await import('../observability/security-signals');
+    securitySignals.reset();
+
+    const prisma = prismaWith({ id: 'mem_1', role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 });
+    const warn = vi.fn();
+    const guard = new ModuleScopeGuard(prisma, new Reflector(), new EffectiveAuthorityResolver(prisma));
+    (guard as any).logger = { warn, debug: vi.fn(), error: vi.fn() };
+
+    const r = await run(guard, Shadowed.prototype.handler);
+
+    expect(r.allowed).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    expect((securitySignals.snapshot().counts as Record<string, number>).authority_shadow_mismatch).toBe(0);
+  });
 });
 
 describe('the shadowed family is exactly one controller', () => {
