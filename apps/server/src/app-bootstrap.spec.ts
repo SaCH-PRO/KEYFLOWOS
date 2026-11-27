@@ -272,3 +272,132 @@ describe('W3-CORS-IDEMPOTENCY-HEADER: a browser may send Idempotency-Key cross-o
     }
   });
 });
+
+describe('SWP-QUERY-CORS-HEADERS (BUG-071): CORS preflight allows X-Visitor-Id and X-Session-Id without widening', () => {
+  const DISALLOWED_ORIGIN = 'https://evil.swp-untrusted.test';
+  const EXPECTED_ALLOWED_HEADERS = [
+    'authorization',
+    'content-type',
+    'idempotency-key',
+    'x-business-id',
+    'x-session-id',
+    'x-visitor-id',
+  ];
+  const GLOBAL_CORS_PATHS = [
+    '/public/events',
+    '/public-events/businesses/biz_swp/track',
+    '/commerce/businesses/biz_swp/invoices',
+  ];
+  const PUBLIC_WIDGET_PATHS = [
+    '/site/storefront/public/cih-store/checkout',
+    '/widgets/swp-probe',
+  ];
+  const HEADER_CASES = [
+    'x-visitor-id, x-session-id',
+    'X-Visitor-Id, X-Session-Id',
+    'Content-Type, X-Visitor-Id, X-Session-Id',
+  ];
+
+  let prodApp: INestApplication;
+  let devApp: INestApplication;
+
+  beforeAll(async () => {
+    prodApp = await bootApp({ NODE_ENV: 'production', APP_URL: APP_ORIGIN });
+    devApp = await bootApp({ NODE_ENV: 'development', APP_URL: APP_ORIGIN });
+  });
+
+  afterAll(async () => {
+    await prodApp?.close();
+    await devApp?.close();
+  });
+
+  it('SWP-CORS-01 RED-BEFORE: production global CORS preflight from an allowed origin allows X-Visitor-Id and X-Session-Id (lowercase and mixed-case)', async () => {
+    for (const path of GLOBAL_CORS_PATHS) {
+      for (const reqHeaders of HEADER_CASES) {
+        const res = await preflight(prodApp, path, APP_ORIGIN, 'POST', reqHeaders);
+        expect(res.status, `${path} [${reqHeaders}]`).toBe(204);
+        expect(res.headers['access-control-allow-origin'], path).toBe(APP_ORIGIN);
+        expect(res.headers['access-control-allow-credentials'], path).toBe('true');
+        const raw = String(res.headers['access-control-allow-headers'] ?? '');
+        expect(raw.split(/\s*,\s*/), `${path} canonical header names`).toEqual(
+          expect.arrayContaining(['X-Visitor-Id', 'X-Session-Id']),
+        );
+        expect(list(raw).sort(), `${path} exact header allowlist`).toEqual(EXPECTED_ALLOWED_HEADERS);
+      }
+    }
+  });
+
+  it('SWP-CORS-02 RED-BEFORE: non-production/dev global CORS preflight allows X-Visitor-Id and X-Session-Id (lowercase and mixed-case)', async () => {
+    for (const path of GLOBAL_CORS_PATHS) {
+      for (const origin of [APP_ORIGIN, SITE_ORIGIN]) {
+        for (const reqHeaders of HEADER_CASES) {
+          const res = await preflight(devApp, path, origin, 'POST', reqHeaders);
+          expect(res.status, `${path} from ${origin} [${reqHeaders}]`).toBe(204);
+          expect(admits(res, origin), `${path} admits ${origin}`).toBe(true);
+          expect(res.headers['access-control-allow-credentials'], path).toBe('true');
+          const raw = String(res.headers['access-control-allow-headers'] ?? '');
+          expect(raw.split(/\s*,\s*/), `${path} canonical header names`).toEqual(
+            expect.arrayContaining(['X-Visitor-Id', 'X-Session-Id']),
+          );
+          expect(list(raw).sort(), `${path} exact header allowlist`).toEqual(EXPECTED_ALLOWED_HEADERS);
+        }
+      }
+    }
+  });
+
+  it('SWP-CORS-03 RED-BEFORE: public widget routes CORS preflight allows X-Visitor-Id and X-Session-Id in both production and development', async () => {
+    for (const [label, app] of [
+      ['production', prodApp],
+      ['development', devApp],
+    ] as const) {
+      for (const path of PUBLIC_WIDGET_PATHS) {
+        for (const reqHeaders of HEADER_CASES) {
+          const res = await preflight(app, path, SITE_ORIGIN, 'POST', reqHeaders);
+          expect(res.status, `${label} ${path} [${reqHeaders}]`).toBe(204);
+          expect(res.headers['access-control-allow-origin'], `${label} ${path}`).toBe('*');
+          const raw = String(res.headers['access-control-allow-headers'] ?? '');
+          expect(raw.split(/\s*,\s*/), `${label} ${path} canonical header names`).toEqual(
+            expect.arrayContaining(['X-Visitor-Id', 'X-Session-Id']),
+          );
+          expect(list(raw).sort(), `${label} ${path} exact header allowlist`).toEqual(EXPECTED_ALLOWED_HEADERS);
+        }
+      }
+    }
+  });
+
+  it('SWP-CORS-04 RED-BEFORE: unlisted headers (e.g. X-Arbitrary-Evil-Header, X-Custom-Debug) are NOT echoed or allowed in either CORS config (prod or dev)', async () => {
+    const reqHeaders = 'X-Visitor-Id, X-Session-Id, X-Arbitrary-Evil-Header, X-Custom-Debug';
+    const cases: Array<[string, INestApplication, string, string]> = [
+      ['prod global', prodApp, '/public/events', APP_ORIGIN],
+      ['prod global auth', prodApp, '/commerce/businesses/biz_swp/invoices', APP_ORIGIN],
+      ['dev global', devApp, '/public/events', SITE_ORIGIN],
+      ['prod public widget', prodApp, '/site/storefront/public/cih-store/checkout', SITE_ORIGIN],
+      ['dev public widget', devApp, '/widgets/swp-probe', SITE_ORIGIN],
+    ];
+    for (const [label, app, path, origin] of cases) {
+      const res = await preflight(app, path, origin, 'POST', reqHeaders);
+      expect(res.status, label).toBe(204);
+      const allowed = list(res.headers['access-control-allow-headers']);
+      expect(allowed, `${label} includes visitor & session headers`).toEqual(
+        expect.arrayContaining(['x-visitor-id', 'x-session-id']),
+      );
+      expect(allowed, `${label} refuses X-Arbitrary-Evil-Header`).not.toContain('x-arbitrary-evil-header');
+      expect(allowed, `${label} refuses X-Custom-Debug`).not.toContain('x-custom-debug');
+      expect(allowed, `${label} does not use wildcard header`).not.toContain('*');
+      expect(allowed.sort(), `${label} strict allowlist unchanged`).toEqual(EXPECTED_ALLOWED_HEADERS);
+    }
+  });
+
+  it('SWP-CORS-05 pinned: disallowed origins are still rejected cleanly in production (origin policy unchanged)', async () => {
+    for (const path of GLOBAL_CORS_PATHS) {
+      for (const reqHeaders of HEADER_CASES) {
+        const res = await preflight(prodApp, path, DISALLOWED_ORIGIN, 'POST', reqHeaders);
+        expect(
+          res.headers['access-control-allow-origin'],
+          `${path} must not admit ${DISALLOWED_ORIGIN}: ${JSON.stringify(res.headers)}`,
+        ).toBeUndefined();
+      }
+    }
+  });
+});
+
