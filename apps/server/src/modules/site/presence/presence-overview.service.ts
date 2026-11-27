@@ -722,20 +722,23 @@ export class PresenceOverviewService {
     return { items };
   }
 
-  async listStorefrontOrders(businessId: string, opts: { limit?: number } = {}) {
+  async listStorefrontOrders(businessId: string, opts: { limit?: number } = {}, actor?: ModuleLevelActor) {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
+    const readsRevenue =
+      rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
     // Reuse the canonical commerce read path — all marketplace orders are
     // storefront-originated by definition (placed via /storefront/checkout).
-    const result = await this.storeOrders.listOrders(businessId, { pageSize: limit });
+    // FU-STORE-ORDERS-MONEY-SCOPE (D-100, D-234): withhold money and payment
+    // fields below revenue:read (fail closed when actor is absent).
+    const result = await this.storeOrders.listOrdersForReader(businessId, readsRevenue, { pageSize: limit });
     const items = (result.data ?? []).map((o: any) => ({
       id: o.id,
       orderNumber: o.orderNumber,
       status: o.status,
-      paymentStatus: o.paymentStatus,
+      ...(readsRevenue ? { paymentStatus: o.paymentStatus } : {}),
       customerName: o.customerName,
       customerEmail: o.customerEmail,
-      total: Number(o.total ?? 0),
-      currency: o.currency,
+      ...(readsRevenue ? { total: Number(o.total ?? 0), currency: o.currency } : {}),
       createdAt: o.createdAt,
       items: (o.items ?? []).map((it: any) => ({ name: it.name, quantity: it.quantity })),
     }));

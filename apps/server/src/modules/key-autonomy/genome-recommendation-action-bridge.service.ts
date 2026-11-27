@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import { GenomeExperimentService } from '../business-genome/key-genome/genome-experiment.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
+import { isFinanceRecommendation } from '../business-genome/key-genome/genome-finance-scope';
 import type { KeyGenomeModuleName } from '../business-genome/key-genome/key-genome.ontology';
 import { KeyActionProposalService } from './key-action-proposal.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -145,6 +146,7 @@ export class GenomeRecommendationActionBridgeService {
         recommendation.recommendation,
       ],
       actionType: actionType as KeyExecutableActionType,
+      carriesMoney: isFinanceRecommendation(recommendation),
       payload: {
         ...preview.payload,
         source: 'KEY_GENOME_RECOMMENDATION',

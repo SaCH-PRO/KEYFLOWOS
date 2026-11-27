@@ -25,6 +25,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { toolSchemaCarriesMoney } from '../key-autonomy/proposal-money-tag';
 import { KeyIdempotencyService, fingerprintToolRequest } from './key-idempotency.service';
 import type { IdempotencyCheckResult } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
@@ -934,6 +935,7 @@ export class KeyCortexToolRegistryService {
     if (!this.proposals) return null;
 
     try {
+      const schemaCarriesMoney = toolSchemaCarriesMoney(tool.parameters as Record<string, unknown> | undefined);
       const proposal = await this.proposals.create(
         ctx.businessId,
         {
@@ -945,6 +947,7 @@ export class KeyCortexToolRegistryService {
           actionType: 'EXECUTE_TOOL',
           toolName: tool.name,
           module: tool.module,
+          ...(schemaCarriesMoney ? { carriesMoney: true } : {}),
           payload: {
             toolName: tool.name,
             inputPayload: input,

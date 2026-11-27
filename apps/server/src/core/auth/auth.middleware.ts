@@ -11,6 +11,40 @@ import {
   signInCutoffClearedAtOf,
   updateUserMetaLocked,
 } from './sign-in-cutoff';
+import type { AuthenticatedUser, AuthKind } from '../decorators/current-user.decorator';
+
+export type { AuthKind };
+
+/**
+ * D-291 (RR-ADMIN-API-SIGNIN-KIND): attach the verified user and the
+ * cryptographic verifier kind (`'supabase'` | `'admin'`) to the request.
+ *
+ * `authKind` is set directly on `req.authKind` and as a non-enumerable,
+ * read-only property on `req.user` so downstream guards and `@CurrentUser()`
+ * handlers can read it without mutating enumerable `{ id, email, role }`
+ * shapes relied upon by Release 0 equality checks and JSON serializers.
+ */
+function attachAuthenticatedUser(
+  req: Request,
+  user: { id: string; email?: string; role: string },
+  authKind: AuthKind,
+): void {
+  const attached: AuthenticatedUser = {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+  };
+  Object.defineProperty(attached, 'authKind', {
+    value: authKind,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express request augmentation; unified user contract elsewhere
+  (req as any).user = attached;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express request augmentation; D-291 sign-in kind
+  (req as any).authKind = authKind;
+}
 
 /** Redis key of the per-user logout revocation marker, written by POST /identity/logout. */
 export const logoutRevocationKey = (userId: string): string => `auth:revoked:user:${userId}`;
@@ -485,10 +519,13 @@ function sessionAuthenticatedAt(token: string): number | null {
  *     clearing notwithstanding; one authenticated after the reset is admitted.
  *     signInCutoffVerdict holds the rule; POST /identity/login and /refresh
  *     name its refusal (CR-W9RPC-2).
- *   - On success, attach `req.user = { id, email, role }`.
- *   - On any failure / missing token, leave `req.user` unset. Downstream
- *     guards/controllers decide whether the route requires authentication
- *     and respond with 401 accordingly.
+ *   - On success, attach `req.user = { id, email, role }` and record the
+ *     cryptographic verifier kind on `req.authKind` (and non-enumerably on
+ *     `req.user.authKind`): `'supabase'` for a Supabase JWT, `'admin'` ONLY for
+ *     a local HMAC admin token verified by `verifyAdminToken` (D-291).
+ *   - On any failure / missing token, leave `req.user` and `req.authKind`
+ *     unset. Downstream guards/controllers decide whether the route requires
+ *     authentication and respond with 401 accordingly.
  *
  * No dev bypass exists. The previous `KEYFLOW_DEV_AUTH_BYPASS` escape hatch
  * was removed entirely (Tier 2 auth hardening); see `apps/server/src/main.ts`
@@ -517,6 +554,9 @@ export class AuthMiddleware implements NestMiddleware {
   }
 
   async use(req: Request, _res: Response, next: NextFunction) {
+    // D-291: never inherit a pre-populated authKind; only a verified token below sets it.
+    delete (req as { authKind?: unknown }).authKind;
+
     const header = req.headers['authorization'];
     const token =
       typeof header === 'string' && header.startsWith('Bearer ')
@@ -544,8 +584,11 @@ export class AuthMiddleware implements NestMiddleware {
           next();
           return;
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express request augmentation; unified user contract elsewhere
-        (req as any).user = { id: user.id, email: user.email, role: localUser.role };
+        attachAuthenticatedUser(
+          req,
+          { id: user.id, email: user.email, role: localUser.role },
+          'supabase',
+        );
         this.logger.debug(
           { userId: user.id },
           'Attached user from supabase',
@@ -573,8 +616,11 @@ export class AuthMiddleware implements NestMiddleware {
             next();
             return;
           }
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express request augmentation; unified user contract elsewhere
-          (req as any).user = { id: adminUser.id, email: adminUser.email, role: localUser.role };
+          attachAuthenticatedUser(
+            req,
+            { id: adminUser.id, email: adminUser.email, role: localUser.role },
+            'admin',
+          );
           this.logger.debug(
             { userId: adminUser.id },
             'Attached user from admin token',

@@ -52,6 +52,13 @@ import {
   wipayMerchantComplete,
   wipayTakesCurrency,
 } from '../../core/connectors/implementations/wipay-merchant';
+import {
+  DEFAULT_BUSINESS_CLOSE_MIN,
+  DEFAULT_BUSINESS_OPEN_MIN,
+  PUBLIC_SLOT_INTERVAL_MINS,
+  isOnSlotGrid,
+  readBusinessDayHours,
+} from './business-hours.util';
 
 /** V1-64: the provider names a refused public booking's message uses. */
 const PUBLIC_BOOKING_PROVIDER_NAMES: Record<string, string> = { WIPAY: 'WiPay', PAYPAL: 'PayPal', STRIPE: 'Stripe' };
@@ -1179,7 +1186,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     slotIntervalMins?: number;
   }): Promise<{ date: string; slots: string[] }> {
     const { businessId, serviceId, staffId } = params;
-    const interval = params.slotIntervalMins ?? 30;
+    const interval = params.slotIntervalMins ?? PUBLIC_SLOT_INTERVAL_MINS;
 
     const service = await this.prisma.client.service.findFirst({
       where: { id: serviceId, businessId, deletedAt: null, sourceProductId: null },
@@ -1198,8 +1205,6 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const dayOfMonth = params.date.getDate();
     const date = `${year}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
     const weekday = new Date(Date.UTC(year, month - 1, dayOfMonth)).getUTCDay();
-    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayKey = dayKeys[weekday];
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { businessHours: true, timezone: true },
@@ -1234,15 +1239,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (windows.length === 0) {
-      const hours = business?.businessHours as BusinessHoursMap | null;
-      const dayHours = hours?.[dayKey];
-      if (!dayHours || dayHours.closed || !dayHours.open || !dayHours.close) {
+      const dayHours = readBusinessDayHours(business?.businessHours, weekday);
+      if (dayHours?.closed) {
         return { date, slots: [] };
       }
-      const [oh, om] = dayHours.open.split(':').map(Number);
-      const [ch, cm] = dayHours.close.split(':').map(Number);
       // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
-      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm, bufferMins: Math.max(0, service.bufferMins ?? 0) }];
+      const bufferMins = Math.max(0, service.bufferMins ?? 0);
+      windows = [
+        dayHours
+          ? { openMin: dayHours.openMin, closeMin: dayHours.closeMin, bufferMins }
+          : { openMin: DEFAULT_BUSINESS_OPEN_MIN, closeMin: DEFAULT_BUSINESS_CLOSE_MIN, bufferMins },
+      ];
     }
 
     const earliest = service.leadTimeMins && service.leadTimeMins > 0
@@ -1503,6 +1510,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     end: Date;
     bufferMins?: number | null;
     timeZone?: string;
+    enforceSlotGrid?: boolean;
   }): Promise<void> {
     const { start, end } = params;
     const startClock = wallClock(start, params.timeZone);
@@ -1523,35 +1531,48 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         }
         // An end at midnight is 1440, as the end's time of day `|| 1440` was.
         const endMinsOfDay = startMinsOfDay + durationMins;
-        const withinAny = slotAvail.some((a) => {
-          const [sh, sm] = a.startTime.split(':').map(Number);
-          const [eh, em] = a.endTime.split(':').map(Number);
-          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
-        });
-        if (!withinAny) {
+        const coveringWindows = slotAvail
+          .map((a) => {
+            const [sh, sm] = a.startTime.split(':').map(Number);
+            const [eh, em] = a.endTime.split(':').map(Number);
+            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em };
+          })
+          .filter((w) => startMinsOfDay >= w.openMin && endMinsOfDay <= w.closeMin);
+        if (coveringWindows.length === 0) {
           throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
+        }
+        // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): match getAvailableSlots's
+        // 30-minute stepping from each availability window's opening minute with zero seconds/ms.
+        if (params.enforceSlotGrid && !coveringWindows.some((w) => isOnSlotGrid(start, startMinsOfDay, w.openMin))) {
+          throw new BadRequestException(
+            `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
+          );
         }
         return;
       }
     }
 
-    const hours = params.hours;
-    if (!hours) return;
-    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayHours = hours[dayKeys[startClock.weekday]];
-    if (dayHours?.closed) {
+    const dayHours = readBusinessDayHours(params.hours, startClock.weekday);
+    if (!dayHours) {
+      if (params.enforceSlotGrid && !isOnSlotGrid(start, startMinsOfDay, DEFAULT_BUSINESS_OPEN_MIN)) {
+        throw new BadRequestException(
+          `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
+        );
+      }
+      return;
+    }
+    if (dayHours.closed) {
       throw new BadRequestException('This business is closed on the selected day.');
     }
-    if (dayHours && dayHours.open && dayHours.close) {
-      const [oh, om] = dayHours.open.split(':').map(Number);
-      const [ch, cm] = dayHours.close.split(':').map(Number);
-      const openMins = oh * 60 + om;
-      const closeMins = ch * 60 + cm;
-      // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
-      const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
-      if (startMinsOfDay < openMins || endMins > closeMins) {
-        throw new BadRequestException('The selected time is outside business hours.');
-      }
+    // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
+    const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
+    if (startMinsOfDay < dayHours.openMin || endMins > dayHours.closeMin) {
+      throw new BadRequestException('The selected time is outside business hours.');
+    }
+    if (params.enforceSlotGrid && !isOnSlotGrid(start, startMinsOfDay, dayHours.openMin)) {
+      throw new BadRequestException(
+        `The selected time must align with an available ${PUBLIC_SLOT_INTERVAL_MINS}-minute booking slot.`,
+      );
     }
   }
 
@@ -1643,29 +1664,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!hasStaffSchedule) {
-      const hours = business?.businessHours as BusinessHoursMap | null;
-      if (hours) {
-        const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-        const dayKey = dayKeys[startClock.weekday];
-        const dayHours = hours[dayKey];
-        if (dayHours?.closed) {
-          throw new BadRequestException('The business is closed on this day.');
-        }
-        if (dayHours && dayHours.open && dayHours.close) {
-          const [oh, om] = dayHours.open.split(':').map(Number);
-          const [ch, cm] = dayHours.close.split(':').map(Number);
-          const openMin = oh * 60 + om;
-          const closeMin = ch * 60 + cm;
-          // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
-          // both create paths (assertWithinSchedule) and the picker read it; a
-          // staff member's own hours above are read without it, as there. A
-          // negative buffer counts as none (SEC-W10BB-1).
-          const bookingEndMin = endMinsOfDay + Math.max(0, service?.bufferMins ?? 0);
-          if (startMinsOfDay < openMin || bookingEndMin > closeMin) {
-            throw new BadRequestException(
-              `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
-            );
-          }
+      const dayHours = readBusinessDayHours(business?.businessHours, startClock.weekday);
+      if (dayHours?.closed) {
+        throw new BadRequestException('The business is closed on this day.');
+      }
+      if (dayHours) {
+        // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
+        // both create paths (assertWithinSchedule) and the picker read it; a
+        // staff member's own hours above are read without it, as there. A
+        // negative buffer counts as none (SEC-W10BB-1).
+        const bookingEndMin = endMinsOfDay + Math.max(0, service?.bufferMins ?? 0);
+        if (startMinsOfDay < dayHours.openMin || bookingEndMin > dayHours.closeMin) {
+          throw new BadRequestException(
+            `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
+          );
         }
       }
     }
@@ -2051,6 +2063,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
      */
     storefrontSlugAsSent?: string | null;
   }) {
+    // V1-91 / P226 (FU-PUBLIC-BOOKING-GRID, SEC-SLOTS-M1): reject invalid or
+    // non-Date startTime defensively with 400 before any DB read or write.
+    if (!(input.startTime instanceof Date) || Number.isNaN(input.startTime.getTime())) {
+      throw new BadRequestException('startTime must be a valid date.');
+    }
+
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },
     });
@@ -2086,7 +2104,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     await this.assertOwnedRefs(input);
 
-    const start = new Date(input.startTime);
+    const start = new Date(input.startTime.getTime());
     const end = new Date(start.getTime() + service.duration * 60000);
 
     this.assertLeadTime(service.leadTimeMins, start);
@@ -2109,6 +2127,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       end,
       bufferMins: service.bufferMins,
       timeZone: this.businessZone(business.timezone),
+      enforceSlotGrid: true,
     });
 
     const sourceDetail = input.storefrontSlug
@@ -2281,6 +2300,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * up, through CommerceService.publicInvoiceUrl (the one place such a URL is
    * built). Best effort: the booking is written, so a link that cannot be
    * issued leaves the answer without one rather than failing it.
+   *
+   * FU-KEY-INVOICE-EMAIL-PAY-LINK (D-248): intentionally unchanged — this
+   * caller invokes publicInvoiceUrl (not automatedInvoiceUrl) for brand-new
+   * invoices just created inside createPublicBooking after the booking, slot
+   * claim, booking.created event, storefront event, and revenue attribution
+   * are already committed, and sends no email. Propagating a 409 here would
+   * fail a committed public HTTP booking response.
    */
   private async customerInvoiceUrl(businessId: string, invoiceId: string): Promise<string | undefined> {
     try {

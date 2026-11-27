@@ -241,7 +241,7 @@ describe('BookingsService', () => {
       businessId: 'biz_1',
       serviceId: 'service_1',
       staffId: 'staff_1',
-      startTime: new Date(),
+      startTime: monday10am(),
       contact: { email: 'a@example.com' },
     });
 

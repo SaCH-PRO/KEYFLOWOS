@@ -1,11 +1,17 @@
-import { BadRequestException, Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import type { Prisma, Service } from '@prisma/client';
 import { ownStockRows, resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { db } from '@keyflow/db';
 
 type TransactionClient = Parameters<Parameters<typeof db['$transaction']>[0]>[0];
+
+/** Advisory lock namespace for atomic (businessId, sourceProductId) store listing writes (P204 / V1-91). */
+const STORE_LISTING_LOCK_NAMESPACE = 'store_listing_service';
+const UNIFORM_PRODUCT_NOT_FOUND_MSG = 'Product not found or does not belong to this business';
+const DUPLICATE_LISTING_CONFLICT_MSG = 'Product is already listed on the store by another service';
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 import {
   ProductCreatedPayload,
@@ -569,12 +575,50 @@ export class CatalogService {
     return { depositRequired: true, depositType: 'FIXED', depositValue: next.depositValue };
   }
 
+  /**
+   * P204 / V1-91 (`FU-STORE-ADD-IDEMPOTENT`): normalize optional `sourceProductId`.
+   * Blank/whitespace strings normalize to `null` (regular bookable service); non-string
+   * or unstorable UTF-16/NUL payloads fail fast with 400.
+   */
+  private normalizeSourceProductId(raw: unknown): string | null {
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('sourceProductId must be a string');
+    }
+    if (raw.includes('\u0000') || UNPAIRED_SURROGATE.test(raw)) {
+      throw new BadRequestException('sourceProductId contains a character that cannot be stored');
+    }
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private async lockStoreListing(
+    txClient: TransactionClient,
+    businessId: string,
+    sourceProductId: string,
+  ): Promise<void> {
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${STORE_LISTING_LOCK_NAMESPACE}), hashtext(${`${businessId}:${sourceProductId}`}))`;
+  }
+
+  private async assertLiveBusinessProduct(
+    txClient: TransactionClient,
+    businessId: string,
+    productId: string,
+  ): Promise<void> {
+    const product = await txClient.product.findFirst({
+      where: { id: productId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!product) {
+      throw new BadRequestException(UNIFORM_PRODUCT_NOT_FOUND_MSG);
+    }
+  }
+
   async createService(
     input: CatalogServiceInput,
     tx?: TransactionClient,
     eventBuffer?: Array<{ name: string; payload: unknown }>,
   ) {
-    const client = tx ?? this.prisma.client;
     if (!input.name?.trim()) throw new BadRequestException('Service name is required');
     if (typeof input.duration !== 'number' || !Number.isFinite(input.duration) || input.duration <= 0) {
       throw new BadRequestException('Service duration must be a positive number');
@@ -589,90 +633,213 @@ export class CatalogService {
       depositType: input.depositType ?? null,
       depositValue: input.depositValue ?? null,
     });
-    const service = await client.service.create({
-      data: {
-        businessId: input.businessId,
-        name: input.name,
-        duration: input.duration,
-        price: input.price,
-        description: input.description ?? null,
-        bufferMins: input.bufferMins ?? null,
-        leadTimeMins: input.leadTimeMins ?? null,
-        sourceProductId: input.sourceProductId ?? null,
-        depositRequired: deposit.depositRequired,
-        depositType: deposit.depositType,
-        depositValue: deposit.depositValue,
-      },
-    });
-    const servicePayload: CatalogServiceCreatedPayload = { service, businessId: input.businessId };
-    if (eventBuffer) {
-      eventBuffer.push({ name: 'catalog.service.created', payload: servicePayload });
-    } else {
-      this.events.emit('catalog.service.created', servicePayload);
+    const sourceProductId = this.normalizeSourceProductId(input.sourceProductId);
+
+    const emitCreated = (service: Service) => {
+      const servicePayload: CatalogServiceCreatedPayload = { service, businessId: input.businessId };
+      if (eventBuffer) {
+        eventBuffer.push({ name: 'catalog.service.created', payload: servicePayload });
+      } else {
+        this.events.emit('catalog.service.created', servicePayload);
+      }
+    };
+
+    if (!sourceProductId) {
+      const client = tx ?? this.prisma.client;
+      const service = await client.service.create({
+        data: {
+          businessId: input.businessId,
+          name: input.name,
+          duration: input.duration,
+          price: input.price,
+          description: input.description ?? null,
+          bufferMins: input.bufferMins ?? null,
+          leadTimeMins: input.leadTimeMins ?? null,
+          sourceProductId: null,
+          depositRequired: deposit.depositRequired,
+          depositType: deposit.depositType,
+          depositValue: deposit.depositValue,
+        },
+      });
+      emitCreated(service);
+      return service;
+    }
+
+    // P204 / V1-91 (`FU-STORE-ADD-IDEMPOTENT`): serialize store listing creation
+    // per (businessId, sourceProductId) with pg_advisory_xact_lock, verify the
+    // product is live and owned by this business, and return any existing live
+    // listing idempotently without creating duplicates or re-emitting events.
+    const runCreate = async (txClient: TransactionClient) => {
+      await this.lockStoreListing(txClient, input.businessId, sourceProductId);
+      await this.assertLiveBusinessProduct(txClient, input.businessId, sourceProductId);
+
+      const existingListing = await txClient.service.findFirst({
+        where: {
+          businessId: input.businessId,
+          sourceProductId,
+          deletedAt: null,
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      if (existingListing) {
+        return { service: existingListing, created: false };
+      }
+
+      const createdService = await txClient.service.create({
+        data: {
+          businessId: input.businessId,
+          name: input.name,
+          duration: input.duration,
+          price: input.price,
+          description: input.description ?? null,
+          bufferMins: input.bufferMins ?? null,
+          leadTimeMins: input.leadTimeMins ?? null,
+          sourceProductId,
+          depositRequired: deposit.depositRequired,
+          depositType: deposit.depositType,
+          depositValue: deposit.depositValue,
+        },
+      });
+      return { service: createdService, created: true };
+    };
+
+    const { service, created } = tx
+      ? await runCreate(tx)
+      : await this.prisma.client.$transaction((innerTx) => runCreate(innerTx));
+
+    if (created) {
+      emitCreated(service);
     }
     return service;
   }
 
   async updateService(input: CatalogServicePatch, tx?: TransactionClient) {
-    const client = tx ?? this.prisma.client;
-    const existing = await client.service.findFirst({
-      where: { id: input.serviceId, businessId: input.businessId },
-    });
-    if (!existing) throw new NotFoundException('Service not found');
     if (input.duration !== undefined && (typeof input.duration !== 'number' || !Number.isFinite(input.duration) || input.duration <= 0)) {
       throw new BadRequestException('Service duration must be a positive number');
     }
     if (input.price !== undefined && (typeof input.price !== 'number' || !Number.isFinite(input.price) || input.price < 0)) {
       throw new BadRequestException('Service price must be a non-negative number');
     }
-    const effectiveRequired =
-      input.depositRequired !== undefined ? input.depositRequired : existing.depositRequired;
-    this.validateDepositInputShape(input, effectiveRequired);
-    const data: Record<string, any> = {};
-    const fields: (keyof CatalogServicePatch)[] = [
-      'name', 'duration', 'price', 'description', 'bufferMins', 'leadTimeMins', 'sourceProductId',
-    ];
-    for (const k of fields) {
-      if (input[k] !== undefined) data[k as string] = input[k];
-    }
-    const depositTouched =
-      input.depositRequired !== undefined ||
-      input.depositType !== undefined ||
-      input.depositValue !== undefined;
-    if (depositTouched || (input.price !== undefined && existing.depositRequired)) {
-      const effectivePrice = input.price !== undefined ? input.price : existing.price;
-      const deposit = this.normalizeServiceDeposit(effectivePrice, {
-        depositRequired: effectiveRequired,
-        depositType:
-          effectiveRequired
-            ? (input.depositType !== undefined ? input.depositType : existing.depositType)
-            : null,
-        depositValue:
-          effectiveRequired
-            ? (input.depositValue !== undefined ? input.depositValue : existing.depositValue)
-            : null,
-      });
-      if (depositTouched) {
-        data.depositRequired = deposit.depositRequired;
-        data.depositType = deposit.depositType;
-        data.depositValue = deposit.depositValue;
+    const hasSourceProductPatch = input.sourceProductId !== undefined;
+    const normalizedSourceProductId = hasSourceProductPatch
+      ? this.normalizeSourceProductId(input.sourceProductId)
+      : undefined;
+
+    const runUpdate = async (txClient: TransactionClient) => {
+      if (normalizedSourceProductId) {
+        await this.lockStoreListing(txClient, input.businessId, normalizedSourceProductId);
       }
-    }
-    const service = await client.service.update({
-      where: { id: input.serviceId, businessId: input.businessId },
-      data,
-    });
+
+      const existing = await txClient.service.findFirst({
+        where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
+      });
+      if (!existing) throw new NotFoundException('Service not found');
+
+      if (normalizedSourceProductId) {
+        await this.assertLiveBusinessProduct(txClient, input.businessId, normalizedSourceProductId);
+        const conflict = await txClient.service.findFirst({
+          where: {
+            businessId: input.businessId,
+            sourceProductId: normalizedSourceProductId,
+            deletedAt: null,
+            id: { not: input.serviceId },
+          },
+          select: { id: true },
+        });
+        if (conflict) {
+          throw new ConflictException(DUPLICATE_LISTING_CONFLICT_MSG);
+        }
+      }
+
+      const effectiveRequired =
+        input.depositRequired !== undefined ? input.depositRequired : existing.depositRequired;
+      this.validateDepositInputShape(input, effectiveRequired);
+      const data: Record<string, any> = {};
+      const fields: (keyof CatalogServicePatch)[] = [
+        'name', 'duration', 'price', 'description', 'bufferMins', 'leadTimeMins',
+      ];
+      for (const k of fields) {
+        if (input[k] !== undefined) data[k as string] = input[k];
+      }
+      if (hasSourceProductPatch) {
+        data.sourceProductId = normalizedSourceProductId ?? null;
+      }
+      const depositTouched =
+        input.depositRequired !== undefined ||
+        input.depositType !== undefined ||
+        input.depositValue !== undefined;
+      if (depositTouched || (input.price !== undefined && existing.depositRequired)) {
+        const effectivePrice = input.price !== undefined ? input.price : existing.price;
+        const deposit = this.normalizeServiceDeposit(effectivePrice, {
+          depositRequired: effectiveRequired,
+          depositType:
+            effectiveRequired
+              ? (input.depositType !== undefined ? input.depositType : existing.depositType)
+              : null,
+          depositValue:
+            effectiveRequired
+              ? (input.depositValue !== undefined ? input.depositValue : existing.depositValue)
+              : null,
+        });
+        if (depositTouched) {
+          data.depositRequired = deposit.depositRequired;
+          data.depositType = deposit.depositType;
+          data.depositValue = deposit.depositValue;
+        }
+      }
+      return txClient.service.update({
+        where: { id: input.serviceId, businessId: input.businessId },
+        data,
+      });
+    };
+
+    const service = normalizedSourceProductId && !tx
+      ? await this.prisma.client.$transaction((innerTx) => runUpdate(innerTx))
+      : await runUpdate(tx ?? this.prisma.client);
     this.events.emit('catalog.service.updated', { service, businessId: input.businessId } as CatalogServiceUpdatedPayload);
     return service;
   }
 
   /** Restore this business's trashed service (the trash's restore, D-95); see restoreProduct. */
   async restoreService(businessId: string, serviceId: string, tx?: TransactionClient) {
-    const client = tx ?? this.prisma.client;
-    const service = await client.service.update({
-      where: { id: serviceId, businessId },
-      data: { deletedAt: null },
-    });
+    const runRestore = async (txClient: TransactionClient) => {
+      const rows = await txClient.$queryRaw<
+        Array<{ source_product_id: string | null; deleted_at: Date | null }>
+      >`
+        SELECT source_product_id, deleted_at
+        FROM services
+        WHERE id = ${serviceId} AND business_id = ${businessId}
+        LIMIT 1
+      `;
+      if (rows.length === 0 || rows[0].deleted_at === null) {
+        throw new NotFoundException('Service not found');
+      }
+      const sourceProductId = this.normalizeSourceProductId(rows[0].source_product_id);
+      if (sourceProductId) {
+        await this.lockStoreListing(txClient, businessId, sourceProductId);
+        await this.assertLiveBusinessProduct(txClient, businessId, sourceProductId);
+        const conflict = await txClient.service.findFirst({
+          where: {
+            businessId,
+            sourceProductId,
+            deletedAt: null,
+            id: { not: serviceId },
+          },
+          select: { id: true },
+        });
+        if (conflict) {
+          throw new ConflictException(DUPLICATE_LISTING_CONFLICT_MSG);
+        }
+      }
+      return txClient.service.update({
+        where: { id: serviceId, businessId },
+        data: { deletedAt: null },
+      });
+    };
+
+    const service = tx
+      ? await runRestore(tx)
+      : await this.prisma.client.$transaction((innerTx) => runRestore(innerTx));
     this.events.emit('catalog.service.updated', { service, businessId } as CatalogServiceUpdatedPayload);
     return service;
   }
@@ -730,15 +897,56 @@ export class CatalogService {
 
   /**
    * Internal: link a Service back to its source Product. Used by
-   * Commerce store-readiness backfill.
+   * Commerce store-readiness backfill. Enforces tenant isolation and the
+   * single-live-listing invariant under the store listing advisory lock.
    */
   async linkServiceToProduct(businessId: string, serviceId: string, productId: string, tx?: TransactionClient) {
-    const client = tx ?? this.prisma.client;
-    const service = await client.service.update({
-      where: { id: serviceId },
-      data: { sourceProductId: productId },
-    });
-    this.events.emit('catalog.service.updated', { service, businessId } as CatalogServiceUpdatedPayload);
+    const normalizedProductId = this.normalizeSourceProductId(productId);
+    if (!normalizedProductId) {
+      throw new BadRequestException(UNIFORM_PRODUCT_NOT_FOUND_MSG);
+    }
+
+    const runLink = async (txClient: TransactionClient) => {
+      await this.lockStoreListing(txClient, businessId, normalizedProductId);
+      await this.assertLiveBusinessProduct(txClient, businessId, normalizedProductId);
+
+      const existing = await txClient.service.findFirst({
+        where: { id: serviceId, businessId, deletedAt: null },
+      });
+      if (!existing) {
+        throw new NotFoundException('Service not found');
+      }
+
+      const conflict = await txClient.service.findFirst({
+        where: {
+          businessId,
+          sourceProductId: normalizedProductId,
+          deletedAt: null,
+          id: { not: serviceId },
+        },
+        select: { id: true },
+      });
+      if (conflict) {
+        throw new ConflictException(DUPLICATE_LISTING_CONFLICT_MSG);
+      }
+
+      if (existing.sourceProductId === normalizedProductId) {
+        return { service: existing, updated: false };
+      }
+
+      const updatedService = await txClient.service.update({
+        where: { id: serviceId, businessId },
+        data: { sourceProductId: normalizedProductId },
+      });
+      return { service: updatedService, updated: true };
+    };
+
+    const { service, updated } = tx
+      ? await runLink(tx)
+      : await this.prisma.client.$transaction((innerTx) => runLink(innerTx));
+    if (updated) {
+      this.events.emit('catalog.service.updated', { service, businessId } as CatalogServiceUpdatedPayload);
+    }
     return service;
   }
 }
