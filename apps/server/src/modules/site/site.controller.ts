@@ -730,18 +730,20 @@ export class SiteController {
   // -------------------------------------------------------------------------
   // S5 — Consent-gated case studies. Drafts are generated from real
   // platform data; publication requires explicit owner consent.
+  // FU-CASE-STUDY-REVENUE (P139, D-100): revenue and paid-order metrics are
+  // withheld below revenue:read on list, generate, publish, and unpublish.
   // -------------------------------------------------------------------------
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/case-studies')
-  listCaseStudies(@Param('businessId') businessId: string) {
-    return this.caseStudyService.list(businessId);
+  listCaseStudies(@Param('businessId') businessId: string, @Req() req: Request) {
+    return this.caseStudyService.list(businessId, requestActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/case-studies/generate')
-  generateCaseStudy(@Param('businessId') businessId: string) {
-    return this.caseStudyService.generateDraft(businessId);
+  generateCaseStudy(@Param('businessId') businessId: string, @Req() req: Request) {
+    return this.caseStudyService.generateDraft(businessId, requestActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -751,10 +753,12 @@ export class SiteController {
     @Param('businessId') businessId: string,
     @Param('caseStudyId') caseStudyId: string,
     @Body() body: { consent: boolean },
-    // Best-effort user attribution; we don't fail if the request user is
-    // missing because BusinessGuard already proves admin authority.
+    @Req() req: Request,
   ) {
-    return this.caseStudyService.publish(businessId, caseStudyId, { consent: !!body?.consent });
+    return this.caseStudyService.publishForReader(businessId, caseStudyId, {
+      consent: !!body?.consent,
+      actor: requestActor(req),
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -763,8 +767,9 @@ export class SiteController {
   unpublishCaseStudy(
     @Param('businessId') businessId: string,
     @Param('caseStudyId') caseStudyId: string,
+    @Req() req: Request,
   ) {
-    return this.caseStudyService.unpublish(businessId, caseStudyId);
+    return this.caseStudyService.unpublish(businessId, caseStudyId, requestActor(req));
   }
 
   @UseGuards(PublicRateLimitGuard)
