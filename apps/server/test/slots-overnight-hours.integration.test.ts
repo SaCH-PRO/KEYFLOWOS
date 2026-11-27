@@ -195,7 +195,6 @@ beforeAll(async () => {
       BookingsService,
       CatalogService,
       BookingOptimizerService,
-      BookingsAdapterService,
       { provide: EventEmitter2, useValue: { emit: () => true } },
       { provide: CrmService, useValue: crmStub },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
@@ -212,7 +211,11 @@ beforeAll(async () => {
     ],
   }).compile();
 
-  bookingsAdapter = moduleRef.get(BookingsAdapterService);
+  bookingsAdapter = new BookingsAdapterService(
+    moduleRef.get(PrismaService),
+    moduleRef.get(BookingsService),
+    moduleRef.get(CatalogService),
+  );
   bookingOptimizer = moduleRef.get(BookingOptimizerService);
 
   app = moduleRef.createNestApplication();
