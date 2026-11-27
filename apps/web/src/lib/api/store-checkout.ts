@@ -17,6 +17,14 @@ export function storeCheckoutOffered(storefrontAnswer: unknown): boolean {
   );
 }
 
+/**
+ * A storefront read that FAILED is not an answer. The gate stays closed (nothing is sold), but nothing is deleted
+ * either, and the page offers to ask again: only a definite answer that is not `true` drops stored product lines.
+ */
+export const STORE_CHECK_FAILED = "Couldn't check online ordering.";
+/** The same, on the order confirmation, where the way to ask again is back on the shop page. */
+export const STORE_CHECK_FAILED_GO_BACK = "Couldn't check online ordering. Go back to the shop and try again.";
+
 /** What the page says when a store order is asked for and the store checkout is not offered. */
 export const STORE_CHECKOUT_NOT_OFFERED = "Online orders are not available from this business.";
 
