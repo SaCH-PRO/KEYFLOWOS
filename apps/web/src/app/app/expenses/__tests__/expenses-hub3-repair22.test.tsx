@@ -3,7 +3,8 @@
  *
  *   R22-1  the recurring panel's read that fails for A after the panel shows B leaves B's loading as it is: no empty
  *          state while B's own read is out
- *   R22-2  the sheet's Extract that throws under a switch changes nothing of the sheet, as its reply does
+ *   R22-2  the sheet's Extract that throws under a switch says nothing, as its reply does (R23-1: and the button
+ *          is usable again; it was left on "Extracting…")
  *   R22-3  the given check's half of every start and reply guard: this tab switched A -> B, another tab switched back
  *          to A, and A's held reply lands before the storage event. The stored id reads A, this tab shows B: nothing
  *          of A's starts or is said (the helper, the hook, the sheet, the panel, the pipeline, the list, budgets,
@@ -423,7 +424,7 @@ describe("R22-1: the recurring panel's read that fails for A after the panel sho
 
 describe("R22-2: the sheet's Extract under a silent switch", () => {
   for (const outcome of ["answers", "throws"] as const) {
-    it(`that ${outcome} changes nothing of the sheet`, async () => {
+    it(`that ${outcome} says nothing, and the button is usable again`, async () => {
       const ex = deferred<unknown>();
       client.extractReceipt.mockReturnValue(ex.promise);
       render(<ExpenseFormSideSheet businessId="biz_A" categories={[]} editingExpense={expense({ status: "PAID", receiptUrl: "https://drive.google.com/file/d/abc/view" })} onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={always} />);
@@ -436,7 +437,8 @@ describe("R22-2: the sheet's Extract under a silent switch", () => {
       });
       await settle();
       noToast2();
-      expect(extractButton().textContent, "A's Extract changed the sheet after the switch").toMatch(/Extracting/);
+      // R23-1 (D-315): the reply and its failure still say and write nothing, but the button is usable again.
+      expect(extractButton().textContent, "Extract stuck on Extracting… after the switch").toMatch(/Extract with AI/);
     });
   }
 });
