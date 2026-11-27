@@ -94,6 +94,22 @@ function confirmedDetailsOf(raw: unknown): ConfirmedDetails | null {
   };
 }
 
+/**
+ * SWP-BOOKING-SLOTS (round 8): a restored line's image, trimmed, only when it resolves (against this page) to an
+ * http: or https: URL: absolute, protocol-relative or a path, any host, as the live cart renders images.
+ */
+function httpImageOf(raw: string): string | null {
+  const value = raw.trim();
+  if (value === "") return null;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const { protocol } = new URL(value, base);
+    return protocol === "http:" || protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** SWP-BOOKING-SLOTS (round 5): a restored record's order lines, only those shaped as cart lines. */
 function orderItemsOf(raw: unknown): CartItem[] {
   if (!Array.isArray(raw)) return [];
@@ -102,14 +118,19 @@ function orderItemsOf(raw: unknown): CartItem[] {
     if (!o || typeof o !== "object" || typeof o.id !== "string" || typeof o.name !== "string") return [];
     // A positive whole quantity and a finite, non-negative price and line total; anything else is no order line.
     const { price, quantity } = o;
-    if (typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 999) return [];
+    if (typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1_000_000) return [];
     if (typeof price !== "number" || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * quantity)) return [];
-    // The shown strings are kept only when they are strings; an image only from an http(s) or same-site URL.
+    // The shown strings are kept only when they are strings; an image only when it is an http(s) image (any host, as
+    // the live cart renders it), and what is rendered is the trimmed value checked.
     const line = { ...o } as Record<string, unknown>;
     for (const field of ["currency", "imageUrl"]) {
       if (line[field] !== undefined && line[field] !== null && typeof line[field] !== "string") delete line[field];
     }
-    if (typeof line.imageUrl === "string" && !/^(https?:\/\/[^\s]+|\/(?!\/)\S*)$/i.test(line.imageUrl.trim())) delete line.imageUrl;
+    if (typeof line.imageUrl === "string") {
+      const image = httpImageOf(line.imageUrl);
+      if (image) line.imageUrl = image;
+      else delete line.imageUrl;
+    }
     return [line as unknown as CartItem];
   });
 }
@@ -414,7 +435,9 @@ function PublicBookingPageInner() {
       // As JSON.parse types it (the record was read this way before); each field is checked where it is used.
       const pending = parsed as ReturnType<typeof JSON.parse>;
       // SWP-BOOKING-SLOTS (round 6): the strings the confirmation shows or puts into a URL, only when they are strings.
-      const text = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);
+      // Zero-width and other invisible characters are stripped before the blank check: a field of only those is none.
+      const text = (v: unknown): string | null =>
+        typeof v === "string" && v.replace(/[\u180E\u200B-\u200D\u2060\uFEFF]/g, "").trim() !== "" ? v : null;
       const orderNumber = text(pending.orderNumber);
       const orderId = text(pending.orderId);
       const customerEmail = text(pending.customerEmail);
