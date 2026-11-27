@@ -22,7 +22,8 @@
  *   RST-10  a quantity that is not a safe whole number from 1 to 1,000,000 (1e21, 1e308) is dropped, a real large
  *           order (1000) is kept, and so is the total of a line whose total would overflow dropped
  *   RST-11  an order number, order id or e-mail made only of invisible characters (format, combining, space,
- *           filler and blank-pattern characters) is none; an accented value with real letters is kept as it is
+ *           control, filler, blank-pattern and default-ignorable characters) is none; an accented value with real
+ *           letters is kept as it is
  *   RST-12  an image URL holding a control character anywhere renders no image
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -331,6 +332,8 @@ describe("SWP-BOOKING-SLOTS: the restored order is exactly the one placed", () =
       "\u200B", "\u180E\u200C", "\u200D \u2060", "\uFEFF",
       "\u00AD", "\u034F", "\u115F\u1160", "\u3164", "\uFFA0", "\u2061\u2064", "\u200E\u200F",
       "\u202A\u202E", "\u2066\u2069", "\uFE0F", "\u2800", "\u3000",
+      // Control characters trim() leaves in place, and unassigned default-ignorable code points.
+      "\u0001", "\u0000", "\u007F", "\u0085\u009F", "\u2065", "\uFFF0\uFFF8", "\u{E0001}", "\u{E0002}\u{E0FFF}",
     ]) {
       net.gets = [];
       window.localStorage.setItem(KEY, record({ orderNumber: invisible, orderId: invisible, customerEmail: invisible }));
