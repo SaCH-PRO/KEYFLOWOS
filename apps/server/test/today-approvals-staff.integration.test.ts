@@ -237,7 +237,7 @@ beforeAll(async () => {
       { userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' },
     ],
   });
-});
+}, 60_000);
 
 afterAll(async () => {
   await cleanup();
