@@ -556,7 +556,8 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140, v92n_)', () => {
       ],
     });
 
-    const hiddenPayrollIds = [payrollItemActId, payRateActId, payrollModActId, grossPayDataActId];
+    const opsPayrollIds = [payrollItemActId, payRateActId, grossPayDataActId];
+    const hiddenPayrollIds = [...opsPayrollIds, payrollModActId];
 
     for (const actor of [ID.staffOpsOnlyA, ID.scopedOwnerNoRevA]) {
       const viewer = await timelineService.resolveViewer(ID.bizA, actor);
@@ -578,8 +579,14 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140, v92n_)', () => {
         (e: any) => e.entityType === 'payroll_run' && e.entityId === ID.runDiscardA,
       );
       expect(discardedRows.length, `payroll_run.discarded visible for ${actor}`).toBeGreaterThanOrEqual(1);
-      for (const hid of hiddenPayrollIds) {
+      for (const hid of opsPayrollIds) {
         expect(ids, `${hid} visible for ${actor}`).toContain(hid);
+      }
+      // Unmapped module 'payroll' follows D-63 (OWNER/ADMIN + revenue:read)
+      if (actor === ID.ownerA) {
+        expect(ids, `${payrollModActId} visible for OWNER with revenue:read`).toContain(payrollModActId);
+      } else {
+        expect(ids, `${payrollModActId} withheld from STAFF under D-63`).not.toContain(payrollModActId);
       }
       expect(ids, `non-payroll operations row visible for ${actor}`).toContain(plainOpsId);
     }

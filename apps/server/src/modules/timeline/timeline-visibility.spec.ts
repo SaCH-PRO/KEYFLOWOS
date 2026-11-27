@@ -750,13 +750,13 @@ describe('W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): name_mismatch withheld rows
     const opsNoRev = viewer(['operations']);
     const scopedOwnerNoRev = viewer(['operations'], { readsUnmapped: true, readsOwnerWithheld: true });
     const opsWithRev = viewer(['operations', 'revenue']);
+    const ownerWithRev = viewer(['operations', 'revenue'], { readsUnmapped: true, readsOwnerWithheld: true });
 
     const payrollRows: Array<[string, Record<string, unknown>]> = [
       ['entityType payroll_run', { module: 'operations', entityType: 'payroll_run', action: 'discarded', data: { totalGross: 1800 } }],
       ['entityType PayrollRun (PascalCase)', { module: 'operations', entityType: 'PayrollRun', action: 'posted' }],
       ['entityType payrollItem (camelCase)', { module: 'operations', entityType: 'payrollItem', action: 'created' }],
       ['entityType pay_rate (trimmed/upper)', { module: 'operations', entityType: ' PAY_RATE ', action: 'set' }],
-      ['module payroll', { module: 'payroll', action: 'run_created' }],
       ['type payroll_run.discarded', { module: 'operations', type: 'payroll_run.discarded' }],
       ['type payroll.paid', { module: 'operations', type: 'payroll.paid' }],
       ['action pay_rate.updated', { module: 'operations', action: 'pay_rate.updated' }],
@@ -771,7 +771,16 @@ describe('W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): name_mismatch withheld rows
       expect(canReadActivityRow(opsNoRev, row), `${label} withheld from ops-only STAFF`).toBe(false);
       expect(canReadActivityRow(scopedOwnerNoRev, row), `${label} withheld from D-140 scoped OWNER`).toBe(false);
       expect(canReadActivityRow(opsWithRev, row), `${label} allowed with revenue:read`).toBe(true);
+      expect(canReadActivityRow(ownerWithRev, row), `${label} allowed for OWNER with revenue:read`).toBe(true);
     }
+
+    // Unmapped module 'payroll' requires BOTH readsUnmapped (D-63) AND revenue:read (D-310).
+    const payrollModRow = { module: 'payroll', action: 'run_created' };
+    expect(payrollRowCarriesMoney(payrollModRow), 'module payroll carries money').toBe(true);
+    expect(canReadActivityRow(opsNoRev, payrollModRow), 'module payroll withheld from ops-only STAFF').toBe(false);
+    expect(canReadActivityRow(scopedOwnerNoRev, payrollModRow), 'module payroll withheld from D-140 scoped OWNER').toBe(false);
+    expect(canReadActivityRow(opsWithRev, payrollModRow), 'module payroll withheld from STAFF under D-63').toBe(false);
+    expect(canReadActivityRow(ownerWithRev, payrollModRow), 'module payroll visible to OWNER with revenue:read').toBe(true);
 
     // Negative controls: non-payroll operations rows (including null/malformed/array/primitive data) stay visible.
     const nonPayrollRows: Array<[string, Record<string, unknown>]> = [
