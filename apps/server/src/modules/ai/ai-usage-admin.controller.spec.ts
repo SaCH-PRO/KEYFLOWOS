@@ -28,11 +28,24 @@ function createController(): AiUsageAdminController {
 }
 
 function superAdminReq() {
-  return { user: { role: 'SUPER_ADMIN' } } as any;
+  return {
+    authKind: 'admin',
+    user: { id: 'admin-1', role: 'SUPER_ADMIN', authKind: 'admin' },
+  } as any;
+}
+
+function supabaseSuperAdminReq() {
+  return {
+    authKind: 'supabase',
+    user: { id: 'admin-1', role: 'SUPER_ADMIN', authKind: 'supabase' },
+  } as any;
 }
 
 function regularUserReq() {
-  return { user: { role: 'USER' } } as any;
+  return {
+    authKind: 'supabase',
+    user: { id: 'user-1', role: 'USER', authKind: 'supabase' },
+  } as any;
 }
 
 describe('AiUsageAdminController', () => {
@@ -54,6 +67,12 @@ describe('AiUsageAdminController', () => {
 
     it('throws ForbiddenException for non-admin', async () => {
       await expect(controller.businessSummary(regularUserReq(), 'biz-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('throws ForbiddenException for Supabase-signed-in SUPER_ADMIN (D-291)', async () => {
+      await expect(controller.businessSummary(supabaseSuperAdminReq(), 'biz-1')).rejects.toThrow(
         ForbiddenException,
       );
     });

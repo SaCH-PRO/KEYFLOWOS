@@ -22,7 +22,7 @@ describe('RiscAdminController', () => {
     risc.eraseForUser.mockResolvedValue({ deleted: 5 });
 
     const result = await controller.eraseUserEvents(
-      { id: 'admin-1', email: 'admin@example.com', role: 'SUPER_ADMIN' },
+      { id: 'admin-1', email: 'admin@example.com', role: 'SUPER_ADMIN', authKind: 'admin' },
       'user-123',
     );
 
@@ -30,12 +30,25 @@ describe('RiscAdminController', () => {
     expect(risc.eraseForUser).toHaveBeenCalledWith('user-123');
   });
 
+  it('rejects Supabase-signed-in SUPER_ADMIN callers (D-291)', async () => {
+    risc.eraseForUser.mockResolvedValue({ deleted: 0 });
+
+    await expect(
+      controller.eraseUserEvents(
+        { id: 'admin-1', email: 'admin@example.com', role: 'SUPER_ADMIN', authKind: 'supabase' },
+        'user-123',
+      ),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(risc.eraseForUser).not.toHaveBeenCalled();
+  });
+
   it('rejects non-admin callers', async () => {
     risc.eraseForUser.mockResolvedValue({ deleted: 0 });
 
     await expect(
       controller.eraseUserEvents(
-        { id: 'user-1', email: 'user@example.com', role: 'USER' },
+        { id: 'user-1', email: 'user@example.com', role: 'USER', authKind: 'supabase' },
         'user-123',
       ),
     ).rejects.toThrow(UnauthorizedException);
