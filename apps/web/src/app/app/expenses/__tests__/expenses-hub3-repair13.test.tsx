@@ -2,19 +2,19 @@
  * EXPENSES-HUB-3 repair round 13 (R12 confirmations at 226873a, MINORs): the guards R12 left unpinned, and the
  * caller-supplied check.
  *
- *   R13-1  budgets save, list bulk categorize, pipeline delete, recurring save (edit): a reply for A that lands after
+ *   R13-1  recurring save (edit): a reply for A that lands after
  *          the switch to B (answering or throwing) says and reloads nothing; the recurring panel's own read for A that
  *          answers after B's does not put A's schedule on B
  *   R13-2  through the real page: the page passes the data hook's check to the recurring panel, so a reply that lands
  *          after the switch but before React commits it (the hook adopts the switch at once; the panel's fallback only
  *          at commit) says nothing
- *   R13-3  ExpenseBudgetsTab, ExpenseList, ExpensePipeline and the recurring panel honour a supplied
- *          `isCurrentBusiness`: it is consulted, not only the fallback
+ *   R13-3  the recurring panel honours a supplied `isCurrentBusiness`: it is consulted, not only the fallback
+ *          (P258: the budgets tab, expense list and pipeline cases of R13-1 and R13-3 went with those components)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Expense, ExpenseCategory, RecurringExpense } from "@/lib/client";
+import type { ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ws = vi.hoisted(() => ({ bid: "biz_A" as string | null }));
 const client = vi.hoisted(() => ({
@@ -24,7 +24,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -65,9 +64,6 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import ExpensesInboxPage from "../page";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpensePipeline } from "../components/expense-pipeline";
 
 const ok = <T,>(data: T) => ({ data, error: null });
 const CATS: Record<string, ExpenseCategory[]> = {
@@ -82,13 +78,6 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function expense(over: Partial<Expense> = {}): Expense {
-  return {
-    id: "exp_A1", description: "Diesel", amount: 50, currency: "TTD", date: "2026-11-20T00:00:00.000Z", vendor: "Shell",
-    paymentMethod: "cash", tags: [], isRecurring: false, status: "BILL", categoryId: "cat_A_fuel",
-    createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
-  } as Expense;
-}
 const SCHEDULE = {
   id: "rec_A1", name: "Rent", frequency: "MONTHLY", nextRunDate: "2026-12-01T00:00:00.000Z", isActive: true, runCount: 0,
   failureCount: 0, description: "Rent", amount: 1000, currency: "TTD", createsBill: false,
@@ -104,7 +93,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
@@ -144,71 +132,6 @@ type Case = {
 const panel = (b: string, check?: (b: string) => boolean) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={0} isCurrentBusiness={check} />;
 
 const CASES: Case[] = [
-  {
-    name: "the budgets tab's save",
-    call: "upsertExpenseBudget",
-    mount: (bid, check) => {
-      const reload = vi.fn();
-      const el = (b: string) => <ExpenseBudgetsTab businessId={b} budgets={[]} categories={CATS[b]} expenses={[]} summary={null} onReload={reload} isCurrentBusiness={check} />;
-      const view = render(el(bid));
-      return { rerenderFor: (b) => view.rerender(el(b)), reload };
-    },
-    act: async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-      fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } });
-      fireEvent.click(screen.getByRole("button", { name: "Save Budget" }));
-    },
-    success: "Budget saved",
-    failure: "Failed to save budget",
-  },
-  {
-    name: "the expense list's bulk categorize",
-    call: "updateExpense",
-    mount: (bid, check) => {
-      const reload = vi.fn();
-      const el = (b: string) => (
-        <ExpenseList
-          businessId={b} expenses={b === "biz_A" ? [expense({ status: "PAID" })] : []} totalExpenses={b === "biz_A" ? 1 : 0}
-          categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-          filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={reload} isCurrentBusiness={check}
-        />
-      );
-      const view = render(el(bid));
-      return { rerenderFor: (b) => view.rerender(el(b)), reload };
-    },
-    act: async () => {
-      const table = await screen.findByRole("table", { name: "Expenses list" });
-      fireEvent.click(table.querySelector("button")!); // the row's select box
-      const assign = screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!;
-      fireEvent.change(assign, { target: { value: "cat_A_tolls" } });
-      fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
-    },
-    success: "1 expense categorized",
-    failure: "Failed to bulk categorize",
-  },
-  {
-    name: "the pipeline's delete",
-    call: "deleteExpense",
-    mount: (bid, check) => {
-      const reload = vi.fn();
-      const el = (b: string) => (
-        <ExpensePipeline
-          businessId={b} expenses={b === "biz_A" ? [expense()] : []} totalExpenses={b === "biz_A" ? 1 : 0} categories={CATS.biz_A} summary={null}
-          period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-          searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onReload={reload} onEdit={vi.fn()} isCurrentBusiness={check}
-        />
-      );
-      const view = render(el(bid));
-      return { rerenderFor: (b) => view.rerender(el(b)), reload };
-    },
-    act: async () => { fireEvent.click((await screen.findAllByRole("button", { name: /^Delete$/i }))[0]); },
-    success: "Expense deleted",
-    failure: "Failed to delete",
-  },
   {
     name: "the recurring panel's save (edit)",
     call: "updateRecurringExpense",

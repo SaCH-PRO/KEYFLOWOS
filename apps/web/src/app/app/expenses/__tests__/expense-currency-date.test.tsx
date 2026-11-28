@@ -6,8 +6,9 @@
  *
  * BUG-027: the expense screens name TTD whatever the business currency is: the
  * forms' "Amount (TTD)" label and footer, expense-utils' formatCurrency (the
- * page's figures, the detail page, the budgets tab), the snapshot tab and the
- * recurring builder. A USD business must see USD.
+ * page's figures, the detail page) and the recurring builder. A USD business
+ * must see USD. (P258: the budgets and snapshot tabs were removed, with their
+ * cases here.)
  *
  * BUG-028: the new expense's date defaults to the UTC date
  * (`new Date().toISOString()`), so at 21:00 in Port of Spain (01:00 UTC the
@@ -19,7 +20,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import type { Expense, ExpenseBudget, ExpenseSummary } from "@/lib/client";
 
 const BUSINESS = "biz_hub2_usd";
 const ZONE_FOR_DISPLAY = "America/Port_of_Spain";
@@ -54,8 +54,6 @@ vi.mock("@/lib/client", () => ({
 import { toast } from "sonner";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { formatCurrency, formatDate } from "../components/expense-utils";
-import { ExpensesSnapshotTab } from "../components/expenses-snapshot-tab";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 
 type Form = "sidesheet"; // R22: the modal is retired
@@ -109,29 +107,7 @@ describe("BUG-027: a USD business sees USD on the expense screens, never TTD", (
     expect(container.textContent).not.toMatch(/TTD/);
   });
 
-  it("the snapshot tab's total and average are in USD", () => {
-    const summary = { total: 300, count: 2, averageExpense: 150 } as unknown as ExpenseSummary;
-    const expenses = [
-      { id: "e1", description: "Hosting", amount: 100, currency: "USD", date: "2026-11-20T00:00:00.000Z", status: "PAID", tags: [], isRecurring: false },
-      { id: "e2", description: "Domain", amount: 200, currency: "USD", date: "2026-11-21T00:00:00.000Z", status: "PAID", tags: [], isRecurring: false },
-    ] as unknown as Expense[];
-    const { container } = render(<ExpensesSnapshotTab expenses={expenses} categories={[]} summary={summary} budgets={[]} />);
-    expect(container.textContent).toMatch(/USD/);
-    expect(container.textContent).not.toMatch(/TTD/);
-  });
 
-  it("the budgets tab (unmounted in v1) shows its figures and its limit field in USD", () => {
-    const budgets = [
-      { id: "b1", categoryId: "c1", amount: 500, spent: 120, remaining: 380, percentUsed: 24, isOverBudget: false, isNearAlert: false, alertAt: 80, month: 11, year: 2026 },
-    ] as unknown as ExpenseBudget[];
-    const { container } = render(
-      <ExpenseBudgetsTab businessId={BUSINESS} budgets={budgets} categories={[{ id: "c1", name: "Rent" } as never]} expenses={[]} summary={null} onReload={vi.fn()} />,
-    );
-    const add = screen.queryAllByRole("button").find((b) => /budget/i.test(b.textContent ?? ""));
-    if (add) fireEvent.click(add);
-    expect(container.textContent).toMatch(/USD/);
-    expect(document.body.textContent).not.toMatch(/TTD/);
-  });
 
   it("the recurring builder names USD on its amount field", async () => {
     newPressed();
