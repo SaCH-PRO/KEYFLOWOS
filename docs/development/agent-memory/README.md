@@ -18,7 +18,7 @@ about the state file: that is hand-written, carries its own timestamp, and is on
 | Layer | What it is here | Authoritative? |
 |---|---|---|
 | Working | The live conversation context | No. Temporary |
-| Episodic | Issue #80, git history, PRs | Yes. Append-only |
+| Episodic | Issue #273 (archived predecessor: #80), git history, PRs | Yes. Append-only |
 | Semantic | Plan, rulings, state file, generated status | Plan and rulings yes; state file is a checkpoint; status is derived |
 | Procedural | The briefs and runbooks in this folder | They restate rulings; the rulings win |
 | Consolidation | The rewrite rules below | - |
@@ -42,7 +42,7 @@ AGENT-CONTINUITY: "Conversation/session memory is temporary. Repository intellig
 The context is the scarcest resource an orchestrator has. Rules for keeping it small:
 
 - **Delegate wide reads, take back conclusions.** Reading the plan, the build map, a long diff, a CI log or issue
-  #80 goes to a subagent that returns an answer with `file:line`, not the text.
+  #273 (or archived #80) goes to a subagent that returns an answer with `file:line`, not the text.
 - **Never paste logs.** A suite result is one line: counts, the R0 line as printed, the head sha. Failures: the
   failing test names and the first error, nothing more.
 - **One status line per event.** A packet return, a review verdict, a CI result or a merge is one line in the
@@ -52,7 +52,7 @@ The context is the scarcest resource an orchestrator has. Rules for keeping it s
 - **Compile, do not load.** For a packet, read its bundle (`bundle.mjs`), never the whole plan (about 740 KB) or the
   whole build map (about 240 KB).
 - **Nothing material lives only in the context.** An owner ruling, a finding, a decision to reorder: write it to
-  issue #80 or a file in the turn it happens. "No procedure may require hidden conversational context to execute
+  issue #273 or a file in the turn it happens. "No procedure may require hidden conversational context to execute
   correctly" (#106 comment 5994966639).
 - **When the context is getting long** (AGENT-CONTINUITY, "Chat-length risk protocol"): start no new broad
   investigation, finish the current atomic step, rewrite the state file, record the exact next action, and hand
@@ -63,7 +63,8 @@ The context is the scarcest resource an orchestrator has. Rules for keeping it s
 Research term: "episodic memory". Rule from #106 comment 5981828884: "forgetting should not erase authoritative
 evidence/audit history"; raw evidence "is never replaced by summaries" (5982274201).
 
-- **Issue #80** (the control room): every DIRECTIVE, ACK, RETURN, PROGRESS, REVIEW and owner ruling (D-nnn).
+- **Issue #273** (the active control room, D-319/Q69; archived predecessor: **issue #80**, read-only at GitHub's 2,500-comment cap): every DIRECTIVE, ACK, CLAIM, RETURN, PROGRESS, REVIEW and owner ruling (D-nnn).
+- **Control-room rollover rule (2,500-comment cap):** GitHub caps issue comments at 2,500. When the active control-room issue reaches **2,350 comments** (150-comment buffer), the orchestrator opens a successor control-room issue linking back to the retiring issue and its archived predecessors, posts one final pointer comment on the retiring issue naming the new issue number, stops posting operational updates on the retiring issue (never editing or deleting archived comments), and updates `CLAUDE.md`, `AGENTS.md`, `docs/development/agent-memory/*`, and `BOARD.md` (`coord/board`) in the next wave PR.
 - **Git history**: commits on main, `pkt/V1-*` branches (a packet's full RED and fix history), wave PRs and their
   review threads.
 
@@ -73,10 +74,10 @@ Append-only and authoritative. **Never loaded whole.** Search it:
 git log --oneline origin/main --grep 'pkt/V1-<ID>'            # a packet's commits on main
 git log --oneline origin/main -- <path>                       # what touched a file
 git log origin/main --format='%h %s' --grep 'D-2[0-9][0-9]'   # commits that record rulings
-gh api 'repos/KEYFLOWOS/KEYFLOWOS/issues/80/comments?since=2026-11-22T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-249")) | {id, body}'   # one ruling on #80
+gh api 'repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments?since=2026-11-27T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-319")) | {id, body}'   # one ruling on #273
 ```
 
-(`gh issue view 80 --comments`, as `CLAUDE.md` gives it, was refused with HTTP 403 in the cloud sessions on
+(`gh issue view <N> --comments`, as `CLAUDE.md` gives it, was refused with HTTP 403 in the cloud sessions on
 2026-11-22; the `gh api` form worked.) Where `gh` is not available, use the GitHub issue tools, read the newest page of comments first, and have a
 subagent do it and return only the comment id and the ruling text. Summaries in the semantic layer must always
 name where the evidence is (a D-nnn, a comment id, a sha, a PR number) so anyone can drill down.
@@ -94,8 +95,8 @@ must be enough to rebuild every derived projection, and a projection links to au
 | `docs/reconstruction/handoff/V1-STATUS.json`, `V1-STATUS.md` | Derived, GENERATED: status of every packet, counts, critical path, ready list | `node scripts/agent-memory/status.mjs` |
 | `docs/reconstruction/V1-HANDOFF-2026-11-20.md`, `handoff/V1-STATUS-2026-11-20.json` | Dated records (20 Nov). Still the reference for build rules and local setup; their counts are superseded by `V1-STATUS.md` | Nobody: do not edit |
 
-Order of authority when two disagree: issue #80 ruling, then `BUILD-MAP-001.md` and the plan, then the state file,
-then the generated status. A contradiction is reported (CONTRADICTION on #80, under the standing directive), not
+Order of authority when two disagree: active control-room ruling (issue #273; archived predecessor: #80), then `BUILD-MAP-001.md` and the plan, then the state file,
+then the generated status. A contradiction is reported (CONTRADICTION on #273, under the standing directive), not
 silently resolved (#106 comment 5994966639: "A contradiction is a valid state, not an exception to hide").
 
 `V1-STATUS` says how each packet's status was derived and lists the uncertain ones. It sees only main: work on
@@ -127,10 +128,10 @@ newer belief won, and must not silently overwrite contradictory claims.
 
 | Event | Rewrite | In the same turn |
 |---|---|---|
-| A PR merges to main | Regenerate `V1-STATUS.*` (`git fetch origin main && node scripts/agent-memory/status.mjs`). State file: remove the merged row from section 3, update next actions; remove from section 2 any ruling that merge carried to main | PROGRESS on #80 (per wave) |
-| A packet returns | State file section 3: one row with branch, head sha, verdict so far, next action | RETURN on #80 (per packet) |
+| A PR merges to main | Regenerate `V1-STATUS.*` (`git fetch origin main && node scripts/agent-memory/status.mjs`). State file: remove the merged row from section 3, update next actions; remove from section 2 any ruling that merge carried to main | PROGRESS on #273 (per wave) |
+| A packet returns | State file section 3: one row with branch, head sha, verdict so far, next action | RETURN on #273 (per packet) |
 | A review verdict arrives | State file section 3: that row's state and next action | - |
-| The owner rules | Post D-nnn on #80 first. State file: section 2 gains the ruling, section 4 loses the question. Next rulings commit: `BUILD-MAP-001.md`, and the plan if a packet is added | - |
+| The owner rules | Post D-nnn on #273 first. State file: section 2 gains the ruling, section 4 loses the question. Next rulings commit: `BUILD-MAP-001.md`, and the plan if a packet is added | - |
 | A packet is started | State file section 3: one row (child session id, "Building") | - |
 | The context is getting long | Whole state file, then hand over | - |
 
@@ -141,13 +142,13 @@ may keep the state file on its own branch, pushed (an unpushed file is not memor
 
 | Dropped | Evidence stays in |
 |---|---|
-| A merged wave's row, its suite totals and review verdicts | The PR body and review threads; the PROGRESS comment on #80; the merge commit |
-| A returned packet's findings and how each was closed | The RETURN comment on #80; the `pkt/V1-<ID>` branch history |
-| A ruling's summary, once recorded | `BUILD-MAP-001.md` row D-nnn; the #80 comment |
+| A merged wave's row, its suite totals and review verdicts | The PR body and review threads; the PROGRESS comment on #273 (or archived #80); the merge commit |
+| A returned packet's findings and how each was closed | The RETURN comment on #273 (or archived #80); the `pkt/V1-<ID>` branch history |
+| A ruling's summary, once recorded | `BUILD-MAP-001.md` row D-nnn; the #273 (or archived #80) comment |
 | An answered owner question | The D-nnn that answered it |
 | Yesterday's working rules that became procedure | The runbook; git history of the state file |
 
-The state file is rewritten, never appended to: it should stay about the size it is now. Nothing on #80, no commit
+The state file is rewritten, never appended to: it should stay about the size it is now. Nothing on #273 or archived #80, no commit
 and no `pkt/*` branch is ever deleted or rewritten to make memory smaller.
 
 ## 6. Retrieval: the context bundle
@@ -176,5 +177,5 @@ rule that has no D-nnn row.
 
 Limits, stated once: a bundle is a derived projection and "MUST NOT outrank [its] source authority" (schema
 invariant). A VALID bundle does not mean the packet's premises about the code are true: the worker still checks
-them. Rulings made on #80 but not yet in `BUILD-MAP-001.md` at the ref are not in the bundle: the state file's
+them. Rulings made on #273 (or archived #80) but not yet in `BUILD-MAP-001.md` at the ref are not in the bundle: the state file's
 section 2 lists them.

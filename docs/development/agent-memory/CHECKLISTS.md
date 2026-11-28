@@ -11,8 +11,8 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 
 ## A. Start of any session (every tool, every time)
 
-- [ ] Read `BOARD.md` at the root of branch `coord/board`, the latest `ORCHESTRATOR-STATE.md`, and #80 since your last
-      visit.
+- [ ] Read `BOARD.md` at the root of branch `coord/board`, the latest `ORCHESTRATOR-STATE.md`, and #273 (active control
+      room; #80 is archived at the 2,500-comment cap; roll over to a new issue at 2,350 comments) since your last visit.
 - [ ] Find your lane's rows on the board. Work only on items your lane owns, or unowned items you claim (step B1).
 - [ ] Check the services: `pg_isready` and `redis-cli ping` (restart them if down). Check `node -v` matches `.nvmrc`.
 - [ ] If an item you own says HANDOFF to you, read its handoff comment before touching its branch.
@@ -20,7 +20,7 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 ## B. Packet (one P0–P3 item of the v1 plan)
 
 1. **Claim.**
-   - [ ] The packet has `"track": "launch"` in the plan (D-263), or the owner assigned it to you on #80 (the board
+   - [ ] The packet has `"track": "launch"` in the plan (D-263), or the owner assigned it to you on #273 (the board
          only mirrors an owner's assignment; a lane never gives itself a follow-on packet).
    - [ ] `git ls-remote origin refs/heads/pkt/V1-<ID>` prints nothing.
    - [ ] Create the branch on the right base (main, or the stack top it depends on), and make a claim commit no
@@ -31,7 +31,7 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
    - [ ] `git ls-remote origin refs/heads/pkt/V1-<ID>` prints your own `git rev-parse HEAD`. If the push was refused,
          or the sha is not yours, another lane owns the packet: pick another, and never delete or force-push its
          branch.
-   - [ ] Post a CLAIM on #80. Set the board row to your lane and `claimed`.
+   - [ ] Post a CLAIM on #273. Set the board row to your lane and `claimed`.
 2. **Read.**
    - [ ] Run `node scripts/agent-memory/bundle.mjs <ID> --ref <plan ref>`: scope, definition of done, write set,
          Release 0 rows.
@@ -69,7 +69,7 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
    Release 0 evidence edit without an owner ruling (an `r0_register` AMEND), fabricated evidence, secrets in chat or
    code.
 8. **Return.**
-   - [ ] Post a RETURN on #80: branch, head, RED and fix shas, files, departures, the proof totals as printed,
+   - [ ] Post a RETURN on #273: branch, head, RED and fix shas, files, departures, the proof totals as printed,
          review verdicts and how each finding closed, and what is open.
    - [ ] Set the board row to `returned`. Update `ORCHESTRATOR-STATE.md` section 3. Push both.
 
@@ -100,7 +100,7 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 - [ ] Head sha, mergeability and the scope ledger (packets and files) are re-verified.
 - [ ] Merge with a merge commit (not squash, not rebase), with the expected head sha pinned.
 - [ ] After: `node scripts/agent-memory/status.mjs`, rewrite `ORCHESTRATOR-STATE.md`, update the board, post
-      PROGRESS on #80.
+      PROGRESS on #273.
 - [ ] Never: a production deploy (the owner's step, D-266), a staging change, or bypassing a gate.
 
 ## E. Handoff (a limit is near, or the lane is stopping)
@@ -108,12 +108,12 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 - [ ] Everything committed is pushed: `git status` is clean and the branch head equals the remote.
 - [ ] Each item you own has, on the board: its exact head, the last step done, and the next step written as a
       command or a checklist line.
-- [ ] Post a HANDOFF on #80 naming the item, the receiving lane (or "any lane"), and the board row.
+- [ ] Post a HANDOFF on #273 naming the item, the receiving lane (or "any lane"), and the board row.
 - [ ] Note anything running (a suite, a review) as "running, result not recorded": the next lane re-runs it.
 
 ## F. Review by an advisory model (ChatGPT, Kimi or Gemini in a browser)
 
 - [ ] The owner pastes the RETURN and the diff range into the advisory model.
-- [ ] The owner relays its findings to #80 as a REVIEW (advisory), and the owning lane triages each one: fix it
+- [ ] The owner relays its findings to #273 as a REVIEW (advisory), and the owning lane triages each one: fix it
       tests-first or answer it.
 - [ ] An advisory review is extra, never one of the two required reviews.
