@@ -162,7 +162,7 @@ beforeAll(async () => {
       StoreOrderService,
       PromoCodeService,
       PaymentsService,
-      { provide: CommerceService, useValue: noop },
+      { provide: CommerceService, useValue: { isBareIdPublicAccessOpen: async () => false } },
       { provide: InvoiceWorkflowService, useValue: noop },
       { provide: InventoryRiskService, useValue: noop },
       { provide: RevenueAttributionService, useValue: noop },
@@ -380,7 +380,7 @@ describe('P253 FU-STORE-GATE-SIDE-DOORS — /gateways, /validate-promo, and crea
     }
   });
 
-  it('[SGSD-04] RED-BEFORE: legacy-read failure fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500) on /gateways and /validate-promo even for legacy store', async () => {
+  it('[SGSD-04] RED-BEFORE: legacy-read failure fails closed to 403 STORE_CHECKOUT_NOT_OFFERED (never 500) on /gateways and /validate-promo for both bizNone and bizStore', async () => {
     const modes: Array<{ label: string; mock: () => ReturnType<typeof vi.spyOn> }> = [
       {
         label: 'async rejection',
@@ -400,17 +400,23 @@ describe('P253 FU-STORE-GATE-SIDE-DOORS — /gateways, /validate-promo, and crea
     ];
 
     for (const { label, mock } of modes) {
+      await clearRateLimits();
       const spy = mock();
       try {
-        const gwRes = await agent().get(`/site/storefront/public/${encodeURIComponent(SLUG.store)}/gateways?currency=TTD`);
-        expect(gwRes.status, `${label} /gateways: ${gwRes.text}`).toBe(403);
-        expect(gwRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+        for (const [slug, prodId, code] of [
+          [SLUG.store, ID.prodStore, 'SAVE10'],
+          [SLUG.none, ID.prodNone, 'SECRET10'],
+        ] as const) {
+          const gwRes = await agent().get(`/site/storefront/public/${encodeURIComponent(slug)}/gateways?currency=TTD`);
+          expect(gwRes.status, `${label} ${slug} /gateways: ${gwRes.text}`).toBe(403);
+          expect(gwRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
 
-        const promoRes = await agent()
-          .post(`/site/storefront/public/${encodeURIComponent(SLUG.store)}/validate-promo`)
-          .send({ code: 'SAVE10', items: [{ productId: ID.prodStore, quantity: 1 }] });
-        expect(promoRes.status, `${label} /validate-promo: ${promoRes.text}`).toBe(403);
-        expect(promoRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+          const promoRes = await agent()
+            .post(`/site/storefront/public/${encodeURIComponent(slug)}/validate-promo`)
+            .send({ code, items: [{ productId: prodId, quantity: 1 }] });
+          expect(promoRes.status, `${label} ${slug} /validate-promo: ${promoRes.text}`).toBe(403);
+          expect(promoRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+        }
       } finally {
         spy.mockRestore();
       }
@@ -428,10 +434,7 @@ describe('P253 FU-STORE-GATE-SIDE-DOORS — /gateways, /validate-promo, and crea
       },
       {
         label: 'async rejection',
-        setup: () =>
-          vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(
-            new Error('postgres://user:supersecret@db.internal:5432/keyflow refused'),
-          ),
+        setup: () => vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(new Error('db refused')),
       },
       {
         label: 'sync throw',
@@ -472,6 +475,76 @@ describe('P253 FU-STORE-GATE-SIDE-DOORS — /gateways, /validate-promo, and crea
         expect(paidRes.status, `${label} paid order: ${paidRes.text}`).toBe(403);
         expect(paidRes.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
         expect(createPaymentSpy).not.toHaveBeenCalled();
+      } finally {
+        legacySpy.mockRestore();
+      }
+    }
+
+    // Redaction & throw-safe catch on PaymentsService.assertStoreCheckoutOffered
+    {
+      await clearRateLimits();
+      const secretToken = ['s3cr3t', 'paydb', '992'].join('_');
+      const dsnErr = new Error(
+        `Invalid \`prisma.$queryRawUnsafe()\` invocation:\nSELECT * FROM marketplace_orders\nCan't reach database at postgres://dbuser:${secretToken}@db.internal:5432/keyflow`,
+      );
+      const legacySpy = vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(dsnErr);
+      const warnSpy = vi.spyOn((paymentsService as any).logger, 'warn').mockImplementation(() => undefined);
+      try {
+        const res = await agent().post('/payments/create-checkout').send({
+          payableType: 'storefront_order',
+          payableId: ID.orderOpen,
+          gateway: 'stripe',
+          returnUrl: 'https://app.test.local/return',
+        });
+        expect(res.status, res.text).toBe(403);
+        expect(res.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+        expect(warnSpy).toHaveBeenCalled();
+        const logged = String(warnSpy.mock.calls[0]?.[0] ?? '');
+        expect(logged).toContain(ID.bizStore);
+        expect(logged).not.toContain(secretToken);
+        expect(logged).not.toContain('dbuser:');
+        expect(logged).not.toContain('\n');
+        expect(logged).not.toContain('SELECT * FROM');
+      } finally {
+        legacySpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+
+      // Null-prototype rejection + throwing logger still fails closed to 403 (never 500)
+      await clearRateLimits();
+      const nullProtoSpy = vi.spyOn(legacyModulesService, 'getLegacyModules').mockRejectedValue(Object.create(null));
+      const throwingWarnSpy = vi.spyOn((paymentsService as any).logger, 'warn').mockImplementation(() => {
+        throw new Error('logger sink unavailable');
+      });
+      try {
+        const res = await agent().post('/payments/create-checkout').send({
+          payableType: 'storefront_order',
+          payableId: ID.orderOpen,
+          gateway: 'stripe',
+          returnUrl: 'https://app.test.local/return',
+        });
+        expect(res.status, res.text).toBe(403);
+        expect(res.body?.code).toBe('STORE_CHECKOUT_NOT_OFFERED');
+      } finally {
+        nullProtoSpy.mockRestore();
+        throwingWarnSpy.mockRestore();
+      }
+    }
+
+    // Non-store payableType ('invoice') is never blocked by the store gate and does not call getLegacyModules
+    {
+      await clearRateLimits();
+      const legacySpy = vi.spyOn(legacyModulesService, 'getLegacyModules').mockResolvedValue([]);
+      try {
+        const invRes = await agent().post('/payments/create-checkout').send({
+          payableType: 'invoice',
+          payableId: `${P}missing_invoice`,
+          gateway: 'stripe',
+          returnUrl: 'https://app.test.local/return',
+        });
+        expect(invRes.status, invRes.text).toBe(404);
+        expect(invRes.body?.code).not.toBe('STORE_CHECKOUT_NOT_OFFERED');
+        expect(legacySpy).not.toHaveBeenCalled();
       } finally {
         legacySpy.mockRestore();
       }
