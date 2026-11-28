@@ -164,6 +164,15 @@ describe("P256: while a save is submitting, the edit sheet cannot be closed", ()
       expect(onClose).toHaveBeenCalledTimes(1);
     });
   }
+  it("R1-1: a save that goes through closes the sheet itself, exactly once (the success path is not held by the guard)", async () => {
+    client.updateExpense.mockResolvedValue(ok(A1({ description: "Printer toner" })));
+    const onClose = vi.fn();
+    sheetFor(onClose);
+    fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
   it("once the save has answered, the sheet can be closed again (a refused save leaves it open and closable)", async () => {
     client.updateExpense.mockResolvedValue({ data: null, error: "Amount can't change on a posted expense", status: 409 });
     const onClose = vi.fn();
