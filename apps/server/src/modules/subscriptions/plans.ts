@@ -275,7 +275,7 @@ export const FEATURE_REGISTRY: FeatureDefinition[] = [
   { key: 'bookings', label: 'Bookings', description: 'Monthly bookings', category: 'bookings', type: 'limit', limitKey: 'bookingsPerMonth', tiers: { FREE: 25, FLOW: 100, KEYFLOW: 'Unlimited' }, billable: true },
   { key: 'ai_credits', label: 'KEY Credits', description: 'Monthly AI credits for KEY assistant features', category: 'ai', type: 'limit', limitKey: 'aiCreditsPerMonth', tiers: { FREE: 50, FLOW: 500, KEYFLOW: 'Fair use' }, billable: true },
   { key: 'automations', label: 'Playbook Automations', description: 'Event-driven automation rules', category: 'ai', type: 'limit', limitKey: 'automations', tiers: { FREE: 0, FLOW: 5, KEYFLOW: 'Unlimited' }, billable: true },
-  { key: 'staff', label: 'Staff Members', description: 'Team staff seats', category: 'operations', type: 'limit', limitKey: 'staffMembers', tiers: { FREE: 1, FLOW: 5, KEYFLOW: 'Unlimited' }, billable: true },
+  { key: 'staff', label: 'Staff Members', description: 'Bookable staff seats', category: 'operations', type: 'limit', limitKey: 'staffMembers', tiers: { FREE: 1, FLOW: 5, KEYFLOW: 'Unlimited' }, billable: true },
   { key: 'priority_support', label: 'Priority Support', description: 'Dedicated support channel', category: 'platform', type: 'boolean', limitKey: 'prioritySupport', tiers: { FREE: false, FLOW: false, KEYFLOW: true } },
 ];
 
@@ -399,7 +399,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       socialPosts: 0,
       onlineStore: true,
       marketplaceListings: 0,
-      warehouses: 0,
+      warehouses: 3,
       emailCampaigns: 0,
       leadForms: 10,
       expenses: -1,
@@ -447,7 +447,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       socialPosts: 0,
       onlineStore: true,
       marketplaceListings: 0,
-      warehouses: 0,
+      warehouses: -1,
       emailCampaigns: 0,
       leadForms: -1,
       expenses: -1,

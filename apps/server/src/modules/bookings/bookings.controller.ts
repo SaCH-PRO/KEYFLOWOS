@@ -15,7 +15,7 @@ import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { CreateWaitlistEntryDto } from './dto/create-waitlist-entry.dto';
 import { OfferWaitlistSlotDto } from './dto/offer-waitlist-slot.dto';
 import { WaitlistQueryDto } from './dto/waitlist-query.dto';
-import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
+import { PlanLimitGuard, RequirePlanLimit, planLimitDenialException } from '../subscriptions/plan-limit.guard';
 import { MAX_PUBLIC_RELEASE_BOOKING_IDS, PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { appUrl } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -540,15 +540,30 @@ export class BookingsController {
   @RequireModuleScope('bookings', 'write')
   @RequirePlanLimit('staff')
   @Post('businesses/:businessId/staff')
-  createStaff(
+  async createStaff(
     @Param('businessId') businessId: string,
     @Body() body: { name: string },
   ) {
-    return this.prisma.client.staffMember.create({
-      data: {
-        businessId,
-        name: body.name,
-      },
+    // V1-66 (PLAN-TABLE review SEC-PT-2): serialize concurrent staff-seat
+    // creation per business so parallel requests cannot race past the plan
+    // seat cap between PlanLimitGuard and the INSERT.
+    const { plan, limits } = await this.subscriptions.getActiveSubscription(businessId);
+    const limit = limits.staffMembers;
+    const upgradeTo = plan === 'FREE' ? 'FLOW' : 'KEYFLOW';
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`bookings:staff-create:${businessId}`}))`;
+      if (limit !== -1) {
+        const count = await tx.staffMember.count({ where: { businessId, deletedAt: null } });
+        if (count >= limit) {
+          throw planLimitDenialException('staff', { current: count, limit, upgradeTo });
+        }
+      }
+      return tx.staffMember.create({
+        data: {
+          businessId,
+          name: body.name,
+        },
+      });
     });
   }
 

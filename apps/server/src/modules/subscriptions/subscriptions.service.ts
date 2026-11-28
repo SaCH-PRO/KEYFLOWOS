@@ -371,10 +371,15 @@ export class SubscriptionsService {
           SELECT 1
           FROM marketplace_orders o
           WHERE o.business_id = i.business_id
-            AND o.type IN ('QUICK_SALE', 'STOREFRONT')
             AND (
-              i.invoice_number = 'INV-' || o.order_number
-              OR i.invoice_number = 'INV-ORD-' || o.order_number
+              (o.type = 'QUICK_SALE' AND i.invoice_number = 'INV-' || o.order_number)
+              OR (
+                o.type = 'STOREFRONT'
+                AND (
+                  i.invoice_number = 'INV-' || o.order_number
+                  OR i.invoice_number = 'INV-ORD-' || o.order_number
+                )
+              )
             )
         )
         AND NOT (
@@ -670,7 +675,7 @@ export class SubscriptionsService {
 
         const nextTier = subInfo.plan === 'FREE' ? 'FLOW' : (subInfo.plan === 'FLOW' ? 'KEYFLOW' : null);
         let upgradeTo: string | null = null;
-        if (nextTier) {
+        if (nextTier && !isUnlimited) {
           const nextTierValue = f.tiers[nextTier as keyof typeof f.tiers];
           if (isUncappedLabel(nextTierValue) || (typeof nextTierValue === 'number' && nextTierValue > (typeof tierValue === 'number' ? tierValue : 0))) {
             upgradeTo = nextTier;
@@ -686,7 +691,7 @@ export class SubscriptionsService {
           limit,
           isUnlimited,
           percent,
-          atLimit: !isUnlimited && limit > 0 && current >= limit,
+          atLimit: !isUnlimited && (limit === 0 || current >= limit),
           nearLimit: !isUnlimited && limit > 0 && percent >= 80,
           upgradeTo,
         };
