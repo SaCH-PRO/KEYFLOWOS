@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
 Last written: 2026-11-28 ~05:05 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M40 merged. Main is `2e4c7a7b`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+M44 merged. Main is `9e0f64c4`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -34,11 +34,11 @@ waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude re
 
 ### 0.1 Waves this session
 
-**Checkpoint 2026-11-28 05:05 UTC: M40 merged (#284, main `2e4c7a7b`); M44 open (#295).**
+**Checkpoint 2026-11-28 05:30 UTC: M40 (#284) and M44 (#295) merged; EXPENSES-HUB-3 is fully on main.**
 - EXPENSES-HUB-3 (P221) was RETURNed after 29 repair rounds (#273 7233136312), each round confirmed by two reviews. It is 85 files, over the 50-file divergence gate, so it ships in two waves (WAVE-RUNBOOK 3, no override):
   - M40 = RED (7 changed + 21 new specs) + FIX (18 code files) + docs; merged.
-  - M44 = the other 39 specs, tests only; PR #295 @ `db181693`, two wave confirmations running.
-  - M40 + M44 equal `pkt/V1-EXPENSES-HUB-3` @ `f600c545`. Five business-switch guards are pinned only by M44's specs, so M44 must merge before any redeploy.
+  - M44 = the other 39 specs, tests only; PR #295 @ `db181693`, merged 05:28 UTC after two wave confirmations.
+  - M40 + M44 equal `pkt/V1-EXPENSES-HUB-3` @ `f600c545`. Five business-switch guards are pinned only by M44's specs (now on main).
 - M40 proof at `782275fa` against `4fc49343`: Release 0 and release0-live passed at both. Journeys H and J have no head-only failures, and the wave fixes H4 (phone), H10 and J6. The receipt sweep passed. Confirmations: two at `e2f5e444` and two merge-delta at `782275fa`.
 - **Proof-harness fix:** a leftover `next-server` from a stopped proof held port 5000. `lsof` did not show it, and Playwright's `reuseExistingServer` reused it after `.next` was rebuilt, so every live page got 404s and 500s and stuck on "Verifying session…". Before a proof: `pgrep -f next-server` must be empty and `curl 127.0.0.1:5000` must fail. The proof script now checks both. Never `pkill` a proof without also killing its `next-server`.
 - **Main-moves loop:** M85 merged during the first M40 proof (it was already queued before the merge-window request), which forced one more merge and proof. Antigravity ACKed and held after that. Ask for the window when a Claude proof starts, and release it on MERGED.
@@ -60,8 +60,8 @@ waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude re
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **P221 EXPENSES-HUB-3** | part 1 merged (M40); part 2 `wave/v1-wave-m44` @ `db181693` | PR #295 (tests only) | Two confirmations + CI, then enqueue |
-| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `386318a` | R15: correctness CONFIRMED (2 MINOR); security review (WEDGE worker) running | R16 with the MINORs, then a wave |
+| **P221 EXPENSES-HUB-3** | merged (M40 #284 + M44 #295) | done | — |
+| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `386318a` | R15 CONFIRMED by both; R16 (six small clip() items + main merge) with worker `session_017o9EBgz5HFUDMDrWzuesH1` | Two reviews of R16, then a wave |
 
 **Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
 - `session_017o9EBhDj4SCaLaHVacciEC`: EXPENSES-HUB-3 (returned; free for the next packet).
