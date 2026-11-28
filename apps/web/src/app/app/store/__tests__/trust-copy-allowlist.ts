@@ -323,14 +323,20 @@ export function clipEndViolation(text: string, kept: string): string | null {
  * ("%", "+", a closing bracket or quote, a straight quote), is kept whole. Returns why not, or null.
  */
 const KEPT_AT_END = ["%", "+", ")", "]", "}", "”", "’", "»", '"', "'"];
-export function clipKeepViolation(text: string, max: number, kept: string): string | null {
-  if (!text.startsWith(kept) || max <= 3) return null;
+/** r17 (R17-3): the tokens clipKeepViolation holds to being kept, for this cut: [] when the property does not apply. */
+export function clipKeepTokens(text: string, max: number, kept: string): { token: string; end: number }[] {
+  if (!text.startsWith(kept) || max <= 3) return [];
   const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   const room = Array.from(seg.segment(text), (s) => s.segment).slice(0, max - 3).join("");
+  const out: { token: string; end: number }[] = [];
   for (const m of text.matchAll(/\S+(?=\s)/gu)) {
     const end = (m.index ?? 0) + m[0].length;
     if (end > room.length) break;
-    if (KEPT_AT_END.some((c) => m[0].endsWith(c)) && kept.length < end) return `dropped ${JSON.stringify(m[0])}`;
+    if (KEPT_AT_END.some((c) => m[0].endsWith(c))) out.push({ token: m[0], end });
   }
-  return null;
+  return out;
+}
+export function clipKeepViolation(text: string, max: number, kept: string): string | null {
+  const lost = clipKeepTokens(text, max, kept).find((t) => kept.length < t.end);
+  return lost ? `dropped ${JSON.stringify(lost.token)}` : null;
 }
