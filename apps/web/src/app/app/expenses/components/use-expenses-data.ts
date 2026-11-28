@@ -187,6 +187,11 @@ export function useExpensesData() {
     // `refresh` is a trigger (R6 C-4): each bump makes a new loadData, so the read effect runs again.
     void refresh;
     if (businessRef.current !== businessId) return;
+    // P259 (site 8): the epoch half alone changes nothing a test can see, and nothing a user can. Past the line
+    // above, an older-epoch loadData is for the business shown, and with the current parameters (the readParams half)
+    // it would read exactly what the current loadData reads: every value the read uses is in readParams. So it is
+    // kept for the reason R5 gives (a stale closure never reads), and is covered by those two refusals; with either
+    // of them removed as well, a test fails.
     if (switchEpoch !== switchRef.current || readParams !== paramsRef.current) {
       setRefresh((n) => n + 1);
       return;
@@ -196,6 +201,9 @@ export function useExpensesData() {
     // compared with the last read started while the reset compares with the last render, and the two could part (a
     // page change batched after the reset), leaving the old filter's rows on screen and every later read refused.
     const generation = ++generationRef.current;
+    // P259 (site 9): the business half is covered by the generation half. businessRef changes only in adopt, which
+    // bumps generationRef in the same synchronous step (pinned: P259 site 2), so a reply for a business the page has
+    // left always carries an older generation. It is kept as the plain statement of the rule.
     const current = () => generation === generationRef.current && businessRef.current === businessId;
     setLoading(true);
     try {
