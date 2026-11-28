@@ -394,8 +394,10 @@ describe("P263 R2-4: a focus change costs nothing; the panel is read only when t
       </SideSheet>,
     );
     await settle();
+    // The fields are looked up first: the test's own queries are not the sheet's.
+    const fields = [3, 150, 299, 0].map((i) => screen.getByLabelText(`Row ${i}`));
     const queries = vi.spyOn(Element.prototype, "querySelectorAll");
-    for (const i of [3, 150, 299, 0]) screen.getByLabelText(`Row ${i}`).focus();
+    for (const field of fields) field.focus();
     await settle();
     const calls = queries.mock.calls.length;
     queries.mockRestore();

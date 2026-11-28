@@ -167,26 +167,22 @@ export function SideSheet({
   // removed (focus falls to <body>). While open, the control focused in the panel is remembered (FocusSnapshot); when
   // the layout flips, that control in the new panel is focused, or the panel itself when it cannot be found or take
   // focus. Focus outside the sheet is left alone.
-  const focusedRef = useRef<FocusSnapshot | null>(null);
+  // P263 R2-4: a focus change only records the focused node and the panel it is in (O(1): no scan of the panel). The
+  // snapshot is taken when the layout flips, against that panel as it was when the remount detached it (the node's own
+  // tree), so its position is never stale (R2-1 (b)) and a large panel costs nothing per tab or click.
+  const focusedRef = useRef<{ node: HTMLElement; panel: HTMLElement } | null>(null);
   useEffect(() => {
     if (!open) return;
     const onFocusIn = (e: FocusEvent) => {
       const el = e.target as HTMLElement | null;
       const panel = panelRef.current;
-      focusedRef.current = el && panel && panel.contains(el) ? snapshotOf(el, panel) : null;
+      focusedRef.current = el && panel && panel.contains(el) ? { node: el, panel } : null;
     };
     document.addEventListener("focusin", onFocusIn);
-    // P263 R2-1: a control added or removed before the focused one (a Retry that goes away) changes its position: the
-    // snapshot is taken again whenever the panel's content changes while focus stays in it.
-    const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(() => {
-      const panel = panelRef.current;
-      const el = document.activeElement as HTMLElement | null;
-      if (panel && el && panel.contains(el)) focusedRef.current = snapshotOf(el, panel);
-    });
-    if (observer && panelRef.current) observer.observe(panelRef.current, { childList: true, subtree: true, attributes: true });
     return () => {
       document.removeEventListener("focusin", onFocusIn);
-      observer?.disconnect();
+      // and no detached subtree stays referenced once the sheet is closed
+      focusedRef.current = null;
     };
   }, [open]);
   const layoutRef = useRef(isMobile);
@@ -194,9 +190,9 @@ export function SideSheet({
     if (layoutRef.current === isMobile) return;
     layoutRef.current = isMobile;
     const panel = panelRef.current;
-    const snap = focusedRef.current;
-    if (!open || !panel || !snap) return;
-    refocus(snap, panel);
+    const last = focusedRef.current;
+    if (!open || !panel || !last) return;
+    refocus(snapshotOf(last.node, last.panel), panel);
   }, [isMobile, open]);
 
   return (
