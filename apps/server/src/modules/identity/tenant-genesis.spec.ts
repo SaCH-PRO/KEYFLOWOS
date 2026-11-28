@@ -569,7 +569,7 @@ describe('FoundingMembershipService.repairDeterministic', () => {
     const client = cappedClient(twoScopes, [], ['u1', 'u2'], 500, upsert);
     const svc = new FoundingMembershipService({ client } as never);
 
-    const scoped = await (svc as any).repairDeterministic({
+    const scoped = await svc.repairDeterministic({
       apply: true,
       businessIdPrefix: 'scope_a_',
     });
