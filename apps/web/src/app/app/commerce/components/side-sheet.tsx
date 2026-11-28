@@ -152,6 +152,8 @@ export function SideSheet({
     }
     // A control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it (P263 R1-4).
     if (!panel.contains(document.activeElement)) { panel.focus(); return; }
+    // The caret is put back explicitly: in Chromium focus() keeps an input's caret, so this is equivalent there (the
+    // jsdom mutant survives for the same reason); WebKit and Firefox may move it on focus, so it is kept for them.
     if (selection && document.activeElement === last && (last instanceof HTMLInputElement || last instanceof HTMLTextAreaElement)) {
       try { last.setSelectionRange(selection[0], selection[1]); } catch { /* a type with no selection */ }
     }
