@@ -184,27 +184,30 @@ const segmenter =
 const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
 const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
 /**
- * r12: what is dropped before the "...": whitespace, sentence punctuation and an opening bracket or quote (it opens
- * nothing); a "%", a closing bracket or quote, a straight quote (it may close one) stay.
+ * r12-r13: what is dropped before the "...": whitespace, punctuation and symbols ("&", "•", "/", "*", "#", "@", "¿",
+ * "¡", "„", "<", "$", an opening bracket or quote, sentence punctuation), except what closes something or means
+ * something: a "%", a "+", closing punctuation (a closing bracket or quote: \p{Pe}, \p{Pf}), a straight quote (it
+ * may close one), and an emoji.
  */
-const SENTENCE_END = /[\s.,;:!?…—–\-([{“‘«]+$/u;
-/** Holds something other than whitespace and punctuation (a letter, a digit, a symbol, an emoji). */
-const hasContent = (t: string) => /[^\s\p{P}]/u.test(t);
+const DROPPED_AT_END = /(?:(?![%+"'\p{Pe}\p{Pf}\p{Extended_Pictographic}])[\s\p{P}\p{S}])+$/u;
+/** Holds a letter, a digit, a mark or an emoji: more than whitespace, punctuation and symbols. */
+const hasContent = (t: string) => /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}/u.test(t);
 
 /**
- * P231 r9-r12: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
+ * P231 r9-r13: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
  * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text, and never
  * "..." alone:
  * - the cut is at the last whitespace (any: a space, a tab, a no-break space, an ideographic space) inside the room
  *   left for the "..."; a word that ends exactly where the room ends is kept whole;
  * - leading whitespace is not a break (a break needs a word before it);
  * - a single word longer than the room is cut hard, then "...";
- * - trailing whitespace and sentence punctuation (. , ; : ! ? … and dashes) and an opening bracket or quote before
- *   the "..." are dropped; a "%", a closing bracket or quote, a straight quote stay ("Get 50%...", "(50% off)...");
- * - when the kept part holds no letter, digit or symbol (all whitespace or punctuation), the text is cut hard instead,
- *   from its first non-whitespace or, when that too holds none, from its first letter, digit or symbol, dropping the
- *   same trailing characters; only a text of punctuation and whitespace alone keeps punctuation before the "...",
- *   never whitespace;
+ * - trailing whitespace, punctuation and symbols before the "..." are dropped ("Shop & Book" gives "Shop...", not
+ *   "Shop &..."), but for a "%", a "+", a closing bracket or quote, a straight quote and an emoji ("Get 50%...",
+ *   "(50% off)...", "500+...");
+ * - when the kept part holds no letter, digit, mark or emoji (all whitespace, punctuation and symbols), the text is
+ *   cut hard instead, from its first non-whitespace or, when that too holds none, from its first letter, digit, mark
+ *   or emoji, dropping the same trailing characters; only a text of punctuation, symbols and whitespace alone keeps
+ *   them before the "...", never whitespace;
  * - with `max` of 3 or less there is no room for "..." and a character: the text's first `max` characters;
  * - a text of whitespace only, longer than `max`, gives "".
  */
@@ -221,7 +224,7 @@ export function clip(text: string, max: number): string {
     // the room's last character. (At i = 0 the prefix is empty, so `i > 0` and `i >= 0` agree there.)
     if (i > 0 && room.slice(0, i).join("").trim() !== "") end = i;
   }
-  const kept = room.slice(0, end).join("").replace(SENTENCE_END, "");
+  const kept = room.slice(0, end).join("").replace(DROPPED_AT_END, "");
   if (hasContent(kept)) return `${kept}...`;
   // r11-r12: the kept part is whitespace or punctuation only: a hard cut from the text's first non-whitespace, its
   // trailing whitespace and sentence punctuation dropped as above; when that leaves no letter, digit or symbol, a
@@ -230,10 +233,10 @@ export function clip(text: string, max: number): string {
   const cutAt = (i: number) => g.slice(i, i + max - 3).join("");
   const start = g.findIndex((c) => !isSpace(c));
   if (start < 0) return "";
-  let cut = cutAt(start).replace(SENTENCE_END, "");
+  let cut = cutAt(start).replace(DROPPED_AT_END, "");
   if (!hasContent(cut)) {
     const content = g.findIndex((c) => hasContent(c));
-    cut = content < 0 ? cutAt(start).replace(/\s+$/u, "") : cutAt(content).replace(SENTENCE_END, "");
+    cut = content < 0 ? cutAt(start).replace(/\s+$/u, "") : cutAt(content).replace(DROPPED_AT_END, "");
   }
   return `${cut}...`;
 }
