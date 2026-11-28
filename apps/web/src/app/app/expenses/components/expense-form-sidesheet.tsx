@@ -206,6 +206,9 @@ export const RECEIPT_UNAVAILABLE_NOTE = "This receipt can't be shown here";
 
 export const RECEIPT_STORED_NOTE = "Receipt stored — viewing isn't available yet";
 
+/** A plain calendar date, as a date input holds one (P267 R3-1). */
+const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 const ACCENT = "rgb(244,63,94)"; // rose-500
 const ACCENT_BG = "rgba(244,63,94,0.15)";
 const ACCENT_BORDER = "rgba(244,63,94,0.3)";
@@ -251,6 +254,7 @@ export function ExpenseFormSideSheet({
   const clientFieldId = useId();
   const serviceFieldId = useId();
   const notesId = useId();
+  const submitHintId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
   const { uploadToDrive } = useDriveUpload();
   const selectedFileRef = useRef<File | null>(prefill?.receiptFile ?? null);
@@ -344,7 +348,9 @@ export function ExpenseFormSideSheet({
 
   const submit = async () => {
     // P267 R2-1: Date is marked required, so it is required here too (an empty date was saved as today by the server).
-    if (!formData.description.trim() || !formData.amount || !formData.date) return;
+    // R3-3: defence in depth. This is unreachable while the button is disabled for the same fields (the only path
+    // here), so no test reaches it; it stays so that a future caller of submit() cannot send a missing field.
+    if (missingRequired.length > 0) return;
     // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
     // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
     if (refusedStart(businessId, isCurrentBusiness)) return;
@@ -377,7 +383,7 @@ export function ExpenseFormSideSheet({
         const billBody: CreateBillBody = {
           description: payload.description!,
           amount: payload.amount!,
-          date: formData.date || undefined,
+          date: formData.date,
           dueDate: formData.dueDate || undefined,
           vendor: payload.vendor ?? undefined,
           notes: payload.notes ?? undefined,
@@ -567,7 +573,8 @@ export function ExpenseFormSideSheet({
           description: inv.lineItems?.[0]?.description || prev.description,
           amount: String(inv.total || inv.subtotal || prev.amount),
           vendor: inv.contactName || prev.vendor,
-          date: inv.issueDate ? inv.issueDate.split("T")[0] : prev.date,
+          // P267 R3-1: only a plain date is taken; "12/03/2026" would leave the date input looking empty while held.
+          date: inv.issueDate && PLAIN_DATE.test(inv.issueDate.split("T")[0]) ? inv.issueDate.split("T")[0] : prev.date,
         }));
         toast.success(`Receipt extracted (${Math.round((data.confidence || 0) * 100)}% confidence)`);
       } else {
@@ -586,6 +593,13 @@ export function ExpenseFormSideSheet({
   const selectedCategory = categories.find((c) => c.id === formData.categoryId);
   const hasLinking = projects.length > 0 || contacts.length > 0 || services.length > 0;
   const amountNum = parseFloat(formData.amount || "0");
+  // P267 R2-1/R3-2: the required fields left empty, in the form's order. Date counts as filled only as a plain
+  // YYYY-MM-DD (R3-1: the pattern the receipt's date is checked against).
+  const missingRequired = [
+    !formData.description.trim() && "Description",
+    !formData.amount && "Amount",
+    !PLAIN_DATE.test(formData.date) && "Date",
+  ].filter((f): f is string => Boolean(f));
 
   return (
     <>
@@ -615,6 +629,11 @@ export function ExpenseFormSideSheet({
               </span>
             </div>
             <div className="flex items-center gap-2">
+              {missingRequired.length > 0 && (
+                <span id={submitHintId} className="text-[10px] text-muted-foreground text-right">
+                  Still needed: {missingRequired.join(", ")}
+                </span>
+              )}
               <button
                 onClick={closeUnlessSaving}
                 disabled={submitting}
@@ -624,7 +643,8 @@ export function ExpenseFormSideSheet({
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={submitting || !formData.description.trim() || !formData.amount || !formData.date}
+                disabled={submitting || missingRequired.length > 0}
+                aria-describedby={missingRequired.length > 0 ? submitHintId : undefined}
                 aria-busy={submitting || undefined}
                 className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50"
                 style={{
@@ -659,6 +679,9 @@ export function ExpenseFormSideSheet({
               </p>
             </div>
           )}
+
+          {/* P267 R3-2: what the star means, said once (assistive technology reads aria-required instead). */}
+          <p className="text-[10px] text-muted-foreground" aria-hidden="true">* = required</p>
 
           {/* Description */}
           <div>
