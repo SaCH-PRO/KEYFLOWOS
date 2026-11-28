@@ -16,7 +16,7 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
+import { CREDITED_STATUSES, InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
 import { visibleVatNumber } from './invoice-email.types';
 import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
@@ -1226,29 +1226,28 @@ export class CommerceService {
     return invoice;
   }
 
-  private static readonly CREDITED_INVOICE_STATUSES: ReadonlySet<string> = new Set([
-    'PARTIALLY_CREDITED',
-    'FULLY_CREDITED',
-  ]);
-
   /**
-   * FU-LIST-CREDIT-AWARE-REMAINING (Journey H, D-256): single credit-aware
-   * money summary shared by `listInvoices` and `getInvoiceForBusiness`.
-   * Nets own-tenant payments (minus refunds) and own-tenant APPLIED credit
-   * notes in cents, and clamps VOID and FULLY_CREDITED remaining to 0.
+   * FU-LIST-CREDIT-AWARE-REMAINING (Journey H, D-249, D-250, D-256): single
+   * credit-aware money summary shared by `listInvoices` and
+   * `getInvoiceForBusiness`. Nets own-tenant payments (minus refunds) and
+   * own-tenant APPLIED credit notes in cents, caps remaining at
+   * `owedCap = max(0, total - credited)` (D-250 orphan-refund bound, matching
+   * `readInvoiceMoney`), and clamps PAID, VOID, and FULLY_CREDITED remaining
+   * to 0.
    */
   private static computeInvoiceMoneySummary(
     invoice: { total: unknown; status: string; currency?: string | null; payments: readonly Payment[] },
     credited: number,
   ) {
-    const balance = creditAwareBalance(
-      balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency),
-      credited,
-    );
+    const total = Number(invoice.total ?? 0) || 0;
+    const rowsBalance = balanceOfStoredRows(total, invoice.payments, invoice.currency);
+    const balance = creditAwareBalance(rowsBalance, credited);
+    const owedCap = Math.max(0, toCents(rowsBalance.total) - toCents(balance.credited));
+    const cappedRemaining = fromCents(Math.min(toCents(balance.remaining), owedCap));
     const remaining =
-      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED'
+      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED' || invoice.status === 'PAID'
         ? 0
-        : balance.remaining;
+        : cappedRemaining;
     return {
       paidAmount: balance.net,
       creditedAmount: balance.credited,
@@ -1278,7 +1277,7 @@ export class CommerceService {
     ]);
 
     const creditedIds = rows
-      .filter((r) => CommerceService.CREDITED_INVOICE_STATUSES.has(r.status))
+      .filter((r) => CREDITED_STATUSES.has(r.status as InvoiceStatus))
       .map((r) => r.id);
     const creditedByInvoice = new Map<string, number>();
     if (creditedIds.length > 0) {
