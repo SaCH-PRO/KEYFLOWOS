@@ -665,11 +665,8 @@ describe("KO-04 execute_custom_logic: unconditionally removed in v1 (KEY-TOOL-AL
         name: 'execute_custom_logic',
         args: { code: `return await api.callTool('procurement_create_request', { userPrompt: '${P}via custom logic' });` },
       });
-      expect(body.toolResults, `${actor}: ${JSON.stringify(body)}`).toHaveLength(1);
-      const r = body.toolResults[0];
-      expect(r.name, actor).toBe('execute_custom_logic');
-      expect(r.success, `${actor}: ${JSON.stringify(r)}`).toBe(false);
-      expect(String(r.error ?? '').toLowerCase(), actor).toContain('not available in this version');
+      expect(body.toolResults, `${actor}: must not execute removed tool: ${JSON.stringify(body)}`).toBeUndefined();
+      expect(String(body.reply ?? '').toLowerCase(), actor).toContain('not available in this version');
     }
     expect(await requestCount()).toBe(beforeReqs);
     expect(await itemRow(item.id)).toBe(beforeItem);
@@ -683,12 +680,12 @@ describe("KO-04 execute_custom_logic: unconditionally removed in v1 (KEY-TOOL-AL
       name: 'execute_custom_logic',
       args: { code: `return await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });` },
     });
-    const results = chunks.find((c) => c.type === 'tool_results');
-    expect(results, JSON.stringify(chunks).slice(0, 400)).toBeTruthy();
-    expect(results.toolResults).toHaveLength(1);
-    expect(results.toolResults[0].name).toBe('execute_custom_logic');
-    expect(results.toolResults[0].success).toBe(false);
-    expect(String(results.toolResults[0].error ?? results.toolResults[0].result?.error ?? '').toLowerCase()).toContain('not available in this version');
+    expect(chunks.find((c) => c.type === 'tool_results'), JSON.stringify(chunks).slice(0, 400)).toBeUndefined();
+    const text = chunks
+      .filter((c) => c.type === 'content_delta')
+      .map((c) => String(c.content ?? ''))
+      .join('');
+    expect(text.toLowerCase(), JSON.stringify(chunks).slice(0, 400)).toContain('not available in this version');
     expect(await itemRow(item.id)).toBe(before);
   });
 });
