@@ -17,12 +17,11 @@ import {
   TrendingUp,
   Sparkles,
   Lock,
-  ShieldCheck,
   Globe,
-  Server,
   Quote,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useServedOverHttps } from "@/lib/use-served-over-https";
 
 const MODULES = [
   { icon: Bot, title: "AI Command Center", desc: "Voice-powered AI assistant that manages your daily operations, creates tasks, and provides real-time business intelligence.", color: "from-orange-500/20 to-amber-500/20", iconColor: "text-orange-400" },
@@ -77,6 +76,7 @@ const fadeUp = { hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0 } };
 const stagger = { visible: { transition: { staggerChildren: 0.08 } } };
 
 export default function Home() {
+  const servedOverHttps = useServedOverHttps();
   const typedWord = useTypingEffect(["autopilot", "confidence", "intelligence", "ease"], 80, 2200);
 
   return (
@@ -172,11 +172,11 @@ export default function Home() {
           initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger}
           className="flex flex-wrap justify-center gap-3 sm:gap-4 mb-24"
         >
+          {/* P238 (D-303): only claims the product can show. "SSL Encrypted" only when served over https; no "Secure
+              Payments" and no "99.9% Uptime" (nothing verifies or measures them). */}
           {[
-            { icon: Lock, label: "SSL Encrypted" },
-            { icon: ShieldCheck, label: "Secure Payments" },
+            ...(servedOverHttps ? [{ icon: Lock, label: "SSL Encrypted" }] : []),
             { icon: Globe, label: "Caribbean-Native" },
-            { icon: Server, label: "99.9% Uptime" },
           ].map(({ icon: Icon, label }) => (
             <motion.div key={label} variants={fadeUp} transition={{ duration: 0.3 }}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/[0.06] bg-white/[0.02] text-xs sm:text-sm text-[hsl(30_10%_55%)]">
