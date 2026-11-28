@@ -41,8 +41,8 @@ const ID = {
   biz: `${P}biz`,
   biz2: `${P}biz2`,
 };
-/** Figures only the money fields of this fixture carry. */
-const FIGURES = /1234\.5|87\.65|0\.137|13\.7/;
+/** Figures only the money fields of this fixture carry (73.1 cannot occur in ISO-8601 timestamps). */
+const FIGURES = /1234\.5|87\.65|0\.731|73\.1/;
 const MONEY_CHANNEL_FIELDS = ['monthlyBudget', 'targetCac', 'targetConversionRate'];
 const MONEY_SNAPSHOT_FIELDS = [
   'blendedCac',
@@ -249,7 +249,7 @@ beforeAll(async () => {
     monthlyBudget: 1234.5,
     currency: 'TTD',
     targetCac: 87.65,
-    targetConversionRate: 0.137,
+    targetConversionRate: 0.731,
   } as any);
   await channels.create(ID.biz, {
     key: 'seo',
@@ -356,6 +356,7 @@ describe('FU-GENOME-SURFACES-REVENUE round 2: marketing-growth money only to rev
       const ads = list.body.find((c: any) => c.key === 'ads');
       expect(ads.monthlyBudget).toBe(1234.5);
       expect(ads.targetCac).toBe(87.65);
+      expect(ads.targetConversionRate).toBe(0.731);
       expect(ads.withheldForRevenue).toBeUndefined();
       const snapshot = await get(mg('/snapshot'), reader);
       expect(typeof snapshot.body.blendedCac).toBe('number');
