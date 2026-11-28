@@ -28,41 +28,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-
-export type ApprovalModelName =
-  | 'KeyActionProposal'
-  | 'AiApprovalItem'
-  | 'ApprovalRequest'
-  | 'ApprovalStep'
-  | 'AiApprovalRequest'
-  | 'IdempotencyKey';
-
-export type ApprovalWriterKind =
-  | 'KEY action proposal'
-  | 'KEY approval queue'
-  | 'human workflow approval'
-  | 'Flow confirmation'
-  | 'dormant';
-
-export interface ApprovalModelWriterEntry {
-  model: ApprovalModelName;
-  file: string;
-  method: string;
-  kind: ApprovalWriterKind;
-  gatedEffect: string;
-  executionSite: string;
-  clearerScope: string;
-  manualPath: string;
-  /**
-   * True when an effect can run without the approval row this writer creates or
-   * when this writer commits/clears without enforcing prior approval.
-   */
-  effectRunsWithoutApproval: boolean;
-  bypassNote?: string;
-}
-
-// RED baseline: empty registry — must fail against live writers on main until populated.
-const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [];
+import {
+  APPROVAL_MODEL_WRITERS,
+  type ApprovalModelName,
+  type ApprovalModelWriterEntry,
+} from './approval-model-registry';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
@@ -122,6 +92,8 @@ interface DiscoveredWriter {
   line: number;
 }
 
+const SELF_REGISTRY_REL = 'apps/server/src/core/config/approval-model-registry.ts';
+
 function walkServerTsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
@@ -131,7 +103,8 @@ function walkServerTsFiles(dir: string, out: string[] = []): string[] {
       entry.name.endsWith('.ts') &&
       !entry.name.endsWith('.spec.ts') &&
       !entry.name.endsWith('.test.ts') &&
-      !entry.name.endsWith('.d.ts')
+      !entry.name.endsWith('.d.ts') &&
+      path.relative(REPO_ROOT, full).replace(/\\/g, '/') !== SELF_REGISTRY_REL
     ) {
       out.push(full);
     }
@@ -161,6 +134,11 @@ function staticStringValue(node: ts.Expression): string | null {
   const u = unwrapExpr(node);
   if (ts.isStringLiteral(u) || ts.isNoSubstitutionTemplateLiteral(u)) {
     return u.text;
+  }
+  if (ts.isBinaryExpression(u) && u.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticStringValue(u.left);
+    const right = staticStringValue(u.right);
+    if (left !== null && right !== null) return left + right;
   }
   return null;
 }
@@ -226,37 +204,6 @@ function enclosingMethodNode(node: ts.Node): ts.Node | null {
   return fallback;
 }
 
-function stripTsComments(sourceText: string, filePath: string): string {
-  const sf = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const ranges: Array<{ pos: number; end: number }> = [];
-  function visit(node: ts.Node) {
-    if (ts.isJSDoc(node)) return;
-    if (node.getChildCount(sf) === 0) {
-      const start = node.getStart(sf, false);
-      if (node.pos < start) {
-        const trivia = sourceText.slice(node.pos, start);
-        if (trivia.includes('//') || trivia.includes('/*')) {
-          ranges.push({ pos: node.pos, end: start });
-        }
-      }
-      return;
-    }
-    ts.forEachChild(node, visit);
-  }
-  visit(sf);
-  if (ranges.length === 0) return sourceText;
-  let out = '';
-  let cursor = 0;
-  for (const r of ranges) {
-    if (r.pos < cursor) continue;
-    out += sourceText.slice(cursor, r.pos);
-    out += sourceText.slice(r.pos, r.end).replace(/[^\n]/g, ' ');
-    cursor = r.end;
-  }
-  out += sourceText.slice(cursor);
-  return out;
-}
-
 function stripSqlComments(sql: string): string {
   return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
 }
@@ -304,10 +251,31 @@ function collectNestedStepWriteOps(expr: ts.Expression, sf: ts.SourceFile): stri
   return ops;
 }
 
-function methodLooksLikeFlowConfirmation(node: ts.Node, sf: ts.SourceFile): boolean {
+function methodLooksLikeFlowConfirmation(node: ts.Node): boolean {
   const owner = enclosingMethodNode(node);
-  const text = owner ? stripTsComments(owner.getText(sf), sf.fileName) : '';
-  return FLOW_CONFIRM_IDENTIFIERS.some((needle) => text.includes(needle));
+  if (!owner) return false;
+  let found = false;
+  function scanTokens(n: ts.Node) {
+    if (found || ts.isJSDoc(n)) return;
+    if (ts.isIdentifier(n) && FLOW_CONFIRM_IDENTIFIERS.includes(n.text)) {
+      found = true;
+      return;
+    }
+    if (
+      (ts.isStringLiteral(n) ||
+        ts.isNoSubstitutionTemplateLiteral(n) ||
+        ts.isTemplateHead(n) ||
+        ts.isTemplateMiddle(n) ||
+        ts.isTemplateTail(n)) &&
+      FLOW_CONFIRM_IDENTIFIERS.some((needle) => n.text.includes(needle))
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, scanTokens);
+  }
+  scanTokens(owner);
+  return found;
 }
 
 function scanSourceForApprovalWriters(sourceText: string, relFile: string): {
@@ -392,7 +360,7 @@ function scanSourceForApprovalWriters(sourceText: string, relFile: string): {
               record('ApprovalStep', node, nestedOp);
             }
           }
-        } else if (delegate === 'idempotencyKey' && methodLooksLikeFlowConfirmation(node, sf)) {
+        } else if (delegate === 'idempotencyKey' && methodLooksLikeFlowConfirmation(node)) {
           record('IdempotencyKey', node, callee.prop);
         }
       }
