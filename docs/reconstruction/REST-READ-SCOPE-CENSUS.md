@@ -46,16 +46,16 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 
 ## Summary
 
-- Total `@Get` routes scanned in `apps/server/src`: **999**
-- Member `@Get` routes (with `AuthGuard`, `BusinessGuard`, or `OptionalAuthGuard`): **920**
+- Total `@Get` routes scanned in `apps/server/src`: **1000**
+- Member `@Get` routes (with `AuthGuard`, `BusinessGuard`, or `OptionalAuthGuard`): **921**
 - Enforced-scope member `@Get` routes (`@RequireModuleScope` + `ModuleScopeGuard`): **318**
-- Membership-only `@Get` routes (unenforced population): **602**
-- Total rows pinned in this census: **608** (602 membership-only + 6 pinned enforced `applied`/`secret-read`)
+- Membership-only `@Get` routes (unenforced population): **603**
+- Total rows pinned in this census: **609** (603 membership-only + 6 pinned enforced `applied`/`secret-read`)
 
 | Disposition | Count |
 | --- | ---: |
 | applied | 3 |
-| exempt-admin | 26 |
+| exempt-admin | 27 |
 | exempt-check | 75 |
 | exempt-guard | 6 |
 | exempt-membership | 1 |
@@ -148,6 +148,12 @@ Pinned by `apps/server/src/core/config/rest-read-scope-census.spec.ts` (`RCEN-01
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `AdminEventController.listEvents` | GET | `/api/admin/events` | exempt-admin | guard:AdminGuard (platform super-admin read, not a business member route) |
+
+### `modules/admin-platform/admin-ops-console.controller.ts` (1)
+
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
+| `AdminOpsConsoleController.getConsole` | GET | `/api/admin/ops/console` | exempt-admin | guard:AdminGuard (platform super-admin read-only ops console, D-237 / D-291, not a business member route) |
 
 ### `modules/admin-platform/admin-user.controller.ts` (1)
 
