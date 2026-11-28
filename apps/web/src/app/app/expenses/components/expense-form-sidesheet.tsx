@@ -2,7 +2,7 @@
 
 import { ReadFailureNote } from "./read-failure-note";
 import type { BlockRead } from "./use-expenses-data";
-import React, { useState, useRef, useId } from "react";
+import React, { useState, useRef, useId, useCallback } from "react";
 import {
   X,
   Upload,
@@ -484,10 +484,11 @@ export function ExpenseFormSideSheet({
   // P256: while a save is submitting the sheet stays open (as Pay does): Cancel is disabled, and Escape, the overlay
   // and the header's Close do nothing. A sheet closed mid-save and reopened on the same read was then closed by the
   // first save's late reply, losing what had been typed. The save's own success still closes it (submit calls onClose).
-  const closeUnlessSaving = () => {
+  // P257 R1-1: memoised (belt-and-braces; the SideSheet reads onClose through a ref).
+  const closeUnlessSaving = useCallback(() => {
     if (submittingRef.current) return;
     onClose();
-  };
+  }, [onClose]);
 
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -577,6 +578,9 @@ export function ExpenseFormSideSheet({
       <SideSheet
         open={true}
         onClose={closeUnlessSaving}
+        // P257: the header Close shows it is held while the save is out; closeUnlessSaving stays as the guard for an
+        // Escape or click in the same tick as the submit, before this render lands.
+        closeDisabled={submitting}
         title={editingExpense ? "Edit Expense" : isBill ? "New Bill" : "New Expense"}
         subtitle={editingExpense ? `Editing ${editingExpense.description}` : isBill ? "Record a bill to pay later" : "Record a business expense"}
         width="md"
