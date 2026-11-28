@@ -4,14 +4,16 @@
  * Read-only exact-match inventory of every entry point in `apps/server/src`
  * that starts a KEY cognitive turn (`FlowOrchestratorService.chat`/`streamChat`,
  * `KeyCortexConsciousnessService.processConsciously`,
- * `KeyCortexReasoningService.processQuery`,
- * `KeyCortexQueryPipelineService.processQuery`) or passes `tools` / `toolChoice`
- * to a model/realtime bridge call.
+ * `KeyCortexReasoningService.processQuery`/`streamQuery`/`streamReasoning`,
+ * `KeyCortexQueryPipelineService.processQuery`/`streamQuery`) or passes
+ * `tools` / `toolChoice` / `tool_choice` to a model or realtime bridge call.
  *
  * Enforced by `cognitive-runtime-census.spec.ts`:
- *  - Any unregistered cognitive entry or model tool-offering call fails CI.
+ *  - Any unregistered cognitive entry or model/realtime tool-offering call fails CI.
  *  - Any stale entry whose call site was removed fails CI.
- *  - Every `processConsciously` caller MUST be `owner-only` (D-208, D-129).
+ *  - Every `processConsciously` caller MUST be `owner-only` (D-208, D-129),
+ *    and `KeyCortexConsciousnessService.processConsciously` MUST invoke
+ *    `mayReadFullKeyContext(...)` in an early-return guard before Step 1.
  *
  * D-17 keeps both Flow and Cortex pipelines in v1; this first slice converges
  * nothing and makes zero runtime or schema changes.
@@ -25,11 +27,16 @@ export type CognitiveRuntimeId =
   | 'intent-parser'
   | 'phone-voice-realtime';
 
-export type CognitiveReachability = 'member' | 'memberless' | 'owner-only';
+export type CognitiveReachability =
+  | 'member'
+  | 'member-and-memberless'
+  | 'memberless'
+  | 'owner-only';
 
 export type CognitiveAuthorityPath =
   | 'Flow confirmation boundary'
   | 'Cortex autonomy orchestrator'
+  | 'PhoneVoice dispatch + memberless allowlist + KeyActionBoundary'
   | 'none (read-only)';
 
 export type CognitiveEntrySignal =
@@ -37,6 +44,8 @@ export type CognitiveEntrySignal =
   | 'flow-stream-chat'
   | 'processConsciously'
   | 'processQuery'
+  | 'streamQuery'
+  | 'streamReasoning'
   | 'model-tools-call';
 
 export interface CognitiveRuntimeEntry {
@@ -112,11 +121,11 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     file: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
     method: 'chat',
     signal: 'model-tools-call',
-    reachableBy: 'member',
+    reachableBy: 'member-and-memberless',
     toolsOffered: true,
     authorityPath: 'Flow confirmation boundary',
     notes:
-      'ModelGatewayService.complete call offering selected FLOW_TOOLS with toolChoice auto (omitted on reflex tier) under Flow confirmation & member-scope boundary.',
+      'AiUsageService.trackAndComplete (wrapping ModelGatewayService) offering selected FLOW_TOOLS with toolChoice auto (omitted on reflex tier); reached by both member HTTP callers and memberless bridges (staff-chat-bridge, chatwoot), bounded by memberless-key-tools.ts / jobRoleEnvelope and Flow confirmation boundary.',
   },
   {
     runtimeId: 'flow-orchestrator',
@@ -127,7 +136,7 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     toolsOffered: true,
     authorityPath: 'Flow confirmation boundary',
     notes:
-      'ModelGatewayService.streamComplete call offering selected FLOW_TOOLS with toolChoice auto (omitted on reflex tier) under Flow confirmation & member-scope boundary.',
+      'AiUsageService.trackAndStream (wrapping ModelGatewayService) offering selected FLOW_TOOLS with toolChoice auto (omitted on reflex tier) under Flow confirmation & member-scope boundary.',
   },
   {
     runtimeId: 'cortex-consciousness',
@@ -136,9 +145,9 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     signal: 'processConsciously',
     reachableBy: 'owner-only',
     toolsOffered: false,
-    authorityPath: 'Cortex autonomy orchestrator',
+    authorityPath: 'none (read-only)',
     notes:
-      'Deliberative escalation from Flow into KeyCortexConsciousnessService.processConsciously; gated owner-only via mayReadFullKeyContext (D-129/D-140/D-208), falling back to member viewer fast path when withheld.',
+      'Deliberative escalation from Flow into KeyCortexConsciousnessService.processConsciously (proposal-only, no executor); gated owner-only via STEP 0 mayReadFullKeyContext (D-129/D-140/D-208), falling back to member fast path when withheld.',
   },
 
   // ── IntentParserService tool-forced structured extraction ──
@@ -151,7 +160,7 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     toolsOffered: true,
     authorityPath: 'none (read-only)',
     notes:
-      'ModelGatewayService.complete forcing toolChoice parse_intent purely for structured JSON extraction; executes no tool side effects.',
+      'AiUsageService.trackAndComplete (wrapping ModelGatewayService) forcing toolChoice parse_intent purely for structured JSON extraction; executes no tool side effects.',
   },
 
   // ── KeyCortexConsciousnessService & KeyCortexReasoningService callers ──
@@ -162,9 +171,9 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     signal: 'processConsciously',
     reachableBy: 'owner-only',
     toolsOffered: false,
-    authorityPath: 'Cortex autonomy orchestrator',
+    authorityPath: 'none (read-only)',
     notes:
-      'POST /api/v1/cortex/conscious/chat (ai:write) invoking KeyCortexConsciousnessService.processConsciously; gated owner-only via mayReadFullKeyContext (D-129/D-208).',
+      'POST /api/v1/cortex/conscious/chat (AuthGuard, BusinessGuard, ModuleScopeGuard ai:write) invoking KeyCortexConsciousnessService.processConsciously (proposal-only, no executor); gated owner-only via STEP 0 mayReadFullKeyContext (D-129/D-208).',
   },
   {
     runtimeId: 'cortex-consciousness',
@@ -173,9 +182,9 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     signal: 'processConsciously',
     reachableBy: 'owner-only',
     toolsOffered: false,
-    authorityPath: 'Cortex autonomy orchestrator',
+    authorityPath: 'none (read-only)',
     notes:
-      'SSE /api/v1/cortex/conscious/stream invoking KeyCortexConsciousnessService.processConsciously; gated owner-only via mayReadFullKeyContext (D-129/D-208).',
+      'SSE /api/v1/cortex/conscious/stream (class-level AuthGuard, BusinessGuard — no route ModuleScopeGuard) invoking KeyCortexConsciousnessService.processConsciously (proposal-only, no executor); gated owner-only via STEP 0 mayReadFullKeyContext (D-129/D-208).',
   },
   {
     runtimeId: 'cortex-reasoning',
@@ -189,6 +198,39 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
       'POST /api/v1/cortex/chat — authenticated member turn delegating to KeyCortexReasoningService.processQuery with request actorId.',
   },
   {
+    runtimeId: 'cortex-reasoning',
+    file: 'apps/server/src/modules/key-cortex/key-cortex.controller.ts',
+    method: 'streamChat',
+    signal: 'streamQuery',
+    reachableBy: 'member',
+    toolsOffered: true,
+    authorityPath: 'Cortex autonomy orchestrator',
+    notes:
+      'GET /api/v1/cortex/chat/stream (SSE) — authenticated member streaming turn delegating to KeyCortexReasoningService.streamQuery with request actorId.',
+  },
+  {
+    runtimeId: 'cortex-reasoning',
+    file: 'apps/server/src/modules/key-cortex/key-cortex.controller.ts',
+    method: 'streamEvents',
+    signal: 'streamQuery',
+    reachableBy: 'member',
+    toolsOffered: true,
+    authorityPath: 'Cortex autonomy orchestrator',
+    notes:
+      'GET /api/v1/cortex/stream (SSE) — authenticated member turn invoking KeyCortexReasoningService.streamQuery when query message is supplied.',
+  },
+  {
+    runtimeId: 'cortex-reasoning',
+    file: 'apps/server/src/modules/key-cortex/key-cortex.gateway.ts',
+    method: 'handleChat',
+    signal: 'streamReasoning',
+    reachableBy: 'member',
+    toolsOffered: true,
+    authorityPath: 'Cortex autonomy orchestrator',
+    notes:
+      'WebSocket @SubscribeMessage("key:chat") — authenticated member socket turn invoking KeyCortexReasoningService.streamReasoning.',
+  },
+  {
     runtimeId: 'cortex-query-pipeline',
     file: 'apps/server/src/modules/key-cortex/key-cortex-reasoning.service.ts',
     method: 'processQuery',
@@ -198,6 +240,17 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     authorityPath: 'Cortex autonomy orchestrator',
     notes:
       'KeyCortexReasoningService.processQuery delegating turn execution to KeyCortexQueryPipelineService.processQuery.',
+  },
+  {
+    runtimeId: 'cortex-query-pipeline',
+    file: 'apps/server/src/modules/key-cortex/key-cortex-reasoning.service.ts',
+    method: 'streamQuery',
+    signal: 'streamQuery',
+    reachableBy: 'member',
+    toolsOffered: true,
+    authorityPath: 'Cortex autonomy orchestrator',
+    notes:
+      'KeyCortexReasoningService.streamQuery delegating streaming turn execution to KeyCortexQueryPipelineService.streamQuery.',
   },
   {
     runtimeId: 'cortex-reasoning',
@@ -241,8 +294,19 @@ export const COGNITIVE_RUNTIME_ENTRIES: readonly CognitiveRuntimeEntry[] = [
     signal: 'model-tools-call',
     reachableBy: 'memberless',
     toolsOffered: true,
-    authorityPath: 'Flow confirmation boundary',
+    authorityPath: 'PhoneVoice dispatch + memberless allowlist + KeyActionBoundary',
     notes:
-      'Telephony WebSocket bridge offering RECEPTIONIST_TOOLS (calendar_check_conflicts, bookings_create_booking, helpdesk_create_ticket) to OpenAI Realtime and dispatching via FlowOrchestratorService.executeToolByName on PHONE_SURFACE.',
+      'Telephony WebSocket bridge offering RECEPTIONIST_TOOLS via RealtimeBridgeService.openSession; executeVoiceTool calls FlowOrchestratorService.executeToolByName (bypassing executeTool confirmation binding) and enforces PHONE_WRITES_OUTSIDE_THE_BOUNDARY, memberlessKeyToolRefusal, and KeyActionBoundary PHONE_STREAM refusal (note: calendar_check_conflicts omits { surface: PHONE_SURFACE }).',
+  },
+  {
+    runtimeId: 'phone-voice-realtime',
+    file: 'apps/server/src/modules/phone-voice/realtime-bridge.service.ts',
+    method: 'openSession',
+    signal: 'model-tools-call',
+    reachableBy: 'memberless',
+    toolsOffered: true,
+    authorityPath: 'PhoneVoice dispatch + memberless allowlist + KeyActionBoundary',
+    notes:
+      'OpenAI Realtime WebSocket transport sending session.update with nested session.tools and session.tool_choice="auto" on behalf of PhoneVoiceService.handleClient.',
   },
 ];
