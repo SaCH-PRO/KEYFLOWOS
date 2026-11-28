@@ -12,6 +12,7 @@ import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrat
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
+import { v1ToolRefusalReasonForInvocation } from './v1-tool-allowlist';
 
 export interface PlanExecutionResult {
   planId: string;
@@ -161,7 +162,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
 
       // Governance pre-check
       const toolName = step.toolName ?? step.action;
-      const decision = await this.evaluateStep(businessId, toolName);
+      const decision = await this.evaluateStep(businessId, toolName, step.inputPayload);
       if (!decision.allowed) {
         await this.prisma.client.aiPlanStep.update({
           where: { id: step.id },
@@ -289,7 +290,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
 
       // Dependency just resolved — enqueue this step now
       const toolName = step.toolName ?? step.action;
-      const decision = await this.evaluateStep(businessId, toolName);
+      const decision = await this.evaluateStep(businessId, toolName, step.inputPayload);
       if (!decision.allowed) {
         await this.prisma.client.aiPlanStep.update({
           where: { id: step.id },
@@ -337,10 +338,26 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
   private async evaluateStep(
     businessId: string,
     toolName: string,
+    inputPayload?: unknown,
   ): Promise<{ allowed: boolean; reason: string; requiresFormalApproval: boolean; requiresAdminApproval: boolean }> {
+    const v1Refusal = v1ToolRefusalReasonForInvocation(toolName, inputPayload);
+    if (v1Refusal) {
+      return {
+        allowed: false,
+        reason: v1Refusal,
+        requiresFormalApproval: false,
+        requiresAdminApproval: false,
+      };
+    }
     if (this.autonomyOrchestrator) {
       try {
-        const verdict = await this.autonomyOrchestrator.evaluateAction(businessId, toolName);
+        const verdict = await this.autonomyOrchestrator.evaluateAction(
+          businessId,
+          toolName,
+          inputPayload && typeof inputPayload === 'object' && !Array.isArray(inputPayload)
+            ? (inputPayload as Record<string, unknown>)
+            : undefined,
+        );
         return {
           allowed: verdict.allowed,
           reason: verdict.reason,

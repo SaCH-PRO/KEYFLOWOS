@@ -33,6 +33,7 @@ import { KeyCortexCompensationService } from './key-cortex-compensation.service'
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
+import { isToolAllowedInV1, v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {
@@ -479,6 +480,11 @@ export class KeyCortexToolRegistryService {
     ctx: KeyCortexToolContext,
     input: Record<string, unknown> = {},
   ): Promise<KeyCortexToolResult> {
+    const v1Refusal = v1ToolRefusalReasonForInvocation(name, input);
+    if (v1Refusal) {
+      return { success: false, error: v1Refusal };
+    }
+
     const tool = this.tools.get(name);
     if (!tool) {
       return { success: false, error: `Tool "${name}" not found in canonical registry` };
@@ -766,7 +772,7 @@ export class KeyCortexToolRegistryService {
   // ========================================================================
 
   buildGatewayDefinitions(filter?: { module?: string; tags?: string[] }): GatewayToolDefinition[] {
-    const tools = this.listTools(filter);
+    const tools = this.listTools(filter).filter((t) => isToolAllowedInV1(t.name));
     return tools.map((t) => ({
       type: 'function',
       function: {
