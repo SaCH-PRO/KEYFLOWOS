@@ -60,61 +60,61 @@ export const REVIEWED_NON_READ_FAMILY_READ_TOOLS: readonly ReviewedReadToolCitat
   {
     tool: 'crm_search_contacts',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 4715,
+    handlerLine: 4809,
     reason: 'Pure prisma.client.contact.findMany with read-only contactReadAccess visibility clause',
   },
   {
     tool: 'crm_list_contacts',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 4739,
+    handlerLine: 4833,
     reason: 'Pure prisma.client.contact.findMany with read-only contactReadAccess visibility clause',
   },
   {
     tool: 'commerce_list_invoices',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5278,
+    handlerLine: 5372,
     reason: 'Pure prisma.client.invoice.findMany with ownRelations tenant filter',
   },
   {
     tool: 'bookings_list_bookings',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5371,
+    handlerLine: 5465,
     reason: 'Pure prisma.client.booking.findMany with ownRelations and contactVisibilityFilter',
   },
   {
     tool: 'bookings_list_services',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5396,
+    handlerLine: 5490,
     reason: 'Pure prisma.client.service.findMany read query',
   },
   {
     tool: 'bookings_list_waitlist',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5500,
+    handlerLine: 5594,
     reason: 'Delegates to BookingWaitlistService.listWaitlist (pure findMany + count) with contactVisibilityFilter',
   },
   {
     tool: 'marketing_list_campaigns',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5542,
+    handlerLine: 5636,
     reason: 'Pure prisma.client.emailCampaign.findMany read query',
   },
   {
     tool: 'social_list_posts',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5619,
+    handlerLine: 5713,
     reason: 'Pure prisma.client.socialPost.findMany read query',
   },
   {
     tool: 'automations_list_playbooks',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 5647,
+    handlerLine: 5741,
     reason: 'Pure prisma.client.automation.findMany read query',
   },
   {
     tool: 'segment_contacts',
     handlerFile: 'apps/server/src/modules/ai/flow-orchestrator.service.ts',
-    handlerLine: 6275,
+    handlerLine: 6369,
     reason: 'Pure prisma.client.contact.findMany and optional invoice.groupBy read query',
   },
 ];
@@ -7888,7 +7888,11 @@ function collectStrictViolations(
     } else {
       collectStrictViolations(items as Record<string, unknown>, `${pathPrefix}.items`, out);
     }
-  } else if (!type && !node.anyOf && !node.enum) {
+  } else if (Array.isArray(node.anyOf)) {
+    (node.anyOf as Array<Record<string, unknown>>).forEach((branch, idx) => {
+      collectStrictViolations(branch, `${pathPrefix}.anyOf[${idx}]`, out);
+    });
+  } else if (!type && !node.enum) {
     out.push(`${pathPrefix}:missing-type`);
   }
 }
@@ -7973,6 +7977,10 @@ function compileNodeForOpenAiStrict(node: Record<string, unknown>): Record<strin
     !Array.isArray(clone.items)
   ) {
     clone.items = compileNodeForOpenAiStrict(clone.items as Record<string, unknown>);
+  } else if (Array.isArray(clone.anyOf)) {
+    clone.anyOf = (clone.anyOf as Array<Record<string, unknown>>).map((branch) =>
+      compileNodeForOpenAiStrict(branch),
+    );
   }
   return clone;
 }

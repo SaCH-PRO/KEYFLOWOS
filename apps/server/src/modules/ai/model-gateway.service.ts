@@ -1448,7 +1448,11 @@ export class ModelGatewayService {
     // take one. Under anthropic-version 2023-06-01, omitting `tools` and
     // `tool_choice` when toolChoice === 'none' guarantees no tool invocation.
     if (request.tools && request.tools.length > 0 && request.toolChoice !== 'none') {
-      body.tools = this.buildAnthropicTools(request.tools);
+      body.tools = request.tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description || '',
+        input_schema: this.buildAnthropicToolSchema(t),
+      }));
       if (request.toolChoice === 'auto') {
         body.tool_choice = { type: 'auto' };
       } else if (request.toolChoice === 'required') {
@@ -1636,7 +1640,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -1727,7 +1731,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -1828,7 +1832,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -1924,7 +1928,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -2490,28 +2494,38 @@ export class ModelGatewayService {
   }
 
   /**
-   * RR-STRICT-TOOL-SCHEMAS: compile tool schemas for Anthropic's `input_schema`.
-   * Canonical FLOW_TOOLS compile through `toProviderToolSchema(tool, 'anthropic')`
-   * so Anthropic receives closed `additionalProperties: false` schemas with original
-   * `required` fields (never OpenAI's `strict` flag or forced-required null unions).
-   * Non-FLOW tools (Cortex organ tools, ad-hoc definitions) are closed recursively.
+   * RR-STRICT-TOOL-SCHEMAS: compile a single tool's schema for non-OpenAI
+   * providers (Anthropic `input_schema` and OpenAI-compatible endpoints such as
+   * xAI, Kimi, Google Gemini, Native, and OpenRouter/Ollama). Canonical
+   * FLOW_TOOLS compile through `toProviderToolSchema(tool, 'anthropic')` so
+   * they receive closed `additionalProperties: false` schemas with original
+   * `required` fields and scalar types (never OpenAI's `strict: true` flag or
+   * forced-required null unions). Non-FLOW tools are closed recursively.
    */
-  private buildAnthropicTools(tools: GatewayToolDefinition[]): Array<{
-    name: string;
-    description: string;
-    input_schema: Record<string, unknown>;
-  }> {
-    return tools.map((t) => {
-      const flowTool = getToolByName(t.function.name);
-      const input_schema = flowTool
-        ? toProviderToolSchema(flowTool, 'anthropic').schema
-        : closeJsonSchemaObject(t.function.parameters);
-      return {
+  private buildAnthropicToolSchema(tool: GatewayToolDefinition): Record<string, unknown> {
+    const flowTool = getToolByName(tool.function.name);
+    return flowTool
+      ? toProviderToolSchema(flowTool, 'anthropic').schema
+      : closeJsonSchemaObject(tool.function.parameters);
+  }
+
+  /**
+   * RR-STRICT-TOOL-SCHEMAS: non-OpenAI OpenAI-compatible endpoints (xAI, Kimi,
+   * Google Gemini, Native, OpenRouter/Ollama) reject or misparse OpenAI's
+   * `strict: true` flag and `['string', 'null']` / `anyOf` null-union rewrites.
+   * Send them closed non-strict schemas without `strict: true`.
+   */
+  private buildOpenAiCompatTools(
+    tools: GatewayToolDefinition[],
+  ): OpenAI.Chat.Completions.ChatCompletionTool[] {
+    return tools.map((t) => ({
+      type: 'function' as const,
+      function: {
         name: t.function.name,
         description: t.function.description || '',
-        input_schema,
-      };
-    });
+        parameters: this.buildAnthropicToolSchema(t),
+      },
+    }));
   }
 
   private buildAnthropicMessages(messages: GatewayMessage[]): {
@@ -2747,7 +2761,11 @@ export class ModelGatewayService {
     }
 
     if (request.tools && request.tools.length > 0 && request.toolChoice !== 'none') {
-      body.tools = this.buildAnthropicTools(request.tools);
+      body.tools = request.tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description || '',
+        input_schema: this.buildAnthropicToolSchema(t),
+      }));
       if (request.toolChoice === 'auto') {
         body.tool_choice = { type: 'auto' };
       } else if (request.toolChoice === 'required') {
@@ -2847,7 +2865,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -2910,7 +2928,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -2987,7 +3005,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -3051,7 +3069,7 @@ export class ModelGatewayService {
     // Tools on the streaming path too. Omitting them here is exactly how the
     // Anthropic fallback ended up able to describe an action and never take one.
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -3149,7 +3167,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }
@@ -3217,7 +3235,7 @@ export class ModelGatewayService {
     };
 
     if (request.tools && request.tools.length > 0) {
-      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      params.tools = this.buildOpenAiCompatTools(request.tools);
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }

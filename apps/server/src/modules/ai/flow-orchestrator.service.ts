@@ -4297,6 +4297,138 @@ ${triage.standingContext}`;
    * once and counts it toward no circuit; the envelope executeTool answers the
    * chat and a plan run over HTTP carries the same message as before.
    */
+  private validateToolObjectSchema(
+    toolName: string,
+    obj: unknown,
+    schema: {
+      properties?: Record<string, any>;
+      required?: string[];
+    },
+    pathPrefix: string,
+    allowedExtras: Set<string> | null,
+  ): void {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      throw new BadRequestException(
+        pathPrefix
+          ? `Field "${pathPrefix}" for ${toolName} must be an object`
+          : `Arguments for ${toolName} must be an object`,
+      );
+    }
+
+    const record = obj as Record<string, any>;
+    const declaredProps = schema.properties;
+    const hasDeclaredProps =
+      !!declaredProps && typeof declaredProps === 'object' && !Array.isArray(declaredProps);
+    if (!hasDeclaredProps) {
+      return;
+    }
+
+    const requiredList = Array.isArray(schema.required) ? schema.required : [];
+    const requiredSet = new Set(requiredList);
+    const formatField = (key: string) => (pathPrefix ? `${pathPrefix}.${key}` : key);
+
+    // Pass 1 (read-only): reject every undeclared key BEFORE mutating `record`
+    // so a rejected call never partially strips fields.
+    for (const key of Object.keys(record)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) {
+        if (allowedExtras?.has(key)) continue;
+        throw new BadRequestException(`Field "${formatField(key)}" is not a parameter of ${toolName}`);
+      }
+    }
+
+    // Pass 2: strip shrink-only exempt extra keys (so handlers never see them)
+    // and strict-mode nulls on optional declared parameters.
+    for (const key of Object.keys(record)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) {
+        if (allowedExtras?.has(key)) {
+          delete record[key];
+        }
+        continue;
+      }
+      if (record[key] === null && !requiredSet.has(key)) {
+        delete record[key];
+      }
+    }
+
+    const missing = requiredList.filter(
+      (field) => record[field] === undefined || record[field] === null || record[field] === '',
+    );
+    if (missing.length > 0) {
+      const formattedMissing = missing.map((field) => formatField(field));
+      throw new BadRequestException(`Missing required fields for ${toolName}: ${formattedMissing.join(', ')}`);
+    }
+
+    for (const [key, value] of Object.entries(record)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) continue;
+      const propSchema = declaredProps[key];
+      if (!propSchema || value === undefined) continue;
+      const fieldPath = formatField(key);
+
+      if (propSchema.type === 'string' && typeof value !== 'string') {
+        throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a string`);
+      }
+      if (propSchema.type === 'number') {
+        const num = typeof value === 'number' ? value : Number(value);
+        if (
+          typeof value === 'boolean' ||
+          (typeof value === 'string' && value.trim() === '') ||
+          !Number.isFinite(num)
+        ) {
+          throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a number`);
+        }
+        record[key] = num;
+      }
+      // W11-KEY-TRANSFER-INTEGER: 'integer' reads a number or a numeric string as the 'number'
+      // branch does, then requires a whole number, so the schema and the route refuse the same thing.
+      if (propSchema.type === 'integer') {
+        const num = typeof value === 'number' ? value : Number(value);
+        if (typeof value === 'boolean' || (typeof value === 'string' && value.trim() === '') || !Number.isInteger(num)) {
+          throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a whole number`);
+        }
+        record[key] = num;
+      }
+      if (propSchema.type === 'boolean' && typeof value !== 'boolean') {
+        if (value === 'true') record[key] = true;
+        else if (value === 'false') record[key] = false;
+        else throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a boolean`);
+      }
+      if (propSchema.type === 'object') {
+        this.validateToolObjectSchema(toolName, value, propSchema, fieldPath, null);
+      }
+      if (propSchema.type === 'array') {
+        if (!Array.isArray(value)) {
+          throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be an array`);
+        }
+        const itemSchema = propSchema.items;
+        const itemType = itemSchema?.type;
+        if (itemType === 'string' || itemType === 'number' || itemType === 'integer' || itemType === 'boolean') {
+          for (let i = 0; i < value.length; i++) {
+            const item = value[i];
+            if (itemType === 'string' && typeof item !== 'string') {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a string`);
+            }
+            if (itemType === 'number' && (typeof item !== 'number' || !Number.isFinite(item))) {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a number`);
+            }
+            if (itemType === 'integer' && (typeof item !== 'number' || !Number.isInteger(item))) {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a whole number`);
+            }
+            if (itemType === 'boolean' && typeof item !== 'boolean') {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a boolean`);
+            }
+          }
+        } else if (itemType === 'object') {
+          for (let i = 0; i < value.length; i++) {
+            this.validateToolObjectSchema(toolName, value[i], itemSchema, `${fieldPath}[${i}]`, null);
+          }
+        }
+      }
+      if (propSchema.enum && typeof value === 'string' && !propSchema.enum.includes(value)) {
+        throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be one of: ${propSchema.enum.join(', ')}`);
+      }
+    }
+  }
+
   private validateToolInput(
     toolName: string,
     args: Record<string, any>,
@@ -4305,91 +4437,8 @@ ${triage.standingContext}`;
     const tool = getToolByName(toolName);
     if (!tool) return;
 
-    const declaredProps = tool.parameters.properties ?? {};
-    const requiredSet = new Set(tool.parameters.required ?? []);
     const allowedExtras = options?.allowExtraKeys ? new Set(options.allowExtraKeys) : null;
-
-    // RR-STRICT-TOOL-SCHEMAS: reject any argument key not declared in the tool's
-    // parameter schema with HTTP 400 (final under D-134), except keys explicitly
-    // allowed for a shrink-only listed caller.
-    for (const key of Object.keys(args)) {
-      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) {
-        if (allowedExtras?.has(key)) continue;
-        throw new BadRequestException(`Field "${key}" is not a parameter of ${toolName}`);
-      }
-      // OpenAI strict mode encodes optional parameters as `<type> | null`.
-      // Strip nulls on optional declared parameters before required & type checks.
-      if (args[key] === null && !requiredSet.has(key)) {
-        delete args[key];
-      }
-    }
-
-    const missing = tool.parameters.required.filter(
-      (field) => args[field] === undefined || args[field] === null || args[field] === '',
-    );
-    if (missing.length > 0) {
-      throw new BadRequestException(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
-    }
-
-    for (const [key, value] of Object.entries(args)) {
-      const schema = declaredProps[key];
-      if (!schema || value === undefined) continue;
-      if (schema.type === 'string' && typeof value !== 'string') {
-        throw new BadRequestException(`Field "${key}" for ${toolName} must be a string`);
-      }
-      if (schema.type === 'number') {
-        const num = typeof value === 'number' ? value : Number(value);
-        if (
-          value === null ||
-          typeof value === 'boolean' ||
-          (typeof value === 'string' && value.trim() === '') ||
-          !Number.isFinite(num)
-        ) {
-          throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
-        }
-        args[key] = num;
-      }
-      // W11-KEY-TRANSFER-INTEGER: 'integer' reads a number or a numeric string as the 'number'
-      // branch does, then requires a whole number, so the schema and the route refuse the same thing.
-      if (schema.type === 'integer') {
-        const num = typeof value === 'number' ? value : Number(value);
-        if (typeof value === 'boolean' || (typeof value === 'string' && value.trim() === '') || !Number.isInteger(num)) {
-          throw new BadRequestException(`Field "${key}" for ${toolName} must be a whole number`);
-        }
-        args[key] = num;
-      }
-      if (schema.type === 'boolean' && typeof value !== 'boolean') {
-        if (value === 'true') args[key] = true;
-        else if (value === 'false') args[key] = false;
-        else throw new BadRequestException(`Field "${key}" for ${toolName} must be a boolean`);
-      }
-      if (schema.type === 'array') {
-        if (!Array.isArray(value)) {
-          throw new BadRequestException(`Field "${key}" for ${toolName} must be an array`);
-        }
-        const itemType = schema.items?.type;
-        if (itemType === 'string' || itemType === 'number' || itemType === 'integer' || itemType === 'boolean') {
-          for (let i = 0; i < value.length; i++) {
-            const item = value[i];
-            if (itemType === 'string' && typeof item !== 'string') {
-              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a string`);
-            }
-            if (itemType === 'number' && (typeof item !== 'number' || !Number.isFinite(item))) {
-              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a number`);
-            }
-            if (itemType === 'integer' && (typeof item !== 'number' || !Number.isInteger(item))) {
-              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a whole number`);
-            }
-            if (itemType === 'boolean' && typeof item !== 'boolean') {
-              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a boolean`);
-            }
-          }
-        }
-      }
-      if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
-        throw new BadRequestException(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
-      }
-    }
+    this.validateToolObjectSchema(toolName, args, tool.parameters, '', allowedExtras);
   }
 
   /**
@@ -8164,7 +8213,11 @@ ${triage.standingContext}`;
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name, toolArgs).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId })),
+          innerToolExecutor: (bizId, name, toolArgs) =>
+            withinMemberScope(bizId, name, toolArgs).then(() => {
+              this.validateToolInput(name, toolArgs as Record<string, any>);
+              return this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId });
+            }),
         });
         return result;
       }
@@ -9544,8 +9597,12 @@ ${triage.standingContext}`;
       const allowExtraKeys = PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS.includes(toolName)
         ? (['businessId'] as const)
         : undefined;
-      this.validateToolInput(toolName, args, allowExtraKeys ? { allowExtraKeys } : undefined);
-      const rawResult = await this.executeToolAction(businessId, toolName, args, action);
+      const validatedArgs =
+        allowExtraKeys && args && typeof args === 'object' && !Array.isArray(args)
+          ? { ...args }
+          : args;
+      this.validateToolInput(toolName, validatedArgs, allowExtraKeys ? { allowExtraKeys } : undefined);
+      const rawResult = await this.executeToolAction(businessId, toolName, validatedArgs, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);

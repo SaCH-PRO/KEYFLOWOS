@@ -62,6 +62,26 @@ function enclosingMethodName(node: ts.Node, sf: ts.SourceFile): string {
   return '<module>';
 }
 
+function recordCaller(
+  found: Map<string, DiscoveredCaller>,
+  rel: string,
+  node: ts.Node,
+  sf: ts.SourceFile,
+  name: string,
+) {
+  if (!TARGET_METHODS.has(name)) return;
+  // Ignore method declarations/definitions themselves on FlowOrchestratorService
+  if (
+    ts.isMethodDeclaration(node) ||
+    (node.parent && ts.isMethodDeclaration(node.parent) && node.parent.name === node)
+  ) {
+    return;
+  }
+  const method = enclosingMethodName(node, sf);
+  const key = `${rel}#${method}::${name}`;
+  found.set(key, { file: rel, method, callee: name });
+}
+
 function scanToolExecutionCallers(): DiscoveredCaller[] {
   const found = new Map<string, DiscoveredCaller>();
   for (const abs of walkServerTsFiles(SERVER_SRC_DIR)) {
@@ -71,12 +91,29 @@ function scanToolExecutionCallers(): DiscoveredCaller[] {
 
     const visit = (node: ts.Node) => {
       if (ts.isJSDoc(node)) return;
-      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-        const name = node.expression.name.text;
-        if (TARGET_METHODS.has(name)) {
-          const method = enclosingMethodName(node, sf);
-          const key = `${rel}#${method}::${name}`;
-          found.set(key, { file: rel, method, callee: name });
+      // Direct call or aliased property read: obj.executeToolDirectly(...) or const fn = obj.executeToolDirectly
+      if (ts.isPropertyAccessExpression(node) && TARGET_METHODS.has(node.name.text)) {
+        recordCaller(found, rel, node, sf, node.name.text);
+      }
+      // Bracketed property access or call: obj['executeToolDirectly'](...)
+      if (ts.isElementAccessExpression(node) && node.argumentExpression) {
+        const arg = node.argumentExpression;
+        if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) {
+          if (TARGET_METHODS.has(arg.text)) {
+            recordCaller(found, rel, node, sf, arg.text);
+          }
+        }
+      }
+      // Destructured binding: const { executeToolDirectly } = orchestrator
+      if (ts.isBindingElement(node)) {
+        const propName =
+          node.propertyName && ts.isIdentifier(node.propertyName)
+            ? node.propertyName.text
+            : ts.isIdentifier(node.name)
+              ? node.name.text
+              : null;
+        if (propName && TARGET_METHODS.has(propName)) {
+          recordCaller(found, rel, node, sf, propName);
         }
       }
       ts.forEachChild(node, visit);

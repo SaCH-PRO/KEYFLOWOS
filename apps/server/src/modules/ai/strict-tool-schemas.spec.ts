@@ -18,6 +18,7 @@
  *      rewrites or `strict`) for Anthropic in both `complete` and `streamComplete`.
  */
 import { BadRequestException } from '@nestjs/common';
+import OpenAI from 'openai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FLOW_TOOLS,
@@ -196,9 +197,31 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
     );
     expect(badCompiled.strict).toBe(false);
     expect(badCompiled.strictReasons).toContain('parameters.properties.code:disallowed-keyword:minLength');
+
+    // anyOf branch recursion: disallowed keyword inside an anyOf branch fails strict compilation
+    const badAnyOfCompiled = toProviderToolSchema(
+      {
+        name: 'synthetic_anyof_bad_tool',
+        parameters: {
+          type: 'object',
+          properties: {
+            token: {
+              description: 'Token',
+              anyOf: [{ type: 'string', minLength: 4 }, { type: 'number' }],
+            } as any,
+          },
+          required: ['token'],
+        },
+      },
+      'openai',
+    );
+    expect(badAnyOfCompiled.strict).toBe(false);
+    expect(badAnyOfCompiled.strictReasons).toContain(
+      'parameters.properties.token.anyOf[0]:disallowed-keyword:minLength',
+    );
   });
 
-  it('refuses undeclared arguments in validateToolInput with HTTP 400 naming the field, strips strict-mode nulls on optional fields, validates typed array items, and passes declared arguments unchanged', () => {
+  it('refuses undeclared arguments in validateToolInput with HTTP 400 naming the field, strips strict-mode nulls on optional fields, validates nested objects and array items, rejects non-objects and prototype keys, and passes declared arguments unchanged', () => {
     const orchestrator = makeOrchestratorForValidation();
 
     // DoD RED case (b): undeclared businessId argument must throw 400 naming businessId
@@ -214,6 +237,36 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
     expect(thrown).toBeInstanceOf(BadRequestException);
     expect((thrown as BadRequestException).getStatus()).toBe(400);
     expect((thrown as Error).message).toBe('Field "businessId" is not a parameter of crm_search_contacts');
+
+    // Two-pass non-mutation: an undeclared key refuses BEFORE optional nulls are stripped
+    const unmutatedArgs: Record<string, any> = {
+      firstName: 'Jane',
+      lastName: null,
+      evil: 'injected',
+    };
+    expect(() => orchestrator.validateToolInput('crm_create_contact', unmutatedArgs)).toThrow(
+      'Field "evil" is not a parameter of crm_create_contact',
+    );
+    expect(unmutatedArgs.lastName).toBeNull();
+
+    // Non-object top-level args refused with 400
+    for (const badArgs of [null, [], 'query', 42]) {
+      expect(() => orchestrator.validateToolInput('crm_search_contacts', badArgs as any)).toThrow(
+        BadRequestException,
+      );
+    }
+
+    // Prototype keys refused with 400 (including JSON.parse __proto__ own property)
+    const protoPayload = JSON.parse('{"__proto__":{"admin":true},"query":"Ada"}') as Record<string, any>;
+    expect(() => orchestrator.validateToolInput('crm_search_contacts', protoPayload)).toThrow(
+      'Field "__proto__" is not a parameter of crm_search_contacts',
+    );
+    expect(() =>
+      orchestrator.validateToolInput('crm_search_contacts', { query: 'Ada', constructor: 'evil' }),
+    ).toThrow('Field "constructor" is not a parameter of crm_search_contacts');
+    expect(() =>
+      orchestrator.validateToolInput('crm_search_contacts', { query: 'Ada', toString: 'evil' }),
+    ).toThrow('Field "toString" is not a parameter of crm_search_contacts');
 
     // Negative control: declared arguments pass unchanged
     const declaredArgs: Record<string, any> = { query: 'Jane Doe' };
@@ -253,14 +306,46 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
       orchestrator.validateToolInput(stringArrayTool!.name, { ...baseReq, [arrayKey]: ['ok', 42] }),
     ).toThrow(BadRequestException);
 
-    // Shrink-only extra-key allowlist permits ONLY the listed key, refusing any other undeclared key
+    // Recursive nested object validation inside array-of-object items (commerce_create_invoice.items)
+    const invoiceArgs: Record<string, any> = {
+      contactId: 'c_1',
+      items: [{ description: 'Design', quantity: 2, unitPrice: 150, productId: null }],
+    };
+    expect(() => orchestrator.validateToolInput('commerce_create_invoice', invoiceArgs)).not.toThrow();
+    expect(invoiceArgs.items[0]).toEqual({ description: 'Design', quantity: 2, unitPrice: 150 });
+    expect('productId' in invoiceArgs.items[0]).toBe(false);
+
     expect(() =>
-      orchestrator.validateToolInput(
-        'fetch_business_summary',
-        { businessId: 'biz_1' },
-        { allowExtraKeys: ['businessId'] },
-      ),
+      orchestrator.validateToolInput('commerce_create_invoice', {
+        contactId: 'c_1',
+        items: [{ description: 'Design', quantity: 2, unitPrice: 150, businessId: 'other_biz' }],
+      }),
+    ).toThrow('Field "items[0].businessId" is not a parameter of commerce_create_invoice');
+
+    expect(() =>
+      orchestrator.validateToolInput('commerce_create_invoice', {
+        contactId: 'c_1',
+        items: ['not-an-object'],
+      }),
+    ).toThrow('Field "items[0]" for commerce_create_invoice must be an object');
+
+    expect(() =>
+      orchestrator.validateToolInput('commerce_create_invoice', {
+        contactId: 'c_1',
+        items: [{ description: 'Design', quantity: 2 }],
+      }),
+    ).toThrow(/Missing required fields for commerce_create_invoice: items\[0\]\.unitPrice/);
+
+    // Shrink-only extra-key allowlist permits ONLY the listed key, strips it so the
+    // handler never sees it, and refuses any other undeclared key
+    const monitorArgs: Record<string, any> = { businessId: 'biz_1' };
+    expect(() =>
+      orchestrator.validateToolInput('fetch_business_summary', monitorArgs, {
+        allowExtraKeys: ['businessId'],
+      }),
     ).not.toThrow();
+    expect(monitorArgs).toEqual({});
+
     expect(() =>
       orchestrator.validateToolInput(
         'fetch_business_summary',
@@ -270,18 +355,167 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
     ).toThrow('Field "evil" is not a parameter of fetch_business_summary');
   });
 
-  describe('ModelGatewayService Anthropic input_schema closure (complete & streamComplete)', () => {
+  describe('ModelGatewayService provider tool schema dispatch (complete & streamComplete)', () => {
     let savedEnv: NodeJS.ProcessEnv;
 
     beforeEach(() => {
       savedEnv = { ...process.env };
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = 'test-openai-key';
       process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
+      process.env.GOOGLE_API_KEY = 'test-google-key';
+      process.env.KIMI_API_KEY = 'test-kimi-key';
       delete process.env.KEY_DISABLED;
     });
 
     afterEach(() => {
       vi.unstubAllGlobals();
       process.env = savedEnv;
+    });
+
+    function makeGateway() {
+      const prisma = {
+        client: {
+          aiMemory: { findUnique: vi.fn().mockResolvedValue(null) },
+        },
+      } as any;
+      const cost = {
+        recordCost: vi.fn().mockResolvedValue({}),
+        getCurrentMonthSpend: vi.fn().mockResolvedValue({ total: 0, byProvider: {} }),
+      } as unknown as LLMCostService;
+      const langfuse = {
+        isEnabled: () => false,
+        traceLlmCall: () => undefined,
+        startTrace: () => null,
+        logGeneration: () => undefined,
+      } as unknown as LangfuseService;
+      return new ModelGatewayService(prisma, cost, langfuse);
+    }
+
+    function stubOpenAiCompatCompletions(captured: Array<Record<string, any>>) {
+      const completionsProto = Object.getPrototypeOf(new OpenAI({ apiKey: 'stub' }).chat.completions);
+      return vi.spyOn(completionsProto, 'create').mockImplementation(async (params: Record<string, any>) => {
+        captured.push(params);
+        if (params.stream) {
+          return (async function* () {
+            yield {
+              id: 'chatcmpl-1',
+              choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: null }],
+            };
+            yield {
+              id: 'chatcmpl-1',
+              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+              usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+            };
+          })();
+        }
+        return {
+          id: 'chatcmpl-1',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+        };
+      });
+    }
+
+    it('preserves strict:true for OpenAI-strict tools and closed non-strict for NON_STRICT_OPENAI_TOOLS on both complete and streamComplete', async () => {
+      const captured: Array<Record<string, any>> = [];
+      const spy = stubOpenAiCompatCompletions(captured);
+
+      try {
+        const gateway = makeGateway();
+        const allOpenAiDefs = getOpenAiToolDefinitions() as GatewayToolDefinition[];
+        const crmCreateOpenAi = allOpenAiDefs.find((d) => d.function.name === 'crm_create_contact')!;
+        const nonStrictName = NON_STRICT_OPENAI_TOOLS[0];
+        const nonStrictOpenAi = allOpenAiDefs.find((d) => d.function.name === nonStrictName)!;
+
+        await gateway.complete({
+          businessId: 'biz_1',
+          taskCategory: 'general',
+          providerOverride: 'openai',
+          modelOverride: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [crmCreateOpenAi, nonStrictOpenAi],
+          toolChoice: 'auto',
+        });
+
+        for await (const _chunk of gateway.streamComplete({
+          businessId: 'biz_1',
+          taskCategory: 'general',
+          providerOverride: 'openai',
+          modelOverride: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [crmCreateOpenAi, nonStrictOpenAi],
+          toolChoice: 'auto',
+        })) {
+          // drain stream
+        }
+
+        expect(captured).toHaveLength(2);
+        for (const body of captured) {
+          const crm = body.tools.find((t: any) => t.function.name === 'crm_create_contact');
+          expect(crm.function.strict).toBe(true);
+          expect(crm.function.parameters.additionalProperties).toBe(false);
+          expect(crm.function.parameters.properties.firstName.type).toEqual(['string', 'null']);
+
+          const nonStrict = body.tools.find((t: any) => t.function.name === nonStrictName);
+          expect(nonStrict.function.strict).toBeUndefined();
+          expect(nonStrict.function.parameters.additionalProperties).toBe(false);
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('sends closed non-strict schemas without strict:true or OpenAI null-union rewrites to non-OpenAI OpenAI-compatible providers (google, kimi) on both complete and streamComplete', async () => {
+      const captured: Array<Record<string, any>> = [];
+      const spy = stubOpenAiCompatCompletions(captured);
+
+      try {
+        const gateway = makeGateway();
+        const crmCreateOpenAi = getOpenAiToolDefinitions().find(
+          (d) => d.function.name === 'crm_create_contact',
+        ) as GatewayToolDefinition;
+
+        for (const { provider, model } of [
+          { provider: 'google' as const, model: 'gemini-2.5-flash' },
+          { provider: 'kimi' as const, model: 'moonshot-v1-8k' },
+        ]) {
+          await gateway.complete({
+            businessId: 'biz_1',
+            taskCategory: 'general',
+            providerOverride: provider,
+            modelOverride: model,
+            messages: [{ role: 'user', content: 'hi' }],
+            tools: [crmCreateOpenAi],
+            toolChoice: 'auto',
+          });
+
+          for await (const _chunk of gateway.streamComplete({
+            businessId: 'biz_1',
+            taskCategory: 'general',
+            providerOverride: provider,
+            modelOverride: model,
+            messages: [{ role: 'user', content: 'hi' }],
+            tools: [crmCreateOpenAi],
+            toolChoice: 'auto',
+          })) {
+            // drain stream
+          }
+        }
+
+        expect(captured).toHaveLength(4);
+        for (const body of captured) {
+          const crm = body.tools.find((t: any) => t.function.name === 'crm_create_contact');
+          expect(crm.function.strict).toBeUndefined();
+          expect(crm.function.parameters.additionalProperties).toBe(false);
+          expect(crm.function.parameters.required).toEqual(
+            getToolByName('crm_create_contact')!.parameters.required,
+          );
+          expect(crm.function.parameters.properties.firstName.type).toBe('string');
+          expect(crm.function.parameters.properties.status.anyOf).toBeUndefined();
+        }
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('sends closed additionalProperties:false input_schema without OpenAI strict or null-union rewrites on both callAnthropic and streamAnthropic', async () => {
@@ -325,16 +559,7 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
         }),
       );
 
-      const cost = {
-        recordCost: vi.fn().mockResolvedValue({}),
-        getCurrentMonthSpend: vi.fn().mockResolvedValue({ total: 0, byProvider: {} }),
-      } as unknown as LLMCostService;
-      const langfuse = {
-        isEnabled: () => false,
-        startTrace: () => null,
-        logGeneration: () => undefined,
-      } as unknown as LangfuseService;
-      const gateway = new ModelGatewayService(cost, langfuse);
+      const gateway = makeGateway();
 
       // Feed an OpenAI-strict-compiled tool from getOpenAiToolDefinitions() into Anthropic!
       const crmCreateOpenAi = getOpenAiToolDefinitions().find(
@@ -359,6 +584,7 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
         businessId: 'biz_1',
         taskCategory: 'general',
         providerOverride: 'anthropic',
+        modelOverride: 'claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: 'hi' }],
         tools: [crmCreateOpenAi, adHocTool],
         toolChoice: 'auto',
@@ -368,6 +594,7 @@ describe('RR-STRICT-TOOL-SCHEMAS — closed schemas, strict compilation, and und
         businessId: 'biz_1',
         taskCategory: 'general',
         providerOverride: 'anthropic',
+        modelOverride: 'claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: 'hi' }],
         tools: [crmCreateOpenAi, adHocTool],
         toolChoice: 'auto',
