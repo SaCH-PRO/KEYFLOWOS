@@ -244,6 +244,13 @@ export function ExpenseFormSideSheet({
   const dateId = useId();
   const vendorId = useId();
   const categoryFieldId = useId();
+  // P267 R1-3: the rest of the sheet's fields, linked to their labels the same way
+  const paymentMethodId = useId();
+  const tagsId = useId();
+  const projectFieldId = useId();
+  const clientFieldId = useId();
+  const serviceFieldId = useId();
+  const notesId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
   const { uploadToDrive } = useDriveUpload();
   const selectedFileRef = useRef<File | null>(prefill?.receiptFile ?? null);
@@ -654,9 +661,10 @@ export function ExpenseFormSideSheet({
 
           {/* Description */}
           <div>
-            <label htmlFor={descriptionId} className="text-xs text-muted-foreground mb-1.5 block">Description *</label>
+            <label htmlFor={descriptionId} className="text-xs text-muted-foreground mb-1.5 block">Description<span aria-hidden="true"> *</span></label>
             <input
               id={descriptionId}
+              aria-required="true"
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder="What was this expense for?"
@@ -667,9 +675,10 @@ export function ExpenseFormSideSheet({
           {/* Amount + Date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor={amountId} className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency}) *</label>
+              <label htmlFor={amountId} className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency})<span aria-hidden="true"> *</span></label>
               <input
                 id={amountId}
+                aria-required="true"
                 type="number"
                 step="0.01"
                 min="0"
@@ -680,9 +689,10 @@ export function ExpenseFormSideSheet({
               />
             </div>
             <div>
-              <label htmlFor={dateId} className="text-xs text-muted-foreground mb-1.5 block">Date *</label>
+              <label htmlFor={dateId} className="text-xs text-muted-foreground mb-1.5 block">Date<span aria-hidden="true"> *</span></label>
               <input
                 id={dateId}
+                aria-required="true"
                 type="date"
                 value={formData.date}
                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
@@ -746,8 +756,9 @@ export function ExpenseFormSideSheet({
               </div>
             ) : (
               <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Payment Method</label>
+                <label htmlFor={paymentMethodId} className="text-xs text-muted-foreground mb-1.5 block">Payment Method</label>
                 <select
+                  id={paymentMethodId}
                   value={formData.paymentMethod}
                   onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
@@ -762,8 +773,9 @@ export function ExpenseFormSideSheet({
               </div>
             )}
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Tags</label>
+              <label htmlFor={tagsId} className="text-xs text-muted-foreground mb-1.5 block">Tags</label>
               <input
+                id={tagsId}
                 value={formData.tags}
                 onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
                 placeholder="tag1, tag2, ..."
@@ -782,8 +794,9 @@ export function ExpenseFormSideSheet({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {projects.length > 0 && (
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Project</label>
+                    <label htmlFor={projectFieldId} className="text-xs text-muted-foreground mb-1 block">Project</label>
                     <select
+                      id={projectFieldId}
                       value={formData.projectId}
                       onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
                       className="w-full px-2 py-2 rounded-xl bg-white/[0.03] border border-border/40 text-xs text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
@@ -799,8 +812,9 @@ export function ExpenseFormSideSheet({
                 )}
                 {contacts.length > 0 && (
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Client</label>
+                    <label htmlFor={clientFieldId} className="text-xs text-muted-foreground mb-1 block">Client</label>
                     <select
+                      id={clientFieldId}
                       value={formData.contactId}
                       onChange={(e) => setFormData({ ...formData, contactId: e.target.value })}
                       className="w-full px-2 py-2 rounded-xl bg-white/[0.03] border border-border/40 text-xs text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
@@ -816,8 +830,9 @@ export function ExpenseFormSideSheet({
                 )}
                 {services.length > 0 && (
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Service</label>
+                    <label htmlFor={serviceFieldId} className="text-xs text-muted-foreground mb-1 block">Service</label>
                     <select
+                      id={serviceFieldId}
                       value={formData.serviceId}
                       onChange={(e) => setFormData({ ...formData, serviceId: e.target.value })}
                       className="w-full px-2 py-2 rounded-xl bg-white/[0.03] border border-border/40 text-xs text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
@@ -837,8 +852,9 @@ export function ExpenseFormSideSheet({
 
           {/* Notes */}
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Notes</label>
+            <label htmlFor={notesId} className="text-xs text-muted-foreground mb-1.5 block">Notes</label>
             <textarea
+              id={notesId}
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
               placeholder="Additional notes..."
@@ -861,6 +877,7 @@ export function ExpenseFormSideSheet({
             </label>
             {formData.isRecurring && (
               <select
+                aria-label="Recurring frequency"
                 value={formData.recurringFrequency}
                 onChange={(e) => setFormData({ ...formData, recurringFrequency: e.target.value })}
                 className="px-3 py-1.5 rounded-xl bg-white/[0.03] border border-border/40 text-xs text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
