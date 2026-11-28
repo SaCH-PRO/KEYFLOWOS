@@ -41,8 +41,8 @@ const ID = {
   biz: `${P}biz`,
   biz2: `${P}biz2`,
 };
-/** Figures only the money fields of this fixture carry (73.1 cannot occur in ISO-8601 timestamps). */
-const FIGURES = /1234\.5|87\.65|0\.731|73\.1/;
+/** Figures only the money fields of this fixture carry (non-digit lookbehind + 73.1 prevent any ISO-8601 timestamp match). */
+const FIGURES = /(?<!\d)(?:1234\.5|87\.65|0\.731|73\.1)/;
 const MONEY_CHANNEL_FIELDS = ['monthlyBudget', 'targetCac', 'targetConversionRate'];
 const MONEY_SNAPSHOT_FIELDS = [
   'blendedCac',
