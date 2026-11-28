@@ -132,7 +132,9 @@ afterEach(() => cleanup());
 const gate = { release: () => {} };
 // P265 R2: the whole page mounts in most of these cases; under a loaded parallel run a case can outlast the 5 s
 // default (seen: COR MINOR-2, COR MINOR-6). The test timeout is longer, as in expenses-tabs-mounted; what each case
-// asserts is unchanged, and only the waits that ran out under load are given explicit timeouts.
+// asserts is unchanged. P265 R3/R4: every wait for something to appear, and every wait for something to go away, has
+// a 10 s ceiling (a ceiling, not a delay: each ends as soon as it holds). Checks that something never appears, or is
+// already gone in the render that should remove it (the sheet that closes on a switch), stay immediate.
 vi.setConfig({ testTimeout: 30000 });
 function holdReads(fns: Array<ReturnType<typeof vi.fn>>) {
   let release: () => void = () => {};
@@ -180,7 +182,8 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     await waitFor(() => expect(text()).toMatch(/alpha rent/i), { timeout: 10000 });
     client.fetchExpenses.mockImplementation(() => new Promise(() => {}));
     switchTo("biz_B");
-    await waitFor(() => expect(text()).not.toMatch(/alpha rent/i));
+    // a wait for A's rows to go (they leave once B's read starts), not a check that they were never there
+    await waitFor(() => expect(text()).not.toMatch(/alpha rent/i), { timeout: 10000 });
     expect(text()).not.toMatch(/4,321/);
   });
 
@@ -371,7 +374,8 @@ async function recurringOpensOnce() {
   fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }, { timeout: 10000 }));
   expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // a wait for the builder to go once the tab is left (its exit animation may run first)
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 10000 });
   fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
   await screen.findByText(/no recurring expenses/i, {}, { timeout: 10000 });
   await new Promise((r) => setTimeout(r, 20));
