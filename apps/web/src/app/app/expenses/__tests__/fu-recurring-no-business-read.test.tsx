@@ -453,3 +453,89 @@ describe("P254 R5-3: the queued open fires after the next business has committed
     expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
   });
 });
+
+describe("P254 R6-1: A's queued New, run while B's render is in progress (before B's layout effects), shows nothing under B", () => {
+  /**
+   * The reviewer's time-sliced case: the switch to B renders in a transition that yields before commit, and A's queued
+   * open runs in that gap, before B's layout effects. act cannot drive a yielding transition deterministically, so the
+   * open A's New queued is captured and run from a probe's render, after the panel has rendered for B and before that
+   * render commits (React warns about an update during another component's render; the update still lands).
+   */
+  function RenderProbe({ fire, run }: { fire: boolean; run: () => void }) {
+    if (fire) run();
+    return null;
+  }
+  it("A, New, then B: the open run mid-render opens no builder under B", async () => {
+    let queued: (() => void) | null = null;
+    let fired = false;
+    const run = () => { if (queued && !fired) { fired = true; queued(); } };
+    const el = (b: string | null, t: number, fire: boolean) => (
+      <>
+        <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={t} />
+        <RenderProbe fire={fire} run={run} />
+      </>
+    );
+    const view = render(el("biz_A", 0, false));
+    await settle();
+    const spy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((cb: () => void) => { queued = cb; });
+    view.rerender(el("biz_A", 1, false));
+    spy.mockRestore();
+    expect(queued, "New queued no open").toBeTruthy();
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    act(() => { view.rerender(el("biz_B", 1, true)); });
+    await settle();
+    await settle();
+    quiet.mockRestore();
+    expect(fired).toBe(true);
+    expect(screen.queryByRole("dialog"), "A's New opened the builder under B").toBeNull();
+  });
+});
+
+describe("P254 R6-2: the panel remounted for the same business offers no New before its list is read again", () => {
+  const announce = (bid: string | null) => {
+    ws.bid = bid;
+    window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: bid } }));
+  };
+  async function onRecurringWithNewOffered() {
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+    fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
+    expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
+  }
+  /** Watches every node the page adds, so a New offered for one commit is seen. */
+  function watchForNew() {
+    const seen = { offered: false };
+    const mo = new MutationObserver((records) => {
+      for (const r of records) for (const n of Array.from(r.addedNodes)) {
+        if (n instanceof HTMLElement && /New recurring expense/.test(n.textContent ?? "")) seen.offered = true;
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return { seen, stop: () => mo.disconnect() };
+  }
+  for (const path of ["A -> B -> A in one batch", "a failed read, then Try again"] as const) {
+    it(`${path}: no New until the list answers again`, async () => {
+      await onRecurringWithNewOffered();
+      const reads = client.fetchRecurringExpenses.mock.calls.length;
+      const held = deferred<unknown>();
+      client.fetchRecurringExpenses.mockImplementation(() => held.promise);
+      const w = watchForNew();
+      if (path === "A -> B -> A in one batch") {
+        act(() => { announce("biz_B"); announce("biz_A"); });
+      } else {
+        client.fetchExpenses.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+        act(() => { announce("biz_B"); announce("biz_A"); });
+        expect(await screen.findByText("Couldn't load expenses.", {}, LONG)).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      }
+      await waitFor(() => expect(client.fetchRecurringExpenses.mock.calls.length).toBeGreaterThan(reads), LONG);
+      await settle();
+      w.stop();
+      expect(w.seen.offered, "New offered beside a list not read again").toBe(false);
+      expect(screen.queryByRole("button", { name: /New recurring expense/ })).toBeNull();
+      // Control: the list answers, and New is offered.
+      await act(async () => { held.resolve(ok([SCHEDULE])); });
+      expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
+    }, 30000);
+  }
+});
