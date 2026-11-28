@@ -7,16 +7,16 @@
  *
  * Snapshot header (updated only when models shrink from this list):
  *   - Date:  2026-11-27
- *   - Count: 0 (RED baseline — committed list not yet populated)
+ *   - Count: 19
  *   - Total schema models at snapshot: 442
  *
  * What counts as "used" (to eliminate false positives):
  *   1. Direct Prisma delegate access on a Prisma client/tx/db receiver or chained
- *      Prisma delegate operation (`findUnique`, `findFirst`, `findMany`, `create`,
- *      `createMany`, `createManyAndReturn`, `update`, `updateMany`,
- *      `updateManyAndReturn`, `upsert`, `delete`, `deleteMany`, `count`,
- *      `aggregate`, `groupBy`, `fields`), including aliased/destructured clients
- *      and bracket access.
+ *      Prisma delegate operation (`findUnique`, `findUniqueOrThrow`, `findFirst`,
+ *      `findFirstOrThrow`, `findMany`, `create`, `createMany`,
+ *      `createManyAndReturn`, `update`, `updateMany`, `updateManyAndReturn`,
+ *      `upsert`, `delete`, `deleteMany`, `count`, `aggregate`, `groupBy`,
+ *      `fields`), including aliased/destructured clients and bracket access.
  *   2. Schema-guided nested relation access (`include`, `select`, `data`, `create`,
  *      `update`, `upsert`, `connectOrCreate`, `where` relation filters
  *      `some`/`every`/`none`/`is`/`isNot`, `_count`, `orderBy`) reachable from a
@@ -48,10 +48,124 @@ export interface UnusedModelEntry {
   readonly disposition: string;
 }
 
-// RED baseline: empty committed list — fails on main until populated with today's verified set.
 export const COMMITTED_UNUSED_MODELS_DATE = '2026-11-27';
-export const COMMITTED_UNUSED_MODELS_COUNT = 0;
-export const COMMITTED_UNUSED_MODELS: readonly UnusedModelEntry[] = [];
+export const COMMITTED_UNUSED_MODELS_COUNT = 19;
+export const COMMITTED_UNUSED_MODELS: readonly UnusedModelEntry[] = [
+  {
+    model: 'AiApprovalRequest',
+    table: 'ai_approval_requests',
+    recordedAt: '2026-11-27',
+    disposition: 'dormant — candidate for future retirement (see RR-APPROVAL-MODEL-CENSUS)',
+  },
+  {
+    model: 'AssessmentResult',
+    table: 'assessment_results',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'AutomationOutcome',
+    table: 'automation_outcomes',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'BotAgent',
+    table: 'bot_agents',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'BotConversationState',
+    table: 'bot_conversation_states',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'BusinessEntityLink',
+    table: 'business_entity_links',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'BusinessInitiative',
+    table: 'business_initiatives',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'ExternalObjectMap',
+    table: 'external_object_maps',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'FlowRoleSubscription',
+    table: 'flow_role_subscriptions',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'GuidanceAssessment',
+    table: 'guidance_assessments',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'GuidanceRecommendation',
+    table: 'guidance_recommendations',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'NetworkEdge',
+    table: 'network_edges',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'NetworkNode',
+    table: 'network_nodes',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'ProductExperiment',
+    table: 'product_experiments',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'ProgressSnapshot',
+    table: 'progress_snapshots',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'PromptVersion',
+    table: 'prompt_versions',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'RoadmapItem',
+    table: 'roadmap_items',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'WorkflowRun',
+    table: 'workflow_runs',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+  {
+    model: 'WorkflowTemplate',
+    table: 'workflow_templates',
+    recordedAt: '2026-11-27',
+    disposition: 'unreviewed',
+  },
+];
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SCHEMA_PATH = path.join(REPO_ROOT, 'packages/db/prisma/schema.prisma');
