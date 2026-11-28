@@ -385,7 +385,15 @@ test('in CI (CI=true) without PowerShell, the cursor proof fails closed instead 
   const out = `${run.stdout}\n${run.stderr}`;
   assert.equal(run.error, undefined, `subprocess spawn must not error or time out: ${run.error?.message}`);
   assert.equal(run.status, 1, `CI=true with no PowerShell must fail closed (exit 1) instead of skipping; got ${run.status}:\n${out}`);
-  assert.ok(!/skipped\s+[1-9]/.test(out), `cursor proof must not be skipped in CI=true:\n${out}`);
+  assert.match(
+    out,
+    /^not ok \d+ - the cursor makes directive processing idempotent$/m,
+    `cursor proof must report failure (not ok) in CI=true:\n${out}`,
+  );
+  assert.ok(
+    !/the cursor makes directive processing idempotent\s+#\s*SKIP/i.test(out),
+    `cursor proof must not be skipped in CI=true:\n${out}`,
+  );
   assert.match(out, /CI requires PowerShell/i, `failure output must name the fail-closed CI guard:\n${out}`);
 });
 
