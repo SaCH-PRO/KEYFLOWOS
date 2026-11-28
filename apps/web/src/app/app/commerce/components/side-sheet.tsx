@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
@@ -21,7 +21,8 @@ function selectionOf(el: Element): [number, number] | null {
 /**
  * The control in the new shell that stands for one in the old shell (the header's Close, a footer button): the same
  * tag with the same accessible label and text, when exactly one matches. The children are never matched this way:
- * they are the same nodes (P263 R3).
+ * they are the same nodes (P263 R3). Only a control that was in the shell when it was focused is looked up (P273-1):
+ * a child removed before the flip is not stood in for by a shell control with its label.
  */
 function shellCounterpart(old: HTMLElement, panel: HTMLElement, content: HTMLElement): HTMLElement | null {
   const same = Array.from(panel.querySelectorAll<HTMLElement>(old.tagName)).filter(
@@ -66,7 +67,8 @@ export function SideSheet({
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const titleId = `sidesheet-title-${title.replace(/\s+/g, "-").toLowerCase()}`;
+  // P273-2: the sheet's own id, so two open sheets with the same title are each labelled by their own heading.
+  const titleId = `sidesheet-title-${useId()}`;
 
   // P257 R1-1: onClose and closeDisabled are read through refs, so the focus and keydown effect below depends on
   // `open` only. A caller passing a new onClose each render (an inline arrow; the expense sheet re-rendering as it is
@@ -114,16 +116,20 @@ export function SideSheet({
   // open on the server has an empty slot there, and hydrates to the same before the children are put in (R4-3).
   const [content] = useState<HTMLDivElement | null>(() => (typeof document === "undefined" ? null : document.createElement("div")));
   const mounted = useSyncExternalStore(subscribeNothing, () => true, () => false);
-  /** Set when the container moved into a new slot: what had focus then (the old shell is already gone) and its caret. */
-  const movedRef = useRef<{ last: HTMLElement | null; selection: [number, number] | null } | null>(null);
-  // R2-4: a focus change only records the focused node (O(1)); nothing is read from the panel until a flip.
-  const focusedRef = useRef<HTMLElement | null>(null);
+  /**
+   * Set when the container moved into a new slot: what had focus then (the old shell is already gone), whether it was
+   * a control of the shell itself when it was focused, and its caret.
+   */
+  const movedRef = useRef<{ last: HTMLElement | null; inShell: boolean; selection: [number, number] | null } | null>(null);
+  // R2-4: a focus change only records the focused node (O(1)); nothing is read from the panel until a flip. P273-1:
+  // and whether it is the shell's own control (in the panel, not among the children), read while it is in place.
+  const focusedRef = useRef<{ el: HTMLElement; inShell: boolean } | null>(null);
   useEffect(() => {
     if (!open) return;
     const onFocusIn = (e: FocusEvent) => {
       const el = e.target as HTMLElement | null;
       const panel = panelRef.current;
-      focusedRef.current = el && panel && panel.contains(el) ? el : null;
+      focusedRef.current = el && panel && panel.contains(el) ? { el, inShell: !content?.contains(el) } : null;
     };
     document.addEventListener("focusin", onFocusIn);
     return () => {
@@ -131,23 +137,23 @@ export function SideSheet({
       // and no detached subtree stays referenced once the sheet is closed
       focusedRef.current = null;
     };
-  }, [open]);
+  }, [open, content]);
   const attachSlot = useCallback((slot: HTMLDivElement | null) => {
     if (!slot || !content || content.parentNode === slot) return;
-    const last = focusedRef.current;
-    movedRef.current = { last, selection: last ? selectionOf(last) : null };
+    const last = focusedRef.current?.el ?? null;
+    movedRef.current = { last, inShell: !!focusedRef.current?.inShell, selection: last ? selectionOf(last) : null };
     slot.appendChild(content);
   }, [content]);
   useLayoutEffect(() => {
     const moved = movedRef.current;
     movedRef.current = null;
     if (!open || !moved || !content) return;
-    const { last, selection } = moved;
+    const { last, inShell, selection } = moved;
     const panel = panelRef.current;
     if (!last || !panel || document.activeElement === last) return;
     if (content.contains(last)) {
       last.focus();
-    } else if (last !== panel && !last.isConnected) {
+    } else if (inShell && last !== panel && !last.isConnected) {
       shellCounterpart(last, panel, content)?.focus();
     }
     // A control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it (P263 R1-4).
