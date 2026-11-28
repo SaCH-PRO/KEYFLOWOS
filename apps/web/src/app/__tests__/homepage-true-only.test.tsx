@@ -6,6 +6,11 @@
  *   - "Secure Payments" and "99.9% Uptime" are not shown (nothing measures or verifies them);
  *   - control: "Caribbean-Native", a description of the product, stays.
  * The https case stubs only the scheme check (jsdom serves http://localhost and its location cannot be replaced).
+ *
+ * R1, with the owner's ruling D-330 ("Remove all of it"): no STATS "80-90% Operations Automated" or "<5 min Daily
+ * Management"; the hero line says no percentage ("built to automate your daily operations"); no testimonials section
+ * (the three hard-coded quotes with invented results). "6 Core Engines" and "TTD Caribbean-Native" stay, and the
+ * stats grid has as many columns as stats (no empty cells).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -72,5 +77,38 @@ describe("P238: the scheme check", () => {
   });
   it("is false on the server render (no claim is made before the browser can tell)", () => {
     expect(renderToString(<Probe />)).toContain("not https");
+  });
+});
+
+describe("P238 R1 (D-330): no invented figures and no invented testimonials", () => {
+  it('no "80-90%", no "Operations Automated", no "<5 min", no "Daily Management"', () => {
+    render(<Home />);
+    for (const claim of [/80-90%/, /Operations Automated/, /<5 min/, /Daily Management/]) {
+      expect(text(), `still claims ${claim}`).not.toMatch(claim);
+    }
+  });
+  it("the hero line says what the product is built to do, with no number", () => {
+    render(<Home />);
+    expect(text()).toMatch(/built to automate your daily operations/i);
+    expect(text()).not.toMatch(/automates \d/i);
+  });
+  it("no testimonials: no heading, no quotes, no names", () => {
+    render(<Home />);
+    for (const gone of [/Loved by founders/, /What entrepreneurs say/, /Sarah M\./, /David K\./, /Aisha R\./, /3 hours to 15 minutes/, /40% more appointments/]) {
+      expect(text(), `a testimonial remains: ${gone}`).not.toMatch(gone);
+    }
+    expect(document.querySelectorAll("blockquote, figure").length, "a testimonial region remains").toBe(0);
+  });
+  it('control: "6 Core Engines" and "TTD Caribbean-Native" stay, and the stats grid has no empty columns', () => {
+    render(<Home />);
+    const engines = screen.getByText("Core Engines");
+    expect(engines.previousElementSibling?.textContent).toBe("6");
+    const grid = engines.closest("div.grid") as HTMLElement;
+    expect(grid, "the stats are no longer in a grid").not.toBeNull();
+    const items = grid.children.length;
+    expect(items).toBe(2);
+    expect(grid.textContent, "TTD Caribbean-Native left the stats").toMatch(/TTD\s*Caribbean-Native/);
+    const columns = (grid.className.match(/(?:^|\s)(?:md:)?grid-cols-(\d+)/g) ?? []).map((c) => Number(c.split("-").pop()));
+    expect(Math.max(...columns), "a column for a stat that is gone (an empty cell)").toBeLessThanOrEqual(items);
   });
 });
