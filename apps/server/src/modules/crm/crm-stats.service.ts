@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OPEN_RECEIVABLE_STATUSES, OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { Prisma, type Contact } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { CrmTimelineService } from './crm-timeline.service';
+import { CrmTimelineService, hydrateNoteCreatedEvents } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
@@ -876,7 +876,14 @@ export class CrmStatsService {
           riskFlags: withoutRevenueSignals(contact.riskFlags, REVENUE_RISK_FLAGS),
           opportunities: withoutRevenueSignals(contact.opportunities, REVENUE_OPPORTUNITIES),
         };
-    return { contact: servedContact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
+    const hydratedEvents = await hydrateNoteCreatedEvents(
+      this.prisma,
+      params.businessId,
+      params.contactId,
+      events,
+      notes,
+    );
+    return { contact: servedContact, events: hydratedEvents, notes, tasks, invoices, bookings, meta, customFieldValues };
   }
 
   /**

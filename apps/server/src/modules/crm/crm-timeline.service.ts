@@ -166,6 +166,87 @@ const TIMELINE_EVENTS = 10;
 /** The batch buildTimeline reads money-free events in (eventsWithoutMoney). */
 const EVENT_SCAN_BATCH = 100;
 
+const NOTE_EVENT_PREVIEW_MAX = 120;
+
+export function formatNoteEventPreview(body: string): string {
+  return body.length > NOTE_EVENT_PREVIEW_MAX ? `${body.slice(0, NOTE_EVENT_PREVIEW_MAX)}…` : body;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * P239 (FU-TIMELINE-NOTE-TEXT, D-319/Q40): hydrate ordinary `note.created`
+ * ContactEvent rows with live `body` and `description` from `ContactNote`,
+ * strictly scoped to `{ businessId, contactId, id: { in: noteIds } }`.
+ *
+ * Reading live `ContactNote` covers historical and newly created notes alike,
+ * reflects edits immediately, strips any stale `body`/`description` when a note
+ * was deleted, never hydrates cross-tenant or cross-contact note ids, and
+ * leaves referral `note.created` events (`data.kind` without `noteId`) untouched.
+ */
+export async function hydrateNoteCreatedEvents<T extends Pick<ContactEvent, 'type' | 'data'>>(
+  prisma: PrismaService,
+  businessId: string,
+  contactId: string,
+  events: T[],
+  prefetchedNotes?: ReadonlyArray<{ id: string; businessId?: string; contactId?: string; body: string }>,
+): Promise<T[]> {
+  const noteIds = new Set<string>();
+  for (const event of events) {
+    if (event.type !== 'note.created' || !isPlainRecord(event.data)) continue;
+    if (typeof event.data.kind === 'string') continue;
+    const noteId = event.data.noteId;
+    if (typeof noteId === 'string' && noteId.length > 0) {
+      noteIds.add(noteId);
+    }
+  }
+  if (noteIds.size === 0) return events;
+
+  const bodyById = new Map<string, string>();
+  if (prefetchedNotes) {
+    for (const note of prefetchedNotes) {
+      if (note.businessId !== undefined && note.businessId !== businessId) continue;
+      if (note.contactId !== undefined && note.contactId !== contactId) continue;
+      if (noteIds.has(note.id) && typeof note.body === 'string') {
+        bodyById.set(note.id, note.body);
+      }
+    }
+  }
+
+  const missingIds = [...noteIds].filter((id) => !bodyById.has(id));
+  if (missingIds.length > 0) {
+    const fetched = await prisma.client.contactNote.findMany({
+      where: { businessId, contactId, id: { in: missingIds } },
+      select: { id: true, body: true },
+    });
+    for (const note of fetched) {
+      if (typeof note.body === 'string') {
+        bodyById.set(note.id, note.body);
+      }
+    }
+  }
+
+  return events.map((event) => {
+    if (event.type !== 'note.created' || !isPlainRecord(event.data)) return event;
+    if (typeof event.data.kind === 'string') return event;
+    const noteId = event.data.noteId;
+    if (typeof noteId !== 'string' || noteId.length === 0) return event;
+
+    const liveBody = bodyById.get(noteId);
+    const nextData: Record<string, unknown> = { ...event.data };
+    if (liveBody !== undefined) {
+      nextData.body = liveBody;
+      nextData.description = formatNoteEventPreview(liveBody);
+    } else {
+      delete nextData.body;
+      delete nextData.description;
+    }
+    return { ...event, data: nextData };
+  });
+}
+
 @Injectable()
 export class CrmTimelineService {
   private readonly logger = new Logger(CrmTimelineService.name);
@@ -364,7 +445,12 @@ export class CrmTimelineService {
       });
       return events.map((event) => ({ ...contactEventActivityRow(event), event }));
     });
-    return page.map((row) => row.event);
+    return hydrateNoteCreatedEvents(
+      this.prisma,
+      params.businessId,
+      params.contactId,
+      page.map((row) => row.event),
+    );
   }
 
   /**
@@ -413,8 +499,9 @@ export class CrmTimelineService {
       return events.map((event) => ({ ...contactEventActivityRow(event), event }));
     });
     const hasMore = visible.length > limit;
-    const events = (hasMore ? visible.slice(0, limit) : visible).map((row) => row.event);
-    const nextCursor = hasMore && events.length > 0 ? encodeContactEventCursor(events[events.length - 1]) : null;
+    const rawEvents = (hasMore ? visible.slice(0, limit) : visible).map((row) => row.event);
+    const nextCursor = hasMore && rawEvents.length > 0 ? encodeContactEventCursor(rawEvents[rawEvents.length - 1]) : null;
+    const events = await hydrateNoteCreatedEvents(this.prisma, params.businessId, params.contactId, rawEvents);
     return { events, nextCursor, hasMore };
   }
 
@@ -1205,17 +1292,32 @@ export class CrmTimelineService {
       select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true },
     });
 
+    const hydratedEvents = await hydrateNoteCreatedEvents(
+      this.prisma,
+      businessId,
+      contactId,
+      events,
+      notes,
+    );
+
     const entries: TimelineEntry[] = [
-      ...events.map((event) => ({
-        id: event.id,
-        type: 'event' as const,
-        contactId: event.contactId,
-        contactName: contact ? this.formatContactName(contact) : undefined,
-        contactEmail: contact?.email ?? null,
-        title: event.type,
-        description: `Event recorded via ${event.source ?? 'system'}`,
-        timestamp: event.createdAt,
-      })),
+      ...hydratedEvents.map((event) => {
+        const data = isPlainRecord(event.data) ? event.data : null;
+        const noteDescription =
+          event.type === 'note.created' && typeof data?.description === 'string'
+            ? data.description
+            : null;
+        return {
+          id: event.id,
+          type: 'event' as const,
+          contactId: event.contactId,
+          contactName: contact ? this.formatContactName(contact) : undefined,
+          contactEmail: contact?.email ?? null,
+          title: event.type,
+          description: noteDescription ?? `Event recorded via ${event.source ?? 'system'}`,
+          timestamp: event.createdAt,
+        };
+      }),
       ...notes.map((note) => ({
         id: note.id,
         type: 'note' as const,
