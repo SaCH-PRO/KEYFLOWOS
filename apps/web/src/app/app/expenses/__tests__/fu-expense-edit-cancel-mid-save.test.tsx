@@ -215,3 +215,20 @@ describe("P256: on the detail page", () => {
     expect(field.value).toBe("Saved description");
   });
 });
+
+describe("P257: the header Close shows it is held while the save is out", () => {
+  it("disabled and aria-disabled mid-save; enabled again once the save is refused", async () => {
+    const held = deferred<unknown>();
+    client.updateExpense.mockReturnValue(held.promise);
+    sheetFor(vi.fn());
+    const close = () => screen.getByRole("button", { name: "Close" }) as HTMLButtonElement;
+    expect(close().disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
+    await waitFor(() => expect(client.updateExpense).toHaveBeenCalled());
+    await waitFor(() => expect(close().disabled, "Close looks pressable mid-save").toBe(true));
+    expect(close().getAttribute("aria-disabled")).toBe("true");
+    await act(async () => { held.resolve({ data: null, error: "Request refused by the server", status: 503 }); });
+    await waitFor(() => expect(close().disabled).toBe(false));
+    expect(close().hasAttribute("aria-disabled")).toBe(false);
+  });
+});
