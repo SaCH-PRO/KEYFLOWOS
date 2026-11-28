@@ -188,6 +188,37 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     expect(client.createExpense).not.toHaveBeenCalled();
   });
 
+  it("P262: a reply that comes back to the started business after A -> B -> A, before the page shows A again, is dropped (the page-business half alone)", async () => {
+    // The stored id and the data hook's current business are A again (so the start check passes), but the page still
+    // shows B: only pageBusiness tells that a switch happened while the upload ran. The reply is dropped.
+    let finish: (v: unknown) => void = () => {};
+    uploadFile.mockImplementation(() => new Promise((r) => { finish = r; }));
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
+    await waitFor(() => expect(uploadFile).toHaveBeenCalled());
+    switchTo("biz_B");
+    await waitFor(() => expect(client.fetchExpenses.mock.calls.at(-1)?.[0]).toBe("biz_B"));
+    await act(async () => {
+      // back to A and the reply in one batch: the page has not rendered A when the reply is judged
+      ws.bid = "biz_A";
+      window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_A" } }));
+      finish({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj1", metadata: {} });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(toast.success, "the reply was taken though the page showed another business while it ran").not.toHaveBeenCalledWith("Receipt uploaded");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("control (P262): with no switch, the same reply opens the sheet with the receipt", async () => {
+    uploadFile.mockResolvedValue({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_A/obj1", metadata: {} });
+    render(<ExpensesInboxPage />);
+    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+    fireEvent.change(await screen.findByLabelText(/^upload receipt$/i), { target: { files: [photo()] } });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Receipt uploaded"));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
   it("a receipt path of another business is never attached", async () => {
     uploadFile.mockResolvedValue({ uploadURL: "http://s3.test/put", objectPath: "/objects/uploads/biz_OTHER/obj1", metadata: {} });
     render(<ExpensesInboxPage />);
