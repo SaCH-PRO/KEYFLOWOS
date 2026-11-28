@@ -265,3 +265,48 @@ describe("P257 R6: after a save fails, the sheet's own controls close it again",
     }
   }
 });
+
+describe("P263 R1-1: through the real expense sheet, a layout flip keeps focus in the field being typed in", () => {
+  // R3: the sheet's children are kept mounted across the flip, so the field focused is the field refocused.
+  let phone = false;
+  const listeners = new Set<(e: MediaQueryListEvent) => void>();
+  const original = window.matchMedia;
+  beforeEach(() => {
+    phone = false;
+    listeners.clear();
+    window.matchMedia = ((query: string) => ({
+      get matches() { return phone && /max-width/.test(query); },
+      media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => listeners.add(fn),
+      removeEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => listeners.delete(fn),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+  });
+  afterEach(() => { window.matchMedia = original; });
+  const flip = async (toPhone: boolean) => {
+    phone = toPhone;
+    act(() => { for (const fn of [...listeners]) fn({ matches: toPhone } as MediaQueryListEvent); });
+    await settle();
+  };
+  for (const [field, find] of [
+    ["Description", () => screen.getByPlaceholderText("What was this expense for?")],
+    ["Amount", () => screen.getByPlaceholderText("0.00")],
+    ["Vendor", () => screen.getByPlaceholderText("Vendor name")],
+  ] as const) {
+    it(`${field}: typed in, then desktop -> phone -> desktop: focus stays in ${field}`, async () => {
+      sheetFor(vi.fn());
+      await settle();
+      const el = () => find() as HTMLInputElement;
+      const node = el();
+      node.focus();
+      fireEvent.change(node, { target: { value: field === "Amount" ? "12" : "Toner" } });
+      await flip(true);
+      expect(document.activeElement, `focus left ${field} on the flip to phone`).toBe(el());
+      await flip(false);
+      expect(document.activeElement, `focus left ${field} on the flip back`).toBe(el());
+      // P263 R3: the field is the same node (not a match in a remounted form), with what was typed.
+      expect(el(), `${field} was remounted by the flip`).toBe(node);
+      expect(node.value).toBe(field === "Amount" ? "12" : "Toner");
+    });
+  }
+});
