@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -304,8 +304,46 @@ test('RR-HOOK-PACKET-SCOPE: scope.mjs lists changed files outside the write set 
       encoding: 'utf8',
     });
     assert.equal(unknownRes.status, 1);
+
+    // Non-ASCII file outside write set is listed unquoted (core.quotePath=false).
+    writeFileSync(join(dir, 'apps/café.ts'), 'export const c = 1;\n', 'utf8');
+    git(['add', 'apps/café.ts']);
+    git(['commit', '-m', 'chore: add non-ASCII file']);
+    const outUtf8 = execFileSync(process.execPath, [SCOPE_SCRIPT, 'A', '--ref', 'HEAD'], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    assert.ok(outUtf8.includes('apps/café.ts'), `non-ASCII path must not be octal-quoted: ${outUtf8}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('RR-HOOK-PACKET-SCOPE R2 regressions: .env.example top-level write set & nested new path under symlinked repo root', () => {
+  // 1. .env.example must remain checkable (3 real plan packets list .env.example).
+  const envMatch = lib.writeSetMatch('.env.example', ['apps/server/src/a.ts', '.env.example']);
+  assert.equal(envMatch.checkable, true, '.env.example must not turn write set uncheckable');
+  assert.equal(envMatch.inside, true);
+  const envOutside = lib.writeSetMatch('apps/other.ts', ['apps/server/src/a.ts', '.env.example']);
+  assert.equal(envOutside.checkable, true);
+  assert.equal(envOutside.inside, false);
+
+  // 2. Nested new file whose parent dirs do not exist yet, accessed through a symlinked repo root.
+  const plan = { packets: [{ id: 'A', files: ['apps/x.ts'] }] };
+  const { dir } = makeTempRepo(plan, 'pkt/V1-A');
+  const linkParent = mkdtempSync(join(tmpdir(), 'kf-write-set-link-'));
+  const linkDir = join(linkParent, 'repo-link');
+  try {
+    symlinkSync(dir, linkDir, 'dir');
+    const nestedNew = join(linkDir, 'apps', 'deep', 'missing-parent', 'z.ts');
+    const res = runGuardEdit(linkDir, { session_id: 'sess-sym', tool_input: { file_path: nestedNew } });
+    assert.equal(res.status, 0);
+    const msg = JSON.stringify(res.json);
+    assert.match(msg, /apps\/deep\/missing-parent\/z\.ts/, `symlinked nested path must trigger scope warning: ${msg}`);
+  } finally {
+    rmSync(linkParent, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 
