@@ -1750,6 +1750,11 @@
       "prefix": "v92p_",
       "owner": "apps/server/test/store-gate-side-doors.integration.test.ts",
       "packet": "V1-92 (P253 FU-STORE-GATE-SIDE-DOORS, D-297)"
+    },
+    {
+      "prefix": "v92r_",
+      "owner": "apps/server/test/general-ledger-zoned-from.integration.test.ts",
+      "packet": "V1-92 (FU-LEDGER-ZONED-FROM, Journey H)"
     }
   ],
   "pendingRenames": [],
