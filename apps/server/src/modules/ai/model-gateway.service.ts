@@ -2515,17 +2515,23 @@ export class ModelGatewayService {
    * `strict: true` flag and `['string', 'null']` / `anyOf` null-union rewrites.
    * Send them closed non-strict schemas without `strict: true`.
    */
-  private buildOpenAiCompatTools(
-    tools: GatewayToolDefinition[],
-  ): OpenAI.Chat.Completions.ChatCompletionTool[] {
-    return tools.map((t) => ({
+  private buildOpenAiCompatTool(
+    t: GatewayToolDefinition,
+  ): OpenAI.Chat.Completions.ChatCompletionTool {
+    return {
       type: 'function' as const,
       function: {
         name: t.function.name,
         description: t.function.description || '',
         parameters: this.buildAnthropicToolSchema(t),
       },
-    }));
+    };
+  }
+
+  private buildOpenAiCompatTools(
+    tools: GatewayToolDefinition[],
+  ): OpenAI.Chat.Completions.ChatCompletionTool[] {
+    return tools.map((t) => this.buildOpenAiCompatTool(t));
   }
 
   private buildAnthropicMessages(messages: GatewayMessage[]): {
@@ -3069,7 +3075,7 @@ export class ModelGatewayService {
     // Tools on the streaming path too. Omitting them here is exactly how the
     // Anthropic fallback ended up able to describe an action and never take one.
     if (request.tools && request.tools.length > 0) {
-      params.tools = this.buildOpenAiCompatTools(request.tools);
+      params.tools = request.tools.map((t) => this.buildOpenAiCompatTool(t));
       if (request.toolChoice) {
         params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
       }

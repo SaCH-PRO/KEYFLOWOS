@@ -8203,6 +8203,7 @@ ${triage.standingContext}`;
         const withinMemberScope = async (bizId: string, name: string, toolArgs?: unknown): Promise<void> => {
           const refusal = await this.memberScopeRefusal(bizId, name, action, toolArgs);
           if (refusal) throw new Error(refusal);
+          this.validateToolInput(name, toolArgs as Record<string, any>);
         };
         // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3b; D-64, D-88): and a contact an inner commerce
         // write binds is judged by that same member's CRM view. The member rides as onBehalfOfUserId,
@@ -8213,11 +8214,7 @@ ${triage.standingContext}`;
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) =>
-            withinMemberScope(bizId, name, toolArgs).then(() => {
-              this.validateToolInput(name, toolArgs as Record<string, any>);
-              return this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId });
-            }),
+          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name, toolArgs).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId })),
         });
         return result;
       }
@@ -9597,12 +9594,11 @@ ${triage.standingContext}`;
       const allowExtraKeys = PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS.includes(toolName)
         ? (['businessId'] as const)
         : undefined;
-      const validatedArgs =
-        allowExtraKeys && args && typeof args === 'object' && !Array.isArray(args)
-          ? { ...args }
-          : args;
-      this.validateToolInput(toolName, validatedArgs, allowExtraKeys ? { allowExtraKeys } : undefined);
-      const rawResult = await this.executeToolAction(businessId, toolName, validatedArgs, action);
+      if (allowExtraKeys && args && typeof args === 'object' && !Array.isArray(args)) {
+        args = { ...args };
+      }
+      this.validateToolInput(toolName, args, allowExtraKeys ? { allowExtraKeys } : undefined);
+      const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
