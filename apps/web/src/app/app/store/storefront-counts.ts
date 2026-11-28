@@ -183,31 +183,57 @@ const segmenter =
 /** The text's graphemes (what a reader counts as characters), or its code points where Intl.Segmenter is missing. */
 const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
 const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
-/**
- * r12-r13: what is dropped before the "...": whitespace, punctuation and symbols ("&", "•", "/", "*", "#", "@", "¿",
- * "¡", "„", "<", "$", an opening bracket or quote, sentence punctuation), except what closes something or means
- * something: a "%", a "+", closing punctuation (a closing bracket or quote: \p{Pe}, \p{Pf}), a straight quote (it
- * may close one), and an emoji.
- */
-const DROPPED_AT_END = /(?:(?![%+"'\p{Pe}\p{Pf}\p{Extended_Pictographic}])[\s\p{P}\p{S}])+$/u;
-/** Holds a letter, a digit, a mark or an emoji: more than whitespace, punctuation and symbols. */
-const hasContent = (t: string) => /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}/u.test(t);
+/** Holds a letter, a digit, a mark, an emoji or a flag: more than whitespace, punctuation and symbols. */
+const hasContent = (t: string | undefined) =>
+  t !== undefined && /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(t);
 
 /**
- * P231 r9-r13: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
+ * P231 r12-r14: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
+ * emoji with a skin tone, a keycap, a flag, a family is never split):
+ * - always: whitespace, sentence punctuation (. , ; : ! ? …), a dash, an opening bracket or quote;
+ * - any other punctuation or symbol ("&", "•", "/", "*", "#", "@", "¿", "<", "$") only when it stands alone, after
+ *   whitespace, punctuation, a symbol or nothing ("Shop &", "Shop •", "4.5 /"); attached to the letter, digit or mark
+ *   before it, it is that word's and stays ("C#", "5★", "20°", "Free*", "a/b/"); a currency sign after a number and
+ *   one space is the number's too ("5 €");
+ * - never: a "%", a "+", a closing bracket or quote, a straight quote (it may close one), an emoji or a flag, or a
+ *   grapheme holding anything else (a letter, a digit, a mark: a keycap).
+ */
+function dropTrailing(g: string[]): string[] {
+  let end = g.length;
+  while (end > 0) {
+    const c = g[end - 1];
+    if (isSpace(c)) {
+      end--;
+      continue;
+    }
+    if (!/^[\p{P}\p{S}]+$/u.test(c) || /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(c)) break;
+    if (/^[%+"'\p{Pe}\p{Pf}]/u.test(c)) break;
+    if (!/^[.,;:!?…\p{Pd}\p{Ps}\p{Pi}]$/u.test(c)) {
+      const before = g[end - 2];
+      if (hasContent(before)) break;
+      if (/^\p{Sc}$/u.test(c) && isSpace(before) && /^\p{Nd}$/u.test(g[end - 3] ?? "")) break;
+    }
+    end--;
+  }
+  return g.slice(0, end);
+}
+
+/**
+ * P231 r9-r14: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
  * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text, and never
  * "..." alone:
  * - the cut is at the last whitespace (any: a space, a tab, a no-break space, an ideographic space) inside the room
  *   left for the "..."; a word that ends exactly where the room ends is kept whole;
  * - leading whitespace is not a break (a break needs a word before it);
  * - a single word longer than the room is cut hard, then "...";
- * - trailing whitespace, punctuation and symbols before the "..." are dropped ("Shop & Book" gives "Shop...", not
- *   "Shop &..."), but for a "%", a "+", a closing bracket or quote, a straight quote and an emoji ("Get 50%...",
- *   "(50% off)...", "500+...");
- * - when the kept part holds no letter, digit, mark or emoji (all whitespace, punctuation and symbols), the text is
- *   cut hard instead, from its first non-whitespace or, when that too holds none, from its first letter, digit, mark
- *   or emoji, dropping the same trailing characters; only a text of punctuation, symbols and whitespace alone keeps
- *   them before the "...", never whitespace;
+ * - trailing whitespace, sentence punctuation, dashes, opening brackets and quotes before the "..." are dropped, and
+ *   a lone symbol or other punctuation mark ("Shop & Book" gives "Shop...", not "Shop &..."), by grapheme
+ *   (dropTrailing); one attached to the word before it stays ("C#...", "Free*..."), as do a "%", a "+", a closing
+ *   bracket or quote, a straight quote, an emoji and a flag ("Get 50%...", "(50% off)...", "500+...", "👍🏽...");
+ * - when the kept part holds no letter, digit, mark, emoji or flag (all whitespace, punctuation and symbols), the text
+ *   is cut hard instead, from its first non-whitespace or, when that too holds none, from its first letter, digit,
+ *   mark, emoji or flag, dropping the same trailing graphemes; only a text of punctuation, symbols and whitespace
+ *   alone keeps them before the "...", never whitespace;
  * - with `max` of 3 or less there is no room for "..." and a character: the text's first `max` characters;
  * - a text of whitespace only, longer than `max`, gives "".
  */
@@ -224,19 +250,19 @@ export function clip(text: string, max: number): string {
     // the room's last character. (At i = 0 the prefix is empty, so `i > 0` and `i >= 0` agree there.)
     if (i > 0 && room.slice(0, i).join("").trim() !== "") end = i;
   }
-  const kept = room.slice(0, end).join("").replace(DROPPED_AT_END, "");
+  const kept = dropTrailing(room.slice(0, end)).join("");
   if (hasContent(kept)) return `${kept}...`;
-  // r11-r12: the kept part is whitespace or punctuation only: a hard cut from the text's first non-whitespace, its
-  // trailing whitespace and sentence punctuation dropped as above; when that leaves no letter, digit or symbol, a
-  // hard cut from the text's first one; a text with none (punctuation only) keeps its punctuation, never whitespace,
-  // before the "...".
-  const cutAt = (i: number) => g.slice(i, i + max - 3).join("");
+  // r11-r14: the kept part is whitespace, punctuation and symbols only: a hard cut from the text's first
+  // non-whitespace, its trailing graphemes dropped as above; when that leaves no letter, digit, mark, emoji or flag, a
+  // hard cut from the text's first one; a text with none keeps its punctuation and symbols, never whitespace, before
+  // the "...".
+  const cutAt = (i: number) => g.slice(i, i + max - 3);
   const start = g.findIndex((c) => !isSpace(c));
   if (start < 0) return "";
-  let cut = cutAt(start).replace(DROPPED_AT_END, "");
+  let cut = dropTrailing(cutAt(start)).join("");
   if (!hasContent(cut)) {
     const content = g.findIndex((c) => hasContent(c));
-    cut = content < 0 ? cutAt(start).replace(/\s+$/u, "") : cutAt(content).replace(DROPPED_AT_END, "");
+    cut = content < 0 ? cutAt(start).join("").replace(/\s+$/u, "") : dropTrailing(cutAt(content)).join("");
   }
   return `${cut}...`;
 }
