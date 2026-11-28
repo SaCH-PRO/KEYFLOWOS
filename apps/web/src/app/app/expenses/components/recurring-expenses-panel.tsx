@@ -104,9 +104,14 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   // change alone never reopens the builder (COR MINOR-6: it opens only on a new click).
   const builderBusiness = useRef(businessId);
   useEffect(() => { builderBusiness.current = businessId; }, [businessId]);
+  // The ref sync above must stay before this effect, so a New and a business change in one commit
+  // read the new business. P254 R4-1: the open is queued, so it opens only if the business is still the one the New
+  // was made for (a second commit in the same task may change it before the microtask runs).
   useEffect(() => {
-    if (triggerNew && builderBusiness.current) {
+    const forBusiness = builderBusiness.current;
+    if (triggerNew && forBusiness) {
       queueMicrotask(() => {
+        if (builderBusiness.current !== forBusiness) return;
         setEditing(null);
         setShowBuilder(true);
       });
