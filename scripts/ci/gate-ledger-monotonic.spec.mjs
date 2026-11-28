@@ -256,12 +256,15 @@ describe('RR-GATE-LEDGER-MONOTONIC: monotonic comparison across git commits', ()
 
   it('wires the gating job "Gate ledgers (monotonic)" into ci-cd.yml and ci-verdict with fetch-depth 0 and event base SHAs', () => {
     const yml = fs.readFileSync(WORKFLOW, 'utf8');
-    assert.match(yml, /name:\s*Gate ledgers \(monotonic\)/);
-    assert.match(yml, /fetch-depth:\s*0/);
-    assert.match(yml, /GITHUB_PR_BASE_SHA:\s*\$\{\{\s*github\.event\.pull_request\.base\.sha\s*\}\}/);
-    assert.match(yml, /GITHUB_MERGE_GROUP_BASE_SHA:\s*\$\{\{\s*github\.event\.merge_group\.base_sha\s*\}\}/);
-    assert.match(yml, /GITHUB_BEFORE_SHA:\s*\$\{\{\s*github\.event\.before\s*\}\}/);
-    assert.match(yml, /scripts\/ci\/gate-ledger-monotonic\.mjs/);
+    const blockMatch = yml.match(/^  gate-ledgers:\n([\s\S]*?)(?=^  [a-zA-Z0-9_-]+:\s*$|(?![\s\S]))/m);
+    assert.ok(blockMatch, 'expected top-level gate-ledgers job block in ci-cd.yml');
+    const jobBlock = blockMatch[0];
+    assert.match(jobBlock, /name:\s*Gate ledgers \(monotonic\)/);
+    assert.match(jobBlock, /fetch-depth:\s*0/);
+    assert.match(jobBlock, /GITHUB_PR_BASE_SHA:\s*\$\{\{\s*github\.event\.pull_request\.base\.sha\s*\}\}/);
+    assert.match(jobBlock, /GITHUB_MERGE_GROUP_BASE_SHA:\s*\$\{\{\s*github\.event\.merge_group\.base_sha\s*\}\}/);
+    assert.match(jobBlock, /GITHUB_BEFORE_SHA:\s*\$\{\{\s*github\.event\.before\s*\}\}/);
+    assert.match(jobBlock, /scripts\/ci\/gate-ledger-monotonic\.mjs/);
     assert.match(yml, /scripts\/ci\/gate-ledger-monotonic\.spec\.mjs/);
     assert.match(yml, /needs:\s*\[[^\]]*gate-ledgers[^\]]*\]/);
   });
@@ -286,6 +289,18 @@ describe('RR-GATE-LEDGER-MONOTONIC: monotonic comparison across git commits', ()
       assert.equal(res.status, 1);
     } finally {
       fs.rmSync(brokenBase.dir, { recursive: true, force: true });
+    }
+
+    // Base anti-vacuity failure (BUSINESS_ID_MODELS < 300 at base, valid 310 at head) must fail closed
+    const vacuousBase = initFixtureRepo({ businessIdModels: 50 }, { businessIdModels: 310 });
+    try {
+      const report = mod.compareRefs({ cwd: vacuousBase.dir, baseRef: vacuousBase.baseSha, headRef: vacuousBase.headSha });
+      assert.equal(report.ok, false, `expected base anti-vacuity error to fail closed, got: ${JSON.stringify(report)}`);
+      assert.ok(report.errors.some((e) => e.includes('base') && e.includes('BUSINESS_ID_MODELS')));
+      const res = runCli(vacuousBase.dir, ['--base', vacuousBase.baseSha, '--head', vacuousBase.headSha]);
+      assert.equal(res.status, 1);
+    } finally {
+      fs.rmSync(vacuousBase.dir, { recursive: true, force: true });
     }
 
     // Genuine constant not yet declared in base file (e.g., new ledger registered later) is still "new"
@@ -337,10 +352,15 @@ describe('RR-GATE-LEDGER-MONOTONIC: monotonic comparison across git commits', ()
       const resolvedOnMain = mod.resolveBaseRef({ cwd: dir, eventName: 'push', beforeSha: ZERO, headRef: 'HEAD' });
       assert.equal(resolvedOnMain, baseSha);
 
-      // When origin/main is behind HEAD on a feature branch, fallback resolves merge-base (baseSha)
+      // Add a 3rd commit (baseSha -> headSha -> tipSha) with origin/main pinned at baseSha:
+      // proves resolveBaseRef selects merge-base (baseSha), NOT HEAD~1 (headSha)!
+      writeFile(dir, 'apps/server/src/core/event-bus/event-wiring.spec.ts', `const KNOWN_DEAD = new Set(['evt.0','evt.1','evt.2','evt.3','evt.4','evt.5','evt.6','evt.7']);\n`);
+      git(dir, ['add', '-A']);
+      git(dir, ['commit', '-m', 'tip']);
       git(dir, ['update-ref', 'refs/remotes/origin/main', baseSha]);
       const resolvedOnBranch = mod.resolveBaseRef({ cwd: dir, eventName: 'push', beforeSha: ZERO, headRef: 'HEAD' });
       assert.equal(resolvedOnBranch, baseSha);
+      assert.notEqual(resolvedOnBranch, headSha);
 
       // Default CLI invocation without --base using CI env vars works end-to-end
       const envRes = spawnSync(process.execPath, [CLI], {
