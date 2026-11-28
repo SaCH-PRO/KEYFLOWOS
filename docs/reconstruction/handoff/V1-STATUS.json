@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "f8ed5984b86cbb0360ad81899523f0bdb85ae6ce",
-  "main_commit_date": "2026-11-28T01:10:36+00:00",
+  "main_sha": "9e0f64c4a87ee06b0e75bcac2b22f0f04a6a7a04",
+  "main_commit_date": "2026-11-28T05:14:40+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 261,
-    "points": 391,
-    "pct_by_points": 68.5
+    "packets": 269,
+    "points": 402,
+    "pct_by_points": 70.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 135,
-    "points": 179.5,
-    "pct_by_points": 31.5
+    "packets": 127,
+    "points": 168.5,
+    "pct_by_points": 29.5
    }
   },
   "by_step": {
@@ -66,21 +66,21 @@
     "total": 7
    },
    "3": {
-    "done": 101,
+    "done": 106,
     "in-progress": 0,
-    "todo": 48,
+    "todo": 43,
     "total": 149
    },
    "4": {
-    "done": 40,
+    "done": 41,
     "in-progress": 0,
-    "todo": 13,
+    "todo": 12,
     "total": 53
    },
    "5": {
-    "done": 62,
+    "done": 63,
     "in-progress": 0,
-    "todo": 30,
+    "todo": 29,
     "total": 92
    },
    "6": {
@@ -90,9 +90,9 @@
     "total": 40
    },
    "7": {
-    "done": 13,
+    "done": 14,
     "in-progress": 0,
-    "todo": 21,
+    "todo": 20,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 171,
+    "done": 179,
     "in-progress": 0,
-    "todo": 84,
+    "todo": 76,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 70,
+   "prior-status-file": 69,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 117,
-   "compacted-commit": 95,
-   "no-evidence": 84,
+   "compacted-commit": 103,
+   "no-evidence": 77,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -249,8 +249,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 84,
-  "todo_with_dependencies_met_launch": 47
+  "todo_with_dependencies_met": 78,
+  "todo_with_dependencies_met_launch": 40
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -314,16 +314,6 @@
    "unblocks": 18
   },
   {
-   "id": "EXPENSES-HUB-3",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
    "id": "SWEEP-RERUN-S2",
    "step": 2,
    "priority": "P1",
@@ -337,6 +327,16 @@
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "SEND-TO-ACCOUNTANT",
+   "step": 4,
+   "priority": "P2",
    "size": "S",
    "lane": "web",
    "track": "launch",
@@ -429,26 +429,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-CONNECTOR-STACK-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-STATUS-PATCH-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 1
@@ -564,16 +544,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-LEDGER-ZONED-FROM",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-LIST-CREDIT-AWARE-REMAINING",
    "step": 5,
    "priority": "P2",
@@ -680,6 +650,16 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CHANGE-ORDER-APPROVE-COMMAND",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -824,16 +804,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-APPROVAL-MODEL-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-BUNDLE-PROOF-PROFILE",
    "step": 3,
    "priority": "P3",
@@ -850,16 +820,6 @@
    "size": "S",
    "lane": "docs",
    "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1074,32 +1034,12 @@
    "unblocks": 0
   },
   {
-   "id": "RR-STRICT-TOOL-SCHEMAS",
-   "step": 7,
-   "priority": "P3",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-TRIAGE-RISK-FLOOR",
    "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "server",
    "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-UNUSED-MODEL-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1156,16 +1096,6 @@
    "unblocks": 18
   },
   {
-   "id": "EXPENSES-HUB-3",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 10
-  },
-  {
    "id": "SWEEP-RERUN-S2",
    "step": 2,
    "priority": "P1",
@@ -1179,6 +1109,16 @@
    "id": "W11-STOREFRONT-PAYPAL-LIST",
    "step": 6,
    "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "SEND-TO-ACCOUNTANT",
+   "step": 4,
+   "priority": "P2",
    "size": "S",
    "lane": "web",
    "track": "launch",
@@ -1251,26 +1191,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "docs",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-CONNECTOR-STACK-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-STATUS-PATCH-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 1
@@ -1386,16 +1306,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-LEDGER-ZONED-FROM",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-LIST-CREDIT-AWARE-REMAINING",
    "step": 5,
    "priority": "P2",
@@ -1486,26 +1396,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-APPROVAL-MODEL-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-GATE-LEDGER-CENSUS",
    "step": 3,
    "priority": "P3",
@@ -1571,26 +1461,6 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-STRICT-TOOL-SCHEMAS",
-   "step": 7,
-   "priority": "P3",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-UNUSED-MODEL-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2910,15 +2780,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "323b62b7"
+   ],
    "depends_on": [
     "EXPENSES-HUB-2"
    ],
    "title": "Expenses page: categories and recurring tabs mounted, no-access state for refused members, toolbar that works, receipt photo upload, no invented figures",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SEND-TO-ACCOUNTANT",
@@ -2935,7 +2807,7 @@
     "EXPENSES-HUB-3"
    ],
    "title": "Money > Reports: one 'Send to my accountant' button on the existing export ZIP and email",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "NAV-A3",
@@ -6215,15 +6087,17 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "be10c0ad"
+   ],
    "depends_on": [
     "SWP-FIN-LEDGER"
    ],
    "title": "General ledger date-only `from` starts at the business-zone day and dates show in the business zone",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-COA-SEEDER-AND-INPUT",
@@ -6604,17 +6478,19 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ffaadd01"
+   ],
    "depends_on": [
     "W11-KEY-TRANSFER-INTEGER",
     "RR-ANTHROPIC-TOOL-PARITY",
     "RR-TOOL-ARGS-MALFORMED-NEVER-RUN"
    ],
    "title": "KEY tool calls: advertised schemas are closed (no undeclared arguments) and strict where the provider supports it, after a census of the callers that send extra keys",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-KEY-RUN-BUDGET",
@@ -6754,13 +6630,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "905a9428"
+   ],
    "depends_on": [],
    "title": "Census ratchet of the two connector stacks (ConnectorRegistry and KeyConnector): every importer is listed with its v1 journey, a new one fails",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-CONNECTOR-CONFORMANCE",
@@ -7118,13 +6996,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "5ac2c31e"
+   ],
    "depends_on": [],
    "title": "Census of every entry that starts a KEY cognitive turn or offers tools to a model, with its runtime, who may reach it and its authority path; a spec fails on an unregistered entry",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-APPROVAL-MODEL-CENSUS",
@@ -7133,13 +7013,15 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "0831debb"
+   ],
    "depends_on": [],
    "title": "Census of every writer of KEY proposals, AI approval items, approval requests and Flow-bound confirmations, with what each approval gates and who may clear it; a spec fails on an unregistered writer",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-REFLECTION-HONEST",
@@ -7328,13 +7210,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "720d04d1"
+   ],
    "depends_on": [],
    "title": "Census of every generic update route that can write a lifecycle status, each registered as transition-checked, decision-refused or free label; a new unregistered one fails",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-CHANGE-ORDER-APPROVE-COMMAND",
@@ -7351,7 +7235,7 @@
     "RR-STATUS-PATCH-CENSUS"
    ],
    "title": "Change orders are approved and rejected through commands that record the real approver; PATCH can no longer set a decision status or a client-chosen approvedBy",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-DEAD-EVENT-CENSUS",
@@ -7439,13 +7323,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ddaf3256"
+   ],
    "depends_on": [],
    "title": "Census of Prisma models no code reads or writes; the list may shrink, and a new model with no reader or writer fails",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-ARCH-SCAN-CI",
