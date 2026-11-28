@@ -1203,7 +1203,7 @@ describe('review repairs: a contact read is known by what the tool does; a refus
   it('RV-07 RED-BEFORE (SEC-R3b-2): the business owner (Business.ownerId) is refused a tool the authority map never runs, whoever asks; an unmapped tool still passes the owner', async () => {
     const planId = `${P}rv07`;
     const stepId = await seedQueuePlan(planId, ID.owner, 'execute_custom_logic', { code: 'return 1;' });
-    expect(await planStepRunRefusal(prisma, ID.biz, planId, 'execute_custom_logic')).toMatch(/not executed/);
+    expect(await planStepRunRefusal(prisma, ID.biz, planId, 'execute_custom_logic')).toBe('not available in this version');
     await runQueueStep(planId, 'execute_custom_logic', { code: 'return 1;' });
     expect(dispatchedFor(stepId)).toEqual([]);
     expect(await planStepRunRefusal(prisma, ID.biz, planId, 'mcp__v87b__tool')).toBeNull();
