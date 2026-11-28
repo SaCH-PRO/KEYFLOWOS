@@ -201,3 +201,57 @@ describe("P254: the hub with no business", () => {
     expect(document.getElementById("expenses-panel-recurring"), "the Recurring panel mounted with no business").toBeNull();
   }, 30000);
 });
+
+describe("P254 R3-1: a business change alone never reopens the builder (COR MINOR-6, at the panel)", () => {
+  const el = (b: string | null, t: number) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={t} />;
+  async function newOnA() {
+    const view = render(el("biz_A", 0));
+    await settle();
+    view.rerender(el("biz_A", 1));
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+    return view;
+  }
+  it("A, New, then B with the trigger unchanged: no builder", async () => {
+    const view = await newOnA();
+    view.rerender(el("biz_B", 1));
+    await settle();
+    await settle();
+    expect(screen.queryByRole("dialog"), "the builder reopened for B on the business change alone").toBeNull();
+  });
+  it("A, New, then none, then B with the trigger unchanged: no builder", async () => {
+    const view = await newOnA();
+    view.rerender(el(null, 1));
+    await settle();
+    view.rerender(el("biz_B", 1));
+    await settle();
+    await settle();
+    expect(screen.queryByRole("dialog"), "the builder reopened for B on the business change alone").toBeNull();
+  });
+});
+
+describe("P254 R3-2: the hub's New request does not outlive the business it was made for", () => {
+  const switchTo = (bid: string | null) => {
+    ws.bid = bid;
+    act(() => { window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: bid } })); });
+  };
+  for (const path of [["biz_B"], [null, "biz_B"]] as const) {
+    it(`New under A, then ${path.map((b) => b ?? "none").join(" → ")}: no builder until New is pressed again`, async () => {
+      render(<ExpensesInboxPage />);
+      await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalledWith("biz_A", expect.anything()), LONG);
+      fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, LONG));
+      fireEvent.click(await screen.findByRole("button", { name: /New recurring expense/ }, LONG));
+      expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+      for (const bid of path) {
+        switchTo(bid);
+        await settle();
+        await settle();
+      }
+      await waitFor(() => expect(client.fetchRecurringExpenses).toHaveBeenCalledWith("biz_B"), LONG);
+      const again = await screen.findByRole("button", { name: /New recurring expense/ }, LONG);
+      await settle();
+      expect(screen.queryByRole("dialog"), "the builder opened for B without a click").toBeNull();
+      fireEvent.click(again);
+      expect(await screen.findByRole("dialog", {}, LONG), "control: New pressed on B opens the builder").toBeTruthy();
+    }, 30000);
+  }
+});
