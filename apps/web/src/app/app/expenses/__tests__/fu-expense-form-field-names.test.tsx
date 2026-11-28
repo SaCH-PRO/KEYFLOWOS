@@ -6,10 +6,15 @@
  * R1 (first review, 3 NITs): R1-1 the edit sheet's five fields are pinned, not Description alone; R1-2 a required
  * field's name carries no "*" (read aloud as "star") and the field is aria-required; R1-3 the rest of the sheet's
  * fields are named too: Payment Method, Tags, Project, Client, Service, Notes and the recurring frequency.
+ *
+ * R2 (review B, 3 NITs): R2-1 Date is marked required, so it is validated like Description and Amount: with no date
+ * the submit button is disabled and nothing is sent (an empty date was saved as "today" by the server); R2-2 the
+ * sweep checks a non-empty computed accessible name, file inputs included, in the add, bill and edit sheets; R2-3
+ * Date's name is pinned by getByLabelText (its input has no ARIA role, so getByRole cannot query it).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within, getRoles, act } from "@testing-library/react";
 import type { Expense } from "@/lib/client";
 
 const blocked = vi.hoisted(() => ({ on: false }));
@@ -133,7 +138,7 @@ describe("P267 R1-2: a required field's name has no star, and the field is marke
       expect(el.getAttribute("aria-required"), `${field} is not marked required`).toBe("true");
     });
   }
-  it("Date: aria-required (a date input has no role here to name-check; its star is pinned below with the others)", () => {
+  it("Date: aria-required (its name is pinned by getByLabelText, as a date input has no ARIA role; its star is pinned below)", () => {
     sheet();
     const date = screen.getByLabelText(/^Date/) as HTMLInputElement;
     expect(date.type).toBe("date");
@@ -176,12 +181,81 @@ describe("P267 R1-3: the rest of the sheet's fields are named", () => {
     const frequency = named("combobox", "Recurring frequency");
     expect(within(frequency).getByRole("option", { name: "Monthly" })).toBeTruthy();
   });
-  it("every form control in the sheet has a name (no unnamed field is left)", () => {
-    sheet(null, LINKS);
-    fireEvent.click(screen.getByRole("checkbox", { name: /Recurring expense/ }));
-    const unnamed = Array.from(document.querySelectorAll<HTMLElement>("input:not([type=hidden]):not([type=file]), select, textarea")).filter(
-      (el) => !el.getAttribute("aria-label") && !(el as HTMLInputElement).labels?.length && !el.getAttribute("aria-labelledby"),
-    );
-    expect(unnamed.map((el) => el.outerHTML.slice(0, 80)), "fields with no name").toEqual([]);
+  /**
+   * R2-2: every form control has a non-empty accessible name, as testing-library computes it: a control with an ARIA
+   * role is found by getAllByRole(role, { name: /\S/ }); one with none (a date or file input) by getAllByLabelText,
+   * whose label must hold text. An empty label or aria-label names nothing and fails.
+   */
+  function unnamedControls(): string[] {
+    const named = new Set<Element>();
+    for (const role of Object.keys(getRoles(document.body))) {
+      for (const el of screen.queryAllByRole(role, { name: /\S/ })) named.add(el);
+    }
+    for (const el of screen.queryAllByLabelText(/\S/)) named.add(el);
+    return Array.from(document.querySelectorAll<HTMLElement>("input:not([type=hidden]), select, textarea"))
+      .filter((el) => !named.has(el))
+      .map((el) => el.outerHTML.slice(0, 90));
+  }
+  for (const [state, open] of [
+    ["the add sheet", () => sheet(null, LINKS)],
+    ["the bill sheet (Due date)", () => render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} initialKind="bill" onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} {...LINKS} />)],
+    ["the edit sheet", () => sheet(EDITING, LINKS)],
+  ] as const) {
+    it(`${state}: every form control has a non-empty accessible name (file inputs included)`, () => {
+      open();
+      const recurring = screen.queryByRole("checkbox", { name: /Recurring expense/ });
+      if (recurring && !(recurring as HTMLInputElement).checked) fireEvent.click(recurring);
+      expect(document.querySelectorAll("input[type=file]").length, "the receipt inputs are not in this sheet").toBeGreaterThan(0);
+      expect(unnamedControls(), "fields with no name").toEqual([]);
+    });
+  }
+  it("the sweep's own control: an empty label or an empty aria-label is reported as unnamed", () => {
+    render(<form><label htmlFor="e1">{" "}</label><input id="e1" /><input aria-label="" /><label>Named <input /></label></form>);
+    expect(unnamedControls()).toHaveLength(2);
+  });
+  it("Due date (the bill sheet) is named", () => {
+    render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} initialKind="bill" onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} />);
+    expect((screen.getByLabelText(/^Due date/) as HTMLInputElement).type).toBe("date");
+  });
+});
+
+describe("P267 R2-1: Date is validated like Description and Amount (it is marked required)", () => {
+  const fill = () => {
+    fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
+    fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
+  };
+  const date = () => screen.getByLabelText(/^Date/) as HTMLInputElement;
+  for (const [kind, button, saves] of [
+    ["expense", "Add Expense", () => client.createExpense],
+    ["bill", "Record bill", () => finance.createBill],
+  ] as const) {
+    it(`${kind}: with no date the "${button}" button is disabled and a click sends nothing`, async () => {
+      render(<ExpenseFormSideSheet businessId="biz_A" categories={CATS as never} editingExpense={null} initialKind={kind} onClose={vi.fn()} onSaved={vi.fn()} isCurrentBusiness={() => true} />);
+      fill();
+      fireEvent.change(date(), { target: { value: "" } });
+      const submit = screen.getByRole("button", { name: button });
+      expect(submit, "an empty date can still be submitted").toBeDisabled();
+      fireEvent.click(submit);
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      expect(saves(), "an empty date was sent (the server saves it as today)").not.toHaveBeenCalled();
+    });
+  }
+  it("edit: clearing the date disables Update Expense", () => {
+    sheet(EDITING);
+    fireEvent.change(date(), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Update Expense" })).toBeDisabled();
+  });
+  it("control: with a date (the sheet's default, today) and no Vendor or Category, the button is enabled", () => {
+    sheet();
+    fill();
+    expect(date().value, "the sheet no longer defaults the date").not.toBe("");
+    expect(named("textbox", "Vendor")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Add Expense" })).toBeEnabled();
+  });
+  it("control: Description and Amount still block on their own", () => {
+    sheet();
+    expect(screen.getByRole("button", { name: "Add Expense" }), "the button is enabled with nothing filled in").toBeDisabled();
+    fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
+    expect(screen.getByRole("button", { name: "Add Expense" })).toBeDisabled();
   });
 });
