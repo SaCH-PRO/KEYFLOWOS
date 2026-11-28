@@ -96,9 +96,10 @@ function specifiersIn(text: string): string[] {
 function toSlashes(p: string): string {
   return p.replace(/\\/g, "/");
 }
-/** The module path a specifier names (no extension), or null for a package. */
+/** The module path a specifier names (no extension, no trailing /index), or null for a package. */
 function resolveSpec(fromAbs: string, spec: string, root: string): string | null {
-  const bare = spec.replace(/\.(tsx|ts|jsx|js|mjs|cjs)$/, "");
+  // An explicit extension, and a trailing /index (the same module named through its index), name the module itself.
+  const bare = spec.replace(/\.(tsx|ts|jsx|js|mjs|cjs)$/, "").replace(/\/index$/, "");
   if (bare.startsWith("@/")) return join(root, bare.slice(2));
   if (bare.startsWith(".")) return join(dirname(fromAbs), bare);
   return null;
