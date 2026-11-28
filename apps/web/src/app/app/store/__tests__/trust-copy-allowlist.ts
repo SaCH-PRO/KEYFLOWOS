@@ -285,3 +285,29 @@ export function onStore<D extends object>(d: D): D & { storeProducts: unknown; s
     storeServices: "storeServices" in v ? v.storeServices : (v.services ?? []),
   };
 }
+
+/**
+ * P231 r14: whether a clip()'s kept part ends in a character clip() drops, left alone, by graphemes (an emoji with a
+ * skin tone, a keycap, a flag, a family, is one character):
+ * - always dropped at the end: whitespace, sentence punctuation (. , ; : ! ? …), a dash, an opening bracket or quote;
+ * - dropped when it stands alone (after whitespace, punctuation, a symbol, or nothing), kept when attached to the
+ *   letter, digit or mark before it ("C#", "5★", "Free*", "a/b/"): any other punctuation or symbol ("&", "•", "/");
+ *   a currency sign after a number and one space ("5 €") is the number's, and stays;
+ * - never dropped: a "%", a "+", a closing bracket or quote, a straight quote, an emoji or a flag, or a character
+ *   that holds anything else (a letter, a digit, a mark: a keycap).
+ */
+export function endsInLoneDropped(kept: string): string | null {
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const g = Array.from(seg.segment(kept), (s) => s.segment);
+  const last = g[g.length - 1];
+  if (last === undefined) return null;
+  if (/^\s+$/u.test(last)) return "whitespace";
+  if (!/^[\p{P}\p{S}]+$/u.test(last) || /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(last)) return null;
+  if (/^[%+"'\p{Pe}\p{Pf}]/u.test(last)) return null;
+  if (/^[.,;:!?…\p{Pd}\p{Ps}\p{Pi}]$/u.test(last)) return `sentence punctuation ${JSON.stringify(last)}`;
+  const before = g[g.length - 2];
+  const content = (c: string | undefined) => c !== undefined && /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(c);
+  if (content(before)) return null;
+  if (/^\p{Sc}$/u.test(last) && before !== undefined && /^\s+$/u.test(before) && /^\p{Nd}$/u.test(g[g.length - 3] ?? "")) return null;
+  return `lone ${JSON.stringify(last)}`;
+}

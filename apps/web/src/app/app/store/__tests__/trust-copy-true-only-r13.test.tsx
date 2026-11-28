@@ -20,6 +20,7 @@ vi.mock("next/navigation", () => ({
 
 import { clip, liveProducts } from "../storefront-counts";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
+import { endsInLoneDropped } from "./trust-copy-allowlist";
 
 function hubTool(id: string) {
   const { result } = renderHook(() => useStoreAiHub());
@@ -56,8 +57,6 @@ describe("R13-1: only storeProducts given: the services are not known", () => {
   });
 });
 
-/** The characters clip() drops before the "...": whitespace, punctuation, symbols, but for those it keeps. */
-const DROPPED = /(?![%+"'\p{Pe}\p{Pf}\p{Extended_Pictographic}])[\s\p{P}\p{S}]$/u;
 /** A letter, a digit, a mark, or an emoji: what makes a kept part more than punctuation and symbols. */
 const CONTENT = /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}/u;
 
@@ -65,7 +64,9 @@ describe("R13-2: clip() drops trailing punctuation and symbols, but for those th
   it("the symbols the review found are dropped at the cut", () => {
     expect(clip("Shop & Book Online", 12)).toBe("Shop...");
     expect(clip("Shop • Book now", 12)).toBe("Shop...");
-    expect(clip("a/b/c dee", 7)).toBe("a/b...");
+    // r14 (R14-1): a "/" attached to the word before it is that word's, and stays; a lone one goes ("4.5 /" below).
+    expect(clip("a/b/c dee", 7)).toBe("a/b/...");
+    expect(clip("Rated 4.5 / 5 by all", 14)).toBe("Rated 4.5...");
     expect(clip("Sauce * Rubs today", 12)).toBe("Sauce...");
     expect(clip("Hot # Spicy today", 10)).toBe("Hot...");
     expect(clip("Mail @ Pepper Co", 10)).toBe("Mail...");
@@ -126,7 +127,8 @@ describe("R13-2: clip() drops trailing punctuation and symbols, but for those th
       expect(t.includes(kept), at).toBe(true);
       if (CONTENT.test(t)) {
         expect(kept, at).toMatch(CONTENT);
-        expect(kept, at).not.toMatch(DROPPED);
+        // r14 (R14-1, R14-2): by graphemes, and a symbol attached to the word before it stays.
+        expect(endsInLoneDropped(kept), at).toBeNull();
       }
     }
   });
