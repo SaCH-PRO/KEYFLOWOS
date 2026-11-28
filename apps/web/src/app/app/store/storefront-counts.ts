@@ -248,83 +248,56 @@ const isCurrency = (c: string | undefined) => c !== undefined && /^\p{Sc}$/u.tes
  *   go: "Yahoo!™" gives "Yahoo"); after a mark that goes it goes with it (R19-2: "Shop (*", "Shop !*" give "Shop").
  */
 function dropTrailing(g: string[]): string[] {
-  // r19 (R19-1, addendum): linear time. A run's start (the marks before a grapheme, back to content, whitespace, the
-  // start or sentence punctuation), where its currency signs end, and a marker run's verdict depend only on where the
-  // run starts, never on `end`; each is found once and reused while `end` stays inside it.
+  // r19-r20 (R19-1, R20-1, R20-3): linear time, and exact. Everything the drop asks of a position depends only on what
+  // is before it, so one left-to-right pass answers it for every position, with no cache to go stale:
+  // - runStart[p]: where the run of marks ending at p starts (back over marks that are not always dropped);
+  // - currencyStart[p]: where the run of currency signs ending at p starts (-1 when g[p] is not one);
+  // - markerStart[p], sentenceStart[p]: the same for conditions markers and for sentence punctuation;
+  // - stays[p]: whether g[p] stays when the kept part ends at p (see below).
+  const n = g.length;
   const closers = lowQuoteClosers(g);
-  let runStart = -1;
-  let runCurrencyEnd = -1;
-  const startOfRun = (p: number) => {
-    if (runStart < 0 || p < runStart) {
-      let k = p;
-      while (k > 0 && isMark(g[k - 1]) && !ALWAYS_DROPPED.test(g[k - 1])) k--;
-      runStart = k;
-      runCurrencyEnd = k;
-      while (runCurrencyEnd < g.length && isCurrency(g[runCurrencyEnd])) runCurrencyEnd++;
-    }
-    return runStart;
-  };
+  const runStart: number[] = new Array(n);
+  const currencyStart: number[] = new Array(n);
+  const markerStart: number[] = new Array(n);
+  const sentenceStart: number[] = new Array(n);
+  const stays: boolean[] = new Array(n);
   /** An all-currency run g[k..p] after a number and a space ("5 €", "5 €€"): the number's. */
-  const numbersCurrency = (k: number, p: number) => runCurrencyEnd > p && isSpace(g[k - 1]) && /^\p{Nd}$/u.test(g[k - 2] ?? "");
+  const numbersCurrency = (k: number, p: number) =>
+    currencyStart[p] >= 0 && currencyStart[p] <= k && isSpace(g[k - 1]) && /^\p{Nd}$/u.test(g[k - 2] ?? "");
   /**
-   * r19 (R19-2): whether g[i], the grapheme before a run of conditions markers (never a marker), stays, so the
-   * markers on it stay too: content, a kept mark, a „-closing "“"; sentence punctuation whose run reaches back to
-   * content or a kept mark ("Free!*", "Free!!*", "Free,*", "Wait…*"); an all-currency run after a number ("5 €*").
-   * An opening bracket or quote, a dash, any other always-dropped mark, whitespace or a lone mark never does
-   * ("Shop (*", "Free—*", "Shop !*", "Shop •*", "Pay €*"). (A mark attached to content, "C#*", needs no test here:
-   * its run, markers included, reaches content, and the run rule below keeps it whole.)
+   * r19-r20 (R19-2, R20-1): whether a run of conditions markers right after g[i] is held, so it stays: when g[i]
+   * stays, or g[i] is sentence punctuation (\p{Sentence_Terminal}, "…", commas) and what its run is attached to
+   * stays ("Free!*", "Save 5 €!*", "Shop C#!*", "Sale „Big“!*", "Free*!†"). Whitespace, an opening bracket or quote,
+   * a dash, any other always-dropped mark (";", ":"), or what does not stay never holds one ("Shop (*", "Shop !*",
+   * "Shop •*", "Shop •!*", "Free;*").
    */
   const holdsMarker = (i: number) => {
-    const b = g[i];
-    if (b === undefined || isSpace(b)) return false;
-    if (hasContent(b) || KEPT_MARK.test(b) || closers.has(i)) return true;
-    if (SENTENCE_PUNCT.test(b)) {
-      let m = i;
-      while (m > 0 && SENTENCE_PUNCT.test(g[m - 1])) m--;
-      return hasContent(g[m - 1]) || KEPT_MARK.test(g[m - 1] ?? "");
-    }
-    if (ALWAYS_DROPPED.test(b) || !isMark(b)) return false;
-    return numbersCurrency(startOfRun(i), i);
+    if (i < 0) return false;
+    if (SENTENCE_PUNCT.test(g[i])) return sentenceStart[i] > 0 && stays[sentenceStart[i] - 1];
+    return stays[i];
   };
-  let markerStart = -1;
-  let markerHolds = false;
-  let end = g.length;
-  while (end > 0) {
-    const p = end - 1;
+  for (let p = 0; p < n; p++) {
     const c = g[p];
-    if (isSpace(c)) {
-      end--;
-      continue;
-    }
-    if (!isMark(c)) break;
-    if (KEPT_MARK.test(c)) break;
-    // r18 (R18-3): a "“" or "‘" closing a „ or ‚ the kept part opened stays, as a closing quote.
-    if (closers.has(p)) break;
-    // r18-r19 (R18-1, R18-2, R19-2): a conditions marker ("*", "†", "‡", or a run of them) qualifies what it is
-    // attached to, and stays while that stays (holdsMarker); after whitespace or nothing, or after a mark that goes,
-    // it goes with the rest of its run, as any lone mark does.
-    if (CONDITIONS.test(c)) {
-      if (markerStart < 0 || p < markerStart) {
-        let j = p;
-        while (j > 0 && CONDITIONS.test(g[j - 1])) j--;
-        markerStart = j;
-        markerHolds = holdsMarker(j - 1);
-      }
-      if (markerHolds) break;
-    }
-    if (!ALWAYS_DROPPED.test(c)) {
-      // The run this grapheme ends: the marks before it, back to content, whitespace, the start, or (r16, R16-3)
-      // sentence punctuation, which is no word: a symbol after it is lone, and goes with it ("Hello!!&" gives
-      // "Hello"; "Yahoo!™" gives "Yahoo"). A never-dropped mark in the run does not stop the walk (R17-1: "50%*",
-      // "(sale)*", "A+*" keep the "*"). Attached, the run stays whole. Lone, it goes grapheme by grapheme, until a
-      // never-dropped mark ends the drop (R17-2: "5 €&" gives "5 €", "Hi.»&" gives "Hi.»"); only an all-currency run
-      // after a number and a space is decided whole, and stays (R16-4: "5 €€").
-      const k = startOfRun(p);
-      if (hasContent(g[k - 1])) break;
-      if (numbersCurrency(k, p)) break;
-    }
-    end--;
+    const prevRunMark = p > 0 && isMark(g[p - 1]) && !ALWAYS_DROPPED.test(g[p - 1]);
+    runStart[p] = prevRunMark ? runStart[p - 1] : p;
+    currencyStart[p] = isCurrency(c) ? (p > 0 && isCurrency(g[p - 1]) ? currencyStart[p - 1] : p) : -1;
+    markerStart[p] = CONDITIONS.test(c) && p > 0 && CONDITIONS.test(g[p - 1]) ? markerStart[p - 1] : p;
+    sentenceStart[p] = SENTENCE_PUNCT.test(c) && p > 0 && SENTENCE_PUNCT.test(g[p - 1]) ? sentenceStart[p - 1] : p;
+    // stays[p]: content (a letter, a digit, a mark, an emoji), a kept mark, a „-closing “ stay; a conditions marker
+    // stays when its run is held; whitespace and an always-dropped mark do not; any other mark stays when its run
+    // reaches content ("C#", "5™", "Off&"), or is a number's currency run ("5 €").
+    if (isSpace(c)) stays[p] = false;
+    else if (!isMark(c) || KEPT_MARK.test(c) || closers.has(p)) stays[p] = true;
+    else if (CONDITIONS.test(c)) stays[p] = holdsMarker(markerStart[p] - 1);
+    else if (ALWAYS_DROPPED.test(c)) stays[p] = false;
+    else stays[p] = hasContent(g[runStart[p] - 1]) || numbersCurrency(runStart[p], p);
   }
+  // The drop: from the end, whitespace and every grapheme that does not stay go, until one stays. A lone run goes
+  // grapheme by grapheme until a never-dropped mark ends the drop (R17-2: "5 €&" gives "5 €", "Hi.»&" gives
+  // "Hi.»"); an attached run stays whole (R15-1: "C##", "4★★"); a run after sentence punctuation is lone (R16-3:
+  // "Hello!!&" gives "Hello"); a marker stays while what it is attached to stays (R18-R20).
+  let end = n;
+  while (end > 0 && !stays[end - 1]) end--;
   return g.slice(0, end);
 }
 
