@@ -7,9 +7,9 @@
  *          is usable again; it was left on "Extracting…")
  *   R22-3  the given check's half of every start and reply guard: this tab switched A -> B, another tab switched back
  *          to A, and A's held reply lands before the storage event. The stored id reads A, this tab shows B: nothing
- *          of A's starts or is said (the helper, the hook, the sheet, the panel, the pipeline, the list, budgets,
- *          categories, Pay, the page's upload; the detail page in -detail)
- *   R22-4  a refused pre-check shows no confirm (pipeline Delete, recurring Cancel)
+ *          of A's starts or is said (the helper, the hook, the sheet, the panel, categories, Pay, the page's upload;
+ *          the detail page in -detail; P258: the pipeline, list and budgets cases went with those components)
+ *   R22-4  a refused pre-check shows no confirm (recurring Cancel)
  *   R22-P  ported from the retired modal: the sheet's schedule that throws under a silent switch says nothing
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,7 +29,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -109,7 +108,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));

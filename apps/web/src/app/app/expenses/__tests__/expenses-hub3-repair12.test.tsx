@@ -4,8 +4,8 @@
  *
  *   R12-1  the Categories tab: A's create or delete that throws (a network error) after the switch says no
  *          "Failed to…" on B (the catch guards)
- *   R12-3  the recurring panel (Run Now, Cancel), the budgets tab (delete), the expense list (inline category) and the
- *          pipeline (Mark Paid): success and failure toasts, and the reload, only while A is still the business shown
+ *   R12-3  the recurring panel (Run Now, Cancel): success and failure toasts, and the reload, only while A is still
+ *          the business shown (P258: the budgets tab, expense list and pipeline cases went with those components)
  *   R12-3c control: with no switch, each still says so and reloads
  *
  * Real components; only the client calls, next/navigation, sonner, the upload hooks and the stored business are stubbed.
@@ -23,7 +23,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -93,7 +92,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));

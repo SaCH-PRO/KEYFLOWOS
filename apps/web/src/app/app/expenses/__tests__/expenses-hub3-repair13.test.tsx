@@ -2,14 +2,14 @@
  * EXPENSES-HUB-3 repair round 13 (R12 confirmations at 226873a, MINORs): the guards R12 left unpinned, and the
  * caller-supplied check.
  *
- *   R13-1  budgets save, list bulk categorize, pipeline delete, recurring save (edit): a reply for A that lands after
+ *   R13-1  recurring save (edit): a reply for A that lands after
  *          the switch to B (answering or throwing) says and reloads nothing; the recurring panel's own read for A that
  *          answers after B's does not put A's schedule on B
  *   R13-2  through the real page: the page passes the data hook's check to the recurring panel, so a reply that lands
  *          after the switch but before React commits it (the hook adopts the switch at once; the panel's fallback only
  *          at commit) says nothing
- *   R13-3  ExpenseBudgetsTab, ExpenseList, ExpensePipeline and the recurring panel honour a supplied
- *          `isCurrentBusiness`: it is consulted, not only the fallback
+ *   R13-3  the recurring panel honours a supplied `isCurrentBusiness`: it is consulted, not only the fallback
+ *          (P258: the budgets tab, expense list and pipeline cases of R13-1 and R13-3 went with those components)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -24,7 +24,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -94,7 +93,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));

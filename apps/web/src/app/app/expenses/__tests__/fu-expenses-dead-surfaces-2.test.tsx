@@ -33,7 +33,7 @@ describe("P258: the second set of dead expense surfaces is gone", () => {
   }
   it("the client no longer offers the recurring-patterns read", () => {
     const client = readFileSync(join(EXPENSES, "../../../lib/client.ts"), "utf8");
-    expect(client, "fetchRecurringCandidates still exported with no caller").not.toMatch(/export async function fetchRecurringCandidates\b/);
+    expect(client, "fetchRecurringCandidates or RecurringCandidate still in the client with no caller").not.toMatch(/\bfetchRecurringCandidates\b|\binterface RecurringCandidate\b/);
   });
   it("control: the surfaces v1 mounts are still there", () => {
     for (const path of ["page.tsx", "components/expense-categories-tab.tsx", "components/recurring-expenses-panel.tsx", "components/use-expenses-data.ts"]) {

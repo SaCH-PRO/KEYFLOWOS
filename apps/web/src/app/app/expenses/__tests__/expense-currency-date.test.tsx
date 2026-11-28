@@ -6,8 +6,9 @@
  *
  * BUG-027: the expense screens name TTD whatever the business currency is: the
  * forms' "Amount (TTD)" label and footer, expense-utils' formatCurrency (the
- * page's figures, the detail page, the budgets tab), the snapshot tab and the
- * recurring builder. A USD business must see USD.
+ * page's figures, the detail page) and the recurring builder. A USD business
+ * must see USD. (P258: the budgets and snapshot tabs were removed, with their
+ * cases here.)
  *
  * BUG-028: the new expense's date defaults to the UTC date
  * (`new Date().toISOString()`), so at 21:00 in Port of Spain (01:00 UTC the
