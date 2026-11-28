@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { FEATURE_REGISTRY } from './plans';
 import { SubscriptionsService } from './subscriptions.service';
 
 export const PLAN_LIMIT_KEY = 'plan_limit_resource';
@@ -31,6 +32,34 @@ function carriesIdempotencyKey(req: { headers?: Record<string, unknown> }): bool
   return typeof header === 'string' && header.trim().length > 0;
 }
 
+/**
+ * Builds the canonical PLAN_LIMIT_REACHED 403 exception.
+ * When `limit === 0` (feature locked on the current tier), returns a readable
+ * unlock message instead of a `(0/0)` metered-cap string (V1-66 R1-COR-02).
+ */
+export function planLimitDenialException(
+  resource: string,
+  result: { current: number; limit: number; upgradeTo: string },
+): ForbiddenException {
+  const limitLabel = result.limit === -1 ? 'unlimited' : String(result.limit);
+  let message: string;
+  if (result.limit === 0) {
+    const label = FEATURE_REGISTRY.find((f) => f.key === resource)?.label ?? resource.replace(/_/g, ' ');
+    message = `${label} is not available on your current plan. Please upgrade to ${result.upgradeTo} to unlock it.`;
+  } else {
+    message = `You have reached the ${resource} limit for your current plan (${result.current}/${limitLabel}). Please upgrade to add more.`;
+  }
+  return new ForbiddenException({
+    statusCode: 403,
+    error: 'PLAN_LIMIT_REACHED',
+    message,
+    resource,
+    current: result.current,
+    limit: result.limit,
+    upgradeTo: result.upgradeTo,
+  });
+}
+
 @Injectable()
 export class PlanLimitGuard implements CanActivate {
   constructor(
@@ -49,16 +78,7 @@ export class PlanLimitGuard implements CanActivate {
     const result = await this.subscriptions.checkLimit(businessId, resource);
 
     if (!result.allowed) {
-      const limitLabel = result.limit === -1 ? 'unlimited' : String(result.limit);
-      const denial = new ForbiddenException({
-        statusCode: 403,
-        error: 'PLAN_LIMIT_REACHED',
-        message: `You have reached the ${resource} limit for your current plan (${result.current}/${limitLabel}). Please upgrade to add more.`,
-        resource,
-        current: result.current,
-        limit: result.limit,
-        upgradeTo: result.upgradeTo,
-      });
+      const denial = planLimitDenialException(resource, result);
       if (this.reflector.get<boolean>(PLAN_LIMIT_REPLAY_KEY, context.getHandler()) && carriesIdempotencyKey(req)) {
         req[PLAN_LIMIT_DENIAL] = denial;
         return true;
