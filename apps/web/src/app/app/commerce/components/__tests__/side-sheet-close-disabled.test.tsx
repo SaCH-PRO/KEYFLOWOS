@@ -80,7 +80,6 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
   const SHEET = join(SRC, "app/app/commerce/components/side-sheet");
   const EXPENSE_SHEET = "app/app/expenses/components/expense-form-sidesheet.tsx";
   const CALLERS = [
-    "components/ui/business-object-drawer.tsx",
     "app/app/finance/components/payment-record-modal.tsx",
     "app/app/expenses/components/recurring-expenses-panel.tsx",
     "app/app/commerce/components/billing-form-modal.tsx",
