@@ -373,3 +373,21 @@ describe("P254 R5-2: after A -> B, B never offers New on A's list answer", () =>
     expect(await screen.findByRole("button", { name: /New recurring expense/ }, LONG)).toBeTruthy();
   }, 30000);
 });
+
+describe("P254 R5-1 at the panel: mounted with a New already counted", () => {
+  const el = (t: number) => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={t} />;
+  it("the mount-time value opens nothing", async () => {
+    render(el(1));
+    await settle();
+    await settle();
+    expect(screen.queryByRole("dialog"), "the builder opened on the value the panel mounted with").toBeNull();
+  });
+  it("reset to 0 while mounted, then New (1 again): the builder opens", async () => {
+    const view = render(el(1));
+    await settle();
+    view.rerender(el(0));
+    await settle();
+    view.rerender(el(1));
+    expect(await screen.findByRole("dialog", {}, LONG), "a New after the reset was taken for the mount-time value").toBeTruthy();
+  });
+});
