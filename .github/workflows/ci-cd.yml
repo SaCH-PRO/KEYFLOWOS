@@ -929,9 +929,13 @@ jobs:
   test-python-harvester:
     name: Run Intelligence Harvester Tests (Python)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v7
