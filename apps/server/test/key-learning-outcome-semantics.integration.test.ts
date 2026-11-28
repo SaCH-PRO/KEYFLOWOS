@@ -146,26 +146,66 @@ describe('RR-LEARNING-OUTCOME-SEMANTICS (real Postgres, two tenants)', () => {
     const beforeFeedback = await learning.getAcceptanceRate(ID.bizA);
     expect(beforeFeedback).toEqual({ accepted: 0, rejected: 0, modified: 0, total: 0, rate: 0 });
 
-    // 3. Real user feedback rows — including one with SQL NULL metadata (`Prisma.DbNull`) — MUST count
-    await db.cognitionMemory.create({
-      data: {
-        businessId: ID.bizA,
-        query: 'Should I raise prices?',
-        recommendation: 'Test a 10% increase on new quotes.',
-        userResponse: 'accepted',
-        confidence: 0.8,
-        metadata: PrismaNs.DbNull,
-      },
-    });
-    await db.cognitionMemory.create({
-      data: {
-        businessId: ID.bizA,
-        query: 'Draft welcome note',
-        recommendation: 'Welcome aboard!',
-        userResponse: 'accepted',
-        confidence: 0.8,
-        metadata: { category: 'user_feedback' },
-      },
+    // 3. Real user feedback rows — across EVERY JSONB metadata edge shape — MUST count
+    await db.cognitionMemory.createMany({
+      data: [
+        {
+          businessId: ID.bizA,
+          query: 'Should I raise prices?',
+          recommendation: 'Test a 10% increase on new quotes.',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: PrismaNs.DbNull,
+        },
+        {
+          businessId: ID.bizA,
+          query: 'JSON null metadata',
+          recommendation: 'Rec',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: PrismaNs.JsonNull,
+        },
+        {
+          businessId: ID.bizA,
+          query: 'Empty object metadata',
+          recommendation: 'Rec',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: {},
+        },
+        {
+          businessId: ID.bizA,
+          query: 'Explicit null category',
+          recommendation: 'Rec',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: { category: null },
+        },
+        {
+          businessId: ID.bizA,
+          query: 'Non-string category',
+          recommendation: 'Rec',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: { category: 123 },
+        },
+        {
+          businessId: ID.bizA,
+          query: 'JSON array metadata',
+          recommendation: 'Rec',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: [],
+        },
+        {
+          businessId: ID.bizA,
+          query: 'Draft welcome note',
+          recommendation: 'Welcome aboard!',
+          userResponse: 'accepted',
+          confidence: 0.8,
+          metadata: { category: 'user_feedback' },
+        },
+      ],
     });
 
     // 4. Tenant B rows must NEVER leak into Tenant A's rate
@@ -181,7 +221,7 @@ describe('RR-LEARNING-OUTCOME-SEMANTICS (real Postgres, two tenants)', () => {
     });
 
     const afterFeedback = await learning.getAcceptanceRate(ID.bizA);
-    expect(afterFeedback).toEqual({ accepted: 2, rejected: 0, modified: 0, total: 2, rate: 1 });
+    expect(afterFeedback).toEqual({ accepted: 7, rejected: 0, modified: 0, total: 7, rate: 1 });
   });
 
   it('negative control: real user rejected feedback rows still lower calibrateConfidence, and tenant isolation holds', async () => {
