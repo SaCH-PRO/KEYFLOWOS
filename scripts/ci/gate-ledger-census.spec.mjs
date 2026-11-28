@@ -166,13 +166,13 @@ describe('RR-GATE-LEDGER-CENSUS: every shrink-only ledger/ratchet is measured by
     assert.ok(serverLint, 'lint.server_max_warnings must be registered in ledger-sizes.mjs');
     assert.equal(serverLint.file, '.github/workflows/ci-cd.yml');
     assert.equal(serverLint.direction, 'shrink');
-    assert.ok(Number.isInteger(serverLint.value) && serverLint.value > 0);
+    assert.ok(Number.isInteger(serverLint.value) && serverLint.value >= 0);
 
     const webLint = byName.get('lint.web_max_warnings');
     assert.ok(webLint, 'lint.web_max_warnings must be registered in ledger-sizes.mjs');
     assert.equal(webLint.file, '.github/workflows/ci-cd.yml');
     assert.equal(webLint.direction, 'shrink');
-    assert.ok(Number.isInteger(webLint.value) && webLint.value > 0);
+    assert.ok(Number.isInteger(webLint.value) && webLint.value >= 0);
 
     const trpcBroken = byName.get('trpc.broken_ctx_business');
     assert.ok(trpcBroken, 'trpc.broken_ctx_business must be registered in ledger-sizes.mjs');
@@ -351,9 +351,14 @@ describe('RR-GATE-LEDGER-CENSUS: negative controls & parser hardening', () => {
     assert.throws(() => osLib.objectKeyCount('{ a: "unterminated}'));
   });
 
-  it('stripComments handles regex literals containing quotes/backticks without desyncing subsequent comments', () => {
+  it('stripComments handles regex literals containing quotes/backticks (including after keyword/ASI boundaries) without desyncing subsequent comments', () => {
     const src = [
       'const re = /source:\\s*["\'`]([^"\'`]+)["\'`]/g;',
+      'function f(a) {',
+      '  const x = 1',
+      '  return /["\'`]/g',
+      '}',
+      'function g(a) { if (a) return 1; else return /["\'`]/g; }',
       'const ITEMS = [',
       "  // don't count this apostrophe's comment",
       "  'one',",
