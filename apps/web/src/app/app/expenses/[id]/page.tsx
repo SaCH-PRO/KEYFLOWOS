@@ -111,6 +111,9 @@ export default function ExpenseDetailPage() {
   // R26-1: whether this page is still mounted. A Retry's reply that outlives the page (the user has gone, and may be
   // on another business's page) sets nothing and navigates nowhere, as the main read's `active` flag does (R16-1).
   const mountedRef = useRef(true);
+  // R27-2: the main read's generation. A Retry started for one expense whose reply lands once the page shows another
+  // (the id changed within this page) sets nothing.
+  const readGen = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -150,13 +153,19 @@ export default function ExpenseDetailPage() {
     // R16-1: a read that lands after this page has gone (unmounted, or the read replaced) does nothing, and above
     // all navigates nowhere: the user may be on another page by then.
     let active = true;
+    readGen.current += 1;
     // R26-3: whether this read has shown its expense, so a later failure (the budgets read) is said for its block.
     let loadedExpense = false;
     (async () => {
       setLoading(true);
       // R26-4: a read starts from nothing: a new expense id whose read fails is never shown as the previous expense.
+      // R27-1: nor with the previous expense's category or budget.
       setExpense(null);
       setExpRead({ kind: "loading" });
+      setCategories([]);
+      setCatRead({ kind: "loading" });
+      setBudgets([]);
+      setBudRead({ kind: "loading" });
       try {
         const [expRes, catRes] = await Promise.all([
           getExpense(businessId, expenseId),
@@ -194,7 +203,7 @@ export default function ExpenseDetailPage() {
           if (loadedExpense) {
             // R26-3: the expense is shown; what failed is its budgets read (the categories answered with it).
             toast.error("Couldn't load this category's budget.");
-            setBudRead((prev) => (prev.kind === "loading" ? { kind: "failed", message: "Couldn't load this category's budget." } : prev));
+            setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
           } else {
             toast.error("Failed to load expense");
             setExpRead({ kind: "failed", message: "Couldn't load this expense." });
@@ -214,33 +223,35 @@ export default function ExpenseDetailPage() {
   // offered only while the block shows failed, and a Retry sets it loading, which hides every note offering it.
   const retryCategories = useCallback(async () => {
     if (!businessId) return;
+    const gen = readGen.current;
     setCatRead({ kind: "loading" });
     try {
       const res = await fetchExpenseCategories(businessId);
-      if (!mountedRef.current || leftRef.current) return;
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
       if (!isCurrentBusiness(businessId)) { leave(); return; }
       const st = readState(res, { what: "the category" });
       setCatRead(st);
       setCategories(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
-      if (!mountedRef.current || leftRef.current) return;
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
       if (canStartFor(businessId, isCurrentBusiness)) setCatRead({ kind: "failed", message: "Couldn't load the category." });
     }
   }, [businessId, isCurrentBusiness, leave]);
   // R25-1: and a Retry of the budgets read reads only the budgets of the expense's own month.
   const retryBudgets = useCallback(async () => {
     if (!businessId || !expense) return;
+    const gen = readGen.current;
     setBudRead({ kind: "loading" });
     try {
       const { month, year } = expenseMonth(expense.date, businessId);
       const res = await fetchExpenseBudgets(businessId, month, year);
-      if (!mountedRef.current || leftRef.current) return;
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
       if (!isCurrentBusiness(businessId)) { leave(); return; }
       const st = readState(res, { what: "this category's budget" });
       setBudRead(st);
       setBudgets(st.kind === "ok" ? res.data ?? [] : []);
     } catch {
-      if (!mountedRef.current || leftRef.current) return;
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
       if (canStartFor(businessId, isCurrentBusiness)) setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
     }
   }, [businessId, expense, isCurrentBusiness, leave]);

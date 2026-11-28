@@ -63,8 +63,6 @@ vi.mock("@/lib/workspace", () => ({
 }));
 
 import { toast } from "sonner";
-import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import ExpensesInboxPage from "../page";
 
 const ok = <T,>(data: T) => ({ data, error: null });
@@ -110,10 +108,6 @@ const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30
 
 
 
-function fill(description = "A rent", amount = "500") {
-  fireEvent.change(screen.getByPlaceholderText("What was this expense for?"), { target: { value: description } });
-  fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: amount } });
-}
 afterEach(() => {
   ZONES.biz_A = "America/Port_of_Spain";
   vi.useRealTimers();
@@ -121,7 +115,6 @@ afterEach(() => {
 
 
 afterEach(() => { blocked.on = false; });
-const always = () => true;
 
 
 

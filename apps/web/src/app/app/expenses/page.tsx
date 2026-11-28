@@ -216,6 +216,9 @@ export default function ExpensesInboxPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [recurringTrigger, setRecurringTrigger] = useState(0);
   const [recurringRead, setRecurringRead] = useState<BlockRead>({ kind: "loading" });
+  // R27-3: leaving the Recurring view forgets its list read, so on return the first render offers no "New recurring
+  // expense" from the earlier visit's answer (reset during render, before the panel can report).
+  if (view !== "recurring" && recurringRead.kind !== "loading") setRecurringRead({ kind: "loading" });
   // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
   // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
   const { uploadFile, isUploading: uploadingReceipt } = useUpload();
