@@ -1,5 +1,6 @@
 "use client";
 
+import { clip, offerWords } from "../storefront-counts";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -34,8 +35,16 @@ type Props = {
   currentHeadline?: string;
   currentSubheadline?: string;
   currentCta?: string;
+  /** P231 r6-r7 (D-303): what the storefront shows, by the kind /book names it (storefront-counts.ts). */
   productsCount?: number;
+  /** Bookable services. */
   servicesCount?: number;
+  packagesCount?: number;
+  /** SERVICE-category products: services /book sells (bought, not booked). */
+  orderableServicesCount?: number;
+  /** P231 r11: whether what is on the store is known (false: the store graph or the storefront config was not read). */
+  productsKnown?: boolean;
+  servicesKnown?: boolean;
   onApply?: (fields: { headline?: string; subheadline?: string; ctaText?: string; ribbonText?: string }) => void;
 };
 
@@ -83,7 +92,7 @@ function OptionList({
           className="text-[10px] flex items-center gap-0.5 transition-colors"
           style={{ color: "hsl(var(--kf-accent1))" }}
         >
-          {open ? "Hide options" : `${options.length} options`}
+          {open ? "Hide options" : `${options.length} option${options.length === 1 ? "" : "s"}`}
           <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.15 }}>
             <ChevronDown className="w-3 h-3" />
           </motion.span>
@@ -135,6 +144,10 @@ export function AiHeroCopyPanel({
   currentCta: _currentCta,
   productsCount = 0,
   servicesCount = 0,
+  packagesCount = 0,
+  orderableServicesCount = 0,
+  productsKnown = true,
+  servicesKnown = true,
   onApply,
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -153,32 +166,46 @@ export function AiHeroCopyPanel({
     const name = storeName || "Your Store";
     const tagline = businessTagline || "";
     const description = businessDescription || "";
-    const totalItems = productsCount + servicesCount;
+    const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount, productsKnown, servicesKnown });
+
+    // P231 r6 (D-303): no quality ("Quality You Can Trust", "Premium"), speed ("in seconds"), delivery ("delivered to
+    // you"), "curated", "N+ Items", "all in one place", "New Arrivals Just Added" or "First-Time Customer Special" the
+    // product does not know the merchant has; only what the store really offers (its counts), and the merchant's own
+    // news and offers as [placeholders].
+    const headlines = [
+      `${name} — ${tagline || "Now Online"}`,
+      ...(offer.total > 0 ? [`Discover ${offer.counted} from ${name}`] : []),
+    ];
+    const subheadlines = [
+      ...(description ? [clip(description, 100)] : offer.total > 0 ? [`Browse ${offer.counted}. ${offer.action}`] : []),
+      // r11: no total when not everything on the store is known.
+      ...(offer.total > 0 && !offer.partial ? [`${offer.items}, online.`] : []),
+    ];
+    if (subheadlines.length === 0) subheadlines.push(`${name}, now online.`);
+    const offerRibbons = [
+      offer.shops ? "🎉 Now Open Online — Shop Today" : offer.books ? "🎉 Now Open Online — Book Today" : "🎉 Now Open Online",
+      "✨ [your latest news]",
+      "🔥 [your offer]",
+    ];
+    const ctas = [
+      // r7: "Shop Now" and "Explore Collection" only with products or packages to shop, never for services only.
+      ...(offer.shops ? ["Shop Now", "Explore Collection"] : []),
+      ...(offer.books ? ["Book Today"] : []),
+      "Get Started",
+    ];
 
     const res: HeroCopyResult = {
-      headlines: [
-        `${name} — ${tagline || "Quality You Can Trust"}`,
-        `Discover What ${name} Has to Offer`,
-        `${totalItems > 0 ? `${totalItems}+ Items` : "Premium Products & Services"} from ${name}`,
-      ],
-      subheadlines: [
-        description ? description.slice(0, 100) : `Browse our curated collection of ${totalItems > 0 ? totalItems : "great"} offerings. Book or buy online in seconds.`,
-        `${totalItems > 0 ? `${totalItems} items` : "Everything you need"} — available online, anytime, delivered to you.`,
-        `Premium service and quality products, all in one place.`,
-      ],
-      offerRibbons: [
-        "🎉 Now Open Online — Shop Today",
-        "✨ New Arrivals Just Added",
-        "🔥 First-Time Customer Special — Ask Us How",
-      ],
-      ctas: ["Shop Now", "Book Today", "Explore Collection", "Get Started"],
+      headlines,
+      subheadlines,
+      offerRibbons,
+      ctas,
       recommendation: {
-        headline: `${name} — ${tagline || "Quality You Can Trust"}`,
-        subheadline: description ? description.slice(0, 100) : `Browse our curated collection. Book or buy online in seconds.`,
-        offerRibbon: "🎉 Now Open Online — Shop Today",
-        cta: servicesCount > productsCount ? "Book Today" : "Shop Now",
+        headline: headlines[0],
+        subheadline: subheadlines[0],
+        offerRibbon: offerRibbons[0],
+        cta: ctas[0],
       },
-      tip: "These are AI-generated suggestions based on your business profile. Click any option to use it, or copy and paste into your hero fields.",
+      tip: "These suggestions are built from your store details. Click any option to use it, or copy and paste into your hero fields. Replace any [bracketed] part with your own before you save.",
     };
 
     setResult(res);

@@ -1,5 +1,6 @@
 "use client";
 
+import { HAS_PLACEHOLDER, clip, offerWords } from "../storefront-counts";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,7 +20,6 @@ type SeoResult = {
   metaTitleOptions: string[];
   metaDescOptions: string[];
   recommendation: { metaTitle: string; metaDescription: string };
-  keywords: string[];
   instruction?: string;
 };
 type FaqResult = {
@@ -33,8 +33,16 @@ type Props = {
   storeName?: string;
   businessDescription?: string;
   businessTagline?: string;
+  /** P231 r7 (D-303): what the storefront shows, by the kind /book names it (storefront-counts.ts). */
   productsCount?: number;
+  /** Bookable services. */
   servicesCount?: number;
+  packagesCount?: number;
+  /** SERVICE-category products: services /book sells (bought, not booked). */
+  orderableServicesCount?: number;
+  /** P231 r11: whether what is on the store is known (false: the store graph or the storefront config was not read). */
+  productsKnown?: boolean;
+  servicesKnown?: boolean;
   hasDelivery?: boolean;
   testimonialCount?: number;
   onApplyFaq?: (faqs: GeneratedFaq[]) => void;
@@ -57,9 +65,28 @@ function CopyBtn({ text }: { text: string }) {
 const ACTIONS: { id: ActionType; icon: React.ElementType; label: string; desc: string; color: string }[] = [
   { id: "faq", icon: HelpCircle, label: "Generate FAQ", desc: "Create FAQ entries for your store", color: "hsl(var(--kf-accent2))" },
   { id: "seo", icon: Search, label: "Generate SEO", desc: "Craft optimized meta title & description", color: "hsl(var(--kf-accent1))" },
-  { id: "trust", icon: ShieldCheck, label: "Trust Copy", desc: "Guarantees, badges, social proof text", color: "hsl(var(--kf-success))" },
+  { id: "trust", icon: ShieldCheck, label: "Trust Copy", desc: "Badges and social proof from your testimonials", color: "hsl(var(--kf-success))" },
   { id: "launch", icon: Megaphone, label: "Launch Posts", desc: "Social media & WhatsApp launch copy", color: "hsl(var(--kf-warning))" },
 ];
+
+/**
+ * P231 (D-303) Trust Copy: only what the testimonials show. No guarantee or service claim the product does not check
+ * (r1-r3: "100% Satisfaction Guarantee", "Secure, Encrypted Checkout", "Verified Business", "Secure Payments",
+ * "Quality Guaranteed", "Fast, Reliable Service", "Real Human Support"); with none, nothing (r2-r3). r4: how many
+ * reviews there are, true at any rating, never that the customers are happy or satisfied or keep coming back.
+ */
+function trustCopyFor(testimonialCount: number): { trustBadges: string[]; socialProofCopy: string[] } {
+  // r5: a count that is not a positive number (NaN, undefined) suggests nothing.
+  if (!(testimonialCount > 0)) return { trustBadges: [], socialProofCopy: [] };
+  const reviews = testimonialCount === 1 ? "review" : "reviews";
+  return {
+    trustBadges: [`${testimonialCount} customer ${reviews}`],
+    socialProofCopy: [`Read ${testimonialCount} ${reviews} from our customers.`],
+  };
+}
+
+/** P231 r5-r7: the placeholder detector the FAQ Manager and the save paths share (any [bracketed] part). */
+export { HAS_PLACEHOLDER };
 
 export function AiContentPanel({
   storeName,
@@ -67,6 +94,10 @@ export function AiContentPanel({
   businessTagline,
   productsCount = 0,
   servicesCount = 0,
+  packagesCount = 0,
+  orderableServicesCount = 0,
+  productsKnown = true,
+  servicesKnown = true,
   hasDelivery = false,
   testimonialCount = 0,
   onApplyFaq,
@@ -76,101 +107,99 @@ export function AiContentPanel({
   const [loading, setLoading] = useState(false);
   const [faqResult, setFaqResult] = useState<FaqResult | null>(null);
   const [seoResult, setSeoResult] = useState<SeoResult | null>(null);
-  const [trustResult, setTrustResult] = useState<{ guarantees: string[]; trustBadges: string[]; socialProofCopy: string[] } | null>(null);
+  // P231 r4: Trust Copy is worked out from the testimonial count each render once it was asked for, so it follows the
+  // count (testimonials removed or added after generating) and never shows a stale "N customer reviews".
+  const [trustRequested, setTrustRequested] = useState(false);
   const [launchResult, setLaunchResult] = useState<{ socialPosts: string[]; whatsappMessages: string[]; emailSubjectLines: string[] } | null>(null);
   const [appliedFaq, setAppliedFaq] = useState(false);
+  // r6: once added, the answers are in the FAQ Manager, and that is where the [bracketed] parts are filled in.
+  const [faqAdded, setFaqAdded] = useState(false);
   const [appliedSeo, setAppliedSeo] = useState(false);
   const [selectedSeoTitle, setSelectedSeoTitle] = useState("");
   const [selectedSeoDesc, setSelectedSeoDesc] = useState("");
 
   const name = storeName || "Your Store";
-  const totalItems = productsCount + servicesCount;
+  const offer = offerWords({ products: productsCount, packages: packagesCount, services: servicesCount, orderableServices: orderableServicesCount, productsKnown, servicesKnown });
+  const totalItems = offer.total;
+  const trustResult = trustRequested ? trustCopyFor(testimonialCount) : null;
 
   async function generate(action: ActionType) {
     setActiveAction(action);
+    if (action === "faq") setFaqAdded(false);
     setLoading(true);
     await new Promise((r) => setTimeout(r, 1000));
 
     if (action === "faq") {
       const faqs: GeneratedFaq[] = [];
-      if (servicesCount > 0) {
-        faqs.push({ question: "How do I book a service?", answer: `Simply browse our services and click "Book Now" on the one you want. You'll choose your preferred time and complete your booking in just a few steps.`, category: "Bookings" });
-        faqs.push({ question: "Can I reschedule or cancel?", answer: "Yes — you can reschedule or cancel up to 24 hours before your appointment. Contact us directly for any last-minute changes.", category: "Bookings" });
+      if (offer.books) {
+        // r7: /book has no "Book Now" control: a service is added, and its time chosen at checkout.
+        faqs.push({ question: "How do I book a service?", answer: "Add the service you want, then choose a date and time at checkout to complete your booking.", category: "Bookings" });
+        // P231 r4 (D-303): the merchant's own policies are left as marked placeholders, never invented.
+        // r6: the policy itself is the merchant's, so the whole answer is theirs to fill in.
+        faqs.push({ question: "Can I reschedule or cancel?", answer: "[your reschedule and cancellation policy]", category: "Bookings" });
       }
-      if (productsCount > 0) {
-        faqs.push({ question: "What payment methods do you accept?", answer: "We accept all major credit and debit cards. All payments are processed securely at checkout.", category: "Payments" });
+      if (offer.buys) {
+        // r7: not "All payments are processed at checkout": cash or manual payment is always offered.
+        faqs.push({ question: "What payment methods do you accept?", answer: "We accept [your payment methods].", category: "Payments" });
       }
       if (hasDelivery) {
-        faqs.push({ question: "How long does delivery take?", answer: "Standard delivery is 3–5 business days. Express options may be available at checkout depending on your location.", category: "Delivery" });
-        faqs.push({ question: "Do you offer local pickup?", answer: "Yes! Select local pickup at checkout and we'll notify you when your order is ready to collect.", category: "Delivery" });
+        // P231 r4b: no "Express options" or "local pickup" the product does not know the merchant offers.
+        faqs.push({ question: "How long does delivery take?", answer: "Delivery takes [your delivery time]. Delivery options are shown at checkout.", category: "Delivery" });
       }
-      faqs.push({ question: `What makes ${name} different?`, answer: `We're committed to quality and customer satisfaction in everything we offer. Every item is carefully selected and every service is delivered with care.`, category: "About" });
-      faqs.push({ question: "How can I contact you?", answer: "Reach us through the contact section on our storefront. We typically respond within 1 business day.", category: "Support" });
-      faqs.push({ question: "What is your refund policy?", answer: "We offer refunds within 7 days of purchase for items in original condition. Services can be cancelled up to 24 hours in advance.", category: "Refunds" });
-      setFaqResult({ faqs, instruction: "These FAQs are ready to use. Click 'Add All to FAQ' to apply them to your FAQ Manager, then save." });
+      faqs.push({ question: `What makes ${name} different?`, answer: "[what makes your business different]", category: "About" });
+      // r6: no contact section or refund the product does not know the store has.
+      faqs.push({ question: "How can I contact you?", answer: "Reach us at [your contact details]. We respond within [your response time].", category: "Support" });
+      faqs.push({ question: "What is your refund policy?", answer: "[your refund policy]", category: "Refunds" });
+      // r5: the [bracketed] parts can only be filled in once the answers are in the FAQ Manager.
+      setFaqResult({ faqs, instruction: "Click 'Add All to FAQ', then fill in the [bracketed] parts with your own policies in the FAQ Manager, and save." });
     }
 
     if (action === "seo") {
       const tagline = businessTagline || "";
+      // P231 r4b-r5: no "fast delivery", "instantly", "quality" or "curated" the product does not check, and only what
+      // the store really offers (from its counts): no "buy" without products, no "book" without services.
       const metaTitleOptions = [
-        `${name} — Shop Online Today`.slice(0, 60),
-        tagline ? `${name} | ${tagline}`.slice(0, 60) : `${name} | ${totalItems > 0 ? `${totalItems} Items` : "Products & Services"}`.slice(0, 60),
-        `Buy ${name} Products Online`.slice(0, 60),
+        // r9: cut at a word, with "...", never mid-word (clip).
+        clip(`${name} — ${offer.shops ? "Shop Online Today" : offer.books ? "Book Online Today" : "Now Online"}`, 60),
+        // r11: a total only when the whole offer is known.
+        clip(tagline ? `${name} | ${tagline}` : `${name} | ${totalItems > 0 && !offer.partial ? offer.Items : "Online"}`, 60),
+        clip(`${name} Online`, 60),
       ];
       const metaDescOptions = [
-        `Browse ${totalItems > 0 ? totalItems : ""} products and services at ${name}. Order online and get fast delivery.`.slice(0, 160),
-        `${name} — ${tagline || "quality products and services available online"}. Book or buy instantly.`.slice(0, 160),
-        `Discover everything ${name} has to offer. ${businessDescription ? businessDescription.slice(0, 80) + "..." : "Shop our curated catalog online today."}`.slice(0, 160),
+        // r6: the count goes with the noun it counts.
+        clip(totalItems > 0 ? `Browse ${offer.counted} at ${name}. ${offer.action}` : `Visit ${name} online.`, 160),
+        clip(`${name} — ${tagline || (offer.counted ? `${offer.counted} available online` : "now online")}.${offer.action ? ` ${offer.action}` : ""}`, 160),
+        clip(`Discover ${name} online.${businessDescription ? ` ${clip(businessDescription, 80)}` : ""}`, 160),
       ];
       setSeoResult({
         metaTitleOptions,
         metaDescOptions,
         recommendation: { metaTitle: metaTitleOptions[0], metaDescription: metaDescOptions[0] },
-        keywords: [name.toLowerCase(), "buy online", "book online", "local business"],
         instruction: "Select the title and description that best represents your store, then click Apply.",
       });
       setSelectedSeoTitle(metaTitleOptions[0]);
       setSelectedSeoDesc(metaDescOptions[0]);
     }
 
-    if (action === "trust") {
-      setTrustResult({
-        guarantees: [
-          "✅ 100% Satisfaction Guarantee",
-          "🔒 Secure, Encrypted Checkout",
-          "⚡ Fast, Reliable Service",
-          "💬 Real Human Support",
-        ],
-        trustBadges: [
-          "Verified Business",
-          testimonialCount > 0 ? `${testimonialCount}+ Happy Customers` : "Trusted by Customers",
-          "Secure Payments",
-          "Quality Guaranteed",
-        ],
-        socialProofCopy: [
-          testimonialCount > 0
-            ? `Join ${testimonialCount}+ satisfied customers who trust ${name}.`
-            : "Join our growing community of satisfied customers.",
-          "Real results, real reviews — see why customers keep coming back.",
-          `Trusted by customers across the region. See what they're saying below.`,
-        ],
-      });
-    }
+    if (action === "trust") setTrustRequested(true);
 
     if (action === "launch") {
       setLaunchResult({
         socialPosts: [
-          `🚀 We're officially live! ${name} is now open online. Browse our ${totalItems > 0 ? `${totalItems}+ items` : "products and services"} and place your first order today. Link in bio! ✨`,
-          `Big news! 🎉 ${name} just launched online. Shop, book, and explore — all in one place. Drop a comment if you want the link! 👇`,
-          `We've been working hard behind the scenes, and it's finally here. ${name} is now live online. Come shop with us! 🛍️`,
+          // P231 r4b-r5: the store's own item count (not "N+"), no "fast response", and only what it really offers.
+          totalItems > 0
+            ? `🚀 We're officially live! ${name} is now open online. Browse our ${offer.partial ? offer.counted : offer.items}. Link in bio! ✨`
+            : `🚀 We're officially live! ${name} is now open online. Link in bio! ✨`,
+          `Big news! 🎉 ${name} just launched online.${offer.action ? ` ${offer.action}` : ""} Drop a comment if you want the link! 👇`,
+          `We've been working hard behind the scenes, and it's finally here. ${name} is now live online. Come take a look! 🛍️`,
         ],
         whatsappMessages: [
-          `Hi! Just wanted to let you know that ${name} is now live online! 🎉 You can browse and shop directly at our store. Would love to see you there! 😊`,
-          `Big news — ${name} is now online! 🚀 Easy ordering, fast response. Check it out and let me know what you think!`,
+          `Hi! Just wanted to let you know that ${name} is now live online! 🎉 Would love to see you there! 😊`,
+          `Big news — ${name} is now online! 🚀 Check it out and let me know what you think!`,
         ],
         emailSubjectLines: [
           `We're Live! ${name} Is Now Online`,
-          `Big News from ${name} — Shop Us Online`,
+          `Big News from ${name} — Visit Us Online`,
           `${name} Just Launched — Come Check It Out`,
         ],
       });
@@ -254,15 +283,27 @@ export function AiContentPanel({
                       <p className="text-xs font-semibold">{faq.question}</p>
                       <CopyBtn text={`Q: ${faq.question}\nA: ${faq.answer}`} />
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{faq.answer}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{faq.answer}</p>
+                    {HAS_PLACEHOLDER.test(faq.answer) && (
+                      <p role="note" className="text-[9px] font-semibold mt-0.5" style={{ color: "hsl(var(--kf-warning))" }}>
+                        Fill in the [bracketed] part in the FAQ Manager.
+                      </p>
+                    )}
                     <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full mt-1 inline-block" style={{ background: "hsl(var(--kf-accent2)/0.1)", color: "hsl(var(--kf-accent2))" }}>{faq.category}</span>
                   </div>
                 ))}
               </div>
+              {faqResult.faqs.some((f) => HAS_PLACEHOLDER.test(f.answer)) && (
+                <p role="note" className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>
+                  {faqAdded
+                    ? "Added. Check the FAQ Manager: fill in the [bracketed] parts there before you save."
+                    : "Some answers have [bracketed] parts: fill them in before your customers see them."}
+                </p>
+              )}
               {onApplyFaq && (
                 <button
                   type="button"
-                  onClick={() => { onApplyFaq(faqResult.faqs); setAppliedFaq(true); setTimeout(() => setAppliedFaq(false), 3000); }}
+                  onClick={() => { onApplyFaq(faqResult.faqs); setAppliedFaq(true); setFaqAdded(true); setTimeout(() => setAppliedFaq(false), 3000); }}
                   className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 min-h-[40px] transition-all"
                   style={{ background: appliedFaq ? "hsl(var(--kf-success)/0.12)" : "hsl(var(--kf-accent2))", color: appliedFaq ? "hsl(var(--kf-success))" : "white" }}
                 >
@@ -318,17 +359,13 @@ export function AiContentPanel({
 
           {!loading && activeAction === "trust" && trustResult && (
             <motion.div key="trust" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Guarantee Statements</p>
-                <div className="space-y-1">
-                  {trustResult.guarantees.map((g, i) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "hsl(var(--kf-success)/0.06)", border: "1px solid hsl(var(--kf-success)/0.12)" }}>
-                      <p className="text-xs">{g}</p>
-                      <CopyBtn text={g} />
-                    </div>
-                  ))}
-                </div>
-              </div>
+              {/* P231 r3: guarantee statements are no longer suggested (D-303); with no testimonials nothing is. */}
+              {trustResult.trustBadges.length === 0 && trustResult.socialProofCopy.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No trust copy yet. Add testimonials under Social Proof, and the copy suggested here will point to them.
+                </p>
+              )}
+              {trustResult.trustBadges.length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Trust Badges</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -340,6 +377,8 @@ export function AiContentPanel({
                   ))}
                 </div>
               </div>
+              )}
+              {trustResult.socialProofCopy.length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Social Proof Copy</p>
                 {trustResult.socialProofCopy.map((c, i) => (
@@ -349,6 +388,7 @@ export function AiContentPanel({
                   </div>
                 ))}
               </div>
+              )}
             </motion.div>
           )}
 

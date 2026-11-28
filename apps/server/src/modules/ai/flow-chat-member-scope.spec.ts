@@ -310,13 +310,13 @@ describe('KMS-04/05/06: the other modules and the old special cases', () => {
     await expect(run(orchestrator, 'contracts_create', { surface: 'CHAT', principalUserId: 'opsWrite' })).resolves.toBeDefined();
   });
 
-  it('KMS-06 control (D-98, the payroll extra scope): the revenue writes and payroll_mark_paid keep their answers', async () => {
+  it('KMS-06 control (D-98, the payroll extra scope): the revenue writes keep their answers and payroll_mark_paid is refused as unavailable in v1', async () => {
     const { orchestrator, rec } = orchestratorFor();
     await expect(run(orchestrator, 'commerce_mark_invoice_paid', { surface: 'CHAT', principalUserId: 'staffDefault' })).rejects.toThrow(
       /^Insufficient permissions: revenue requires write access \(you have read\).*\(D-98\)/,
     );
     await expect(run(orchestrator, 'payroll_mark_paid', { surface: 'CHAT', principalUserId: 'opsWrite' })).rejects.toThrow(
-      /^Insufficient permissions: expenses requires write access \(you have none\)/,
+      /not available in this version/,
     );
     expect(rec.markInvoicePaid).not.toHaveBeenCalled();
     expect(rec.markRunPaid).not.toHaveBeenCalled();
@@ -327,28 +327,33 @@ describe('KMS-04/05/06: the other modules and the old special cases', () => {
 describe('KMS-07: a platform SUPER_ADMIN, as ModuleScopeGuard and each door hold them', () => {
   it('KMS-07 RED-BEFORE: a SUPER_ADMIN member passes the expenses writes, the Books reads and writes, operations; is held to its own revenue write on an invoice', async () => {
     const { orchestrator } = orchestratorFor();
-    const PASSED = ['expenses_create', 'finance_pay_bill', 'inventory_advance_purchase_order', 'finance_view_receivables', 'finance_post_journal_entry', 'contracts_create', 'payroll_mark_paid'];
-    const names = await menu(orchestrator, 'saMember', [...PASSED, 'commerce_mark_invoice_paid']);
+    const PASSED = ['expenses_create', 'finance_pay_bill', 'inventory_advance_purchase_order', 'finance_view_receivables', 'finance_post_journal_entry', 'contracts_create'];
+    const names = await menu(orchestrator, 'saMember', [...PASSED, 'commerce_mark_invoice_paid', 'payroll_mark_paid']);
     for (const t of PASSED) {
       expect(names, t).toContain(t);
       await expect(run(orchestrator, t, { surface: 'CHAT', principalUserId: 'saMember' }), t).resolves.toBeDefined();
     }
     expect(names).not.toContain('commerce_mark_invoice_paid');
     await expect(run(orchestrator, 'commerce_mark_invoice_paid', { surface: 'CHAT', principalUserId: 'saMember' })).rejects.toThrow(/revenue requires write access \(you have read\)/);
+    expect(names).not.toContain('payroll_mark_paid');
+    await expect(run(orchestrator, 'payroll_mark_paid', { surface: 'CHAT', principalUserId: 'saMember' })).rejects.toThrow(/not available in this version/);
   });
 
   it('KMS-07 RED-BEFORE (D-46, SEC-P195BW-7): a SUPER_ADMIN who is not a member is refused every money write, the expenses ones included; a read passes as ModuleScopeGuard passes it', async () => {
     const { orchestrator, rec } = orchestratorFor();
-    const MONEY = ['expenses_create', 'finance_pay_bill', 'inventory_advance_purchase_order', 'finance_post_journal_entry', 'commerce_mark_invoice_paid', 'payroll_mark_paid'];
-    const names = await menu(orchestrator, 'saOutsider', [...MONEY, 'finance_profit_and_loss', 'contracts_create']);
+    const MONEY = ['expenses_create', 'finance_pay_bill', 'inventory_advance_purchase_order', 'finance_post_journal_entry', 'commerce_mark_invoice_paid'];
+    const names = await menu(orchestrator, 'saOutsider', [...MONEY, 'payroll_mark_paid', 'finance_profit_and_loss', 'contracts_create']);
     for (const t of MONEY) {
       expect(names, t).not.toContain(t);
       await expect(run(orchestrator, t, { surface: 'CHAT', principalUserId: 'saOutsider' }), t).rejects.toThrow(/\(D-46\)/);
     }
+    expect(names).not.toContain('payroll_mark_paid');
+    await expect(run(orchestrator, 'payroll_mark_paid', { surface: 'CHAT', principalUserId: 'saOutsider' })).rejects.toThrow(/not available in this version/);
     expect(rec.createExpense).not.toHaveBeenCalled();
     expect(rec.markBillPaid).not.toHaveBeenCalled();
     expect(rec.advancePurchaseOrderStatus).not.toHaveBeenCalled();
     expect(rec.post).not.toHaveBeenCalled();
+    expect(rec.markRunPaid).not.toHaveBeenCalled();
     expect(names).toContain('finance_profit_and_loss');
     expect(names).toContain('contracts_create');
   });

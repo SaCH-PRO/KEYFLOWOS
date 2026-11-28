@@ -11,6 +11,7 @@ import { UndoService } from './undo.service';
 import { AgentStateMachineService } from './agent-state-machine.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
 import { schedulersDisabled } from '../../core/config/env';
+import { v1ToolRefusalReasonForInvocation } from './v1-tool-allowlist';
 
 export interface PlanStepJob {
   planId: string;
@@ -236,6 +237,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     // a plan with no member (a journey, an agent trigger, the daily briefing) no contact read and no
     // money write. A refused step is recorded failed with the reason and nothing is dispatched; the
     // job completes (asking again gets the same answer).
+    const v1Refusal = v1ToolRefusalReasonForInvocation(data.toolName, data.args);
+    if (v1Refusal) {
+      this.logger.warn(`Plan step ${data.stepId} (${data.toolName}) refused (v1): ${v1Refusal}`);
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: data.stepId },
+        data: { status: 'failed', errorMessage: `Refused: ${v1Refusal}`, completedAt: new Date() },
+      });
+      this.events.emit('action.failed', {
+        businessId: data.businessId,
+        toolName: data.toolName,
+        planId: data.planId,
+        planStepId: data.stepId,
+        error: `Refused: ${v1Refusal}`,
+      });
+      return { refused: v1Refusal };
+    }
+
     const { planStepRunRefusal } = await import('./plan-step-authority');
     const refusal = await planStepRunRefusal(this.prisma, data.businessId, data.planId, data.toolName);
     if (refusal) {
@@ -256,6 +274,21 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
     // Governance check
     const decision = await this.governance.evaluateAutoApproval(data.businessId, data.toolName, { confidence: 0.8, planStepId: data.planContext?.planStepId });
+    if (decision.allowed === false) {
+      this.logger.warn(`Plan step ${data.stepId} (${data.toolName}) disallowed: ${decision.reason}`);
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: data.stepId },
+        data: { status: 'failed', errorMessage: `Refused: ${decision.reason}`, completedAt: new Date() },
+      });
+      this.events.emit('action.failed', {
+        businessId: data.businessId,
+        toolName: data.toolName,
+        planId: data.planId,
+        planStepId: data.stepId,
+        error: `Refused: ${decision.reason}`,
+      });
+      return { refused: decision.reason };
+    }
     if (!decision.autoApproved) {
       await this.prisma.client.aiPlanStep.update({
         where: { id: data.stepId },

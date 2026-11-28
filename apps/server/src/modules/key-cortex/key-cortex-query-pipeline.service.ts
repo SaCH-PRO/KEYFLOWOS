@@ -14,6 +14,7 @@ import {
 } from '../ai/model-gateway.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import { v1ToolRefusalReason } from '../ai/v1-tool-allowlist';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import {
@@ -2086,21 +2087,31 @@ export class KeyCortexQueryPipelineService {
     if (named.includes('')) refusals.set('', 'A tool call that names no tool is not run');
     const tools = named.filter((name) => name !== '');
     if (tools.length === 0) return refusals;
+    const remaining: string[] = [];
+    for (const name of tools) {
+      const v1Refusal = v1ToolRefusalReason(name);
+      if (v1Refusal) {
+        refusals.set(name, v1Refusal);
+      } else {
+        remaining.push(name);
+      }
+    }
+    if (remaining.length === 0) return refusals;
     if (!query.userId) {
-      for (const name of tools) refusals.set(name, `Not a member of this business: "${name}" runs only for a member of the business (D-104)`);
+      for (const name of remaining) refusals.set(name, `Not a member of this business: "${name}" runs only for a member of the business (D-104)`);
       return refusals;
     }
     try {
       // Loaded on use, as the plan queue's other callers load it: plan-step-authority imports
       // graph-actions.controller, which imports the flow orchestrator.
       const { memberToolRunAuthority } = await import('../ai/plan-step-authority');
-      for (const name of tools) {
+      for (const name of remaining) {
         const { refusal } = await memberToolRunAuthority(this.prisma, query.businessId, query.userId, name);
         if (refusal) refusals.set(name, refusal);
       }
     } catch (err: unknown) {
       const reason = `The member's authority could not be read, so the tool call is not run (failed closed): ${err instanceof Error ? err.message : String(err)}`;
-      for (const name of tools) refusals.set(name, reason);
+      for (const name of remaining) refusals.set(name, reason);
     }
     return refusals;
   }

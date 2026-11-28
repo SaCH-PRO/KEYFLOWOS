@@ -567,7 +567,8 @@ describe('PR195-PORT payroll -> ledger -> cash -> safe-to-spend -> KEY (real Pos
     await expect(
       mods.graphActions.assertMayRunGraphAction(prisma, ID.bizA, { id: ID.superAdmin, role: 'SUPER_ADMIN' }, 'payroll_mark_paid', null),
     ).rejects.toMatchObject({ status: 403 });
-    expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.superAdmin, 'payroll_mark_paid')).refusal).toMatch(/D-46/);
+    expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.superAdmin, 'payroll_mark_paid')).refusal).toBe('not available in this version');
+    expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.superAdmin, 'expenses_create')).refusal).toMatch(/D-46/);
 
     const row = await runRow(ID.runSa);
     expect(row.status).toBe('APPROVED');
@@ -597,6 +598,8 @@ describe('PR195-PORT payroll -> ledger -> cash -> safe-to-spend -> KEY (real Pos
     expect((await runRow(ID.runOps)).status).toBe('APPROVED');
     expect(await postingsOf(ID.runOps)).toHaveLength(0);
     expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.opsOnly, 'payroll_mark_paid')).refusal)
+      .toBe('not available in this version');
+    expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.opsOnly, 'expenses_create')).refusal)
       .toMatch(/expenses requires write access/);
 
     const paid = await controller.markRunPaid(ID.bizA, ID.runOps, { paymentMethod: 'cash' }, { user: { id: ID.opsExpenses, role: 'USER' } });

@@ -14,7 +14,6 @@ import {
   CalendarDays,
   UserCircle,
   ShieldCheck,
-  Lock,
   CreditCard,
   Truck,
   MapPin,
@@ -81,7 +80,7 @@ type Props = {
 
 const paymentMethods: { id: PaymentMethod; name: string; description: string; icon: typeof CreditCard }[] = [
   { id: "wipay", name: "WiPay", description: "Pay with credit/debit card via WiPay", icon: CreditCard },
-  { id: "paypal", name: "PayPal", description: "Pay securely with your PayPal account", icon: CreditCard },
+  { id: "paypal", name: "PayPal", description: "Pay with your PayPal account", icon: CreditCard },
   { id: "cash", name: "Cash / Manual Payment", description: "Pay in person or arrange payment with the business", icon: CreditCard },
 ];
 
@@ -174,13 +173,13 @@ export function useSlotAnswers(businessId: string, timeZone: string | null | und
 }
 
 /** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
-type StorefrontGateways = { wipay: boolean; paypal: boolean };
+export type StorefrontGateways = { wipay: boolean; paypal: boolean };
 
 /**
  * The storefront's gateway list for this currency, as the server answers it:
  * null until it does, or when it cannot (a failed read, or no list).
  */
-function useStorefrontGateways(slug: string, currency: string): StorefrontGateways | null {
+export function useStorefrontGateways(slug: string, currency: string): StorefrontGateways | null {
   const code = (currency ?? "").trim().toUpperCase();
   const key = `${slug}|${code}`;
   const [answer, setAnswer] = useState<{ key: string; gateways: StorefrontGateways | null } | null>(null);
@@ -644,10 +643,7 @@ export function CheckoutFlow({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-[10px] text-gray-900/25 pt-1">
-                  <Lock className="w-3 h-3" />
-                  <span>Your information is kept private and secure</span>
-                </div>
+                {/* P231 r1 (D-303): no 'Your information is kept private and secure'; the checkout verifies neither. */}
               </div>
             </div>
           )}
@@ -1271,20 +1267,7 @@ export function CheckoutFlow({
                 </div>
               )}
 
-              <div
-                className="rounded-2xl border border-gray-200 p-4 flex items-center justify-between gap-3"
-                style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.03) 0%, rgba(16,185,129,0.01) 100%)" }}
-              >
-                {[
-                  { icon: ShieldCheck, label: "Secure Checkout" },
-                  { icon: Lock, label: "Encrypted" },
-                ].map(({ icon: Icon, label }) => (
-                  <div key={label} className="flex items-center gap-1.5 text-[11px] text-emerald-400/60">
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{label}</span>
-                  </div>
-                ))}
-              </div>
+              {/* P231 r1 (D-303): no 'Secure Checkout' and no 'Encrypted' badges on the payment step. */}
 
               {(business.whatsapp || business.email) && (
                 <div className="flex items-center justify-center">
@@ -1401,9 +1384,9 @@ export function CheckoutFlow({
           </span>
         </div>
 
+        {/* P231 r1 (D-303): 'Powered by KeyFlowOS' only, no '· Secure Checkout'. */}
         <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300 pb-4">
-          <Lock className="w-3 h-3" />
-          <span>Powered by KeyFlowOS · Secure Checkout</span>
+          <span>Powered by KeyFlowOS</span>
         </div>
       </div>
 

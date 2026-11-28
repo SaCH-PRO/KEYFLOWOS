@@ -1780,6 +1780,11 @@
       "prefix": "v66f_",
       "owner": "apps/server/test/plan-table.integration.test.ts",
       "packet": "V1-66 (PLAN-TABLE)"
+    },
+    {
+      "prefix": "v63c_",
+      "owner": "apps/server/test/key-v1-tool-allowlist.integration.test.ts",
+      "packet": "V1-63 (KEY-TOOL-ALLOWLIST)"
     }
   ],
   "pendingRenames": [],

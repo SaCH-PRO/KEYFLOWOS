@@ -63,7 +63,6 @@ import {
   MapPin,
   Wallet,
   ArrowRight,
-  Shield,
   Landmark,
   Banknote,
   Copy,
@@ -1238,7 +1237,7 @@ function TokenPaymentPageInner() {
                           </svg>
                         </div>
                         <div className="font-medium text-sm mb-1">Google Pay</div>
-                        <div className="text-xs text-slate-500">Fast & secure checkout</div>
+                        {/* P231 r1 (D-303): no 'Fast & secure checkout'. */}
                         <div className="text-[10px] text-slate-600 mt-2 font-medium">{currency}</div>
                       </button>
                     )}
@@ -1425,10 +1424,7 @@ function TokenPaymentPageInner() {
                     </Button>
                   )}
 
-                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-600">
-                    <Shield className="w-3 h-3" />
-                    <span>Secure payment processing</span>
-                  </div>
+                  {/* P231 r1 (D-303): no 'Secure payment processing'; the page verifies no such thing. */}
                 </>
               )}
             </div>

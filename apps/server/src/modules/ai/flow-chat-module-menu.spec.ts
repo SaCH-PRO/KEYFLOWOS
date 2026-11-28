@@ -122,17 +122,17 @@ describe('PR195-JOURNAL-SCOPE: the FLOW chat menu offers a money write only to a
     for (const who of ['revenueWrite', 'admin', 'owner']) expect(await menu(orchestrator, who), who).toContain('finance_post_journal_entry');
   });
 
-  it('FM-03 RED-BEFORE: operations write with expenses read is not offered payroll_mark_paid; payroll_approve_run (operations write alone) still is', async () => {
+  it('FM-03 RED-BEFORE: payroll write tools (payroll_mark_paid, payroll_approve_run) are withheld from the v1 menu', async () => {
     const { orchestrator } = orchestratorFor(MEMBERS);
     const names = await menu(orchestrator, 'opsWriteExpRead');
     expect(names).not.toContain('payroll_mark_paid');
-    expect(names).toContain('payroll_approve_run');
+    expect(names).not.toContain('payroll_approve_run');
   });
 
-  it('FM-04 CONTROL: operations and expenses write are offered payroll_mark_paid; operations read is not (D-40), whatever its expenses', async () => {
+  it('FM-04 CONTROL: payroll_mark_paid is never offered in v1, even to operations+expenses write or owner (KEY-TOOL-ALLOWLIST)', async () => {
     const { orchestrator } = orchestratorFor(MEMBERS);
-    expect(await menu(orchestrator, 'opsWriteExpWrite')).toContain('payroll_mark_paid');
-    expect(await menu(orchestrator, 'owner')).toContain('payroll_mark_paid');
+    expect(await menu(orchestrator, 'opsWriteExpWrite')).not.toContain('payroll_mark_paid');
+    expect(await menu(orchestrator, 'owner')).not.toContain('payroll_mark_paid');
     expect(await menu(orchestrator, 'opsReadExpWrite')).not.toContain('payroll_mark_paid');
   });
 
@@ -167,22 +167,21 @@ describe('PR195-JOURNAL-SCOPE: a call the member may not make is refused before 
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('FM-07 RED-BEFORE: payroll_mark_paid for operations write with expenses read is refused before PayrollService is called', async () => {
+  it('FM-07 RED-BEFORE: payroll_mark_paid is unconditionally refused in v1 before PayrollService is called', async () => {
     const { orchestrator, markRunPaid } = orchestratorFor(MEMBERS, ['saOutsider']);
     for (const surface of ['CHAT', 'PLAN_HTTP']) {
       await expect(
         orchestrator.executeToolDirectly(BIZ, 'payroll_mark_paid', { runId: 'run_1', paymentMethod: 'cash' }, undefined, { surface, principalUserId: 'opsWriteExpRead' }),
         surface,
-      ).rejects.toThrow(/Insufficient permissions: expenses requires write access \(you have read\)/);
+      ).rejects.toThrow(/not available in this version/);
     }
-    // D-46: a platform SUPER_ADMIN who is not a member is refused as PayrollService refuses them.
     await expect(
       orchestrator.executeToolDirectly(BIZ, 'payroll_mark_paid', { runId: 'run_1', paymentMethod: 'cash' }, undefined, { surface: 'CHAT', principalUserId: 'saOutsider' }),
-    ).rejects.toThrow(/Not a member of this business/);
+    ).rejects.toThrow(/not available in this version/);
     expect(markRunPaid).not.toHaveBeenCalled();
   });
 
-  it('FM-08 CONTROL: the OWNER\'s and an ADMIN\'s journal post once; operations and expenses write mark the run paid', async () => {
+  it('FM-08 CONTROL: the OWNER\'s and an ADMIN\'s journal post once; payroll_mark_paid stays refused in v1 even for operations+expenses write', async () => {
     const { orchestrator, post, markRunPaid } = orchestratorFor(MEMBERS);
     for (const who of ['owner', 'admin', 'revenueWrite']) {
       await expect(
@@ -193,8 +192,8 @@ describe('PR195-JOURNAL-SCOPE: a call the member may not make is refused before 
     expect(post).toHaveBeenCalledTimes(3);
     await expect(
       orchestrator.executeToolDirectly(BIZ, 'payroll_mark_paid', { runId: 'run_1', paymentMethod: 'cash' }, undefined, { surface: 'CHAT', principalUserId: 'opsWriteExpWrite' }),
-    ).resolves.toEqual({ id: 'run_1', status: 'PAID' });
-    expect(markRunPaid).toHaveBeenCalledTimes(1);
+    ).rejects.toThrow(/not available in this version/);
+    expect(markRunPaid).not.toHaveBeenCalled();
   });
 });
 
