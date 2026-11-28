@@ -1,5 +1,8 @@
 "use client";
 
+import { ReadFailureNote, readFailure } from "./read-failure-note";
+import { readState } from "@/lib/failure-kit";
+import type { BlockRead } from "./use-expenses-data";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -21,7 +24,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, todayInBusinessZone } from "./expense-utils";
+import { businessCurrency, dayAfter, formatCurrency as formatAmount, formatShortDate, isCalendarDay, useShownBusiness, todayInBusinessZone, refusedStart, canStartFor, writeFailure } from "./expense-utils";
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -29,6 +32,13 @@ interface RecurringExpensesPanelProps {
   businessId: string | null;
   categories: ExpenseCategory[];
   triggerNew?: number;
+  /** R12: the data hook's check that the business an action was for is still the one shown. */
+  isCurrentBusiness?: (businessId: string) => boolean;
+  /** R24b: the categories read's own state; a refused one is said here, where schedules name their category. */
+  categoriesRead?: BlockRead;
+  onRetryCategories?: () => void;
+  /** R26-6: told the list read's state, so the page offers "New recurring expense" only when the list answered. */
+  onListRead?: (read: BlockRead) => void;
 }
 
 const FREQUENCIES: Record<string, string> = {
@@ -39,21 +49,54 @@ const FREQUENCIES: Record<string, string> = {
   YEARLY: "Yearly",
 };
 
-export default function RecurringExpensesPanel({ businessId, categories, triggerNew }: RecurringExpensesPanelProps) {
+export default function RecurringExpensesPanel({ businessId, categories, triggerNew, isCurrentBusiness: hookCheck, categoriesRead, onRetryCategories, onListRead }: RecurringExpensesPanelProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
+  // R25-2: the list's own read state: a refused, thrown or no-access read is said, never "No recurring expenses".
+  const [listRead, setListRead] = useState<BlockRead>({ kind: "loading" });
+  useEffect(() => { onListRead?.(listRead); }, [listRead, onListRead]);
   const [showBuilder, setShowBuilder] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
+  // R14-6: an editor opened for one business closes when the panel shows another, so Update can never send a
+  // schedule of the old business to the new one (React's "reset state on a prop change", during render).
+  const [editorFor, setEditorFor] = useState(businessId);
+  if (editorFor !== businessId) {
+    setEditorFor(businessId);
+    setShowBuilder(false);
+    // Not observable on its own (every path that opens the builder sets `editing` first, and only the builder
+    // saves): kept so no state of the old business outlives the switch. R15's mutation table lists it as equivalent.
+    setEditing(null);
+    // R20-4: and none of the old business's schedules stays listed (or can be run) while the new one's read is out.
+    setRecurring([]);
+    // R21-3: and the new business's read is out, so no "No recurring expenses" shows before it answers.
+    setLoading(true);
+    setListRead({ kind: "loading" });
+  }
 
   const load = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
+    // R26-5: the list is being read: its Retry is not offered again until this read answers (one read at a time).
+    setListRead({ kind: "loading" });
     try {
       const res = await fetchRecurringExpenses(businessId);
-      if (res.data) setRecurring(res.data);
-    } catch {}
+      // R12: a read for a business no longer shown writes nothing. (A read, not a write's reply: it is judged by the
+      // business this panel shows, which may be one other than the stored, R19-5 leaves it so.)
+      if (!isCurrentBusiness(businessId)) return;
+      const st = readState(res, { what: "recurring expenses" });
+      setListRead(st);
+      setRecurring(st.kind === "ok" ? res.data ?? [] : []);
+    } catch {
+      // R22-1: a read that fails for a business no longer shown leaves the one shown loading: its own read is out.
+      if (!isCurrentBusiness(businessId)) return;
+      setListRead({ kind: "failed", message: "Couldn't load recurring expenses." });
+    }
     setLoading(false);
-  }, [businessId]);
+  }, [businessId, isCurrentBusiness]);
 
   useEffect(() => { queueMicrotask(load); }, [load]);
   useEffect(() => {
@@ -70,6 +113,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   const [saving, setSaving] = useState(false);
   const handleSave = async (form: RecurringFormData) => {
     if (!businessId || savingRef.current) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -94,6 +138,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       const res = editing
         ? await updateRecurringExpense(businessId, editing.id, payload)
         : await createRecurringExpense(businessId, payload);
+      // R12: answered after a switch to another business: nothing is said or reloaded there.
+      if (!live()) return;
       if (res?.error) {
         toast.error(res.error);
         return;
@@ -103,7 +149,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
       setEditing(null);
       void load();
     } catch {
-      toast.error("Failed to save");
+      if (live()) toast.error("Failed to save");
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -112,30 +158,46 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
 
   const handleCancel = async (id: string) => {
     if (!businessId) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     if (!window.confirm("Cancel this recurring expense?")) return;
+    // R18-1: the confirm blocked this tab: a switch made while it was open is seen only now.
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await cancelRecurringExpense(businessId, id);
+      const res = await cancelRecurringExpense(businessId, id);
+      if (!live()) return;
+      // R24-1: the client answers a refusal as { error }; it is said, never reported as cancelled.
+      const failure = writeFailure(res, "cancel this recurring expense");
+      if (failure) { toast.error(failure); return; }
       toast.success("Cancelled");
       void load();
     } catch {
-      toast.error("Failed to cancel");
+      if (live()) toast.error("Failed to cancel");
     }
   };
 
   const handleRunNow = async (id: string) => {
     if (!businessId) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await runRecurringExpenseNow(businessId, id);
+      const res = await runRecurringExpenseNow(businessId, id);
+      if (!live()) return;
+      const failure = writeFailure(res, "run this recurring expense");
+      if (failure) { toast.error(failure); return; }
       toast.success("Expense generated");
       void load();
     } catch {
-      toast.error("Failed to run");
+      if (live()) toast.error("Failed to run");
     }
   };
 
   return (
     <div className="space-y-4">
-      {recurring.length === 0 && !loading ? (
+      <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} />
+      {readFailure(listRead) ? (
+        <div className="kf-card rounded-xl p-6 text-center">
+          <ReadFailureNote read={listRead} onRetry={() => { void load(); }} className="text-sm text-muted-foreground" />
+        </div>
+      ) : recurring.length === 0 && !loading ? (
         <EmptyState
           icon={Repeat}
           title="No recurring expenses"

@@ -7,9 +7,12 @@ import {
   FileText,
   DollarSign,
 } from "lucide-react";
+import { useCallback, useLayoutEffect, useRef } from "react";
+import { toast } from "sonner";
 import { formatCurrency as formatMoney } from "@/lib/currency";
 import { getCachedBusiness, getStoredBusinessId } from "@/lib/workspace";
 import type { RecurringExpense } from "@/lib/client";
+import { refusalMessage, type ApiAnswer } from "@/lib/failure-kit";
 
 export const CATEGORY_COLORS = [
   "#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e",
@@ -210,8 +213,9 @@ export interface ScheduleSource {
  * saved expense marked recurring. No currency: the server writes the business
  * currency (FOLLOW3-B4, D-13).
  */
-export function recurringScheduleBody(src: ScheduleSource, businessId?: string | null): Partial<RecurringExpense> {
-  const today = todayInBusinessZone(new Date(), businessId);
+export function recurringScheduleBody(src: ScheduleSource, businessId?: string | null, timeZone?: string): Partial<RecurringExpense> {
+  // R18-8: the zone the save started in, when given (the cache may hold another business by now).
+  const today = timeZone ? dayInZone(new Date(), timeZone) : todayInBusinessZone(new Date(), businessId);
   const date = parseDay(src.date) ? src.date.slice(0, 10) : today;
   const body: Partial<RecurringExpense> = {
     name: src.description,
@@ -233,4 +237,150 @@ export function recurringScheduleBody(src: ScheduleSource, businessId?: string |
     if (offset !== null && offset >= 0) body.dueOffsetDays = offset;
   }
   return body;
+}
+
+/**
+ * EXPENSES-HUB-3 R12: a check that the business an action was started for is still the one this component shows (its
+ * latest `businessId` prop). A reply to an action started on A that lands after the switch to B says and reloads
+ * nothing. The default for components rendered without the data hook's `isCurrentBusiness`.
+ *
+ * R13: a fallback only. Its ref follows the prop at commit, so a reply that lands after the switch is announced but
+ * before React commits it still reads the old business. A parent that has the data hook should pass its ref-based
+ * `isCurrentBusiness` (adopted at the switch itself), as the page does for the recurring panel.
+ */
+export function useShownBusiness(businessId: string | null | undefined): (forBusiness: string) => boolean {
+  const shown = useRef(businessId);
+  useLayoutEffect(() => { shown.current = businessId; }, [businessId]);
+  return useCallback((forBusiness: string) => Boolean(forBusiness) && shown.current === forBusiness, []);
+}
+
+/**
+ * EXPENSES-HUB-3 R15: the localStorage key the workspace keeps the chosen business under (lib/workspace.ts
+ * BUSINESS_ID_KEY, not exported there). A spec checks it against the key setStoredBusinessId writes.
+ */
+export const EXPENSES_BUSINESS_ID_KEY = "kf_business_id";
+
+/**
+ * EXPENSES-HUB-3 R15: the CSV's file name names the business it is for (taken when the export is asked for), so an
+ * export that arrives after a switch cannot pass for the other business's: expenses-<business>-<YYYY-MM-DD>.csv.
+ */
+export function expenseExportFileName(businessId: string, now: Date = new Date()): string {
+  // R17-7: storage that is blocked (getCachedBusiness throws) names the file after the business id.
+  let cached: { id?: string; name?: string } | null = null;
+  try {
+    cached = getCachedBusiness();
+  } catch {
+    cached = null;
+  }
+  // R16-5: only this business's cache entry names it; another's never does.
+  const name = cached?.id === businessId && typeof cached.name === "string" ? cached.name : "";
+  // R16-4: letters and digits of any script (NFKD drops accents: "Café Ñandú" is "cafe-nandu"); a name with none
+  // falls back to the business id's slug, so two such businesses never share a file name; at most 60 characters;
+  // nothing path-like survives (only letters, digits and single dashes do). Dated on the business's own day.
+  const slug = exportSlug(name) || exportSlug(businessId) || "business";
+  return `expenses-${slug}-${todayInBusinessZone(now, businessId)}.csv`;
+}
+
+const EXPORT_SLUG_MAX = 60;
+// R19-4: and at most 200 bytes of UTF-8, so the whole name (expenses-, the slug, -YYYY-MM-DD.csv) stays under 255.
+const EXPORT_SLUG_MAX_BYTES = 200;
+function exportSlug(text: string): string {
+  const kept = text
+    // R18-7: emoji variation selectors and the keycap mark carry no letter of their own.
+    .replace(/[\uFE00-\uFE0F\u20E3\u{E0100}-\u{E01EF}]/gu, "")
+    // R19-4: enclosing marks (a keycap, a circle) belong to no word.
+    .replace(/\p{Me}/gu, "")
+    // R20-7: nor do invisible letters: every default-ignorable code point, which takes in the Hangul fillers (U+3164,
+    // U+1160, U+115F, U+FFA0), the grapheme joiner, zero-width spaces and joiners, word joiners and the like.
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
+    .normalize("NFKD")
+    // R17-4: combining marks are dropped only after a Latin letter (accents: "Café Ñandú" is cafe-nandu). In other
+    // scripts they are part of the word (Devanagari vowel signs, Japanese voicing, Thai tone marks, Arabic harakat).
+    .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
+    // R18-7 / R19-4: a mark with no letter before it (at the start, after a dash, after a digit) is part of no word.
+    .replace(/(?<![\p{L}\p{M}])\p{M}+/gu, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return capGraphemes(kept, EXPORT_SLUG_MAX, EXPORT_SLUG_MAX_BYTES).replace(/-+$/g, "");
+}
+
+/**
+ * R18-7 / R19-4: the first `max` user-perceived characters (graphemes), within `maxBytes` of UTF-8: a cluster is kept
+ * whole or not at all, and one too large to fit (a letter with hundreds of marks) is not kept.
+ */
+function capGraphemes(text: string, max: number, maxBytes: number): string {
+  const Segmenter = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter;
+  const clusters = Segmenter ? Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(text), (g) => g.segment) : Array.from(text);
+  const encoder = new TextEncoder();
+  let out = "";
+  let n = 0;
+  let size = 0;
+  for (const cluster of clusters) {
+    if (n >= max) break;
+    const bytes = encoder.encode(cluster).length;
+    if (size + bytes > maxBytes) break;
+    out += cluster;
+    size += bytes;
+    n += 1;
+  }
+  return out;
+}
+
+/** EXPENSES-HUB-3 R17: what a write that will not start says when another business is chosen. */
+export const BUSINESS_CHANGED_ELSEWHERE = "The business changed in another tab. Reload this page, then try again.";
+/** EXPENSES-HUB-3 R18-4: what it says when the chosen business cannot be read (storage blocked). */
+export const BUSINESS_UNREADABLE = "Couldn't check which business is open. Reload the page.";
+
+/**
+ * EXPENSES-HUB-3 R17/R18: the one start check of every write in this folder, and what a refused start says (null when
+ * the write may start). A write starts only for the business the workspace has chosen (the stored id, which another
+ * tab can change before its storage event reaches this tab), and, when a check is given (the data hook's, or the
+ * component's own), only while that check still shows it. Storage that cannot be read refuses (R18-4). A write that
+ * asks first (window.confirm) runs the check again once the answer is in: the tab saw no event while the dialog was
+ * open (R18-1).
+ *
+ * Two exceptions, both deliberate: an export that arrives after a switch still downloads (the owner asked for it,
+ * and its file names the business it is for: expenseExportFileName); and a save whose first write has landed
+ * completes its remaining steps (extra fields, schedule, Drive copy) for the same business, in that business's zone
+ * taken when the save started, silently (expense-form-sidesheet.tsx), so a bill is never
+ * left without its schedule or a schedule without its receipt.
+ */
+export function startRefusal(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): string | null {
+  if (!businessId) return BUSINESS_CHANGED_ELSEWHERE;
+  let stored: string | null = null;
+  try {
+    stored = getStoredBusinessId();
+  } catch {
+    return BUSINESS_UNREADABLE;
+  }
+  return stored === businessId && (isCurrent ? isCurrent(businessId) : true) ? null : BUSINESS_CHANGED_ELSEWHERE;
+}
+
+/** Whether a write for `businessId` may start (startRefusal says nothing against it). */
+export function canStartFor(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): boolean {
+  return startRefusal(businessId, isCurrent) === null;
+}
+
+/** The start check, saying why when it refuses: true when the write must not start. */
+export function refusedStart(businessId: string | null | undefined, isCurrent?: (businessId: string) => boolean): boolean {
+  const refusal = startRefusal(businessId, isCurrent);
+  if (refusal) toast.error(refusal);
+  return refusal !== null;
+}
+
+/**
+ * R24-1: what a write's answer says went wrong, in the owner's words, or null when it went through. The client
+ * (lib/api.ts) does not throw for a refusal or a network failure: it answers { data: null, error }, so a reply is read,
+ * never assumed. A write failed when it carries an error (said in the server's words, FAILURE-KIT), when no answer came
+ * back, or, for a write whose success is the row it returns (a create or an update), when no row came back.
+ */
+export function writeFailure(res: ApiAnswer, what: string, needsRow = false): string | null {
+  if (!res) return `Couldn't ${what}.`;
+  const refusal = refusalMessage(res, { what });
+  if (refusal !== null) return refusal;
+  if (needsRow && (res.data === null || res.data === undefined)) return `Couldn't ${what}.`;
+  return null;
 }

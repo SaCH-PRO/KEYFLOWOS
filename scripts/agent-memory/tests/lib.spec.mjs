@@ -248,3 +248,58 @@ test('buildStatus: each row carries its track, and ready_launch holds only launc
   assert.match(md, /Follow-on packets ready \(D-263; only on the owner's assignment\): 2/);
   assert.match(md, /\| launch \| 0 \| 0 \| 2 \| 2 \|/);
 });
+
+// D-319 / Q69 (P246 DOCS-CONTROL-ROOM-273): #273 is the active control room (#80 archived at 2,500 comments),
+// with a rollover rule before the next 2,500-comment cap.
+test('D-319/Q69: active control room is #273 with rollover rule across bundle and operational docs', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+
+  const plan = { packets: [pk('SAMPLE', [], { decisions: ['D-222'] })], r0_register: [], fixture_prefix_table: [] };
+  const rulings = [{ id: 'D-222', line: 1, heading: 'Standing', text: 'standing rule' }];
+  const b = buildBundle({
+    plan,
+    packetId: 'SAMPLE',
+    rulings,
+    statusById: {},
+    fileExists: () => true,
+    mainSha: 'a'.repeat(40),
+    statusSource: 'V1-STATUS.json',
+  });
+  const prohibitedJoined = b.task.prohibited_scope.join('\n');
+  assert.match(prohibitedJoined, /issue #273/, 'buildBundle prohibited_scope must name #273');
+  assert.ok(
+    b.excluded.sources.some((s) => /#273/.test(s.source)),
+    'buildBundle excluded.sources must name #273',
+  );
+
+  const rolloverDocs = [
+    'CLAUDE.md',
+    'AGENTS.md',
+    'docs/development/agent-memory/README.md',
+    'docs/development/agent-memory/CHECKLISTS.md',
+    'docs/development/agent-memory/WAVE-RUNBOOK.md',
+    'docs/development/agent-memory/OWNER-QUESTION-FORMAT.md',
+    'docs/development/agent-memory/PACKET-WORKER-BRIEF.md',
+    'docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md',
+  ];
+  for (const rel of rolloverDocs) {
+    const text = readFileSync(resolve(repoRoot, rel), 'utf8');
+    assert.match(text, /#273/, `${rel} must name #273 as the active control room`);
+    assert.match(text, /2,350/, `${rel} must document the 2,350-comment rollover threshold`);
+    assert.doesNotMatch(
+      text,
+      /issues\/80\/comments|gh issue (view|comment) 80|Post (a )?(CLAIM|RETURN|PROGRESS|HANDOFF|\"CLAIM <ID>\") on (issue )?#80|Issue #80 is the control room/i,
+      `${rel} must not contain stale operational instructions pointing to archived #80`,
+    );
+  }
+  for (const rel of ['CLAUDE.md', 'AGENTS.md', 'docs/development/agent-memory/README.md']) {
+    const text = readFileSync(resolve(repoRoot, rel), 'utf8');
+    assert.match(text, /scripts\/agent-memory\/lib\.mjs/, `${rel} rollover checklist must include scripts/agent-memory/lib.mjs`);
+  }
+  const measurement = readFileSync(resolve(repoRoot, 'docs/development/agent-memory/MEASUREMENT.md'), 'utf8');
+  assert.match(measurement, /#273/, 'MEASUREMENT.md must reference #273');
+});
+

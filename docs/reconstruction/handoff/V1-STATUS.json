@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "f9c8966b73c523eb2c16ca76f04c21c00ad8ddd3",
-  "main_commit_date": "2026-11-27T15:17:01+00:00",
+  "main_sha": "f8ed5984b86cbb0360ad81899523f0bdb85ae6ce",
+  "main_commit_date": "2026-11-28T01:10:36+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 242,
-    "points": 364.5,
-    "pct_by_points": 63.9
+    "packets": 261,
+    "points": 391,
+    "pct_by_points": 68.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 154,
-    "points": 206,
-    "pct_by_points": 36.1
+    "packets": 135,
+    "points": 179.5,
+    "pct_by_points": 31.5
    }
   },
   "by_step": {
@@ -66,15 +66,15 @@
     "total": 7
    },
    "3": {
-    "done": 95,
+    "done": 101,
     "in-progress": 0,
-    "todo": 54,
+    "todo": 48,
     "total": 149
    },
    "4": {
-    "done": 36,
+    "done": 40,
     "in-progress": 0,
-    "todo": 17,
+    "todo": 13,
     "total": 53
    },
    "5": {
@@ -84,15 +84,15 @@
     "total": 92
    },
    "6": {
-    "done": 27,
+    "done": 29,
     "in-progress": 0,
-    "todo": 13,
+    "todo": 11,
     "total": 40
    },
    "7": {
-    "done": 6,
+    "done": 13,
     "in-progress": 0,
-    "todo": 28,
+    "todo": 21,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 152,
+    "done": 171,
     "in-progress": 0,
-    "todo": 103,
+    "todo": 84,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 77,
+   "prior-status-file": 70,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 105,
-   "compacted-commit": 88,
-   "no-evidence": 96,
+   "code-commit-subject": 117,
+   "compacted-commit": 95,
+   "no-evidence": 84,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -136,6 +136,7 @@
    "TOF-FINANCE-CANONICAL-TOOLS",
    "W11-OWNER-HELPER-REST",
    "TOF-KEY-SELF-MODEL",
+   "KEY-CRONS-FLAGS",
    "SWP-SEC-AUDIT-TRUTH",
    "SWP-PROFILE-TEAMSIZE",
    "CATALOG-1",
@@ -145,6 +146,7 @@
    "W11-GENOME-RECS-DOMAIN",
    "W11-PROPOSAL-RESULT-READER-SCOPE",
    "W11-GENOME-RUNWAY",
+   "SWP-CENSUS-KEY-A",
    "SWP-CENSUS-KEY-B",
    "SWP-CENSUS-GENOME",
    "W11-RUNWAY-BURN-CURRENCY",
@@ -169,9 +171,13 @@
    "SWP-READ-SCOPE-CENSUS",
    "SWP-CENSUS-V1-A",
    "SWP-CENSUS-V1-B",
+   "TOF-TIER-PRICING-SCHEMA",
+   "TOF-TIER-PRICING-ROUTES",
    "NAV-B-LEGACY-SERVER",
    "W11-TRANSIENT-CONFLICT",
    "W11-LOAD-SENSITIVE-TESTS",
+   "W11-PAGING-TOTAL-ORDER-B",
+   "W11-PAGING-TOTAL-ORDER-C",
    "W1F-ORDER-TRANSITIONS",
    "W1F-SETTLE-NO-STOCK",
    "W1F-STORE-STRIPE-R0",
@@ -203,6 +209,7 @@
    "FU-CASE-STUDY-REVENUE",
    "RR-MODEL-LIFECYCLE-GUARD",
    "RR-UNKNOWN-COST-NOT-ZERO",
+   "RR-DIRECT-PROVIDER-CENSUS",
    "RR-CORTEX-TYPED-RESULT",
    "RR-STRUCTURED-PARSE-INVALID-STATE",
    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
@@ -211,9 +218,13 @@
    "RR-DISPATCH-NO-BLIND-RETRY",
    "RR-DISPATCH-ATOMIC-CLAIM",
    "RR-WEBHOOK-INGRESS-CENSUS",
+   "RR-LEGACY-FALLBACK-REMOVE",
+   "RR-GOAL-WRITER-CENSUS",
    "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "RR-SELFTUNE-CANDIDATE-ONLY",
    "RR-EVAL-HARNESS-NO-VACUOUS",
    "RR-LANGFUSE-INGESTION-CUTOVER",
+   "RR-CRON-OCCURRENCE-LOCK",
    "RR-DB-CRYPTO-KEY-CENSUS",
    "RR-BUSINESS-EVENT-REDACT",
    "RR-ADMIN-LOGOUT",
@@ -221,6 +232,7 @@
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
    "RR-PRIVACY-DELETED-CONTACT-GATES",
+   "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
    "FU-TIMELINE-CALLERS-SCOPE",
    "FU-UNTRUSTED-INBOUND-FENCE",
    "FU-STORE-ORDERS-MONEY-SCOPE",
@@ -237,8 +249,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 90,
-  "todo_with_dependencies_met_launch": 56
+  "todo_with_dependencies_met": 84,
+  "todo_with_dependencies_met_launch": 47
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -289,7 +301,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 41
+   "unblocks": 32
   },
   {
    "id": "SWP-UI-COPY",
@@ -327,16 +339,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 9
-  },
-  {
-   "id": "W11-PAGING-TOTAL-ORDER-A",
-   "step": 7,
-   "priority": "P3",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 9
@@ -382,16 +384,6 @@
    "unblocks": 5
   },
   {
-   "id": "WEDGE-HIDE-STORE",
-   "step": 7,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 5
-  },
-  {
    "id": "S0-DEPENDABOT-FREEZE",
    "step": 0,
    "priority": "P2",
@@ -432,16 +424,6 @@
    "unblocks": 2
   },
   {
-   "id": "RR-ANTHROPIC-TOOL-PARITY",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
    "id": "FU-ARCH-MAP-REFRESH",
    "step": 3,
    "priority": "P2",
@@ -454,16 +436,6 @@
   {
    "id": "RR-CONNECTOR-STACK-CENSUS",
    "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-SECURITY-SIGNAL-COUNTERS",
-   "step": 4,
    "priority": "P3",
    "size": "S",
    "lane": "server",
@@ -802,16 +774,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-TOOL-EFFECT-METADATA",
-   "step": 3,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "W11-ORDER-METADATA-WRITERS",
    "step": 6,
    "priority": "P2",
@@ -912,32 +874,12 @@
    "unblocks": 0
   },
   {
-   "id": "RR-CRON-OCCURRENCE-LOCK",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-DEAD-EVENT-CENSUS",
    "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "server",
    "track": "follow-on",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-DIRECT-PROVIDER-CENSUS",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -962,16 +904,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
-   "step": 4,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-FORWARDREF-RATCHET",
    "step": 3,
    "priority": "P3",
@@ -987,16 +919,6 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-GOAL-WRITER-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1062,6 +984,16 @@
    "unblocks": 0
   },
   {
+   "id": "RR-KEY-SAFE-MODE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-LEARNING-OUTCOME-SEMANTICS",
    "step": 3,
    "priority": "P3",
@@ -1092,20 +1024,20 @@
    "unblocks": 0
   },
   {
-   "id": "RR-REFLECTION-HONEST",
-   "step": 3,
+   "id": "RR-PROMPT-CACHE-PREFIX",
+   "step": 7,
    "priority": "P3",
    "size": "S",
    "lane": "server",
-   "track": "launch",
+   "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
   },
   {
-   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
+   "id": "RR-REFLECTION-HONEST",
    "step": 3,
    "priority": "P3",
-   "size": "XS",
+   "size": "S",
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
@@ -1142,6 +1074,16 @@
    "unblocks": 0
   },
   {
+   "id": "RR-STRICT-TOOL-SCHEMAS",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-TRIAGE-RISK-FLOOR",
    "step": 3,
    "priority": "P3",
@@ -1170,6 +1112,16 @@
    "track": "follow-on",
    "on_critical_path": false,
    "unblocks": 0
+  },
+  {
+   "id": "W11-RELEASE0-INDEX-STALE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "track": "follow-on",
+   "on_critical_path": false,
+   "unblocks": 0
   }
  ],
  "ready_launch": [
@@ -1191,7 +1143,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 41
+   "unblocks": 32
   },
   {
    "id": "SWP-UI-COPY",
@@ -1229,16 +1181,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 9
-  },
-  {
-   "id": "W11-PAGING-TOTAL-ORDER-A",
-   "step": 7,
-   "priority": "P3",
-   "size": "M",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 9
@@ -1284,16 +1226,6 @@
    "unblocks": 5
   },
   {
-   "id": "WEDGE-HIDE-STORE",
-   "step": 7,
-   "priority": "P1",
-   "size": "S",
-   "lane": "web",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 5
-  },
-  {
    "id": "S0-DEPENDABOT-FREEZE",
    "step": 0,
    "priority": "P2",
@@ -1314,16 +1246,6 @@
    "unblocks": 2
   },
   {
-   "id": "RR-ANTHROPIC-TOOL-PARITY",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
    "id": "FU-ARCH-MAP-REFRESH",
    "step": 3,
    "priority": "P2",
@@ -1336,16 +1258,6 @@
   {
    "id": "RR-CONNECTOR-STACK-CENSUS",
    "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "RR-SECURITY-SIGNAL-COUNTERS",
-   "step": 4,
    "priority": "P3",
    "size": "S",
    "lane": "server",
@@ -1574,16 +1486,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-TOOL-EFFECT-METADATA",
-   "step": 3,
-   "priority": "P2",
-   "size": "M",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-APPROVAL-MODEL-CENSUS",
    "step": 3,
    "priority": "P3",
@@ -1604,51 +1506,11 @@
    "unblocks": 0
   },
   {
-   "id": "RR-CRON-OCCURRENCE-LOCK",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-DIRECT-PROVIDER-CENSUS",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
-   "step": 4,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-GATE-LEDGER-CENSUS",
    "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-GOAL-WRITER-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -1694,16 +1556,6 @@
    "unblocks": 0
   },
   {
-   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
-   "step": 3,
-   "priority": "P3",
-   "size": "XS",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "RR-SLO-AVAILABILITY-LEDGER",
    "step": 7,
    "priority": "P3",
@@ -1719,6 +1571,16 @@
    "priority": "P3",
    "size": "S",
    "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STRICT-TOOL-SCHEMAS",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2288,15 +2150,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "72575c09"
+   ],
    "depends_on": [
     "KEY-TOOL-ALLOWLIST"
    ],
    "title": "KEY_CRONS_DISABLED term plus per-producer flags for growth-intelligence, momentum, analytics and intelligence scans (never DISABLE_SCHEDULERS in production)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-TEAM-INVITE-SERVER",
@@ -3384,16 +3248,18 @@
    "size": "L",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "5790f850"
+   ],
    "depends_on": [
     "KEY-CRONS-FLAGS",
     "SWP-CENSUS-HIDDEN"
    ],
    "title": "REST scope census, KEY batch A: ai, agent, output templates, graph actions, bookings AI, blueprint onboarding (60 open rows, 6 controllers)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-KEY-B",
@@ -4498,10 +4364,12 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "498edf2c"
+   ],
    "depends_on": [
     "MIGRATION-SET-A",
     "DECIMALS-SERVER",
@@ -4509,7 +4377,7 @@
     "READY-TO-SEND"
    ],
    "title": "Tiered pricing service: tenant-bound PricingService and commerce wiring (the migration and the tenant model list moved to MIGRATION-SET-A)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "TOF-TIER-PRICING-ROUTES",
@@ -4518,15 +4386,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "1a9364c8"
+   ],
    "depends_on": [
     "TOF-TIER-PRICING-SCHEMA"
    ],
    "title": "Tiered pricing routes: tier prices, contact tier and a price lookup under revenue scopes",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "TOF-TIER-PRICING-WEB",
@@ -4773,10 +4643,12 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "293aa782"
+   ],
    "depends_on": [
     "W11-LOAD-SENSITIVE-TESTS",
     "SWP-INV-SKU-COUNT",
@@ -4788,7 +4660,7 @@
     "QUICK-SALE-SERVER"
    ],
    "title": "Paged lists get a total order (money and customer-facing lists) plus a paged-order census with a shrinking allow-list",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-PAGING-TOTAL-ORDER-B",
@@ -4797,16 +4669,18 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f07140cb"
+   ],
    "depends_on": [
     "W11-PAGING-TOTAL-ORDER-A",
     "SWP-CENSUS-HIDDEN"
    ],
    "title": "Paged lists get a total order (AI, KEY, flow, inbox, command lists); census allow-list shrinks",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-PAGING-TOTAL-ORDER-C",
@@ -4815,16 +4689,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b67300bd"
+   ],
    "depends_on": [
     "W11-PAGING-TOTAL-ORDER-B",
     "VAT-BASICS"
    ],
    "title": "Paged lists get a total order (admin, analytics, device, identity, signals lists); census allow-list emptied",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-RELEASE0-INDEX-STALE",
@@ -4841,7 +4717,7 @@
     "W11-PAGING-TOTAL-ORDER-C"
    ],
    "title": "release0-index.json: drop the explained entries whose todo is gone (three with a wrong status)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MIGRATION-SET-B",
@@ -6592,13 +6468,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "29450f3f"
+   ],
    "depends_on": [],
    "title": "Census of model-provider calls that bypass the gateway: a shrink-only spec fails on a new direct SDK or provider URL",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-ANTHROPIC-TOOL-PARITY",
@@ -6607,13 +6485,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "e4ebd85a"
+   ],
    "depends_on": [],
    "title": "Anthropic path keeps tool semantics: toolChoice 'none' honoured, assistant tool calls sent as tool_use and results as tool_result blocks",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-PROMPT-CACHE-PREFIX",
@@ -6631,7 +6511,7 @@
     "RR-ANTHROPIC-TOOL-PARITY"
    ],
    "title": "Provider prompt caching: Anthropic system prefix marked cacheable, cached input tokens read from usage and priced",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-RESPONSE-FORMAT-HONEST",
@@ -6734,7 +6614,7 @@
     "RR-TOOL-ARGS-MALFORMED-NEVER-RUN"
    ],
    "title": "KEY tool calls: advertised schemas are closed (no undeclared arguments) and strict where the provider supports it, after a census of the callers that send extra keys",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-KEY-RUN-BUDGET",
@@ -6779,15 +6659,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "53437c3b"
+   ],
    "depends_on": [
     "RR-TOOL-EFFECT-CLASS"
    ],
    "title": "FLOW_TOOLS declare idempotency, reversibility and contract version, and WRITE is refined into INTERNAL_WRITE, EXTERNAL_EFFECT, MONEY or DESTRUCTIVE (census spec)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-TOOL-WRITES-SEQUENTIAL",
@@ -6940,16 +6822,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "0e22c2ea"
+   ],
    "depends_on": [
     "TOF-FINANCE-CANONICAL-TOOLS",
     "KEY-TOOL-ALLOWLIST"
    ],
    "title": "Classify the 14 legacy KeyToolRegistry tools against FLOW_TOOLS in a checked-in equivalence table; route the SAME/ALIAS ones canonically",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "RR-LEGACY-FALLBACK-REMOVE",
@@ -6958,15 +6842,17 @@
    "size": "M",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "09d29c4d"
+   ],
    "depends_on": [
     "RR-LEGACY-TOOLS-CLASSIFY"
    ],
    "title": "Remove KeyCommand's legacy-registry fallback and KeyToolRegistryService once every legacy tool is canonical or retired",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "RR-GOAL-WRITER-CENSUS",
@@ -6975,13 +6861,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "5415c6f1"
+   ],
    "depends_on": [],
    "title": "Goal writer census: every writer of AiGoal and BusinessGoal listed with its provenance source; a new writer fails",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-HEALTH-TIGHTENS-CONTROL",
@@ -7014,7 +6902,7 @@
     "KEY-CRONS-FLAGS"
    ],
    "title": "KEY_SAFE_MODE: a partial, operator-set safe mode where KEY reads and answers but runs no write and no autonomous action",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-ACTION-UNDERSTANDING-SERVER",
@@ -7145,13 +7033,15 @@
    "size": "XS",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6cd3aab5"
+   ],
    "depends_on": [],
    "title": "Remove KEY's unreachable self-tuning path that applies model-chosen changes to AI preferences directly, and pin that no service writes AI preferences or tuning memory from a model response",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-LEARNING-OUTCOME-SEMANTICS",
@@ -7374,13 +7264,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "1dcccd4d"
+   ],
    "depends_on": [],
    "title": "Runtime counters for security signals (bearer verification failures, cross-business refusals, webhook signature failures), visible to the platform super-admin",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-INTEGRITY-WATCH",
@@ -7404,13 +7296,15 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "a80df9cd"
+   ],
    "depends_on": [],
    "title": "A scheduled job occurrence is claimed once across replicas and restarts; a census fails on any new @Cron that is neither claimed nor registered as idempotent",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-JOB-TENANT-CONTEXT",
@@ -7481,15 +7375,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "7d6b5b93"
+   ],
    "depends_on": [
     "RR-SECURITY-SIGNAL-COUNTERS"
    ],
    "title": "Evidence for the effective-authority cutover: a base-envelope parity matrix against the legacy guard on Postgres, and shadow mismatches counted, not only warn-logged",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "RR-FORWARDREF-RATCHET",
@@ -7990,15 +7886,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "ecbe6661"
+   ],
    "depends_on": [
     "RR-PRIVACY-DELETED-CONTACT-GATES"
    ],
    "title": "Cancelling a forget request restores only what the forget request deleted",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-VITEST-DECORATOR-METADATA",
@@ -8390,15 +8288,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "78734dee"
+   ],
    "depends_on": [
     "NAV-B-LEGACY-SERVER"
    ],
    "title": "Store checkout, Sales > Orders and Quick sale are offered at launch only to a business that already sells online; everyone else gets the booking page and invoices",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "GATE-PILOT-10",

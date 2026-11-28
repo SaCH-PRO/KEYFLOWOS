@@ -45,7 +45,8 @@ interface ObjectUploaderProps {
  *
  * The flow mirrors what the rest of the app already does (see
  * `apps/web/src/app/app/profile/components/personal-info-section.tsx` and
- * `apps/web/src/app/app/expenses/components/expense-form-modal.tsx`):
+ * `apps/web/src/app/app/expenses/components/expense-form-sidesheet.tsx`, whose
+ * receipt upload goes through `hooks/use-upload.ts`):
  *   1. Ask the caller for presigned upload parameters per file.
  *   2. PUT the file body directly to that URL.
  *   3. Report results via `onComplete`.

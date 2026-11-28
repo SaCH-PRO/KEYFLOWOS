@@ -64,7 +64,7 @@ import {
 } from '../key-cortex/genome-read-projections';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
-import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
+import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool, PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { classifyActionIntent } from '../key-cortex/action-intent';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
@@ -4289,62 +4289,156 @@ ${triage.standingContext}`;
   }
 
   /**
-   * The call against the tool's own schema: every required field present, each named field of its
-   * type (a number or boolean sent as text is read). W11-DISPATCH-REFUSAL-FINAL (D-134): a call the
-   * schema refuses is a 400 with the message it always had, not a plain Error, so the plan queue
-   * answers it once and counts it toward no circuit; the envelope executeTool answers the chat and a
-   * plan run over HTTP carries the same message as before.
+   * The call against the tool's own schema: no undeclared arguments, strict-mode
+   * optional `null` values stripped before required/type checks, every required
+   * field present, each named field (and typed array item) of its type (a number
+   * or boolean sent as text is read). W11-DISPATCH-REFUSAL-FINAL (D-134): a call
+   * the schema refuses is a 400, not a plain Error, so the plan queue answers it
+   * once and counts it toward no circuit; the envelope executeTool answers the
+   * chat and a plan run over HTTP carries the same message as before.
    */
-  private validateToolInput(toolName: string, args: Record<string, any>): void {
-    const tool = getToolByName(toolName);
-    if (!tool) return;
-
-    const missing = tool.parameters.required.filter(
-      (field) => args[field] === undefined || args[field] === null || args[field] === '',
-    );
-    if (missing.length > 0) {
-      throw new BadRequestException(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+  private validateToolObjectSchema(
+    toolName: string,
+    obj: unknown,
+    schema: {
+      properties?: Record<string, any>;
+      required?: string[];
+    },
+    pathPrefix: string,
+    allowedExtras: Set<string> | null,
+  ): void {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      throw new BadRequestException(
+        pathPrefix
+          ? `Field "${pathPrefix}" for ${toolName} must be an object`
+          : `Arguments for ${toolName} must be an object`,
+      );
     }
 
-    for (const [key, value] of Object.entries(args)) {
-      const schema = tool.parameters.properties[key];
-      if (!schema) continue;
-      if (schema.type === 'string' && typeof value !== 'string') {
-        throw new BadRequestException(`Field "${key}" for ${toolName} must be a string`);
+    const record = obj as Record<string, any>;
+    const declaredProps = schema.properties;
+    const hasDeclaredProps =
+      !!declaredProps && typeof declaredProps === 'object' && !Array.isArray(declaredProps);
+    if (!hasDeclaredProps) {
+      return;
+    }
+
+    const requiredList = Array.isArray(schema.required) ? schema.required : [];
+    const requiredSet = new Set(requiredList);
+    const formatField = (key: string) => (pathPrefix ? `${pathPrefix}.${key}` : key);
+
+    // Pass 1 (read-only): reject every undeclared key BEFORE mutating `record`
+    // so a rejected call never partially strips fields.
+    for (const key of Object.keys(record)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) {
+        if (allowedExtras?.has(key)) continue;
+        throw new BadRequestException(`Field "${formatField(key)}" is not a parameter of ${toolName}`);
       }
-      if (schema.type === 'number') {
+    }
+
+    // Pass 2: strip shrink-only exempt extra keys (so handlers never see them)
+    // and strict-mode nulls on optional declared parameters.
+    for (const key of Object.keys(record)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) {
+        if (allowedExtras?.has(key)) {
+          delete record[key];
+        }
+        continue;
+      }
+      if (record[key] === null && !requiredSet.has(key)) {
+        delete record[key];
+      }
+    }
+
+    const missing = requiredList.filter(
+      (field) => record[field] === undefined || record[field] === null || record[field] === '',
+    );
+    if (missing.length > 0) {
+      const formattedMissing = missing.map((field) => formatField(field));
+      throw new BadRequestException(`Missing required fields for ${toolName}: ${formattedMissing.join(', ')}`);
+    }
+
+    for (const [key, value] of Object.entries(record)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) continue;
+      const propSchema = declaredProps[key];
+      if (!propSchema || value === undefined) continue;
+      const fieldPath = formatField(key);
+
+      if (propSchema.type === 'string' && typeof value !== 'string') {
+        throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a string`);
+      }
+      if (propSchema.type === 'number') {
         const num = typeof value === 'number' ? value : Number(value);
         if (
-          value === null ||
           typeof value === 'boolean' ||
           (typeof value === 'string' && value.trim() === '') ||
           !Number.isFinite(num)
         ) {
-          throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
+          throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a number`);
         }
-        args[key] = num;
+        record[key] = num;
       }
       // W11-KEY-TRANSFER-INTEGER: 'integer' reads a number or a numeric string as the 'number'
       // branch does, then requires a whole number, so the schema and the route refuse the same thing.
-      if (schema.type === 'integer') {
+      if (propSchema.type === 'integer') {
         const num = typeof value === 'number' ? value : Number(value);
         if (typeof value === 'boolean' || (typeof value === 'string' && value.trim() === '') || !Number.isInteger(num)) {
-          throw new BadRequestException(`Field "${key}" for ${toolName} must be a whole number`);
+          throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a whole number`);
         }
-        args[key] = num;
+        record[key] = num;
       }
-      if (schema.type === 'boolean' && typeof value !== 'boolean') {
-        if (value === 'true') args[key] = true;
-        else if (value === 'false') args[key] = false;
-        else throw new BadRequestException(`Field "${key}" for ${toolName} must be a boolean`);
+      if (propSchema.type === 'boolean' && typeof value !== 'boolean') {
+        if (value === 'true') record[key] = true;
+        else if (value === 'false') record[key] = false;
+        else throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be a boolean`);
       }
-      if (schema.type === 'array' && !Array.isArray(value)) {
-        throw new BadRequestException(`Field "${key}" for ${toolName} must be an array`);
+      if (propSchema.type === 'object') {
+        this.validateToolObjectSchema(toolName, value, propSchema, fieldPath, null);
       }
-      if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
-        throw new BadRequestException(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
+      if (propSchema.type === 'array') {
+        if (!Array.isArray(value)) {
+          throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be an array`);
+        }
+        const itemSchema = propSchema.items;
+        const itemType = itemSchema?.type;
+        if (itemType === 'string' || itemType === 'number' || itemType === 'integer' || itemType === 'boolean') {
+          for (let i = 0; i < value.length; i++) {
+            const item = value[i];
+            if (itemType === 'string' && typeof item !== 'string') {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a string`);
+            }
+            if (itemType === 'number' && (typeof item !== 'number' || !Number.isFinite(item))) {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a number`);
+            }
+            if (itemType === 'integer' && (typeof item !== 'number' || !Number.isInteger(item))) {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a whole number`);
+            }
+            if (itemType === 'boolean' && typeof item !== 'boolean') {
+              throw new BadRequestException(`Field "${fieldPath}[${i}]" for ${toolName} must be a boolean`);
+            }
+          }
+        } else if (itemType === 'object') {
+          for (let i = 0; i < value.length; i++) {
+            this.validateToolObjectSchema(toolName, value[i], itemSchema, `${fieldPath}[${i}]`, null);
+          }
+        }
+      }
+      if (propSchema.enum && typeof value === 'string' && !propSchema.enum.includes(value)) {
+        throw new BadRequestException(`Field "${fieldPath}" for ${toolName} must be one of: ${propSchema.enum.join(', ')}`);
       }
     }
+  }
+
+  private validateToolInput(
+    toolName: string,
+    args: Record<string, any>,
+    options?: { allowExtraKeys?: readonly string[] },
+  ): void {
+    const tool = getToolByName(toolName);
+    if (!tool) return;
+
+    const allowedExtras = options?.allowExtraKeys ? new Set(options.allowExtraKeys) : null;
+    this.validateToolObjectSchema(toolName, args, tool.parameters, '', allowedExtras);
   }
 
   /**
@@ -8109,6 +8203,7 @@ ${triage.standingContext}`;
         const withinMemberScope = async (bizId: string, name: string, toolArgs?: unknown): Promise<void> => {
           const refusal = await this.memberScopeRefusal(bizId, name, action, toolArgs);
           if (refusal) throw new Error(refusal);
+          this.validateToolInput(name, toolArgs as Record<string, any>);
         };
         // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3b; D-64, D-88): and a contact an inner commerce
         // write binds is judged by that same member's CRM view. The member rides as onBehalfOfUserId,
@@ -9496,7 +9591,13 @@ ${triage.standingContext}`;
 
     const startTime = Date.now();
     try {
-      this.validateToolInput(toolName, args);
+      const allowExtraKeys = PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS.includes(toolName)
+        ? (['businessId'] as const)
+        : undefined;
+      if (allowExtraKeys && args && typeof args === 'object' && !Array.isArray(args)) {
+        args = { ...args };
+      }
+      this.validateToolInput(toolName, args, allowExtraKeys ? { allowExtraKeys } : undefined);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;

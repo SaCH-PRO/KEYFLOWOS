@@ -3,6 +3,7 @@
 import React from "react";
 import { formatCurrency } from "@/lib/currency";
 import type { Expense, ExpenseSummary } from "@/lib/client";
+import { businessCurrency } from "./expense-utils";
 
 interface ExpenseMetricsRowProps {
   expenses: Expense[];
@@ -10,7 +11,9 @@ interface ExpenseMetricsRowProps {
   currency?: string;
 }
 
-export function ExpenseMetricsRow({ expenses, summary, currency = "TTD" }: ExpenseMetricsRowProps) {
+export function ExpenseMetricsRow({ expenses, summary, currency }: ExpenseMetricsRowProps) {
+  // EXPENSES-HUB-3 (BUG-027 remainder): the business currency, never a literal TTD.
+  const code = currency || businessCurrency();
   const totalSpent = summary?.total ?? expenses.reduce((s, e) => s + e.amount, 0);
   const thisMonth = expenses
     .filter((e) => {
@@ -23,8 +26,8 @@ export function ExpenseMetricsRow({ expenses, summary, currency = "TTD" }: Expen
   const missingReceipts = expenses.filter((e) => !e.receiptUrl && e.status === "PAID").length;
 
   const items = [
-    { label: "Total Spent", value: formatCurrency(totalSpent, currency), color: "text-rose-400" },
-    { label: "This Month", value: formatCurrency(thisMonth, currency), color: "text-foreground" },
+    { label: "Total Spent", value: formatCurrency(totalSpent, code), color: "text-rose-400" },
+    { label: "This Month", value: formatCurrency(thisMonth, code), color: "text-foreground" },
     { label: "Bills Due", value: billsDue > 0 ? `${billsDue} pending` : "All paid", color: billsDue > 0 ? "text-amber-400" : "text-emerald-400" },
     { label: "Missing Receipts", value: missingReceipts > 0 ? `${missingReceipts}` : "All attached", color: missingReceipts > 0 ? "text-amber-400" : "text-emerald-400" },
   ];
