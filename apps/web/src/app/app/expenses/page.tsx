@@ -230,6 +230,9 @@ export default function ExpensesInboxPage() {
     setTriggerBusiness(d.businessId);
     setRecurringTrigger(0);
     // P254 R5-2: and the earlier business's list answer, so no commit offers New on B before B's list answers.
+    // Belt-and-braces (P254 R10): R6-2's reset above covers every business change, because adopt() in
+    // use-expenses-data sets the read (loading, or no-business) together with the business, so a render with a new
+    // business never has an ok read. Pinned by "after A -> B, B never offers New on A's list answer".
     setRecurringRead({ kind: "loading" });
   }
   // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
