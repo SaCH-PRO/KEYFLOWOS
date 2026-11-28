@@ -7726,15 +7726,313 @@ export function isCortexBridgedTool(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(CORTEX_TOOL_BRIDGE, name);
 }
 
+/**
+ * RR-STRICT-TOOL-SCHEMAS (D-261, D-262, D-17):
+ *
+ * Shrink-only list of FLOW_TOOLS whose parameter schemas currently include
+ * free-form `type: 'object'` without `properties` or `type: 'array'` without
+ * `items` and therefore cannot compile to OpenAI `strict: true`. They still
+ * receive `additionalProperties: false` on every object level that declares
+ * `properties` (including top-level `parameters`), and are sent without
+ * `strict: true` until tightened in follow-up slices.
+ */
+export const NON_STRICT_OPENAI_TOOLS: readonly string[] = [
+  'approval_create_request',
+  'assets_tag',
+  'assets_untag',
+  'assets_update',
+  'automations_create_playbook',
+  'crm_merge_execute',
+  'evidence_submit',
+  'execute_custom_logic',
+  'finance_post_journal_entry',
+  'inventory_create_purchase_order',
+  'procurement_create_request',
+  'sequence_create',
+  'sequence_enroll',
+  'time_mark_billed',
+  'update_business_blueprint',
+];
+
+/**
+ * RR-STRICT-TOOL-SCHEMAS (D-261, D-262):
+ *
+ * Shrink-only caller census of every production caller reaching
+ * `FlowOrchestratorService.validateToolInput` via `executeToolDirectly`,
+ * `executeToolDirect`, or `autoExecuteToolForMonitoring`.
+ */
+export interface StrictToolCallerEntry {
+  readonly file: string;
+  readonly method: string;
+  readonly callee: 'executeToolDirectly' | 'executeToolDirect' | 'autoExecuteToolForMonitoring';
+  readonly verdict: 'clean' | 'exempt-shrink-only';
+  readonly exemptTools?: readonly string[];
+  readonly exemptKeys?: readonly string[];
+  readonly rationale: string;
+}
+
+export const PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS: readonly string[] = [
+  'fetch_business_summary',
+  'fetch_storefront_quality',
+  'fetch_project_status',
+  'fetch_expense_pressure',
+  'fetch_schedule_health',
+  'fetch_client_health',
+  'fetch_revenue_risk',
+];
+
+export const STRICT_TOOL_CALLER_CENSUS: readonly StrictToolCallerEntry[] = [
+  {
+    file: 'apps/server/src/modules/ai/action-dispatcher.service.ts',
+    method: 'executeClaimedDispatch',
+    callee: 'executeToolDirectly',
+    verdict: 'clean',
+    rationale: 'Forwards stored plan step ctx.args unchanged; planId/planStepId pass via separate planContext/action params.',
+  },
+  {
+    file: 'apps/server/src/modules/ai/conversational-ai.service.ts',
+    method: 'executeAction',
+    callee: 'executeToolDirectly',
+    verdict: 'clean',
+    rationale: 'Forwards parsed action.payload; businessId passes as first positional arg and surface via action context.',
+  },
+  {
+    file: 'apps/server/src/modules/ai/graph-actions.controller.ts',
+    method: 'executeAction',
+    callee: 'executeToolDirect',
+    verdict: 'clean',
+    rationale: 'Forwards stored plan step args; businessId/planId/planStepId/action pass via separate positional arguments.',
+  },
+  {
+    file: 'apps/server/src/modules/ai/pro-auto-monitor.service.ts',
+    method: 'escalateInsights',
+    callee: 'autoExecuteToolForMonitoring',
+    verdict: 'exempt-shrink-only',
+    exemptTools: PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS,
+    exemptKeys: ['businessId'],
+    rationale:
+      'ProAutoMonitorService.buildAutoExecArgs returns { businessId } for the 7 AUTO_EXECUTABLE_READ_TOOLS even though none declare businessId; shrink-only exemption allows only key "businessId" on those 7 read tools in autoExecuteToolForMonitoring until buildAutoExecArgs is updated.',
+  },
+  {
+    file: 'apps/server/src/modules/key-cortex/key-cortex-action-executor.plugin.ts',
+    method: 'execute',
+    callee: 'executeToolDirectly',
+    verdict: 'clean',
+    rationale: 'Forwards proposal.payload.inputPayload ?? parameters; planContext and actor metadata pass via separate arguments.',
+  },
+  {
+    file: 'apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts',
+    method: 'dispatch',
+    callee: 'executeToolDirectly',
+    verdict: 'clean',
+    rationale: 'Forwards Cortex organ tool input unchanged; businessId/userId/correlationId pass via separate arguments.',
+  },
+];
+
+export const OPENAI_STRICT_DISALLOWED_KEYWORDS = new Set<string>([
+  'oneOf',
+  'allOf',
+  'not',
+  'patternProperties',
+  'additionalItems',
+  'dependencies',
+  'minLength',
+  'maxLength',
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+  'minItems',
+  'maxItems',
+  'uniqueItems',
+  'minProperties',
+  'maxProperties',
+  'pattern',
+  'format',
+  'default',
+]);
+
+export interface CompiledProviderToolSchema {
+  readonly provider: 'openai' | 'anthropic';
+  readonly strict: boolean;
+  readonly strictReasons: readonly string[];
+  readonly schema: Record<string, unknown>;
+}
+
+function collectStrictViolations(
+  node: Record<string, unknown> | undefined,
+  pathPrefix: string,
+  out: string[],
+): void {
+  if (!node || typeof node !== 'object') return;
+  for (const key of Object.keys(node)) {
+    if (OPENAI_STRICT_DISALLOWED_KEYWORDS.has(key)) {
+      out.push(`${pathPrefix}:disallowed-keyword:${key}`);
+    }
+  }
+  const type = node.type;
+  if (type === 'object') {
+    const props = node.properties;
+    if (!props || typeof props !== 'object' || Array.isArray(props)) {
+      out.push(`${pathPrefix}:object-without-properties`);
+    } else {
+      for (const [k, v] of Object.entries(props as Record<string, Record<string, unknown>>)) {
+        collectStrictViolations(v, `${pathPrefix}.properties.${k}`, out);
+      }
+    }
+  } else if (type === 'array') {
+    const items = node.items;
+    if (!items || typeof items !== 'object' || Array.isArray(items)) {
+      out.push(`${pathPrefix}:array-without-items`);
+    } else {
+      collectStrictViolations(items as Record<string, unknown>, `${pathPrefix}.items`, out);
+    }
+  } else if (!type && !node.anyOf && !node.enum) {
+    out.push(`${pathPrefix}:missing-type`);
+  }
+}
+
+/**
+ * Recursively clones a JSON Schema object and adds `additionalProperties: false`
+ * to every `type: 'object'` node that declares `properties`.
+ */
+export function closeJsonSchemaObject(
+  node: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!node || typeof node !== 'object') {
+    return { type: 'object', properties: {}, additionalProperties: false };
+  }
+  const clone: Record<string, unknown> = { ...node };
+  if (
+    clone.type === 'object' &&
+    clone.properties &&
+    typeof clone.properties === 'object' &&
+    !Array.isArray(clone.properties)
+  ) {
+    const closedProps: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(clone.properties as Record<string, Record<string, unknown>>)) {
+      closedProps[k] = closeJsonSchemaObject(v);
+    }
+    clone.properties = closedProps;
+    clone.additionalProperties = false;
+  }
+  if (clone.type === 'array' && clone.items && typeof clone.items === 'object' && !Array.isArray(clone.items)) {
+    clone.items = closeJsonSchemaObject(clone.items as Record<string, unknown>);
+  }
+  if (Array.isArray(clone.anyOf)) {
+    clone.anyOf = (clone.anyOf as Record<string, unknown>[]).map((branch) => closeJsonSchemaObject(branch));
+  }
+  return clone;
+}
+
+function compileNodeForOpenAiStrict(node: Record<string, unknown>): Record<string, unknown> {
+  const clone: Record<string, unknown> = { ...node };
+  if (
+    clone.type === 'object' &&
+    clone.properties &&
+    typeof clone.properties === 'object' &&
+    !Array.isArray(clone.properties)
+  ) {
+    const originalRequired = new Set<string>(
+      Array.isArray(clone.required) ? (clone.required as string[]) : [],
+    );
+    const compiledProps: Record<string, unknown> = {};
+    const allKeys: string[] = [];
+    for (const [k, rawProp] of Object.entries(clone.properties as Record<string, Record<string, unknown>>)) {
+      allKeys.push(k);
+      const compiled = compileNodeForOpenAiStrict(rawProp);
+      if (originalRequired.has(k)) {
+        compiledProps[k] = compiled;
+      } else {
+        // OpenAI strict mode requires every property in `required`; optional
+        // fields are encoded as a null union.
+        if (
+          typeof compiled.type === 'string' &&
+          !Array.isArray(compiled.enum) &&
+          compiled.type !== 'object' &&
+          compiled.type !== 'array'
+        ) {
+          compiledProps[k] = { ...compiled, type: [compiled.type, 'null'] };
+        } else {
+          const { description, ...rest } = compiled;
+          compiledProps[k] = {
+            anyOf: [rest, { type: 'null' }],
+            ...(typeof description === 'string' ? { description } : {}),
+          };
+        }
+      }
+    }
+    clone.properties = compiledProps;
+    clone.required = allKeys;
+    clone.additionalProperties = false;
+  } else if (
+    clone.type === 'array' &&
+    clone.items &&
+    typeof clone.items === 'object' &&
+    !Array.isArray(clone.items)
+  ) {
+    clone.items = compileNodeForOpenAiStrict(clone.items as Record<string, unknown>);
+  }
+  return clone;
+}
+
+/**
+ * Single schema compiler for FLOW_TOOLS:
+ *  - Closes every object level declaring `properties` with `additionalProperties: false`.
+ *  - For `'openai'`: compiles strict-compatible tools with `strict: true` (every
+ *    property required, optional properties nullable); incompatible tools fall
+ *    back to closed non-strict parameters and report `strictReasons`.
+ *  - For `'anthropic'`: emits closed `input_schema` preserving original `required`
+ *    and property types without OpenAI null-union rewrites or `strict`.
+ */
+export function toProviderToolSchema(
+  tool: Pick<FlowTool, 'name' | 'parameters'>,
+  provider: 'openai' | 'anthropic',
+): CompiledProviderToolSchema {
+  const root = tool.parameters as unknown as Record<string, unknown>;
+  const strictReasons: string[] = [];
+  collectStrictViolations(root, 'parameters', strictReasons);
+
+  if (provider === 'anthropic') {
+    return {
+      provider: 'anthropic',
+      strict: false,
+      strictReasons,
+      schema: closeJsonSchemaObject(root),
+    };
+  }
+
+  if (strictReasons.length === 0) {
+    return {
+      provider: 'openai',
+      strict: true,
+      strictReasons: [],
+      schema: compileNodeForOpenAiStrict(root),
+    };
+  }
+
+  return {
+    provider: 'openai',
+    strict: false,
+    strictReasons,
+    schema: closeJsonSchemaObject(root),
+  };
+}
+
 export function getOpenAiToolDefinitions() {
-  return FLOW_TOOLS.map((tool) => ({
-    type: 'function' as const,
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    },
-  }));
+  return FLOW_TOOLS.map((tool) => {
+    const compiled = toProviderToolSchema(tool, 'openai');
+    return {
+      type: 'function' as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        ...(compiled.strict ? { strict: true as const } : {}),
+        parameters: compiled.schema,
+      },
+    };
+  });
 }
 
 /**

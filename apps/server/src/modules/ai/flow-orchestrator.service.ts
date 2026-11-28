@@ -64,7 +64,7 @@ import {
 } from '../key-cortex/genome-read-projections';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
-import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
+import { getOpenAiToolDefinitions, getToolByName, isReadOnlyTool, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool, PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { classifyActionIntent } from '../key-cortex/action-intent';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
@@ -4289,15 +4289,40 @@ ${triage.standingContext}`;
   }
 
   /**
-   * The call against the tool's own schema: every required field present, each named field of its
-   * type (a number or boolean sent as text is read). W11-DISPATCH-REFUSAL-FINAL (D-134): a call the
-   * schema refuses is a 400 with the message it always had, not a plain Error, so the plan queue
-   * answers it once and counts it toward no circuit; the envelope executeTool answers the chat and a
-   * plan run over HTTP carries the same message as before.
+   * The call against the tool's own schema: no undeclared arguments, strict-mode
+   * optional `null` values stripped before required/type checks, every required
+   * field present, each named field (and typed array item) of its type (a number
+   * or boolean sent as text is read). W11-DISPATCH-REFUSAL-FINAL (D-134): a call
+   * the schema refuses is a 400, not a plain Error, so the plan queue answers it
+   * once and counts it toward no circuit; the envelope executeTool answers the
+   * chat and a plan run over HTTP carries the same message as before.
    */
-  private validateToolInput(toolName: string, args: Record<string, any>): void {
+  private validateToolInput(
+    toolName: string,
+    args: Record<string, any>,
+    options?: { allowExtraKeys?: readonly string[] },
+  ): void {
     const tool = getToolByName(toolName);
     if (!tool) return;
+
+    const declaredProps = tool.parameters.properties ?? {};
+    const requiredSet = new Set(tool.parameters.required ?? []);
+    const allowedExtras = options?.allowExtraKeys ? new Set(options.allowExtraKeys) : null;
+
+    // RR-STRICT-TOOL-SCHEMAS: reject any argument key not declared in the tool's
+    // parameter schema with HTTP 400 (final under D-134), except keys explicitly
+    // allowed for a shrink-only listed caller.
+    for (const key of Object.keys(args)) {
+      if (!Object.prototype.hasOwnProperty.call(declaredProps, key)) {
+        if (allowedExtras?.has(key)) continue;
+        throw new BadRequestException(`Field "${key}" is not a parameter of ${toolName}`);
+      }
+      // OpenAI strict mode encodes optional parameters as `<type> | null`.
+      // Strip nulls on optional declared parameters before required & type checks.
+      if (args[key] === null && !requiredSet.has(key)) {
+        delete args[key];
+      }
+    }
 
     const missing = tool.parameters.required.filter(
       (field) => args[field] === undefined || args[field] === null || args[field] === '',
@@ -4307,8 +4332,8 @@ ${triage.standingContext}`;
     }
 
     for (const [key, value] of Object.entries(args)) {
-      const schema = tool.parameters.properties[key];
-      if (!schema) continue;
+      const schema = declaredProps[key];
+      if (!schema || value === undefined) continue;
       if (schema.type === 'string' && typeof value !== 'string') {
         throw new BadRequestException(`Field "${key}" for ${toolName} must be a string`);
       }
@@ -4338,8 +4363,28 @@ ${triage.standingContext}`;
         else if (value === 'false') args[key] = false;
         else throw new BadRequestException(`Field "${key}" for ${toolName} must be a boolean`);
       }
-      if (schema.type === 'array' && !Array.isArray(value)) {
-        throw new BadRequestException(`Field "${key}" for ${toolName} must be an array`);
+      if (schema.type === 'array') {
+        if (!Array.isArray(value)) {
+          throw new BadRequestException(`Field "${key}" for ${toolName} must be an array`);
+        }
+        const itemType = schema.items?.type;
+        if (itemType === 'string' || itemType === 'number' || itemType === 'integer' || itemType === 'boolean') {
+          for (let i = 0; i < value.length; i++) {
+            const item = value[i];
+            if (itemType === 'string' && typeof item !== 'string') {
+              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a string`);
+            }
+            if (itemType === 'number' && (typeof item !== 'number' || !Number.isFinite(item))) {
+              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a number`);
+            }
+            if (itemType === 'integer' && (typeof item !== 'number' || !Number.isInteger(item))) {
+              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a whole number`);
+            }
+            if (itemType === 'boolean' && typeof item !== 'boolean') {
+              throw new BadRequestException(`Field "${key}[${i}]" for ${toolName} must be a boolean`);
+            }
+          }
+        }
       }
       if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
         throw new BadRequestException(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
@@ -9496,7 +9541,10 @@ ${triage.standingContext}`;
 
     const startTime = Date.now();
     try {
-      this.validateToolInput(toolName, args);
+      const allowExtraKeys = PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS.includes(toolName)
+        ? (['businessId'] as const)
+        : undefined;
+      this.validateToolInput(toolName, args, allowExtraKeys ? { allowExtraKeys } : undefined);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;

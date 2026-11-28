@@ -43,6 +43,12 @@ export type TaskCategory =
 
 export type AiMode = 'balanced' | 'premium' | 'fast';
 
+import {
+  closeJsonSchemaObject,
+  getToolByName,
+  toProviderToolSchema,
+} from './flow-tool-registry';
+
 export interface GatewayToolCall {
   id: string;
   type: 'function';
@@ -54,6 +60,7 @@ export interface GatewayToolDefinition {
   function: {
     name: string;
     description?: string;
+    strict?: boolean;
     parameters?: Record<string, unknown>;
   };
 }
@@ -1441,11 +1448,7 @@ export class ModelGatewayService {
     // take one. Under anthropic-version 2023-06-01, omitting `tools` and
     // `tool_choice` when toolChoice === 'none' guarantees no tool invocation.
     if (request.tools && request.tools.length > 0 && request.toolChoice !== 'none') {
-      body.tools = request.tools.map((t) => ({
-        name: t.function.name,
-        description: t.function.description || '',
-        input_schema: t.function.parameters || { type: 'object', properties: {} },
-      }));
+      body.tools = this.buildAnthropicTools(request.tools);
       if (request.toolChoice === 'auto') {
         body.tool_choice = { type: 'auto' };
       } else if (request.toolChoice === 'required') {
@@ -2486,6 +2489,31 @@ export class ModelGatewayService {
     }
   }
 
+  /**
+   * RR-STRICT-TOOL-SCHEMAS: compile tool schemas for Anthropic's `input_schema`.
+   * Canonical FLOW_TOOLS compile through `toProviderToolSchema(tool, 'anthropic')`
+   * so Anthropic receives closed `additionalProperties: false` schemas with original
+   * `required` fields (never OpenAI's `strict` flag or forced-required null unions).
+   * Non-FLOW tools (Cortex organ tools, ad-hoc definitions) are closed recursively.
+   */
+  private buildAnthropicTools(tools: GatewayToolDefinition[]): Array<{
+    name: string;
+    description: string;
+    input_schema: Record<string, unknown>;
+  }> {
+    return tools.map((t) => {
+      const flowTool = getToolByName(t.function.name);
+      const input_schema = flowTool
+        ? toProviderToolSchema(flowTool, 'anthropic').schema
+        : closeJsonSchemaObject(t.function.parameters);
+      return {
+        name: t.function.name,
+        description: t.function.description || '',
+        input_schema,
+      };
+    });
+  }
+
   private buildAnthropicMessages(messages: GatewayMessage[]): {
     systemPrompt: string;
     messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>;
@@ -2719,11 +2747,7 @@ export class ModelGatewayService {
     }
 
     if (request.tools && request.tools.length > 0 && request.toolChoice !== 'none') {
-      body.tools = request.tools.map(t => ({
-        name: t.function.name,
-        description: t.function.description || '',
-        input_schema: t.function.parameters || { type: 'object', properties: {} },
-      }));
+      body.tools = this.buildAnthropicTools(request.tools);
       if (request.toolChoice === 'auto') {
         body.tool_choice = { type: 'auto' };
       } else if (request.toolChoice === 'required') {

@@ -4,17 +4,22 @@
  * Scans `apps/server/src` for every production caller of
  * `FlowOrchestratorService.executeToolDirectly`, `executeToolDirect`, and
  * `autoExecuteToolForMonitoring` and requires each caller to be registered in
- * `STRICT_TOOL_CALLER_CENSUS` (exported from `flow-tool-registry.ts` or
- * `flow-orchestrator.service.ts`) with its extra-key verdict (`clean` |
- * `exempt-shrink-only`).
- *
- * RED on main: no caller census exists yet.
+ * `STRICT_TOOL_CALLER_CENSUS` with its extra-key verdict (`clean` |
+ * `exempt-shrink-only`), plus verifies that a stored plan step with declared
+ * keys runs cleanly through `executeToolDirectly` while an undeclared key is
+ * refused with HTTP 400.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
-import { describe, expect, it } from 'vitest';
-import * as flowToolRegistry from './flow-tool-registry';
+import { BadRequestException } from '@nestjs/common';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS,
+  STRICT_TOOL_CALLER_CENSUS,
+  getToolByName,
+} from './flow-tool-registry';
+import { FlowOrchestratorService } from './flow-orchestrator.service';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
@@ -85,28 +90,74 @@ function scanToolExecutionCallers(): DiscoveredCaller[] {
 
 describe('RR-STRICT-TOOL-SCHEMAS — executeToolDirectly / direct caller census', () => {
   it('registers every production caller of executeToolDirectly, executeToolDirect, and autoExecuteToolForMonitoring with its extra-key verdict', () => {
-    const census = (
-      flowToolRegistry as unknown as {
-        STRICT_TOOL_CALLER_CENSUS?: ReadonlyArray<{
-          file: string;
-          method: string;
-          callee: string;
-          verdict: 'clean' | 'exempt-shrink-only';
-          rationale: string;
-        }>;
-      }
-    ).STRICT_TOOL_CALLER_CENSUS;
-
-    expect(census, 'STRICT_TOOL_CALLER_CENSUS must be exported from flow-tool-registry.ts').toBeDefined();
+    expect(STRICT_TOOL_CALLER_CENSUS.length).toBeGreaterThanOrEqual(6);
 
     const discovered = scanToolExecutionCallers();
     const discoveredKeys = new Set(discovered.map((d) => `${d.file}#${d.method}::${d.callee}`));
-    const registeredKeys = new Set((census ?? []).map((c) => `${c.file}#${c.method}::${c.callee}`));
+    const registeredKeys = new Set(
+      STRICT_TOOL_CALLER_CENSUS.map((c) => `${c.file}#${c.method}::${c.callee}`),
+    );
 
     const unregistered = [...discoveredKeys].filter((k) => !registeredKeys.has(k)).sort();
     const stale = [...registeredKeys].filter((k) => !discoveredKeys.has(k)).sort();
 
     expect(unregistered, 'Unregistered tool-dispatch caller found').toEqual([]);
     expect(stale, 'Stale tool-dispatch caller entry found').toEqual([]);
+
+    for (const entry of STRICT_TOOL_CALLER_CENSUS) {
+      expect(entry.rationale.trim().length).toBeGreaterThan(10);
+      if (entry.verdict === 'exempt-shrink-only') {
+        expect(entry.exemptTools?.length ?? 0).toBeGreaterThan(0);
+        expect(entry.exemptKeys?.length ?? 0).toBeGreaterThan(0);
+      }
+    }
+
+    // Verify every listed ProAutoMonitor read tool exists in FLOW_TOOLS and genuinely lacks businessId
+    for (const toolName of PRO_AUTO_MONITOR_EXEMPT_READ_TOOLS) {
+      const tool = getToolByName(toolName);
+      expect(tool, `Exempt tool ${toolName} must exist in FLOW_TOOLS`).toBeDefined();
+      expect(Object.prototype.hasOwnProperty.call(tool!.parameters.properties, 'businessId')).toBe(false);
+    }
+  });
+
+  it('executes a stored plan step with declared keys cleanly through executeToolDirectly and refuses an undeclared key with 400', async () => {
+    const orchestrator = Object.create(FlowOrchestratorService.prototype) as FlowOrchestratorService & {
+      memberScopeRefusal: ReturnType<typeof vi.fn>;
+      executeToolAction: ReturnType<typeof vi.fn>;
+      governance: { getToolTier: ReturnType<typeof vi.fn> };
+      executionLog: { logToolExecution: ReturnType<typeof vi.fn> };
+      businessGraph: { invalidateCache: ReturnType<typeof vi.fn> };
+      attributeExecutionLog: ReturnType<typeof vi.fn>;
+    };
+    orchestrator.memberScopeRefusal = vi.fn().mockResolvedValue(null);
+    orchestrator.executeToolAction = vi.fn().mockResolvedValue({ contacts: [{ id: 'c_1' }] });
+    orchestrator.governance = { getToolTier: vi.fn().mockReturnValue(1) };
+    orchestrator.executionLog = { logToolExecution: vi.fn().mockResolvedValue('log_1') };
+    orchestrator.businessGraph = { invalidateCache: vi.fn() };
+    orchestrator.attributeExecutionLog = vi.fn().mockResolvedValue(undefined);
+
+    // Stored plan step with declared keys only -> runs cleanly
+    const okResult = await orchestrator.executeToolDirectly(
+      'biz_1',
+      'crm_search_contacts',
+      { query: 'Ada' },
+      { planId: 'plan_1', planStepId: 'step_1' },
+      { surface: 'PLAN_QUEUE', planId: 'plan_1', planStepId: 'step_1' },
+    );
+    expect(okResult).toEqual({ contacts: [{ id: 'c_1' }] });
+    expect(orchestrator.executeToolAction).toHaveBeenCalledTimes(1);
+
+    // Stored plan step injecting undeclared businessId -> refused 400 before executeToolAction runs
+    orchestrator.executeToolAction.mockClear();
+    await expect(
+      orchestrator.executeToolDirectly(
+        'biz_1',
+        'crm_search_contacts',
+        { query: 'Ada', businessId: 'other_biz' },
+        { planId: 'plan_1', planStepId: 'step_2' },
+        { surface: 'PLAN_QUEUE', planId: 'plan_1', planStepId: 'step_2' },
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(orchestrator.executeToolAction).not.toHaveBeenCalled();
   });
 });
