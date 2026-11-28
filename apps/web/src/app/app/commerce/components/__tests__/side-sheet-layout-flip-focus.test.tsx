@@ -403,6 +403,31 @@ describe("P263 R2-4: a focus change costs nothing; the panel is read only when t
     queries.mockRestore();
     expect(calls, "a focus change scanned the panel").toBe(0);
   });
+  it("a burst of content changes while a field is focused makes no query; the flip then reads the panel once", async () => {
+    function Totals() {
+      const [text, setText] = useState("");
+      return (
+        <SideSheet open onClose={() => {}} title="Edit Expense">
+          <input aria-label="Amount" value={text} onChange={(e) => setText(e.target.value)} />
+          <p>Total: {text.length * 3}</p>
+          {Array.from({ length: 300 }, (_, i) => <input key={i} aria-label={`Row ${i}`} />)}
+        </SideSheet>
+      );
+    }
+    render(<Totals />);
+    await settle();
+    const amount = screen.getByLabelText("Amount") as HTMLInputElement;
+    amount.focus();
+    const queries = vi.spyOn(Element.prototype, "querySelectorAll");
+    for (const v of ["1", "12", "123", "1234", "12345"]) fireEvent.change(amount, { target: { value: v } }); // each re-renders the total
+    await settle();
+    expect(queries.mock.calls.length, "content changes while focused scanned the panel").toBe(0);
+    await flip(true);
+    const atFlip = queries.mock.calls.length;
+    queries.mockRestore();
+    expect(atFlip, "the flip did not read the panel").toBeGreaterThan(0);
+    expect(document.activeElement).toBe(screen.getByLabelText("Amount"));
+  });
   it("control: the flip still finds the field (the snapshot is taken then)", async () => {
     const rows = Array.from({ length: 300 }, (_, i) => i);
     render(
