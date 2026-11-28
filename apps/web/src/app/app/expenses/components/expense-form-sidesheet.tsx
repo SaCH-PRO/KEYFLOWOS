@@ -208,6 +208,15 @@ export const RECEIPT_STORED_NOTE = "Receipt stored — viewing isn't available y
 
 /** A plain calendar date, as a date input holds one (P267 R3-1). */
 const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * P267 R4-2: a date the calendar has ("2026-02-30" and "2026-13-01" match PLAIN_DATE but are no day: a date input shows
+ * them as empty). Used both for taking a receipt's date and for whether Date is filled in.
+ */
+function isCalendarDate(d: string): boolean {
+  if (!PLAIN_DATE.test(d)) return false;
+  const at = new Date(`${d}T00:00:00Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === d;
+}
 
 const ACCENT = "rgb(244,63,94)"; // rose-500
 const ACCENT_BG = "rgba(244,63,94,0.15)";
@@ -348,8 +357,9 @@ export function ExpenseFormSideSheet({
 
   const submit = async () => {
     // P267 R2-1: Date is marked required, so it is required here too (an empty date was saved as today by the server).
-    // R3-3: defence in depth. This is unreachable while the button is disabled for the same fields (the only path
-    // here), so no test reaches it; it stays so that a future caller of submit() cannot send a missing field.
+    // R4-1: this is the guard. Save is aria-disabled (not disabled) while a required field is empty, so it stays
+    // focusable and its "Still needed" description is heard; activating it (a click, or Enter or Space, which a
+    // native button turns into a click) comes here and sends nothing.
     if (missingRequired.length > 0) return;
     // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
     // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
@@ -574,7 +584,7 @@ export function ExpenseFormSideSheet({
           amount: String(inv.total || inv.subtotal || prev.amount),
           vendor: inv.contactName || prev.vendor,
           // P267 R3-1: only a plain date is taken; "12/03/2026" would leave the date input looking empty while held.
-          date: inv.issueDate && PLAIN_DATE.test(inv.issueDate.split("T")[0]) ? inv.issueDate.split("T")[0] : prev.date,
+          date: inv.issueDate && isCalendarDate(inv.issueDate.split("T")[0]) ? inv.issueDate.split("T")[0] : prev.date,
         }));
         toast.success(`Receipt extracted (${Math.round((data.confidence || 0) * 100)}% confidence)`);
       } else {
@@ -598,7 +608,7 @@ export function ExpenseFormSideSheet({
   const missingRequired = [
     !formData.description.trim() && "Description",
     !formData.amount && "Amount",
-    !PLAIN_DATE.test(formData.date) && "Date",
+    !isCalendarDate(formData.date) && "Date",
   ].filter((f): f is string => Boolean(f));
 
   return (
@@ -629,11 +639,10 @@ export function ExpenseFormSideSheet({
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {missingRequired.length > 0 && (
-                <span id={submitHintId} className="text-[10px] text-muted-foreground text-right">
-                  Still needed: {missingRequired.join(", ")}
-                </span>
-              )}
+              {/* R4-1: a polite status, always present so that its changes are announced; empty when nothing is missing. */}
+              <span id={submitHintId} role="status" className="text-[10px] text-muted-foreground text-right">
+                {missingRequired.length > 0 ? `Still needed: ${missingRequired.join(", ")}` : ""}
+              </span>
               <button
                 onClick={closeUnlessSaving}
                 disabled={submitting}
@@ -643,10 +652,11 @@ export function ExpenseFormSideSheet({
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={submitting || missingRequired.length > 0}
+                disabled={submitting}
+                aria-disabled={missingRequired.length > 0 || undefined}
                 aria-describedby={missingRequired.length > 0 ? submitHintId : undefined}
                 aria-busy={submitting || undefined}
-                className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50"
+                className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
                 style={{
                   background: ACCENT_BG,
                   color: ACCENT,
