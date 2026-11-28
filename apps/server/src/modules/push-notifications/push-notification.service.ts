@@ -145,28 +145,21 @@ export class PushNotificationService {
     return this.vapidReady;
   }
 
-  async subscribe(userId: string, businessId: string, subscription: webpush.PushSubscription) {
-    const endpoint = assertAllowedPushEndpoint(subscription?.endpoint);
-    const keys = assertValidPushKeys(subscription?.keys);
-
-    const existing = await this.prisma.client.pushSubscription.findUnique({
-      where: { endpoint },
-    });
-
-    if (existing) {
-      return this.prisma.client.pushSubscription.update({
-        where: { id: existing.id },
-        data: {
-          p256dh: keys.p256dh,
-          auth: keys.auth,
-          userId,
-          businessId,
-        },
-      });
-    }
-
-    return this.prisma.client.pushSubscription.create({
-      data: {
+  private async upsertDeviceSubscription(
+    tx: Pick<typeof this.prisma.client, 'pushSubscription'>,
+    userId: string,
+    businessId: string,
+    endpoint: string,
+    keys: { p256dh: string; auth: string },
+  ) {
+    const saved = await tx.pushSubscription.upsert({
+      where: { businessId_endpoint: { businessId, endpoint } },
+      update: {
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        userId,
+      },
+      create: {
         endpoint,
         p256dh: keys.p256dh,
         auth: keys.auth,
@@ -174,19 +167,48 @@ export class PushNotificationService {
         businessId,
       },
     });
+    // Keep rotated browser push keys in sync across every other business this
+    // same member already subscribed this device endpoint for.
+    await tx.pushSubscription.updateMany({
+      where: { userId, endpoint, businessId: { not: businessId } },
+      data: {
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+      },
+    });
+    return saved;
+  }
+
+  async subscribe(userId: string, businessId: string, subscription: webpush.PushSubscription) {
+    const endpoint = assertAllowedPushEndpoint(subscription?.endpoint);
+    const keys = assertValidPushKeys(subscription?.keys);
+
+    return this.prisma.client.$transaction(async (tx) =>
+      this.upsertDeviceSubscription(tx, userId, businessId, endpoint, keys),
+    );
   }
 
   /**
-   * SWEEP-P0-FOLLOWUP (census owner question 3): a member's own device. An endpoint another member's subscription
-   * already holds is not taken over (a browser endpoint is one device: it stays its subscriber's until they remove
-   * it); the caller's own is refreshed.
+   * SWEEP-P0-FOLLOWUP (census owner question 3) + P242 FU-PUSH-MULTI-BUSINESS (D-319 / Q45):
+   * A member's own device. An endpoint another member's subscription already holds (in this
+   * business or any other) is never taken over; the caller's own device can be subscribed across
+   * multiple businesses without overwriting prior businesses, and rotated keys refresh all of
+   * that member's rows for the endpoint atomically under a per-endpoint advisory lock.
    */
   async subscribeOwn(userId: string, businessId: string, subscription: webpush.PushSubscription) {
     const endpoint = assertAllowedPushEndpoint(subscription?.endpoint);
-    assertValidPushKeys(subscription?.keys);
-    const existing = await this.prisma.client.pushSubscription.findUnique({ where: { endpoint }, select: { userId: true } });
-    if (existing && existing.userId !== userId) throw new ForbiddenException('This device is subscribed by another member');
-    return this.subscribe(userId, businessId, subscription);
+    const keys = assertValidPushKeys(subscription?.keys);
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(18842, hashtext(${endpoint}))`;
+      const heldByOther = await tx.pushSubscription.findFirst({
+        where: { endpoint, userId: { not: userId } },
+        select: { userId: true },
+      });
+      if (heldByOther) {
+        throw new ForbiddenException('This device is subscribed by another member');
+      }
+      return this.upsertDeviceSubscription(tx, userId, businessId, endpoint, keys);
+    });
   }
 
   /** SWEEP-P0-FOLLOWUP (census owner question 3): removes the caller's own subscription of that endpoint only. */
@@ -226,12 +248,22 @@ export class PushNotificationService {
   }
 
   async sendToUser(userId: string, payload: { title: string; body: string; icon?: string; url?: string }) {
-    const subs = await this.prisma.client.pushSubscription.findMany({
+    const allSubs = await this.prisma.client.pushSubscription.findMany({
       where: { userId },
+      orderBy: { updatedAt: 'desc' },
     });
-    if (subs.length === 0 || !this.isConfigured()) {
+    if (allSubs.length === 0 || !this.isConfigured()) {
       return { sent: 0, failed: 0 };
     }
+
+    // Deduplicate by endpoint so a device subscribed to multiple businesses
+    // receives a single user-level push (using its most recently updated keys).
+    const seenEndpoints = new Set<string>();
+    const subs = allSubs.filter((sub) => {
+      if (seenEndpoints.has(sub.endpoint)) return false;
+      seenEndpoints.add(sub.endpoint);
+      return true;
+    });
 
     const serialized = JSON.stringify(payload);
     const results = await Promise.allSettled(
@@ -243,7 +275,7 @@ export class PushNotificationService {
       ),
     );
 
-    // Clean up expired subscriptions
+    // Clean up expired subscriptions across every business holding the dead endpoint
     const expiredEndpoints: string[] = [];
     results.forEach((result, i) => {
       if (result.status === 'rejected') {
