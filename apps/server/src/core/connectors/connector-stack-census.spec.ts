@@ -102,7 +102,7 @@ function stripSqlComments(sql: string): string {
 }
 
 const RAW_SQL_CONNECTOR_STATUSES_RE =
-  /(?:^|[^A-Za-z0-9_])(?:["`]?[A-Za-z_][A-Za-z0-9_]*["`]?\s*\.\s*)?["`]?connector_statuses["`]?(?![A-Za-z0-9_])/i;
+  /\b(?:FROM(?:\s+ONLY)?|JOIN|INSERT\s+INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM(?:\s+ONLY)?|MERGE\s+INTO|TRUNCATE(?:\s+TABLE)?(?:\s+ONLY)?)\s+(?:[^;\n]*?,\s*)?(?:["`]?[A-Za-z_][A-Za-z0-9_]*["`]?\s*\.\s*)?["`]?connector_statuses["`]?(?![A-Za-z0-9_])/i;
 
 export function detectConnectorStackSignals(
   source: string,
