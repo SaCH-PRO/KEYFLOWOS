@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "9e0f64c4a87ee06b0e75bcac2b22f0f04a6a7a04",
-  "main_commit_date": "2026-11-28T05:14:40+00:00",
+  "main_sha": "856abb03e65004efae332a92ae532b9d856ee84d",
+  "main_commit_date": "2026-11-28T08:30:07+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 269,
-    "points": 402,
-    "pct_by_points": 70.5
+    "packets": 284,
+    "points": 421,
+    "pct_by_points": 73.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 127,
-    "points": 168.5,
-    "pct_by_points": 29.5
+    "packets": 112,
+    "points": 149.5,
+    "pct_by_points": 26.2
    }
   },
   "by_step": {
@@ -54,9 +54,9 @@
     "total": 3
    },
    "1": {
-    "done": 9,
+    "done": 12,
     "in-progress": 0,
-    "todo": 4,
+    "todo": 1,
     "total": 13
    },
    "2": {
@@ -66,9 +66,9 @@
     "total": 7
    },
    "3": {
-    "done": 106,
+    "done": 111,
     "in-progress": 0,
-    "todo": 43,
+    "todo": 38,
     "total": 149
    },
    "4": {
@@ -78,9 +78,9 @@
     "total": 53
    },
    "5": {
-    "done": 63,
+    "done": 68,
     "in-progress": 0,
-    "todo": 29,
+    "todo": 24,
     "total": 92
    },
    "6": {
@@ -90,9 +90,9 @@
     "total": 40
    },
    "7": {
-    "done": 14,
+    "done": 16,
     "in-progress": 0,
-    "todo": 20,
+    "todo": 18,
     "total": 34
    },
    "8": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 179,
+    "done": 194,
     "in-progress": 0,
-    "todo": 76,
+    "todo": 61,
     "total": 255
    },
    "follow-on": {
@@ -123,14 +123,17 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 69,
+   "prior-status-file": 66,
+   "code-commit-subject": 132,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 117,
    "compacted-commit": 103,
-   "no-evidence": 77,
+   "no-evidence": 65,
    "compacted-tests-only": 2
   },
   "uncertain": [
+   "TOF-STALE-GATES-PKT",
+   "TOF-LISTER-FORK-PRS",
+   "TOF-WORKER-CURSOR-PROOF",
    "W11-CORTEX-INSIGHT-QUERIES",
    "W11-KEY-TRANSFER-INTEGER",
    "TOF-FINANCE-CANONICAL-TOOLS",
@@ -189,12 +192,14 @@
    "FU-PHONE-COUNTRY-DUPLICATES",
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE",
+   "OPS-CONSOLE-READONLY",
    "FU-PROPOSAL-REVENUE-SIGHT",
    "FU-PROPOSAL-MONEY-TAG",
    "FU-KEY-INVOICE-EMAIL-PAY-LINK",
    "FU-MARKETPLACE-PAID-PAYMENT-ROW",
    "FU-PENDING-OWED-SERVER",
    "FU-PENDING-OWED-WEB",
+   "FU-LIST-CREDIT-AWARE-REMAINING",
    "FU-CASH-LABEL-SANITISER",
    "FU-DOC-FETCH-BODY-CAP",
    "MEM-CENSUS",
@@ -207,6 +212,7 @@
    "FU-RESEARCH-CORPUS-YAML",
    "FU-CONVERSION-REPS-REVENUE",
    "FU-CASE-STUDY-REVENUE",
+   "FU-REMINDER-HONESTY",
    "RR-MODEL-LIFECYCLE-GUARD",
    "RR-UNKNOWN-COST-NOT-ZERO",
    "RR-DIRECT-PROVIDER-CENSUS",
@@ -222,8 +228,11 @@
    "RR-GOAL-WRITER-CENSUS",
    "RR-ACTION-INTENT-ONE-CLASSIFIER",
    "RR-SELFTUNE-CANDIDATE-ONLY",
+   "RR-LEARNING-OUTCOME-SEMANTICS",
    "RR-EVAL-HARNESS-NO-VACUOUS",
+   "RR-REFLECTION-HONEST",
    "RR-LANGFUSE-INGESTION-CUTOVER",
+   "RR-SLO-AVAILABILITY-LEDGER",
    "RR-CRON-OCCURRENCE-LOCK",
    "RR-DB-CRYPTO-KEY-CENSUS",
    "RR-BUSINESS-EVENT-REDACT",
@@ -231,14 +240,20 @@
    "RR-RETENTION-EXPIRED-EXPORTS",
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "RR-GATE-LEDGER-MONOTONIC",
+   "RR-HOOK-PACKET-SCOPE",
+   "RR-STATUS-STALL-REPORT",
    "RR-PRIVACY-DELETED-CONTACT-GATES",
    "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
    "FU-TIMELINE-CALLERS-SCOPE",
    "FU-UNTRUSTED-INBOUND-FENCE",
    "FU-STORE-ORDERS-MONEY-SCOPE",
+   "FU-ATTACHMENT-PERSIST-SEPARATE",
    "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
    "FU-OPENAI-FINISH-REASON",
    "FU-CONTACTID-WRITER-VALIDATION",
+   "FU-TEST-FLAKES-2026-11-23",
+   "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
    "FU-WEB-PAYLINK-STATUS-BUTTONS",
    "SEC-KEY-CUSTOM-LOGIC",
    "FU-OUTBOUND-ATTACHMENT-URL",
@@ -249,8 +264,10 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 78,
-  "todo_with_dependencies_met_launch": 40
+  "todo_with_dependencies_met": 67,
+  "todo_with_dependencies_met_launch": 29,
+  "stalled_ready": 0,
+  "stalled_ready_launch": 0
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -291,7 +308,9 @@
    "lane": "both",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 12
+   "unblocks": 12,
+   "ready_since": "2026-11-26T15:07:34+00:00",
+   "stalled": false
   },
   {
    "id": "TOF-KNOWLEDGE-UPLOAD",
@@ -301,7 +320,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 32
+   "unblocks": 32,
+   "ready_since": "2026-11-26T04:11:16+00:00",
+   "stalled": false
   },
   {
    "id": "SWP-UI-COPY",
@@ -311,7 +332,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 18
+   "unblocks": 18,
+   "ready_since": "2026-11-26T20:55:22+00:00",
+   "stalled": false
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -321,7 +344,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 10
+   "unblocks": 10,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
@@ -331,7 +356,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 9,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "SEND-TO-ACCOUNTANT",
@@ -341,7 +368,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 9,
+   "ready_since": "2026-11-28T03:29:38+00:00",
+   "stalled": false
   },
   {
    "id": "PLAN-TABLE",
@@ -351,17 +380,9 @@
    "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 8
-  },
-  {
-   "id": "TOF-STALE-GATES-PKT",
-   "step": 1,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8
+   "unblocks": 8,
+   "ready_since": "2026-11-26T02:37:12+00:00",
+   "stalled": false
   },
   {
    "id": "RR-OWNER-RULINGS-RECORD",
@@ -371,7 +392,9 @@
    "lane": "docs",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 7
+   "unblocks": 7,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "S0-SEC-LANE-DEPLOY",
@@ -381,7 +404,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 5
+   "unblocks": 5,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "S0-DEPENDABOT-FREEZE",
@@ -391,7 +416,21 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 5
+   "unblocks": 5,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
+  },
+  {
+   "id": "TOF-CI-PYTHON-HARVESTER",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5,
+   "ready_since": "2026-11-28T05:45:15+00:00",
+   "stalled": false
   },
   {
    "id": "SWP-STORE-FRAME",
@@ -401,17 +440,9 @@
    "lane": "web",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
-   "id": "FU-VITEST-DECORATOR-METADATA",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 2
+   "unblocks": 3,
+   "ready_since": "2026-11-25T15:17:54+00:00",
+   "stalled": false
   },
   {
    "id": "RR-ACTION-UNDERSTANDING-SERVER",
@@ -421,7 +452,21 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 2
+   "unblocks": 2,
+   "ready_since": "2026-11-26T22:21:32+00:00",
+   "stalled": false
+  },
+  {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 1,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-ARCH-MAP-REFRESH",
@@ -431,7 +476,9 @@
    "lane": "docs",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 1
+   "unblocks": 1,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -441,7 +488,9 @@
    "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-22T06:44:33+00:00",
+   "stalled": false
   },
   {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
@@ -451,7 +500,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-HEALTH-MONEY-SCOPE",
@@ -461,7 +512,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-22T21:12:53+00:00",
+   "stalled": false
   },
   {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
@@ -471,17 +524,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-CI-MERGE-QUEUE",
@@ -491,7 +536,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-COA-SEEDER-AND-INPUT",
@@ -501,7 +548,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-22T22:42:48+00:00",
+   "stalled": false
   },
   {
    "id": "FU-CONTACT-PANEL-PRUNE",
@@ -511,7 +560,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-24T17:16:58+00:00",
+   "stalled": false
   },
   {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
@@ -521,7 +572,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-CONTACTS-OPEN-DOORS",
@@ -531,7 +584,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-25T01:31:55+00:00",
+   "stalled": false
   },
   {
    "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
@@ -541,17 +596,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
-   "step": 5,
-   "priority": "P2",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "FU-NMS-SERVER-METADATA",
@@ -561,7 +608,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T01:10:05+00:00",
+   "stalled": false
   },
   {
    "id": "FU-OVERLAY-LAYER-TABLE",
@@ -571,27 +620,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-REMINDER-HONESTY",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-TEST-FLAKES-2026-11-23",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "FU-UNIT-GUARD-CI",
@@ -601,7 +632,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "FU-UNIT-MOCK-ISOLATION-2",
@@ -611,7 +644,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "MEM-CONSOLIDATION-CHECKPOINT",
@@ -621,7 +656,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "MEM-HONEST-RETRIEVAL",
@@ -631,7 +668,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-27T03:07:24+00:00",
+   "stalled": false
   },
   {
    "id": "MEM-TEMPORAL-EMBED-DEDUP",
@@ -641,17 +680,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "OPS-CONSOLE-READONLY",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "RR-CHANGE-ORDER-APPROVE-COMMAND",
@@ -661,17 +692,9 @@
    "lane": "both",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-GATE-LEDGER-MONOTONIC",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-28T01:49:32+00:00",
+   "stalled": false
   },
   {
    "id": "RR-HEALTH-TIGHTENS-CONTROL",
@@ -681,7 +704,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-JOB-TENANT-CONTEXT",
@@ -691,7 +716,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
@@ -701,7 +728,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "RR-KEY-RUN-BUDGET",
@@ -711,7 +740,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-26T21:05:17+00:00",
+   "stalled": false
   },
   {
    "id": "RR-KEY-SAFETY-POLICY",
@@ -721,7 +752,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T07:54:10+00:00",
+   "stalled": false
   },
   {
    "id": "RR-LLM-ADMISSION-CONTROL",
@@ -731,7 +764,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T06:55:46+00:00",
+   "stalled": false
   },
   {
    "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
@@ -741,7 +776,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "RR-RESPONSE-FORMAT-HONEST",
@@ -751,7 +788,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "W11-ORDER-METADATA-WRITERS",
@@ -761,7 +800,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-27T02:54:53+00:00",
+   "stalled": false
   },
   {
    "id": "FU-COMMUNITY-LIKE-OWN-ACTION",
@@ -771,7 +812,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "FU-FOCUS-QUEUE-PENDING-DELETE",
@@ -781,7 +824,9 @@
    "lane": "web",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-25T01:31:55+00:00",
+   "stalled": false
   },
   {
    "id": "RR-AI-CONTRACT-ZOD-FIRST",
@@ -791,7 +836,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-AI-TRACE-ATTEMPTS-CORRELATION",
@@ -801,7 +848,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-24T11:25:55+00:00",
+   "stalled": false
   },
   {
    "id": "RR-BUNDLE-PROOF-PROFILE",
@@ -811,7 +860,9 @@
    "lane": "docs",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "RR-BUNDLE-RULING-CONFLICTS",
@@ -821,7 +872,9 @@
    "lane": "docs",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "RR-CORTEX-BUS-BACKPRESSURE",
@@ -831,7 +884,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-27T06:09:27+00:00",
+   "stalled": false
   },
   {
    "id": "RR-DEAD-EVENT-CENSUS",
@@ -841,7 +896,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-ERROR-CAPSULE",
@@ -851,7 +908,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-EVAL-RUN-LINEAGE",
@@ -861,7 +920,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-24T11:25:55+00:00",
+   "stalled": false
   },
   {
    "id": "RR-FORWARDREF-RATCHET",
@@ -871,7 +932,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-GATE-LEDGER-CENSUS",
@@ -881,17 +944,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-HOOK-PACKET-SCOPE",
-   "step": 3,
-   "priority": "P3",
-   "size": "M",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "RR-HOTSPOT-SCANNER",
@@ -901,7 +956,9 @@
    "lane": "docs",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "RR-INDEX-COVERAGE-REPORT",
@@ -911,7 +968,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-INTEGRITY-WATCH",
@@ -921,7 +980,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-KEY-CORTEX-SIZE-RATCHET",
@@ -931,7 +992,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-KEY-PROMPT-CANARY",
@@ -941,7 +1004,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-KEY-SAFE-MODE",
@@ -951,17 +1016,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-LEARNING-OUTCOME-SEMANTICS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-27T22:07:03+00:00",
+   "stalled": false
   },
   {
    "id": "RR-MODEL-SELECTION-ONE-SEAM",
@@ -971,7 +1028,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-26T09:34:03+00:00",
+   "stalled": false
   },
   {
    "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
@@ -981,7 +1040,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-24T14:09:50+00:00",
+   "stalled": false
   },
   {
    "id": "RR-PROMPT-CACHE-PREFIX",
@@ -991,27 +1052,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-REFLECTION-HONEST",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-SLO-AVAILABILITY-LEDGER",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-27T16:00:18+00:00",
+   "stalled": false
   },
   {
    "id": "RR-STATUS-REVIEW-CYCLES",
@@ -1021,17 +1064,9 @@
    "lane": "docs",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-STATUS-STALL-REPORT",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "RR-TRIAGE-RISK-FLOOR",
@@ -1041,7 +1076,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-24T11:26:28+00:00",
+   "stalled": false
   },
   {
    "id": "RR-WEB-CLIENT-RATCHET",
@@ -1051,7 +1088,9 @@
    "lane": "web",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "W11-RELEASE0-INDEX-STALE",
@@ -1061,7 +1100,9 @@
    "lane": "server",
    "track": "follow-on",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-27T22:07:03+00:00",
+   "stalled": false
   }
  ],
  "ready_launch": [
@@ -1073,7 +1114,9 @@
    "lane": "both",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 12
+   "unblocks": 12,
+   "ready_since": "2026-11-26T15:07:34+00:00",
+   "stalled": false
   },
   {
    "id": "TOF-KNOWLEDGE-UPLOAD",
@@ -1083,7 +1126,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 32
+   "unblocks": 32,
+   "ready_since": "2026-11-26T04:11:16+00:00",
+   "stalled": false
   },
   {
    "id": "SWP-UI-COPY",
@@ -1093,7 +1138,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 18
+   "unblocks": 18,
+   "ready_since": "2026-11-26T20:55:22+00:00",
+   "stalled": false
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -1103,7 +1150,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 10
+   "unblocks": 10,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "W11-STOREFRONT-PAYPAL-LIST",
@@ -1113,7 +1162,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 9,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "SEND-TO-ACCOUNTANT",
@@ -1123,7 +1174,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 9,
+   "ready_since": "2026-11-28T03:29:38+00:00",
+   "stalled": false
   },
   {
    "id": "PLAN-TABLE",
@@ -1133,17 +1186,9 @@
    "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 8
-  },
-  {
-   "id": "TOF-STALE-GATES-PKT",
-   "step": 1,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8
+   "unblocks": 8,
+   "ready_since": "2026-11-26T02:37:12+00:00",
+   "stalled": false
   },
   {
    "id": "RR-OWNER-RULINGS-RECORD",
@@ -1153,7 +1198,9 @@
    "lane": "docs",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 7
+   "unblocks": 7,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "S0-SEC-LANE-DEPLOY",
@@ -1163,7 +1210,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 5
+   "unblocks": 5,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "S0-DEPENDABOT-FREEZE",
@@ -1173,7 +1222,21 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 5
+   "unblocks": 5,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
+  },
+  {
+   "id": "TOF-CI-PYTHON-HARVESTER",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5,
+   "ready_since": "2026-11-28T05:45:15+00:00",
+   "stalled": false
   },
   {
    "id": "FU-VITEST-DECORATOR-METADATA",
@@ -1183,7 +1246,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 2
+   "unblocks": 1,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-ARCH-MAP-REFRESH",
@@ -1193,7 +1258,9 @@
    "lane": "docs",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 1
+   "unblocks": 1,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -1203,7 +1270,9 @@
    "lane": "both",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-22T06:44:33+00:00",
+   "stalled": false
   },
   {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
@@ -1213,7 +1282,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-HEALTH-MONEY-SCOPE",
@@ -1223,7 +1294,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-22T21:12:53+00:00",
+   "stalled": false
   },
   {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
@@ -1233,17 +1306,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-CI-MERGE-QUEUE",
@@ -1253,7 +1318,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-COA-SEEDER-AND-INPUT",
@@ -1263,7 +1330,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-22T22:42:48+00:00",
+   "stalled": false
   },
   {
    "id": "FU-CONTACT-PANEL-PRUNE",
@@ -1273,7 +1342,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-24T17:16:58+00:00",
+   "stalled": false
   },
   {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
@@ -1283,7 +1354,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "FU-CONTACTS-OPEN-DOORS",
@@ -1293,7 +1366,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-25T01:31:55+00:00",
+   "stalled": false
   },
   {
    "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
@@ -1303,17 +1378,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
-   "step": 5,
-   "priority": "P2",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "FU-NMS-SERVER-METADATA",
@@ -1323,7 +1390,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T01:10:05+00:00",
+   "stalled": false
   },
   {
    "id": "FU-OVERLAY-LAYER-TABLE",
@@ -1333,47 +1402,9 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-REMINDER-HONESTY",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-TEST-FLAKES-2026-11-23",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "OPS-CONSOLE-READONLY",
-   "step": 7,
-   "priority": "P2",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-GATE-LEDGER-MONOTONIC",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": null,
+   "stalled": false
   },
   {
    "id": "RR-JOB-TENANT-CONTEXT",
@@ -1383,7 +1414,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   },
   {
    "id": "RR-KEY-SAFETY-POLICY",
@@ -1393,7 +1426,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T07:54:10+00:00",
+   "stalled": false
   },
   {
    "id": "RR-GATE-LEDGER-CENSUS",
@@ -1403,17 +1438,9 @@
    "lane": "gate",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-HOOK-PACKET-SCOPE",
-   "step": 3,
-   "priority": "P3",
-   "size": "M",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-23T03:49:05+00:00",
+   "stalled": false
   },
   {
    "id": "RR-INDEX-COVERAGE-REPORT",
@@ -1423,47 +1450,9 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-LEARNING-OUTCOME-SEMANTICS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-REFLECTION-HONEST",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "server",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-SLO-AVAILABILITY-LEDGER",
-   "step": 7,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-STATUS-STALL-REPORT",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0
+   "unblocks": 0,
+   "ready_since": "2026-11-16T21:50:00Z",
+   "stalled": false
   }
  ],
  "packets": [
@@ -1553,15 +1542,17 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "14eaa0c1"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "stale-gates covers pkt/* heads, where the agent gate runs (D-22)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "TOF-LISTER-FORK-PRS",
@@ -1570,15 +1561,18 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "ca315c3e",
+    "b83ed417"
+   ],
    "depends_on": [
     "TOF-STALE-GATES-PKT"
    ],
    "title": "The sweep's PR lister excludes fork impl/* PRs (#185)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "TOF-WORKER-CURSOR-PROOF",
@@ -1587,15 +1581,17 @@
    "size": "M",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "3ac98ffb"
+   ],
    "depends_on": [
     "TOF-LISTER-FORK-PRS"
    ],
    "title": "Worker cursor-idempotency proof runs in CI instead of skipping (#114 part 2, PRS-M49)",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "TOF-CI-PYTHON-HARVESTER",
@@ -1612,7 +1608,7 @@
     "TOF-WORKER-CURSOR-PROOF"
    ],
    "title": "CI runs the scripts/intelligence harvester tests with Python (PRS-M54)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-KEY-CHAT-SESSION-BIND",
@@ -5331,15 +5327,19 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "d21fd9e1",
+    "f04fb95e",
+    "6ea235c0"
+   ],
    "depends_on": [
     "FU-KEY-GENOME-READS-RESIDUAL"
    ],
    "title": "The owner's read-only engineering console in the platform admin area",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -5567,15 +5567,18 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "086193a0",
+    "b49cd36f"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Invoice list rows serve a credit-aware remaining amount, so web owed figures can count PARTIALLY_CREDITED",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CASH-LABEL-SANITISER",
@@ -6070,15 +6073,18 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "4ee0d2ae",
+    "6dfb89d6"
+   ],
    "depends_on": [
     "FU-SEND-REMINDER-SERVER-GATE"
    ],
    "title": "Reminders record the real recipient, re-check status at send, and the web never claims a send that failed",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-LEDGER-ZONED-FROM",
@@ -6928,15 +6934,17 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "83d5240c"
+   ],
    "depends_on": [
     "MEM-CENSUS"
    ],
    "title": "A tool's execution result is recorded as execution, not as the user's acceptance, and confidence calibration counts only real user responses",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-EVAL-HARNESS-NO-VACUOUS",
@@ -7030,15 +7038,18 @@
    "size": "S",
    "lane": "server",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "7ac5a5b6",
+    "dd89bfc3"
+   ],
    "depends_on": [
     "MEM-CENSUS"
    ],
    "title": "KEY's reflection maintenance stops reporting work it did not do, and the in-process dream journal is bounded and labelled unpersisted",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-MIGRATION-CASH-TARGET",
@@ -7116,13 +7127,16 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "445d3964",
+    "cbba43d3"
+   ],
    "depends_on": [],
    "title": "Written availability objectives for the two probed endpoints, and the uptime monitor reports 30-day availability and remaining error budget against them",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-ERROR-CAPSULE",
@@ -7568,15 +7582,18 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "7c2bd0b4",
+    "b34c917a"
+   ],
    "depends_on": [
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "CI compares every registered shrink-only ledger and floor ratchet between base and head and goes red when one moves the wrong way",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-GATE-LEDGER-CENSUS",
@@ -7670,15 +7687,19 @@
    "size": "M",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "dd9ce2c5",
+    "eaf34281",
+    "8e872af6"
+   ],
    "depends_on": [
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Edits outside a packet's write set are flagged at edit time on pkt/V1-* branches, and a scope report lists them for the merge check",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-INDEX-COVERAGE-REPORT",
@@ -7719,15 +7740,18 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "01273920",
+    "7c5339ab"
+   ],
    "depends_on": [
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "V1-STATUS reports packets that have been ready for longer than a budget without landing (stall signal from main alone)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
@@ -7864,15 +7888,19 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "01e3c9db",
+    "14432bb6",
+    "1866e087"
+   ],
    "depends_on": [
     "RR-UNTRUSTED-CONTENT-FENCE"
    ],
    "title": "Chat attachments are saved apart from the member's own text and replayed as their own fenced message",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-PATTERNS-SIGHT",
@@ -8014,13 +8042,16 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6db90f04",
+    "8c32ee7b"
+   ],
    "depends_on": [],
    "title": "Three load-sensitive or random-collision tests become deterministic",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-NAV-A1-CODEX-224",
@@ -8048,15 +8079,18 @@
    "size": "S",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "434cc93e",
+    "09256d6b"
+   ],
    "depends_on": [
     "FU-VITEST-DECORATOR-METADATA"
    ],
    "title": "KEY execute accepts the structured module+action call its handler documents",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "FU-UNIT-MOCK-ISOLATION-2",

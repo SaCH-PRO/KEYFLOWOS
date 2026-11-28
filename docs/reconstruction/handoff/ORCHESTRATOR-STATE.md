@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-28 ~05:05 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
-M44 merged. Main is `9e0f64c4`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-28 ~10:20 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), while
+M47 is in proof. Main is `856abb03`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,7 +17,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-28 ~05:05 UTC)
+## 0. Current state: the next session starts here (2026-11-28 ~08:45 UTC)
 
 **Control room: issue #273** (continuation of #80, which is full and read-only). Post with `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<file>`. Wherever this file, CLAUDE.md or the agent-memory docs say "#80" for posting, read #273.
 
@@ -27,12 +27,24 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 **Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y` (since 2026-11-27 ~00:50 UTC). An hourly scheduled check
 (`trig_01HUyoEU9w9zzJBNR3t5qFjL`) runs section 0.5 step 7 in this session.
 
-**State:** main `2e4c7a7b` (M40 #284 merged 2026-11-28 04:58 UTC; M42 #285 at 01:25; Antigravity's M83 and M85 between). V1-STATUS: 269 of 396 done (70.5% of points; launch 179 of 255). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
+**State:** main `856abb03` (M46 #300 merged 2026-11-28 08:43 UTC; M40 #284 and M44 #295 before it; Antigravity's M87 to M93 between). V1-STATUS: 269 of 396 done (70.5% of points; launch 179 of 255). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
 
 **Board numbering (D-297):** Claude-lane rows number from P200 up; Antigravity keeps its own sequence below 200. Claude
 waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude reviews become Antigravity board rows.
 
 ### 0.1 Waves this session
+
+**Checkpoint 2026-11-28 10:20 UTC: M47 built and in proof** (`wave/v1-wave-m47` on main `856abb03`): P257 FU-SIDESHEET-CLOSE-DISABLED-CUE (`50ff357b`, R1 to R5 each CONFIRMED x2) + P261 FU-EXPENSE-DETAIL-ONSAVED-ORDER (`58f11422`) + P259 FU-EXPENSES-DATA-GUARD-PINS (`80658317`) + P254 FU-RECURRING-NO-BUSINESS-READ (`02042f7c`, R9 CONFIRMED x2) + docs. 13 code files.
+- **Why it is urgent:** M46 put a MAJOR regression on main. Typing in the expense sheet moved focus to the panel after every keystroke, because a new `onClose` each render re-ran the commerce SideSheet focus effect. P257 R1 fixes it with refs and a stable `close()`. R2 to R5 hardened its source pin, which now uses the TypeScript parser, follows barrels, and has a 10 s walk guard (2 s flaked under parallel load).
+- **Next wave (M48):** P258 FU-EXPENSES-DEAD-SURFACES-2 (`cef7044e`, CONFIRMED x2; with M47 it was 55 files, over the gate). P231 is in round 20 (R19 dropped conditions markers after sentence punctuation that follows currency, a closer or an attached symbol).
+- **New board rows:** P263 FU-SIDESHEET-LAYOUT-FLIP-FOCUS, P264 FU-RECURRING-EXIT-BUILDER-INERT.
+- **Speed tracker (D-320):** P257 about 1.7 h from first review to wave (5 rounds). P254 R6 to R9 took about 1.5 h today. One restart about 09:02 UTC, no proof lost.
+
+**Checkpoint 2026-11-28 08:45 UTC: M46 merged (#300, main `856abb03`): P256 FU-EXPENSE-EDIT-CANCEL-MID-SAVE + P252 FU-EXPENSES-DEAD-SURFACES + docs.**
+- Proof at `c7af5115` against `cd31a482`: Release 0 and release0-live passed; journeys H and J have no head-only failures; the receipt sweep passed. CI's one red shard was `[CFN-X01]`, an order-dependent server fixture test (board P260, server lane), which passed on its single re-run. Both wave confirmations were CONFIRMED.
+- **Load rule (new):** running six local reviewers during a proof pushed load to about 20, and Release 0 (D11-S13) and journey H's nav checks timed out. While a wave proof runs, hold new reviewers; re-run a load-failed step alone when load is under about 10.
+- **Board-only packets** (P2xx rows not in `V1-PLAN-RECUT.json`) are tracked on the board, not by status.mjs. Their compacted commits are correctly formed, but status.mjs reads only plan IDs.
+- **Next Claude wave:** P259 (done, `80658317`, stacked on P252) plus whichever of P254 (R5/R5-3 under review, `aa815233`), P258 (`0072e6d3`, on P259), P261 (`58f11422`) and P257 (`1238f44e`, on M46's head) are confirmed by then. P231 is in round 19 (blocker: exponential time in clip()).
 
 **Checkpoint 2026-11-28 05:30 UTC: M40 (#284) and M44 (#295) merged; EXPENSES-HUB-3 is fully on main.**
 - EXPENSES-HUB-3 (P221) was RETURNed after 29 repair rounds (#273 7233136312), each round confirmed by two reviews. It is 85 files, over the 50-file divergence gate, so it ships in two waves (WAVE-RUNBOOK 3, no override):
@@ -60,8 +72,13 @@ waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude re
 
 | Packet | Branch @ head | State | Next |
 | --- | --- | --- | --- |
-| **P221 EXPENSES-HUB-3** | merged (M40 #284 + M44 #295) | done | — |
-| **P231 TRUST-BADGES-TRUE-ONLY** | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `386318a` | R15 CONFIRMED by both; R16 (six small clip() items + main merge) with worker `session_017o9EBgz5HFUDMDrWzuesH1` | Two reviews of R16, then a wave |
+| **P256, P252** | merged | M46 #300 | — |
+| **P259** FU-EXPENSES-DATA-GUARD-PINS | `pkt/V1-FU-EXPENSES-DATA-GUARD-PINS` @ `80658317` (on P252) | CONFIRMED x2 | next wave |
+| **P254** FU-RECURRING-NO-BUSINESS-READ | `pkt/V1-FU-RECURRING-NO-BUSINESS-READ` @ `aa815233` | R5 + R5-3 under two reviews | then wave |
+| **P258** FU-EXPENSES-DEAD-SURFACES-2 | `pkt/V1-FU-EXPENSES-DEAD-SURFACES-2` @ `0072e6d3` (on P259) | under two reviews | then wave |
+| **P261** FU-EXPENSE-DETAIL-ONSAVED-ORDER | `pkt/V1-FU-EXPENSE-DETAIL-ONSAVED-ORDER` @ `58f11422` | under two reviews | then wave |
+| **P257** FU-SIDESHEET-CLOSE-DISABLED-CUE | `pkt/V1-FU-SIDESHEET-CLOSE-DISABLED-CUE` @ `1238f44e` (on M46 head) | under two reviews (commerce SideSheet; board row corrected) | then wave |
+| **P231** TRUST-BADGES-TRUE-ONLY | `pkt/V1-TRUST-BADGES-TRUE-ONLY` @ `f0d0a54` | R18 NOT CONFIRMED (exponential clip(), lone marks kept); R19 with worker | two reviews of R19 |
 
 **Cloud workers** (on the `keyflowos` environment, Opus; at most three at once):
 - `session_017o9EBhDj4SCaLaHVacciEC`: EXPENSES-HUB-3 (returned; free for the next packet).
