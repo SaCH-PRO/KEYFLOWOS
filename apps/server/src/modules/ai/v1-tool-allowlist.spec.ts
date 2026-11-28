@@ -768,4 +768,67 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
     expect(dispatchC).toHaveBeenCalledTimes(1);
     expect(resStub).not.toHaveProperty('refused');
   });
+
+  it('R4 RED (COR MAJOR-1): legitimate cortex.execute_tool calls and EXECUTE_TOOL proposals with >24 business items, Date fields, or deep patches are NOT false-positively refused', async () => {
+    const { v1ToolRefusalReasonForInvocation } = await import('./v1-tool-allowlist');
+
+    // 1. cortex.execute_tool invoking commerce_create_invoice with 30 line items (> maxNodes=24)
+    const invoicePayload = {
+      toolName: 'commerce_create_invoice',
+      toolParams: {
+        contactId: 'c_1',
+        items: Array.from({ length: 30 }, (_, i) => ({
+          description: `Line item ${i}`,
+          quantity: 1,
+          unitPrice: 100,
+          tax: { code: 'VAT', rate: 12.5 },
+        })),
+      },
+    };
+    expect(v1ToolRefusalReasonForInvocation('cortex.execute_tool', invoicePayload)).toBeNull();
+
+    // 2. Full Prisma-shaped EXECUTE_TOOL KeyActionProposal row (Date fields + evidence + affectedEntities + 30 items)
+    const proposalRow = {
+      id: 'prop_inv_1',
+      businessId: BIZ,
+      actionType: 'EXECUTE_TOOL',
+      toolName: 'commerce_create_invoice',
+      status: 'APPROVED',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      approvedAt: new Date(),
+      expiresAt: new Date(),
+      evidence: Array.from({ length: 12 }, (_, i) => ({ source: 'invoice', ref: `ref_${i}` })),
+      affectedEntities: Array.from({ length: 12 }, (_, i) => ({ type: 'item', id: `id_${i}` })),
+      payload: {
+        items: Array.from({ length: 30 }, (_, i) => ({ description: `Row ${i}`, amount: 50 })),
+      },
+      inputPayload: {
+        items: Array.from({ length: 30 }, (_, i) => ({ description: `Row ${i}`, amount: 50 })),
+      },
+    };
+    expect(v1ToolRefusalReasonForInvocation('commerce_create_invoice', proposalRow)).toBeNull();
+    expect(v1ToolRefusalReasonForInvocation('EXECUTE_TOOL', proposalRow)).toBeNull();
+
+    // 3. Deep (>6) benign business patch inside cortex.execute_tool for a concrete non-wrapper v1 tool
+    let deepPatch: Record<string, unknown> = { value: 'Port of Spain' };
+    for (let i = 0; i < 8; i++) {
+      deepPatch = { nested: deepPatch };
+    }
+    expect(
+      v1ToolRefusalReasonForInvocation('cortex.execute_tool', {
+        toolName: 'update_business_blueprint',
+        toolParams: { patch: deepPatch },
+      }),
+    ).toBeNull();
+
+    // 4. Negative control: concrete outer toolName MUST still catch a disabled tool smuggled in envelope payload
+    expect(
+      v1ToolRefusalReasonForInvocation('EXECUTE_TOOL', {
+        actionType: 'EXECUTE_TOOL',
+        toolName: 'crm_create_contact',
+        payload: { toolName: 'execute_custom_logic' },
+      }),
+    ).toBe('not available in this version');
+  });
 });
