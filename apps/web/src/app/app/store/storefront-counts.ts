@@ -183,20 +183,33 @@ const segmenter =
 /** The text's graphemes (what a reader counts as characters), or its code points where Intl.Segmenter is missing. */
 const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
 const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
-/** Holds a letter, a digit, a mark, an emoji or a flag: more than whitespace, punctuation and symbols. */
-const hasContent = (t: string | undefined) =>
-  t !== undefined && /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(t);
+/**
+ * r15 (R15-3): an emoji, as a reader sees one: a grapheme shown as a picture (\p{Emoji_Presentation}, or asked to be
+ * with U+FE0F), a flag, a keycap (U+20E3), or a ZWJ sequence. Text-style ©, ®, ™, ‼, ↔ are Extended_Pictographic but
+ * read as symbols, and are not.
+ */
+const isEmoji = (g: string) => /\p{Emoji_Presentation}|\uFE0F|\u20E3|\u200D|\p{Regional_Indicator}/u.test(g);
+/** Holds a letter, a digit, a mark, or is an emoji: more than whitespace, punctuation and symbols. */
+const hasContent = (t: string | undefined) => t !== undefined && (/[^\s\p{P}\p{S}]/u.test(t) || isEmoji(t));
+/** Punctuation or symbols only, and no emoji: what may be dropped at the cut. */
+const isMark = (g: string | undefined) => g !== undefined && /^[\p{P}\p{S}]+$/u.test(g) && !isEmoji(g);
+/**
+ * r15 (R15-2): sentence punctuation, ASCII, CJK and full-width (\p{Sentence_Terminal}: . ! ? … 。 ！ ？ ．; and the
+ * commas, colons, semicolons), dashes, opening brackets and quotes: always dropped at the cut.
+ */
+const ALWAYS_DROPPED = /^(?:[,;:…、，､：；﹐﹑﹔﹕]|\p{Sentence_Terminal}|\p{Pd}|\p{Ps}|\p{Pi})$/u;
 
 /**
- * P231 r12-r14: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
+ * P231 r12-r15: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
  * emoji with a skin tone, a keycap, a flag, a family is never split):
- * - always: whitespace, sentence punctuation (. , ; : ! ? …), a dash, an opening bracket or quote;
- * - any other punctuation or symbol ("&", "•", "/", "*", "#", "@", "¿", "<", "$") only when it stands alone, after
- *   whitespace, punctuation, a symbol or nothing ("Shop &", "Shop •", "4.5 /"); attached to the letter, digit or mark
- *   before it, it is that word's and stays ("C#", "5★", "20°", "Free*", "a/b/"); a currency sign after a number and
- *   one space is the number's too ("5 €");
- * - never: a "%", a "+", a closing bracket or quote, a straight quote (it may close one), an emoji or a flag, or a
- *   grapheme holding anything else (a letter, a digit, a mark: a keycap).
+ * - always: whitespace and ALWAYS_DROPPED;
+ * - any other punctuation or symbol ("&", "•", "/", "*", "#", "@", "¿", "<", "$", "©", "↔") only when its run of
+ *   punctuation and symbols stands alone, after whitespace or nothing ("Shop &", "Shop &&", "4.5 /"); a run attached
+ *   to the letter, digit, mark or emoji before it is that word's and stays whole ("C##", "4★★", "Free**", "a/b/",
+ *   "Pepper™", R15-1); a currency sign after a number and one space is the number's too ("5 €");
+ * - never: a "%", a "+", a closing bracket or quote, a straight quote (it may close one), an emoji, or a grapheme
+ *   holding anything else (a letter, a digit, a mark), alone or not (R15-4: "50 %...", "1 +...", "( weekdays )...":
+ *   a closing mark closes what the kept part opened, and dropping it would leave that open).
  */
 function dropTrailing(g: string[]): string[] {
   let end = g.length;
@@ -206,12 +219,13 @@ function dropTrailing(g: string[]): string[] {
       end--;
       continue;
     }
-    if (!/^[\p{P}\p{S}]+$/u.test(c) || /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(c)) break;
+    if (!isMark(c)) break;
     if (/^[%+"'\p{Pe}\p{Pf}]/u.test(c)) break;
-    if (!/^[.,;:!?…\p{Pd}\p{Ps}\p{Pi}]$/u.test(c)) {
-      const before = g[end - 2];
-      if (hasContent(before)) break;
-      if (/^\p{Sc}$/u.test(c) && isSpace(before) && /^\p{Nd}$/u.test(g[end - 3] ?? "")) break;
+    if (!ALWAYS_DROPPED.test(c)) {
+      let k = end - 1;
+      while (k > 0 && isMark(g[k - 1])) k--;
+      if (hasContent(g[k - 1])) break;
+      if (/^\p{Sc}$/u.test(c) && k === end - 1 && isSpace(g[k - 1]) && /^\p{Nd}$/u.test(g[k - 2] ?? "")) break;
     }
     end--;
   }
@@ -219,7 +233,7 @@ function dropTrailing(g: string[]): string[] {
 }
 
 /**
- * P231 r9-r14: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
+ * P231 r9-r15: `text` cut to at most `max` characters (graphemes, so an emoji or an accented letter is never split
  * and no lone surrogate is left), with "..." whenever anything is dropped and never after a whole text, and never
  * "..." alone:
  * - the cut is at the last whitespace (any: a space, a tab, a no-break space, an ideographic space) inside the room
