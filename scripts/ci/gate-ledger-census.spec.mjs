@@ -2,9 +2,9 @@
  * Gate-ledger census (RR-GATE-LEDGER-CENSUS, owner rulings D-261, D-262, D-22).
  *
  * Every file under apps/, packages/, scripts/, or .github/ that declares a
- * shrink-only ledger or ratchet (matching PHRASE_RE) must either be registered
- * in scripts/os/ledger-sizes.mjs (so `node scripts/os/ledger-sizes.mjs` parses
- * and reports its numeric cardinality) or appear in EXEMPT below with a
+ * shrink-only ledger or ratchet (matching PHRASE_PATTERN) must either be
+ * registered in scripts/os/ledger-sizes.mjs (so `node scripts/os/ledger-sizes.mjs`
+ * parses and reports its numeric cardinality) or appear in EXEMPT below with a
  * one-line factual reason.
  *
  * No external dependencies: runs before `pnpm install` in ci-cd.yml's
@@ -17,10 +17,12 @@ import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as osLib from '../os/lib.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const LEDGER_SCRIPT = path.join('scripts', 'os', 'ledger-sizes.mjs');
 const SELF = 'scripts/ci/gate-ledger-census.spec.mjs';
+const CENSUS_JOB = 'lint-and-typecheck';
 
 export const PHRASE_PATTERN = 'shrink-only|may only shrink|only shrink|can only go down|may only fall';
 export const SCAN_ROOTS = Object.freeze(['apps/', 'packages/', 'scripts/', '.github/']);
@@ -143,7 +145,7 @@ describe('RR-GATE-LEDGER-CENSUS: every shrink-only ledger/ratchet is measured by
   const rows = readLedgerRows();
   const registeredFiles = [...new Set(rows.map((r) => r.file))];
 
-  it('ledger-sizes.mjs exits 0 with all 14 original ledgers plus KNOWN_BROKEN and server/web lint ceilings', () => {
+  it('ledger-sizes.mjs exits 0 with all 14 original ledgers plus KNOWN_BROKEN, lint ceilings, trpc.broken_ctx_business, and site counts', () => {
     const byName = new Map(rows.map((r) => [r.name, r]));
 
     // Zero duplicate ledger names
@@ -171,6 +173,22 @@ describe('RR-GATE-LEDGER-CENSUS: every shrink-only ledger/ratchet is measured by
     assert.equal(webLint.file, '.github/workflows/ci-cd.yml');
     assert.equal(webLint.direction, 'shrink');
     assert.ok(Number.isInteger(webLint.value) && webLint.value > 0);
+
+    const trpcBroken = byName.get('trpc.broken_ctx_business');
+    assert.ok(trpcBroken, 'trpc.broken_ctx_business must be registered in ledger-sizes.mjs');
+    assert.equal(trpcBroken.file, 'apps/server/src/trpc.module.spec.ts');
+    assert.equal(trpcBroken.direction, 'shrink');
+    assert.ok(Number.isInteger(trpcBroken.value) && trpcBroken.value >= 0);
+
+    const balanceSites = byName.get('commerce.balance_known_outside_sites');
+    assert.ok(balanceSites, 'commerce.balance_known_outside_sites must be registered in ledger-sizes.mjs');
+    assert.equal(balanceSites.direction, 'shrink');
+    assert.ok(Number.isInteger(balanceSites.value) && balanceSites.value >= 0);
+
+    const unencodedSites = byName.get('web.unencoded_invoice_detail_outside_sites');
+    assert.ok(unencodedSites, 'web.unencoded_invoice_detail_outside_sites must be registered in ledger-sizes.mjs');
+    assert.equal(unencodedSites.direction, 'shrink');
+    assert.ok(Number.isInteger(unencodedSites.value) && unencodedSites.value >= 0);
   });
 
   it('every file matching the shrink-only phrase list is registered in ledger-sizes.mjs or honestly EXEMPT', () => {
@@ -185,17 +203,30 @@ describe('RR-GATE-LEDGER-CENSUS: every shrink-only ledger/ratchet is measured by
     }
   });
 
-  it('this census spec itself is run in ci-cd.yml before pnpm install', () => {
+  it(`this census spec itself runs in ci-cd.yml's ${CENSUS_JOB} job via an active run step before pnpm install`, () => {
     const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci-cd.yml'), 'utf8');
-    const selfPos = ci.indexOf(SELF);
-    const installPos = ci.indexOf('pnpm install --frozen-lockfile');
-    assert.ok(selfPos > -1, `${SELF} must be named in .github/workflows/ci-cd.yml`);
-    assert.ok(installPos > -1, 'ci-cd.yml must run pnpm install');
-    assert.ok(selfPos < installPos, `${SELF} must run before pnpm install`);
+    const lines = ci.split(/\r?\n/).map((l) => (/^\s*#/.test(l) ? '' : l));
+    const jobsIdx = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+    assert.ok(jobsIdx >= 0, 'ci-cd.yml has jobs:');
+    const start = lines.findIndex((l, k) => k > jobsIdx && new RegExp(`^ {2}${CENSUS_JOB}:\\s*$`).test(l));
+    assert.ok(start >= 0, `ci-cd.yml has a ${CENSUS_JOB} job`);
+    let end = start + 1;
+    while (end < lines.length && !/^ {2}[A-Za-z_][\w-]*:\s*$/.test(lines[end]) && !/^\S/.test(lines[end])) end += 1;
+    const jobSrc = lines.slice(start, end).join('\n');
+    assert.equal(typeof osLib.extractWorkflowRunCommands, 'function', 'extractWorkflowRunCommands must be exported from scripts/os/lib.mjs');
+    const runs = osLib.extractWorkflowRunCommands(jobSrc);
+    const selfRun = runs.find((r) => {
+      const uncommented = r.text.split(/\r?\n/).map((l) => l.replace(/(^|[\s;&|()])#.*$/, '$1')).join('\n');
+      return /(?:^|[\n;&|])\s*node\s+--test\b[^\n;&|]*\bscripts\/ci\/gate-ledger-census\.spec\.mjs\b/.test(uncommented);
+    });
+    assert.ok(selfRun, `an active node --test run line in ${CENSUS_JOB} must name ${SELF}`);
+    const installRun = runs.find((r) => /\bpnpm\s+install\b/.test(r.text));
+    assert.ok(installRun, `${CENSUS_JOB} installs dependencies`);
+    assert.ok(selfRun.line < installRun.line, `census step (line ${selfRun.line}) must run before pnpm install (line ${installRun.line})`);
   });
 });
 
-describe('RR-GATE-LEDGER-CENSUS: negative controls', () => {
+describe('RR-GATE-LEDGER-CENSUS: negative controls & parser hardening', () => {
   it('a fixture file with "may only SHRINK" and no registration fails matchingFiles + census', () => {
     const tmp = fs.mkdtempSync(path.join(tmpdir(), 'kf-ledger-census-'));
     try {
@@ -249,5 +280,87 @@ describe('RR-GATE-LEDGER-CENSUS: negative controls', () => {
     );
     assert.equal(problems.length, 1);
     assert.match(problems[0], /missing one-line reason/);
+  });
+
+  it('parseWorkflowMaxWarnings parses active inline/block pnpm lint runs and rejects comments, echo, spoofs, 0, and >1 matches', () => {
+    assert.equal(typeof osLib.parseWorkflowMaxWarnings, 'function', 'parseWorkflowMaxWarnings must be exported from scripts/os/lib.mjs');
+
+    const inlineWf = 'jobs:\n  lint:\n    steps:\n      - run: pnpm --filter server lint --max-warnings 3343\n';
+    assert.equal(osLib.parseWorkflowMaxWarnings(inlineWf, 'server'), 3343);
+
+    const blockWf = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - run: |',
+      '          CI=1 pnpm --filter=web lint --max-warnings=26',
+    ].join('\n');
+    assert.equal(osLib.parseWorkflowMaxWarnings(blockWf, 'web'), 26);
+
+    // Inline shell comment with ceiling must NOT be matched
+    const inlineCommentWf = 'jobs:\n  lint:\n    steps:\n      - run: true # pnpm --filter server lint --max-warnings 0\n';
+    assert.throws(() => osLib.parseWorkflowMaxWarnings(inlineCommentWf, 'server'));
+
+    // echo command mentioning pnpm must NOT be matched
+    const echoWf = 'jobs:\n  lint:\n    steps:\n      - run: echo "pnpm --filter server lint --max-warnings 0"\n';
+    assert.throws(() => osLib.parseWorkflowMaxWarnings(echoWf, 'server'));
+
+    // Trailing comment ceiling spoof must read the REAL command ceiling (9999), never the commented 3343
+    const spoofWf = 'jobs:\n  lint:\n    steps:\n      - run: pnpm --filter server lint --max-warnings 9999 # old: pnpm --filter server lint --max-warnings 3343\n';
+    assert.equal(osLib.parseWorkflowMaxWarnings(spoofWf, 'server'), 9999);
+
+    // YAML full-line comment must NOT be matched
+    const yamlCommentWf = 'jobs:\n  lint:\n    steps:\n      # - run: pnpm --filter server lint --max-warnings 0\n';
+    assert.throws(() => osLib.parseWorkflowMaxWarnings(yamlCommentWf, 'server'));
+
+    // Duplicate runs must fail closed
+    const dupWf = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - run: pnpm --filter server lint --max-warnings 10',
+      '      - run: pnpm --filter server lint --max-warnings 20',
+    ].join('\n');
+    assert.throws(() => osLib.parseWorkflowMaxWarnings(dupWf, 'server'));
+  });
+
+  it('extractInitializer handles => and string literals in TS types, and fails closed on empty scalars', () => {
+    const withArrow = 'const A: { fn: (x: number) => string; count: number } = { a: 1, b: 2 };';
+    assert.equal(osLib.objectKeyCount(osLib.extractInitializer(withArrow, 'A')), 2);
+
+    const withTypeStr = "const B: Record<string, 'a;b=c<d'> = { x: 'a;b=c<d' };";
+    assert.equal(osLib.objectKeyCount(osLib.extractInitializer(withTypeStr, 'B')), 1);
+
+    // Empty scalar initializer must throw, never silently parse as 0
+    assert.throws(() => osLib.extractInitializer('const ALLOWLIST_CEILING = ;', 'ALLOWLIST_CEILING'));
+    assert.throws(() => osLib.extractInitializer('const ALLOWLIST_CEILING =   ;', 'ALLOWLIST_CEILING'));
+  });
+
+  it('arrayElementCount and objectKeyCount handle nested/empty/trailing-comma forms and fail closed on malformed inputs', () => {
+    assert.equal(osLib.arrayElementCount('[]'), 0);
+    assert.equal(osLib.arrayElementCount('[{ a: 1, b: [1, 2] }, `x,y`, ]'), 2);
+    assert.equal(osLib.objectKeyCount('{}'), 0);
+    assert.equal(osLib.objectKeyCount('{ AiPlanResult: { count: 2, why: "a, b" }, "quoted": 1, }'), 2);
+
+    // Malformed / unbalanced / multi-literal / unterminated strings MUST throw
+    assert.throws(() => osLib.arrayElementCount('[{ a: 1 ]'));
+    assert.throws(() => osLib.arrayElementCount('[a], [b]'));
+    assert.throws(() => osLib.arrayElementCount('["unterminated]'));
+    assert.throws(() => osLib.objectKeyCount('{ a: { b: 1 }'));
+    assert.throws(() => osLib.objectKeyCount('{ a: 1 }, { b: 2 }'));
+    assert.throws(() => osLib.objectKeyCount('{ a: "unterminated}'));
+  });
+
+  it('stripComments handles regex literals containing quotes/backticks without desyncing subsequent comments', () => {
+    const src = [
+      'const re = /source:\\s*["\'`]([^"\'`]+)["\'`]/g;',
+      'const ITEMS = [',
+      "  // don't count this apostrophe's comment",
+      "  'one',",
+      "  'two',",
+      '];',
+    ].join('\n');
+    const init = osLib.extractInitializer(src, 'ITEMS');
+    assert.deepEqual(osLib.stringLiterals(init), ['one', 'two']);
   });
 });
