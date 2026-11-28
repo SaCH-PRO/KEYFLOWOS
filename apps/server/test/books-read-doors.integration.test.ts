@@ -118,7 +118,9 @@ const bodyOf = (res: request.Response): unknown => (res.body && Object.keys(res.
  * so leaked figures are never silently masked.
  */
 function refusalPayloadText(res: Pick<request.Response, 'body' | 'text'>): string {
-  let parsed: unknown = res.body && typeof res.body === 'object' && Object.keys(res.body).length ? res.body : null;
+  const isPlainObj = (v: unknown): v is Record<string, unknown> =>
+    Boolean(v) && typeof v === 'object' && !Array.isArray(v) && !Buffer.isBuffer(v);
+  let parsed: unknown = isPlainObj(res.body) && Object.keys(res.body).length ? res.body : null;
   if (!parsed && typeof res.text === 'string' && res.text.trim()) {
     try {
       parsed = JSON.parse(res.text);
@@ -126,10 +128,12 @@ function refusalPayloadText(res: Pick<request.Response, 'body' | 'text'>): strin
       return res.text;
     }
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return typeof res.text === 'string' ? res.text : JSON.stringify(parsed ?? '');
+  if (!isPlainObj(parsed)) {
+    if (typeof res.text === 'string' && res.text.length > 0) return res.text;
+    if (Buffer.isBuffer(res.body)) return res.body.toString('utf8');
+    return JSON.stringify(parsed ?? res.body ?? '');
   }
-  const rest: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+  const rest: Record<string, unknown> = { ...parsed };
   delete rest.path;
   delete rest.correlationId;
   return JSON.stringify(rest);
@@ -386,9 +390,15 @@ describe('BRD-01: the Books reads need revenue read (D-146, SEC-P195BW-4)', () =
     const stripped = refusalPayloadText({ body: cleanEnvelope, text: JSON.stringify(cleanEnvelope) });
     for (const f of FIGURES) expect(stripped).not.toContain(f);
 
-    // Negative control: a figure leaked inside message/details/data or raw text MUST still be caught
-    const leakedBody = { ...cleanEnvelope, details: { balance: Number(FIGURES[0]) } };
+    // CSV-style response where res.body is {} and JSON sits only in res.text
+    const strippedCsv = refusalPayloadText({ body: {}, text: JSON.stringify(cleanEnvelope) });
+    for (const f of FIGURES) expect(strippedCsv).not.toContain(f);
+
+    // Negative controls: leaked figures in details (even nested `path`), arrays, or raw non-JSON text MUST still be caught
+    const leakedBody = { ...cleanEnvelope, details: { balance: Number(FIGURES[0]), path: `nested-${FIGURES[4]}` } };
     expect(refusalPayloadText({ body: leakedBody, text: JSON.stringify(leakedBody) })).toContain(FIGURES[0]);
+    expect(refusalPayloadText({ body: leakedBody, text: JSON.stringify(leakedBody) })).toContain(FIGURES[4]);
+    expect(refusalPayloadText({ body: [Number(FIGURES[5])], text: '' })).toContain(FIGURES[5]);
     expect(refusalPayloadText({ body: {}, text: `raw refusal leaked ${FIGURES[3]}` })).toContain(FIGURES[3]);
   });
 

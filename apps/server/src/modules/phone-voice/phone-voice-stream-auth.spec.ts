@@ -289,11 +289,17 @@ describe('the Twilio-verified inbound webhook hands the stream a signed tenant t
     expect(verify(good, { callSid: CALL_1 }), 'a token signed under another secret').toBeNull();
   });
 
-  it('determinism (FU-TEST-FLAKES-2026-11-23): tamperSignature mutates even a signature ending in AA', () => {
+  it('determinism (FU-TEST-FLAKES-2026-11-23): tamperSignature and tamperTokenSignature mutate any signature including AA suffixes', () => {
     const endsWithAA = 'abcdefghijklmnopqrstuvwxyz0123456789_-abcAA';
     expect(tamperSignature(endsWithAA)).not.toBe(endsWithAA);
     const startsWithA = 'Abcdefghijklmnopqrstuvwxyz0123456789_-abcAA';
     expect(tamperSignature(startsWithA)).not.toBe(startsWithA);
+    expect(tamperSignature('A')).toBe('B');
+    expect(tamperSignature('z')).toBe('A');
+    expect(() => tamperSignature('')).toThrow(/empty signature/);
+    const tok = `v1.payload.${endsWithAA}`;
+    expect(tamperTokenSignature(tok)).not.toBe(tok);
+    expect(() => tamperTokenSignature('malformed')).toThrow(/unexpected token shape/);
   });
 
   it('positive control: the webhook still refuses an unsigned request and emits no TwiML', () => {
