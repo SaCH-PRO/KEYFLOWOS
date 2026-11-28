@@ -229,19 +229,22 @@ function resolveFieldsOfSymbol(
   const visitKey = `${fileInfo.relPath}#${symbolName}`;
   if (visiting.has(visitKey)) return new Set();
   visiting.add(visitKey);
-
-  const localDecl = fileInfo.decls.get(symbolName);
-  if (localDecl) {
-    return resolveFieldsOfDecl(fileInfo, localDecl, index, visiting);
-  }
-  const imp = fileInfo.imports.get(symbolName);
-  if (imp) {
-    const targetInfo = index.get(imp.targetRelPath);
-    if (targetInfo) {
-      return resolveFieldsOfSymbol(targetInfo, imp.exportedName, index, visiting);
+  try {
+    const localDecl = fileInfo.decls.get(symbolName);
+    if (localDecl) {
+      return resolveFieldsOfDecl(fileInfo, localDecl, index, visiting);
     }
+    const imp = fileInfo.imports.get(symbolName);
+    if (imp) {
+      const targetInfo = index.get(imp.targetRelPath);
+      if (targetInfo) {
+        return resolveFieldsOfSymbol(targetInfo, imp.exportedName, index, visiting);
+      }
+    }
+    return new Set();
+  } finally {
+    visiting.delete(visitKey);
   }
-  return new Set();
 }
 
 function resolveFieldsOfTypeNode(
@@ -294,13 +297,35 @@ function resolveFieldsOfTypeNode(
 function resolveFieldsOfHeritageExpr(
   fileInfo: ParsedFileInfo,
   expr: ts.Expression,
+  typeArgs: ts.NodeArray<ts.TypeNode> | undefined,
   index: ReadonlyMap<string, ParsedFileInfo>,
   visiting: Set<string>,
 ): Set<'status' | 'stage'> {
   const fields = new Set<'status' | 'stage'>();
   const unwrapped = unwrapExpr(expr);
   if (ts.isIdentifier(unwrapped)) {
-    for (const f of resolveFieldsOfSymbol(fileInfo, unwrapped.text, index, visiting)) {
+    const name = unwrapped.text;
+    const args = typeArgs ?? [];
+    if ((name === 'Partial' || name === 'Required' || name === 'Readonly') && args[0]) {
+      return resolveFieldsOfTypeNode(fileInfo, args[0], index, visiting);
+    }
+    if (name === 'Pick' && args.length >= 2) {
+      const baseFields = resolveFieldsOfTypeNode(fileInfo, args[0], index, visiting);
+      const picked = extractLiteralUnionKeys(args[1]);
+      for (const f of baseFields) {
+        if (picked.has(f)) fields.add(f);
+      }
+      return fields;
+    }
+    if (name === 'Omit' && args.length >= 2) {
+      const baseFields = resolveFieldsOfTypeNode(fileInfo, args[0], index, visiting);
+      const omitted = extractLiteralUnionKeys(args[1]);
+      for (const f of baseFields) {
+        if (!omitted.has(f)) fields.add(f);
+      }
+      return fields;
+    }
+    for (const f of resolveFieldsOfSymbol(fileInfo, name, index, visiting)) {
       fields.add(f);
     }
     return fields;
@@ -309,10 +334,16 @@ function resolveFieldsOfHeritageExpr(
     const helper = unwrapped.expression.text;
     const args = unwrapped.arguments;
     if (helper === 'PartialType' && args[0]) {
-      return resolveFieldsOfHeritageExpr(fileInfo, args[0], index, visiting);
+      return resolveFieldsOfHeritageExpr(fileInfo, args[0], undefined, index, visiting);
     }
     if (helper === 'PickType' && args.length >= 2) {
-      const baseFields = resolveFieldsOfHeritageExpr(fileInfo, args[0], index, visiting);
+      const baseFields = resolveFieldsOfHeritageExpr(
+        fileInfo,
+        args[0],
+        undefined,
+        index,
+        visiting,
+      );
       const picked = extractStringArrayArg(args[1]);
       if (!picked) return baseFields;
       for (const f of baseFields) {
@@ -321,7 +352,13 @@ function resolveFieldsOfHeritageExpr(
       return fields;
     }
     if (helper === 'OmitType' && args.length >= 2) {
-      const baseFields = resolveFieldsOfHeritageExpr(fileInfo, args[0], index, visiting);
+      const baseFields = resolveFieldsOfHeritageExpr(
+        fileInfo,
+        args[0],
+        undefined,
+        index,
+        visiting,
+      );
       const omitted = extractStringArrayArg(args[1]);
       if (!omitted) return baseFields;
       for (const f of baseFields) {
@@ -331,7 +368,13 @@ function resolveFieldsOfHeritageExpr(
     }
     if (helper === 'IntersectionType') {
       for (const arg of args) {
-        for (const f of resolveFieldsOfHeritageExpr(fileInfo, arg, index, visiting)) {
+        for (const f of resolveFieldsOfHeritageExpr(
+          fileInfo,
+          arg,
+          undefined,
+          index,
+          visiting,
+        )) {
           fields.add(f);
         }
       }
@@ -358,6 +401,7 @@ function resolveFieldsOfDecl(
         for (const f of resolveFieldsOfHeritageExpr(
           fileInfo,
           exprWithTypeArgs.expression,
+          exprWithTypeArgs.typeArguments,
           index,
           visiting,
         )) {

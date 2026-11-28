@@ -244,7 +244,7 @@ export const STATUS_PATCH_CENSUS: readonly StatusPatchCensusEntry[] = [
     fields: ['status'],
     mode: 'FREE_LABEL',
     reason:
-      'Inline PATCH body forwarding external Google Calendar event status on hidden-in-v1 calendar sync.',
+      'Live-v1 unified calendar PATCH (@RequireModuleScope bookings:write): CalendarQueryService.patchEvent validates status against CALENDAR_EVENT_STATUSES and projects to source rows (bookings via withBookingSlotLock + assertBookingSlotFree, contact_task, project_task; read-only sources refused).',
   },
   {
     file: 'apps/server/src/modules/commerce/recurring-invoice.controller.ts',
@@ -252,7 +252,7 @@ export const STATUS_PATCH_CENSUS: readonly StatusPatchCensusEntry[] = [
     fields: ['status'],
     mode: 'FREE_LABEL',
     reason:
-      'Inline PATCH body for recurring invoice schedule status (ACTIVE/PAUSED/CANCELLED) on hidden-in-v1 recurring-invoices; unguarded billing schedule status tracked outside v1.',
+      'Live-v1 commerce recurring-invoice schedule PATCH (@RequireModuleScope revenue:write): writes input.status unchecked (bypassing pause/resume/cancel commands); non-OPEN per D-261/D-262 first-slice scope (strictly contracts + change orders OPEN) and flagged for follow-up hardening.',
   },
   {
     file: 'apps/server/src/modules/community/community.controller.ts',
@@ -332,7 +332,7 @@ export const STATUS_PATCH_CENSUS: readonly StatusPatchCensusEntry[] = [
     fields: ['status'],
     mode: 'FREE_LABEL',
     reason:
-      'Inline PATCH body for reserve bucket status label on hidden-in-v1 finance reserves; does not move ledger funds.',
+      'Live-v1 cash-reserve bucket status label (/app/financial-flow); reversible operator organization tag that does not move ledger funds.',
   },
   {
     file: 'apps/server/src/modules/helpdesk/helpdesk.controller.ts',
