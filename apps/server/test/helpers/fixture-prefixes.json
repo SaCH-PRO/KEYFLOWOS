@@ -583,6 +583,11 @@
       "packet": "V1-63 (TOF-KNOWLEDGE-UPLOAD)"
     },
     {
+      "prefix": "v64k_",
+      "owner": "apps/server/test/census-key-a.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-KEY-A)"
+    },
+    {
       "prefix": "v67a_",
       "owner": "apps/server/test/paged-order-ties.integration.test.ts",
       "packet": "V1-67 (W11-PAGING-TOTAL-ORDER-A)"

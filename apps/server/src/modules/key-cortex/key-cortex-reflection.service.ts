@@ -23,7 +23,7 @@
  * ============================================================================
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
@@ -43,6 +43,8 @@ import { AiUsageService } from '../ai/ai-usage.service';
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcDateSlot, utcIntervalSlot, utcWeekSlot } from '../../core/scheduling/occurrence-claim';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -148,6 +150,7 @@ export class KeyCortexReflectionService {
     private readonly genomeBridge: KeyCortexGenomeBridgeService,
     private readonly modelGateway: ModelGatewayService,
     private readonly aiUsage: AiUsageService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════
@@ -709,6 +712,7 @@ export class KeyCortexReflectionService {
   async scheduledReflection(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-reflection', utcIntervalSlot(30 * 60 * 1000), 28 * 60 * 1000))) return;
     const idleBusinesses = await this.findIdleBusinesses();
     for (const businessId of idleBusinesses) {
       if (!this.activeSessions.has(businessId)) {
@@ -724,6 +728,7 @@ export class KeyCortexReflectionService {
   async scheduledDream(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-reflection-dream', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     const allBusinesses = await this.findAllActiveBusinesses();
     for (const businessId of allBusinesses) {
       await this.runDream(businessId).catch((err) =>
@@ -737,6 +742,7 @@ export class KeyCortexReflectionService {
   async scheduledSynthesis(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-reflection-synthesis', utcWeekSlot(), 6 * 24 * 60 * 60 * 1000))) return;
     const allBusinesses = await this.findAllActiveBusinesses();
     for (const businessId of allBusinesses) {
       await this.runSynthesis(businessId).catch((err) =>
@@ -750,6 +756,7 @@ export class KeyCortexReflectionService {
   async scheduledMaintenance(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-reflection-maintenance', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     const allBusinesses = await this.findAllActiveBusinesses();
     for (const businessId of allBusinesses) {
       await this.runMaintenance(businessId).catch((err) =>

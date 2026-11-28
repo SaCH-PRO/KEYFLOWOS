@@ -22,7 +22,7 @@
  * ============================================================================
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
@@ -38,6 +38,8 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { createHash, randomUUID as uuidv4 } from 'node:crypto';
 import { BusinessEventType } from '@prisma/client';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcDateSlot, utcHourSlot } from '../../core/scheduling/occurrence-claim';
 import { EXCLUDE_WHATSAPP_INBOUND_SOURCE } from '../crm/whatsapp-inbound-exclusion';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
@@ -243,6 +245,7 @@ export class KeyCortexIntuitionService {
     // @Optional so a module that does not register notifications still boots —
     // an alert that cannot be delivered must not stop one being detected.
     @Optional() private readonly notifications?: NotificationsAdapterService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════
@@ -547,6 +550,7 @@ export class KeyCortexIntuitionService {
   async scheduledIntuitionScan(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-intuition-scan', utcHourSlot(), 55 * 60 * 1000))) return;
     // WHY THIS LOGS ON SUCCESS AND NOT ONLY ON FAILURE
     //
     // It used to log only in the catch. A scan that ran and found nothing was
@@ -794,6 +798,7 @@ export class KeyCortexIntuitionService {
   async scheduledChurnAnalysis(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-intuition-churn', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       await this.detectChurnPrecursors(businessId)

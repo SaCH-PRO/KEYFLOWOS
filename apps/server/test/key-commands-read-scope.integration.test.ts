@@ -225,23 +225,29 @@ beforeAll(async () => {
     await db.membership.create({ data: { id: `${id}_m_owner`, userId: ID.owner, businessId: id, role: 'OWNER' } });
   }
   await db.membership.create({ data: { id: `${P}m_admin`, userId: ID.admin, businessId: ID.biz, role: 'ADMIN' } });
+  const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
   await db.membership.create({
     data: {
       id: `${P}m_adminNoMoney`, userId: ID.adminNoMoney, businessId: ID.biz, role: 'ADMIN',
-      permissionScopes: { crm: 'admin', revenue: 'none', bookings: 'admin' },
+      permissionScopes: { crm: 'admin', revenue: 'none', bookings: 'admin', ai: 'write' },
     },
   });
-  await db.membership.create({ data: { id: `${P}m_staffRead`, userId: ID.staffRead, businessId: ID.biz, role: 'STAFF' } });
+  await db.membership.create({
+    data: {
+      id: `${P}m_staffRead`, userId: ID.staffRead, businessId: ID.biz, role: 'STAFF',
+      permissionScopes: { ...defaultScopesForRole('STAFF'), ai: 'write' },
+    },
+  });
   await db.membership.create({
     data: {
       id: `${P}m_staffNone`, userId: ID.staffNone, businessId: ID.biz, role: 'STAFF',
-      permissionScopes: { crm: 'none', revenue: 'none', bookings: 'none' },
+      permissionScopes: { crm: 'none', revenue: 'none', bookings: 'none', ai: 'write' },
     },
   });
   await db.membership.create({
     data: {
       id: `${P}m_staffMine`, userId: ID.staffMine, businessId: ID.biz, role: 'STAFF',
-      permissionScopes: { crm: 'read', crm_view: 'mine', revenue: 'read', bookings: 'read' },
+      permissionScopes: { crm: 'read', crm_view: 'mine', revenue: 'read', bookings: 'read', ai: 'write' },
     },
   });
   // CR-V109b-1: ownerId set and no membership row, as legacy businesses were created.

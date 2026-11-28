@@ -23,7 +23,7 @@
  * ============================================================================
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -42,6 +42,8 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
 import { keyCronsDisabled } from '../../core/config/env';
+import { RedisService } from '../../core/redis/redis.service';
+import { claimOccurrence, utcDateSlot } from '../../core/scheduling/occurrence-claim';
 import { dnaScoresForReader, isFinanceRecommendation, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
@@ -150,6 +152,7 @@ export class KeyCortexCreativityService {
     private readonly aiUsage: AiUsageService,
     private readonly contextService: KeyCortexContextV2Service,
     private readonly insightService: KeyCortexInsightService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════
@@ -524,6 +527,7 @@ Return JSON:
   async scheduledCreativeExploration(): Promise<void> {
     // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
     if (keyCronsDisabled()) return;
+    if (!(await claimOccurrence(this.redis, 'key-creativity-exploration', utcDateSlot(), 23 * 60 * 60 * 1000))) return;
     this.logger.log('[Creativity] 🌅 Starting daily creative exploration');
 
     const businesses = await this.findAllActiveBusinesses();
