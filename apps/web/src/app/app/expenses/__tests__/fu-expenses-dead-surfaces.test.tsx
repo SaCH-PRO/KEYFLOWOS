@@ -26,7 +26,6 @@ const client = vi.hoisted(() => ({
   fetchContacts: vi.fn(),
   fetchVendorAnalytics: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
 }));
 
 vi.mock("@/lib/client", () => client);
@@ -55,7 +54,6 @@ beforeEach(() => {
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
 });
 afterEach(() => {
   cleanup();
@@ -80,12 +78,13 @@ describe("P252: the dead expense surfaces are gone", () => {
 });
 
 describe("P252: the data hook makes no read nothing shows", () => {
-  it("vendor analytics, margin analysis and recurring patterns are not read", async () => {
+  it("vendor analytics and margin analysis are not read (recurring patterns have no client read at all)", async () => {
     const { result } = renderHook(() => useExpensesData());
     await waitFor(() => expect(result.current.read.kind).toBe("ok"));
     expect(client.fetchVendorAnalytics, "vendor analytics read for no screen").not.toHaveBeenCalled();
     expect(client.fetchMarginAnalysis, "margin analysis read for no screen").not.toHaveBeenCalled();
-    expect(client.fetchRecurringCandidates, "recurring patterns read for no screen").not.toHaveBeenCalled();
+    // Recurring patterns: P258 removed fetchRecurringCandidates from lib/client.ts, so nothing can read them; that is
+    // pinned by its absence from the source (fu-expenses-dead-surfaces-2.test.tsx), not by a mock (P270).
   });
   it("and exposes none of them", async () => {
     const { result } = renderHook(() => useExpensesData());
