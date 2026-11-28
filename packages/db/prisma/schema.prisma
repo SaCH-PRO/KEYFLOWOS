@@ -2257,7 +2257,7 @@ model Session {
 
 model PushSubscription {
   id         String   @id @default(cuid())
-  endpoint   String   @unique
+  endpoint   String
   p256dh     String
   auth       String
   userId     String   @map("user_id")
@@ -2266,6 +2266,8 @@ model PushSubscription {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
+  @@unique([businessId, endpoint])
+  @@index([endpoint])
   @@index([userId])
   @@index([businessId])
   @@map("push_subscriptions")
