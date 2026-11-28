@@ -199,14 +199,23 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
       put("pages/d.cjs", 'const { SideSheet } = require("../lib/sheet/side-sheet");');
       put("pages/via-barrel.tsx", 'import { SideSheet } from "../lib/sheet";');
       put("pages/unrelated.ts", 'import { x } from "./elsewhere";');
+      // P257 R5-1: two barrels re-exporting each other, one of them reaching the sheet: the walk must end.
+      put("lib/a/index.ts", 'export * from "../b";');
+      put("lib/b/index.ts", 'export * from "../a";\nexport { SideSheet } from "../sheet/side-sheet";');
+      put("pages/via-cycle.tsx", 'import { SideSheet } from "../lib/a";');
+      // P257 R5-2: a .spec file outside __tests__ (real src has them, e.g. commerce/quotes/quotes-panel.spec.tsx).
+      put("pages/x.spec.tsx", 'import { SideSheet } from "../lib/sheet/side-sheet";');
       put("pages/__tests__/ignored.test.tsx", 'import { SideSheet } from "../../lib/sheet/side-sheet";');
       // A test helper that is not itself a .test file: skipped because it is under __tests__.
       put("pages/__tests__/render-helper.tsx", 'import { SideSheet } from "../../lib/sheet/side-sheet";');
     });
     afterAll(() => { rmSync(root, { recursive: true, force: true }); });
-    it("finds an importer of every module kind, and one through a barrel, and nothing in tests", () => {
+    it("finds an importer of every module kind, one through a barrel and one through a barrel cycle, and nothing in tests or .spec files", () => {
       const target = join(root, "lib/sheet/side-sheet");
-      expect(importersOf(target, root)).toEqual(["lib/sheet/index.ts", "pages/a.js", "pages/b.jsx", "pages/c.mjs", "pages/d.cjs", "pages/via-barrel.tsx"]);
+      expect(importersOf(target, root)).toEqual([
+        "lib/a/index.ts", "lib/b/index.ts", "lib/sheet/index.ts",
+        "pages/a.js", "pages/b.jsx", "pages/c.mjs", "pages/d.cjs", "pages/via-barrel.tsx", "pages/via-cycle.tsx",
+      ]);
     });
   });
 
@@ -219,9 +228,11 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
   it("the list is complete: every file that imports the commerce SideSheet is listed (or is the expense sheet)", () => {
     const t0 = performance.now();
     const importers = importersOf(SHEET, SRC);
-    expect(performance.now() - t0, "the scan is slow").toBeLessThan(2000);
+    // P257 R5-3: a gross-hang guard (the walk takes about 0.5 to 1 s locally), not a timing test: a loaded CI shard
+    // must not flake it, and a walk that loops or rescans would still fail it.
+    expect(performance.now() - t0, "the scan hung or ran away").toBeLessThan(10000);
     expect(importers, "a caller of the commerce SideSheet is missing from CALLERS, or one listed is not a caller").toEqual([...CALLERS, EXPENSE_SHEET].sort());
-  });
+  }, 30000);
   it("the expense sheet passes it", () => {
     const text = readFileSync(join(SRC, EXPENSE_SHEET), "utf8");
     expect(text).toMatch(/closeDisabled=\{submitting\}/);
