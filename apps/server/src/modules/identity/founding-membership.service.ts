@@ -115,14 +115,20 @@ export class FoundingMembershipService {
     return out;
   }
 
-  /** Every non-deleted Business, paged by id so the cursor is stable under concurrent writes. */
-  private async allBusinesses(): Promise<{ id: string; name: string; ownerId: string }[]> {
+  /** Every non-deleted Business (optionally restricted to `businessIdPrefix`), paged by id so the cursor is stable under concurrent writes. */
+  private async allBusinesses(
+    businessIdPrefix?: string,
+  ): Promise<{ id: string; name: string; ownerId: string }[]> {
     const out: { id: string; name: string; ownerId: string }[] = [];
     let cursor: string | undefined;
+    const where = {
+      deletedAt: null,
+      ...(businessIdPrefix ? { id: { startsWith: businessIdPrefix } } : {}),
+    };
 
     for (;;) {
       const page = await this.prisma.client.business.findMany({
-        where: { deletedAt: null },
+        where,
         select: { id: true, name: true, ownerId: true },
         orderBy: { id: 'asc' },
         take: FoundingMembershipService.PAGE,
@@ -210,8 +216,8 @@ export class FoundingMembershipService {
    * business if it ever ran inside an ambient tenant context, and a truncated
    * inventory reports "nothing missing" rather than failing.
    */
-  async classify(): Promise<FoundingMembershipInventory> {
-    const businesses = await this.allBusinesses();
+  async classify(options: { businessIdPrefix?: string } = {}): Promise<FoundingMembershipInventory> {
+    const businesses = await this.allBusinesses(options.businessIdPrefix);
 
     if (businesses.length === 0) {
       return { scanned: 0, counts: EMPTY_COUNTS(), rows: [] };
@@ -304,9 +310,13 @@ export class FoundingMembershipService {
    * a concurrent bootstrap, say — and the upsert converges on it instead of
    * failing the whole run.
    */
-  async repairDeterministic(options: { apply?: boolean } = {}): Promise<FoundingMembershipRepairResult> {
+  async repairDeterministic(
+    options: { apply?: boolean; businessIdPrefix?: string } = {},
+  ): Promise<FoundingMembershipRepairResult> {
     const apply = options.apply ?? false;
-    const inventory = await this.classify();
+    const inventory = await this.classify(
+      options.businessIdPrefix ? { businessIdPrefix: options.businessIdPrefix } : {},
+    );
 
     const repairable = inventory.rows.filter(
       (r) => r.classification === 'missing_founding_membership_with_resolvable_owner',

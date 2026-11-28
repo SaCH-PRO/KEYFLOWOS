@@ -14,6 +14,7 @@ import {
   isExplicitScopeMap,
   type GraphActionScope,
 } from './graph-actions.controller';
+import { v1ToolRefusalReason } from './v1-tool-allowlist';
 
 /**
  * KEY-R3b-PLAN-AUTHORITY (owner rulings D-71 and D-73, 2026-11-03; D-46): who a stored ai plan step
@@ -48,6 +49,8 @@ import {
  * is refused, as assertMayRunGraphAction refuses it to every member.
  */
 export function noMemberToolRefusal(toolName: string): string | null {
+  const v1Refusal = v1ToolRefusalReason(toolName);
+  if (v1Refusal) return v1Refusal;
   const requirement = graphActionRequirement(toolName);
   if (!requirement) {
     return `"${toolName}" is mapped to no module scope, so a KEY plan or monitor with no member principal does not run it (D-73: denied by default)`;
@@ -160,6 +163,8 @@ export async function planStepRunAuthority(
   toolName: string,
   options: PlanStepRunOptions = {},
 ): Promise<{ memberId: string | null; principalId: string | null; refusal: string | null }> {
+  const v1Refusal = v1ToolRefusalReason(toolName);
+  if (v1Refusal) return { memberId: null, principalId: null, refusal: v1Refusal };
   const plan = await prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: SYSTEM_PLAN_MARKERS });
   if (!plan) return { memberId: null, principalId: null, refusal: 'Plan not found in this business' };
   // W4-D93-NO-MEMBER-CONTACTS (D-93): a plan only the system can have stored with no member runs as the owner.
@@ -261,6 +266,8 @@ export async function memberToolRunAuthority(
   toolName: string,
   options: { asPrincipal?: boolean } = {},
 ): Promise<{ refusal: string | null; principal: boolean }> {
+  const v1Refusal = v1ToolRefusalReason(toolName);
+  if (v1Refusal) return { refusal: v1Refusal, principal: false };
   // W11-D116-KEY-OWNER (owner rulings D-116, D-125; D-119): the owner arm is the OWNER membership, the
   // recorded owner's or a co-owner's, never Business.ownerId (D-104 had admitted the recorded owner
   // holding any membership, so one holding ADMIN ran D-119's owner-only tools).
