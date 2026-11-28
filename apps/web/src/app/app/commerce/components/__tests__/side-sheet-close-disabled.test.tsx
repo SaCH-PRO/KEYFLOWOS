@@ -196,6 +196,8 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
       put("pages/via-barrel.tsx", 'import { SideSheet } from "../lib/sheet";');
       put("pages/unrelated.ts", 'import { x } from "./elsewhere";');
       put("pages/__tests__/ignored.test.tsx", 'import { SideSheet } from "../../lib/sheet/side-sheet";');
+      // A test helper that is not itself a .test file: skipped because it is under __tests__.
+      put("pages/__tests__/render-helper.tsx", 'import { SideSheet } from "../../lib/sheet/side-sheet";');
     });
     afterAll(() => { rmSync(root, { recursive: true, force: true }); });
     it("finds an importer of every module kind, and one through a barrel, and nothing in tests", () => {
