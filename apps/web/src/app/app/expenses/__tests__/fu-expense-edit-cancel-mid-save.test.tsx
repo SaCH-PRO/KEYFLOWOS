@@ -109,7 +109,7 @@ const A1 = (over: Partial<Expense> = {}) => expense({ id: "exp_A1", status: "PAI
 let a1Status: Expense["status"] = "PAID";
 afterEach(() => { routeParams.id = "exp_A1"; a1Status = "PAID"; });
 beforeEach(() => {
-  client.getExpense.mockImplementation(async (_b: string, id: string) => ok(id === "exp_A2" ? A2() : A1({ status: a1Status })));
+  client.getExpense.mockImplementation(async () => ok(A1({ status: a1Status })));
   client.fetchExpenseCategories.mockResolvedValue(ok([CAT]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
 });
