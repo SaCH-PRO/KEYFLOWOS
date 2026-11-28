@@ -5,6 +5,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 
+/** A selector that finds this control again in a remounted panel (P263), or null when nothing identifies it. */
+function focusKey(el: HTMLElement): string | null {
+  const q = (v: string) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(v) : v.replace(/["\\]/g, "\\$&"));
+  if (el.id) return `#${q(el.id)}`;
+  const tag = el.tagName.toLowerCase();
+  const name = el.getAttribute("name");
+  if (name) return `${tag}[name="${q(name)}"]`;
+  const label = el.getAttribute("aria-label");
+  if (label) return `${tag}[aria-label="${q(label)}"]`;
+  return null;
+}
+
 interface SideSheetProps {
   open: boolean;
   onClose: () => void;
@@ -72,6 +84,33 @@ export function SideSheet({
       previousFocusRef.current?.focus();
     };
   }, [open, close]);
+
+  // P263: the panel is keyed by the layout, so a resize or rotation while open remounts it and the focused control is
+  // removed (focus falls to <body>). While open, the control focused in the panel is remembered by what identifies it
+  // across the remount (its id, name or accessible label; the node itself is gone); when the layout flips, that
+  // control in the new panel is focused, or the panel itself when there is none. Focus outside the sheet is left alone.
+  const focusedRef = useRef<{ inPanel: boolean; key: string | null }>({ inPanel: false, key: null });
+  useEffect(() => {
+    if (!open) return;
+    const onFocusIn = (e: FocusEvent) => {
+      const el = e.target as HTMLElement | null;
+      const panel = panelRef.current;
+      if (!el || !panel || !panel.contains(el)) { focusedRef.current = { inPanel: false, key: null }; return; }
+      focusedRef.current = { inPanel: true, key: el === panel ? null : focusKey(el) };
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, [open]);
+  const layoutRef = useRef(isMobile);
+  useLayoutEffect(() => {
+    if (layoutRef.current === isMobile) return;
+    layoutRef.current = isMobile;
+    const panel = panelRef.current;
+    if (!open || !panel || !focusedRef.current.inPanel) return;
+    const key = focusedRef.current.key;
+    const same = key ? panel.querySelector<HTMLElement>(key) : null;
+    (same ?? panel).focus();
+  }, [isMobile, open]);
 
   return (
     <AnimatePresence>
