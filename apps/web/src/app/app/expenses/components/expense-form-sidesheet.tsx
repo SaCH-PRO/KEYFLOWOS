@@ -292,6 +292,10 @@ export function ExpenseFormSideSheet({
     // BUG-028: today in Trinidad (the business's zone), not the UTC date (tomorrow after 20:00 in Port of Spain).
     const dateValue = prefill?.date ?? todayInBusinessZone(new Date(), businessId);
     const prefillDay = (value: string): string => {
+      // P267 R6-1: a date-shaped value that is no calendar day ("2026-02-30") starts on today: new Date would roll it
+      // over to a plausible, different day (2026-03-02) that the owner never saw. Only a full date-time is read as an
+      // instant.
+      if (PLAIN_DATE.test(value)) return todayInBusinessZone(new Date(), businessId);
       const at = new Date(value);
       return Number.isNaN(at.getTime()) ? todayInBusinessZone(new Date(), businessId) : dayInZone(at, businessTimeZone(businessId));
     };
