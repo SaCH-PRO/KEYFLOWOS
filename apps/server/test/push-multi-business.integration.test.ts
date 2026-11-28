@@ -241,30 +241,50 @@ describe('P242 FU-PUSH-MULTI-BUSINESS (D-319 / Q45)', () => {
     }
   });
 
-  it('[PMB-02] RED-BEFORE: re-subscribing the same device on bizB with rotated keys refreshes keys across all of that member\'s rows for the endpoint', async () => {
+  it('[PMB-02] RED-BEFORE: re-subscribing the same device on bizB or bizA with rotated keys refreshes keys across all of that member\'s rows for the endpoint', async () => {
     await db.pushSubscription.deleteMany({ where: { userId: ID.owner } });
     const device = `https://updates.push.services.mozilla.com/wpush/v2/${P}rotated_device`;
 
+    // New-business create path on bizB syncs rotated keys back to bizA.
     expect((await subscribe(ID.bizA, ID.owner, device, { p256dh: `${P}k1`, auth: `${P}a1` })).status).toBe(201);
     expect((await subscribe(ID.bizB, ID.owner, device, { p256dh: `${P}k2`, auth: `${P}a2` })).status).toBe(201);
 
-    const rows = await db.pushSubscription.findMany({
+    const afterCreate = await db.pushSubscription.findMany({
       where: { userId: ID.owner, endpoint: device },
       select: { businessId: true, p256dh: true, auth: true },
       orderBy: { businessId: 'asc' },
     });
-    expect(rows).toEqual([
+    expect(afterCreate).toEqual([
       { businessId: ID.bizA, p256dh: `${P}k2`, auth: `${P}a2` },
       { businessId: ID.bizB, p256dh: `${P}k2`, auth: `${P}a2` },
     ]);
+
+    // Same-business update path on bizA syncs rotated keys forward to bizB.
+    expect((await subscribe(ID.bizA, ID.owner, device, { p256dh: `${P}k3`, auth: `${P}a3` })).status).toBe(201);
+    const afterUpdate = await db.pushSubscription.findMany({
+      where: { userId: ID.owner, endpoint: device },
+      select: { businessId: true, p256dh: true, auth: true },
+      orderBy: { businessId: 'asc' },
+    });
+    expect(afterUpdate).toEqual([
+      { businessId: ID.bizA, p256dh: `${P}k3`, auth: `${P}a3` },
+      { businessId: ID.bizB, p256dh: `${P}k3`, auth: `${P}a3` },
+    ]);
   });
 
-  it('[PMB-03] RED-BEFORE: sendToUser deduplicates by endpoint (delivers once, not once per business) and prunes all rows on 410 expiry', async () => {
+  it('[PMB-03] RED-BEFORE: sendToUser deduplicates by endpoint (including mixed valid+poisoned across businesses) and prunes all rows on 410 and 404 expiry', async () => {
     await db.pushSubscription.deleteMany({ where: { userId: ID.owner } });
     const device = `https://web.push.apple.com/${P}dedup_device`;
+    const poisoned = `https://169.254.169.254/latest/meta-data/${P}poisoned_multi`;
 
     expect((await subscribe(ID.bizA, ID.owner, device)).status).toBe(201);
     expect((await subscribe(ID.bizB, ID.owner, device)).status).toBe(201);
+    await db.pushSubscription.createMany({
+      data: [
+        { endpoint: poisoned, p256dh: `${P}pp1`, auth: `${P}pa1`, userId: ID.owner, businessId: ID.bizA },
+        { endpoint: poisoned, p256dh: `${P}pp2`, auth: `${P}pa2`, userId: ID.owner, businessId: ID.bizB },
+      ],
+    });
 
     const sentEndpoints: string[] = [];
     const sendSpy = vi.spyOn(pushService as any, 'sendPushNotification').mockImplementation(async (sub: any) => {
@@ -274,29 +294,45 @@ describe('P242 FU-PUSH-MULTI-BUSINESS (D-319 / Q45)', () => {
 
     try {
       const res = await pushService.sendToUser(ID.owner, { title: 'Account Alert', body: 'Once only' });
-      expect(res).toEqual({ sent: 1, failed: 0 });
+      expect(res).toEqual({ sent: 1, failed: 1 });
       expect(sentEndpoints).toEqual([device]);
     } finally {
       sendSpy.mockRestore();
     }
+
+    await db.pushSubscription.deleteMany({ where: { userId: ID.owner, endpoint: poisoned } });
 
     // 410 Gone prunes both business rows for this user+endpoint.
     const goneSpy = vi.spyOn(pushService as any, 'sendPushNotification').mockRejectedValue(
       Object.assign(new Error('Gone'), { statusCode: 410 }),
     );
     try {
-      const res = await pushService.sendToUser(ID.owner, { title: 'Expired', body: 'Prune' });
+      const res = await pushService.sendToUser(ID.owner, { title: 'Expired 410', body: 'Prune' });
       expect(res).toEqual({ sent: 0, failed: 1 });
-      const remaining = await db.pushSubscription.count({ where: { userId: ID.owner, endpoint: device } });
-      expect(remaining).toBe(0);
+      expect(await db.pushSubscription.count({ where: { userId: ID.owner, endpoint: device } })).toBe(0);
     } finally {
       goneSpy.mockRestore();
     }
+
+    // 404 Not Found also prunes both business rows for this user+endpoint.
+    expect((await subscribe(ID.bizA, ID.owner, device)).status).toBe(201);
+    expect((await subscribe(ID.bizB, ID.owner, device)).status).toBe(201);
+    const notFoundSpy = vi.spyOn(pushService as any, 'sendPushNotification').mockRejectedValue(
+      Object.assign(new Error('Not Found'), { statusCode: 404 }),
+    );
+    try {
+      const res = await pushService.sendToUser(ID.owner, { title: 'Expired 404', body: 'Prune' });
+      expect(res).toEqual({ sent: 0, failed: 1 });
+      expect(await db.pushSubscription.count({ where: { userId: ID.owner, endpoint: device } })).toBe(0);
+    } finally {
+      notFoundSpy.mockRestore();
+    }
   });
 
-  it('[PMB-04] cross-member takeover guard holds across businesses (403 on subscribe, no-op on unsubscribe)', async () => {
+  it('[PMB-04] cross-member takeover guard holds across businesses and mixed-case authority variants (403 on subscribe, no-op on unsubscribe)', async () => {
     await db.pushSubscription.deleteMany({ where: { userId: { in: [ID.owner, ID.other] } } });
     const ownerDevice = `https://fcm.googleapis.com/fcm/send/${P}owner_protected_device`;
+    const mixedCaseVariant = `HTTPS://FCM.GOOGLEAPIS.COM/fcm/send/${P}owner_protected_device`;
 
     expect((await subscribe(ID.bizA, ID.owner, ownerDevice)).status).toBe(201);
     expect((await subscribe(ID.bizB, ID.owner, ownerDevice)).status).toBe(201);
@@ -308,6 +344,10 @@ describe('P242 FU-PUSH-MULTI-BUSINESS (D-319 / Q45)', () => {
     // Different business takeover attempt (other is OWNER of bizOther) -> 403
     const crossBizTakeover = await subscribe(ID.bizOther, ID.other, ownerDevice);
     expect(crossBizTakeover.status, JSON.stringify(crossBizTakeover.body)).toBe(403);
+
+    // Mixed-case scheme/host variant -> canonicalized and still 403
+    const mixedCaseTakeover = await subscribe(ID.bizOther, ID.other, mixedCaseVariant);
+    expect(mixedCaseTakeover.status, JSON.stringify(mixedCaseTakeover.body)).toBe(403);
 
     // Unsubscribe by another member removes 0 rows
     const crossDrop = await unsubscribe(ID.bizOther, ID.other, ownerDevice);
@@ -325,20 +365,28 @@ describe('P242 FU-PUSH-MULTI-BUSINESS (D-319 / Q45)', () => {
     ]);
   });
 
-  it('[PMB-05] owner unsubscribe removes all of owner\'s business rows for the device while leaving other devices intact', async () => {
+  it('[PMB-05] owner unsubscribe removes all of owner\'s business rows for the device while leaving owner\'s second device and other users\' devices intact', async () => {
     await db.pushSubscription.deleteMany({ where: { userId: { in: [ID.owner, ID.other] } } });
     const ownerDevice = `https://fcm.googleapis.com/fcm/send/${P}owner_optout_device`;
+    const ownerSecondDevice = `https://fcm.googleapis.com/fcm/send/${P}owner_second_device`;
     const otherDevice = `https://fcm.googleapis.com/fcm/send/${P}other_separate_device`;
 
     expect((await subscribe(ID.bizA, ID.owner, ownerDevice)).status).toBe(201);
     expect((await subscribe(ID.bizB, ID.owner, ownerDevice)).status).toBe(201);
+    expect((await subscribe(ID.bizA, ID.owner, ownerSecondDevice)).status).toBe(201);
     expect((await subscribe(ID.bizOther, ID.other, otherDevice)).status).toBe(201);
 
-    const drop = await unsubscribe(ID.bizA, ID.owner, ownerDevice);
+    // Mixed-case unsubscribe still matches canonicalized rows cleanly.
+    const drop = await unsubscribe(
+      ID.bizA,
+      ID.owner,
+      `HTTPS://FCM.GOOGLEAPIS.COM/fcm/send/${P}owner_optout_device`,
+    );
     expect([200, 201]).toContain(drop.status);
     expect(drop.body?.count).toBe(2);
 
     expect(await db.pushSubscription.count({ where: { endpoint: ownerDevice } })).toBe(0);
+    expect(await db.pushSubscription.count({ where: { endpoint: ownerSecondDevice, userId: ID.owner } })).toBe(1);
     expect(await db.pushSubscription.count({ where: { endpoint: otherDevice, userId: ID.other } })).toBe(1);
   });
 });

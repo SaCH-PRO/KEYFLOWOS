@@ -84,7 +84,11 @@ export function assertAllowedPushEndpoint(endpoint: unknown): string {
   if (!isAllowedPushEndpoint(endpoint)) {
     throw new BadRequestException('Push subscription endpoint must be an HTTPS URL on a supported push service');
   }
-  return endpoint;
+  const canonical = new URL(endpoint).href;
+  if (!isAllowedPushEndpoint(canonical)) {
+    throw new BadRequestException('Push subscription endpoint must be an HTTPS URL on a supported push service');
+  }
+  return canonical;
 }
 
 function assertValidPushKeys(keys: unknown): { p256dh: string; auth: string } {
@@ -183,9 +187,10 @@ export class PushNotificationService {
     const endpoint = assertAllowedPushEndpoint(subscription?.endpoint);
     const keys = assertValidPushKeys(subscription?.keys);
 
-    return this.prisma.client.$transaction(async (tx) =>
-      this.upsertDeviceSubscription(tx, userId, businessId, endpoint, keys),
-    );
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(18842, hashtext(${endpoint}))`;
+      return this.upsertDeviceSubscription(tx, userId, businessId, endpoint, keys);
+    });
   }
 
   /**
@@ -211,14 +216,24 @@ export class PushNotificationService {
     });
   }
 
+  private endpointMatchCandidates(endpoint: string): string[] {
+    if (!isAllowedPushEndpoint(endpoint)) return [endpoint];
+    const canonical = new URL(endpoint).href;
+    return canonical === endpoint ? [endpoint] : [endpoint, canonical];
+  }
+
   /** SWEEP-P0-FOLLOWUP (census owner question 3): removes the caller's own subscription of that endpoint only. */
   async unsubscribeOwn(userId: string, endpoint: string) {
-    return this.prisma.client.pushSubscription.deleteMany({ where: { endpoint, userId } });
+    const candidates = this.endpointMatchCandidates(endpoint);
+    return this.prisma.client.pushSubscription.deleteMany({
+      where: { endpoint: { in: candidates }, userId },
+    });
   }
 
   async unsubscribe(endpoint: string) {
+    const candidates = this.endpointMatchCandidates(endpoint);
     return this.prisma.client.pushSubscription.deleteMany({
-      where: { endpoint },
+      where: { endpoint: { in: candidates } },
     });
   }
 
