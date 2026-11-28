@@ -113,54 +113,122 @@ test('a stale lock from a dead process is reclaimed', { skip: PS ? false : 'no P
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+const CURSOR_FIXTURE = 'scripts/agent-control/tests/fixtures/issue-80-cursor.json';
+const STUB_GH = 'scripts/agent-control/fixtures/stub-gh.ps1';
+const STUB_CLAUDE = 'scripts/agent-control/fixtures/stub-claude.ps1';
+const EXPECTED_FIXTURE_DIRECTIVE = 'CG-CURSOR-PROOF-002';
+const OLDER_FIXTURE_DIRECTIVE = 'CG-CURSOR-PROOF-001';
+
 /**
- * Reading the control issue needs an authenticated `gh`. On a CI runner there
- * is none, so this proof is skipped rather than passed vacuously: without a
- * readable channel "no directive was processed" is true for the wrong reason.
+ * TOF-WORKER-CURSOR-PROOF (#114 part 2, PRS-M49, D-61):
+ * The cursor idempotency proof runs against a recorded #80 channel fixture via
+ * stub-gh.ps1 + stub-claude.ps1 (no live GitHub token or claude session).
+ *
+ * In CI (CI=true / CI=1 / KF_REQUIRE_POWERSHELL=1), a missing PowerShell or
+ * missing fixture/stub FAILS CLOSED instead of skipping. Missing tracked
+ * fixture/stub files always fail closed, locally and in CI.
  */
-function ghAuthenticated() {
-  const probe = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8', shell: process.platform === 'win32' });
-  return probe.status === 0;
+function isCiEnv(env = process.env) {
+  const ci = String(env.CI ?? '').trim().toLowerCase();
+  return ci === 'true' || ci === '1' || String(env.KF_REQUIRE_POWERSHELL ?? '').trim() === '1';
 }
 
-const CHANNEL_READY = PS && ghAuthenticated();
+function cursorChannelStatus({
+  ps = PS,
+  fixturePath = CURSOR_FIXTURE,
+  stubGhPath = STUB_GH,
+  stubClaudePath = STUB_CLAUDE,
+  env = process.env,
+} = {}) {
+  for (const [label, filePath] of [
+    ['recorded #80 cursor fixture', fixturePath],
+    ['gh stub', stubGhPath],
+    ['claude stub', stubClaudePath],
+  ]) {
+    if (!fs.existsSync(filePath)) {
+      return { ready: false, skip: false, reason: `missing ${label}: ${filePath}` };
+    }
+  }
+  if (!ps) {
+    if (isCiEnv(env)) {
+      return {
+        ready: false,
+        skip: false,
+        reason: 'CI requires PowerShell for the cursor idempotency proof (D-61: fail closed instead of skipping)',
+      };
+    }
+    return { ready: false, skip: 'no PowerShell available', reason: 'no PowerShell available' };
+  }
+  return { ready: true, skip: false, reason: null };
+}
 
-function runWorker(root) {
+const CURSOR_CHANNEL = cursorChannelStatus();
+
+function runWorkerWithFixture(root, fixturePath = CURSOR_FIXTURE) {
   return spawnSync(
     PS,
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(WORKER), '-DryRun', '-RepoRoot', root],
-    { encoding: 'utf8', timeout: 180000 },
+    [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(WORKER),
+      '-DryRun',
+      '-RepoRoot', root,
+      '-LockRoot', path.join(root, 'locks'),
+      '-GhPath', path.resolve(STUB_GH),
+      '-ClaudePath', path.resolve(STUB_CLAUDE),
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 180000,
+      env: {
+        ...process.env,
+        KF_STUB_COMMENTS: path.resolve(fixturePath),
+      },
+    },
   );
 }
 
-test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ? false : 'needs PowerShell and an authenticated gh' }, () => {
+test('the cursor makes directive processing idempotent', { skip: CURSOR_CHANNEL.skip }, () => {
+  assert.ok(CURSOR_CHANNEL.ready, CURSOR_CHANNEL.reason);
+
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
   const stateDir = path.join(root, '.agent-control', '.worker');
   fs.mkdirSync(stateDir, { recursive: true });
+  try {
+    // First tick against the recorded #80 fixture must find the newest directive.
+    const first = runWorkerWithFixture(root);
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    assert.match(
+      first.stdout,
+      new RegExp(`unprocessed DIRECTIVE: ${EXPECTED_FIXTURE_DIRECTIVE}`),
+      `expected newest fixture directive ${EXPECTED_FIXTURE_DIRECTIVE}; stdout:\n${first.stdout}`,
+    );
+    assert.match(
+      first.stdout,
+      new RegExp(`DRY RUN: would invoke claude for ${EXPECTED_FIXTURE_DIRECTIVE}`),
+      `expected dry-run wake plan for ${EXPECTED_FIXTURE_DIRECTIVE}; stdout:\n${first.stdout}`,
+    );
 
-  // Discover whatever directive is actually newest on the channel rather than
-  // hardcoding one: a hardcoded id silently stops testing the claim the moment
-  // a newer directive is posted, which is exactly how this test broke once.
-  const first = runWorker(root);
-  assert.equal(first.status, 0, first.stderr);
-  const pending = first.stdout.match(/unprocessed (?:REVIEW|DIRECTIVE): (\S+)/);
-  if (!pending) {
-    assert.match(first.stdout, /no unprocessed directive/, 'a clean channel must say so explicitly');
+    // Record that directive id in cursor.json, then run a second tick.
+    fs.writeFileSync(
+      path.join(stateDir, 'cursor.json'),
+      JSON.stringify({ processed_message_ids: [EXPECTED_FIXTURE_DIRECTIVE], last_processed_at: new Date().toISOString() }),
+      'utf8',
+    );
+
+    const second = runWorkerWithFixture(root);
+    assert.equal(second.status, 0, second.stderr || second.stdout);
+    assert.match(
+      second.stdout,
+      /no unprocessed directive/,
+      `${EXPECTED_FIXTURE_DIRECTIVE} was recorded as processed and must not wake Claude again; stdout:\n${second.stdout}`,
+    );
+    assert.ok(!/would invoke claude/.test(second.stdout), 'no invocation may be planned for a processed directive');
+    assert.ok(
+      !second.stdout.includes(OLDER_FIXTURE_DIRECTIVE),
+      `marking ${EXPECTED_FIXTURE_DIRECTIVE} processed must not fall back to older directive ${OLDER_FIXTURE_DIRECTIVE}`,
+    );
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
-    return;
   }
-
-  // Record exactly that id as processed, then ask again.
-  fs.writeFileSync(
-    path.join(stateDir, 'cursor.json'),
-    JSON.stringify({ processed_message_ids: [pending[1]], last_processed_at: new Date().toISOString() }),
-  );
-
-  const run = runWorker(root);
-  assert.equal(run.status, 0, run.stderr);
-  assert.match(run.stdout, /no unprocessed directive/, `${pending[1]} was recorded as processed and must not wake Claude again`);
-  assert.ok(!/would invoke claude/.test(run.stdout), 'no invocation may be planned for a processed directive');
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('the worker delegates authority and verdict to the shared scripts', () => {
@@ -193,7 +261,7 @@ test('the woken session gets a bounded allowlist, not a permission bypass', () =
 });
 
 test('the recorded #80 cursor fixture exists and drives idempotent directive selection', () => {
-  const fixturePath = path.resolve('scripts/agent-control/tests/fixtures/issue-80-cursor.json');
+  const fixturePath = path.resolve(CURSOR_FIXTURE);
   assert.ok(fs.existsSync(fixturePath), `recorded #80 fixture must exist at ${fixturePath}`);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-cursor-fixture-'));
@@ -208,7 +276,12 @@ test('the recorded #80 cursor fixture exists and drives idempotent directive sel
     );
     assert.equal(first.status, 0, first.stderr || first.stdout);
     const firstOut = JSON.parse(first.stdout);
-    assert.ok(firstOut.selected && firstOut.selected.message_id, 'fixture must yield an actionable directive before cursor update');
+    assert.equal(
+      firstOut.selected?.message_id,
+      EXPECTED_FIXTURE_DIRECTIVE,
+      'fixture must select the newest directive before cursor update',
+    );
+    assert.deepEqual(firstOut.rejected, [], 'recorded fixture must have zero rejected comments');
 
     fs.writeFileSync(
       cursorFile,
@@ -223,10 +296,48 @@ test('the recorded #80 cursor fixture exists and drives idempotent directive sel
     );
     assert.equal(second.status, 0, second.stderr || second.stdout);
     const secondOut = JSON.parse(second.stdout);
-    assert.equal(secondOut.selected, null, 'recording the selected directive in cursor.json must suppress re-selection');
+    assert.equal(secondOut.selected, null, 'recording the newest directive in cursor.json must suppress re-selection');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('cursorChannelStatus fails closed in CI and on missing fixtures, skipping only locally without PowerShell', () => {
+  const ciNoPs = cursorChannelStatus({ ps: null, env: { CI: 'true' } });
+  assert.equal(ciNoPs.ready, false);
+  assert.equal(ciNoPs.skip, false, 'CI=true without PowerShell must not skip');
+  assert.match(ciNoPs.reason, /fail closed/i);
+
+  const ciNumericNoPs = cursorChannelStatus({ ps: null, env: { CI: '1' } });
+  assert.equal(ciNumericNoPs.ready, false);
+  assert.equal(ciNumericNoPs.skip, false, 'CI=1 without PowerShell must not skip');
+
+  const reqPsNoPs = cursorChannelStatus({ ps: null, env: { KF_REQUIRE_POWERSHELL: '1' } });
+  assert.equal(reqPsNoPs.ready, false);
+  assert.equal(reqPsNoPs.skip, false, 'KF_REQUIRE_POWERSHELL=1 without PowerShell must not skip');
+
+  const localNoPs = cursorChannelStatus({ ps: null, env: {} });
+  assert.equal(localNoPs.ready, false);
+  assert.equal(localNoPs.skip, 'no PowerShell available', 'local dev without PowerShell skips cleanly');
+
+  const missingFixtureLocal = cursorChannelStatus({
+    ps: 'pwsh',
+    fixturePath: 'scripts/agent-control/tests/fixtures/does-not-exist.json',
+    env: {},
+  });
+  assert.equal(missingFixtureLocal.ready, false);
+  assert.equal(missingFixtureLocal.skip, false, 'a missing fixture must fail closed even locally');
+
+  const missingStubCi = cursorChannelStatus({
+    ps: 'pwsh',
+    stubGhPath: 'scripts/agent-control/fixtures/missing-stub.ps1',
+    env: { CI: 'true' },
+  });
+  assert.equal(missingStubCi.ready, false);
+  assert.equal(missingStubCi.skip, false, 'a missing stub must fail closed');
+
+  const ready = cursorChannelStatus({ ps: 'pwsh', env: { CI: 'true' } });
+  assert.deepEqual(ready, { ready: true, skip: false, reason: null });
 });
 
 test('in CI (CI=true) without PowerShell, the cursor proof fails closed instead of skipping', () => {
@@ -246,5 +357,6 @@ test('in CI (CI=true) without PowerShell, the cursor proof fails closed instead 
   const out = `${run.stdout}\n${run.stderr}`;
   assert.notEqual(run.status, 0, `CI=true with no PowerShell must fail closed instead of skipping; got exit 0:\n${out}`);
   assert.ok(!/skipped\s+[1-9]/.test(out), `cursor proof must not be skipped in CI=true:\n${out}`);
+  assert.match(out, /CI requires PowerShell/i, `failure output must name the fail-closed CI guard:\n${out}`);
 });
 
