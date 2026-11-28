@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "4fd320794eacc5d9caa8801becd55b488abc0a5a",
-  "main_commit_date": "2026-11-28T13:23:10+00:00",
+  "main_sha": "f844413143892230b1fa9b06f23d3ccc8e90a77b",
+  "main_commit_date": "2026-11-28T14:54:42+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 286,
-    "points": 425,
-    "pct_by_points": 74.5
+    "packets": 287,
+    "points": 427,
+    "pct_by_points": 74.8
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 110,
-    "points": 145.5,
-    "pct_by_points": 25.5
+    "packets": 109,
+    "points": 143.5,
+    "pct_by_points": 25.2
    }
   },
   "by_step": {
@@ -84,9 +84,9 @@
     "total": 92
    },
    "6": {
-    "done": 30,
+    "done": 31,
     "in-progress": 0,
-    "todo": 10,
+    "todo": 9,
     "total": 40
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 196,
+    "done": 197,
     "in-progress": 0,
-    "todo": 59,
+    "todo": 58,
     "total": 255
    },
    "follow-on": {
@@ -123,8 +123,8 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 65,
-   "code-commit-subject": 134,
+   "prior-status-file": 64,
+   "code-commit-subject": 135,
    "prior-status-file+wave-2b-commit": 28,
    "compacted-commit": 103,
    "no-evidence": 64,
@@ -160,6 +160,7 @@
    "READY-TO-SEND",
    "OWNER-ALERTS-SERVER",
    "VAT-BASICS",
+   "HARNESS-REMOVAL",
    "W11-SHIP-STOCK-DECREMENT",
    "W11-STOREFRONT-ROUTE-DECREMENTED",
    "W11-STOREFRONT-FULFIL-STEPS",
@@ -266,14 +267,13 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 66,
-  "todo_with_dependencies_met_launch": 28,
+  "todo_with_dependencies_met": 65,
+  "todo_with_dependencies_met_launch": 27,
   "stalled_ready": 0,
   "stalled_ready_launch": 0
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "HARNESS-REMOVAL",
    "NAV-B-HIDE",
    "NAV-B-HIDE-2",
    "NAV-B-LINKS",
@@ -303,18 +303,6 @@
  },
  "ready": [
   {
-   "id": "HARNESS-REMOVAL",
-   "step": 6,
-   "priority": "P1",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": true,
-   "unblocks": 12,
-   "ready_since": "2026-11-26T15:07:34+00:00",
-   "stalled": false
-  },
-  {
    "id": "TOF-KNOWLEDGE-UPLOAD",
    "step": 3,
    "priority": "P2",
@@ -322,7 +310,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 31,
+   "unblocks": 30,
    "ready_since": "2026-11-26T04:11:16+00:00",
    "stalled": false
   },
@@ -1097,18 +1085,6 @@
  ],
  "ready_launch": [
   {
-   "id": "HARNESS-REMOVAL",
-   "step": 6,
-   "priority": "P1",
-   "size": "M",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": true,
-   "unblocks": 12,
-   "ready_since": "2026-11-26T15:07:34+00:00",
-   "stalled": false
-  },
-  {
    "id": "TOF-KNOWLEDGE-UPLOAD",
    "step": 3,
    "priority": "P2",
@@ -1116,7 +1092,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 31,
+   "unblocks": 30,
    "ready_since": "2026-11-26T04:11:16+00:00",
    "stalled": false
   },
@@ -3805,15 +3781,17 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "f60d7d74"
+   ],
    "depends_on": [
     "TODAY-4BLOCK"
    ],
    "title": "Remove the developer harness and fake-data pages customers and crawlers can reach, and the KF Store drawer",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-INV-SET-MOVEMENT",
@@ -8031,6 +8009,7 @@
    "derived_from": "code-commit-subject",
    "uncertain": true,
    "evidence": [
+    "0b8fc87a",
     "6db90f04",
     "8c32ee7b"
    ],
