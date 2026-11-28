@@ -238,6 +238,12 @@ export function ExpenseFormSideSheet({
   const [currency] = useState(() => businessCurrency(businessId));
   const dueDateId = useId();
   const billToggleId = useId();
+  // P267: each field's label is linked to it, so the field is named by its label (it was unnamed to assistive tech).
+  const descriptionId = useId();
+  const amountId = useId();
+  const dateId = useId();
+  const vendorId = useId();
+  const categoryFieldId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
   const { uploadToDrive } = useDriveUpload();
   const selectedFileRef = useRef<File | null>(prefill?.receiptFile ?? null);
@@ -648,8 +654,9 @@ export function ExpenseFormSideSheet({
 
           {/* Description */}
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Description *</label>
+            <label htmlFor={descriptionId} className="text-xs text-muted-foreground mb-1.5 block">Description *</label>
             <input
+              id={descriptionId}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder="What was this expense for?"
@@ -660,8 +667,9 @@ export function ExpenseFormSideSheet({
           {/* Amount + Date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency}) *</label>
+              <label htmlFor={amountId} className="text-xs text-muted-foreground mb-1.5 block">Amount ({currency}) *</label>
               <input
+                id={amountId}
                 type="number"
                 step="0.01"
                 min="0"
@@ -672,8 +680,9 @@ export function ExpenseFormSideSheet({
               />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Date *</label>
+              <label htmlFor={dateId} className="text-xs text-muted-foreground mb-1.5 block">Date *</label>
               <input
+                id={dateId}
                 type="date"
                 value={formData.date}
                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
@@ -685,8 +694,9 @@ export function ExpenseFormSideSheet({
           {/* Vendor + Category */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Vendor</label>
+              <label htmlFor={vendorId} className="text-xs text-muted-foreground mb-1.5 block">Vendor</label>
               <input
+                id={vendorId}
                 value={formData.vendor}
                 onChange={(e) => setFormData({ ...formData, vendor: e.target.value })}
                 placeholder="Vendor name"
@@ -694,9 +704,10 @@ export function ExpenseFormSideSheet({
               />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Category</label>
+              <label htmlFor={categoryFieldId} className="text-xs text-muted-foreground mb-1.5 block">Category</label>
               <div className="relative">
                 <select
+                  id={categoryFieldId}
                   value={formData.categoryId}
                   onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground focus:outline-none focus:border-rose-500/40 appearance-none"
