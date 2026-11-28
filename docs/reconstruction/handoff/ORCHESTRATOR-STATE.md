@@ -34,6 +34,11 @@ waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude re
 
 ### 0.1 Waves this session
 
+**Checkpoint 2026-11-28 12:55 UTC: M48 built and in proof** (`wave/v1-wave-m48` on main `bd789777`, after the server lane's M95, M99 and M97 merged): P258 FU-EXPENSES-DEAD-SURFACES-2 (`cef7044e`, CONFIRMED x2) + docs, 46 code files.
+- **In review:** P263 (R2 needs repair; R3 changes approach to keep the sheet's children mounted across the layout flip, absorbing P269), P267 part one (`b1324f9b`, field names) and P264 (closed as a pin after a CONTRADICTION: the exiting builder doesn't exist).
+- **Done, waiting for a wave:** P265 (`04fa4c23`) and P231 (`49226f8`, two-wave split).
+- **Restart:** about 12:39 UTC, with no proof or reviewer lost.
+
 **Checkpoint 2026-11-28 12:10 UTC: M47 merged (#303, main `8e0d070b`).** It carried P257 FU-SIDESHEET-CLOSE-DISABLED-CUE (`a4d2efa5`, R1 to R6), P261 FU-EXPENSE-DETAIL-ONSAVED-ORDER (`58f11422`), P259 FU-EXPENSES-DATA-GUARD-PINS (`80658317`), P254 FU-RECURRING-NO-BUSINESS-READ (`67139ea0`, R10) and docs. This removed M46's MAJOR typing-focus regression from main.
 - Proof at `5e568bbf` against `856abb03`: Release 0 and release0-live passed, and the receipt sweep passed. Journey H fails H1, H3 and H9 and journey J fails J10, identically at head and base (P247). The security confirmation's two MINOR test gaps were fixed as P257 R6 (the `closeDisabledRef` reset is pinned) and P254 R10 (comment only, compiled output identical), then the wave was rebuilt at `4939f4b0`. The two merge-delta confirmations were CONFIRMED; the live proof stands because no app code token changed.
 - **Merge queue:** the first merge_group run failed on server test `MGR-02`, where a `computedAt` timestamp at `:13.7xx` seconds matched a figures regex. That is unrelated, and the server lane fixed it (`FU-MGR02-TIMESTAMP-FLAKE`, its Wave M99). It was re-enqueued once and merged. Check a merge_group failure's log before re-enqueuing.
