@@ -566,17 +566,17 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140): fail-closed redactio
       expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_get_run', { runId: 'run_1' }, action)).toEqual({
         run: { id: 'run_1', totalGross: null },
       });
-      expect(
-        await (orchestrator as any).executeToolAction('biz_1', 'payroll_set_rate', { assignmentId: 'a1', amount: 95 }, action),
-      ).toEqual({ id: 'r2', amount: null });
-      expect(
-        await (orchestrator as any).executeToolAction(
+      await expect(
+        (orchestrator as any).executeToolAction('biz_1', 'payroll_set_rate', { assignmentId: 'a1', amount: 95 }, action),
+      ).rejects.toThrow(/not available in this version/);
+      await expect(
+        (orchestrator as any).executeToolAction(
           'biz_1',
           'payroll_generate_run',
           { periodStart: '2026-09-01', periodEnd: '2026-09-30' },
           action,
         ),
-      ).toEqual({ id: 'run_2', totalGross: null, itemCount: 2 });
+      ).rejects.toThrow(/not available in this version/);
     }
 
     const revAction = { surface: 'CHAT', principalUserId: 'u_rev' };
@@ -589,20 +589,22 @@ describe('P235 FU-PAYROLL-IS-MONEY (D-310 / D-100 / D-140): fail-closed redactio
     expect(await (orchestrator as any).executeToolAction('biz_1', 'payroll_get_run', { runId: 'run_1' }, revAction)).toEqual({
       run: { id: 'run_1', totalGross: 3200 },
     });
-    expect(
-      await (orchestrator as any).executeToolAction('biz_1', 'payroll_set_rate', { assignmentId: 'a1', amount: 95 }, revAction),
-    ).toEqual({ id: 'r2', amount: 95 });
-    expect(
-      await (orchestrator as any).executeToolAction(
+    await expect(
+      (orchestrator as any).executeToolAction('biz_1', 'payroll_set_rate', { assignmentId: 'a1', amount: 95 }, revAction),
+    ).rejects.toThrow(/not available in this version/);
+    await expect(
+      (orchestrator as any).executeToolAction(
         'biz_1',
         'payroll_generate_run',
         { periodStart: '2026-09-01', periodEnd: '2026-09-30' },
         revAction,
       ),
-    ).toEqual({ id: 'run_2', totalGross: 4100, itemCount: 2 });
-    expect(
-      await (orchestrator as any).executeToolAction('biz_1', 'payroll_approve_run', { runId: 'run_1' }, revAction),
-    ).toEqual({ id: 'run_1', status: 'APPROVED' });
-    expect(approveRun).toHaveBeenLastCalledWith('biz_1', 'run_1', 'u_rev');
+    ).rejects.toThrow(/not available in this version/);
+    await expect(
+      (orchestrator as any).executeToolAction('biz_1', 'payroll_approve_run', { runId: 'run_1' }, revAction),
+    ).rejects.toThrow(/not available in this version/);
+    expect(setRate).not.toHaveBeenCalled();
+    expect(generateRun).not.toHaveBeenCalled();
+    expect(approveRun).not.toHaveBeenCalled();
   });
 });

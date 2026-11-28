@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AiOversightService } from '../ai/ai-oversight.service';
+import { v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
@@ -60,6 +61,27 @@ export class AutonomyOrchestratorService {
   async evaluate(context: AutonomyActionContext): Promise<AutonomyVerdict> {
     const trace: AutonomyRuleTrace[] = [];
     const now = new Date();
+
+    const v1Refusal = v1ToolRefusalReasonForInvocation(context.actionKey, context.parameters);
+    if (v1Refusal) {
+      return {
+        allowed: false,
+        requiresApproval: false,
+        tier: 'manual',
+        confidence: 1.0,
+        reason: v1Refusal,
+        ruleTrace: [
+          {
+            source: 'V1ToolAllowlist',
+            rule: 'v1-disabled',
+            result: 'block',
+            reason: v1Refusal,
+          },
+        ],
+        createdAt: now,
+        proposalId: context.proposalId,
+      };
+    }
 
     let allowed = true;
     let requiresApproval = false;

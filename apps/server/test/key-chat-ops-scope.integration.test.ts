@@ -636,11 +636,10 @@ describe('KO-03 parity with the routes, and what stays unchanged', () => {
  * business that auto-executes tier 3 ran it in the member's own turn. Each inner call is now held
  * to the operations scope of the member whose chat turn ran the snippet.
  */
-describe("KO-04 execute_custom_logic: every api.callTool in the snippet is held to the member's operations scope (review SEC-D16-1)", () => {
-  /** resolveCrew staffs the operator crew first: its ceiling (3) admits execute_custom_logic. */
+describe("KO-04 execute_custom_logic: unconditionally removed in v1 (KEY-TOOL-ALLOWLIST, D-318 Option 1)", () => {
+  /** resolveCrew staffs the operator crew first. */
   const OPERATOR = 'execute it: run, process, handle and complete the work';
   beforeAll(async () => {
-    // The business auto-executes up to tier 3 (AutopilotSettings autonomyLevel 3 gives the same).
     await db.aiMemory.update({ where: { id: `${P}autonomy` }, data: { value: JSON.stringify({ mode: 'assisted', maxAutoTier: 3 }) } });
   });
 
@@ -648,88 +647,45 @@ describe("KO-04 execute_custom_logic: every api.callTool in the snippet is held 
     await db.aiMemory.update({ where: { id: `${P}autonomy` }, data: { value: JSON.stringify({ mode: 'assisted', maxAutoTier: 2 }) } });
   });
 
-  /** The one execute_custom_logic result of a member's turn: the snippet ran in the turn. */
-  async function snippet(actor: string, code: string) {
-    const body = await chatTurn(actor, OPERATOR, { name: 'execute_custom_logic', args: { code } });
-    expect(body.requiresConfirmation, JSON.stringify(body).slice(0, 400)).toBeFalsy();
-    return onlyResult(body, 'execute_custom_logic') as { ok: boolean; value?: any; error?: string };
-  }
-
-  it('CONTROL: the operator crew is staffed first, and the operations-none member is offered execute_custom_logic and no operations tool', async () => {
+  it('CONTROL: the operator crew is staffed first, and execute_custom_logic is never offered (nor any operations tool to operations-none)', async () => {
     expect((await roleEngine.resolveCrew({ message: OPERATOR })).crew[0]).toBe('operator');
-    const menu = await menuFor(ID.staffNone, OPERATOR);
-    expect(menu).toContain('execute_custom_logic');
-    expect(menu.filter((t) => Object.prototype.hasOwnProperty.call(OPERATIONS, t))).toEqual([]);
+    const menuNone = await menuFor(ID.staffNone, OPERATOR);
+    expect(menuNone).not.toContain('execute_custom_logic');
+    expect(menuNone.filter((t) => Object.prototype.hasOwnProperty.call(OPERATIONS, t))).toEqual([]);
+    const menuOwner = await menuFor(ID.owner, OPERATOR);
+    expect(menuOwner).not.toContain('execute_custom_logic');
   });
 
-  it("KO-04a RED-BEFORE: STAFF { operations: 'none' }: a snippet calling procurement_create_request is refused inside the sandbox and no ProcurementRequest row is created", async () => {
-    const before = await requestCount();
-    const r = await snippet(ID.staffNone, `return await api.callTool('procurement_create_request', { userPrompt: '${P}via custom logic' });`);
-    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(false);
-    expectScopeRefusal(r.error as string, 'write', 'none');
-    expect(await requestCount()).toBe(before);
-  });
-
-  it("KO-04b RED-BEFORE: STAFF { operations: 'none' }: a snippet calling command_discharge_obligation is refused and the item is unchanged (dischargedAt stays null); a read (command_list_due_obligations) is refused too", async () => {
+  it('KO-04a/b/c/e: execute_custom_logic on POST flow/chat is refused with "not available in this version" for STAFF and OWNER alike, with zero writes', async () => {
     const item = await seedObligation();
-    const before = await itemRow(item.id);
-    const r = await snippet(ID.staffNone, `return await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });`);
-    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(false);
-    expectScopeRefusal(r.error as string, 'write', 'none');
-    expect(await itemRow(item.id)).toBe(before);
+    const beforeReqs = await requestCount();
+    const beforeItem = await itemRow(item.id);
+    for (const actor of [ID.staffNone, ID.staffDefault, ID.owner]) {
+      const body = await chatTurn(actor, OPERATOR, {
+        name: 'execute_custom_logic',
+        args: { code: `return await api.callTool('procurement_create_request', { userPrompt: '${P}via custom logic' });` },
+      });
+      expect(body.toolResults, `${actor}: must not execute removed tool: ${JSON.stringify(body)}`).toBeUndefined();
+      expect(String(body.reply ?? '').toLowerCase(), actor).toContain('not available in this version');
+    }
+    expect(await requestCount()).toBe(beforeReqs);
+    expect(await itemRow(item.id)).toBe(beforeItem);
     expect((await db.commandItem.findUnique({ where: { id: item.id } })).dischargedAt).toBeNull();
-
-    const read = await snippet(ID.staffNone, `return await api.callTool('command_list_due_obligations', {});`);
-    expect(read.ok).toBe(false);
-    expectScopeRefusal(read.error as string, 'read', 'none');
-    expect(JSON.stringify(read)).not.toContain(item.id);
   });
 
-  it('KO-04c RED-BEFORE: STAFF on role defaults (operations read): in one snippet the operations read runs and the write is refused (no row), the snippet seeing the refusal as a rejected api.callTool', async () => {
-    const req = await seedRequest();
-    const before = await requestCount();
-    const r = await snippet(
-      ID.staffDefault,
-      `const list = await api.callTool('procurement_list_requests', {});
-       let refused = null;
-       try { await api.callTool('procurement_create_request', { userPrompt: '${P}via custom logic read' }); } catch (e) { refused = e.message; }
-       return { listed: list.requests.map((x) => x.id), refused };`,
-    );
-    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
-    expect(r.value.listed).toContain(req.id);
-    expectScopeRefusal(r.value.refused, 'write', 'read');
-    expect(await requestCount()).toBe(before);
-  });
-
-  it('KO-04d RED-BEFORE: the streamed member chat (POST flow/chat/stream) holds the snippet to the same scope: the discharge is refused and the item is unchanged', async () => {
+  it('KO-04d: the streamed member chat (POST flow/chat/stream) refuses execute_custom_logic with "not available in this version" and leaves the item unchanged', async () => {
     const item = await seedObligation();
     const before = await itemRow(item.id);
     const chunks = await streamTurn(ID.staffNone, OPERATOR, {
       name: 'execute_custom_logic',
       args: { code: `return await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });` },
     });
-    const results = chunks.find((c) => c.type === 'tool_results');
-    expect(results, JSON.stringify(chunks).slice(0, 400)).toBeTruthy();
-    expect(results.toolResults).toHaveLength(1);
-    expect(results.toolResults[0].name).toBe('execute_custom_logic');
-    expect(results.toolResults[0].result.ok).toBe(false);
-    expectScopeRefusal(results.toolResults[0].result.error, 'write', 'none');
+    expect(chunks.find((c) => c.type === 'tool_results'), JSON.stringify(chunks).slice(0, 400)).toBeUndefined();
+    const text = chunks
+      .filter((c) => c.type === 'content_delta')
+      .map((c) => String(c.content ?? ''))
+      .join('');
+    expect(text.toLowerCase(), JSON.stringify(chunks).slice(0, 400)).toContain('not available in this version');
     expect(await itemRow(item.id)).toBe(before);
-  });
-
-  it('KO-04e CONTROL: the OWNER is unchanged: the snippet creates the request and discharges the item', async () => {
-    const item = await seedObligation();
-    const before = await requestCount();
-    const r = await snippet(
-      ID.owner,
-      `const created = await api.callTool('procurement_create_request', { userPrompt: '${P}owner via custom logic' });
-       const done = await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });
-       return { created: created.id, discharged: done.id };`,
-    );
-    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
-    expect(await requestCount()).toBe(before + 1);
-    expect((await db.procurementRequest.findUnique({ where: { id: r.value.created } })).businessId).toBe(ID.bizA);
-    expect(r.value.discharged).toBe(item.id);
-    expect((await db.commandItem.findUnique({ where: { id: item.id } })).dischargedAt).not.toBeNull();
   });
 });

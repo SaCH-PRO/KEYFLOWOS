@@ -81,10 +81,11 @@ describe('payroll mark-paid authority is unchanged by the port (PR195-PORT)', ()
     expect(approve && 'scopes' in approve ? approve.scopes.map((s) => s.module) : approve).toEqual(['operations']);
     expect(requirement && 'scopes' in requirement ? requirement.ownerOnly : undefined).toBeUndefined();
     expect(keyRevenueWriteLevel('payroll_mark_paid')).toBeNull();
-    // D-73: a plan with no member principal writes no money. Mark-paid now posts the disbursement to the
-    // ledger, so such a run is refused it (narrower than the head, never wider); approve stays as it was.
-    expect(noMemberToolRefusal('payroll_mark_paid')).toMatch(/no member principal writes no money \(D-73\)/);
-    expect(noMemberToolRefusal('payroll_approve_run')).toBeNull();
+    // KEY-TOOL-ALLOWLIST (V1-63): payroll write tools are unconditionally refused in v1;
+    // D-73 no-member money-write refusal stays pinned on active money-writing tools (e.g. expenses_create).
+    expect(noMemberToolRefusal('payroll_mark_paid')).toBe('not available in this version');
+    expect(noMemberToolRefusal('payroll_approve_run')).toBe('not available in this version');
+    expect(noMemberToolRefusal('expenses_create')).toMatch(/no member principal writes neither \(D-73\)/);
     const t = tool('payroll_mark_paid');
     expect(t.riskTier).toBe(3);
     expect(t.riskLevel).toBe('high');
@@ -118,53 +119,64 @@ describe('payroll mark-paid authority is unchanged by the port (PR195-PORT)', ()
     });
   });
 
-  it('PA-05 KEY: posts as KEY\'s system actor for the member the turn runs for', async () => {
+  it('PA-05 KEY: payroll_mark_paid is unconditionally refused in v1 (KEY-TOOL-ALLOWLIST) before PayrollService is called', async () => {
     const markRunPaid = vi.fn(async () => ({ id: 'run_1', status: 'PAID' }));
     const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
       getPayroll: () => ({ markRunPaid }),
     });
-    const result = await (orchestrator as any).executeToolAction(
-      'biz_1',
-      'payroll_mark_paid',
-      { runId: 'run_1', paymentMethod: 'cash', actorId: 'forged' },
-      { surface: 'CHAT', principalUserId: 'u_admin' },
-    );
-    expect(result).toEqual({ id: 'run_1', status: 'PAID' });
-    expect(markRunPaid).toHaveBeenCalledWith('biz_1', 'run_1', {
-      paymentAccountId: undefined,
-      paymentMethod: 'cash',
-      actorId: KEY_SYSTEM_ACTOR_ID,
-      initiatedBy: 'u_admin',
-    });
+    await expect(
+      (orchestrator as any).executeToolAction(
+        'biz_1',
+        'payroll_mark_paid',
+        { runId: 'run_1', paymentMethod: 'cash', actorId: 'forged' },
+        { surface: 'CHAT', principalUserId: 'u_admin' },
+      ),
+    ).rejects.toThrow(/not available in this version/);
+    expect(markRunPaid).not.toHaveBeenCalled();
   });
 
   it('PA-06 finance_post_journal_entry points at the General Journal page', () => {
     expect(tool('finance_post_journal_entry').manualEquivalentRoute).toBe('/app/finance/journal');
   });
 
-  it('PA-07 (SEC-P195-1, D-46) a SUPER_ADMIN who is not a member is refused payroll_mark_paid; a member SUPER_ADMIN, and a no-money operations tool, are as before', async () => {
+  it('PA-07 (SEC-P195-1, D-46) payroll write tools are refused in v1 for SUPER_ADMIN too; D-46 non-member SUPER_ADMIN refusal stays pinned on active money tools', async () => {
     const prismaFor = (membership: unknown) => ({ client: { membership: { findUnique: vi.fn(async () => membership) } } }) as any;
     const sa = { id: 'u_sa', role: 'SUPER_ADMIN' };
     await expect(assertMayRunGraphAction(prismaFor(null), 'biz_1', sa, 'payroll_mark_paid', null)).rejects.toThrow(
+      /not available in this version/,
+    );
+    await expect(assertMayRunGraphAction(prismaFor({ role: 'STAFF', permissionScopes: null }), 'biz_1', sa, 'payroll_mark_paid', null)).rejects.toThrow(
+      /not available in this version/,
+    );
+    await expect(assertMayRunGraphAction(prismaFor(null), 'biz_1', sa, 'payroll_approve_run', null)).rejects.toThrow(
+      /not available in this version/,
+    );
+    // Active money-write control: non-member SUPER_ADMIN still refused under D-46; member SUPER_ADMIN admitted.
+    await expect(assertMayRunGraphAction(prismaFor(null), 'biz_1', sa, 'expenses_create', null)).rejects.toThrow(
       /Not a member of this business.*\(D-46\)/,
     );
-    await expect(assertMayRunGraphAction(prismaFor({ role: 'STAFF', permissionScopes: null }), 'biz_1', sa, 'payroll_mark_paid', null)).resolves.toBeUndefined();
-    await expect(assertMayRunGraphAction(prismaFor(null), 'biz_1', sa, 'payroll_approve_run', null)).resolves.toBeUndefined();
+    await expect(assertMayRunGraphAction(prismaFor({ role: 'STAFF', permissionScopes: null }), 'biz_1', sa, 'expenses_create', null)).resolves.toBeUndefined();
   });
 
-  it('PA-08 (SEC-P195-3) operations write without expenses write is refused payroll_mark_paid; with expenses write it passes', async () => {
+  it('PA-08 (SEC-P195-3) payroll write tools are refused in v1 regardless of scopes; expenses write gate stays pinned on active expenses_create', async () => {
     const prismaFor = (permissionScopes: unknown) =>
       ({ client: { membership: { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes })) } } }) as any;
     const member = { id: 'u_ops', role: 'USER' };
     await expect(
       assertMayRunGraphAction(prismaFor({ operations: 'write', expenses: 'read' }), 'biz_1', member, 'payroll_mark_paid', 'u_ops'),
-    ).rejects.toThrow(/expenses requires write access/);
+    ).rejects.toThrow(/not available in this version/);
     await expect(
       assertMayRunGraphAction(prismaFor({ operations: 'write', expenses: 'write' }), 'biz_1', member, 'payroll_mark_paid', 'u_ops'),
-    ).resolves.toBeUndefined();
-    // approve stays operations write alone.
+    ).rejects.toThrow(/not available in this version/);
     await expect(
       assertMayRunGraphAction(prismaFor({ operations: 'write', expenses: 'none' }), 'biz_1', member, 'payroll_approve_run', 'u_ops'),
+    ).rejects.toThrow(/not available in this version/);
+    // Active expenses_create control: read is refused, write passes.
+    await expect(
+      assertMayRunGraphAction(prismaFor({ operations: 'write', expenses: 'read' }), 'biz_1', member, 'expenses_create', 'u_ops'),
+    ).rejects.toThrow(/expenses requires write access/);
+    await expect(
+      assertMayRunGraphAction(prismaFor({ operations: 'write', expenses: 'write' }), 'biz_1', member, 'expenses_create', 'u_ops'),
     ).resolves.toBeUndefined();
   });
 });

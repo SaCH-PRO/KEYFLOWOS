@@ -204,11 +204,17 @@ describe('W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): every dotted organ and leg
 
   it('W11-KEY-ORGAN-AUTHORITY-MAP unmapped (D-119): every unmapped name has a reason, graphActionRequirement is null, and noMemberToolRefusal says it is mapped to no module scope', async () => {
     const { KEY_ORGAN_TOOLS_UNMAPPED } = await organMap();
+    const { v1ToolRefusalReason } = await import('../ai/v1-tool-allowlist');
     expect(Object.keys(KEY_ORGAN_TOOLS_UNMAPPED).sort()).toEqual([...UNMAPPED].sort());
     for (const name of UNMAPPED) {
       expect(KEY_ORGAN_TOOLS_UNMAPPED[name], name).toMatch(/\S{3}/);
       expect(graphActionRequirement(name), name).toBeNull();
-      expect(noMemberToolRefusal(name), name).toMatch(/is mapped to no module scope/);
+      const v1Refusal = v1ToolRefusalReason(name);
+      if (v1Refusal) {
+        expect(noMemberToolRefusal(name), name).toBe(v1Refusal);
+      } else {
+        expect(noMemberToolRefusal(name), name).toMatch(/is mapped to no module scope/);
+      }
     }
   });
 });

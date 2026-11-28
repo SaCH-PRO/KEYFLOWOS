@@ -13,6 +13,7 @@ import { contactWhereBase } from '../crm/crm.helpers';
 import { CANONICAL_MODULES, LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { keyDisabled } from '../../core/config/env';
 import { getLegacyToolEquivalence, obsoleteLegacyToolRefusal } from './legacy-tool-equivalence';
+import { v1ToolRefusalReason } from './v1-tool-allowlist';
 import type { KeyCommand, Prisma } from '@prisma/client';
 
 export interface ToolResult<T = unknown> {
@@ -608,6 +609,8 @@ export class KeyCommandService {
     }
 
     if (!this.oversight) return refuse(name, 'KEY oversight is unavailable; nothing was run');
+    const v1Refusal = v1ToolRefusalReason(name);
+    if (v1Refusal) return refuse(name, v1Refusal);
     const read = ASK_READ_CAPABILITIES.get(name);
     try {
       const decision = await this.oversight.evaluate(businessId, name);

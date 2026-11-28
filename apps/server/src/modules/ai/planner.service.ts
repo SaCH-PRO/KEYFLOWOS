@@ -8,6 +8,7 @@ import { AiMemoryService } from './ai-memory.service';
 import { ParsedIntent } from './intent-parser.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { getToolByName } from './flow-tool-registry';
+import { isToolAllowedInV1 } from './v1-tool-allowlist';
 
 /**
  * Trial-N integration review (correctness NEW-2 / V1-31c CRR-1): the stored tool of a step is a
@@ -17,7 +18,7 @@ import { getToolByName } from './flow-tool-registry';
  * web callers skip, instead of a tool name every execute refuses 403, stopping the run.
  */
 function registryToolName(name: unknown): string | null {
-  return typeof name === 'string' && name.length > 0 && getToolByName(name) ? name : null;
+  return typeof name === 'string' && name.length > 0 && getToolByName(name) && isToolAllowedInV1(name) ? name : null;
 }
 
 interface RawAiStep {

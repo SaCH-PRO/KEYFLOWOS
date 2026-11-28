@@ -16,6 +16,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
+import { v1ToolRefusalReason } from './v1-tool-allowlist';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
@@ -505,6 +506,10 @@ export async function assertMayRunGraphAction(
   proposerId: string | null,
   options: GraphActionAuthorityOptions = {},
 ): Promise<void> {
+  const v1Refusal = v1ToolRefusalReason(toolName);
+  if (v1Refusal) {
+    throw new ForbiddenException(v1Refusal);
+  }
   const requirement = graphActionRequirement(toolName);
   if (!requirement) {
     throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);

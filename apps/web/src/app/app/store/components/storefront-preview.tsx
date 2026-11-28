@@ -773,9 +773,10 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                   style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}
                 >
                   {[
-                    { label: "Secure" },
-                    { label: "Instant" },
-                    { label: "Safe Pay" },
+                    // P231 r1: the store's own trust lines (D-303), each shown there only when true.
+                    { label: "Orders completed" },
+                    { label: "Payments by your gateway" },
+                    { label: "Today's hours" },
                   ].map((t) => (
                     <span key={t.label} className="text-[7px] text-white/25 flex items-center gap-0.5">
                       <span className="w-1 h-1 rounded-full bg-emerald-400/30" />

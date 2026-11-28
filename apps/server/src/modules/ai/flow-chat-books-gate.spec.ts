@@ -127,9 +127,8 @@ describe('FB-01/02 (SEC-P195JS-4): a member-driven turn that names no member wri
   ])('FB-01 RED-BEFORE: %s with no member: every money write is refused before dispatch', async (_s, action) => {
     const { orchestrator, post, markRunPaid, markInvoicePaid, manualMatch } = orchestratorFor(MEMBERS);
     for (const [tool, args] of MONEY_CALLS) {
-      await expect(orchestrator.executeToolDirectly(BIZ, tool, { ...args }, undefined, { ...action }), tool).rejects.toThrow(
-        /names no member .*\(D-73\)/,
-      );
+      const expected = tool === 'payroll_mark_paid' ? /not available in this version/ : /names no member .*\(D-73\)/;
+      await expect(orchestrator.executeToolDirectly(BIZ, tool, { ...args }, undefined, { ...action }), tool).rejects.toThrow(expected);
     }
     expect(post).not.toHaveBeenCalled();
     expect(markRunPaid).not.toHaveBeenCalled();
@@ -179,7 +178,7 @@ describe('FB-04 (SEC-P195JS-5, CRR-P195JS-1): a SUPER_ADMIN who is a member, as 
     expect(names).toContain('finance_post_journal_entry');
     expect(names).toContain('reconcile_match_line');
     expect(names).not.toContain('commerce_mark_invoice_paid');
-    expect(names).toContain('payroll_mark_paid');
+    expect(names).not.toContain('payroll_mark_paid');
     await expect(
       orchestrator.executeToolDirectly(BIZ, 'finance_post_journal_entry', { ...JOURNAL_ARGS, type: 'ADJUSTMENT' }, undefined, { surface: 'CHAT', principalUserId: 'saMember' }),
     ).resolves.toEqual({ transactionId: 'tx_1', alreadyPosted: false });
@@ -189,6 +188,9 @@ describe('FB-04 (SEC-P195JS-5, CRR-P195JS-1): a SUPER_ADMIN who is a member, as 
     await expect(
       orchestrator.executeToolDirectly(BIZ, 'commerce_mark_invoice_paid', { invoiceId: 'inv_1' }, undefined, { surface: 'CHAT', principalUserId: 'saMember' }),
     ).rejects.toThrow(/revenue requires write access \(you have read\)/);
+    await expect(
+      orchestrator.executeToolDirectly(BIZ, 'payroll_mark_paid', { runId: 'run_1', paymentMethod: 'cash' }, undefined, { surface: 'CHAT', principalUserId: 'saMember' }),
+    ).rejects.toThrow(/not available in this version/);
     expect(post).toHaveBeenCalledTimes(1);
     expect(manualMatch).toHaveBeenCalledTimes(1);
     expect(markInvoicePaid).not.toHaveBeenCalled();
