@@ -1785,6 +1785,11 @@
       "prefix": "v63c_",
       "owner": "apps/server/test/key-v1-tool-allowlist.integration.test.ts",
       "packet": "V1-63 (KEY-TOOL-ALLOWLIST)"
+    },
+    {
+      "prefix": "v67c_",
+      "owner": "apps/server/test/key-v1-domain-hide.integration.test.ts",
+      "packet": "V1-67 (KEY-TOOL-DOMAIN-HIDE)"
     }
   ],
   "pendingRenames": [],
