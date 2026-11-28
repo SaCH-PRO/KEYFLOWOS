@@ -1246,7 +1246,9 @@ Return JSON array:
     for (const h of hypotheses) {
       h.parentDreamId = parentDreamId;
     }
-    const merged = [...existing, ...hypotheses];
+    const merged = [...existing, ...hypotheses].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
     const bounded =
       merged.length > MAX_DREAM_HYPOTHESES_PER_BUSINESS
         ? merged.slice(merged.length - MAX_DREAM_HYPOTHESES_PER_BUSINESS)
@@ -1526,13 +1528,12 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
 
   private async checkDataIntegrity(
     _businessId: string,
-  ): Promise<{ ran: true; issues: string[] } | { ran: false; reason: string; issues: string[] }> {
+  ): Promise<{ ran: true; issues: string[] } | { ran: false; reason: string }> {
     // Orphan and null-confidence checks require dedicated insight and reflection-session
     // tables that are absent from schema.prisma. Report not-run honestly instead of 0 issues.
     return {
       ran: false,
       reason: 'insight and reflection-session tables are absent from schema',
-      issues: [],
     };
   }
 
