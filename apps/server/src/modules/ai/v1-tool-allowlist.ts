@@ -215,3 +215,58 @@ export function v1ToolRefusalReason(toolName: string): string | null {
 export function isToolAllowedInV1(toolName: string): boolean {
   return v1ToolRefusalReason(toolName) === null;
 }
+
+const V1_WRAPPER_PAYLOAD_KEYS = ['payload', 'toolParams', 'inputPayload', 'parameters', 'result'] as const;
+
+/**
+ * Checks `toolOrActionName` and any nested tool/action name carried inside a
+ * wrapper or proposal payload (`toolName`, `actionType`, and nested
+ * `payload` / `toolParams` / `inputPayload` / `parameters` / `result` objects)
+ * using bounded BFS so cyclic or deeply nested payloads fail safely.
+ */
+export function v1ToolRefusalReasonForInvocation(
+  toolOrActionName: string | null | undefined,
+  payload?: unknown,
+  maxDepth = 6,
+  maxNodes = 24,
+): string | null {
+  if (typeof toolOrActionName === 'string') {
+    const direct = v1ToolRefusalReason(toolOrActionName);
+    if (direct) return direct;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const seen = new Set<object>();
+  const queue: Array<{ obj: Record<string, unknown>; depth: number }> = [
+    { obj: payload as Record<string, unknown>, depth: 0 },
+  ];
+  let visited = 0;
+
+  while (queue.length > 0 && visited < maxNodes) {
+    const current = queue.shift()!;
+    if (seen.has(current.obj)) continue;
+    seen.add(current.obj);
+    visited += 1;
+
+    if (typeof current.obj.toolName === 'string') {
+      const refusal = v1ToolRefusalReason(current.obj.toolName);
+      if (refusal) return refusal;
+    }
+    if (typeof current.obj.actionType === 'string') {
+      const refusal = v1ToolRefusalReason(current.obj.actionType);
+      if (refusal) return refusal;
+    }
+
+    if (current.depth >= maxDepth) continue;
+    for (const key of V1_WRAPPER_PAYLOAD_KEYS) {
+      const nested = current.obj[key];
+      if (nested && typeof nested === 'object' && !Array.isArray(nested) && !seen.has(nested)) {
+        queue.push({ obj: nested as Record<string, unknown>, depth: current.depth + 1 });
+      }
+    }
+  }
+  return null;
+}
+

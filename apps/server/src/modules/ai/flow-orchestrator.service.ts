@@ -3009,7 +3009,7 @@ ${triage.standingContext}`;
       try {
         if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
           // Governed again now, on the bound tool and the crew it was proposed under.
-          const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
+          const confirmDecision = this.v1BlockedDecision(pendingConfirmation.toolName) ?? await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
           if (!confirmDecision.allowed) {
             await claim.settle('refused', confirmDecision.reason);
             return {
@@ -3175,7 +3175,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          const decision = this.v1BlockedDecision(tc.name) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
           // runs for its holder (chatToolAction); every other call keeps this context.
           // PR195-KEY-GATES (review SEC-P195BW-1): a staff position's turn (an envelope, no principal) is marked so,
@@ -3731,7 +3731,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          const decision = this.v1BlockedDecision(tc.name) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           return this.governToolCall(businessId, tc, decision, {
             surface: 'CHAT_STREAM',
             principalUserId: userId ?? null,
@@ -4266,7 +4266,7 @@ ${triage.standingContext}`;
     if (!isFlowConfirmationId(confirmationId)) {
       if (!pending.confirmed) return answer(cancelled, false);
       if (pending.toolName) {
-        const decision = await this.governance.evaluate(businessId, pending.toolName, undefined, turnCrew, envelope);
+        const decision = this.v1BlockedDecision(pending.toolName) ?? await this.governance.evaluate(businessId, pending.toolName, undefined, turnCrew, envelope);
         if (!decision.allowed) return answer(`This action is blocked: ${decision.reason}`);
       }
       return answer(UNBOUND_CONFIRMATION_REPLY);
@@ -9648,7 +9648,7 @@ ${triage.standingContext}`;
 
       if (step.toolName) {
         const stepRole = (step.role ?? plan.role ?? undefined) as BusinessRole | undefined;
-        const decision = await this.governance.evaluate(businessId, step.toolName, undefined, stepRole);
+        const decision = this.v1BlockedDecision(step.toolName) ?? await this.governance.evaluate(businessId, step.toolName, undefined, stepRole);
         if (!decision.allowed) {
           await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
           stepsSkipped++;
@@ -9756,6 +9756,19 @@ ${triage.standingContext}`;
   ): Promise<FlowToolResult> {
     const planContext = planId && planStepId ? { planId, planStepId } : undefined;
     return this.executeTool(businessId, toolName, args, undefined, planContext, action);
+  }
+
+  private v1BlockedDecision(toolName: string) {
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (!v1Refusal) return null;
+    return {
+      allowed: false,
+      requiresQuickConfirm: false,
+      requiresFormalApproval: false,
+      requiresAdminApproval: false,
+      tier: (this.governance?.getToolTier ? this.governance.getToolTier(toolName) : 4) as 1 | 2 | 3 | 4,
+      reason: v1Refusal,
+    };
   }
 
   async autoExecuteToolForMonitoring(

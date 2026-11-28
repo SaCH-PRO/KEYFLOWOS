@@ -8,7 +8,7 @@ import { CortexQuery, CortexActionResult, CortexActionType } from './key-cortex.
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
-import { v1ToolRefusalReason } from '../ai/v1-tool-allowlist';
+import { v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 
 /**
  * Executes the LLM ↔ tool-call loop.
@@ -118,7 +118,7 @@ export class KeyCortexToolLoopService {
       const args: Record<string, unknown> = parsed.args;
 
       // 0. V1 tool allowlist gate (before safety/autonomy approval creation)
-      const v1Refusal = v1ToolRefusalReason(toolName);
+      const v1Refusal = v1ToolRefusalReasonForInvocation(toolName, args);
       if (v1Refusal) {
         result = {
           success: false,
