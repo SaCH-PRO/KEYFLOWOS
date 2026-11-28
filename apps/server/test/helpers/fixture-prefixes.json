@@ -1755,6 +1755,11 @@
       "prefix": "v92r_",
       "owner": "apps/server/test/general-ledger-zoned-from.integration.test.ts",
       "packet": "V1-92 (FU-LEDGER-ZONED-FROM, Journey H)"
+    },
+    {
+      "prefix": "v66f_",
+      "owner": "apps/server/test/plan-table.integration.test.ts",
+      "packet": "V1-66 (PLAN-TABLE)"
     }
   ],
   "pendingRenames": [],
