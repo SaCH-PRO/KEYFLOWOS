@@ -75,6 +75,10 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Validate,
+  type ValidationArguments,
+  ValidatorConstraint,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
@@ -1267,20 +1271,58 @@ export class UpdateAutonomyProfileDto {
 /*  DTOs  (v2 Integration Layer)                                       */
 /* ------------------------------------------------------------------ */
 
-/** Command execution -- natural language or structured command */
+const EXECUTE_COMMAND_MODE_MESSAGE =
+  'Provide either a non-empty command (natural language) or both module and action (structured), not both or neither';
+
+function hasNonEmptyExecuteText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isValidExecuteCommandMode(dto: {
+  command?: unknown;
+  module?: unknown;
+  action?: unknown;
+}): boolean {
+  if (dto.command !== undefined && typeof dto.command !== 'string') return false;
+  if (dto.module !== undefined && typeof dto.module !== 'string') return false;
+  if (dto.action !== undefined && typeof dto.action !== 'string') return false;
+  const hasCommand = hasNonEmptyExecuteText(dto.command);
+  const hasModule = hasNonEmptyExecuteText(dto.module);
+  const hasAction = hasNonEmptyExecuteText(dto.action);
+  const isNatural = hasCommand && dto.module === undefined && dto.action === undefined;
+  const isStructured = !hasCommand && hasModule && hasAction;
+  return isNatural !== isStructured;
+}
+
+@ValidatorConstraint({ name: 'executeCommandMode', async: false })
+class ExecuteCommandModeConstraint implements ValidatorConstraintInterface {
+  validate(businessId: unknown, args: ValidationArguments): boolean {
+    if (!hasNonEmptyExecuteText(businessId)) return false;
+    return isValidExecuteCommandMode(args.object as ExecuteCommandDto);
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    if (!hasNonEmptyExecuteText(args.value)) return 'businessId must be a non-empty string';
+    return EXECUTE_COMMAND_MODE_MESSAGE;
+  }
+}
+
+/** Command execution -- natural language or structured command (exactly one mode required) */
 export class ExecuteCommandDto {
   /** Natural language command (e.g. "Create an invoice for John for $500") */
+  @IsOptional()
   @IsString()
-  command: string;
+  command?: string;
   @IsString()
+  @Validate(ExecuteCommandModeConstraint)
   businessId: string;
   /** Accepted and ignored: the command's actor is the authenticated principal. */
   @IsOptional()
   @IsString()
   userId?: string;
-  /** Optional structured override -- bypasses NL parsing */
+  /** Structured execution target -- bypasses NL parsing (requires both module and action, without command) */
   @IsOptional()
-  @Allow()
+  @IsString()
   module?: ModuleName;
   @IsOptional()
   @IsString()
@@ -2558,19 +2600,19 @@ export class KeyCortexController {
     @CortexMember() member?: CortexMemberAuthority,
   ): Promise<ConnectorResult & { intent?: string; confidence?: number }> {
     const actorId = requestActorId(user);
-    if (!dto.command?.trim() && !dto.module) {
-      throw new BadRequestException('command (natural language) or module+action is required');
-    }
-    if (!dto.businessId) {
+    if (!hasNonEmptyExecuteText(dto.businessId)) {
       throw new BadRequestException('businessId is required');
+    }
+    if (!isValidExecuteCommandMode(dto)) {
+      throw new BadRequestException(EXECUTE_COMMAND_MODE_MESSAGE);
     }
 
     try {
       // If a structured command is provided, execute directly
-      if (dto.module && dto.action) {
+      if (hasNonEmptyExecuteText(dto.module) && hasNonEmptyExecuteText(dto.action)) {
         const connectorCommand: ConnectorCommand = {
-          module: dto.module,
-          action: dto.action,
+          module: dto.module!,
+          action: dto.action!,
           parameters: dto.parameters ?? {},
           businessId: dto.businessId,
           userId: actorId,
@@ -2593,7 +2635,7 @@ export class KeyCortexController {
         viewerReadsRevenue(member),
       );
 
-      const parsedIntents = await this.command.parseIntent(dto.command, {
+      const parsedIntents = await this.command.parseIntent(dto.command!, {
         businessId: dto.businessId,
         userId: actorId,
         capabilities,
