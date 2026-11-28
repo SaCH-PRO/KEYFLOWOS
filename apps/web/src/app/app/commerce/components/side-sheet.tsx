@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -14,6 +14,11 @@ interface SideSheetProps {
   children: ReactNode;
   footer?: ReactNode;
   width?: "sm" | "md" | "lg";
+  /**
+   * P257: while set, the sheet cannot be closed by its own controls: the header Close is disabled and says so
+   * (disabled, aria-disabled), and Escape and the overlay do nothing. For a sheet whose save is in flight. Default false.
+   */
+  closeDisabled?: boolean;
 }
 
 const WIDTH_MAP = {
@@ -31,21 +36,34 @@ export function SideSheet({
   children,
   footer,
   width = "lg",
+  closeDisabled = false,
 }: SideSheetProps) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = `sidesheet-title-${title.replace(/\s+/g, "-").toLowerCase()}`;
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose],
-  );
+  // P257 R1-1: onClose and closeDisabled are read through refs, so the focus and keydown effect below depends on
+  // `open` only. A caller passing a new onClose each render (an inline arrow; the expense sheet re-rendering as it is
+  // typed in) or toggling closeDisabled re-ran that effect on every render: its cleanup focused the opener and the
+  // rerun focused the panel, so focus left the field after every keystroke.
+  const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+    closeDisabledRef.current = closeDisabled;
+  });
+  // P257: every way the sheet closes itself goes through this, so closeDisabled holds them all; it calls the latest
+  // onClose.
+  const close = useCallback(() => {
+    if (!closeDisabledRef.current) onCloseRef.current();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
     previousFocusRef.current = document.activeElement as HTMLElement;
     document.addEventListener("keydown", handleKeyDown);
     requestAnimationFrame(() => panelRef.current?.focus());
@@ -53,7 +71,7 @@ export function SideSheet({
       document.removeEventListener("keydown", handleKeyDown);
       previousFocusRef.current?.focus();
     };
-  }, [open, handleKeyDown]);
+  }, [open, close]);
 
   return (
     <AnimatePresence>
@@ -64,7 +82,7 @@ export function SideSheet({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
           className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)] flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)]"}
-          onClick={(e) => e.target === e.currentTarget && onClose()}
+          onClick={(e) => e.target === e.currentTarget && close()}
         >
           {/* MOUNT-QUOTES: the two branches are keyed. useIsMobile() starts false, so a sheet
               that mounts when it opens shows the desktop panel for a frame and then the bottom
@@ -105,7 +123,9 @@ export function SideSheet({
                     </div>
                   </div>
                   <button
-                    onClick={onClose}
+                    onClick={close}
+                    disabled={closeDisabled}
+                    aria-disabled={closeDisabled || undefined}
                     aria-label="Close"
                     className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-xl transition-colors"
                   >
@@ -151,7 +171,9 @@ export function SideSheet({
                     </div>
                   </div>
                   <button
-                    onClick={onClose}
+                    onClick={close}
+                    disabled={closeDisabled}
+                    aria-disabled={closeDisabled || undefined}
                     aria-label="Close"
                     className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-xl transition-colors"
                   >
