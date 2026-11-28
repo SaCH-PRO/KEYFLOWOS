@@ -1762,7 +1762,10 @@
       "packet": "V1-92 (P242 FU-PUSH-MULTI-BUSINESS, D-319 / Q45)",
       "prefix": "v92s_",
       "owner": "apps/server/test/reminder-honesty.integration.test.ts",
-      "packet": "V1-92 (FU-REMINDER-HONESTY)"
+      "packet": "V1-92 (FU-REMINDER-HONESTY)",
+      "prefix": "v92t_",
+      "owner": "apps/server/test/invoice-list-remaining.integration.test.ts",
+      "packet": "V1-92 (FU-LIST-CREDIT-AWARE-REMAINING, Journey H)"
     }
   ],
   "pendingRenames": [],
