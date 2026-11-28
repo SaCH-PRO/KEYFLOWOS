@@ -10,10 +10,11 @@ points at an authoritative source or is derived from one.
 2. `docs/reconstruction/handoff/V1-STATUS.md`: what is done, what is ready (generated).
 3. The one procedure file below that matches what you are about to do.
 
-Then run `git fetch origin main && node scripts/agent-memory/status.mjs --check`. It compares packet status, not
-the sha, so it stays "current" across merges that change no packet's status. If it says STALE, packets have landed
-since the status was generated: regenerate it, and expect the state file to be behind too. "Current" says nothing
-about the state file: that is hand-written, carries its own timestamp, and is only as fresh as that.
+Then run `git fetch origin main && node scripts/agent-memory/status.mjs --check`. It compares packet status and
+stall state, not the sha, so it stays "current" across merges that change neither packet status nor stall state. If it
+says STALE, packets have landed or crossed the stall budget since the status was generated: regenerate it, and expect
+the state file to be behind too. "Current" says nothing about the state file: that is hand-written, carries its own
+timestamp, and is only as fresh as that.
 
 | Layer | What it is here | Authoritative? |
 |---|---|---|
