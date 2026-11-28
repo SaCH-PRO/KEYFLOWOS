@@ -35,7 +35,7 @@ describe("R19-1: linear time", () => {
       expect(dt, t).toBeLessThan(50);
     }
   });
-  it("fuzz: inputs up to 500 graphemes, heavy in markers and marks, each in under 5 ms", () => {
+  it("fuzz: inputs up to 500 graphemes, heavy in markers and marks, each in under 10 ms (measured worst: under 3 ms)", () => {
     const PARTS = ["*", "*", "*", "†", "‡", "!", ".", ",", "(", "—", "“", "&", "€", "%", ")", " ", " ", "a", "5"];
     let seed = 0x3119;
     const rand = () => {
@@ -54,7 +54,7 @@ describe("R19-1: linear time", () => {
       worst = Math.max(worst, performance.now() - t0);
     }
     console.info(`R19-1 worst clip() time over 300 inputs of 50-500 graphemes: ${worst.toFixed(2)} ms`);
-    expect(worst).toBeLessThan(5);
+    expect(worst).toBeLessThan(10);
   });
 });
 

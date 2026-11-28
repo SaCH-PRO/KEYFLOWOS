@@ -375,7 +375,12 @@ export function clipKeepViolation(text: string, max: number, kept: string): stri
  * a mark that closes or means something, or sentence punctuation ("50%*", "Free*", "( sale )*", "Free!*"), is kept
  * whole. Returns why not, or null.
  */
-const CONDITION_HOLDERS = /[\p{L}\p{N}%+)\]}”’»"'.,;:!?…。、，！？]/u;
+const CONDITION_HOLDERS = /[\p{L}\p{N}%+)\]}”’»"']/u;
+/**
+ * r19 (R19-2): sentence punctuation holds a marker only when attached: its run of sentence punctuation (terminals and
+ * commas; never ";", ":", "…", an opener or a dash) reaches back to a letter, a digit or a kept mark.
+ */
+const SENTENCE_HOLDERS = [".", "!", "?", "。", "！", "？", ",", "，", "、"];
 export function clipConditionsTokens(text: string, max: number, kept: string): { token: string; end: number }[] {
   if (!text.startsWith(kept) || max <= 3) return [];
   const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -392,7 +397,13 @@ export function clipConditionsTokens(text: string, max: number, kept: string): {
     const before = text.slice(0, at);
     const currency = CURRENCY.includes(held[1]) && /[0-9]\s?$/u.test(before);
     const closing = (held[1] === "“" && opensLow(before, "“", "„")) || (held[1] === "‘" && opensLow(before, "‘", "‚"));
-    if (CONDITION_HOLDERS.test(held[1]) || currency || closing) out.push({ token: m[0], end });
+    let sentence = false;
+    if (SENTENCE_HOLDERS.includes(held[1])) {
+      const run = /[.!?。！？,，、]+$/u.exec(before + held[1]);
+      const prior = (before + held[1]).slice(0, (before + held[1]).length - (run?.[0].length ?? 0));
+      sentence = CONDITION_HOLDERS.test(prior.slice(-1));
+    }
+    if (CONDITION_HOLDERS.test(held[1]) || currency || closing || sentence) out.push({ token: m[0], end });
   }
   return out;
 }
