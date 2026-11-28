@@ -16,6 +16,13 @@
  * part), otherwise the date already in the form is kept, and the form's validity check is that same pattern; R3-2 a
  * hint beside the submit button names the empty required fields (the button's accessible description), and the
  * form says once what the star means.
+ *
+ * R4 (real-Chromium review of R3, 2 MINORs): R4-1 a Save blocked by an empty required field stays focusable
+ * (aria-disabled, not disabled), so its description ("Still needed: ...") is read on focus, and the hint is a polite
+ * status, so its changes are said; activating it sends nothing (submit() is the guard). R4-2 a receipt's impossible
+ * calendar date ("2026-02-30", "2026-13-01") is not taken, and does not count as a date.
+ * The R2 and R3 checks that said toBeDisabled / toBeEnabled for a missing field now say blocked / not blocked
+ * (aria-disabled): the button is no longer natively disabled for a missing field (R4-1).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -82,6 +89,8 @@ const sheet = (editing: Expense | null = null, links: Partial<typeof LINKS> = {}
 const EDITING = { id: "exp_A1", description: "Printer toner", amount: 100, currency: "TTD", date: "2026-10-15T00:00:00.000Z", vendor: "Office Depot", paymentMethod: "cash", tags: [], isRecurring: false, status: "PAID", categoryId: "cat_1", createdAt: "2026-10-15T00:00:00.000Z", updatedAt: "2026-10-15T00:00:00.000Z" } as unknown as Expense;
 /** A field's accessible name, exactly (no "*"), found by its role. */
 const named = (role: string, name: string) => screen.getByRole(role, { name });
+/** R4-1: a Save blocked by a missing required field is aria-disabled, and still focusable (not natively disabled). */
+const isBlocked = (el: HTMLElement) => el.getAttribute("aria-disabled") === "true" && !(el as HTMLButtonElement).disabled;
 
 describe("P267: the expense sheet's fields are named by their labels", () => {
   const FIELDS: Array<[string, RegExp, string, string]> = [
@@ -239,7 +248,7 @@ describe("P267 R2-1: Date is validated like Description and Amount (it is marked
       fill();
       fireEvent.change(date(), { target: { value: "" } });
       const submit = screen.getByRole("button", { name: button });
-      expect(submit, "an empty date can still be submitted").toBeDisabled();
+      expect(isBlocked(submit), "an empty date can still be submitted").toBe(true);
       fireEvent.click(submit);
       await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
       expect(saves(), "an empty date was sent (the server saves it as today)").not.toHaveBeenCalled();
@@ -248,20 +257,20 @@ describe("P267 R2-1: Date is validated like Description and Amount (it is marked
   it("edit: clearing the date disables Update Expense", () => {
     sheet(EDITING);
     fireEvent.change(date(), { target: { value: "" } });
-    expect(screen.getByRole("button", { name: "Update Expense" })).toBeDisabled();
+    expect(isBlocked(screen.getByRole("button", { name: "Update Expense" }))).toBe(true);
   });
   it("control: with a date (the sheet's default, today) and no Vendor or Category, the button is enabled", () => {
     sheet();
     fill();
     expect(date().value, "the sheet no longer defaults the date").not.toBe("");
     expect(named("textbox", "Vendor")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Add Expense" })).toBeEnabled();
+    expect(isBlocked(screen.getByRole("button", { name: "Add Expense" }))).toBe(false);
   });
   it("control: Description and Amount still block on their own", () => {
     sheet();
-    expect(screen.getByRole("button", { name: "Add Expense" }), "the button is enabled with nothing filled in").toBeDisabled();
+    expect(isBlocked(screen.getByRole("button", { name: "Add Expense" })), "the button is enabled with nothing filled in").toBe(true);
     fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
-    expect(screen.getByRole("button", { name: "Add Expense" })).toBeDisabled();
+    expect(isBlocked(screen.getByRole("button", { name: "Add Expense" }))).toBe(true);
   });
 });
 
@@ -285,14 +294,33 @@ describe("P267 R3-1: a receipt's date is taken only when it is a plain date", ()
     expect(before, "the sheet no longer defaults the date").toMatch(/^\d{4}-\d{2}-\d{2}$/);
     await extractWith("12/03/2026");
     expect(date().value, "the receipt's unreadable date replaced the form's").toBe(before);
-    expect(screen.getByRole("button", { name: "Add Expense" })).toBeEnabled();
+    expect(isBlocked(screen.getByRole("button", { name: "Add Expense" }))).toBe(false);
   });
+  for (const impossible of ["2026-02-30", "2026-13-01"]) {
+    it(`R4-2: an impossible calendar date ("${impossible}") keeps the form's date`, async () => {
+      open();
+      const before = date().value;
+      await extractWith(impossible);
+      expect(date().value, "an impossible date replaced the form's").toBe(before);
+      expect(isBlocked(screen.getByRole("button", { name: "Add Expense" }))).toBe(false);
+    });
+    it(`R4-2: "${impossible}" with Date cleared: Date stays empty, Save stays blocked, and nothing is sent`, async () => {
+      open();
+      fireEvent.change(named("textbox", "Description"), { target: { value: "Toner" } });
+      fireEvent.change(date(), { target: { value: "" } });
+      await extractWith(impossible);
+      expect(isBlocked(screen.getByRole("button", { name: "Add Expense" })), "an impossible date counted as a date").toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "Add Expense" }));
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      expect(client.createExpense, "an impossible date was sent").not.toHaveBeenCalled();
+    });
+  }
   it("a non-ISO date when Date was cleared: Date stays empty and the button stays disabled (no hidden value passes the check)", async () => {
     open();
     fireEvent.change(date(), { target: { value: "" } });
     await extractWith("12/03/2026");
     expect(date().value).toBe("");
-    expect(screen.getByRole("button", { name: "Add Expense" }), "an unreadable date counted as filled in").toBeDisabled();
+    expect(isBlocked(screen.getByRole("button", { name: "Add Expense" })), "an unreadable date counted as filled in").toBe(true);
   });
 });
 
@@ -307,7 +335,7 @@ describe("P267 R3-2: why the button is disabled is said beside it", () => {
     fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
     fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: "" } });
-    expect(button()).toBeDisabled();
+    expect(isBlocked(button())).toBe(true);
     expect(description(), "the button does not say what is missing").toMatch(/Date/);
     expect(description()).not.toMatch(/Description|Amount/);
   });
@@ -321,11 +349,58 @@ describe("P267 R3-2: why the button is disabled is said beside it", () => {
     sheet();
     fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
     fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
-    expect(button()).toBeEnabled();
+    expect(isBlocked(button())).toBe(false);
     expect(description()).not.toMatch(/Description|Amount|Date/);
   });
   it('the form says once what the star means ("* = required")', () => {
     sheet();
     expect(screen.getAllByText(/\* = required/)).toHaveLength(1);
+  });
+});
+
+describe("P267 R4-1: a blocked Save stays focusable, says why, and sends nothing", () => {
+  const save = () => screen.getByRole("button", { name: "Add Expense" });
+  const fill = () => {
+    fireEvent.change(named("textbox", "Description"), { target: { value: "Printer toner" } });
+    fireEvent.change(named("spinbutton", "Amount (TTD)"), { target: { value: "100" } });
+  };
+  it("with Date empty, Save takes focus and its description (read on focus) names Date", () => {
+    sheet();
+    fill();
+    fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: "" } });
+    expect(save().hasAttribute("disabled"), "a natively disabled Save is skipped by Tab and its description never heard").toBe(false);
+    expect(save().getAttribute("aria-disabled")).toBe("true");
+    save().focus();
+    expect(document.activeElement, "Save cannot take focus").toBe(save());
+    const ids = (save().getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+    expect(ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ")).toMatch(/Date/);
+  });
+  it("activating the blocked Save sends nothing (submit() refuses; a native button turns Enter and Space into this click)", async () => {
+    sheet();
+    fill();
+    fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: "" } });
+    save().focus();
+    fireEvent.click(save());
+    fireEvent.click(save());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(client.createExpense, "a blocked Save sent the expense").not.toHaveBeenCalled();
+  });
+  it("the hint is a polite status (its changes are announced), and it keeps its visible text", () => {
+    sheet();
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live") ?? "polite").toBe("polite");
+    expect(status.textContent).toMatch(/Still needed: Description, Amount/);
+    fill();
+    expect(screen.getByRole("status").textContent, "the hint still names filled fields").not.toMatch(/Description|Amount|Date/);
+  });
+  it("filling the last field removes the hint, unblocks Save, and Save sends", async () => {
+    client.createExpense.mockResolvedValue(ok({ id: "exp_new" }));
+    sheet();
+    fill();
+    expect(isBlocked(save())).toBe(false);
+    expect(save().getAttribute("aria-describedby"), "the button still points at a hint").toBeNull();
+    fireEvent.click(save());
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(client.createExpense).toHaveBeenCalledTimes(1);
   });
 });
