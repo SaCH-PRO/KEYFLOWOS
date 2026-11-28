@@ -25,14 +25,14 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@types/pg": "^8.20.0",
+    "@types/pg": "^8.23.1",
     "dotenv": "^16.5.0",
     "prisma": "^6.19.0",
     "vitest": "^2.1.1"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.3.0",
+    "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^6.19.0",
-    "pg": "^8.18.0"
+    "pg": "^8.23.1"
   }
 }
