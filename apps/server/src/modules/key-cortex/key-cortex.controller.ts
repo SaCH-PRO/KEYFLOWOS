@@ -1290,7 +1290,7 @@ function isValidExecuteCommandMode(dto: {
   const hasModule = hasNonEmptyExecuteText(dto.module);
   const hasAction = hasNonEmptyExecuteText(dto.action);
   const isNatural = hasCommand && dto.module === undefined && dto.action === undefined;
-  const isStructured = !hasCommand && hasModule && hasAction;
+  const isStructured = (dto.command === undefined || dto.command === '') && hasModule && hasAction;
   return isNatural !== isStructured;
 }
 
