@@ -165,19 +165,34 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
     expect(mod.v1ToolModuleFamily(' PROJECTS_LIST ')).toBe('projects');
   });
 
-  it('R1 security hardening: AiOversightService.evaluate & PlanExecutorService.evaluateStep refuse disabled tools with zero approval creation', async () => {
+  it('R1/R2 security hardening: AiOversightService.createApprovalItem, evaluateAutoApproval, and PlanExecutorService.evaluateStep refuse disabled tools with zero approval creation', async () => {
+    const { ForbiddenException } = await import('@nestjs/common');
     const { AiOversightService } = await import('./ai-oversight.service');
+    const createApproval = vi.fn();
+    const routeAndNotify = vi.fn();
     const oversight = Object.assign(Object.create(AiOversightService.prototype), {
+      prisma: { client: { aiApprovalItem: { create: createApproval } } },
       getAutonomySettings: vi.fn(),
+      routeAndNotify,
     }) as any;
 
     for (const disabled of ['execute_custom_logic', 'EXECUTE_CUSTOM_LOGIC', 'payroll_mark_paid', 'cortex.send_email']) {
-      const decision = await oversight.evaluate(BIZ, disabled);
-      expect(decision.allowed, disabled).toBe(false);
-      expect(decision.requiresFormalApproval, disabled).toBe(false);
-      expect(decision.requiresAdminApproval, disabled).toBe(false);
-      expect(decision.reason, disabled).toBe('not available in this version');
+      await expect(
+        oversight.createApprovalItem(BIZ, { toolName: disabled, title: 'Disabled tool' }),
+        `createApprovalItem(${disabled})`,
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        oversight.createApprovalItem(BIZ, { toolName: disabled, title: 'Disabled tool' }),
+        `createApprovalItem(${disabled}) msg`,
+      ).rejects.toThrow('not available in this version');
+
+      const autoDecision = await oversight.evaluateAutoApproval(BIZ, disabled);
+      expect(autoDecision.allowed, `evaluateAutoApproval(${disabled})`).toBe(false);
+      expect(autoDecision.autoApproved, `evaluateAutoApproval(${disabled})`).toBe(false);
+      expect(autoDecision.reason, `evaluateAutoApproval(${disabled})`).toBe('not available in this version');
     }
+    expect(createApproval).not.toHaveBeenCalled();
+    expect(routeAndNotify).not.toHaveBeenCalled();
     expect(oversight.getAutonomySettings).not.toHaveBeenCalled();
 
     const { PlanExecutorService } = await import('./plan-executor.service');
@@ -320,5 +335,199 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
         surface: 'PLAN_QUEUE',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('R2 security hardening (MAJOR-1): KeyActionProposalService.create/execute and KeyCortexActionExecutorPlugin.execute refuse disabled tools with zero DB writes', async () => {
+    const { ForbiddenException } = await import('@nestjs/common');
+    const { KeyActionProposalService } = await import('../key-autonomy/key-action-proposal.service');
+    const proposalCreate = vi.fn();
+    const emitLifecycle = vi.fn();
+    const proposalUpdate = vi.fn();
+    const proposalSvc = Object.assign(Object.create(KeyActionProposalService.prototype), {
+      prisma: {
+        client: {
+          keyActionProposal: { create: proposalCreate, update: proposalUpdate, updateMany: proposalUpdate },
+        },
+      },
+      policy: {
+        getPolicy: vi.fn(),
+        riskLevel: vi.fn(() => 'MEDIUM'),
+        requiresApproval: vi.fn(() => true),
+        isExecutable: vi.fn(() => true),
+      },
+      boundary: { sealProposal: vi.fn(() => null), governs: vi.fn(() => false) },
+      emitLifecycleEvent: emitLifecycle,
+      autonomyOrchestrator: { evaluateAction: vi.fn() },
+    }) as any;
+
+    const payloads = [
+      { sourceType: 'MANUAL', actionType: 'EXECUTE_TOOL', title: 't', payload: { toolName: 'execute_custom_logic' } },
+      { sourceType: 'MANUAL', actionType: 'EXECUTE_TOOL', title: 't', toolName: ' PAYROLL_MARK_PAID ', payload: {} },
+      { sourceType: 'MANUAL', actionType: 'EXECUTE_TOOL', title: 't', payload: { toolName: 'cortex.execute_tool', toolParams: { toolName: 'cortex.send_email' } } },
+      { sourceType: 'MANUAL', actionType: 'SEND_EMAIL', title: 't', payload: {} },
+      { sourceType: 'MANUAL', actionType: 'EXECUTE_TOOL', title: 't', inputPayload: { toolName: 'payroll_approve_run' } },
+    ];
+    for (const input of payloads) {
+      await expect(proposalSvc.create(BIZ, input, OWNER)).rejects.toThrow(ForbiddenException);
+      await expect(proposalSvc.create(BIZ, input, OWNER)).rejects.toThrow('not available in this version');
+    }
+    expect(proposalCreate).not.toHaveBeenCalled();
+    expect(emitLifecycle).not.toHaveBeenCalled();
+
+    // Pre-existing APPROVED proposal in DB must be refused BEFORE claiming EXECUTING
+    proposalSvc.get = vi.fn(async () => ({
+      id: 'prop_1',
+      businessId: BIZ,
+      status: 'APPROVED',
+      actionType: 'EXECUTE_TOOL',
+      riskLevel: 'LOW',
+      toolName: null,
+      payload: { toolName: 'execute_custom_logic' },
+    }));
+    await expect(proposalSvc.execute(BIZ, 'prop_1', OWNER, true)).rejects.toThrow('not available in this version');
+    expect(proposalUpdate).not.toHaveBeenCalled();
+
+    // KeyCortexActionExecutorPlugin refuses before runAuthority
+    const { KeyCortexActionExecutorPlugin } = await import('../key-cortex/key-cortex-action-executor.plugin');
+    const runAuthority = vi.fn();
+    const plugin = Object.assign(Object.create(KeyCortexActionExecutorPlugin.prototype), {
+      runAuthority,
+    }) as any;
+    const pluginRes = await plugin.execute(
+      BIZ,
+      { id: 'prop_1', actionType: 'EXECUTE_TOOL', payload: { toolName: 'execute_custom_logic', inputPayload: {} } },
+      OWNER,
+    );
+    expect(pluginRes).toEqual({ success: false, error: 'not available in this version' });
+    expect(runAuthority).not.toHaveBeenCalled();
+  });
+
+  it('R2 security hardening (MAJOR-2): nested cortex.execute_tool payloads are refused before safety, idempotency, or approval in ToolRegistry, ToolLoop, and ActionsService', async () => {
+    const { KeyCortexToolRegistryService } = await import('../key-cortex/key-cortex-tool-registry.service');
+    const safetyCheck = vi.fn();
+    const idemCheck = vi.fn();
+    const proposeForApproval = vi.fn();
+    const registry = Object.assign(Object.create(KeyCortexToolRegistryService.prototype), {
+      logger: quiet,
+      safety: { check: safetyCheck },
+      idempotency: { check: idemCheck },
+      proposeForApproval,
+    }) as any;
+    const regRes = await registry.execute(
+      'cortex.execute_tool',
+      { businessId: BIZ, userId: OWNER, autonomyLevel: 1 },
+      { toolName: ' EXECUTE_CUSTOM_LOGIC ', toolParams: {} },
+    );
+    expect(regRes).toMatchObject({ success: false, error: 'not available in this version' });
+    expect(safetyCheck).not.toHaveBeenCalled();
+    expect(idemCheck).not.toHaveBeenCalled();
+    expect(proposeForApproval).not.toHaveBeenCalled();
+
+    const { KeyCortexToolLoopService } = await import('../key-cortex/key-cortex-tool-loop.service');
+    const loopSafety = vi.fn();
+    const loopAutonomy = vi.fn();
+    const loopExec = vi.fn();
+    const loop = Object.assign(Object.create(KeyCortexToolLoopService.prototype), {
+      logger: quiet,
+      modelGateway: { complete: vi.fn(async () => ({ content: 'refused' })) },
+      toolRegistry: { getTool: () => ({ name: 'cortex.execute_tool', riskTier: 2 }), execute: loopExec },
+      safety: { check: loopSafety, recordExecution: vi.fn() },
+      autonomyOrchestrator: { evaluate: loopAutonomy },
+      autonomyLevelService: { resolve: vi.fn(async () => ({ level: 1 })) },
+    }) as any;
+    const loopOut = await loop.handleToolCalls(
+      {
+        toolCalls: [
+          { id: 'tc_nested', function: { name: 'cortex.execute_tool', arguments: JSON.stringify({ toolName: 'payroll_mark_paid' }) } },
+        ],
+      },
+      [{ role: 'user', content: 'pay' }],
+      { businessId: BIZ, userId: OWNER, message: 'pay' },
+      { provider: 'openai', model: 'gpt-4o-mini', tier: 1, reason: 'test' },
+      {},
+      'general',
+    );
+    expect(loopOut?.actions).toHaveLength(1);
+    expect(loopOut!.actions[0]).toMatchObject({ status: 'error', error: 'not available in this version', requiresApproval: false });
+    expect(loopSafety).not.toHaveBeenCalled();
+    expect(loopAutonomy).not.toHaveBeenCalled();
+    expect(loopExec).not.toHaveBeenCalled();
+
+    // Double-nested EXECUTE_TOOL -> cortex.execute_tool -> execute_custom_logic
+    const { KeyCortexActionsService } = await import('../key-cortex/key-cortex-actions.service');
+    const actionsCreateProposal = vi.fn();
+    const actionsSvc = Object.assign(Object.create(KeyCortexActionsService.prototype), {
+      logger: quiet,
+      proposalService: { create: actionsCreateProposal },
+      evaluateAutonomy: vi.fn(),
+      trackActionExecution: vi.fn(),
+      emitActionEvent: vi.fn(),
+    }) as any;
+    const doubleNested = await actionsSvc.executeActions(
+      [
+        {
+          actionType: 'EXECUTE_TOOL',
+          status: 'pending',
+          description: 'double nested',
+          result: { toolName: 'cortex.execute_tool', toolParams: { toolName: 'execute_custom_logic' } },
+        },
+      ],
+      { id: 'sess_2', businessId: BIZ, userId: OWNER },
+    );
+    expect(doubleNested[0]).toMatchObject({ status: 'blocked', requiresApproval: false, error: 'not available in this version' });
+    expect(actionsCreateProposal).not.toHaveBeenCalled();
+  });
+
+  it('R2 security hardening (MAJOR-3 & MINOR-1): plan-step-authority, QueueService.processPlanStep, GraphActionsController, and memberToolCallRefusals without userId refuse disabled tools cleanly', async () => {
+    const { ForbiddenException } = await import('@nestjs/common');
+    const { noMemberToolRefusal, memberToolRunAuthority, planStepRunAuthority } = await import('./plan-step-authority');
+    for (const tool of ['execute_custom_logic', 'payroll_set_rate', 'payroll_generate_run', 'payroll_approve_run', 'payroll_mark_paid']) {
+      expect(noMemberToolRefusal(tool), `noMemberToolRefusal(${tool})`).toBe('not available in this version');
+      const mRun = await memberToolRunAuthority({ client: {} } as any, BIZ, OWNER, tool);
+      expect(mRun.refusal, `memberToolRunAuthority(${tool})`).toBe('not available in this version');
+      const pRun = await planStepRunAuthority({ client: {} } as any, BIZ, 'plan_1', tool);
+      expect(pRun.refusal, `planStepRunAuthority(${tool})`).toBe('not available in this version');
+    }
+
+    // QueueService.processPlanStep marks step failed (never awaiting_approval)
+    const { QueueService } = await import('./queue.service');
+    const stepUpdate = vi.fn(async () => ({}));
+    const stateTransition = vi.fn();
+    const queueSvc = Object.assign(Object.create(QueueService.prototype), {
+      logger: quiet,
+      prisma: { client: { aiPlanStep: { update: stepUpdate }, aiPlan: { findFirst: vi.fn() } } },
+      events: { emit: vi.fn() },
+      governance: { evaluateAutoApproval: vi.fn() },
+      stateMachine: { transition: stateTransition },
+      actionDispatcher: { dispatch: vi.fn() },
+    }) as any;
+    const qRes = await (queueSvc as any).processPlanStep({
+      data: { businessId: BIZ, planId: 'plan_1', stepId: 'step_1', toolName: 'payroll_mark_paid', args: {}, idempotencyKey: 'k1' },
+    });
+    expect(qRes).toEqual({ refused: 'not available in this version' });
+    expect(stepUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'step_1' },
+      data: expect.objectContaining({ status: 'failed', errorMessage: 'Refused: not available in this version' }),
+    }));
+    expect(stateTransition).not.toHaveBeenCalled();
+
+    // assertMayRunGraphAction refuses disabled tools with ForbiddenException('not available in this version')
+    const { assertMayRunGraphAction } = await import('./graph-actions.controller');
+    await expect(
+      assertMayRunGraphAction({ client: {} } as any, BIZ, { id: OWNER, role: 'USER' }, 'payroll_approve_run', OWNER, { flowDispatch: true }),
+    ).rejects.toThrow(ForbiddenException);
+    await expect(
+      assertMayRunGraphAction({ client: {} } as any, BIZ, { id: OWNER, role: 'USER' }, 'execute_custom_logic', OWNER, { flowDispatch: true }),
+    ).rejects.toThrow('not available in this version');
+
+    // MINOR-1: memberToolCallRefusals checks v1 refusal before missing userId D-104 message
+    const { KeyCortexQueryPipelineService } = await import('../key-cortex/key-cortex-query-pipeline.service');
+    const qp = Object.assign(Object.create(KeyCortexQueryPipelineService.prototype), { prisma: { client: {} } }) as any;
+    const refusals: Map<string, string> = await qp.memberToolCallRefusals(
+      { businessId: BIZ, message: 'hi' },
+      ['execute_custom_logic', 'crm_list_contacts'],
+    );
+    expect(refusals.get('execute_custom_logic')).toBe('not available in this version');
+    expect(refusals.get('crm_list_contacts')).toMatch(/Not a member of this business/);
   });
 });
