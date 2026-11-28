@@ -254,11 +254,138 @@ describe('RR-GATE-LEDGER-MONOTONIC: monotonic comparison across git commits', ()
     assert.notEqual(badFlag.status, 0);
   });
 
-  it('wires the gating job "Gate ledgers (monotonic)" into ci-cd.yml and ci-verdict', () => {
+  it('wires the gating job "Gate ledgers (monotonic)" into ci-cd.yml and ci-verdict with fetch-depth 0 and event base SHAs', () => {
     const yml = fs.readFileSync(WORKFLOW, 'utf8');
     assert.match(yml, /name:\s*Gate ledgers \(monotonic\)/);
+    assert.match(yml, /fetch-depth:\s*0/);
+    assert.match(yml, /GITHUB_PR_BASE_SHA:\s*\$\{\{\s*github\.event\.pull_request\.base\.sha\s*\}\}/);
+    assert.match(yml, /GITHUB_MERGE_GROUP_BASE_SHA:\s*\$\{\{\s*github\.event\.merge_group\.base_sha\s*\}\}/);
+    assert.match(yml, /GITHUB_BEFORE_SHA:\s*\$\{\{\s*github\.event\.before\s*\}\}/);
     assert.match(yml, /scripts\/ci\/gate-ledger-monotonic\.mjs/);
     assert.match(yml, /scripts\/ci\/gate-ledger-monotonic\.spec\.mjs/);
     assert.match(yml, /needs:\s*\[[^\]]*gate-ledgers[^\]]*\]/);
+  });
+
+  it('R1: fails closed when base has a parse or anti-vacuity error instead of treating ledgers as "new"', async () => {
+    const mod = await import('./gate-ledger-monotonic.mjs');
+    // Unterminated / unparseable constant at base must NOT allow growth at head as "new"
+    const brokenBase = initFixtureRepo(
+      {
+        raw: {
+          'apps/server/src/core/prisma/tenant-model-list.spec.ts':
+            'const ACKNOWLEDGED_UNSCOPED = [ /* unterminated\nconst NEVER_SCOPE = [];\n',
+        },
+      },
+      { acknowledgedUnscoped: ['SmuggledModel'] },
+    );
+    try {
+      const report = mod.compareRefs({ cwd: brokenBase.dir, baseRef: brokenBase.baseSha, headRef: brokenBase.headSha });
+      assert.equal(report.ok, false, `expected base parse error to fail closed, got: ${JSON.stringify(report)}`);
+      assert.ok(report.errors.some((e) => e.includes('base') && e.includes('tenant.acknowledged_unscoped')));
+      const res = runCli(brokenBase.dir, ['--base', brokenBase.baseSha, '--head', brokenBase.headSha]);
+      assert.equal(res.status, 1);
+    } finally {
+      fs.rmSync(brokenBase.dir, { recursive: true, force: true });
+    }
+
+    // Genuine constant not yet declared in base file (e.g., new ledger registered later) is still "new"
+    const absentConst = initFixtureRepo(
+      {
+        raw: {
+          'apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts': '// before FLOOR_PCT existed\n',
+        },
+      },
+      { floorPct: 39 },
+    );
+    try {
+      const report = mod.compareRefs({ cwd: absentConst.dir, baseRef: absentConst.baseSha, headRef: absentConst.headSha });
+      assert.equal(report.ok, true, `expected genuinely absent constant to be new, got: ${JSON.stringify(report)}`);
+      assert.ok(report.added.some((a) => a.name === 'ai.handler_coverage_floor_pct' && a.status === 'new'));
+    } finally {
+      fs.rmSync(absentConst.dir, { recursive: true, force: true });
+    }
+
+    // Direct compare() with base parse errors fails closed
+    const synthetic = mod.compare(
+      { results: [], absent: [], errors: ['tenant.acknowledged_unscoped: parse failure'] },
+      { results: [{ name: 'tenant.acknowledged_unscoped', file: 'x', direction: 'shrink', value: 99 }], absent: [], errors: [] },
+    );
+    assert.equal(synthetic.ok, false);
+    assert.ok(synthetic.errors.length > 0);
+  });
+
+  it('R1: resolveBaseRef covers all CI events, fails closed on missing PR/merge_group SHAs, and never self-compares HEAD===base', async () => {
+    const mod = await import('./gate-ledger-monotonic.mjs');
+    const ZERO = '0000000000000000000000000000000000000000';
+    const { dir, baseSha, headSha } = initFixtureRepo({ knownDead: 10 }, { knownDead: 9 });
+    try {
+      // pull_request / pull_request_target / merge_group return explicit base SHA
+      assert.equal(mod.resolveBaseRef({ cwd: dir, eventName: 'pull_request', prBaseSha: baseSha }), baseSha);
+      assert.equal(mod.resolveBaseRef({ cwd: dir, eventName: 'pull_request_target', prBaseSha: baseSha }), baseSha);
+      assert.equal(mod.resolveBaseRef({ cwd: dir, eventName: 'merge_group', mergeGroupBaseSha: baseSha }), baseSha);
+      assert.equal(mod.resolveBaseRef({ cwd: dir, eventName: 'push', beforeSha: baseSha }), baseSha);
+
+      // Missing or ZERO_SHA on PR / pull_request_target / merge_group MUST fail closed (throw)
+      assert.throws(() => mod.resolveBaseRef({ cwd: dir, eventName: 'pull_request', prBaseSha: '' }));
+      assert.throws(() => mod.resolveBaseRef({ cwd: dir, eventName: 'pull_request', prBaseSha: ZERO }));
+      assert.throws(() => mod.resolveBaseRef({ cwd: dir, eventName: 'pull_request_target', prBaseSha: '' }));
+      assert.throws(() => mod.resolveBaseRef({ cwd: dir, eventName: 'merge_group', mergeGroupBaseSha: '' }));
+      assert.throws(() => mod.resolveBaseRef({ cwd: dir, eventName: 'merge_group', mergeGroupBaseSha: ZERO }));
+
+      // Create origin/main pointing AT headSha: fallback must NOT self-compare headSha===headSha, must step to baseSha (HEAD~1)
+      git(dir, ['update-ref', 'refs/remotes/origin/main', headSha]);
+      const resolvedOnMain = mod.resolveBaseRef({ cwd: dir, eventName: 'push', beforeSha: ZERO, headRef: 'HEAD' });
+      assert.equal(resolvedOnMain, baseSha);
+
+      // When origin/main is behind HEAD on a feature branch, fallback resolves merge-base (baseSha)
+      git(dir, ['update-ref', 'refs/remotes/origin/main', baseSha]);
+      const resolvedOnBranch = mod.resolveBaseRef({ cwd: dir, eventName: 'push', beforeSha: ZERO, headRef: 'HEAD' });
+      assert.equal(resolvedOnBranch, baseSha);
+
+      // Default CLI invocation without --base using CI env vars works end-to-end
+      const envRes = spawnSync(process.execPath, [CLI], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GITHUB_EVENT_NAME: 'pull_request',
+          GITHUB_PR_BASE_SHA: baseSha,
+        },
+      });
+      assert.equal(envRes.status, 0, envRes.stderr);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('R1: assertSafeGitRef rejects leading-whitespace option injection and colon/control chars; CLI runs through symlinks', async () => {
+    const mod = await import('./gate-ledger-monotonic.mjs');
+    for (const bad of [' --independent', ' --help', '-n', 'HEAD:file', 'HEAD\nmain', '   ']) {
+      assert.throws(
+        () => mod.resolveBaseRef({ cwd: ROOT, eventName: '', headRef: bad }),
+        `expected ref "${bad}" to be rejected`,
+      );
+      assert.throws(
+        () => mod.compareRefs({ cwd: ROOT, baseRef: bad, headRef: 'HEAD' }),
+        `expected baseRef "${bad}" to be rejected`,
+      );
+    }
+
+    // Invoking CLI via symlink must still execute (realpathSync in isMain), not exit 0 silently
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-ledger-sym-'));
+    try {
+      const linkCli = path.join(tmpDir, 'mono-link.mjs');
+      fs.symlinkSync(CLI, linkCli);
+      const res = spawnSync(process.execPath, [linkCli, '--unknown-flag'], { cwd: ROOT, encoding: 'utf8' });
+      assert.notEqual(res.status, 0, 'symlinked CLI must run and reject unknown flag rather than exit 0 silently');
+
+      const linkSizes = path.join(tmpDir, 'sizes-link.mjs');
+      fs.symlinkSync(LEDGER_SIZES, linkSizes);
+      const sz = spawnSync(process.execPath, [linkSizes], { cwd: ROOT, encoding: 'utf8' });
+      assert.equal(sz.status, 0, sz.stderr);
+      assert.ok(JSON.parse(sz.stdout).length >= 14);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
