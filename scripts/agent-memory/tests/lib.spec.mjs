@@ -288,7 +288,16 @@ test('D-319/Q69: active control room is #273 with rollover rule across bundle an
   for (const rel of rolloverDocs) {
     const text = readFileSync(resolve(repoRoot, rel), 'utf8');
     assert.match(text, /#273/, `${rel} must name #273 as the active control room`);
-    assert.match(text, /2,350|2,500/, `${rel} must document the 2,500-comment rollover rule`);
+    assert.match(text, /2,350/, `${rel} must document the 2,350-comment rollover threshold`);
+    assert.doesNotMatch(
+      text,
+      /issues\/80\/comments|gh issue (view|comment) 80|Post (a )?(CLAIM|RETURN|PROGRESS|HANDOFF|\"CLAIM <ID>\") on (issue )?#80|Issue #80 is the control room/i,
+      `${rel} must not contain stale operational instructions pointing to archived #80`,
+    );
+  }
+  for (const rel of ['CLAUDE.md', 'AGENTS.md', 'docs/development/agent-memory/README.md']) {
+    const text = readFileSync(resolve(repoRoot, rel), 'utf8');
+    assert.match(text, /scripts\/agent-memory\/lib\.mjs/, `${rel} rollover checklist must include scripts/agent-memory/lib.mjs`);
   }
   const measurement = readFileSync(resolve(repoRoot, 'docs/development/agent-memory/MEASUREMENT.md'), 'utf8');
   assert.match(measurement, /#273/, 'MEASUREMENT.md must reference #273');

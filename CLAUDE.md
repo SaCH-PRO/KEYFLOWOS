@@ -41,7 +41,7 @@ gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<message-file>
 **Rollover rule (2,500-comment limit):** GitHub caps issue comments at 2,500. When the active control-room issue reaches **2,350 comments** (150-comment buffer), the orchestrator MUST:
 1. Open the successor control-room issue linking back to the retiring issue and its archived predecessors.
 2. Post a final pointer comment on the retiring issue naming the successor issue number and stop posting operational updates there (never edit or delete archived comments).
-3. Update `CLAUDE.md`, `AGENTS.md`, `docs/development/agent-memory/*`, and `BOARD.md` (`coord/board`) with the new control-room issue number in the next wave PR.
+3. Update `CLAUDE.md`, `AGENTS.md`, `docs/development/agent-memory/*`, `scripts/agent-memory/lib.mjs` (and its test `scripts/agent-memory/tests/lib.spec.mjs`), and `BOARD.md` (`coord/board`) with the new control-room issue number in the next wave PR.
 
 If GitHub CLI cannot read/write issue #273, stop before implementation and report the control-channel failure to the human operator.
 

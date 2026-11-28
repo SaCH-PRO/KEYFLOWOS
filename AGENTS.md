@@ -201,4 +201,5 @@ archived predecessor: issue #80 at GitHub's 2,500-comment limit) or a file in th
 continue the work must be pushed to GitHub (a branch, a PR, issue #273), never left only in a session, a container or a
 scratch directory. **Control-room rollover (D-319 / Q69):** when the active control-room issue reaches 2,350 comments
 (150-comment buffer before GitHub's 2,500-comment cap), open a successor control-room issue, post a final pointer on
-the retiring issue, and update `CLAUDE.md`, `AGENTS.md`, `docs/development/agent-memory/*`, and `BOARD.md` in the next wave.
+the retiring issue, and update `CLAUDE.md`, `AGENTS.md`, `docs/development/agent-memory/*`, `scripts/agent-memory/lib.mjs`
+(and `scripts/agent-memory/tests/lib.spec.mjs`), and `BOARD.md` in the next wave.
