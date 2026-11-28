@@ -591,7 +591,7 @@ export function statusFilesCurrent({ jsonText, mdText, status, md }) {
 const REPO_ROOT_PREFIX_RE =
   /^(?:apps|packages|scripts|docs|architecture|infrastructure|prisma|public|src|test|tests|patches|artifacts|\.github|\.claude|\.agents|\.agent-control)\/[A-Za-z0-9._/*[\]-]*$/;
 const TOP_LEVEL_FILE_RE =
-  /^(?:CLAUDE\.md|AGENTS\.md|README\.md|SECURITY\.md|MAINTENANCE\.md|MIGRATION\.md|DEPLOYMENT\.md|CODEOWNERS|Dockerfile|Makefile|\.nvmrc|\.gitignore|\.dockerignore|\.npmrc|\.prettierrc|\.mcp\.json|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|turbo\.json|render\.yaml|stackhawk\.yml|next\.config\.mjs|tailwind\.config\.ts|postcss\.config\.js|tsconfig(?:\.base)?\.json|docker-compose(?:\.production)?\.yml|ecosystem\.config\.js)$/;
+  /^(?:CLAUDE\.md|AGENTS\.md|README\.md|SECURITY\.md|MAINTENANCE\.md|MIGRATION\.md|DEPLOYMENT\.md|CODEOWNERS|Dockerfile|Makefile|\.env(?:\.example)?|\.nvmrc|\.gitignore|\.dockerignore|\.npmrc|\.prettierrc|\.mcp\.json|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|turbo\.json|render\.yaml|stackhawk\.yml|next\.config\.mjs|tailwind\.config\.ts|postcss\.config\.js|tsconfig(?:\.base)?\.json|docker-compose(?:\.production)?\.yml|ecosystem\.config\.js)$/;
 
 function cleanPathToken(raw) {
   let tok = raw.replace(/^[`'"({+]+/, '').replace(/[`'"\)},;:]+$/, '');
