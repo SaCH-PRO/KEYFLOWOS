@@ -299,6 +299,16 @@ const CURRENCY = ["$", "€"];
 export const CLIP_EMOJI = ["🎉", "🌶️", "👍🏽", "#️⃣", "1️⃣", "🇹🇹", "🇺🇸", "👨‍👩‍👧", "🏳️‍🌈", "❤️"];
 export const hasWordOrEmoji = (t: string) => /[\p{L}\p{N}]/u.test(t) || CLIP_EMOJI.some((e) => t.includes(e));
 
+/** Whether `before` leaves a low quote (`low`, „ or ‚) open for a `q` (“ or ‘) to close, read left to right. */
+function opensLow(before: string, q: string, low: string): boolean {
+  let open = 0;
+  for (const c of Array.from(before)) {
+    if (c === low) open++;
+    else if (c === q && open > 0) open--;
+  }
+  return open > 0;
+}
+
 export function clipEndViolation(text: string, kept: string): string | null {
   if (/\s$/u.test(kept)) return "whitespace before the '...'";
   if (!hasWordOrEmoji(text)) return null;
@@ -316,11 +326,14 @@ export function clipEndViolation(text: string, kept: string): string | null {
   };
   const closing = closesLow("“", "„") || closesLow("‘", "‚");
   if (!closing && ALWAYS_DROPPED.some((c) => kept.endsWith(c))) return `ends in ${JSON.stringify(kept.slice(-1))}`;
-  // The last token after a space, made only of characters that go when alone: a lone symbol left at the end.
+  // The last token after a space, made only of characters that go when alone, or always go (r19, R19-3: "(*", "—*",
+  // "!*", ",*"): a lone run left at the end, but for a currency run after a number, or a quote closing a „.
   const m = /(\S*)\s+(\S+)$/u.exec(kept);
   if (m) {
     const token = Array.from(m[2]);
-    if (token.every((c) => LONE_DROPPED.includes(c))) {
+    const bare = m[2].replace(/[*†‡]+$/u, "");
+    const closingQuote = (bare === "“" && opensLow(kept.slice(0, kept.length - m[2].length), "“", "„")) || (bare === "‘" && opensLow(kept.slice(0, kept.length - m[2].length), "‘", "‚"));
+    if (!closingQuote && token.every((c) => LONE_DROPPED.includes(c) || ALWAYS_DROPPED.includes(c))) {
       // A currency run after a number is the number's, with any conditions marker on it (r18: "5 €*").
       const signs = token.join("").replace(/[*†‡]+$/u, "");
       const afterNumber = signs !== "" && Array.from(signs).every((c) => CURRENCY.includes(c)) && /[0-9]$/.test(m[1]);
@@ -372,7 +385,14 @@ export function clipConditionsTokens(text: string, max: number, kept: string): {
     const end = (m.index ?? 0) + m[0].length;
     if (end > room.length) break;
     const held = /(.)[*†‡]+$/u.exec(m[0]);
-    if (held && CONDITION_HOLDERS.test(held[1])) out.push({ token: m[0], end });
+    if (!held) continue;
+    // r19 (R19-3): a currency sign holds a marker after a number ("5€*", "5 €*"); a "“" (or "‘") that closes a „ (or
+    // ‚) opened before it in the text does too ("„Big“*").
+    const at = (m.index ?? 0) + held.index;
+    const before = text.slice(0, at);
+    const currency = CURRENCY.includes(held[1]) && /[0-9]\s?$/u.test(before);
+    const closing = (held[1] === "“" && opensLow(before, "“", "„")) || (held[1] === "‘" && opensLow(before, "‘", "‚"));
+    if (CONDITION_HOLDERS.test(held[1]) || currency || closing) out.push({ token: m[0], end });
   }
   return out;
 }
