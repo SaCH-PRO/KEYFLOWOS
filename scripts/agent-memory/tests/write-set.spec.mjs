@@ -145,12 +145,12 @@ test('RR-HOOK-PACKET-SCOPE: session-guard.mjs edit warns outside write set on pk
 
     // 5. On main (not pkt/V1-*) -> {}.
     git(['checkout', 'main']);
-    const mainRes = runGuardEdit(dir, { session_id: 'sess-main', tool_input: { file_path: 'apps/y.ts' } });
+    const mainRes = runGuardEdit(dir, { session_id: 'sess-main', tool_input: { file_path: 'apps/z.ts' } });
     assert.deepEqual(mainRes.json, {});
 
     // 6. On pkt/V1-PROSE (prose-only write set -> not checkable) -> {}.
     git(['checkout', '-b', 'pkt/V1-PROSE']);
-    const proseRes = runGuardEdit(dir, { session_id: 'sess-prose', tool_input: { file_path: 'apps/y.ts' } });
+    const proseRes = runGuardEdit(dir, { session_id: 'sess-prose', tool_input: { file_path: 'apps/w.ts' } });
     assert.deepEqual(proseRes.json, {});
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -39,13 +39,29 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, rename
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { PLAN_PATH, writeSetMatch } from '../../scripts/agent-memory/lib.mjs';
 
 // fileURLToPath, not `.pathname`: a URL pathname keeps percent-encoding, so a
 // checkout under "C:/My Projects/..." resolved to "My%20Projects". The registry
 // directory was then never found, every lookup returned empty, and the guard
 // allowed everything. Silent AND open — the worst failure mode a guard can
 // have, and invisible on any path without a space in it.
-const REPO = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const SCRIPT_REPO = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+
+function detectRepoRoot() {
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (top) return resolve(top);
+  } catch { /* fall back to the script's own checkout */ }
+  return SCRIPT_REPO;
+}
+
+const REPO = detectRepoRoot();
 const REG_DIR = join(REPO, '.claude', 'coordination', 'sessions');
 
 /** A session that has not been seen for this long is treated as gone. */
@@ -501,6 +517,84 @@ function modeBash(input) {
 /* mode: edit — claim files, warn when another session holds one       */
 /* ------------------------------------------------------------------ */
 
+/** Repo-relative case-preserving path (forward slashes), or null if outside REPO. */
+function repoRelPath(p) {
+  if (!p) return null;
+  try {
+    const abs = resolve(process.cwd(), p);
+    const rel = relative(REPO, abs);
+    if (!rel || rel.startsWith('..')) return null;
+    return rel.split(sep).join('/');
+  } catch {
+    return null;
+  }
+}
+
+function currentBranchName() {
+  try {
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: REPO,
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function nearestEntries(relPath, writeSet, limit = 3) {
+  const segs = relPath.split('/');
+  const scored = writeSet.map((entry, idx) => {
+    const eSegs = String(entry).split('/');
+    let shared = 0;
+    while (shared < segs.length && shared < eSegs.length && segs[shared] === eSegs[shared]) shared += 1;
+    return { entry, shared, idx };
+  });
+  scored.sort((a, b) => b.shared - a.shared || a.idx - b.idx);
+  return scored.slice(0, limit).map((s) => s.entry);
+}
+
+/**
+ * Check if an edit on a `pkt/V1-<ID>` branch falls outside the packet's write set
+ * in the plan at HEAD. Always fails open (returns null, writing a note on stderr on error).
+ */
+function checkPacketScope(relPath) {
+  if (!relPath) return null;
+  const branch = currentBranchName();
+  const m = /^pkt\/V1-(.+)$/.exec(branch);
+  if (!m) return null;
+  const packetId = m[1];
+  let planRaw;
+  try {
+    planRaw = execFileSync('git', ['show', `HEAD:${PLAN_PATH}`], {
+      cwd: REPO,
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
+  let plan;
+  try {
+    plan = JSON.parse(planRaw);
+  } catch (err) {
+    process.stderr.write(`[session-guard] packet-scope fail-open: corrupt ${PLAN_PATH} at HEAD (${err instanceof Error ? err.message : String(err)})\n`);
+    return null;
+  }
+  const packet = Array.isArray(plan?.packets) ? plan.packets.find((p) => p && p.id === packetId) : null;
+  if (!packet || !Array.isArray(packet.files)) return null;
+  const result = writeSetMatch(relPath, packet.files);
+  if (!result.checkable || result.inside) return null;
+  return {
+    packetId,
+    relPath,
+    nearest: nearestEntries(relPath, packet.files),
+  };
+}
+
 function modeEdit(input) {
   const file = input?.tool_input?.file_path;
   if (!file) allow();
@@ -530,23 +624,45 @@ function modeEdit(input) {
   for (const [k, v] of Object.entries(rec.claims)) {
     if (now - (Date.parse(v) || 0) > CLAIM_TTL_MS) delete rec.claims[k];
   }
+
+  // RR-HOOK-PACKET-SCOPE: check packet write set on pkt/V1-* branches (fail open, never deny).
+  const relPath = repoRelPath(file);
+  const scopeWarn = checkPacketScope(relPath);
+  if (scopeWarn) {
+    rec.outOfScope = Array.isArray(rec.outOfScope) ? rec.outOfScope : [];
+    if (!rec.outOfScope.includes(scopeWarn.relPath)) rec.outOfScope.push(scopeWarn.relPath);
+  }
   saveSession(rec);
 
-  if (!holder) allow();
+  if (holder) {
+    const mins = Math.max(1, Math.round((now - Date.parse(holder.at)) / 60000));
+    const who = holder.session.label
+      ? `${holder.session.label} (${holder.session.sessionId.slice(0, 8)})`
+      : holder.session.sessionId.slice(0, 8);
 
-  const mins = Math.max(1, Math.round((now - Date.parse(holder.at)) / 60000));
-  const who = holder.session.label
-    ? `${holder.session.label} (${holder.session.sessionId.slice(0, 8)})`
-    : holder.session.sessionId.slice(0, 8);
+    ask(
+      `Another live Claude session edited this file ${mins} minute(s) ago:\n` +
+        `    ${key}\n` +
+        `    held by: ${who}\n\n` +
+        `Editing it now can silently overwrite work that session has not finished or committed. ` +
+        `Consider messaging it first (ListAgents / SendMessage), or pick a different file.\n\n` +
+        `Approve to edit anyway.`,
+    );
+  }
 
-  ask(
-    `Another live Claude session edited this file ${mins} minute(s) ago:\n` +
-      `    ${key}\n` +
-      `    held by: ${who}\n\n` +
-      `Editing it now can silently overwrite work that session has not finished or committed. ` +
-      `Consider messaging it first (ListAgents / SendMessage), or pick a different file.\n\n` +
-      `Approve to edit anyway.`,
-  );
+  if (!scopeWarn) allow();
+
+  const nearestText = scopeWarn.nearest.length
+    ? `\n    nearest write-set entries: ${scopeWarn.nearest.join(', ')}`
+    : '';
+  const msg =
+    `Packet ${scopeWarn.packetId} — ${scopeWarn.relPath} is outside the write set: keep it minimal and report it.` +
+    nearestText;
+
+  if (process.env.KF_PACKET_SCOPE === 'ask') {
+    ask(msg);
+  }
+  emit({ systemMessage: msg });
 }
 
 /* ------------------------------------------------------------------ */

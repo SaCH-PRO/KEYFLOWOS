@@ -585,3 +585,85 @@ export function statusFilesCurrent({ jsonText, mdText, status, md }) {
   if (body(mdText) !== body(md)) return { current: false, reason: 'V1-STATUS.md differs from what the generator renders' };
   return { current: true, reason: '' };
 }
+
+// ---------------------------------------------------------------- packet write-set matching (RR-HOOK-PACKET-SCOPE)
+
+const PATH_TOKEN_RE = /^(?:[a-z0-9._-]+|\.[a-z0-9._-]+)\/[A-Za-z0-9._/*-]*$/;
+const TOP_LEVEL_FILE_RE = /^(?:[A-Za-z0-9._-]+\.(?:md|json|mjs|cjs|js|ts|tsx|yml|yaml|sh|sql|prisma)|Dockerfile|Makefile|\.nvmrc|\.gitignore|\.env(?:\.[a-z]+)?)$/;
+
+function cleanPathToken(raw) {
+  return raw
+    .replace(/^[`'"([{+]+/, '')
+    .replace(/[`'"\])},;:]+$/, '')
+    .replace(/^\.\//, '');
+}
+
+/**
+ * Extract repo-relative path or glob patterns from one plan `files` entry (which may carry prose
+ * like "apps/server/src/modules/identity/ (business settings route)" or "a/b.ts (new)").
+ * Returns an array of normalized pattern strings, or [] if no path can be extracted.
+ */
+export function extractWriteSetPatterns(entry) {
+  if (typeof entry !== 'string') return [];
+  const trimmed = entry.trim();
+  if (!trimmed) return [];
+  const patterns = [];
+  for (const part of trimmed.split(/\s+/)) {
+    const tok = cleanPathToken(part);
+    if (!tok) continue;
+    // Skip prose slashes like "GET/PATCH" (all-uppercase left segment) and URLs.
+    if (/^[A-Z]+\/[A-Z]+$/.test(tok) || /^https?:\/\//i.test(tok)) continue;
+    if (PATH_TOKEN_RE.test(tok) || TOP_LEVEL_FILE_RE.test(tok)) {
+      patterns.push(tok.replace(/\/+/g, '/'));
+    }
+  }
+  return patterns;
+}
+
+function matchSinglePattern(normFile, pattern) {
+  const p = pattern.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!p) return false;
+  // Directory prefix (explicit trailing slash)
+  if (p.endsWith('/')) {
+    return normFile.startsWith(p);
+  }
+  // Single-segment wildcard '*' (does NOT cross '/')
+  if (p.includes('*')) {
+    const reSrc = '^' + p.split('*').map(escapeRe).join('[^/]*') + '$';
+    return new RegExp(reSrc).test(normFile);
+  }
+  // Exact file match
+  if (normFile === p) return true;
+  // Directory path without trailing slash (no file extension in last segment, e.g. "apps/server/src/modules/ai")
+  const lastSeg = p.split('/').at(-1) ?? '';
+  if (p.includes('/') && !lastSeg.includes('.')) {
+    return normFile.startsWith(`${p}/`);
+  }
+  return false;
+}
+
+/**
+ * Pure check of whether repo-relative `filePath` falls inside a packet's `files` write set.
+ * Returns `{ inside, checkable }`. If `files` is empty or ANY entry yields no extractable path
+ * (prose-only entry), returns `{ inside: false, checkable: false }`.
+ */
+export function writeSetMatch(filePath, files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { inside: false, checkable: false };
+  }
+  const allPatterns = [];
+  for (const entry of files) {
+    const pats = extractWriteSetPatterns(entry);
+    if (pats.length === 0) {
+      return { inside: false, checkable: false };
+    }
+    allPatterns.push(...pats);
+  }
+  const norm = typeof filePath === 'string'
+    ? filePath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/')
+    : '';
+  if (!norm) return { inside: false, checkable: true };
+  const inside = allPatterns.some((pat) => matchSinglePattern(norm, pat));
+  return { inside, checkable: true };
+}
+
