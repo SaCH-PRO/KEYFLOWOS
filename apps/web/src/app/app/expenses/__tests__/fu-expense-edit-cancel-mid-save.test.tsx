@@ -267,7 +267,7 @@ describe("P257 R6: after a save fails, the sheet's own controls close it again",
 });
 
 describe("P263 R1-1: through the real expense sheet, a layout flip keeps focus in the field being typed in", () => {
-  // The sheet's fields carry no id, name or label of their own (a separate board row); position matching finds them.
+  // R3: the sheet's children are kept mounted across the flip, so the field focused is the field refocused.
   let phone = false;
   const listeners = new Set<(e: MediaQueryListEvent) => void>();
   const original = window.matchMedia;
@@ -297,12 +297,16 @@ describe("P263 R1-1: through the real expense sheet, a layout flip keeps focus i
       sheetFor(vi.fn());
       await settle();
       const el = () => find() as HTMLInputElement;
-      el().focus();
-      fireEvent.change(el(), { target: { value: field === "Amount" ? "12" : "Toner" } });
+      const node = el();
+      node.focus();
+      fireEvent.change(node, { target: { value: field === "Amount" ? "12" : "Toner" } });
       await flip(true);
       expect(document.activeElement, `focus left ${field} on the flip to phone`).toBe(el());
       await flip(false);
       expect(document.activeElement, `focus left ${field} on the flip back`).toBe(el());
+      // P263 R3: the field is the same node (not a match in a remounted form), with what was typed.
+      expect(el(), `${field} was remounted by the flip`).toBe(node);
+      expect(node.value).toBe(field === "Amount" ? "12" : "Toner");
     });
   }
 });

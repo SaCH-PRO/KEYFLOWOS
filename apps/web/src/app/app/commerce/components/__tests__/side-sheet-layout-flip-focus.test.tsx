@@ -4,10 +4,16 @@
  * and the open-only focus effect (P257 R1-1) never refocuses. Across a layout flip focus stays in the sheet: on the
  * same control in the new panel when there is one (matched by id, name or accessible label, since the old node is
  * gone), otherwise on the panel. Pinned desktop -> phone -> desktop.
+ *
+ * R3 (P269 folded in): the children are no longer remounted by a flip. They are the same nodes, with their state, and
+ * the node focused before the flip is the one focused after it. The tests below hold the node itself, not a lookup.
+ * Dropped with the matching they pinned (no matching is left to pin): R1-1 position match; a position that no longer
+ * agrees; R1-5 odd ids and labels (x3); R2-1 placeholder match; R2-1 <label> match; R2-2 aria-label after a
+ * phone-only focusable; R2-3 tabindex=-1 positions.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { useId, useState, type ReactNode } from "react";
-import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { render, screen, cleanup, fireEvent, act, waitFor } from "@testing-library/react";
 
 import { SideSheet } from "../side-sheet";
 
@@ -63,7 +69,8 @@ describe("P263: focus stays in the sheet across a layout flip", () => {
       render(<Sheet />);
       await settle();
       expect(layout()).toBe("desktop");
-      find().focus();
+      const node = find();
+      node.focus();
       expect(document.activeElement).toBe(find());
       await flip(true);
       expect(layout(), "the flip did not reach the sheet").toBe("phone");
@@ -71,43 +78,79 @@ describe("P263: focus stays in the sheet across a layout flip", () => {
       await flip(false);
       expect(layout()).toBe("desktop");
       expect(document.activeElement, `focus left ${what} on the flip back to desktop`).toBe(find());
+      // R3: a child is the same node throughout; the header's Close is the new shell's own Close.
+      if (what !== "the header Close") expect(find(), `${what} was remounted by the flip`).toBe(node);
     });
   }
-  it("P263 R1-1: a control with no identifier is matched by its position (tag and type agreeing)", async () => {
-    render(<Sheet />);
-    await settle();
-    (screen.getByText("A focusable block with no name") as HTMLElement).focus();
-    await flip(true);
-    expect(document.activeElement, "the unnamed control lost focus").toBe(screen.getByText("A focusable block with no name"));
-    await flip(false);
-    expect(document.activeElement).toBe(screen.getByText("A focusable block with no name"));
-  });
-  it("a control whose position no longer agrees (tag or type) and with no identifier: focus goes to the panel, not <body>", async () => {
-    /** A select before the field on a phone (read when the child mounts, so the remounted panel has it). */
-    function PhoneOnlySelect() {
-      return phone ? <select><option>x</option></select> : null;
-    }
-    function Shifting() {
-      return (
-        <SideSheet open onClose={() => {}} title="Edit Expense">
-          <PhoneOnlySelect />
-          {/* P263 R2: a placeholder now identifies a field, so this one carries none (a test id is not read). */}
-          <input data-testid="no-identifier" />
-        </SideSheet>
-      );
-    }
-    render(<Shifting />);
-    await settle();
-    screen.getByTestId("no-identifier").focus();
-    await flip(true);
-    expect(document.activeElement, "focus fell to <body>").toBe(screen.getByRole("dialog"));
-  });
   it("the panel itself focused (as on open): it is focused again in the new layout", async () => {
     render(<Sheet />);
     await settle();
     expect(document.activeElement).toBe(screen.getByRole("dialog"));
     await flip(true);
     expect(document.activeElement, "focus fell to <body>").toBe(screen.getByRole("dialog"));
+  });
+  it("R3: a field with no identifier at all (no id, name, label or placeholder) keeps focus: the same node", async () => {
+    render(<SideSheet open onClose={() => {}} title="Edit Expense"><input data-testid="bare" /><input data-testid="other" /></SideSheet>);
+    await settle();
+    const bare = screen.getByTestId("bare");
+    bare.focus();
+    await flip(true);
+    expect(document.activeElement, "the bare field lost focus").toBe(bare);
+    expect(screen.getByTestId("bare"), "the bare field was remounted").toBe(bare);
+    await flip(false);
+    expect(document.activeElement).toBe(bare);
+  });
+  it("R3: a child's own state and its uncontrolled draft survive the flip; the child mounts once", async () => {
+    let mounts = 0;
+    function Stateful() {
+      const [count, setCount] = useState(0);
+      useEffect(() => { mounts += 1; }, []);
+      return (
+        <>
+          <button onClick={() => setCount((n) => n + 1)}>Count {count}</button>
+          <input aria-label="Draft" defaultValue="" />
+        </>
+      );
+    }
+    render(<SideSheet open onClose={() => {}} title="Edit Expense"><Stateful /></SideSheet>);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Count 0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Count 1" }));
+    const draft = screen.getByLabelText("Draft") as HTMLInputElement;
+    draft.value = "half a sentence";
+    draft.focus();
+    draft.setSelectionRange(4, 4);
+    await flip(true);
+    await flip(false);
+    expect(screen.getByRole("button", { name: "Count 2" }), "the child's state was reset").toBeTruthy();
+    expect((screen.getByLabelText("Draft") as HTMLInputElement).value, "the typed draft was lost").toBe("half a sentence");
+    expect(document.activeElement).toBe(draft);
+    expect([draft.selectionStart, draft.selectionEnd]).toEqual([4, 4]);
+    expect(mounts, "the child was remounted by a flip").toBe(1);
+  });
+  it("R3: a footer button focused: the new shell's same button is focused", async () => {
+    render(<SideSheet open onClose={() => {}} title="Edit Expense" footer={<><button>Cancel</button><button>Save</button></>}><p>body</p></SideSheet>);
+    await settle();
+    screen.getByRole("button", { name: "Save" }).focus();
+    await flip(true);
+    expect(document.activeElement, "focus left the footer's Save").toBe(screen.getByRole("button", { name: "Save" }));
+    await flip(false);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save" }));
+  });
+  it("R3: closing removes the children (after the exit), and reopening mounts them fresh", async () => {
+    function Draft() {
+      const [v, setV] = useState("");
+      return <input aria-label="Draft" value={v} onChange={(e) => setV(e.target.value)} />;
+    }
+    const el = (open: boolean) => <SideSheet open={open} onClose={() => {}} title="Edit Expense"><Draft /></SideSheet>;
+    const view = render(el(true));
+    await settle();
+    fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "x" } });
+    view.rerender(el(false));
+    await waitFor(() => expect(screen.queryByLabelText("Draft"), "the children outlived the closed sheet").toBeNull());
+    view.rerender(el(true));
+    await settle();
+    expect((screen.getByLabelText("Draft") as HTMLInputElement).value, "a reopened sheet kept the old draft").toBe("");
   });
   it("typing after the flip goes to the field (focus is usable, not only reported)", async () => {
     render(<Sheet />);
@@ -148,9 +191,10 @@ describe("P263 R1: matching the focused control in the remounted panel", () => {
       </SideSheet>,
     );
     await settle();
-    screen.getAllByRole("button", { name: "Remove" })[1].focus();
+    const second = screen.getAllByRole("button", { name: "Remove" })[1];
+    second.focus();
     await flip(true);
-    expect(document.activeElement, "the wrong row's Remove was focused").toBe(screen.getAllByRole("button", { name: "Remove" })[1]);
+    expect(document.activeElement, "the wrong row's Remove was focused").toBe(second);
   });
   it("R1-2: a radio group sharing a name: the radio that had focus is refocused", async () => {
     render(
@@ -162,22 +206,25 @@ describe("P263 R1: matching the focused control in the remounted panel", () => {
     );
     await settle();
     const radio = (v: string) => document.querySelector(`input[value="${v}"]`) as HTMLElement;
-    radio("c").focus();
+    const c = radio("c");
+    c.focus();
     await flip(true);
-    expect(document.activeElement, "the first radio of the group was focused").toBe(radio("c"));
+    expect(document.activeElement, "the first radio of the group was focused").toBe(c);
   });
-  it("R1-3: an id made by useId changes across the remount: the control is still refocused (by its position)", async () => {
+  it("R1-3 (R3): an id made by useId does not change across the flip: the same field keeps it and focus", async () => {
     function Field() {
       const id = useId();
       return <input id={id} placeholder="generated id" />;
     }
     render(<SideSheet open onClose={() => {}} title="Edit Expense"><Field /></SideSheet>);
     await settle();
-    const before = (screen.getByPlaceholderText("generated id") as HTMLInputElement).id;
-    screen.getByPlaceholderText("generated id").focus();
+    const field = screen.getByPlaceholderText("generated id") as HTMLInputElement;
+    const before = field.id;
+    field.focus();
     await flip(true);
-    expect((screen.getByPlaceholderText("generated id") as HTMLInputElement).id, "the fixture's id did not change").not.toBe(before);
-    expect(document.activeElement, "the id missed and focus was not restored to the field").toBe(screen.getByPlaceholderText("generated id"));
+    expect(screen.getByPlaceholderText("generated id"), "the field was remounted").toBe(field);
+    expect(field.id, "the id changed (the child was remounted)").toBe(before);
+    expect(document.activeElement).toBe(field);
   });
   it("R1-4: the matched control is now disabled (Close, after closeDisabled): focus goes to the panel, not <body>", async () => {
     const el = (closeDisabled: boolean) => <SideSheet open onClose={() => {}} title="Edit Expense" closeDisabled={closeDisabled}><p>body</p></SideSheet>;
@@ -188,19 +235,6 @@ describe("P263 R1: matching the focused control in the remounted panel", () => {
     await flip(true);
     expect(document.activeElement, "focus fell to <body> on a disabled control").toBe(screen.getByRole("dialog"));
   });
-  for (const [what, props] of [
-    ["an id starting with a digit", { id: "1abc" }],
-    ["an id with a quote, a bracket and a space", { id: 'say "hi" [x]' }],
-    ["a label with a quote, a bracket and a space", { "aria-label": 'Say "hi" [x] now' }],
-  ] as const) {
-    it(`R1-5: ${what} is matched, and the lookup does not throw`, async () => {
-      render(<SideSheet open onClose={() => {}} title="Edit Expense"><input {...props} placeholder="odd identifier" /></SideSheet>);
-      await settle();
-      screen.getByPlaceholderText("odd identifier").focus();
-      await flip(true);
-      expect(document.activeElement).toBe(screen.getByPlaceholderText("odd identifier"));
-    });
-  }
   it("R1-5: the focusin listener is removed when the sheet closes", async () => {
     const add = vi.spyOn(document, "addEventListener");
     const remove = vi.spyOn(document, "removeEventListener");
@@ -228,7 +262,7 @@ describe("P263 R1: matching the focused control in the remounted panel", () => {
   });
 });
 
-describe("P263 R2: a position match never lands on a different field", () => {
+describe("P263 R2 probes, R3: the focused node itself is kept, so focus never lands on a different field", () => {
   /** Rendered on one layout only: read when the child mounts, so the remounted panel has it or not. */
   function OnlyOn({ layout, children }: { layout: "phone" | "desktop"; children: ReactNode }) {
     return (layout === "phone") === phone ? <>{children}</> : null;
@@ -244,10 +278,11 @@ describe("P263 R2: a position match never lands on a different field", () => {
     );
     await settle();
     expect(layout()).toBe("phone");
-    screen.getByTestId("B").focus();
+    const b = screen.getByTestId("B");
+    b.focus();
     await flip(false);
-    expect(document.activeElement, "focus moved to a different field").not.toBe(screen.getByTestId("desktop-only"));
-    expect([screen.getByTestId("B"), screen.getByRole("dialog")], "focus left both the field and the panel").toContain(document.activeElement);
+    expect(document.activeElement, "focus moved to a different field").not.toBe(screen.queryByTestId("desktop-only"));
+    expect(document.activeElement, "B itself was not refocused").toBe(b);
   });
   it("R2-1 (b): Retry before A and B, A focused, Retry then removed: after the flip focus is not on B", async () => {
     function WithRetry() {
@@ -262,17 +297,18 @@ describe("P263 R2: a position match never lands on a different field", () => {
     }
     render(<WithRetry />);
     await settle();
-    screen.getByTestId("A").focus();
+    const a = screen.getByTestId("A");
+    a.focus();
     fireEvent.keyDown(screen.getByTestId("A"), { key: "x" }); // Retry goes away while A keeps focus
     await settle();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByTestId("A"));
     await flip(true);
     expect(document.activeElement, "the index recorded before Retry went away put focus on B").not.toBe(screen.getByTestId("B"));
-    // The snapshot is taken again when Retry goes away, so A itself (not only "not B") is refocused.
-    expect(document.activeElement, "A was not refocused (the snapshot was not refreshed)").toBe(screen.getByTestId("A"));
+    expect(document.activeElement, "A itself was not refocused").toBe(a);
+    expect(screen.queryByRole("button", { name: "Retry" }), "the parent's state (Retry gone) was reset").toBeNull();
   });
-  it("R2-1 (c): a child's own state reveals 'extra' before 'next'; 'extra' focused, then a flip resets the child: focus is not on 'next'", async () => {
+  it("R2-1 (c), R3: a child's own state reveals 'extra' before 'next'; 'extra' focused: the flip keeps the child's state and focus on 'extra'", async () => {
     function Reveal() {
       const [more, setMore] = useState(false);
       return (
@@ -286,50 +322,12 @@ describe("P263 R2: a position match never lands on a different field", () => {
     render(<SideSheet open onClose={() => {}} title="Edit Expense"><Reveal /></SideSheet>);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "More" }));
-    screen.getByTestId("extra").focus();
+    const extra = screen.getByTestId("extra");
+    extra.focus();
     await flip(true);
-    expect(screen.queryByTestId("extra"), "the fixture's child was not reset by the remount").toBeNull();
     expect(document.activeElement, "focus moved to the next field").not.toBe(screen.getByTestId("next"));
-    expect(document.activeElement).toBe(screen.getByRole("dialog"));
-  });
-  it("R2-1: a field matched by its placeholder, with the position changed (as the expense form's fields are)", async () => {
-    phone = true;
-    render(
-      <SideSheet open onClose={() => {}} title="Edit Expense">
-        <OnlyOn layout="desktop"><input placeholder="Search" /></OnlyOn>
-        <input placeholder="Vendor name" />
-      </SideSheet>,
-    );
-    await settle();
-    screen.getByPlaceholderText("Vendor name").focus();
-    await flip(false);
-    expect(document.activeElement).toBe(screen.getByPlaceholderText("Vendor name"));
-  });
-  it("R2-1: a field matched by its <label> text, with the position changed", async () => {
-    phone = true;
-    render(
-      <SideSheet open onClose={() => {}} title="Edit Expense">
-        <OnlyOn layout="desktop"><input placeholder="Search" /></OnlyOn>
-        <label>Amount <input type="number" /></label>
-      </SideSheet>,
-    );
-    await settle();
-    const amount = () => screen.getByRole("spinbutton");
-    amount().focus();
-    await flip(false);
-    expect(document.activeElement).toBe(amount());
-  });
-  it("R2-2: an aria-label field after a phone-only focusable: the label, not the position, finds it", async () => {
-    render(
-      <SideSheet open onClose={() => {}} title="Edit Expense">
-        <OnlyOn layout="phone"><button>Phone only</button></OnlyOn>
-        <input aria-label="Reference" />
-      </SideSheet>,
-    );
-    await settle();
-    screen.getByLabelText("Reference").focus();
-    await flip(true);
-    expect(document.activeElement, "the aria-label branch did not find the field").toBe(screen.getByLabelText("Reference"));
+    expect(screen.queryByTestId("extra"), "the child's state was reset by the flip").toBe(extra);
+    expect(document.activeElement, "'extra' itself was not refocused").toBe(extra);
   });
   it("R2-2: the second of two 'Remove' buttons, after a phone-only focusable: the same one is refocused", async () => {
     render(
@@ -340,9 +338,10 @@ describe("P263 R2: a position match never lands on a different field", () => {
       </SideSheet>,
     );
     await settle();
-    screen.getAllByRole("button", { name: "Remove" })[1].focus();
+    const second = screen.getAllByRole("button", { name: "Remove" })[1];
+    second.focus();
     await flip(true);
-    expect(document.activeElement, "the wrong Remove was focused").toBe(screen.getAllByRole("button", { name: "Remove" })[1]);
+    expect(document.activeElement, "the wrong Remove was focused").toBe(second);
   });
   it("R2-2: a 'Remove' that gains a phone-only twin (3 matches, not 2): no stale index lands on another row", async () => {
     render(
@@ -353,10 +352,11 @@ describe("P263 R2: a position match never lands on a different field", () => {
       </SideSheet>,
     );
     await settle();
-    (document.querySelector('[data-row="2"]') as HTMLElement).focus();
+    const row2 = document.querySelector('[data-row="2"]') as HTMLElement;
+    row2.focus();
     await flip(true);
     expect(document.activeElement, "matches[1] of a changed count focused row 1").not.toBe(document.querySelector('[data-row="1"]'));
-    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+    expect(document.activeElement, "row 2 itself was not refocused").toBe(row2);
   });
   it("R2-2: the focused 'Remove' exists on desktop only, its twin on both: the twin (another row) is not focused", async () => {
     render(
@@ -366,26 +366,15 @@ describe("P263 R2: a position match never lands on a different field", () => {
       </SideSheet>,
     );
     await settle();
-    (document.querySelector('[data-row="desktop"]') as HTMLElement).focus();
+    const desktopRow = document.querySelector('[data-row="desktop"]') as HTMLElement;
+    desktopRow.focus();
     await flip(true);
     expect(document.activeElement, "a single match taken though there were two").not.toBe(document.querySelector('[data-row="both"]'));
-    expect(document.activeElement).toBe(screen.getByRole("dialog"));
-  });
-  it("R2-3: a tabindex=-1 element on one layout only does not count as a position", async () => {
-    render(
-      <SideSheet open onClose={() => {}} title="Edit Expense">
-        <OnlyOn layout="phone"><div tabIndex={-1}>not in the tab order</div></OnlyOn>
-        <input data-testid="unnamed" />
-      </SideSheet>,
-    );
-    await settle();
-    screen.getByTestId("unnamed").focus();
-    await flip(true);
-    expect(document.activeElement, "a tabindex=-1 element shifted the position").toBe(screen.getByTestId("unnamed"));
+    expect(document.activeElement, "the focused row itself was not kept").toBe(desktopRow);
   });
 });
 
-describe("P263 R2-4: a focus change costs nothing; the panel is read only when the layout flips", () => {
+describe("P263 R2-4, R3: a focus change costs nothing, and a flip with a child focused reads nothing either", () => {
   it("in a 300-row panel, moving focus between fields makes no query of the panel", async () => {
     const rows = Array.from({ length: 300 }, (_, i) => i);
     render(
@@ -403,7 +392,7 @@ describe("P263 R2-4: a focus change costs nothing; the panel is read only when t
     queries.mockRestore();
     expect(calls, "a focus change scanned the panel").toBe(0);
   });
-  it("a burst of content changes while a field is focused makes no query; the flip then reads the panel once", async () => {
+  it("a burst of content changes while a field is focused makes no query; nor does the flip (the node is kept)", async () => {
     function Totals() {
       const [text, setText] = useState("");
       return (
@@ -425,10 +414,10 @@ describe("P263 R2-4: a focus change costs nothing; the panel is read only when t
     await flip(true);
     const atFlip = queries.mock.calls.length;
     queries.mockRestore();
-    expect(atFlip, "the flip did not read the panel").toBeGreaterThan(0);
+    expect(atFlip, "the flip searched the panel for a node it kept").toBe(0);
     expect(document.activeElement).toBe(screen.getByLabelText("Amount"));
   });
-  it("control: the flip still finds the field (the snapshot is taken then)", async () => {
+  it("control: the flip keeps focus on the field among 300 rows", async () => {
     const rows = Array.from({ length: 300 }, (_, i) => i);
     render(
       <SideSheet open onClose={() => {}} title="Edit Expense">
@@ -436,8 +425,9 @@ describe("P263 R2-4: a focus change costs nothing; the panel is read only when t
       </SideSheet>,
     );
     await settle();
-    screen.getByLabelText("Row 150").focus();
+    const row = screen.getByLabelText("Row 150");
+    row.focus();
     await flip(true);
-    expect(document.activeElement).toBe(screen.getByLabelText("Row 150"));
+    expect(document.activeElement).toBe(row);
   });
 });
