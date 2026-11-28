@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { clip } from "../storefront-counts";
-import { endsInLoneDropped } from "./trust-copy-allowlist";
+import { clipEndViolation } from "./trust-copy-allowlist";
 
 const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const G = (t: string) => Array.from(seg.segment(t), (s) => s.segment);
@@ -119,7 +119,7 @@ describe("R14-4: fuzz", () => {
       expect(kept, at).not.toMatch(/\s$/u);
       if (content.test(t)) {
         expect(kept, at).toMatch(content);
-        expect(endsInLoneDropped(kept), at).toBeNull();
+        expect(clipEndViolation(t, kept), at).toBeNull();
       }
     }
   });

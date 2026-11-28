@@ -287,27 +287,31 @@ export function onStore<D extends object>(d: D): D & { storeProducts: unknown; s
 }
 
 /**
- * P231 r14: whether a clip()'s kept part ends in a character clip() drops, left alone, by graphemes (an emoji with a
- * skin tone, a keycap, a flag, a family, is one character):
- * - always dropped at the end: whitespace, sentence punctuation (. , ; : ! ? …), a dash, an opening bracket or quote;
- * - dropped when it stands alone (after whitespace, punctuation, a symbol, or nothing), kept when attached to the
- *   letter, digit or mark before it ("C#", "5★", "Free*", "a/b/"): any other punctuation or symbol ("&", "•", "/");
- *   a currency sign after a number and one space ("5 €") is the number's, and stays;
- * - never dropped: a "%", a "+", a closing bracket or quote, a straight quote, an emoji or a flag, or a character
- *   that holds anything else (a letter, a digit, a mark: a keycap).
+ * P231 r15 (R15-5): what a clip()'s kept part must not end in, checked independently of clip()'s own rules, from
+ * explicit lists of the characters the fuzz alphabets use (never clip()'s Unicode classes, so a mistake shared by
+ * clip() and its check cannot pass). Returns why, or null.
  */
-export function endsInLoneDropped(kept: string): string | null {
-  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  const g = Array.from(seg.segment(kept), (s) => s.segment);
-  const last = g[g.length - 1];
-  if (last === undefined) return null;
-  if (/^\s+$/u.test(last)) return "whitespace";
-  if (!/^[\p{P}\p{S}]+$/u.test(last) || /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(last)) return null;
-  if (/^[%+"'\p{Pe}\p{Pf}]/u.test(last)) return null;
-  if (/^[.,;:!?…\p{Pd}\p{Ps}\p{Pi}]$/u.test(last)) return `sentence punctuation ${JSON.stringify(last)}`;
-  const before = g[g.length - 2];
-  const content = (c: string | undefined) => c !== undefined && /[^\s\p{P}\p{S}]|\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(c);
-  if (content(before)) return null;
-  if (/^\p{Sc}$/u.test(last) && before !== undefined && /^\s+$/u.test(before) && /^\p{Nd}$/u.test(g[g.length - 3] ?? "")) return null;
-  return `lone ${JSON.stringify(last)}`;
+const ALWAYS_DROPPED = [".", ",", ";", ":", "!", "?", "…", "—", "–", "-", "(", "[", "{", "“", "‘", "«", "„", "。", "、", "，", "！", "？", "；", "：", "．", "｡", "､"];
+/** Symbols and marks that go when they stand alone (after a space): none of them closes or means anything there. */
+const LONE_DROPPED = ["&", "•", "/", "*", "#", "@", "¿", "¡", "<", "$", "€", "°", "★", "|", "©", "®", "™", "↔", "→", "‼"];
+const CURRENCY = ["$", "€"];
+/** What makes text more than punctuation and symbols: a letter, a digit, or one of the alphabets' emoji. */
+export const CLIP_EMOJI = ["🎉", "🌶️", "👍🏽", "#️⃣", "1️⃣", "🇹🇹", "🇺🇸", "👨‍👩‍👧", "🏳️‍🌈", "❤️"];
+export const hasWordOrEmoji = (t: string) => /[\p{L}\p{N}]/u.test(t) || CLIP_EMOJI.some((e) => t.includes(e));
+
+export function clipEndViolation(text: string, kept: string): string | null {
+  if (/\s$/u.test(kept)) return "whitespace before the '...'";
+  if (!hasWordOrEmoji(text)) return null;
+  if (!hasWordOrEmoji(kept)) return "only punctuation and symbols kept from text that has words";
+  if (ALWAYS_DROPPED.some((c) => kept.endsWith(c))) return `ends in ${JSON.stringify(kept.slice(-1))}`;
+  // The last token after a space, made only of characters that go when alone: a lone symbol left at the end.
+  const m = /(\S*)\s+(\S+)$/u.exec(kept);
+  if (m) {
+    const token = Array.from(m[2]);
+    if (token.every((c) => LONE_DROPPED.includes(c))) {
+      const afterNumber = token.every((c) => CURRENCY.includes(c)) && /[0-9]$/.test(m[1]);
+      if (!afterNumber) return `ends in a lone ${JSON.stringify(m[2])}`;
+    }
+  }
+  return null;
 }

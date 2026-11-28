@@ -20,7 +20,7 @@ vi.mock("next/navigation", () => ({
 
 import { clip, liveProducts } from "../storefront-counts";
 import { useStoreAiHub } from "../hooks/use-store-ai-hub";
-import { endsInLoneDropped } from "./trust-copy-allowlist";
+import { clipEndViolation } from "./trust-copy-allowlist";
 
 function hubTool(id: string) {
   const { result } = renderHook(() => useStoreAiHub());
@@ -128,7 +128,7 @@ describe("R13-2: clip() drops trailing punctuation and symbols, but for those th
       if (CONTENT.test(t)) {
         expect(kept, at).toMatch(CONTENT);
         // r14 (R14-1, R14-2): by graphemes, and a symbol attached to the word before it stays.
-        expect(endsInLoneDropped(kept), at).toBeNull();
+        expect(clipEndViolation(t, kept), at).toBeNull();
       }
     }
   });
