@@ -203,14 +203,15 @@ const isMark = (g: string | undefined) => g !== undefined && /^[\p{P}\p{S}]+$/u.
 const ALWAYS_DROPPED = /^(?:[,;:…、，､：；﹐﹑﹔﹕]|\p{Sentence_Terminal}|\p{Pd}|\p{Ps}|\p{Pi})$/u;
 
 /**
- * P231 r12-r16: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
+ * P231 r12-r17: the graphemes dropped from the end of the kept part, before the "..." (one grapheme at a time, so an
  * emoji with a skin tone, a keycap, a flag, a family is never split):
  * - always: whitespace and ALWAYS_DROPPED;
  * - any other punctuation or symbol ("&", "•", "/", "*", "#", "@", "¿", "<", "$", "©", "↔") only when its run of
  *   punctuation and symbols stands alone, after whitespace or nothing ("Shop &", "Shop &&", "4.5 /"); a run attached
  *   to the letter, digit, mark or emoji before it is that word's and stays whole ("C##", "4★★", "Free**", "a/b/",
  *   "Pepper™", R15-1); a run after sentence punctuation is lone (R16-3: "Shop.★" gives "Shop"); a run of currency
- *   signs after a number and one space is the number's too ("5 €", "5 €€": R16-4, decided for the whole run);
+ *   signs after a number and one space is the number's too ("5 €", "5 €€": R16-4, decided for the whole run; a
+ *   mixed run is decided grapheme by grapheme, R17-2: "5 €&" gives "5 €");
  * - never: a "%", a "+", a closing bracket or quote, a straight quote (it may close one), an emoji, or a grapheme
  *   holding anything else (a letter, a digit, a mark), alone or not (R15-4: "50 %...", "1 +...", "( weekdays )...":
  *   a closing mark closes what the kept part opened, and dropping it would leave that open).
@@ -228,7 +229,11 @@ function dropTrailing(g: string[]): string[] {
     if (!ALWAYS_DROPPED.test(c)) {
       // The run this grapheme ends: the marks before it, back to content, whitespace, the start, or (r16, R16-3)
       // sentence punctuation, which is no word: a symbol after it is lone, and goes with it ("Hello!!&" gives
-      // "Hello"). The run is decided whole, here, before any of it goes (R16-4): it stays whole or goes whole.
+      // "Hello"; "Yahoo!™" gives "Yahoo"). A never-dropped mark in the run does not stop the walk (R17-1: "50%*",
+      // "(sale)*", "A+*" keep the "*"). Attached, the run stays whole. Lone, it goes grapheme by grapheme, each
+      // decided here as it comes to the end, until a never-dropped mark ends the drop (R17-2: "5 €&" gives "5 €",
+      // "Hi.»&" gives "Hi.»"); only an all-currency run after a number and a space is decided whole, and stays
+      // (R16-4: "5 €€").
       let k = end - 1;
       while (k > 0 && isMark(g[k - 1]) && !ALWAYS_DROPPED.test(g[k - 1])) k--;
       if (hasContent(g[k - 1])) break;
