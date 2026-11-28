@@ -140,28 +140,119 @@ export function longestRemainingChain(packets, statusById) {
 
 const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
+/** Informational liveness budget for ready packets (RR-STATUS-STALL-REPORT). */
+export const STALL_BUDGET_DAYS = 14;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/**
+ * Parse an ISO-8601 date or timestamp (also accepting the plan's "YYYY-MM-DD HH:MMZ" form)
+ * into { ms, iso }. Returns null for empty, malformed, or calendar-invalid dates.
+ */
+function parseIsoDate(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  const m = trimmed.match(ISO_DATE_RE);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = m[4] === undefined ? 0 : Number(m[4]);
+  const minute = m[5] === undefined ? 0 : Number(m[5]);
+  const second = m[6] === undefined ? 0 : Number(m[6]);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
+  // Calendar round-trip rejects impossible dates such as 2026-02-30.
+  const cal = new Date(Date.UTC(year, month - 1, day));
+  if (cal.getUTCFullYear() !== year || cal.getUTCMonth() + 1 !== month || cal.getUTCDate() !== day) return null;
+  let normalized;
+  if (m[4] === undefined) {
+    normalized = `${m[1]}-${m[2]}-${m[3]}T00:00:00Z`;
+  } else {
+    const frac = m[7] ? `.${m[7]}` : '';
+    const tz = m[8] ?? 'Z';
+    const sec = m[6] ?? '00';
+    normalized = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${sec}${frac}${tz}`;
+  }
+  const ms = Date.parse(normalized);
+  if (!Number.isFinite(ms)) return null;
+  const iso = m[4] !== undefined && m[6] !== undefined && !trimmed.includes(' ') ? trimmed : normalized;
+  return { ms, iso };
+}
+
+/** Extract the plan's leading snapshot timestamp (e.g. "2026-11-16 21:50Z; ...") as ISO-8601, or null. */
+export function planSnapshotDate(plan) {
+  const raw = typeof plan?._about?.snapshot === 'string'
+    ? plan._about.snapshot
+    : (typeof plan?.snapshot_date === 'string' ? plan.snapshot_date : null);
+  if (!raw) return null;
+  const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)/);
+  if (!m) return null;
+  return parseIsoDate(m[1])?.iso ?? null;
+}
+
+function newestCommitDate(list) {
+  let best = null;
+  for (const c of list ?? []) {
+    const parsed = parseIsoDate(c?.date);
+    if (parsed && (!best || parsed.ms > best.ms)) best = parsed;
+  }
+  return best?.iso ?? null;
+}
+
 /**
  * Packets that can start now: status todo and every depends_on done.
  * Ranked: on the plan's critical path first, then by how many not-done packets wait on it,
  * then priority, then id.
  */
-export function readyList(packets, statusById, criticalPath) {
+export function readyList(packets, statusById, criticalPath, options = {}) {
+  const {
+    mainDate = null,
+    snapshotDate = null,
+    evidenceDateById = {},
+    stallBudgetDays = STALL_BUDGET_DAYS,
+  } = options;
+  const mainParsed = parseIsoDate(mainDate);
+  const snapParsed = parseIsoDate(snapshotDate);
+  const budgetMs = stallBudgetDays * MS_PER_DAY;
   const dependents = transitiveDependents(packets);
   const ids = new Set(packets.map((p) => p.id));
   const crit = new Set(criticalPath ?? []);
   return packets
     .filter((p) => statusById[p.id] === 'todo')
     .filter((p) => (p.depends_on ?? []).every((d) => ids.has(d) && statusById[d] === 'done'))
-    .map((p) => ({
-      id: p.id,
-      step: p.step,
-      priority: p.priority,
-      size: p.size,
-      lane: p.lane,
-      track: p.track ?? null,
-      on_critical_path: crit.has(p.id),
-      unblocks: [...(dependents.get(p.id) ?? [])].filter((d) => statusById[d] !== 'done').length,
-    }))
+    .map((p) => {
+      const deps = p.depends_on ?? [];
+      let readySinceParsed = null;
+      if (deps.length === 0) {
+        readySinceParsed = snapParsed;
+      } else {
+        let newest = null;
+        let allDated = true;
+        for (const d of deps) {
+          const parsed = parseIsoDate(evidenceDateById[d]);
+          if (!parsed) {
+            allDated = false;
+            break;
+          }
+          if (!newest || parsed.ms > newest.ms) newest = parsed;
+        }
+        readySinceParsed = allDated ? newest : null;
+      }
+      const stalled = Boolean(mainParsed && readySinceParsed && (mainParsed.ms - readySinceParsed.ms) > budgetMs);
+      return {
+        id: p.id,
+        step: p.step,
+        priority: p.priority,
+        size: p.size,
+        lane: p.lane,
+        track: p.track ?? null,
+        on_critical_path: crit.has(p.id),
+        unblocks: [...(dependents.get(p.id) ?? [])].filter((d) => statusById[d] !== 'done').length,
+        ready_since: readySinceParsed ? readySinceParsed.iso : null,
+        stalled,
+      };
+    })
     .sort(
       (a, b) =>
         Number(b.on_critical_path) - Number(a.on_critical_path) ||
@@ -175,8 +266,16 @@ export function readyList(packets, statusById, criticalPath) {
 export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate, baseSha }) {
   const priorById = new Map((prior?.packets ?? []).map((r) => [r.id, r]));
   const wave2bOnMain = wave2bMerged(commits);
+  const evidenceDateById = {};
   const rows = plan.packets.map((p) => {
     const d = deriveStatus(p, { priorRow: priorById.get(p.id), commits, wave2bOnMain, branches });
+    if (d.status === 'done') {
+      const ev = commitEvidence(p.id, commits);
+      if (d.derived_from === 'compacted-commit') evidenceDateById[p.id] = newestCommitDate(ev.compacted);
+      else if (d.derived_from === 'compacted-tests-only') evidenceDateById[p.id] = newestCommitDate(ev.testsOnly);
+      else if (d.derived_from === 'code-commit-subject') evidenceDateById[p.id] = newestCommitDate(ev.code);
+      else evidenceDateById[p.id] = null;
+    }
     return {
       id: p.id,
       step: p.step,
@@ -221,7 +320,12 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
   const by_derivation = {};
   for (const r of rows) by_derivation[r.derived_from] = (by_derivation[r.derived_from] ?? 0) + 1;
   const planCritical = plan.validation?.critical_path ?? [];
-  const ready = readyList(plan.packets, statusById, planCritical);
+  const ready = readyList(plan.packets, statusById, planCritical, {
+    mainDate,
+    snapshotDate: planSnapshotDate(plan),
+    evidenceDateById,
+    stallBudgetDays: STALL_BUDGET_DAYS,
+  });
   const readyLaunch = ready.filter((r) => r.track === 'launch');
   return {
     _generated: {
@@ -257,6 +361,8 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
       uncertain: rows.filter((r) => r.uncertain).map((r) => r.id),
       todo_with_dependencies_met: ready.length,
       todo_with_dependencies_met_launch: readyLaunch.length,
+      stalled_ready: ready.filter((r) => r.stalled).length,
+      stalled_ready_launch: readyLaunch.filter((r) => r.stalled).length,
     },
     critical_path: {
       plan_recorded_remaining: planCritical.filter((id) => statusById[id] !== 'done'),
@@ -311,6 +417,17 @@ export function renderStatusMd(status, { readyLimit = 25 } = {}) {
     const followOn = status.ready.filter((r) => r.track === 'follow-on').length;
     const untracked = status.ready.length - launch.length - followOn;
     L.push('', `Follow-on packets ready (D-263; only on the owner's assignment): ${followOn}.${untracked ? ` Ready with no track: ${untracked}.` : ''} All ${status.ready.length} are in the JSON file, \`ready\`.`);
+  }
+  const stalled = status.ready.filter((r) => r.stalled);
+  L.push('', `## Ready but stalled (${stalled.length}; > ${STALL_BUDGET_DAYS} days, informational)`, '');
+  L.push(`Informational liveness signal from main alone (no wall clock, no branches, no automatic action; a person decides what a stall means). Budget: ${STALL_BUDGET_DAYS} days between \`ready_since\` and \`main_commit_date\`.`, '');
+  if (!stalled.length) {
+    L.push('(none)');
+  } else {
+    for (const r of stalled.slice(0, readyLimit)) {
+      L.push(`- ${r.id} (${r.track ?? 'untracked'}, ${r.priority}, ${r.lane}, ready_since: ${r.ready_since})`);
+    }
+    if (stalled.length > readyLimit) L.push(`- (${stalled.length - readyLimit} more in the JSON file, \`ready\`.)`);
   }
   const inprog = status.packets.filter((p) => p.status === 'in-progress');
   if (inprog.length) {
