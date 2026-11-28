@@ -350,7 +350,7 @@ describe('founding-membership inventory and deterministic repair — real DB', (
     const ambiguousBefore = await snapshot(seeded.ambiguous.id);
     const ghostBefore = await snapshot(seeded.ghost.id);
 
-    const out = await founding.repairDeterministic({ apply: true });
+    const out = await founding.repairDeterministic({ apply: true, businessIdPrefix: P });
 
     // Scoped to this suite's rows on purpose. `classify()` sweeps every business
     // in the database by design, and sibling integration suites seed their own,
@@ -373,10 +373,10 @@ describe('founding-membership inventory and deterministic repair — real DB', (
 
   it('is safe to run twice', async () => {
     const seeded = await seedAllClasses();
-    await founding.repairDeterministic({ apply: true });
+    await founding.repairDeterministic({ apply: true, businessIdPrefix: P });
     const afterFirst = await db.membership.count({ where: { businessId: { startsWith: P } } });
 
-    const second = await founding.repairDeterministic({ apply: true });
+    const second = await founding.repairDeterministic({ apply: true, businessIdPrefix: P });
 
     // Nothing of ours is left in the deterministic class, and the second pass
     // added no row of ours.
@@ -399,7 +399,7 @@ describe('founding-membership inventory and deterministic repair — real DB', (
       orderBy: [{ businessId: 'asc' }, { userId: 'asc' }],
     });
 
-    await founding.repairDeterministic({ apply: true });
+    await founding.repairDeterministic({ apply: true, businessIdPrefix: P });
 
     const ownersAfter = await db.business.findMany({
       where: { id: { startsWith: P } },
@@ -419,5 +419,27 @@ describe('founding-membership inventory and deterministic repair — real DB', (
     }
     expect(historyAfter.length).toBe(historyBefore.length + 1);
     expect(seeded.safe.id).toBeDefined();
+  });
+
+  it('P271 (D-297): businessIdPrefix scopes classify and repairDeterministic strictly to that prefix so sibling suites are never mutated', async () => {
+    const ownerA = await seedUser('p271_a');
+    const ownerB = await seedUser('p271_b');
+    const bizA = await db.business.create({
+      data: { id: `${P}scope_a_biz`, name: `${P}scope_a`, ownerId: ownerA },
+    });
+    const bizB = await db.business.create({
+      data: { id: `${P}scope_b_biz`, name: `${P}scope_b`, ownerId: ownerB },
+    });
+
+    const out = await founding.repairDeterministic({
+      apply: true,
+      businessIdPrefix: `${P}scope_a_`,
+    });
+
+    expect(out.repaired).toEqual([bizA.id]);
+    expect(out.inventory.rows.map((r: any) => r.businessId)).toEqual([bizA.id]);
+    expect(await db.membership.findMany({ where: { businessId: bizA.id } })).toHaveLength(1);
+    // Sibling prefix must remain completely untouched (zero OWNER membership injected).
+    expect(await db.membership.findMany({ where: { businessId: bizB.id } })).toHaveLength(0);
   });
 });
