@@ -140,7 +140,7 @@ jobs:
 
       - name: Publish actionable wake event
         if: fromJSON(steps.event.outputs.json).actionable == true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           # D-272.4 (P2): #80 wake-event posting is switched off while keeping
           # the agent-control modules, workflow structure, and specs intact.
