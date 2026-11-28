@@ -384,3 +384,33 @@ describe("P263 R2: a position match never lands on a different field", () => {
     expect(document.activeElement, "a tabindex=-1 element shifted the position").toBe(screen.getByTestId("unnamed"));
   });
 });
+
+describe("P263 R2-4: a focus change costs nothing; the panel is read only when the layout flips", () => {
+  it("in a 300-row panel, moving focus between fields makes no query of the panel", async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => i);
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        {rows.map((i) => <input key={i} aria-label={`Row ${i}`} />)}
+      </SideSheet>,
+    );
+    await settle();
+    const queries = vi.spyOn(Element.prototype, "querySelectorAll");
+    for (const i of [3, 150, 299, 0]) screen.getByLabelText(`Row ${i}`).focus();
+    await settle();
+    const calls = queries.mock.calls.length;
+    queries.mockRestore();
+    expect(calls, "a focus change scanned the panel").toBe(0);
+  });
+  it("control: the flip still finds the field (the snapshot is taken then)", async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => i);
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        {rows.map((i) => <input key={i} aria-label={`Row ${i}`} />)}
+      </SideSheet>,
+    );
+    await settle();
+    screen.getByLabelText("Row 150").focus();
+    await flip(true);
+    expect(document.activeElement).toBe(screen.getByLabelText("Row 150"));
+  });
+});
