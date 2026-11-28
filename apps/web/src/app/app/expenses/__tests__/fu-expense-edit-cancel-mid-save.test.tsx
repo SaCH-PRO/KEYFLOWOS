@@ -232,3 +232,17 @@ describe("P257: the header Close shows it is held while the save is out", () => 
     expect(close().hasAttribute("aria-disabled")).toBe(false);
   });
 });
+
+describe("P257 R1-1: typing in the edit sheet keeps focus in the field", () => {
+  it("several characters into the description: focus stays in it", async () => {
+    sheetFor(vi.fn());
+    await settle();
+    const field = () => screen.getByPlaceholderText("What was this expense for?") as HTMLInputElement;
+    field().focus();
+    for (const v of ["P", "Pr", "Pri", "Prin", "Print"]) {
+      fireEvent.change(field(), { target: { value: v } });
+      await settle();
+      expect(document.activeElement, `focus left the description after typing "${v}"`).toBe(field());
+    }
+  });
+});

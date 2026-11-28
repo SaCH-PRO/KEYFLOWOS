@@ -5,6 +5,7 @@
  * prop (the default, false) every way to close works as before, on the desktop panel and the phone bottom sheet.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { useState } from "react";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -82,16 +83,99 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
     "app/app/expenses/components/recurring-expenses-panel.tsx",
     "app/app/commerce/components/billing-form-modal.tsx",
     "app/app/commerce/components/standalone-payment-recorder.tsx",
+    // P257 R1-3: the sixth (it imports ../components/side-sheet).
+    "app/app/commerce/recurring/recurring-panel.tsx",
   ];
   for (const path of CALLERS) {
     it(`${path} imports this SideSheet and passes no closeDisabled`, () => {
       const text = readFileSync(join(SRC, path), "utf8");
-      expect(text).toMatch(/commerce\/components\/side-sheet"|from "\.\/side-sheet"/);
+      expect(text).toMatch(/components\/side-sheet"|from "\.\/side-sheet"/);
       expect(text, `${path} now passes closeDisabled`).not.toMatch(/closeDisabled/);
     });
   }
   it("the expense sheet passes it", () => {
     const text = readFileSync(join(SRC, "app/app/expenses/components/expense-form-sidesheet.tsx"), "utf8");
     expect(text).toMatch(/closeDisabled=\{submitting\}/);
+  });
+});
+
+describe("P257 R1-1: the sheet's focus and keydown effect does not re-run while it is open", () => {
+  /** A caller that passes a new onClose arrow on every render, and re-renders as its field is typed in. */
+  function Caller({ closeDisabled = false, onClose }: { closeDisabled?: boolean; onClose: () => void }) {
+    const [text, setText] = useState("");
+    return (
+      <SideSheet open onClose={() => onClose()} title="Edit Expense" closeDisabled={closeDisabled}>
+        <input aria-label="Field" value={text} onChange={(e) => setText(e.target.value)} />
+      </SideSheet>
+    );
+  }
+  const field = () => screen.getByLabelText("Field") as HTMLInputElement;
+  for (const layout of ["desktop", "phone"] as const) {
+    describe(layout, () => {
+      beforeEach(() => { mobile = layout === "phone"; });
+      it("typing several characters keeps focus in the field (a new onClose each render)", async () => {
+        render(<Caller onClose={vi.fn()} />);
+        await settle();
+        field().focus();
+        for (const v of ["P", "Pr", "Pri", "Prin"]) {
+          fireEvent.change(field(), { target: { value: v } });
+          await settle();
+          expect(document.activeElement, `focus left the field after typing "${v}"`).toBe(field());
+        }
+      });
+      it("toggling closeDisabled while focus is in a field keeps it there", async () => {
+        const onClose = vi.fn();
+        const view = render(<Caller onClose={onClose} />);
+        await settle();
+        field().focus();
+        view.rerender(<Caller onClose={onClose} closeDisabled />);
+        await settle();
+        expect(document.activeElement, "focus left the field when closing was held").toBe(field());
+        view.rerender(<Caller onClose={onClose} />);
+        await settle();
+        expect(document.activeElement, "focus left the field when closing was released").toBe(field());
+      });
+      it("control: the panel takes focus when the sheet opens", async () => {
+        render(<Caller onClose={vi.fn()} />);
+        await settle();
+        expect(document.activeElement).toBe(screen.getByRole("dialog"));
+      });
+    });
+  }
+  it("control: closing returns focus to the opener", async () => {
+    function Opener() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Open</button>
+          <SideSheet open={open} onClose={() => setOpen(false)} title="Edit Expense"><p>body</p></SideSheet>
+        </>
+      );
+    }
+    render(<Opener />);
+    const opener = screen.getByRole("button", { name: "Open" });
+    opener.focus();
+    fireEvent.click(opener);
+    await settle();
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    expect(document.activeElement, "focus not returned to the opener").toBe(opener);
+  });
+  it("control: Escape, the overlay and Close call the latest onClose, and closeDisabled set later holds them", async () => {
+    const first = vi.fn();
+    const latest = vi.fn();
+    const view = render(<SideSheet open onClose={first} title="Edit Expense"><p>body</p></SideSheet>);
+    await settle();
+    view.rerender(<SideSheet open onClose={latest} title="Edit Expense"><p>body</p></SideSheet>);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(overlay());
+    fireEvent.click(closeButton());
+    expect(first, "a stale onClose was called").not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledTimes(3);
+    view.rerender(<SideSheet open onClose={latest} title="Edit Expense" closeDisabled><p>body</p></SideSheet>);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(overlay());
+    expect(latest, "closeDisabled set after open did not hold Escape and the overlay").toHaveBeenCalledTimes(3);
   });
 });
