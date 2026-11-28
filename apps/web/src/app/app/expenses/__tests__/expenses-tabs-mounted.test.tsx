@@ -86,13 +86,31 @@ afterEach(() => cleanup());
 // default and the test's 5 s default (one timeout seen under load, 3 of 3 passes alone). The waits are longer; what
 // each test asserts is unchanged.
 vi.setConfig({ testTimeout: 30000 });
+/**
+ * P265 R2-3: reads held on a gate, for the twin below; the release is scheduled right after mountPage's call-only
+ * wait, so a lookup made at once always runs before any reply (as P265 R2-1 does in expenses-hub3-repair-page).
+ */
+const gate = { release: () => {} };
+function holdReads(fns: Array<ReturnType<typeof vi.fn>>) {
+  let release: () => void = () => {};
+  const opened = new Promise<void>((r) => { release = r; });
+  gate.release = release;
+  for (const fn of fns) {
+    const answer = fn.getMockImplementation();
+    fn.mockImplementation((...args: unknown[]) => opened.then(() => (answer ? answer(...args) : undefined)));
+  }
+}
+afterEach(() => { gate.release = () => {}; });
 async function mountPage() {
   const view = render(<ExpensesInboxPage />);
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
+  const release = gate.release;
+  setTimeout(release, 0);
   return view;
 }
 
-describe("BUG-060: the categories tab and the recurring panel are mounted on the Expenses page", () => {
+/** BUG-060's cases (P265 R2-3: run as they were, and again with the reads held until after mountPage's wait). */
+function bug060Cases() {
   it("the page offers Expenses, Categories and Recurring views", async () => {
     await mountPage();
     const views = screen.getByRole("tablist", { name: /expenses views/i });
@@ -148,4 +166,11 @@ describe("BUG-060: the categories tab and the recurring panel are mounted on the
     expect(screen.queryByRole("button", { name: /^inbox/i })).toBeNull();
     expect(screen.getByText(/create category/i)).toBeTruthy();
   });
+}
+describe("BUG-060: the categories tab and the recurring panel are mounted on the Expenses page", bug060Cases);
+describe("P265 R2-3: BUG-060 with every default expenses read held until after mountPage's wait", () => {
+  beforeEach(() => {
+    holdReads([client.fetchExpenses, client.fetchExpenseCategories, client.fetchExpenseSummary, client.fetchExpenseBudgets]);
+  });
+  bug060Cases();
 });
