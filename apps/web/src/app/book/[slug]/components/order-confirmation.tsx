@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   RefreshCw,
   Package,
-  Shield,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { ShareButtons } from "./share-buttons";
@@ -558,10 +557,7 @@ export function OrderConfirmation({
       {/* CUSTOMER-PAGE-HONESTY: no "Get Order Updates / Notify Me" sign-up here. It posted to a route the server does
          not have and said "Subscribed!" whatever it answered; the server alerts the owner of an order (OWNER-ALERTS-SERVER). */}
 
-      <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300 pt-2">
-        <Shield className="w-3 h-3" />
-        <span>Secured by KeyFlowOS</span>
-      </div>
+      {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Secured by KeyFlowOS'; KeyFlowOS makes no such promise. */}
     </div>
   );
 }

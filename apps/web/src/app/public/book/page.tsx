@@ -86,16 +86,8 @@ export default function PublicBookPage() {
             Premium, glassy public booking experience. Requests hit the live endpoint at{" "}
             <code className="font-mono">{API_BASE}</code>.
           </p>
-          <div className="grid grid-cols-2 gap-3 text-sm text-slate-300">
-            <div className="rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.35)] p-3">
-              <div className="text-xs uppercase tracking-[0.12em] text-[var(--kf-text-muted)]">Trust</div>
-              <div className="mt-1 font-semibold">Secure & Encrypted</div>
-            </div>
-            <div className="rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.35)] p-3">
-              <div className="text-xs uppercase tracking-[0.12em] text-[var(--kf-text-muted)]">Speed</div>
-              <div className="mt-1 font-semibold">Instant confirmation</div>
-            </div>
-          </div>
+          {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Secure & Encrypted' and no 'Instant confirmation' cards; a request
+             can wait for the owner, and the form checks neither. */}
         </div>
 
         <Card title="Book Now" badge="Live" className="bg-[rgba(0,0,0,0.35)] border border-[var(--kf-border)]">

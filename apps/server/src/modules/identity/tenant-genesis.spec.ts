@@ -393,7 +393,14 @@ function cappedClient(
     return sorted.slice(start, start + Math.min(args?.take ?? cap, cap));
   };
   return {
-    business: { findMany: vi.fn(async (args: any) => page(businesses, args)) },
+    business: {
+      findMany: vi.fn(async (args: any) => {
+        const prefix = args?.where?.id?.startsWith;
+        const filtered =
+          typeof prefix === 'string' ? businesses.filter((b) => b.id.startsWith(prefix)) : businesses;
+        return page(filtered, args);
+      }),
+    },
     membership: {
       findMany: vi.fn(async (args: any) => {
         const ids: string[] = args.where.businessId.in;
@@ -551,5 +558,31 @@ describe('FoundingMembershipService.repairDeterministic', () => {
       { businessId: 'b-first', reason: 'FK violation: user was deleted' },
     ]);
     expect(upsert).toHaveBeenCalledTimes(2); // it kept going
+  });
+
+  it('P271 (D-297): scopes classify and repairDeterministic to businessIdPrefix when provided and keeps global sweep when omitted', async () => {
+    const twoScopes = [
+      { id: 'scope_a_1', name: 'A1', ownerId: 'u1' },
+      { id: 'scope_b_1', name: 'B1', ownerId: 'u2' },
+    ];
+    const upsert = vi.fn().mockResolvedValue({ id: 'm' });
+    const client = cappedClient(twoScopes, [], ['u1', 'u2'], 500, upsert);
+    const svc = new FoundingMembershipService({ client } as never);
+
+    const scoped = await svc.repairDeterministic({
+      apply: true,
+      businessIdPrefix: 'scope_a_',
+    });
+
+    expect(scoped.repaired).toEqual(['scope_a_1']);
+    expect(scoped.inventory.rows.map((r: any) => r.businessId)).toEqual(['scope_a_1']);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(client.business.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { deletedAt: null, id: { startsWith: 'scope_a_' } } }),
+    );
+
+    // Omitted prefix preserves global sweep.
+    const globalInv = await svc.classify();
+    expect(globalInv.rows.map((r) => r.businessId)).toEqual(['scope_a_1', 'scope_b_1']);
   });
 });

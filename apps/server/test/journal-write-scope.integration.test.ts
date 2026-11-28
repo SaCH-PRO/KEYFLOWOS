@@ -501,11 +501,13 @@ describe('KEY: finance_post_journal_entry needs the member\'s revenue write on c
 
   it('JWS-13 RED-BEFORE: the chat menu offers finance_post_journal_entry to the OWNER only among these, and payroll_mark_paid to no member without expenses write', async () => {
     expect(await chatMenu(ID.owner)).toContain(TOOL);
-    expect(await chatMenu(ID.owner)).toContain('payroll_mark_paid');
+    // V1-63 (KEY-TOOL-ALLOWLIST): payroll write tools are unconditionally removed from v1 KEY menus.
+    expect(await chatMenu(ID.owner)).not.toContain('payroll_mark_paid');
+    expect(await chatMenu(ID.owner)).not.toContain('payroll_approve_run');
     for (const as of [ID.staffRead, ID.staffDefault, ID.staffNone, ID.superAdmin]) expect(await chatMenu(as), as).not.toContain(TOOL);
     const ops = await chatMenu(ID.opsWriteExpRead);
     expect(ops).not.toContain('payroll_mark_paid');
-    expect(ops).toContain('payroll_approve_run');
+    expect(ops).not.toContain('payroll_approve_run');
   });
 });
 

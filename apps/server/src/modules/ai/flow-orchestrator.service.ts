@@ -56,7 +56,7 @@ import { GenomeFactService } from '../business-genome/key-genome/genome-fact.ser
 // for flow-tool-effect-metadata REVIEWED_NON_READ_FAMILY_READ_TOOLS citations.
 import { genomeReaderReadsRevenue, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 import { createReminderTask, createSentOverdueInvoiceReminderDraft, listSentOverdueInvoices, recommendStaleFollowUps, summarizePaidRevenue } from './legacy-promoted-tools.helper';
-// (5 lines total matching original block)
+import { isToolAllowedInV1, v1ToolRefusalReason, V1_TOOL_UNAVAILABLE_MESSAGE } from './v1-tool-allowlist';
 import {
   blueprintForReader,
   genomeFactsForReader,
@@ -2232,7 +2232,7 @@ export class FlowOrchestratorService {
     } else {
       candidates = all;
     }
-
+    candidates = candidates.filter((t) => isToolAllowedInV1(t.function.name));
     // PR195-KEY-GATES (review SEC-P195BW-3, SEC-P195BW-5, CRR-P195BD-2): in a member's own chat a tool is offered
     // only when the member holds every module scope its REST routes require, read or write (keyMemberMenuScopes,
     // derived from CANONICAL_MODULE_TOOLS, the governed part of a GOVERNED_UNGRANTED tool and the authority map's
@@ -3009,7 +3009,7 @@ ${triage.standingContext}`;
       try {
         if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
           // Governed again now, on the bound tool and the crew it was proposed under.
-          const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
+          const confirmDecision = this.v1BlockedDecision(pendingConfirmation.toolName) ?? await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
           if (!confirmDecision.allowed) {
             await claim.settle('refused', confirmDecision.reason);
             return {
@@ -3175,7 +3175,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          const decision = this.v1BlockedDecision(tc.name) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
           // runs for its holder (chatToolAction); every other call keeps this context.
           // PR195-KEY-GATES (review SEC-P195BW-1): a staff position's turn (an envelope, no principal) is marked so,
@@ -3731,7 +3731,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          const decision = this.v1BlockedDecision(tc.name) ?? await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           return this.governToolCall(businessId, tc, decision, {
             surface: 'CHAT_STREAM',
             principalUserId: userId ?? null,
@@ -4266,7 +4266,7 @@ ${triage.standingContext}`;
     if (!isFlowConfirmationId(confirmationId)) {
       if (!pending.confirmed) return answer(cancelled, false);
       if (pending.toolName) {
-        const decision = await this.governance.evaluate(businessId, pending.toolName, undefined, turnCrew, envelope);
+        const decision = this.v1BlockedDecision(pending.toolName) ?? await this.governance.evaluate(businessId, pending.toolName, undefined, turnCrew, envelope);
         if (!decision.allowed) return answer(`This action is blocked: ${decision.reason}`);
       }
       return answer(UNBOUND_CONFIRMATION_REPLY);
@@ -4428,7 +4428,7 @@ ${triage.standingContext}`;
       // KEY-cortex turn's bridged call; review SEC-W8KRG-1, SEC-W8KRG-2), judged with these arguments
       // (review CR-W8KRG-1).
       const refusal = await this.memberScopeRefusal(businessId, toolName, action, args);
-      if (refusal) throw new Error(refusal);
+      if (refusal) throw v1ToolRefusalReason(toolName) ? new ForbiddenException(refusal) : new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
@@ -4663,10 +4663,10 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     action?: KeyDispatchAction,
   ): Promise<unknown> {
-    // PR195-KEY-GATES (review SEC-P195BW-1): this door reaches the dispatcher without executeTool (the phone stream's
-    // receptionist, an execute_custom_logic snippet's inner call), so a turn that names no member is held to the
-    // customer-safe allowlist here too, before anything is read or written. A member's inner call was held before it
-    // got here, with its outer turn's context (execute_custom_logic: withinMemberScope).
+    // PR195-KEY-GATES (SEC-P195BW-1) + KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): refuse v1-removed tools
+    // before memberlessKeyTurn/executeToolAction; otherwise hold memberless turns to the customer-safe allowlist.
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) throw new ForbiddenException(v1Refusal);
     if (memberlessKeyTurn(action)) {
       const refusal = memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
       if (refusal) throw new ForbiddenException(refusal);
@@ -4703,8 +4703,8 @@ ${triage.standingContext}`;
     action?: KeyDispatchAction,
     args?: unknown,
   ): Promise<string | null> {
+    if (!isToolAllowedInV1(toolName)) return V1_TOOL_UNAVAILABLE_MESSAGE;
     if (memberlessKeyTurn(action)) return memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
-    // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
     const { memberToolScopeRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
     const memberId = memberRevenueGateMember(action);
     if (memberId) return memberToolScopeRefusal(this.prisma, businessId, memberId, toolName, args);
@@ -4987,8 +4987,8 @@ ${triage.standingContext}`;
     // that passes nothing arrives there undeclared and is refused.
     action?: KeyDispatchAction,
   ): Promise<any> {
-    // Bridged MCP tools route to the allowlisted remote server, for this business only
-    // (RR-MCP-TENANT-BOUND): a server not bound to it refuses before connecting.
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) throw new ForbiddenException(v1Refusal);
     if (isMcpToolName(toolName)) {
       return this.getMcp().callTool(businessId, toolName, args);
     }
@@ -9648,7 +9648,7 @@ ${triage.standingContext}`;
 
       if (step.toolName) {
         const stepRole = (step.role ?? plan.role ?? undefined) as BusinessRole | undefined;
-        const decision = await this.governance.evaluate(businessId, step.toolName, undefined, stepRole);
+        const decision = this.v1BlockedDecision(step.toolName) ?? await this.governance.evaluate(businessId, step.toolName, undefined, stepRole);
         if (!decision.allowed) {
           await this.planner.updateStepStatus(step.id, 'blocked', null, decision.reason);
           stepsSkipped++;
@@ -9758,6 +9758,19 @@ ${triage.standingContext}`;
     return this.executeTool(businessId, toolName, args, undefined, planContext, action);
   }
 
+  private v1BlockedDecision(toolName: string) {
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (!v1Refusal) return null;
+    return {
+      allowed: false,
+      requiresQuickConfirm: false,
+      requiresFormalApproval: false,
+      requiresAdminApproval: false,
+      tier: (this.governance?.getToolTier ? this.governance.getToolTier(toolName) : 4) as 1 | 2 | 3 | 4,
+      reason: v1Refusal,
+    };
+  }
+
   async autoExecuteToolForMonitoring(
     businessId: string,
     toolName: string,
@@ -9779,8 +9792,19 @@ ${triage.standingContext}`;
     // human, so the action boundary still sends a write it adopted to a human for approval.
     // Refused before anything runs, and recorded. (Imported at call time: plan-step-authority imports
     // graph-actions.controller, which imports this file.)
-    const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
     const memberId = options.memberId || undefined;
+    const v1Refusal = v1ToolRefusalReason(toolName);
+    if (v1Refusal) {
+      await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${v1Refusal}`, false, 0, {
+        riskTier: this.governance.getToolTier(toolName),
+        mode: 'pro_auto',
+        rationale: 'Refused for Pro Auto monitoring: tool is disabled in v1 (V1-63)',
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
+        this.logger.error(`Failed to log refused auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return { success: false, error: `Refused: ${v1Refusal}`, blocked: true };
+    }
+    const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
     const refusal = memberId
       ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
       : noMemberToolRefusal(toolName);
