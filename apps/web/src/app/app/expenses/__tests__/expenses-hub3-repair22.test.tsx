@@ -418,6 +418,8 @@ describe("R22-1: the recurring panel's read that fails for A after the panel sho
     await act(async () => { readA.reject(new TypeError("Failed to fetch")); });
     await settle();
     expect(screen.queryByText(/no recurring expenses/i), "A's failure ended B's loading").toBeNull();
+    // R26-5: nor is A's failure said on B.
+    expect(screen.queryByText(/Couldn't load recurring expenses/), "A's failure said on B").toBeNull();
     expect(screen.queryByRole("button", { name: "Add Recurring Expense" })).toBeNull();
   });
 });
