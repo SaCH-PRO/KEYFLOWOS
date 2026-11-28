@@ -56,11 +56,26 @@ export function stripComments(src) {
  */
 export function extractInitializer(src, name) {
   const clean = stripComments(src);
-  const decl = new RegExp(`(?:export\\s+)?const\\s+${name}\\b[^=;]*=`, 'm');
+  const decl = new RegExp(`(?:export\\s+)?const\\s+${name}\\b`, 'm');
   const m = decl.exec(clean);
   if (!m) throw new Error(`constant ${name} not found`);
   let i = m.index + m[0].length;
   const n = clean.length;
+  // Advance past optional TypeScript type annotation (which may contain `{ a: number; b: string }` or `=>`)
+  let typeDepth = 0;
+  let foundEq = false;
+  for (; i < n; i++) {
+    const c = clean[i];
+    if (c === '<' || c === '(' || c === '[' || c === '{') { typeDepth++; continue; }
+    if (c === '>' || c === ')' || c === ']' || c === '}') { if (typeDepth > 0) typeDepth--; continue; }
+    if (typeDepth === 0 && c === '=' && clean[i + 1] !== '>' && clean[i + 1] !== '=') {
+      i++;
+      foundEq = true;
+      break;
+    }
+    if (typeDepth === 0 && c === ';') break;
+  }
+  if (!foundEq) throw new Error(`constant ${name} initializer not found`);
   while (i < n && /\s/.test(clean[i])) i++;
   const start = i;
   let depth = 0;
@@ -152,3 +167,81 @@ export function recordNumericValues(segment) {
   while ((m = re.exec(segment)) !== null) out.push(Number(m[1]));
   return out;
 }
+
+/**
+ * Count top-level elements of an array initializer `[...]` (already comment-stripped).
+ * Handles empty `[]`, trailing commas, string literals, and nested objects/arrays.
+ */
+export function arrayElementCount(segment) {
+  const s = segment.trim();
+  if (!s.startsWith('[') || !s.endsWith(']')) {
+    throw new Error('expected array initializer [...]');
+  }
+  const inner = s.slice(1, -1);
+  let count = 0;
+  let hasToken = false;
+  let depth = 0;
+  let state = 'code';
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (state !== 'code') {
+      if (c === '\\') { i++; continue; }
+      if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) {
+        state = 'code';
+      }
+      continue;
+    }
+    if (c === "'") { state = 'sq'; hasToken = true; continue; }
+    if (c === '"') { state = 'dq'; hasToken = true; continue; }
+    if (c === '`') { state = 'tpl'; hasToken = true; continue; }
+    if (c === '(' || c === '[' || c === '{') { depth++; hasToken = true; continue; }
+    if (c === ')' || c === ']' || c === '}') { depth--; continue; }
+    if (depth === 0 && c === ',') {
+      if (hasToken) { count++; hasToken = false; }
+      continue;
+    }
+    if (!/\s/.test(c)) hasToken = true;
+  }
+  if (hasToken) count++;
+  return count;
+}
+
+/**
+ * Count top-level properties (depth 1) of an object literal `{...}` (already
+ * comment-stripped). Supports both quoted string keys and bare identifier keys,
+ * and ignores keys inside nested objects.
+ */
+export function objectKeyCount(segment) {
+  const s = segment.trim();
+  if (!s.startsWith('{') || !s.endsWith('}')) {
+    throw new Error('expected object initializer {...}');
+  }
+  const inner = s.slice(1, -1);
+  let count = 0;
+  let hasToken = false;
+  let depth = 0;
+  let state = 'code';
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (state !== 'code') {
+      if (c === '\\') { i++; continue; }
+      if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) {
+        state = 'code';
+      }
+      continue;
+    }
+    if (c === "'") { state = 'sq'; hasToken = true; continue; }
+    if (c === '"') { state = 'dq'; hasToken = true; continue; }
+    if (c === '`') { state = 'tpl'; hasToken = true; continue; }
+    if (c === '(' || c === '[' || c === '{') { depth++; hasToken = true; continue; }
+    if (c === ')' || c === ']' || c === '}') { depth--; continue; }
+    if (depth === 0 && c === ',') {
+      if (hasToken) { count++; hasToken = false; }
+      continue;
+    }
+    if (!/\s/.test(c)) hasToken = true;
+  }
+  if (hasToken) count++;
+  return count;
+}
+
