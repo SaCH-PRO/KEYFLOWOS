@@ -441,8 +441,8 @@ afterAll(async () => {
 
 describe('W9-CUSTOM-FIELDS-TENANT fixture sanity (real rows)', () => {
   it('[CFN-X01] B defines a name A does not, both define one shared name (B\'s row first), A archived a name B keeps live, and B holds one value', async () => {
-    const defs: Array<{ id: string; business_id: string; name: string; archived: boolean }> = await db.$queryRawUnsafe(
-      `SELECT id, business_id, name, archived_at IS NOT NULL AS archived FROM custom_field_definitions
+    const defs: Array<{ id: string; business_id: string; name: string; archived: boolean; created_at: Date }> = await db.$queryRawUnsafe(
+      `SELECT id, business_id, name, archived_at IS NOT NULL AS archived, created_at FROM custom_field_definitions
         WHERE business_id IN ($1, $2) ORDER BY created_at, id`, ID.bizA, ID.bizB,
     );
     expect(defs.map((d) => [d.id, d.business_id, d.name, d.archived])).toEqual([
@@ -453,6 +453,12 @@ describe('W9-CUSTOM-FIELDS-TENANT fixture sanity (real rows)', () => {
       [ID.defAOwn, ID.bizA, NAME.aOwn, false],
       [ID.defARetired, ID.bizA, NAME.retired, true],
     ]);
+    // P260 (FU-CFN-X01-ORDER-FLAKE): consecutive seeded definitions must have strictly distinct
+    // created_at timestamps (>= 1s apart) so ORDER BY created_at, id never breaks ties by id.
+    for (let i = 1; i < defs.length; i++) {
+      const deltaMs = new Date(defs[i].created_at).getTime() - new Date(defs[i - 1].created_at).getTime();
+      expect(deltaMs, `created_at gap between ${defs[i - 1].id} and ${defs[i].id}`).toBeGreaterThanOrEqual(1_000);
+    }
     expect(await boundValues(ID.cB)).toEqual([{ definitionId: ID.defBOnly, business: ID.bizB, name: NAME.bOnly, value: 'b-plat' }]);
     expect(await boundValues(ID.cA)).toEqual([]);
   });
