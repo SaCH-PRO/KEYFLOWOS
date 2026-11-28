@@ -56,7 +56,9 @@ describe("P238: the homepage makes no trust claim the product does not back", ()
   });
   it('control: "Caribbean-Native" stays', () => {
     render(<Home />);
-    expect(screen.getAllByText("Caribbean-Native").length, "the true badge went too").toBeGreaterThan(0);
+    // R1-1: the STATS strip also has a "Caribbean-Native" label (a <p>, no icon); the badge is the one with its icon.
+    const badges = screen.getAllByText("Caribbean-Native").filter((el) => el.querySelector("svg"));
+    expect(badges, "the true badge went too").toHaveLength(1);
   });
 });
 
