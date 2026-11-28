@@ -5,16 +5,80 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 
-/** A selector that finds this control again in a remounted panel (P263), or null when nothing identifies it. */
-function focusKey(el: HTMLElement): string | null {
-  const q = (v: string) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(v) : v.replace(/["\\]/g, "\\$&"));
-  if (el.id) return `#${q(el.id)}`;
-  const tag = el.tagName.toLowerCase();
-  const name = el.getAttribute("name");
-  if (name) return `${tag}[name="${q(name)}"]`;
-  const label = el.getAttribute("aria-label");
-  if (label) return `${tag}[aria-label="${q(label)}"]`;
+/**
+ * P263: what identifies the control focused in the panel, so the same control can be found again in a remounted panel
+ * (the node itself is gone). Read by iterating the panel's elements and comparing attributes: no selector is built, so
+ * an id or label with any characters is matched and the lookup cannot throw.
+ */
+type FocusSnapshot = {
+  /** The panel itself was focused (or focus is on something with no position among the focusables). */
+  panel: boolean;
+  /** Each identifier the control carries, with the control's index among the elements carrying the same value. */
+  ids: Array<{ attr: "id" | "name" | "aria-label"; value: string; nth: number }>;
+  /** Its index among the panel's focusables in DOM order, with its tag and type, for a control with no identifier. */
+  index: number;
+  tag: string;
+  type: string;
+  /** The control itself: detached by the remount, it still holds its caret and selection, read when refocusing. */
+  node: HTMLElement | null;
+};
+const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]';
+function focusablesIn(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el !== panel && el.getAttribute("tabindex") !== "-1");
+}
+function carrying(panel: HTMLElement, attr: string, value: string): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>("*")).filter((el) => el.getAttribute(attr) === value);
+}
+function selectionOf(el: HTMLElement): [number, number] | null {
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
+  try {
+    return el.selectionStart === null || el.selectionEnd === null ? null : [el.selectionStart, el.selectionEnd];
+  } catch {
+    return null; // input types with no selection (number, date, ...) throw on read in some engines
+  }
+}
+function snapshotOf(el: HTMLElement, panel: HTMLElement): FocusSnapshot {
+  if (el === panel) return { panel: true, ids: [], index: -1, tag: "", type: "", node: null };
+  const ids: FocusSnapshot["ids"] = [];
+  for (const attr of ["id", "name", "aria-label"] as const) {
+    const value = el.getAttribute(attr);
+    if (value) ids.push({ attr, value, nth: carrying(panel, attr, value).indexOf(el) });
+  }
+  return {
+    panel: false, ids, index: focusablesIn(panel).indexOf(el),
+    tag: el.tagName, type: el.getAttribute("type") ?? "", node: el,
+  };
+}
+/** The control in `panel` that the snapshot names, or null (then the panel is focused). */
+function findAgain(snap: FocusSnapshot, panel: HTMLElement): HTMLElement | null {
+  if (snap.panel) return null;
+  try {
+    for (const { attr, value, nth } of snap.ids) {
+      const matches = carrying(panel, attr, value);
+      // P263 R1-2: an identifier is used only when it names this control: exactly one match, or the same index among
+      // as many matches as before. P263 R1-3: one that finds nothing (a useId id that changed) falls through.
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1 && nth >= 0 && matches[nth]) return matches[nth];
+    }
+    // P263 R1-1: no identifier: the same position among the focusables, if it is the same kind of control.
+    const at = snap.index >= 0 ? focusablesIn(panel)[snap.index] : undefined;
+    if (at && at.tagName === snap.tag && (at.getAttribute("type") ?? "") === snap.type) return at;
+  } catch {
+    // never let a lookup throw out of the layout effect: focus the panel instead
+  }
   return null;
+}
+/** Focuses the control again (with its caret and selection), or the panel when it is gone or cannot take focus. */
+function refocus(snap: FocusSnapshot, panel: HTMLElement) {
+  const target = findAgain(snap, panel);
+  target?.focus();
+  // P263 R1-4: a matched control that cannot take focus now (disabled) leaves focus on <body>: the panel takes it.
+  if (!target || !panel.contains(document.activeElement)) { panel.focus(); return; }
+  // P263 R1-6: a text field keeps its caret and selection (as the old node last had them).
+  const selection = snap.node ? selectionOf(snap.node) : null;
+  if (selection && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+    try { target.setSelectionRange(selection[0], selection[1]); } catch { /* a type with no selection */ }
+  }
 }
 
 interface SideSheetProps {
@@ -86,17 +150,16 @@ export function SideSheet({
   }, [open, close]);
 
   // P263: the panel is keyed by the layout, so a resize or rotation while open remounts it and the focused control is
-  // removed (focus falls to <body>). While open, the control focused in the panel is remembered by what identifies it
-  // across the remount (its id, name or accessible label; the node itself is gone); when the layout flips, that
-  // control in the new panel is focused, or the panel itself when there is none. Focus outside the sheet is left alone.
-  const focusedRef = useRef<{ inPanel: boolean; key: string | null }>({ inPanel: false, key: null });
+  // removed (focus falls to <body>). While open, the control focused in the panel is remembered (FocusSnapshot); when
+  // the layout flips, that control in the new panel is focused, or the panel itself when it cannot be found or take
+  // focus. Focus outside the sheet is left alone.
+  const focusedRef = useRef<FocusSnapshot | null>(null);
   useEffect(() => {
     if (!open) return;
     const onFocusIn = (e: FocusEvent) => {
       const el = e.target as HTMLElement | null;
       const panel = panelRef.current;
-      if (!el || !panel || !panel.contains(el)) { focusedRef.current = { inPanel: false, key: null }; return; }
-      focusedRef.current = { inPanel: true, key: el === panel ? null : focusKey(el) };
+      focusedRef.current = el && panel && panel.contains(el) ? snapshotOf(el, panel) : null;
     };
     document.addEventListener("focusin", onFocusIn);
     return () => document.removeEventListener("focusin", onFocusIn);
@@ -106,10 +169,9 @@ export function SideSheet({
     if (layoutRef.current === isMobile) return;
     layoutRef.current = isMobile;
     const panel = panelRef.current;
-    if (!open || !panel || !focusedRef.current.inPanel) return;
-    const key = focusedRef.current.key;
-    const same = key ? panel.querySelector<HTMLElement>(key) : null;
-    (same ?? panel).focus();
+    const snap = focusedRef.current;
+    if (!open || !panel || !snap) return;
+    refocus(snap, panel);
   }, [isMobile, open]);
 
   return (

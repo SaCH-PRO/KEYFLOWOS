@@ -83,11 +83,14 @@ describe("P263: focus stays in the sheet across a layout flip", () => {
     expect(document.activeElement).toBe(screen.getByText("A focusable block with no name"));
   });
   it("a control whose position no longer agrees (tag or type) and with no identifier: focus goes to the panel, not <body>", async () => {
-    /** Renders a select before the field on a phone, so the field's position holds a select there. */
+    /** A select before the field on a phone (read when the child mounts, so the remounted panel has it). */
+    function PhoneOnlySelect() {
+      return phone ? <select><option>x</option></select> : null;
+    }
     function Shifting() {
       return (
         <SideSheet open onClose={() => {}} title="Edit Expense">
-          {phone ? <select><option>x</option></select> : null}
+          <PhoneOnlySelect />
           <input placeholder="no identifier" />
         </SideSheet>
       );
