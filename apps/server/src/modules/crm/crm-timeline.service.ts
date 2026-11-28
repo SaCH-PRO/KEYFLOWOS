@@ -169,7 +169,12 @@ const EVENT_SCAN_BATCH = 100;
 const NOTE_EVENT_PREVIEW_MAX = 120;
 
 export function formatNoteEventPreview(body: string): string {
-  return body.length > NOTE_EVENT_PREVIEW_MAX ? `${body.slice(0, NOTE_EVENT_PREVIEW_MAX)}…` : body;
+  const normalized = body.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  const chars = Array.from(normalized);
+  return chars.length > NOTE_EVENT_PREVIEW_MAX
+    ? `${chars.slice(0, NOTE_EVENT_PREVIEW_MAX).join('')}…`
+    : normalized;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -191,7 +196,7 @@ export async function hydrateNoteCreatedEvents<T extends Pick<ContactEvent, 'typ
   businessId: string,
   contactId: string,
   events: T[],
-  prefetchedNotes?: ReadonlyArray<{ id: string; businessId?: string; contactId?: string; body: string }>,
+  prefetchedNotes?: ReadonlyArray<{ id: string; businessId: string; contactId: string; body: string }>,
 ): Promise<T[]> {
   const noteIds = new Set<string>();
   for (const event of events) {
@@ -207,8 +212,7 @@ export async function hydrateNoteCreatedEvents<T extends Pick<ContactEvent, 'typ
   const bodyById = new Map<string, string>();
   if (prefetchedNotes) {
     for (const note of prefetchedNotes) {
-      if (note.businessId !== undefined && note.businessId !== businessId) continue;
-      if (note.contactId !== undefined && note.contactId !== contactId) continue;
+      if (note.businessId !== businessId || note.contactId !== contactId) continue;
       if (noteIds.has(note.id) && typeof note.body === 'string') {
         bodyById.set(note.id, note.body);
       }
@@ -238,7 +242,12 @@ export async function hydrateNoteCreatedEvents<T extends Pick<ContactEvent, 'typ
     const nextData: Record<string, unknown> = { ...event.data };
     if (liveBody !== undefined) {
       nextData.body = liveBody;
-      nextData.description = formatNoteEventPreview(liveBody);
+      const preview = formatNoteEventPreview(liveBody);
+      if (preview.length > 0) {
+        nextData.description = preview;
+      } else {
+        delete nextData.description;
+      }
     } else {
       delete nextData.body;
       delete nextData.description;
@@ -1304,7 +1313,9 @@ export class CrmTimelineService {
       ...hydratedEvents.map((event) => {
         const data = isPlainRecord(event.data) ? event.data : null;
         const noteDescription =
-          event.type === 'note.created' && typeof data?.description === 'string'
+          event.type === 'note.created' &&
+          typeof data?.description === 'string' &&
+          data.description.length > 0
             ? data.description
             : null;
         return {
@@ -1325,7 +1336,7 @@ export class CrmTimelineService {
         contactName: contact ? this.formatContactName(contact) : undefined,
         contactEmail: contact?.email ?? null,
         title: 'Note added',
-        description: note.body.slice(0, 120),
+        description: formatNoteEventPreview(note.body),
         timestamp: note.createdAt,
       })),
       ...tasks.map((task) => ({
@@ -1445,19 +1456,60 @@ export class CrmTimelineService {
       : [];
     const contactMap = new Map(contacts.map((contact) => [contact.id, contact]));
 
+    // P239: hydrate ordinary note.created rows in business highlights strictly
+    // matched by (businessId, contactId, noteId) within the viewer's visible contacts.
+    const noteBodyByContactAndId = new Map<string, string>();
+    for (const note of notes) {
+      if (note.businessId === businessId && typeof note.body === 'string') {
+        noteBodyByContactAndId.set(`${note.contactId}:${note.id}`, note.body);
+      }
+    }
+    const missingNoteIds = new Set<string>();
+    for (const event of events) {
+      if (event.type !== 'note.created' || !isPlainRecord(event.data) || typeof event.data.kind === 'string') {
+        continue;
+      }
+      const noteId = typeof event.data.noteId === 'string' ? event.data.noteId : '';
+      if (noteId && !noteBodyByContactAndId.has(`${event.contactId}:${noteId}`)) {
+        missingNoteIds.add(noteId);
+      }
+    }
+    if (missingNoteIds.size > 0) {
+      const fetchedNotes = await this.prisma.client.contactNote.findMany({
+        where: { businessId, ...ofContacts, id: { in: [...missingNoteIds] } },
+        select: { id: true, contactId: true, body: true },
+      });
+      for (const note of fetchedNotes) {
+        if (typeof note.body === 'string') {
+          noteBodyByContactAndId.set(`${note.contactId}:${note.id}`, note.body);
+        }
+      }
+    }
+
     const entries: TimelineEntry[] = [
-      ...events.map((event) => ({
-        id: event.id,
-        type: 'event' as const,
-        contactId: event.contactId,
-        contactName: contactMap.get(event.contactId)
-          ? this.formatContactName(contactMap.get(event.contactId)!)
-          : undefined,
-        contactEmail: contactMap.get(event.contactId)?.email ?? null,
-        title: event.type,
-        description: `Event recorded via ${event.source ?? 'system'}`,
-        timestamp: event.createdAt,
-      })),
+      ...events.map((event) => {
+        let noteDescription: string | null = null;
+        if (event.type === 'note.created' && isPlainRecord(event.data) && typeof event.data.kind !== 'string') {
+          const noteId = typeof event.data.noteId === 'string' ? event.data.noteId : '';
+          const liveBody = noteId ? noteBodyByContactAndId.get(`${event.contactId}:${noteId}`) : undefined;
+          if (liveBody !== undefined) {
+            const preview = formatNoteEventPreview(liveBody);
+            if (preview.length > 0) noteDescription = preview;
+          }
+        }
+        return {
+          id: event.id,
+          type: 'event' as const,
+          contactId: event.contactId,
+          contactName: contactMap.get(event.contactId)
+            ? this.formatContactName(contactMap.get(event.contactId)!)
+            : undefined,
+          contactEmail: contactMap.get(event.contactId)?.email ?? null,
+          title: event.type,
+          description: noteDescription ?? `Event recorded via ${event.source ?? 'system'}`,
+          timestamp: event.createdAt,
+        };
+      }),
       ...notes.map((note) => ({
         id: note.id,
         type: 'note' as const,
@@ -1465,7 +1517,7 @@ export class CrmTimelineService {
         contactName: contactMap.get(note.contactId) ? this.formatContactName(contactMap.get(note.contactId)!) : undefined,
         contactEmail: contactMap.get(note.contactId)?.email ?? null,
         title: 'Note added',
-        description: note.body.slice(0, 120),
+        description: formatNoteEventPreview(note.body),
         timestamp: note.createdAt,
       })),
       ...tasks.map((task) => ({
