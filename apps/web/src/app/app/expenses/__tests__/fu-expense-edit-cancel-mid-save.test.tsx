@@ -246,3 +246,22 @@ describe("P257 R1-1: typing in the edit sheet keeps focus in the field", () => {
     }
   });
 });
+
+describe("P257 R6: after a save fails, the sheet's own controls close it again", () => {
+  const SHEET_WAYS = WAYS.filter((w) => w.name !== "Cancel");
+  for (const outcome of ["refused", "throws"] as const) {
+    for (const w of SHEET_WAYS) {
+      it(`a save that ${outcome}, then ${w.name}: the sheet closes`, async () => {
+        if (outcome === "refused") client.updateExpense.mockResolvedValue({ data: null, error: "Request refused by the server", status: 503 });
+        else client.updateExpense.mockRejectedValue(new TypeError("Failed to fetch"));
+        const onClose = vi.fn();
+        sheetFor(onClose);
+        fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        await waitFor(() => expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(false));
+        w.close();
+        expect(onClose, `${w.name} left the sheet trapped open after the save ${outcome === "refused" ? "was refused" : "threw"}`).toHaveBeenCalledTimes(1);
+      });
+    }
+  }
+});

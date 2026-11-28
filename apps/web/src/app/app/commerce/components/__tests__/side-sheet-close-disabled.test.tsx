@@ -68,6 +68,23 @@ for (const layout of ["desktop", "phone"] as const) {
       fireEvent.click(overlay());
       expect(onClose).toHaveBeenCalledTimes(3);
     });
+    it("P257 R6: closeDisabled set, then cleared: Close, Escape and the overlay each close again", async () => {
+      const onClose = vi.fn();
+      const el = (closeDisabled: boolean) => <SideSheet open onClose={onClose} title="Edit Expense" closeDisabled={closeDisabled}><p>body</p></SideSheet>;
+      const view = render(el(true));
+      await settle();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose, "held while set").not.toHaveBeenCalled();
+      view.rerender(el(false));
+      await settle();
+      expect(closeButton().disabled).toBe(false);
+      fireEvent.click(closeButton());
+      expect(onClose, "Close still held once closeDisabled was cleared").toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose, "Escape still held once closeDisabled was cleared").toHaveBeenCalledTimes(2);
+      fireEvent.click(overlay());
+      expect(onClose, "the overlay still held once closeDisabled was cleared").toHaveBeenCalledTimes(3);
+    });
     it("control: closeDisabled={false} behaves as the default", async () => {
       const onClose = await sheet({ closeDisabled: false });
       expect(closeButton().disabled).toBe(false);
