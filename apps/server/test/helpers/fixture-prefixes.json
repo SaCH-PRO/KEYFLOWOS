@@ -1745,6 +1745,11 @@
       "prefix": "v92o_",
       "owner": "apps/server/test/service-write-scope.integration.test.ts",
       "packet": "V1-92 (P234 FU-SERVICE-WRITE-SCOPE, D-317)"
+    },
+    {
+      "prefix": "v92q_",
+      "owner": "apps/server/test/push-multi-business.integration.test.ts",
+      "packet": "V1-92 (P242 FU-PUSH-MULTI-BUSINESS, D-319 / Q45)"
     }
   ],
   "pendingRenames": [],
