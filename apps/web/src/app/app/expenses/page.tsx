@@ -219,6 +219,14 @@ export default function ExpensesInboxPage() {
   // R27-3: leaving the Recurring view forgets its list read, so on return the first render offers no "New recurring
   // expense" from the earlier visit's answer (reset during render, before the panel can report).
   if (view !== "recurring" && recurringRead.kind !== "loading") setRecurringRead({ kind: "loading" });
+  // P254 R3-2: a New request is for the business it was pressed under. The panel remounts on a business change
+  // (directly or via none) and opens its builder when triggerNew is set at mount, so the request is forgotten in the
+  // render that shows the new business, before that panel mounts.
+  const [triggerBusiness, setTriggerBusiness] = useState(d.businessId);
+  if (triggerBusiness !== d.businessId) {
+    setTriggerBusiness(d.businessId);
+    setRecurringTrigger(0);
+  }
   // EXPENSES-HUB-3: "Upload receipts" was a button with no handler. A receipt goes up through the one presigned
   // upload (hooks/use-upload.ts) and opens Add expense with it attached; saving writes it to Expense.receiptUrl.
   const { uploadFile, isUploading: uploadingReceipt } = useUpload();
