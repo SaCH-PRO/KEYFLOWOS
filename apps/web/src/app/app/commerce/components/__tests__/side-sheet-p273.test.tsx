@@ -7,7 +7,6 @@
  *           dialog is labelled by its own heading.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { useState } from "react";
 import { render, screen, cleanup, act, within } from "@testing-library/react";
 
 import { SideSheet } from "../side-sheet";

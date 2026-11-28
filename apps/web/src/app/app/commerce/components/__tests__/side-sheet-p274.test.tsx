@@ -176,6 +176,32 @@ describe("P274-2: the footer is not remounted by a flip", () => {
   });
 });
 
+describe("P274-2 with P273-1: the footer is the footer's, not the shell's", () => {
+  const headerClose = () => screen.getAllByRole("button", { name: "Close" }).find((b) => !b.hasAttribute("data-footer"));
+  it("a footer 'Close' focused, then removed, then a flip: the panel is focused, not the header's Close", async () => {
+    const el = (show: boolean) => (
+      <SideSheet open onClose={() => {}} title="Edit Expense" footer={show ? <button aria-label="Close" data-footer="" /> : <span>done</span>}>
+        <p>body</p>
+      </SideSheet>
+    );
+    const view = render(el(true));
+    await settle();
+    (document.querySelector("button[data-footer]") as HTMLElement).focus();
+    view.rerender(el(false));
+    await settle();
+    await flip(true);
+    expect(document.activeElement, "focus was given to the header's Close, a control the user never focused").not.toBe(headerClose());
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+  it("the header's Close focused, with a footer 'Close' too: the new shell's header Close is focused", async () => {
+    render(<SideSheet open onClose={() => {}} title="Edit Expense" footer={<button aria-label="Close" data-footer="" />}><p>body</p></SideSheet>);
+    await settle();
+    headerClose()!.focus();
+    await flip(true);
+    expect(document.activeElement, "the footer's Close made the header's ambiguous").toBe(headerClose());
+  });
+});
+
 describe("P274-3: a child's autoFocus is respected", () => {
   function Opener({ children }: { children: (open: boolean, close: () => void) => ReactNode }) {
     const [open, setOpen] = useState(false);
