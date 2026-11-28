@@ -43,6 +43,7 @@ let app: any;
 let coa: any;
 let posting: any;
 let cashPosId: string;
+let cashIstId: string;
 
 async function cleanup() {
   for (const sql of [
@@ -225,6 +226,7 @@ beforeAll(async () => {
 
   // Asia/Kolkata (UTC+5:30): 2026-03-10 starts at 2026-03-09T18:30:00.000Z.
   const ist = await seedBiz(ID.bizIst, ID.ownerB, 'Asia/Kolkata');
+  cashIstId = ist.cashId;
   await postAt(ID.bizIst, ist.cashId, ist.revId, 'ist-before', '2026-03-09T18:29:59.999Z');
   await postAt(ID.bizIst, ist.cashId, ist.revId, 'ist-start', '2026-03-09T18:30:00.000Z');
   await postAt(ID.bizIst, ist.cashId, ist.revId, 'ist-midday', '2026-03-10T06:00:00.000Z');
@@ -286,8 +288,11 @@ describe('FU-LEDGER-ZONED-FROM (server half, Journey H)', () => {
     expect(labels(tsFrom.body)).toEqual(['d1-evening-utc-midnight', 'd1-last-ms', 'd2-first-ms', 'd2-noon', 'd2-last-ms']);
   });
 
-  it('[GLZF-03] RED-BEFORE: impossible calendar dates, repeated from/to params, and out-of-range timestamps return 400 (never 200 or 500)', async () => {
+  it('[GLZF-03] RED-BEFORE: impossible calendar dates, year-0000 dates, empty strings, repeated from/to params, and out-of-range timestamps return 400 (never 200 or 500)', async () => {
     for (const badFrom of [
+      '',
+      '0000-01-01',
+      '0000-12-31',
       '2026-02-31',
       '2026-13-01',
       '2026-00-10',
@@ -300,7 +305,13 @@ describe('FU-LEDGER-ZONED-FROM (server half, Journey H)', () => {
       expect(res.body.rows).toBeUndefined();
     }
 
-    for (const badTo of ['+100000-01-01T00:00:00.000Z', '-000001-01-01T00:00:00.000Z']) {
+    for (const badTo of [
+      '',
+      '0000-01-01',
+      '0000-12-31',
+      '+100000-01-01T00:00:00.000Z',
+      '-000001-01-01T00:00:00.000Z',
+    ]) {
       const res = await ledger(ID.bizPos, { to: badTo });
       expect(res.status, `to=${badTo}: ${JSON.stringify(res.body)}`).toBe(400);
       expect(res.body.rows).toBeUndefined();
@@ -318,8 +329,9 @@ describe('FU-LEDGER-ZONED-FROM (server half, Journey H)', () => {
     expect(leap.body.total).toBe(0);
   });
 
-  it('[GLZF-04] RED-BEFORE: huge/invalid/repeated page, pageSize, and repeated accountId return 400 (never 500)', async () => {
+  it('[GLZF-04] RED-BEFORE: huge/invalid/empty/repeated page, pageSize, and accountId return 400 (never 500)', async () => {
     for (const qs of [
+      'page=',
       'page=999999999999',
       'page=10001',
       'page=0',
@@ -327,12 +339,14 @@ describe('FU-LEDGER-ZONED-FROM (server half, Journey H)', () => {
       'page=1.5',
       'page=12abc',
       'page=1&page=2',
+      'pageSize=',
       'pageSize=0',
       'pageSize=-5',
       'pageSize=501',
       'pageSize=999999999',
       'pageSize=10abc',
       'pageSize=10&pageSize=20',
+      'accountId=',
       `accountId=${cashPosId}&accountId=${cashPosId}`,
     ]) {
       const res = await ledger(ID.bizPos, qs);
@@ -347,7 +361,7 @@ describe('FU-LEDGER-ZONED-FROM (server half, Journey H)', () => {
     expect(ok.body.rows.every((r: any) => r.accountId === cashPosId)).toBe(true);
   });
 
-  it('[GLZF-05] tenancy and revenue:read scope hold on zoned from queries', async () => {
+  it('[GLZF-05] tenancy, cross-tenant accountId isolation, and revenue:read scope hold on zoned from queries', async () => {
     const outsider = await ledger(ID.bizPos, { from: '2026-03-10', to: '2026-03-10' }, ID.ownerB);
     expect(outsider.status).toBe(403);
     expect(outsider.body.rows).toBeUndefined();
@@ -355,5 +369,11 @@ describe('FU-LEDGER-ZONED-FROM (server half, Journey H)', () => {
     const denied = await ledger(ID.bizPos, { from: '2026-03-10', to: '2026-03-10' }, ID.staffNone);
     expect(denied.status).toBe(403);
     expect(denied.body.rows).toBeUndefined();
+
+    // Cross-tenant accountId returns 200 with 0 rows and no leak.
+    const crossAccount = await ledger(ID.bizPos, { from: '2026-03-10', to: '2026-03-10', accountId: cashIstId });
+    expect(crossAccount.status).toBe(200);
+    expect(crossAccount.body.rows).toEqual([]);
+    expect(crossAccount.body.total).toBe(0);
   });
 });
