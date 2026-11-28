@@ -100,8 +100,12 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   }, [businessId, isCurrentBusiness]);
 
   useEffect(() => { queueMicrotask(load); }, [load]);
+  // P254 R1-2: a New request opens the builder only for a business. The business is read through a ref so a business
+  // change alone never reopens the builder (COR MINOR-6: it opens only on a new click).
+  const builderBusiness = useRef(businessId);
+  useEffect(() => { builderBusiness.current = businessId; }, [businessId]);
   useEffect(() => {
-    if (triggerNew) {
+    if (triggerNew && builderBusiness.current) {
       queueMicrotask(() => {
         setEditing(null);
         setShowBuilder(true);
