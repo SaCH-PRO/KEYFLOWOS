@@ -43,7 +43,7 @@ waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude re
   - **Then:** P231 in two waves.
   - **Then:** P263 FU-SIDESHEET-LAYOUT-FLIP-FOCUS (R1 `adea2f93` under review) and P265 FU-HUB3-REPAIR-PAGE-SWITCH-FLAKE (R2 `833a7453`, one review CONFIRMED).
 - **New board rows:** P263 to P267 (P267 covers the expense form's field names and accessibility).
-- **Owner rulings 12:20 UTC ("All recommended please go ahead"):** D-322 (`;`/`:` keep a conditions marker; P266 item 1), D-323 (on a silent server lane, alert and proceed; ask the owner only if blocked), D-324 (from round 3, NITs become board rows; MINOR and above still block).
+- **Owner rulings 12:20 UTC ("All recommended please go ahead"):** D-325 (`;`/`:` keep a conditions marker; P266 item 1), D-326 (on a silent server lane, alert and proceed; ask the owner only if blocked), D-327 (from round 3, NITs become board rows; MINOR and above still block). The server lane recorded D-322 to D-324 from the same owner message (#273 7239023024); its D-324 moves P266 to follow-on (post-launch).
 - **Server lane:** M95 #301, M97 #302 and M99 are held until M47 merged (released at 12:05). The 10:48 silent-lane alert was cleared by its 11:40 post.
 - **Speed tracker (D-320):** M47 took about 3.5 h from P257's first review to merge (P257 6 rounds, P254 R6 to R10 today), including about 45 min for the two MINOR gaps and about 40 min of merge queue (one flake). No restart since about 09:02 UTC.
 
