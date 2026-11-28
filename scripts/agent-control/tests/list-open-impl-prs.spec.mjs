@@ -41,7 +41,13 @@ function openPrs(n, { every = 3, from = 101 } = {}) {
   return Array.from({ length: n }, (_, i) => {
     const number = from + i;
     const impl = i % every === 0;
-    return { number, headRefName: impl ? `impl/kf-packet-${number}` : `chore/branch-${number}`, isDraft: impl };
+    return {
+      number,
+      headRefName: impl ? `impl/kf-packet-${number}` : `chore/branch-${number}`,
+      isDraft: impl,
+      isCrossRepository: false,
+      headRepository: { nameWithOwner: REPO },
+    };
   });
 }
 
@@ -146,10 +152,11 @@ test('more than 30 impl/* PRs on a single page are all listed', async () => {
 });
 
 test('the numbers are ascending whatever order the API returned them in', async () => {
+  const sameRepo = { isCrossRepository: false, headRepository: { nameWithOwner: REPO } };
   const prs = [
-    { number: 162, headRefName: 'impl/a', isDraft: true },
-    { number: 155, headRefName: 'impl/b', isDraft: true },
-    { number: 160, headRefName: 'impl/c', isDraft: false },
+    { number: 162, headRefName: 'impl/a', isDraft: true, ...sameRepo },
+    { number: 155, headRefName: 'impl/b', isDraft: true, ...sameRepo },
+    { number: 160, headRefName: 'impl/c', isDraft: false, ...sameRepo },
   ];
   const result = await listOpenImplPrs({ fetchImpl: fakeFetch(pagesOf(prs)), token: TOKEN, repository: REPO });
   assert.deepEqual(result.numbers, [155, 160, 162]);
@@ -166,12 +173,13 @@ test('a complete enumeration with no impl/* PR is an empty list, not an error', 
 });
 
 test('only the impl/ prefix qualifies: impl-, Impl/ and a branch containing impl/ elsewhere do not', async () => {
+  const sameRepo = { isCrossRepository: false, headRepository: { nameWithOwner: REPO } };
   const prs = [
-    { number: 1, headRefName: 'impl/x', isDraft: true },
-    { number: 2, headRefName: 'impl-x', isDraft: true },
-    { number: 3, headRefName: 'Impl/x', isDraft: true },
-    { number: 4, headRefName: 'feature/impl/x', isDraft: true },
-    { number: 5, headRefName: 'implementation/x', isDraft: true },
+    { number: 1, headRefName: 'impl/x', isDraft: true, ...sameRepo },
+    { number: 2, headRefName: 'impl-x', isDraft: true, ...sameRepo },
+    { number: 3, headRefName: 'Impl/x', isDraft: true, ...sameRepo },
+    { number: 4, headRefName: 'feature/impl/x', isDraft: true, ...sameRepo },
+    { number: 5, headRefName: 'implementation/x', isDraft: true, ...sameRepo },
   ];
   const result = await listOpenImplPrs({ fetchImpl: fakeFetch(pagesOf(prs)), token: TOKEN, repository: REPO });
   assert.deepEqual(result.numbers, [1]);
@@ -389,7 +397,7 @@ globalThis.fetch = async (url, init) => {
   const start = pageIndex * PAGE;
   const end = Math.min(start + PAGE, TOTAL);
   const nodes = [];
-  for (let i = start; i < end; i += 1) nodes.push({ number: FROM + i, headRefName: 'impl/kf-' + (FROM + i), isDraft: true });
+  for (let i = start; i < end; i += 1) nodes.push({ number: FROM + i, headRefName: 'impl/kf-' + (FROM + i), isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: process.env.GITHUB_REPOSITORY } });
   const last = end >= TOTAL;
   const body = { data: { repository: { pullRequests: {
     totalCount: TOTAL,
@@ -495,3 +503,47 @@ test('NC: the CLI drains its stdout pipe before it exits: 5,000 candidates reach
     assertCompletePipeDelivery('modeled asynchronous stdout', await runCliThroughPipe({ asyncStdout: true }));
   });
 });
+
+// ------------------------------------------------------------- TOF-LISTER-FORK-PRS (#185)
+
+test('TOF-LISTER-FORK-PRS: fork impl/* PRs (and deleted forks) are excluded and reported; same-repo impl/* kept (case-insensitive)', async () => {
+  const prs = [
+    { number: 301, headRefName: 'impl/same-repo', isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: REPO } },
+    { number: 302, headRefName: 'impl/same-repo-upper', isDraft: false, isCrossRepository: false, headRepository: { nameWithOwner: REPO.toUpperCase() } },
+    { number: 303, headRefName: 'impl/from-fork', isDraft: true, isCrossRepository: true, headRepository: { nameWithOwner: 'attacker/KEYFLOWOS' } },
+    { number: 304, headRefName: 'impl/deleted-fork', isDraft: true, isCrossRepository: true, headRepository: null },
+    { number: 305, headRefName: 'impl/mismatched-repo', isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: 'other-org/KEYFLOWOS' } },
+    { number: 306, headRefName: 'chore/fork-non-impl', isDraft: false, isCrossRepository: true, headRepository: { nameWithOwner: 'attacker/KEYFLOWOS' } },
+  ];
+
+  const fetch1 = fakeFetch(pagesOf(prs));
+  const result = await listOpenImplPrs({ fetchImpl: fetch1, token: TOKEN, repository: REPO });
+  assert.deepEqual(result.numbers, [301, 302]);
+  assert.deepEqual(result.excludedForks, [303, 304, 305]);
+
+  // Verify the GraphQL query actually requests isCrossRepository and headRepository
+  const sentQuery = JSON.parse(fetch1.calls[0].init.body).query;
+  assert.match(sentQuery, /\bisCrossRepository\b/);
+  assert.match(sentQuery, /\bheadRepository\b/);
+
+  // Verify CLI stdout lists only same-repo PRs and stderr reports the excluded forks
+  const run = await runMain(fakeFetch(pagesOf(prs)));
+  assert.equal(run.code, 0, run.stderr);
+  assert.equal(run.stdout, '301\n302\n');
+  assert.match(run.stderr, /excluded 3 fork impl\/\* PR\(s\): #303, #304, #305/);
+});
+
+test('TOF-LISTER-FORK-PRS: missing or non-boolean isCrossRepository or malformed headRepository fails closed with SHAPE', async () => {
+  const badPages = [
+    pagesOf([{ number: 401, headRefName: 'impl/x', isDraft: true, headRepository: { nameWithOwner: REPO } }]),
+    pagesOf([{ number: 402, headRefName: 'impl/x', isDraft: true, isCrossRepository: 'false', headRepository: { nameWithOwner: REPO } }]),
+    pagesOf([{ number: 403, headRefName: 'impl/x', isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: 123 } }]),
+  ];
+  for (const pages of badPages) {
+    await rejectsWith(
+      listOpenImplPrs({ fetchImpl: fakeFetch(pages), token: TOKEN, repository: REPO }),
+      LISTING_ERRORS.SHAPE,
+    );
+  }
+});
+
