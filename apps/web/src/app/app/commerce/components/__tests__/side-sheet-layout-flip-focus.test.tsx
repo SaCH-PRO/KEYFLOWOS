@@ -6,7 +6,7 @@
  * gone), otherwise on the panel. Pinned desktop -> phone -> desktop.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 
 import { SideSheet } from "../side-sheet";
@@ -224,5 +224,134 @@ describe("P263 R1: matching the focused control in the remounted panel", () => {
     await flip(true);
     expect(document.activeElement).toBe(field());
     expect([field().selectionStart, field().selectionEnd], "the caret and selection were lost").toEqual([2, 7]);
+  });
+});
+
+describe("P263 R2: a position match never lands on a different field", () => {
+  /** Rendered on one layout only: read when the child mounts, so the remounted panel has it or not. */
+  function OnlyOn({ layout, children }: { layout: "phone" | "desktop"; children: ReactNode }) {
+    return (layout === "phone") === phone ? <>{children}</> : null;
+  }
+  it("R2-1 (a): a desktop-only text input before B and C: B focused on a phone, then desktop: focus is not on the desktop-only input", async () => {
+    phone = true;
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="desktop"><input data-testid="desktop-only" /></OnlyOn>
+        <input data-testid="B" />
+        <input data-testid="C" />
+      </SideSheet>,
+    );
+    await settle();
+    expect(layout()).toBe("phone");
+    screen.getByTestId("B").focus();
+    await flip(false);
+    expect(document.activeElement, "focus moved to a different field").not.toBe(screen.getByTestId("desktop-only"));
+    expect([screen.getByTestId("B"), screen.getByRole("dialog")], "focus left both the field and the panel").toContain(document.activeElement);
+  });
+  it("R2-1 (b): Retry before A and B, A focused, Retry then removed: after the flip focus is not on B", async () => {
+    function WithRetry() {
+      const [retry, setRetry] = useState(true);
+      return (
+        <SideSheet open onClose={() => {}} title="Edit Expense">
+          {retry && <button onClick={() => setRetry(false)}>Retry</button>}
+          <input data-testid="A" onKeyDown={() => setRetry(false)} />
+          <input data-testid="B" />
+        </SideSheet>
+      );
+    }
+    render(<WithRetry />);
+    await settle();
+    screen.getByTestId("A").focus();
+    fireEvent.keyDown(screen.getByTestId("A"), { key: "x" }); // Retry goes away while A keeps focus
+    await settle();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("A"));
+    await flip(true);
+    expect(document.activeElement, "the index recorded before Retry went away put focus on B").not.toBe(screen.getByTestId("B"));
+    expect([screen.getByTestId("A"), screen.getByRole("dialog")]).toContain(document.activeElement);
+  });
+  it("R2-1 (c): a child's own state reveals 'extra' before 'next'; 'extra' focused, then a flip resets the child: focus is not on 'next'", async () => {
+    function Reveal() {
+      const [more, setMore] = useState(false);
+      return (
+        <>
+          <button onClick={() => setMore(true)}>More</button>
+          {more && <input data-testid="extra" />}
+          <input data-testid="next" />
+        </>
+      );
+    }
+    render(<SideSheet open onClose={() => {}} title="Edit Expense"><Reveal /></SideSheet>);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    screen.getByTestId("extra").focus();
+    await flip(true);
+    expect(screen.queryByTestId("extra"), "the fixture's child was not reset by the remount").toBeNull();
+    expect(document.activeElement, "focus moved to the next field").not.toBe(screen.getByTestId("next"));
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+  it("R2-1: a field matched by its placeholder, with the position changed (as the expense form's fields are)", async () => {
+    phone = true;
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="desktop"><input placeholder="Search" /></OnlyOn>
+        <input placeholder="Vendor name" />
+      </SideSheet>,
+    );
+    await settle();
+    screen.getByPlaceholderText("Vendor name").focus();
+    await flip(false);
+    expect(document.activeElement).toBe(screen.getByPlaceholderText("Vendor name"));
+  });
+  it("R2-1: a field matched by its <label> text, with the position changed", async () => {
+    phone = true;
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="desktop"><input placeholder="Search" /></OnlyOn>
+        <label>Amount <input type="number" /></label>
+      </SideSheet>,
+    );
+    await settle();
+    const amount = () => screen.getByRole("spinbutton");
+    amount().focus();
+    await flip(false);
+    expect(document.activeElement).toBe(amount());
+  });
+  it("R2-2: an aria-label field after a phone-only focusable: the label, not the position, finds it", async () => {
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="phone"><button>Phone only</button></OnlyOn>
+        <input aria-label="Reference" />
+      </SideSheet>,
+    );
+    await settle();
+    screen.getByLabelText("Reference").focus();
+    await flip(true);
+    expect(document.activeElement, "the aria-label branch did not find the field").toBe(screen.getByLabelText("Reference"));
+  });
+  it("R2-2: the second of two 'Remove' buttons, after a phone-only focusable: the same one is refocused", async () => {
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="phone"><button>Phone only</button></OnlyOn>
+        <button aria-label="Remove">x</button>
+        <button aria-label="Remove">x</button>
+      </SideSheet>,
+    );
+    await settle();
+    screen.getAllByRole("button", { name: "Remove" })[1].focus();
+    await flip(true);
+    expect(document.activeElement, "the wrong Remove was focused").toBe(screen.getAllByRole("button", { name: "Remove" })[1]);
+  });
+  it("R2-3: a tabindex=-1 element on one layout only does not count as a position", async () => {
+    render(
+      <SideSheet open onClose={() => {}} title="Edit Expense">
+        <OnlyOn layout="phone"><div tabIndex={-1}>not in the tab order</div></OnlyOn>
+        <input data-testid="unnamed" />
+      </SideSheet>,
+    );
+    await settle();
+    screen.getByTestId("unnamed").focus();
+    await flip(true);
+    expect(document.activeElement, "a tabindex=-1 element shifted the position").toBe(screen.getByTestId("unnamed"));
   });
 });
