@@ -211,13 +211,13 @@ test('RR-SLO-AVAILABILITY-LEDGER: state file stays bounded after 40 simulated da
   }
 });
 
-test('RR-SLO-AVAILABILITY-LEDGER: exhausted error budget emits exactly one alert per transition', () => {
+test('RR-SLO-AVAILABILITY-LEDGER: exhausted error budget emits exactly one alert per transition (including recovery -> re-exhaustion)', () => {
   const work = mkdtempSync(join(tmpdir(), 'kf-slo-alert-'));
   try {
     const stubBin = makeStubBin(work);
     const stateFile = join(work, 'state.json');
     const webhookLog = join(work, 'webhooks.log');
-    // Start healthy: 199 good / 199 total (100% >= 99.5%, budget_exhausted=false).
+    // Start healthy: 199 good / 200 total (99.50% >= 99.5%, budget_exhausted=false).
     writeFileSync(
       stateFile,
       JSON.stringify({
@@ -225,14 +225,14 @@ test('RR-SLO-AVAILABILITY-LEDGER: exhausted error budget emits exactly one alert
         api_readyz: 0,
         slo: {
           web_healthz: { days: { '2026-11-28': { good: 200, total: 200 } }, budget_exhausted: false },
-          api_readyz: { days: { '2026-11-28': { good: 198, total: 199 } }, budget_exhausted: false },
+          api_readyz: { days: { '2026-10-30': { good: 199, total: 200 } }, budget_exhausted: false },
         },
         updatedAt: '2026-11-28T00:00:00Z',
       }),
       'utf8',
     );
 
-    // Run 1: api fails (1st consecutive failure -> no DOWN page, but 198/200 = 99.00% < 99.5% -> budget exhausted!).
+    // Run 1: api fails (1st consecutive failure -> no DOWN page, 199/201 = 99.00% < 99.5% -> budget exhausted!).
     const r1 = runMonitor(stubBin, {
       STATE_FILE: stateFile,
       UPTIME_NOW_UTC: '2026-11-28T00:05:00Z',
@@ -246,7 +246,7 @@ test('RR-SLO-AVAILABILITY-LEDGER: exhausted error budget emits exactly one alert
     const sloAlerts1 = lines1.filter((l) => l.includes('SLO_BUDGET_EXHAUSTED'));
     assert.equal(sloAlerts1.length, 1, `expected 1 budget exhaustion alert on transition, got: ${lines1.join('\n')}`);
 
-    // Run 2: api passes (199/201 = 99.00% < 99.5%, STILL exhausted -> must NOT alert again).
+    // Run 2: api passes (200/202 = 99.01% < 99.5%, STILL exhausted -> must NOT alert again).
     const r2 = runMonitor(stubBin, {
       STATE_FILE: stateFile,
       UPTIME_NOW_UTC: '2026-11-28T00:10:00Z',
@@ -259,6 +259,33 @@ test('RR-SLO-AVAILABILITY-LEDGER: exhausted error budget emits exactly one alert
     const lines2 = readFileSync(webhookLog, 'utf8').trim().split('\n').filter(Boolean);
     const sloAlerts2 = lines2.filter((l) => l.includes('SLO_BUDGET_EXHAUSTED'));
     assert.equal(sloAlerts2.length, 1, 'still-exhausted run must not emit a duplicate alert');
+
+    // Run 3: advance 31 days so 2026-10-30 and 2026-11-28 roll out; api passes -> recovers (budget_exhausted=false).
+    const r3 = runMonitor(stubBin, {
+      STATE_FILE: stateFile,
+      UPTIME_NOW_UTC: '2026-12-29T00:05:00Z',
+      ALERT_WEBHOOK_URL: 'https://hooks.stub.invalid/alert',
+      STUB_WEBHOOK_LOG: webhookLog,
+      STUB_WEB_MODE: 'ok',
+      STUB_API_MODE: 'ok',
+    });
+    assert.equal(r3.status, 0);
+    const saved3 = JSON.parse(readFileSync(stateFile, 'utf8'));
+    assert.equal(saved3.slo.api_readyz.budget_exhausted, false, 'budget_exhausted must reset on recovery');
+
+    // Run 4: api fails (1 good / 2 total = 50% < 99.5%, >= min_samples) -> re-exhaustion fires 2nd alert!
+    const r4 = runMonitor(stubBin, {
+      STATE_FILE: stateFile,
+      UPTIME_NOW_UTC: '2026-12-29T00:10:00Z',
+      ALERT_WEBHOOK_URL: 'https://hooks.stub.invalid/alert',
+      STUB_WEBHOOK_LOG: webhookLog,
+      STUB_WEB_MODE: 'ok',
+      STUB_API_MODE: 'fail',
+    });
+    assert.equal(r4.status, 0);
+    const lines4 = readFileSync(webhookLog, 'utf8').trim().split('\n').filter(Boolean);
+    const sloAlerts4 = lines4.filter((l) => l.includes('SLO_BUDGET_EXHAUSTED'));
+    assert.equal(sloAlerts4.length, 2, 're-exhaustion after recovery must emit a 2nd alert');
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -295,3 +322,88 @@ test('RR-SLO-AVAILABILITY-LEDGER: with no state file behaves as today and docs/o
     rmSync(work, { recursive: true, force: true });
   }
 });
+
+test('RR-SLO-AVAILABILITY-LEDGER R1 hardening: pre-SLO migration + DOWN/RECOVERED, clamped window, effective target echo, strict bool budget_exhausted', () => {
+  const work = mkdtempSync(join(tmpdir(), 'kf-slo-r1-'));
+  try {
+    const stubBin = makeStubBin(work);
+    const stateFile = join(work, 'legacy-state.json');
+    const webhookLog = join(work, 'webhooks.log');
+
+    // 1. Pre-SLO state file with 1 prior api failure: next failure crosses FAIL_THRESHOLD=2 -> exit 1 + DOWN alert.
+    writeFileSync(stateFile, JSON.stringify({ web_healthz: 0, api_readyz: 1, updatedAt: '2026-11-28T00:00:00Z' }), 'utf8');
+    const rDown = runMonitor(stubBin, {
+      STATE_FILE: stateFile,
+      UPTIME_NOW_UTC: '2026-11-28T00:05:00Z',
+      ALERT_WEBHOOK_URL: 'https://hooks.stub.invalid/alert',
+      STUB_WEBHOOK_LOG: webhookLog,
+      STUB_WEB_MODE: 'ok',
+      STUB_API_MODE: 'fail',
+    });
+    assert.equal(rDown.status, 1, '2nd consecutive failure must exit 1');
+    const downEvents = readFileSync(webhookLog, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l.split('\t')[1]));
+    assert.ok(downEvents.some((e) => e.event.trim() === 'DOWN' && e.check.trim() === 'api.readyz'));
+
+    // Next run with "slo" now present in stateFile: api recovers -> exit 0 + RECOVERED alert (proving get_counter reads top-level counter).
+    const rRec = runMonitor(stubBin, {
+      STATE_FILE: stateFile,
+      UPTIME_NOW_UTC: '2026-11-28T00:10:00Z',
+      ALERT_WEBHOOK_URL: 'https://hooks.stub.invalid/alert',
+      STUB_WEBHOOK_LOG: webhookLog,
+      STUB_WEB_MODE: 'ok',
+      STUB_API_MODE: 'ok',
+    });
+    assert.equal(rRec.status, 0);
+    const recEvents = readFileSync(webhookLog, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l.split('\t')[1]));
+    assert.ok(recEvents.some((e) => e.event.trim() === 'RECOVERED' && e.check.trim() === 'api.readyz'));
+
+    // 2. Extreme SLO_WINDOW_DAYS=1000000 must clamp cleanly (no Python OverflowError) and invalid SLO_TARGET_PCT=150 echoes effective target=99.5%.
+    const rClamp = runMonitor(stubBin, {
+      STATE_FILE: stateFile,
+      UPTIME_NOW_UTC: '2026-11-28T00:15:00Z',
+      SLO_WINDOW_DAYS: '1000000',
+      SLO_TARGET_PCT: '150',
+      STUB_WEB_MODE: 'ok',
+      STUB_API_MODE: 'ok',
+    });
+    assert.equal(rClamp.status, 0);
+    assert.match(rClamp.stdout, /api\.readyz availability_30d=66\.67% error_budget_remaining=0\.00% \(good=2\/total=3, target=99\.5%\)/);
+    assert.doesNotMatch(rClamp.stdout, /target=150%/);
+
+    // 3. Corrupted string "budget_exhausted":"false" must NOT be coerced to True and suppress an exhaustion alert.
+    const stateCorrupt = join(work, 'corrupt-bool.json');
+    const logCorrupt = join(work, 'corrupt-webhooks.log');
+    writeFileSync(
+      stateCorrupt,
+      JSON.stringify({
+        web_healthz: 0,
+        api_readyz: 0,
+        slo: {
+          web_healthz: { days: { '2026-11-28': { good: 10, total: 10 } }, budget_exhausted: false },
+          api_readyz: { days: { '2026-11-28': { good: 1, total: 2 } }, budget_exhausted: 'false' },
+        },
+        updatedAt: '2026-11-28T00:00:00Z',
+      }),
+      'utf8',
+    );
+    const rCorrupt = runMonitor(stubBin, {
+      STATE_FILE: stateCorrupt,
+      UPTIME_NOW_UTC: '2026-11-28T00:05:00Z',
+      ALERT_WEBHOOK_URL: 'https://hooks.stub.invalid/alert',
+      STUB_WEBHOOK_LOG: logCorrupt,
+      STUB_WEB_MODE: 'ok',
+      STUB_API_MODE: 'fail',
+    });
+    assert.equal(rCorrupt.status, 0);
+    assert.match(readFileSync(logCorrupt, 'utf8'), /SLO_BUDGET_EXHAUSTED/, 'string "false" must not suppress exhaustion alert');
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
