@@ -5,6 +5,10 @@
  * the saved storefront kept the old status. A status change now saves the config with the new status.
  * Real hook (useStoreData) and real OperationsMode, wired as the Store page wires them; only lib/client's reads and
  * writes, lib/api, the workspace and toasts are stubbed (the harness is use-store-data-r7.test.tsx's).
+ *
+ * R1 (first review, 2 MINOR test gaps): R1-1 a change-and-save made for A after the page has switched to B sends
+ * nothing (saveConfig's tenancy guard); R1-2 withConfigChange's three rules, pinned directly: "__root" merges at the
+ * top, an array section (sections, faqEntries) is replaced, any other section is merged.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
@@ -47,7 +51,8 @@ vi.mock("../shipping-zones-panel", () => ({ ShippingZonesPanel: () => null }));
 vi.mock("../qualification-config", () => ({ QualificationConfig: () => null }));
 vi.mock("../hours-editor", async (importOriginal) => ({ ...(await importOriginal<typeof import("../hours-editor")>()), HoursEditor: () => null }));
 
-import { useStoreData } from "../../hooks/use-store-data";
+import { useStoreData, withConfigChange } from "../../hooks/use-store-data";
+import type { StorefrontConfig } from "@/lib/client";
 import { OperationsMode } from "../operations-mode";
 
 /** The Operations tab as the Store page renders it (store/page.tsx). */
@@ -137,5 +142,65 @@ describe("P237: a store status change saves the status just chosen", () => {
     await waitFor(() => expect(client.updateStorefrontConfig).toHaveBeenCalled());
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     expect(client.updateStorefrontConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("P237 R1-1: a change-and-save made for A after a switch to B sends nothing", () => {
+  it("the handler captured while A was shown, called once B is shown: no storefront config is written", async () => {
+    let captured: ((section: string, updates: Record<string, unknown>) => Promise<void>) | null = null;
+    let shown: string | null = null;
+    function Capture() {
+      const s = useStoreData();
+      shown = s.loading ? null : s.businessId;
+      if (shown === A && !captured) captured = s.handleConfigChangeAndSave;
+      return null;
+    }
+    render(<Capture />);
+    await waitFor(() => expect(shown).toBe(A));
+    expect(captured, "A's handler was not captured").not.toBeNull();
+    act(() => {
+      ws.businessId = "biz_B";
+      window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } }));
+    });
+    await waitFor(() => expect(shown).toBe("biz_B"));
+    client.updateStorefrontConfig.mockClear();
+    await act(async () => { await captured!("storeSettings", { storeStatus: "paused" }); });
+    expect(client.updateStorefrontConfig, "A's change was written after the page switched to B").not.toHaveBeenCalled();
+  });
+});
+
+describe("P237 R1-2: withConfigChange", () => {
+  const base = {
+    hero: { headline: "Hi", imageUrl: "x" },
+    sections: [{ id: "s1" }, { id: "s2" }],
+    faqEntries: [{ q: "old", a: "old" }],
+    storeSettings: { storeStatus: "active", deliveryOptions: ["pickup"] },
+  } as unknown as StorefrontConfig;
+  it('"__root" merges the updates at the top level', () => {
+    const next = withConfigChange(base, "__root", { seo: { title: "T" } }) as unknown as Record<string, unknown>;
+    expect(next.seo).toEqual({ title: "T" });
+    expect(next.hero).toEqual({ headline: "Hi", imageUrl: "x" });
+  });
+  for (const key of ["sections", "faqEntries"]) {
+    it(`an array section (${key}) is replaced by the updates, not merged`, () => {
+      const replacement = [{ id: "only" }] as unknown as Record<string, unknown>;
+      const next = withConfigChange(base, key, replacement) as unknown as Record<string, unknown>;
+      expect(next[key]).toEqual([{ id: "only" }]);
+      expect(Array.isArray(next[key]), `${key} became an object`).toBe(true);
+    });
+  }
+  it("any other section is merged: its other keys are kept", () => {
+    const next = withConfigChange(base, "storeSettings", { storeStatus: "paused" }) as unknown as Record<string, unknown>;
+    expect(next.storeSettings).toEqual({ storeStatus: "paused", deliveryOptions: ["pickup"] });
+    expect(next.hero, "another section changed").toEqual({ headline: "Hi", imageUrl: "x" });
+  });
+  it("a section that did not exist is created", () => {
+    const next = withConfigChange(base, "promotions", { banner: "Sale" }) as unknown as Record<string, unknown>;
+    expect(next.promotions).toEqual({ banner: "Sale" });
+  });
+  it("the config passed in is not changed (a new object is returned)", () => {
+    const before = JSON.stringify(base);
+    withConfigChange(base, "storeSettings", { storeStatus: "paused" });
+    expect(JSON.stringify(base)).toBe(before);
   });
 });
