@@ -705,14 +705,45 @@ export function statusFilesCurrent({ jsonText, mdText, status, md }) {
 
 // ---------------------------------------------------------------- packet write-set matching (RR-HOOK-PACKET-SCOPE)
 
-const PATH_TOKEN_RE = /^(?:[a-z0-9._-]+|\.[a-z0-9._-]+)\/[A-Za-z0-9._/*-]*$/;
-const TOP_LEVEL_FILE_RE = /^(?:[A-Za-z0-9._-]+\.(?:md|json|mjs|cjs|js|ts|tsx|yml|yaml|sh|sql|prisma)|Dockerfile|Makefile|\.nvmrc|\.gitignore|\.env(?:\.[a-z]+)?)$/;
+const REPO_ROOT_PREFIX_RE =
+  /^(?:apps|packages|scripts|docs|architecture|infrastructure|prisma|public|src|test|tests|patches|artifacts|\.github|\.claude|\.agents|\.agent-control)\/[A-Za-z0-9._/*[\]-]*$/;
+const TOP_LEVEL_FILE_RE =
+  /^(?:CLAUDE\.md|AGENTS\.md|README\.md|SECURITY\.md|MAINTENANCE\.md|MIGRATION\.md|DEPLOYMENT\.md|CODEOWNERS|Dockerfile|Makefile|\.nvmrc|\.gitignore|\.dockerignore|\.npmrc|\.prettierrc|\.mcp\.json|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|turbo\.json|render\.yaml|stackhawk\.yml|next\.config\.mjs|tailwind\.config\.ts|postcss\.config\.js|tsconfig(?:\.base)?\.json|docker-compose(?:\.production)?\.yml|ecosystem\.config\.js)$/;
 
 function cleanPathToken(raw) {
-  return raw
-    .replace(/^[`'"([{+]+/, '')
-    .replace(/[`'"\])},;:]+$/, '')
-    .replace(/^\.\//, '');
+  let tok = raw.replace(/^[`'"({+]+/, '').replace(/[`'"\)},;:]+$/, '');
+  // Strip outer wrapping brackets "[path]" without breaking Next.js dynamic routes like ".../[id]"
+  if (tok.startsWith('[') && !tok.includes('/')) {
+    tok = tok.replace(/^\[+/, '').replace(/\]+$/, '');
+  } else {
+    tok = tok.replace(/^\[+/, '');
+    // Strip trailing ']' ONLY when unbalanced (more ']' than '[').
+    while (tok.endsWith(']') && (tok.match(/\[/g)?.length ?? 0) < (tok.match(/\]/g)?.length ?? 0)) {
+      tok = tok.slice(0, -1);
+    }
+  }
+  return tok.replace(/^\.\//, '');
+}
+
+/** Pure POSIX path normalization (no node:path import required, stays browser/pure-lib safe). */
+function normalizePosixPath(raw) {
+  if (typeof raw !== 'string') return '';
+  const slashed = raw.replace(/\\/g, '/').trim();
+  if (!slashed || slashed.startsWith('/')) return '';
+  const trailingSlash = slashed.endsWith('/');
+  const parts = slashed.split('/');
+  const out = [];
+  for (const part of parts) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (out.length === 0) return ''; // escapes repo root
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  if (out.length === 0) return '';
+  return trailingSlash ? `${out.join('/')}/` : out.join('/');
 }
 
 /**
@@ -727,14 +758,75 @@ export function extractWriteSetPatterns(entry) {
   const patterns = [];
   for (const part of trimmed.split(/\s+/)) {
     const tok = cleanPathToken(part);
-    if (!tok) continue;
-    // Skip prose slashes like "GET/PATCH" (all-uppercase left segment) and URLs.
-    if (/^[A-Z]+\/[A-Z]+$/.test(tok) || /^https?:\/\//i.test(tok)) continue;
-    if (PATH_TOKEN_RE.test(tok) || TOP_LEVEL_FILE_RE.test(tok)) {
+    if (!tok || /^https?:\/\//i.test(tok)) continue;
+    if (tok.split('/').some((seg) => seg === '..')) continue;
+    if (REPO_ROOT_PREFIX_RE.test(tok) || TOP_LEVEL_FILE_RE.test(tok)) {
       patterns.push(tok.replace(/\/+/g, '/'));
     }
   }
   return patterns;
+}
+
+/** Linear-time O(n) single-segment wildcard matcher (`*` matches 0+ chars within one segment). */
+function matchSegmentGlob(seg, pat) {
+  // Collapse consecutive '*' within a segment to prevent redundant states.
+  const p = pat.replace(/\*+/g, '*');
+  let si = 0;
+  let pi = 0;
+  let starIdx = -1;
+  let matchIdx = 0;
+  while (si < seg.length) {
+    if (pi < p.length && p[pi] === seg[si]) {
+      si += 1;
+      pi += 1;
+    } else if (pi < p.length && p[pi] === '*') {
+      starIdx = pi;
+      matchIdx = si;
+      pi += 1;
+    } else if (starIdx !== -1) {
+      pi = starIdx + 1;
+      matchIdx += 1;
+      si = matchIdx;
+    } else {
+      return false;
+    }
+  }
+  while (pi < p.length && p[pi] === '*') pi += 1;
+  return pi === p.length;
+}
+
+/** Linear-time segment-level glob matcher supporting `**` (0+ segments) and `*` (within 1 segment). */
+function matchPathGlob(normFile, pattern) {
+  const fileSegs = normFile.split('/');
+  const rawPatSegs = pattern.split('/');
+  // Collapse adjacent '**' segments so matching is strictly linear.
+  const patSegs = [];
+  for (const s of rawPatSegs) {
+    if (s === '**' && patSegs.at(-1) === '**') continue;
+    patSegs.push(s);
+  }
+  let fi = 0;
+  let pi = 0;
+  let starSeg = -1;
+  let matchFi = 0;
+  while (fi < fileSegs.length) {
+    if (pi < patSegs.length && patSegs[pi] === '**') {
+      starSeg = pi;
+      matchFi = fi;
+      pi += 1;
+    } else if (pi < patSegs.length && matchSegmentGlob(fileSegs[fi], patSegs[pi])) {
+      fi += 1;
+      pi += 1;
+    } else if (starSeg !== -1) {
+      pi = starSeg + 1;
+      matchFi += 1;
+      fi = matchFi;
+    } else {
+      return false;
+    }
+  }
+  while (pi < patSegs.length && patSegs[pi] === '**') pi += 1;
+  return pi === patSegs.length;
 }
 
 function matchSinglePattern(normFile, pattern) {
@@ -744,14 +836,13 @@ function matchSinglePattern(normFile, pattern) {
   if (p.endsWith('/')) {
     return normFile.startsWith(p);
   }
-  // Single-segment wildcard '*' (does NOT cross '/')
+  // Wildcards: linear-time segment matcher ('*' within 1 segment, '**' across 0+ segments)
   if (p.includes('*')) {
-    const reSrc = '^' + p.split('*').map(escapeRe).join('[^/]*') + '$';
-    return new RegExp(reSrc).test(normFile);
+    return matchPathGlob(normFile, p);
   }
   // Exact file match
   if (normFile === p) return true;
-  // Directory path without trailing slash (no file extension in last segment, e.g. "apps/server/src/modules/ai")
+  // Directory path without trailing slash (no file extension in last segment, e.g. "apps/server/src/modules/ai" or ".../[id]")
   const lastSeg = p.split('/').at(-1) ?? '';
   if (p.includes('/') && !lastSeg.includes('.')) {
     return normFile.startsWith(`${p}/`);
@@ -776,9 +867,7 @@ export function writeSetMatch(filePath, files) {
     }
     allPatterns.push(...pats);
   }
-  const norm = typeof filePath === 'string'
-    ? filePath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/')
-    : '';
+  const norm = normalizePosixPath(filePath);
   if (!norm) return { inside: false, checkable: true };
   const inside = allPatterns.some((pat) => matchSinglePattern(norm, pat));
   return { inside, checkable: true };

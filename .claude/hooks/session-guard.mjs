@@ -35,11 +35,10 @@
  * Input:  hook JSON on stdin.  Output: hook JSON on stdout.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, renameSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, renameSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { PLAN_PATH, writeSetMatch } from '../../scripts/agent-memory/lib.mjs';
 
 // fileURLToPath, not `.pathname`: a URL pathname keeps percent-encoding, so a
 // checkout under "C:/My Projects/..." resolved to "My%20Projects". The registry
@@ -48,16 +47,42 @@ import { PLAN_PATH, writeSetMatch } from '../../scripts/agent-memory/lib.mjs';
 // have, and invisible on any path without a space in it.
 const SCRIPT_REPO = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
-function detectRepoRoot() {
+function gitCommonDir(dir) {
   try {
-    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    const raw = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: dir,
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return raw ? realpathSync(resolve(dir, raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function detectRepoRoot() {
+  // Always anchor on SCRIPT_REPO (preserving fileURLToPath space-path semantics
+  // and preventing foreign-repo cwd split-brain); only adopt cwd's toplevel when
+  // cwd is a linked worktree sharing the same git common dir as SCRIPT_REPO.
+  try {
+    const cwdTop = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: process.cwd(),
       encoding: 'utf8',
       timeout: 5000,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    if (top) return resolve(top);
-  } catch { /* fall back to the script's own checkout */ }
+    if (cwdTop) {
+      const resolvedTop = resolve(cwdTop);
+      if (resolvedTop !== SCRIPT_REPO) {
+        const scriptCommon = gitCommonDir(SCRIPT_REPO);
+        const cwdCommon = gitCommonDir(resolvedTop);
+        if (scriptCommon && cwdCommon && scriptCommon === cwdCommon) {
+          return resolvedTop;
+        }
+      }
+    }
+  } catch { /* fall back to SCRIPT_REPO */ }
   return SCRIPT_REPO;
 }
 
@@ -522,8 +547,18 @@ function repoRelPath(p) {
   if (!p) return null;
   try {
     const abs = resolve(process.cwd(), p);
-    const rel = relative(REPO, abs);
-    if (!rel || rel.startsWith('..')) return null;
+    let repoReal = REPO;
+    let absReal = abs;
+    try { repoReal = realpathSync(REPO); } catch { /* keep resolved */ }
+    try { absReal = realpathSync(abs); } catch {
+      try {
+        const parent = resolve(abs, '..');
+        const name = abs.slice(parent.length).replace(/^[/\\]+/, '');
+        absReal = join(realpathSync(parent), name);
+      } catch { /* keep resolved */ }
+    }
+    const rel = relative(repoReal, absReal);
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
     return rel.split(sep).join('/');
   } catch {
     return null;
@@ -557,14 +592,30 @@ function nearestEntries(relPath, writeSet, limit = 3) {
 
 /**
  * Check if an edit on a `pkt/V1-<ID>` branch falls outside the packet's write set
- * in the plan at HEAD. Always fails open (returns null, writing a note on stderr on error).
+ * in the plan at HEAD. Lazy-loads scripts/agent-memory/lib.mjs and always fails open
+ * (returning null and writing a note on stderr on any error).
  */
-function checkPacketScope(relPath) {
+async function checkPacketScope(relPath) {
   if (!relPath) return null;
   const branch = currentBranchName();
   const m = /^pkt\/V1-(.+)$/.exec(branch);
   if (!m) return null;
   const packetId = m[1];
+
+  let PLAN_PATH;
+  let writeSetMatch;
+  try {
+    const mod = await import(new URL('../../scripts/agent-memory/lib.mjs', import.meta.url));
+    PLAN_PATH = mod.PLAN_PATH;
+    writeSetMatch = mod.writeSetMatch;
+    if (typeof PLAN_PATH !== 'string' || typeof writeSetMatch !== 'function') {
+      throw new Error('missing PLAN_PATH or writeSetMatch export');
+    }
+  } catch (err) {
+    process.stderr.write(`[session-guard] packet-scope fail-open: unable to load scripts/agent-memory/lib.mjs (${err instanceof Error ? err.message : String(err)})\n`);
+    return null;
+  }
+
   let planRaw;
   try {
     planRaw = execFileSync('git', ['show', `HEAD:${PLAN_PATH}`], {
@@ -574,7 +625,8 @@ function checkPacketScope(relPath) {
       maxBuffer: 64 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-  } catch {
+  } catch (err) {
+    process.stderr.write(`[session-guard] packet-scope fail-open: unable to read ${PLAN_PATH} at HEAD (${err instanceof Error ? err.message : String(err)})\n`);
     return null;
   }
   let plan;
@@ -595,7 +647,7 @@ function checkPacketScope(relPath) {
   };
 }
 
-function modeEdit(input) {
+async function modeEdit(input) {
   const file = input?.tool_input?.file_path;
   if (!file) allow();
   const key = normPath(file);
@@ -627,7 +679,7 @@ function modeEdit(input) {
 
   // RR-HOOK-PACKET-SCOPE: check packet write set on pkt/V1-* branches (fail open, never deny).
   const relPath = repoRelPath(file);
-  const scopeWarn = checkPacketScope(relPath);
+  const scopeWarn = await checkPacketScope(relPath);
   if (scopeWarn) {
     rec.outOfScope = Array.isArray(rec.outOfScope) ? rec.outOfScope : [];
     if (!rec.outOfScope.includes(scopeWarn.relPath)) rec.outOfScope.push(scopeWarn.relPath);
@@ -694,15 +746,17 @@ function modeEnd(input) {
 
 /* ------------------------------------------------------------------ */
 
-try {
-  const input = readStdin();
-  if (mode === 'bash') modeBash(input);
-  else if (mode === 'edit') modeEdit(input);
-  else if (mode === 'start') modeStart(input);
-  else if (mode === 'end') modeEnd(input);
-  else allow();
-} catch (err) {
-  // Fail open, loudly. A broken guard must never block work.
-  process.stderr.write(`[session-guard] failed open: ${err?.message}\n`);
-  allow();
-}
+(async () => {
+  try {
+    const input = readStdin();
+    if (mode === 'bash') modeBash(input);
+    else if (mode === 'edit') await modeEdit(input);
+    else if (mode === 'start') modeStart(input);
+    else if (mode === 'end') modeEnd(input);
+    else allow();
+  } catch (err) {
+    // Fail open, loudly. A broken guard must never block work.
+    process.stderr.write(`[session-guard] failed open: ${err?.message}\n`);
+    allow();
+  }
+})();

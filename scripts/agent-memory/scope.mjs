@@ -13,7 +13,7 @@ import { repoRoot, show } from './git.mjs';
 const SAFE_REF_RE = /^[A-Za-z0-9._/@^{}~-]+$/;
 
 function assertSafeRef(ref, label) {
-  if (typeof ref !== 'string' || !ref || ref.startsWith('-') || !SAFE_REF_RE.test(ref)) {
+  if (typeof ref !== 'string' || !ref || ref.startsWith('-') || ref.includes('..') || !SAFE_REF_RE.test(ref)) {
     throw new Error(`invalid ${label}: ${String(ref)}`);
   }
 }
@@ -27,11 +27,15 @@ export function scopeReport(root, packetId, { ref = 'HEAD', base = 'origin/main'
     return { found: false, packetId, ref, base, checkable: false, changed: [], inside: [], outside: [], writeSet: [] };
   }
   const writeSet = Array.isArray(packet.files) ? packet.files : [];
-  const rawDiff = execFileSync('git', ['diff', '--name-only', `${base}...${ref}`], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const rawDiff = execFileSync(
+    'git',
+    ['-c', 'core.quotePath=false', 'diff', '--no-renames', '--name-only', `${base}...${ref}`, '--'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   const changed = rawDiff.split('\n').map((s) => s.trim()).filter(Boolean);
   const probe = writeSetMatch(changed[0] ?? 'probe', writeSet);
   if (!probe.checkable) {
@@ -63,10 +67,10 @@ function main() {
     const a = args[i];
     if (a === '--ref') {
       ref = args[(i += 1)];
-      if (!ref || ref.startsWith('--')) fail('--ref needs a value');
+      if (!ref || ref.startsWith('-')) fail('--ref needs a value');
     } else if (a === '--base') {
       base = args[(i += 1)];
-      if (!base || base.startsWith('--')) fail('--base needs a value');
+      if (!base || base.startsWith('-')) fail('--base needs a value');
     } else if (a === '--json') {
       asJson = true;
     } else if (a.startsWith('-')) {
