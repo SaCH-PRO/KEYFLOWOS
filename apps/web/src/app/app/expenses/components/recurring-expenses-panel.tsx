@@ -78,7 +78,8 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   }
 
   const load = useCallback(async () => {
-    if (!businessId) { setLoading(false); return; }
+    // P254: with no business nothing is read: no list, no read that answered, nothing to add a schedule to.
+    if (!businessId) { setRecurring([]); setListRead({ kind: "loading" }); setLoading(false); return; }
     setLoading(true);
     // R26-5: the list is being read: its Retry is not offered again until this read answers (one read at a time).
     setListRead({ kind: "loading" });
@@ -193,7 +194,7 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
   return (
     <div className="space-y-4">
       <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} />
-      {readFailure(listRead) ? (
+      {!businessId ? null : readFailure(listRead) ? (
         <div className="kf-card rounded-xl p-6 text-center">
           <ReadFailureNote read={listRead} onRetry={() => { void load(); }} className="text-sm text-muted-foreground" />
         </div>
