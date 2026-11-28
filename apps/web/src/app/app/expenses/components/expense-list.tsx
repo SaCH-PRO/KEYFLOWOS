@@ -24,7 +24,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Expense, ExpenseCategory, PAYMENT_METHODS, updateExpense, RecurringCandidate } from "@/lib/client";
-import { formatCurrency, formatDate } from "./expense-utils";
+import { formatCurrency, formatDate, useShownBusiness, refusedStart, canStartFor, writeFailure } from "./expense-utils";
 import { toast } from "sonner";
 import type { ProjectOption, ContactOption, ServiceOption } from "./use-expenses-data";
 
@@ -50,6 +50,8 @@ interface ExpenseListProps {
   contacts?: ContactOption[];
   services?: ServiceOption[];
   recurringCandidates?: RecurringCandidate[];
+  /** R12: the data hook's check that the business an action was for is still the one shown. */
+  isCurrentBusiness?: (businessId: string) => boolean;
 }
 
 const PAYMENT_ICONS: Record<string, typeof CreditCard> = {
@@ -76,7 +78,12 @@ export function ExpenseList({
   businessId, onReload,
   projects = [], contacts = [], services = [],
   recurringCandidates = [],
+  isCurrentBusiness: hookCheck,
 }: ExpenseListProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R19-5: every reply is judged by the start check's test (the given check, and the stored id).
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -119,30 +126,45 @@ export function ExpenseList({
 
   const handleBulkCategorize = async () => {
     if (!businessId || !bulkCategoryId || selectedIds.size === 0) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await Promise.all(
+      const answers = await Promise.all(
         Array.from(selectedIds).map(id =>
           updateExpense(businessId, id, { categoryId: bulkCategoryId })
         )
       );
+      // R12: answered after a switch to another business: nothing is said or reloaded there.
+      if (!live()) return;
+      // R24-1: each answer is read (the client answers a refusal as { error }); any refused is said, and the list is
+      // read again so it shows which went through.
+      const failures = answers.map((res) => writeFailure(res, "categorize these expenses")).filter((f): f is string => f !== null);
+      if (failures.length) {
+        toast.error(failures.length === answers.length ? failures[0] : `${failures.length} of ${answers.length} expenses were not categorized: ${failures[0]}`);
+        onReload?.();
+        return;
+      }
       toast.success(`${selectedIds.size} expense${selectedIds.size > 1 ? "s" : ""} categorized`);
       setSelectedIds(new Set());
       setBulkCategoryId("");
       onReload?.();
     } catch {
-      toast.error("Failed to bulk categorize");
+      if (live()) toast.error("Failed to bulk categorize");
     }
   };
 
   const handleInlineCategory = async (expenseId: string, categoryId: string) => {
     if (!businessId) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     try {
-      await updateExpense(businessId, expenseId, { categoryId: categoryId || null });
+      const res = await updateExpense(businessId, expenseId, { categoryId: categoryId || null });
+      if (!live()) return;
+      const failure = writeFailure(res, "change this expense's category");
+      if (failure) { toast.error(failure); return; }
       toast.success("Category updated");
       setInlineCatExpId(null);
       onReload?.();
     } catch {
-      toast.error("Failed to update category");
+      if (live()) toast.error("Failed to update category");
     }
   };
 

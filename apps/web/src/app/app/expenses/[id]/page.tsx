@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
-  CheckCircle,
   X,
   Download,
   Loader2,
@@ -16,9 +15,7 @@ import {
   Trash2,
   Ban,
   Check,
-  Clock,
   Upload,
-  MessageSquare,
 } from "lucide-react";
 import {
   getExpense,
@@ -30,11 +27,13 @@ import {
   ExpenseBudget,
 } from "@/lib/client";
 import { voidBill } from "@/lib/api/finance";
-import { getStoredBusinessId } from "@/lib/workspace";
-import { businessCurrency, formatCurrency, formatDate } from "../components/expense-utils";
-import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
+import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
+import { EXPENSES_BUSINESS_ID_KEY, businessCurrency, businessTimeZone, dayInZone, formatCurrency, formatDate, canStartFor, refusedStart } from "../components/expense-utils";
+import { ExpenseFormSideSheet, RECEIPT_STORED_NOTE, RECEIPT_UNAVAILABLE_NOTE, receiptKind } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { refusalMessage } from "@/lib/failure-kit";
+import { refusalMessage, readState } from "@/lib/failure-kit";
+import { ReadFailureNote, readFailure } from "../components/read-failure-note";
+import type { BlockRead } from "../components/use-expenses-data";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 
 /**
@@ -70,6 +69,16 @@ function deriveStatus(expense: Expense) {
   return { label: "Approved", color: "text-emerald-700", bg: "bg-emerald-50" };
 }
 
+/**
+ * The expense's own month, as { month, year } (COR MINOR-4: its budget is that month's). A calendar day (date-only, or
+ * exactly midnight UTC, as the forms store a date) is read as written; any other instant in the business's zone.
+ */
+function expenseMonth(date: string, businessId: string | null): { month: number; year: number } {
+  const calendar = /^(\d{4})-(\d{2})-\d{2}(?:T00:00(?::00(?:\.0+)?)?Z)?$/.exec(date);
+  const day = calendar ? date.slice(0, 10) : dayInZone(new Date(date), businessTimeZone(businessId));
+  return { year: Number(day.slice(0, 4)), month: Number(day.slice(5, 7)) };
+}
+
 export default function ExpenseDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -78,35 +87,188 @@ export default function ExpenseDetailPage() {
   const [expense, setExpense] = useState<Expense | null>(null);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
+  // R24b (D-315): the categories and budgets reads keep their own state: a refused one is said, never shown as
+  // "Uncategorized" or "No budget set". Retry reads the page again.
+  const [catRead, setCatRead] = useState<BlockRead>({ kind: "loading" });
+  const [budRead, setBudRead] = useState<BlockRead>({ kind: "loading" });
+  // R25-3: the expense read's own state: a refusal or a failure is said with Retry, "not found" is a real 404 only.
+  const [expRead, setExpRead] = useState<BlockRead | { kind: "not-found" }>({ kind: "loading" });
+  const [readAgain, setReadAgain] = useState(0);
+  const retryExpense = useCallback(() => setReadAgain((n) => n + 1), []);
   const [loading, setLoading] = useState(true);
   const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
-  const [showEdit, setShowEdit] = useState(false);
+  // R29-1: an open edit sheet or Pay dialog is the read it was opened on (null when closed). Each open is its own
+  // instance (keyed by that read) with its own check, so a reply for an earlier open never answers for a later one.
+  const [editFor, setEditFor] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
-  const [showPay, setShowPay] = useState(false);
+  const [payFor, setPayFor] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  // R14-4: this page shows one business's expense. A switch (this tab's switcher, or another tab's stored id) leaves
+  // for the Expenses list and stops showing it; a reply for it that lands after the switch says nothing.
+  const [left, setLeft] = useState(false);
+  // R22-3: and this page still shows it. Once it has left (this tab's switch), a reply is stale even if another tab
+  // stores this business again before its storage event arrives.
+  const leftRef = useRef(false);
+  // R26-1: whether this page is still mounted. A Retry's reply that outlives the page (the user has gone, and may be
+  // on another business's page) sets nothing and navigates nowhere, as the main read's `active` flag does (R16-1).
+  const mountedRef = useRef(true);
+  // R27-2: the main read's generation. A Retry started for one expense whose reply lands once the page shows another
+  // (the id changed within this page) sets nothing.
+  const readGen = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const isCurrentBusiness = useCallback((forBusiness: string) => !leftRef.current && getStoredBusinessId() === forBusiness, []);
+  // R19-5: replies to this page's actions are judged by the start check's test.
+  const live = (forBusiness: string) => canStartFor(forBusiness, isCurrentBusiness);
+  // R15-5: leaving is one step, used by the listeners and by a read that lands after the stored business moved on.
+  // The router is read through a ref: a router object that changes identity between renders must not re-run the
+  // read effect (which depends on leave).
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; }, [router]);
+  // R16-2: once only (leftRef, above). A real switch fires the listener, and the read that then lands is stale too.
+  const leave = useCallback(() => {
+    if (leftRef.current) return;
+    leftRef.current = true;
+    setLeft(true);
+    routerRef.current.replace("/app/expenses");
+  }, []);
+  useEffect(() => {
+    if (!businessId) return;
+    const check = () => {
+      if (getStoredBusinessId() === businessId) return;
+      leave();
+    };
+    const onStorage = (e: StorageEvent) => { if (e.key === null || e.key === EXPENSES_BUSINESS_ID_KEY) check(); };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, check);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, check);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [businessId, leave]);
 
   useEffect(() => {
     if (!businessId || !expenseId) return;
+    // R16-1: a read that lands after this page has gone (unmounted, or the read replaced) does nothing, and above
+    // all navigates nowhere: the user may be on another page by then.
+    let active = true;
+    readGen.current += 1;
+    // R26-3: whether this read has shown its expense, so a later failure (the budgets read) is said for its block.
+    let loadedExpense = false;
     (async () => {
       setLoading(true);
+      // R26-4: a read starts from nothing: a new expense id whose read fails is never shown as the previous expense.
+      // R27-1: nor with the previous expense's category or budget.
+      setExpense(null);
+      setExpRead({ kind: "loading" });
+      setCategories([]);
+      setCatRead({ kind: "loading" });
+      setBudgets([]);
+      setBudRead({ kind: "loading" });
+      // R28-2: and with no dialog of the previous expense open: Delete, Void, Pay and Edit act on the expense shown.
+      setEditFor(null);
+      setConfirmDelete(false);
+      setConfirmVoid(false);
+      setPayFor(null);
+      setActionLoading(null);
       try {
-        const [expRes, catRes, budRes] = await Promise.all([
+        const [expRes, catRes] = await Promise.all([
           getExpense(businessId, expenseId),
           fetchExpenseCategories(businessId),
-          fetchExpenseBudgets(businessId),
         ]);
-        if (expRes.data) setExpense(expRes.data);
-        if (catRes.data) setCategories(catRes.data);
-        if (budRes.data) setBudgets(budRes.data);
+        if (!active) return;
+        // R15-5: a read that lands for a business no longer stored writes nothing and leaves the page at once
+        // (another tab's switch can reach the stored id before its storage event reaches this tab).
+        if (!isCurrentBusiness(businessId)) { leave(); return; }
+        // R24-1: the client answers a failed read as { data: null, error } (it does not throw): said, as a throw is.
+        if (expRes.error || !expRes.data) {
+          toast.error("Failed to load expense");
+          // The client's answer carries the HTTP status at run time (lib/api.ts handleErrorResponse); its type omits it.
+          setExpRead((expRes as { status?: number }).status === 404 ? { kind: "not-found" } : readState(expRes, { what: "this expense" }));
+          setLoading(false);
+          return;
+        }
+        setExpense(expRes.data);
+        setExpRead({ kind: "ok" });
+        loadedExpense = true;
+        const catState = readState(catRes, { what: "the category" });
+        setCatRead(catState);
+        setCategories(catState.kind === "ok" ? catRes.data ?? [] : []);
+        // COR MINOR-4: the budgets of the expense's own month, not of the month it is today.
+        const { month, year } = expenseMonth(expRes.data.date, businessId);
+        const budRes = await fetchExpenseBudgets(businessId, month, year);
+        if (!active) return;
+        if (!isCurrentBusiness(businessId)) { leave(); return; }
+        const budState = readState(budRes, { what: "this category's budget" });
+        setBudRead(budState);
+        setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
       } catch {
-        toast.error("Failed to load expense");
+        // R23-6: the start check's test, which reads the stored id safely (blocked storage refuses, never throws).
+        if (active && canStartFor(businessId, isCurrentBusiness)) {
+          if (loadedExpense) {
+            // R26-3: the expense is shown; what failed is its budgets read (the categories answered with it).
+            toast.error("Couldn't load this category's budget.");
+            setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
+          } else {
+            toast.error("Failed to load expense");
+            setExpRead({ kind: "failed", message: "Couldn't load this expense." });
+          }
+        }
       }
-      setLoading(false);
+      if (active) setLoading(false);
     })();
-  }, [businessId, expenseId]);
+    return () => {
+      active = false;
+    };
+    // R25-3: readAgain is a Retry of a refused or failed expense read (the page shows no expense then).
+  }, [businessId, expenseId, isCurrentBusiness, leave, readAgain]);
+
+  // R25-1: a Retry of the categories read reads only the categories: no loading state, no expense read, so the page
+  // and an open edit sheet (with its unsaved edits) stay mounted. One read of a block is out at a time: its Retry is
+  // offered only while the block shows failed, and a Retry sets it loading, which hides every note offering it.
+  const retryCategories = useCallback(async () => {
+    if (!businessId) return;
+    const gen = readGen.current;
+    setCatRead({ kind: "loading" });
+    try {
+      const res = await fetchExpenseCategories(businessId);
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
+      if (!isCurrentBusiness(businessId)) { leave(); return; }
+      const st = readState(res, { what: "the category" });
+      setCatRead(st);
+      setCategories(st.kind === "ok" ? res.data ?? [] : []);
+    } catch {
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
+      if (canStartFor(businessId, isCurrentBusiness)) setCatRead({ kind: "failed", message: "Couldn't load the category." });
+    }
+  }, [businessId, isCurrentBusiness, leave]);
+  // R25-1: and a Retry of the budgets read reads only the budgets of the expense's own month.
+  const retryBudgets = useCallback(async () => {
+    if (!businessId || !expense) return;
+    const gen = readGen.current;
+    setBudRead({ kind: "loading" });
+    try {
+      const { month, year } = expenseMonth(expense.date, businessId);
+      const res = await fetchExpenseBudgets(businessId, month, year);
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
+      if (!isCurrentBusiness(businessId)) { leave(); return; }
+      const st = readState(res, { what: "this category's budget" });
+      setBudRead(st);
+      setBudgets(st.kind === "ok" ? res.data ?? [] : []);
+    } catch {
+      if (!mountedRef.current || leftRef.current || gen !== readGen.current) return;
+      if (canStartFor(businessId, isCurrentBusiness)) setBudRead({ kind: "failed", message: "Couldn't load this category's budget." });
+    }
+  }, [businessId, expense, isCurrentBusiness, leave]);
 
   const category = useMemo(() => categories.find((c) => c.id === expense?.categoryId), [categories, expense]);
+  // R24b: an expense with a category the page could not read is never called "Uncategorized"; R26-2: nor while it is
+  // being read again.
+  const categoryUnread = !!expense?.categoryId && !category && catRead.kind !== "ok";
+  const categoryLabel = category?.name || (categoryUnread ? (catRead.kind === "loading" ? "Loading…" : "Couldn't load the category") : "Uncategorized");
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);
   const status = useMemo(() => (expense ? deriveStatus(expense) : { label: "", color: "", bg: "" }), [expense]);
 
@@ -116,9 +278,18 @@ export default function ExpenseDetailPage() {
   // door answers the row as it now stands; a refusal is said in the server's words (FAILURE-KIT).
   const runVoid = async (action: "reject" | "void", success: string) => {
     if (!businessId || !expense) return;
+    // R19-3: a refused start says why (another business chosen, or the choice could not be read); R20-5: and its
+    // confirm closes, as Pay's dialog does.
+    if (refusedStart(businessId, isCurrentBusiness)) {
+      setConfirmVoid(false);
+      return;
+    }
+    // R28-1: the read this action was taken on; a reply that lands once the page shows another expense is dropped.
+    const gen = readGen.current;
     setActionLoading(action);
     try {
       const res = await voidBill(businessId, expense.id);
+      if (!live(businessId) || gen !== readGen.current) return;
       const refusal = refusalMessage(res, { what: action === "void" ? "void this expense" : "reject this bill" });
       if (refusal !== null) {
         toast.error(refusal);
@@ -127,13 +298,20 @@ export default function ExpenseDetailPage() {
         if (res.data) setExpense({ ...expense, ...res.data });
       }
     } catch {
-      toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
+      if (gen !== readGen.current) return;
+      if (live(businessId)) toast.error(action === "void" ? "Couldn't void this expense." : "Failed to reject");
     }
     setActionLoading(null);
     setConfirmVoid(false);
   };
 
-  const handleApprove = () => setShowPay(true);
+  // R28-1 / R29-1: Pay's and the edit sheet's replies are judged by this page's check and by the read their own open
+  // was made on still being the one shown: a reply for A1 says and sets nothing once the page shows A2, even with the
+  // same dialog opened again on A2.
+  const handleApprove = () => setPayFor(readGen.current);
+  const payCheck = useCallback((forBusiness: string) => payFor !== null && payFor === readGen.current && isCurrentBusiness(forBusiness), [payFor, isCurrentBusiness]);
+  const openEdit = () => setEditFor(readGen.current);
+  const editCheck = useCallback((forBusiness: string) => editFor !== null && editFor === readGen.current && isCurrentBusiness(forBusiness), [editFor, isCurrentBusiness]);
   const handleReject = () => runVoid("reject", "Bill rejected and voided");
   const handleVoid = () => runVoid("void", "Expense voided");
 
@@ -141,9 +319,15 @@ export default function ExpenseDetailPage() {
   // the answer: "Expense deleted" only when it went through.
   const handleDelete = async () => {
     if (!businessId || !expense) return;
+    if (refusedStart(businessId, isCurrentBusiness)) {
+      setConfirmDelete(false);
+      return;
+    }
+    const gen = readGen.current;
     setActionLoading("delete");
     try {
       const res = await deleteExpense(businessId, expense.id);
+      if (!live(businessId) || gen !== readGen.current) return;
       const refusal = refusalMessage(res, { what: "delete this expense" });
       if (refusal !== null) {
         toast.error(POSTED_DELETE_REFUSAL.test(refusal) ? postedDeleteWords(expense.status) : refusal);
@@ -152,11 +336,21 @@ export default function ExpenseDetailPage() {
         router.push("/app/expenses");
       }
     } catch {
-      toast.error("Couldn't delete this expense.");
+      if (gen !== readGen.current) return;
+      if (live(businessId)) toast.error("Couldn't delete this expense.");
     }
     setActionLoading(null);
     setConfirmDelete(false);
   };
+
+  if (left) {
+    // R14-4: the business changed: nothing of the old one's expense is shown, and nothing can be done to it.
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">The business changed. Opening your expenses…</p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -171,7 +365,12 @@ export default function ExpenseDetailPage() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <FileText className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Expense not found</p>
+          {expRead.kind === "failed" || expRead.kind === "no-access" ? (
+            // R25-3: a refused or failed read is said in the server's words, with Retry where reading again can help.
+            <ReadFailureNote read={expRead} onRetry={retryExpense} className="text-sm text-muted-foreground" />
+          ) : (
+            <p className="text-sm text-muted-foreground">Expense not found</p>
+          )}
           <button onClick={() => router.push("/app/expenses")} className="mt-3 text-sm text-[hsl(var(--kf-accent1))] hover:underline">
             Back to expenses
           </button>
@@ -184,7 +383,10 @@ export default function ExpenseDetailPage() {
   // D-170: a posted expense (paid; a bill is corrected by Reject) offers Void.
   const canVoid = expense.status === "PAID";
   const percentUsed = budget ? Math.min(100, Math.round(budget.percentUsed)) : 0;
-  const remainingAfter = budget ? Math.max(0, budget.remaining - expense.amount) : 0;
+  // The server's remaining already counts this expense (spent is the month's paid expenses); it is shown as is.
+  const { month: budgetMonth, year: budgetYear } = expenseMonth(expense.date, businessId);
+  const budgetMonthLabel = new Date(Date.UTC(budgetYear, budgetMonth - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const receipt = receiptKind(expense.receiptUrl, businessId);
 
   return (
     <div className="min-h-screen bg-background">
@@ -211,7 +413,7 @@ export default function ExpenseDetailPage() {
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              {formatCurrency(expense.amount, expense.currency, businessId)} · {category?.name || "Uncategorized"} · {expense.vendor || "—"} · {expense.paymentMethod || "—"}
+              {formatCurrency(expense.amount, expense.currency, businessId)} · {categoryLabel} · {expense.vendor || "—"} · {expense.paymentMethod || "—"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -238,14 +440,15 @@ export default function ExpenseDetailPage() {
           </div>
         </div>
 
-        {/* Info cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+        {/* Info cards. EXPENSES-HUB-3 (BUG-072, fixed by removal): an "Approval: Manager / Jane → Finance" (or
+            "Self / Auto-approved") card, "Policy check passed", "Uploaded today" and "Recurring SaaS" were invented
+            here; v1 has no approval chain and no expense policy. Each card shows only what the server sent. */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
           {[
             { label: "Amount", value: formatCurrency(expense.amount, expense.currency, businessId), sub: expense.currency || businessCurrency(businessId) },
-            { label: "Merchant", value: expense.vendor || "—", sub: expense.isRecurring ? "Recurring SaaS" : "One-time" },
-            { label: "Date", value: formatDate(expense.date, businessId), sub: "Uploaded today" },
-            { label: "Status", value: status.label, sub: expense.status === "BILL" ? "Policy check passed" : "Recorded" },
-            { label: "Approval", value: isPending ? "Manager" : "Self", sub: isPending ? "Jane → Finance" : "Auto-approved" },
+            { label: "Merchant", value: expense.vendor || "—", sub: expense.isRecurring ? "Recurring" : "One-time" },
+            { label: "Date", value: formatDate(expense.date, businessId), sub: "" },
+            { label: "Status", value: status.label, sub: "" },
           ].map((card, i) => (
             <div key={i} className="rounded-xl border border-border bg-card p-3 shadow-sm">
               <p className="text-[10px] font-medium text-muted-foreground uppercase mb-1">{card.label}</p>
@@ -261,9 +464,9 @@ export default function ExpenseDetailPage() {
           <div className="rounded-xl border border-border bg-card shadow-sm p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-foreground">Receipt preview</h3>
-              {expense.receiptUrl && (
+              {expense.receiptUrl && receipt === "link" && (
                 <a
-                  href={expense.receiptUrl}
+                  href={expense.receiptUrl.trim()}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -273,11 +476,19 @@ export default function ExpenseDetailPage() {
                 </a>
               )}
             </div>
-            {expense.receiptUrl ? (
-              expense.receiptUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+            {receipt === "stored" || receipt === "unavailable" ? (
+              // COR MINOR-1 / R2-3: no route serves an /objects/ path yet (server row P222). This business's upload is
+              // said to be stored; any other /objects/ path is not claimed as this expense's receipt. Neither is linked.
+              <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-dashed border-border bg-muted/30 text-center px-4">
+                <FileText className="w-10 h-10 text-muted-foreground/40 mb-2" />
+                <p className="text-sm text-foreground">{receipt === "stored" ? RECEIPT_STORED_NOTE : RECEIPT_UNAVAILABLE_NOTE}</p>
+              </div>
+            ) : receipt === "link" && expense.receiptUrl ? (
+              // R11-4: only an address receiptKind calls a link is linked; a blank one (whitespace only) is "none".
+              expense.receiptUrl.trim().match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={expense.receiptUrl}
+                  src={expense.receiptUrl.trim()}
                   alt="Receipt"
                   className="w-full max-h-96 object-contain rounded-lg border border-border/40"
                 />
@@ -285,7 +496,7 @@ export default function ExpenseDetailPage() {
                 <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-dashed border-border bg-muted/30">
                   <FileText className="w-10 h-10 text-muted-foreground/40 mb-2" />
                   <a
-                    href={expense.receiptUrl}
+                    href={expense.receiptUrl.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-sm text-[hsl(var(--kf-accent1))] hover:underline"
@@ -310,13 +521,14 @@ export default function ExpenseDetailPage() {
                 <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Category</label>
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-background">
                   {category?.color && <div className="w-2 h-2 rounded-full" style={{ background: category.color }} />}
-                  <span className="text-sm text-foreground">{category?.name || "Uncategorized"}</span>
+                  <span className="text-sm text-foreground">{categoryLabel}</span>
                 </div>
+                {categoryUnread && <ReadFailureNote read={catRead} onRetry={() => { void retryCategories(); }} className="mt-1 text-xs text-muted-foreground" />}
               </div>
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Budget line</label>
                 <div className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground">
-                  {category?.name || "Uncategorized"}
+                  {categoryLabel}
                 </div>
               </div>
               <div>
@@ -325,18 +537,7 @@ export default function ExpenseDetailPage() {
                   {expense.projectId || "—"}
                 </div>
               </div>
-              <div>
-                <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Tax treatment</label>
-                <div className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground">
-                  {"Tax included"}
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Policy</label>
-                <div className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground">
-                  Within policy
-                </div>
-              </div>
+              {/* BUG-072: "Tax treatment: Tax included" and "Policy: Within policy" were the same for every expense. */}
               {expense.notes && (
                 <div>
                   <label className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Reviewer note</label>
@@ -353,9 +554,13 @@ export default function ExpenseDetailPage() {
             <div className="rounded-xl border border-border bg-card shadow-sm p-4">
               <h3 className="text-sm font-semibold text-foreground mb-1">Budget impact</h3>
               <p className="text-xs text-muted-foreground mb-3">
-                {category?.name || "Uncategorized"} · {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                {categoryLabel} · {budgetMonthLabel}
               </p>
-              {budget ? (
+              {/* R28 / R29-3: defensive. Every path that leaves budRead not ok also clears the budgets (the read start,
+                  a refused or failed read, the catch); a Retry starts only from failed, whose budgets are already
+                  empty. So a matching budget with budRead not ok cannot be built today: this check keeps figures from
+                  ever showing beside an unread budget if a later path forgets to clear them. Not counted as proven. */}
+              {budget && budRead.kind === "ok" ? (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Monthly budget</span>
@@ -370,9 +575,9 @@ export default function ExpenseDetailPage() {
                     <span className="font-semibold text-foreground">{formatCurrency(expense.amount, expense.currency, businessId)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Remaining after</span>
-                    <span className={cn("font-semibold", remainingAfter < 0 ? "text-rose-600" : "text-foreground")}>
-                      {formatCurrency(remainingAfter, undefined, businessId)}
+                    <span className="text-muted-foreground">Remaining</span>
+                    <span className={cn("font-semibold", budget.remaining < 0 ? "text-rose-600" : "text-foreground")}>
+                      {formatCurrency(budget.remaining, undefined, businessId)}
                     </span>
                   </div>
                   <div className="pt-1">
@@ -394,62 +599,33 @@ export default function ExpenseDetailPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No budget set for this category.</p>
+                readFailure(budRead) ? (
+                  <ReadFailureNote read={budRead} onRetry={() => { void retryBudgets(); }} className="text-sm text-muted-foreground" />
+                ) : budRead.kind === "loading" ? (
+                  // R26-2: a budget being read again is not "No budget set".
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No budget set for this category.</p>
+                )
               )}
             </div>
 
+            {/* BUG-072: the "Approval & activity" list ("Uploaded receipt", "Rule suggested ...", "Queued for review",
+                "Approved", each stamped "Today") and its dead "Add comment" were invented. The history is the server's. */}
             <div className="rounded-xl border border-border bg-card shadow-sm p-4">
-              <h3 className="text-sm font-semibold text-foreground mb-3">Approval & activity</h3>
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Upload className="w-3 h-3 text-emerald-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground">Uploaded receipt</p>
-                    <p className="text-[11px] text-muted-foreground">{expense.vendor || "User"}</p>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">Today</span>
+              <h3 className="text-sm font-semibold text-foreground mb-3">History</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Recorded</dt>
+                  <dd className="text-foreground">{formatDate(expense.createdAt, businessId)}</dd>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <CheckCircle className="w-3 h-3 text-blue-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground">Rule suggested {category?.name || "category"}</p>
-                    <p className="text-[11px] text-muted-foreground">System</p>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">Today</span>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Clock className="w-3 h-3 text-purple-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground">Queued for review</p>
-                    <p className="text-[11px] text-muted-foreground">Finance workflow</p>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">Today</span>
-                </div>
-                {expense.status === "PAID" && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Check className="w-3 h-3 text-emerald-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-foreground">Approved</p>
-                      <p className="text-[11px] text-muted-foreground">Finance</p>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">Today</span>
+                {expense.paidAt && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Paid</dt>
+                    <dd className="text-foreground">{formatDate(expense.paidAt, businessId)}</dd>
                   </div>
                 )}
-              </div>
-              <div className="mt-3 pt-3 border-t border-border/60">
-                <button className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  Add comment
-                </button>
-              </div>
+              </dl>
             </div>
 
             {/* Actions */}
@@ -457,7 +633,7 @@ export default function ExpenseDetailPage() {
               <h3 className="text-sm font-semibold text-foreground mb-2">Actions</h3>
               <div className="flex flex-col gap-2">
                 <button
-                  onClick={() => setShowEdit(true)}
+                  onClick={openEdit}
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-foreground border border-border hover:bg-muted transition-colors"
                 >
                   <Pencil className="w-4 h-4" />
@@ -487,17 +663,34 @@ export default function ExpenseDetailPage() {
       </div>
 
       {/* Edit drawer */}
-      {showEdit && businessId && (
+      {editFor !== null && businessId && (
         <ExpenseFormSideSheet
+          key={editFor}
           businessId={businessId}
           categories={categories}
+          categoriesRead={catRead}
+          onRetryCategories={() => { void retryCategories(); }}
           editingExpense={expense}
-          onClose={() => setShowEdit(false)}
+          onClose={() => setEditFor(null)}
           onSaved={async () => {
-            setShowEdit(false);
-            const res = await getExpense(businessId, expenseId);
-            if (res.data) setExpense(res.data);
+            // R29-1: the read this open was made on (this closure's own), compared with the one shown after each step.
+            const opened = editFor;
+            setEditFor(null);
+            // R23-4: the saved expense is read again for this page only; a failed refresh is said, never thrown.
+            try {
+              const res = await getExpense(businessId, expenseId);
+              if (!live(businessId) || opened !== readGen.current) return;
+              // R24-1: a refused refresh ({ error }, or no row) is said, as a thrown one is.
+              if (res.error || !res.data) {
+                toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
+                return;
+              }
+              setExpense(res.data);
+            } catch {
+              if (live(businessId) && opened === readGen.current) toast.error("Saved, but couldn't refresh this expense. Reload to see it.");
+            }
           }}
+          isCurrentBusiness={editCheck}
         />
       )}
 
@@ -526,13 +719,17 @@ export default function ExpenseDetailPage() {
       />
 
       {/* Pay a bill: asks the account and the method (D-168) */}
-      {showPay && businessId && (
+      {payFor !== null && businessId && (
         <BillPayDialog
+          key={payFor}
           businessId={businessId}
           bill={expense}
-          onClose={() => setShowPay(false)}
+          onClose={() => setPayFor(null)}
+          isCurrentBusiness={payCheck}
           onPaid={(paid) => {
-            setShowPay(false);
+            // R29-1: this open's own read (the dialog's check already holds it; compared again before any write).
+            if (payFor !== readGen.current) return;
+            setPayFor(null);
             toast.success("Bill paid");
             if (paid) setExpense({ ...expense, ...paid });
           }}

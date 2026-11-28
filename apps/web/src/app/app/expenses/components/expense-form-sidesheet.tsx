@@ -1,9 +1,12 @@
 "use client";
 
+import { ReadFailureNote } from "./read-failure-note";
+import type { BlockRead } from "./use-expenses-data";
 import React, { useState, useRef, useId } from "react";
 import {
   X,
   Upload,
+  Camera,
   Image as ImageIcon,
   Repeat,
   FileText,
@@ -25,7 +28,7 @@ import {
 } from "@/lib/client";
 import { createBill, type CreateBillBody } from "@/lib/api/finance";
 import { formatCurrency as formatMoney } from "@/lib/currency";
-import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone } from "./expense-utils";
+import { businessCurrency, businessTimeZone, dayInZone, recurringScheduleBody, todayInBusinessZone, useShownBusiness, canStartFor, refusedStart, startRefusal, BUSINESS_CHANGED_ELSEWHERE, writeFailure } from "./expense-utils";
 import { useUpload } from "@/hooks/use-upload";
 import { useDriveUpload } from "@/hooks/use-drive-upload";
 import { API_BASE } from "@/lib/api";
@@ -45,6 +48,16 @@ interface ExpenseFormSideSheetProps {
   initialKind?: "expense" | "bill";
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * R14: the check that the business this was opened for is still the one shown. A parent with the data hook passes
+   * its ref-based `isCurrentBusiness`; without it, the component's own latest `businessId` (useShownBusiness).
+   */
+  isCurrentBusiness?: (businessId: string) => boolean;
+  /** R24b: the reads behind the category list and the links; a refused one is said, never shown as none. */
+  categoriesRead?: BlockRead;
+  onRetryCategories?: () => void;
+  linksRead?: BlockRead;
+  onRetryLinks?: () => void;
 }
 
 export interface ExpensePrefill {
@@ -53,7 +66,145 @@ export interface ExpensePrefill {
   date?: string;
   vendor?: string;
   receiptUrl?: string;
+  /** The photo behind receiptUrl when the page uploaded it (EXPENSES-HUB-3 COR MINOR-2: the save makes its Drive copy). */
+  receiptFile?: File;
 }
+
+/**
+ * What a receipt address is, for this business (EXPENSES-HUB-3 COR MINOR-1, repair round 2 R2-3):
+ *   "stored"       an upload of this business (/objects/uploads/<businessId>/...): no route serves it yet (server row
+ *                  P222), so it is said to be stored and never linked;
+ *   "unavailable"  any other /objects/ path (another business's upload, a non-upload object): neither linked nor said
+ *                  to be stored;
+ *   "link"         any other address (a Drive copy): linked as before;
+ *   "none"         no receipt.
+ */
+export type ReceiptKind = "none" | "stored" | "unavailable" | "link";
+
+/** One object-key segment, as the server allows it (core/object-storage SAFE_KEY_SEGMENT): no "/", "\\", "%" or "..". */
+const SAFE_KEY_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/;
+
+/**
+ * Whether `path` is an upload of `businessId`, exactly as the server binds one (isObjectPathOfBusiness): the relative
+ * path /objects/uploads/<businessId>/<id>, three safe segments, the second equal to the business. This is the one test
+ * of an own upload: the page's and the sheet's upload checks and receiptKind all use it (repair round 3, S-M2).
+ */
+export function isOwnUploadPath(path: unknown, businessId: unknown): boolean {
+  if (typeof path !== "string" || typeof businessId !== "string" || !SAFE_KEY_SEGMENT.test(businessId)) return false;
+  if (!path.startsWith("/objects/")) return false;
+  const segments = path.slice("/objects/".length).split("/");
+  return segments.length === 3 && segments[0] === "uploads" && segments[1] === businessId && SAFE_KEY_SEGMENT.test(segments[2]);
+}
+
+/** How many times a path is percent-decoded when looking for a disguised /objects path (R5 MINOR-4). */
+const MAX_DECODE_ROUNDS = 4;
+
+/**
+ * Whether a path is, or decodes to, an object path: "/objects" after any run of slashes ("//objects/x"), raw or
+ * percent-decoded up to MAX_DECODE_ROUNDS times ("%256Fbjects", "/%2Fobjects/x"). A path that will not decode is
+ * treated as one: it is not a receipt anyone can be sent to.
+ */
+/**
+ * An object path: "/objects" after any run of slashes, looking through a leading "/__api" (R7-1: next.config rewrites
+ * /__api/* to the API on any host that serves the app), ended by "/", a matrix ";" (R8-2) or the end.
+ */
+const OBJECT_PATH = /^\/+(?:__api\/+)*objects(?:[/;]|$)/i;
+
+/** A path as a URL path resolver reads it (R8-1): backslashes as slashes, "." and ".." segments resolved. */
+function resolveDotSegments(path: string): string {
+  const out: string[] = [];
+  for (const segment of path.replace(/\\/g, "/").split("/")) {
+    if (segment === ".") continue;
+    if (segment === "..") {
+      if (out.length > 1) out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return out.join("/");
+}
+
+function isObjectLikePath(path: string): boolean {
+  let p = path;
+  for (let round = 0; round <= MAX_DECODE_ROUNDS; round += 1) {
+    // R8-2: a NUL, raw or decoded, ends a path differently on different servers: refused.
+    if (p.includes("\u0000") || /%00/.test(p)) return true;
+    if (OBJECT_PATH.test(p) || OBJECT_PATH.test(resolveDotSegments(p))) return true;
+    let next: string;
+    try {
+      next = decodeURIComponent(p);
+    } catch {
+      // R7: a path with a literal "%" ("100%.pdf", "invoice 50% deposit.pdf") will not decode as a whole: each run of
+      // valid escapes is decoded on its own instead, and escapes that never decode are left as they are.
+      next = p.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+        try {
+          return decodeURIComponent(run);
+        } catch {
+          return run;
+        }
+      });
+    }
+    if (next === p) {
+      // Nothing more decodes. What is left still holding an escape (%XX that never decodes, or %uXXXX) may hide
+      // anything once a server reads it differently: refused (R6 C-1, R7-2). A literal "%" alone is judged as it is.
+      return /%[0-9A-Fa-f]{2}|%u[0-9A-Fa-f]{4}/i.test(p);
+    }
+    p = next;
+  }
+  return true;
+}
+
+/** A hostname as compared for "is this the API host": lower-cased, without a trailing dot (R5 MINOR-3). */
+const hostKey = (hostname: string) => hostname.toLowerCase().replace(/\.+$/, "");
+
+export function receiptKind(url: string | null | undefined, businessId: string | null | undefined): ReceiptKind {
+  if (!url || !url.trim()) return "none";
+  const raw = url.trim();
+  const api = API_BASE.replace(/\/+$/, "");
+  const apiIsRelative = api.startsWith("/") && !api.startsWith("//");
+  // R5 MAJOR-1: with a relative API base ("/__api", served by next.config's rewrite) the sheets store an upload as
+  // "/__api/objects/uploads/<biz>/<id>": the base is stripped and the rest judged as an object path.
+  if (apiIsRelative && raw.startsWith(`${api}/`)) {
+    return isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
+  }
+  // A relative path is judged by its path as written: only this business's upload is "stored" (S-m1).
+  if (raw.startsWith("/") && !raw.startsWith("//")) return isOwnUploadPath(raw, businessId) ? "stored" : "unavailable";
+  // Anything else must be an absolute http(s) address; javascript:, data:, //host and the like never are (S-m2).
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "unavailable";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "unavailable";
+  // R4-4 / R5: the API's host, however it is spelled (case, a trailing dot, any scheme or port; for a relative base,
+  // the page's own host), is never a link. It is "stored" only for this business's upload written exactly as the
+  // sheets store it with an absolute base (API_BASE + objectPath); anything else there is "unavailable".
+  let apiHost: string | null = null;
+  try {
+    const pageOrigin = typeof window !== "undefined" ? window.location.origin : undefined;
+    apiHost = api ? hostKey(new URL(api, pageOrigin).hostname) : null;
+  } catch {
+    apiHost = null;
+  }
+  // R6 S-1: the page's own host is an API host too: next.config rewrites /__api/* on it to the API whatever the base.
+  let pageHost: string | null = null;
+  try {
+    pageHost = typeof window !== "undefined" ? hostKey(window.location.hostname) : null;
+  } catch {
+    pageHost = null;
+  }
+  if (pageHost && hostKey(parsed.hostname) === pageHost && pageHost !== apiHost) return "unavailable";
+  if (apiHost && hostKey(parsed.hostname) === apiHost) {
+    return !apiIsRelative && raw.startsWith(`${api}/`) && isOwnUploadPath(raw.slice(api.length), businessId) ? "stored" : "unavailable";
+  }
+  // An object path on another host is not this business's receipt, however it is encoded or slashed.
+  if (isObjectLikePath(parsed.pathname)) return "unavailable";
+  return "link";
+}
+export const RECEIPT_UNAVAILABLE_NOTE = "This receipt can't be shown here";
+
+export const RECEIPT_STORED_NOTE = "Receipt stored — viewing isn't available yet";
 
 const ACCENT = "rgb(244,63,94)"; // rose-500
 const ACCENT_BG = "rgba(244,63,94,0.15)";
@@ -70,14 +221,26 @@ export function ExpenseFormSideSheet({
   initialKind = "expense",
   onClose,
   onSaved,
+  isCurrentBusiness: hookCheck,
+  categoriesRead,
+  onRetryCategories,
+  linksRead,
+  onRetryLinks,
 }: ExpenseFormSideSheetProps) {
+  const shownCheck = useShownBusiness(businessId);
+  const isCurrentBusiness = hookCheck ?? shownCheck;
+  // R14 MAJOR: a reply for the business this sheet was opened for, landing after the switch to another, says
+  // nothing and neither saves nor closes: the sheet now open may be the other business's.
+  // R18-2: the same test as the start checks (the hook's or the sheet's own check, and the stored id another tab may
+  // already have changed): nothing is said, closed or reloaded for a business no longer chosen.
+  const live = () => canStartFor(businessId, isCurrentBusiness);
   // BUG-027: the business currency (the server writes it on the expense), never a literal TTD.
   const [currency] = useState(() => businessCurrency(businessId));
   const dueDateId = useId();
   const billToggleId = useId();
   const { uploadFile, isUploading: uploading, progress } = useUpload();
   const { uploadToDrive } = useDriveUpload();
-  const selectedFileRef = useRef<File | null>(null);
+  const selectedFileRef = useRef<File | null>(prefill?.receiptFile ?? null);
   const [formData, setFormData] = useState(() => {
     if (editingExpense) {
       return {
@@ -142,7 +305,7 @@ export function ExpenseFormSideSheet({
    * saved now is this period's, so the schedule is next due one period later.
    * Answers the refusal, if any.
    */
-  const createSchedule = async (bill: boolean): Promise<string | null> => {
+  const createSchedule = async (bill: boolean, zone?: string): Promise<string | null> => {
     const body = recurringScheduleBody({
       description: formData.description.trim(),
       amount: parseFloat(formData.amount),
@@ -156,10 +319,11 @@ export function ExpenseFormSideSheet({
       contactId: formData.contactId || null,
       serviceId: formData.serviceId || null,
       bill: bill ? { dueDate: formData.dueDate || null } : null,
-    }, businessId);
+    }, businessId, zone);
     try {
       const res = await createRecurringExpense(businessId, body);
-      return res?.error ? res.error : null;
+      // R24-1: a schedule that answers no row was not created either.
+      return writeFailure(res, "create the schedule", true);
     } catch (err) {
       return err instanceof Error ? err.message : "the request failed";
     }
@@ -167,6 +331,11 @@ export function ExpenseFormSideSheet({
 
   const submit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    // R16-3: checked before anything is sent. Another tab's switch can reach the stored id before its storage event
+    // reaches this tab (so before the page's own check knows): nothing is saved for the business no longer chosen.
+    if (refusedStart(businessId, isCurrentBusiness)) return;
+    // R18-8: this business's zone, taken now: a later step must not date itself in another business's zone.
+    const zone = businessTimeZone(businessId);
     const tags = formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
     // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
@@ -203,9 +372,12 @@ export function ExpenseFormSideSheet({
         };
         const res = await createBill(businessId, billBody);
         if (res?.error || !res?.data) {
-          toast.error(res?.error || "Failed to record bill");
+          if (live()) toast.error(res?.error || "Failed to record bill");
           return;
         }
+        // R17-1: the first write has landed for this business. The rest of this save (the bill's extra fields, its
+        // schedule, its Drive copy) completes for it even if the business shown changes now, so a bill is never left
+        // without its schedule; nothing of it is said, closed or reloaded on another business (the checks below).
         expenseId = res.data.id;
         // The bill door takes no receipt, tags, project or service: they are written onto the bill it created.
         const extra: Partial<Expense> = {};
@@ -218,8 +390,18 @@ export function ExpenseFormSideSheet({
         if (formData.projectId) extra.projectId = formData.projectId;
         if (formData.serviceId) extra.serviceId = formData.serviceId;
         if (Object.keys(extra).length) {
+          // R25-7: the notice names what this bill carried and was not saved (not a receipt it never had).
+          const parts = [
+            extra.receiptUrl ? "receipt" : null,
+            extra.tags ? "tags" : null,
+            extra.isRecurring ? "recurring frequency" : null,
+            extra.projectId ? "project" : null,
+            extra.serviceId ? "service" : null,
+          ].filter((p): p is string => p !== null);
+          const named = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
           const patched = await updateExpense(businessId, res.data.id, extra);
-          if (patched?.error) notices.push(`its receipt and tags were not saved: ${patched.error}`);
+          const notSaved = writeFailure(patched, `save its ${named}`, true);
+          if (notSaved) notices.push(`its ${named} ${parts.length > 1 || parts[0] === "tags" ? "were" : "was"} not saved: ${notSaved}`);
         }
       } else {
         const res = editingExpense
@@ -227,35 +409,53 @@ export function ExpenseFormSideSheet({
           : await createExpense(businessId, payload);
         // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
         if (res?.error) {
-          toast.error(res.error);
+          if (live()) toast.error(res.error);
           return;
         }
+        // R24-1: a create or an update that answers no row did not save.
+        if (!res?.data) {
+          if (live()) toast.error("Failed to save expense");
+          return;
+        }
+        // R17-1: the first write has landed; the schedule and Drive copy below still complete for this business.
         if (!editingExpense && res.data) expenseId = res.data.id;
       }
 
       if (makesSchedule) {
-        const refused = await createSchedule(isBill);
+        const refused = await createSchedule(isBill, zone);
         if (refused) notices.push(`its recurring schedule was not created: ${refused}`);
       }
 
       // Upload receipt to Google Drive if a file was selected
       if (expenseId && selectedFileRef.current && formData.receiptUrl) {
         const file = selectedFileRef.current;
-        const arr = await file.arrayBuffer();
-        uploadToDrive({
+        // R2-1: the expense is saved by now. A Drive copy that cannot be made is said with it, never as a failed save
+        // (which kept the sheet open, so a second Save made a duplicate).
+        let arr: ArrayBuffer | null = null;
+        try {
+          arr = await file.arrayBuffer();
+        } catch {
+          notices.push("its Drive copy was not made");
+        }
+        if (arr) uploadToDrive({
           businessId,
           entityType: "expense",
           entityId: expenseId,
-          fileName: `Receipt-${formData.description || "Expense"}-${todayInBusinessZone(new Date(), businessId)}.${file.name.split(".").pop()}`,
+          fileName: `Receipt-${formData.description || "Expense"}-${dayInZone(new Date(), zone)}.${file.name.split(".").pop()}`,
           mimeType: file.type || "application/octet-stream",
           content: arr,
           contentFormat: "binary",
           silent: true,
         }).then((ok) => {
+          if (!live()) return;
+          // R24-1: the Drive hook answers its failure as false (it does not throw): said, as a throw is.
           if (ok) toast.success("Receipt saved to Drive");
-        });
+          else toast.error("Expense saved, but its Drive copy was not made");
+        }).catch(() => { if (live()) toast.error("Expense saved, but its Drive copy was not made"); });
       }
 
+      // The schedule and Drive steps await too: the business is checked again before anything is said or closed.
+      if (!live()) return;
       const what = isBill ? "Bill recorded" : "Expense saved";
       if (notices.length) toast.error(`${what}, but ${notices.join("; and ")}`);
       else toast.success(isBill ? "Bill recorded: pay it when it is due" : what);
@@ -263,7 +463,7 @@ export function ExpenseFormSideSheet({
       onSaved();
       onClose();
     } catch (_err) {
-      toast.error(isBill ? "Failed to record bill" : "Failed to save expense");
+      if (live()) toast.error(isBill ? "Failed to record bill" : "Failed to save expense");
     }
   };
 
@@ -285,10 +485,24 @@ export function ExpenseFormSideSheet({
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // S-m3 / R17-2: the presign is sent for the stored business (hooks/use-upload.ts); a sheet for another one, or one
+    // no longer shown, refuses first.
+    {
+      const refusal = startRefusal(businessId, isCurrentBusiness);
+      if (refusal) {
+        toast.error(refusal === BUSINESS_CHANGED_ELSEWHERE ? "The business changed in another tab. Close this sheet and reload, then add the receipt." : refusal);
+        return;
+      }
+    }
     selectedFileRef.current = file;
     try {
       const uploaded = await uploadFile(file);
-      if (uploaded) {
+      if (!live()) return;
+      if (uploaded && !isOwnUploadPath(uploaded.objectPath, businessId)) {
+        // SEC-EXH3-1: a path issued for another business is never attached to this one's expense.
+        selectedFileRef.current = null;
+        toast.error("Couldn't attach the receipt: it was stored for another business. Try again.");
+      } else if (uploaded) {
         const path = uploaded.objectPath;
         const receiptUrl = path.startsWith("http") ? path : `${API_BASE}${path}`;
         setFormData((prev) => ({ ...prev, receiptUrl, receiptMimeType: file.type }));
@@ -298,7 +512,7 @@ export function ExpenseFormSideSheet({
         toast.error("Failed to upload receipt");
       }
     } catch (_err) {
-      toast.error("Failed to upload receipt");
+      if (live()) toast.error("Failed to upload receipt");
     }
   };
 
@@ -311,14 +525,16 @@ export function ExpenseFormSideSheet({
 
   const handleExtractReceipt = async () => {
     if (!formData.receiptUrl) return;
+    if (refusedStart(businessId, isCurrentBusiness)) return;
     setExtracting(true);
     setScanError(null);
     try {
       const res = await extractReceipt(businessId, { url: formData.receiptUrl, filename: "receipt.jpg" });
+      // R23-1: a reply after a switch says and writes nothing; the button is freed in the finally below.
+      if (!live()) return;
       if (res.error) {
         setScanError(res.error);
         toast.error(res.error);
-        setExtracting(false);
         return;
       }
       const data = res.data;
@@ -336,9 +552,13 @@ export function ExpenseFormSideSheet({
         toast.info("Could not extract data from receipt");
       }
     } catch (_err) {
-      toast.error("Extraction failed");
+      // R22-2: as the reply above, a failure answering after the switch says nothing.
+      if (live()) toast.error("Extraction failed");
+    } finally {
+      // R23-1: whatever answered, and whichever business is shown now, Extract is usable again: another tab can
+      // switch away and back while it is out, and the sheet is then this business's again.
+      setExtracting(false);
     }
-    setExtracting(false);
   };
 
   const selectedCategory = categories.find((c) => c.id === formData.categoryId);
@@ -476,6 +696,7 @@ export function ExpenseFormSideSheet({
                     </option>
                   ))}
                 </select>
+                <ReadFailureNote read={categoriesRead} onRetry={onRetryCategories} className="mt-1 text-xs text-muted-foreground" />
                 {selectedCategory && (
                   <div
                     className="absolute right-8 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full"
@@ -528,7 +749,8 @@ export function ExpenseFormSideSheet({
             </div>
           </div>
 
-          {/* Linking */}
+          {/* Linking. R24b: links that could not be read are said, never left out as if there were none. */}
+          <ReadFailureNote read={linksRead} onRetry={onRetryLinks} />
           {hasLinking && (
             <div className="p-3 rounded-xl bg-white/[0.02] border border-border/40 space-y-3">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
@@ -634,11 +856,18 @@ export function ExpenseFormSideSheet({
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Receipt</p>
 
             {!formData.receiptUrl ? (
-              <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-xl border border-border/40 hover:border-rose-500/40 hover:bg-rose-500/5 transition-all cursor-pointer text-center">
-                  <Upload className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-[10px] font-medium text-muted-foreground">Upload File</span>
-                  <input type="file" accept="image/*,.pdf" className="hidden" onChange={handleReceiptUpload} />
+              <div className="grid grid-cols-3 gap-2">
+                {/* EXPENSES-HUB-3 (journey H4): on a phone a receipt is a photo, so Take photo opens the camera
+                    (capture); Upload file keeps any image or PDF from the gallery or the disk. */}
+                <label className="flex flex-col items-center gap-1.5 px-3 py-3 min-h-[44px] rounded-xl border border-border/40 hover:border-rose-500/40 hover:bg-rose-500/5 transition-all cursor-pointer text-center">
+                  <Camera className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-[10px] font-medium text-muted-foreground">Take photo</span>
+                  <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={handleReceiptUpload} />
+                </label>
+                <label className="flex flex-col items-center gap-1.5 px-3 py-3 min-h-[44px] rounded-xl border border-border/40 hover:border-rose-500/40 hover:bg-rose-500/5 transition-all cursor-pointer text-center">
+                  <Upload className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-[10px] font-medium text-muted-foreground">Upload file</span>
+                  <input type="file" accept="image/*,.pdf" className="sr-only" onChange={handleReceiptUpload} />
                 </label>
                 <button
                   onClick={() => setShowDrivePicker(true)}
@@ -656,7 +885,15 @@ export function ExpenseFormSideSheet({
                   ) : (
                     <FileText className="w-4 h-4 text-red-400 shrink-0" />
                   )}
-                  <span className="text-xs truncate flex-1">Receipt attached</span>
+                  <span className="text-xs flex-1 min-w-0">
+                    <span className="block truncate">Receipt attached</span>
+                    {receiptKind(formData.receiptUrl, businessId) === "stored" && (
+                      <span className="block text-[10px] text-muted-foreground">{RECEIPT_STORED_NOTE}</span>
+                    )}
+                    {receiptKind(formData.receiptUrl, businessId) === "unavailable" && (
+                      <span className="block text-[10px] text-muted-foreground">{RECEIPT_UNAVAILABLE_NOTE}</span>
+                    )}
+                  </span>
                   <button
                     onClick={() => setFormData((prev) => ({ ...prev, receiptUrl: "", receiptMimeType: "" }))}
                     className="p-1 rounded hover:bg-white/[0.05] shrink-0"
