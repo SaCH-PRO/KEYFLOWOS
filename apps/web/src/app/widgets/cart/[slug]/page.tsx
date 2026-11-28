@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
+import { storeCheckoutOffered, STORE_CHECKOUT_NOT_OFFERED } from '@/lib/api/store-checkout';
 
 interface Product {
   id: string;
@@ -28,7 +29,7 @@ export default function CartWidgetPage() {
   const primary = searchParams.get('primary') || '#f97316';
   const singleProductId = searchParams.get('productId') || '';
 
-  const [step, setStep] = useState<'loading' | 'browse' | 'checkout' | 'success' | 'error'>('loading');
+  const [step, setStep] = useState<'loading' | 'browse' | 'checkout' | 'success' | 'error' | 'unavailable'>('loading');
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
@@ -36,6 +37,9 @@ export default function CartWidgetPage() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [orderResult, setOrderResult] = useState<{ orderId?: string; payment?: { redirectUrl?: string } } | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  /** Counts the storefront reads asked for: Try again after a failed read asks for another. */
+  const [readAttempt, setReadAttempt] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   const addToCart = useCallback((product: Product) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.productId === product.id);
@@ -48,20 +52,40 @@ export default function CartWidgetPage() {
 
   useEffect(() => {
     apiGet<{ products?: Product[] }>(`/site/storefront/public/${encodeURIComponent(slug)}`)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // WEDGE-HIDE-STORE part 2 (P225, D-263, D-304): the widget sells only when the storefront answers
+        // storeCheckout: true (lib/api/store-checkout.ts). This widget is an order-only embed, with no listing of its
+        // own to keep, so when the checkout is not offered it lists nothing and says so. A read that failed is not
+        // that answer: it says it could not load, and Try again reads again.
+        if (error) {
+          setProducts([]);
+          setCart([]);
+          setErrorMsg('Unable to load products.');
+          setStep('error');
+          return;
+        }
+        if (!storeCheckoutOffered(data)) {
+          setProducts([]);
+          setCart([]);
+          setStep('unavailable');
+          return;
+        }
         const list = data?.products ?? [];
         setProducts(list);
         if (singleProductId) {
           const p = list.find((x) => x.id === singleProductId);
           if (p) addToCart(p);
         }
+        setLoaded(true);
         setStep('browse');
       })
       .catch(() => {
-        setStep('error');
+        setProducts([]);
+        setCart([]);
         setErrorMsg('Unable to load products.');
+        setStep('error');
       });
-  }, [slug, singleProductId, addToCart]);
+  }, [slug, singleProductId, addToCart, readAttempt]);
 
   useEffect(() => {
     if (step !== 'loading') {
@@ -78,7 +102,9 @@ export default function CartWidgetPage() {
 
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0) return;
+    // WEDGE-HIDE-STORE part 2. Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-12,
+    // WHS2-24). The server refuses the order itself (P233: 403 STORE_CHECKOUT_NOT_OFFERED); this guard stays as well.
+    if (cart.length === 0 || step === 'unavailable' || !loaded) return;
     setStep('loading');
     const { data, error } = await apiPost<{
       order: { id: string };
@@ -124,7 +150,7 @@ export default function CartWidgetPage() {
 
       <div className="mx-auto max-w-sm space-y-4">
         <div className="text-center">
-          <h1 className="text-lg font-semibold">{step === 'checkout' ? 'Checkout' : 'Order Now'}</h1>
+          {step !== 'unavailable' && <h1 className="text-lg font-semibold">{step === 'checkout' ? 'Checkout' : 'Order Now'}</h1>}
           <p className="text-xs opacity-60 mt-1">Powered by KeyflowOS</p>
         </div>
 
@@ -134,10 +160,25 @@ export default function CartWidgetPage() {
           </div>
         )}
 
+        {step === 'unavailable' && (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${card}`}>
+            <p>{STORE_CHECKOUT_NOT_OFFERED}</p>
+          </div>
+        )}
+
         {step === 'error' && (
           <div className={`rounded-xl border px-4 py-3 text-sm ${card}`}>
             <p className="text-red-400">{errorMsg}</p>
-            <button onClick={() => setStep('browse')} className="mt-2 text-sm underline" style={{ color: primary }}>
+            <button
+              onClick={() => {
+                // A checkout that failed goes back to the products; a storefront read that failed is asked for again.
+                if (loaded) { setStep('browse'); return; }
+                setStep('loading');
+                setReadAttempt((n) => n + 1);
+              }}
+              className="mt-2 text-sm underline"
+              style={{ color: primary }}
+            >
               Try again
             </button>
           </div>

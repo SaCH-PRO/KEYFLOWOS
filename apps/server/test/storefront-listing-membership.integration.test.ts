@@ -244,6 +244,12 @@ beforeAll(async () => {
     });
     await db.membership.create({ data: { userId: ownerId, businessId: id, role: 'OWNER' } });
   }
+  // P233 WEDGE-HIDE-STORE-SERVER: bizA and bizReadded test public store checkout listing membership on selling stores.
+  for (const businessId of [ID.bizA, ID.bizReadded] as const) {
+    await db.marketplaceOrder.create({
+      data: { id: `${businessId}_legacy_seed`, businessId, orderNumber: `${businessId.toUpperCase()}-LEGACY-0`, status: 'completed', customerName: 'Legacy Seed', total: 1, subtotal: 1, currency: 'TTD' },
+    });
+  }
 
   await db.sitePagePublished.create({
     data: {

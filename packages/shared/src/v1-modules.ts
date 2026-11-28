@@ -334,6 +334,23 @@ export const V1_HIDDEN_MODULES = [
     ],
     keyTools: [],
   },
+  // ---------------------------------------------------------------- Selling online
+  {
+    key: 'store',
+    label: 'Store checkout, Sales > Orders and Quick sale',
+    treatment: 'defer-v1plus',
+    rulings: ['D-263'],
+    routes: [],
+    tables: [{ name: 'orders', table: 'marketplace_orders', businessColumn: 'business_id' }],
+    keyTools: [],
+    note:
+      'WEDGE-HIDE-STORE (D-263): a business that has taken a store order or a quick sale (both are marketplace_orders ' +
+      'rows; a quick sale\'s number starts QS-) keeps selling online, read and write; any other business is not offered ' +
+      'it at launch. Every row counts, whatever its status: the table has no soft delete, and a cancelled order still ' +
+      'means the business sold online. No route is hidden here: /app/store also manages the booking page (journey F). ' +
+      'The gates land with the entries (the public store checkout, SALES-ORDERS-TAB, QUICK-SALE-WEB), each reading the ' +
+      'legacy answer through apps/web/src/lib/api/legacy-modules.ts. No KEY tool is classified here.',
+  },
   // ---------------------------------------------------------------- Your page
   {
     key: 'presence_pages',
