@@ -8,7 +8,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { useState } from "react";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 import { SideSheet } from "../side-sheet";
 
@@ -92,13 +92,20 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
    * components/ui/side-sheet.tsx, a different component. Relative specifiers resolve from the importing file, `@/`
    * from src; only one that names the commerce side-sheet module counts.
    */
-  /** The side-sheet module specifiers a source text imports. */
+  /**
+   * The side-sheet module specifiers a source text imports: `from "…"`, a dynamic `import("…")` (also inside
+   * next/dynamic), and `require("…")`, with or without an explicit extension (P257 R3-1, R3-2, R3-4).
+   */
   function specifiersIn(text: string): string[] {
-    return [...text.matchAll(/from\s+["']([^"']*side-sheet)["']/g)].map((m) => m[1]);
+    const SPEC = String.raw`["']([^"']*side-sheet(?:\.(?:tsx|ts|jsx|js|mjs|cjs))?)["']`;
+    const forms = [new RegExp(String.raw`from\s+` + SPEC, "g"), new RegExp(String.raw`\b(?:import|require)\(\s*` + SPEC + String.raw`\s*\)`, "g")];
+    return forms.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
   }
   /** Whether `spec`, imported by the file at `fromRel` (relative to src), is the commerce side-sheet module. */
   function resolvesToSheet(fromRel: string, spec: string): boolean {
-    const resolved = spec.startsWith("@/") ? join(SRC, spec.slice(2)) : spec.startsWith(".") ? join(dirname(join(SRC, fromRel)), spec) : null;
+    // P257 R3-2: an explicit extension names the same module.
+    const bare = spec.replace(/\.(tsx|ts|jsx|js|mjs|cjs)$/, "");
+    const resolved = bare.startsWith("@/") ? join(SRC, bare.slice(2)) : bare.startsWith(".") ? join(dirname(join(SRC, fromRel)), bare) : null;
     return resolved === SHEET;
   }
   function importsCommerceSheet(rel: string): boolean {
@@ -109,7 +116,8 @@ describe("P257: the commerce SideSheet's other callers are unchanged", () => {
     return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       const full = join(dir, e.name);
       if (e.isDirectory()) return e.name === "__tests__" || e.name === "node_modules" ? [] : sources(full);
-      return /\.(ts|tsx)$/.test(e.name) && !/\.(test|spec)\.tsx?$/.test(e.name) ? [relative(SRC, full)] : [];
+      // P257 R3-2: every module kind under src; R3-3: written with / so the comparison holds on Windows too.
+      return /\.(tsx|ts|jsx|js|mjs|cjs)$/.test(e.name) && !/\.(test|spec)\.[cm]?[jt]sx?$/.test(e.name) ? [relative(SRC, full).split(sep).join("/")] : [];
     });
   }
   describe("P257 R3: the import forms the pin must see (fixture texts, not files)", () => {
