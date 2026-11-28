@@ -460,12 +460,25 @@ describe('FU-REMINDER-HONESTY (server half)', () => {
     expect(loggedEvents).toHaveLength(0);
   });
 
-  it('RH-05: fresh remindable status logged on concurrent SENT->PARTIALLY_PAID; malformed recipientEmail 400; cross-tenant refused', async () => {
-    // (a) Concurrent SENT -> PARTIALLY_PAID (still remindable) records fresh status
+  it('RH-05: fresh remindable status + payments logged on concurrent SENT->PARTIALLY_PAID; malformed recipientEmail 400; cross-tenant refused', async () => {
+    // (a) Concurrent SENT -> PARTIALLY_PAID with a real 100.00 payment refreshes email balance due & timeline status
     const inv1 = await seedInvoice(ID.bizA, ID.contactA, 'SENT', true);
     const origReissue = commerceService.reissueLink.bind(commerceService);
     vi.spyOn(commerceService, 'reissueLink').mockImplementationOnce(async (link: any) => {
       const out = await origReissue(link);
+      await db.payment.create({
+        data: {
+          id: `${P}pay_concurrent_${seq}`,
+          businessId: ID.bizA,
+          invoiceId: inv1,
+          amount: 100.0,
+          currency: 'TTD',
+          status: 'SUCCESSFUL',
+          method: 'MANUAL',
+          provider: 'MANUAL',
+          providerPaymentId: `${P}pp_concurrent_${seq}`,
+        },
+      });
       await db.invoice.update({ where: { id: inv1 }, data: { status: 'PARTIALLY_PAID' } });
       return out;
     });
@@ -476,15 +489,29 @@ describe('FU-REMINDER-HONESTY (server half)', () => {
       .send({ channel: 'email' });
     expect(ok.status).toBe(201);
     expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0].htmlBody).toContain('150.00');
+    expect(sentEmails[0].htmlBody).toContain('100.00');
     expect(loggedEvents).toHaveLength(1);
     expect(loggedEvents[0].data.status).toBe('PARTIALLY_PAID');
 
     sentEmails.length = 0;
     loggedEvents.length = 0;
 
-    // (b) Header-injection / malformed recipientEmail rejected with 400 before link creation or send
+    // (b) Header-injection / malformed recipientEmail (including trailing CRLF, C1 NEL, quotes, degenerate domains) rejected with 400
     const inv2 = await seedInvoice(ID.bizA, ID.contactA, 'SENT', false);
-    for (const bad of ['victim@test.local\r\nBcc: evil@attacker.test', 'not-an-email', 'a@b']) {
+    for (const bad of [
+      'victim@test.local\r\nBcc: evil@attacker.test',
+      'victim@test.local\r\n',
+      '\r\n',
+      'victim@test.local\u0085',
+      'a"b@test.local',
+      'a@...',
+      'a@.test.local',
+      'a@test.local.',
+      'a@test..local',
+      'not-an-email',
+      'a@b',
+    ]) {
       const r = await agent()
         .post(`/commerce/businesses/${ID.bizA}/invoices/${inv2}/send-reminder`)
         .set(HEADER, ID.ownerA)
@@ -510,5 +537,42 @@ describe('FU-REMINDER-HONESTY (server half)', () => {
     expect(crossForeign.status).toBe(403);
     expect(sentEmails).toHaveLength(0);
     expect(loggedEvents).toHaveLength(0);
+  });
+
+  it('RH-06: TOCTOU refuses 409 on concurrent contactId reassignment; non-email deliver never receives or logs recipientEmail', async () => {
+    // (a) Concurrent contactId change before delivery -> 409, 0 emails, 0 timeline events
+    const inv1 = await seedInvoice(ID.bizA, ID.contactA, 'SENT', true);
+    const origReissue = commerceService.reissueLink.bind(commerceService);
+    vi.spyOn(commerceService, 'reissueLink').mockImplementationOnce(async (link: any) => {
+      const out = await origReissue(link);
+      await db.invoice.update({ where: { id: inv1 }, data: { contactId: ID.contactNoEmailA } });
+      return out;
+    });
+
+    const reassigned = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${inv1}/send-reminder`)
+      .set(HEADER, ID.ownerA)
+      .send({ channel: 'email' });
+    expect(reassigned.status).toBe(409);
+    expect(sentEmails).toHaveLength(0);
+    expect(emitted).toHaveLength(0);
+    expect(loggedEvents).toHaveLength(0);
+
+    // (b) Service-level honesty: non-email channel passes recipientEmail: null to deliver and ignores any deliver-supplied email
+    const inv2 = await seedInvoice(ID.bizA, ID.contactA, 'SENT', true);
+    let receivedByDeliver: string | null | undefined = 'unset';
+    const serviceRes = await commerceService.sendInvoiceReminder({
+      invoiceId: inv2,
+      businessId: ID.bizA,
+      channel: 'manual',
+      deliver: async ({ recipientEmail }: { recipientEmail: string | null }) => {
+        receivedByDeliver = recipientEmail;
+        return { delivered: false, recipientEmail: `${P}bogus@test.local` };
+      },
+    });
+    expect(receivedByDeliver).toBeNull();
+    expect(serviceRes.recipientEmail).toBeNull();
+    expect(loggedEvents).toHaveLength(1);
+    expect(loggedEvents[0].data.recipientEmail).toBeNull();
   });
 });
