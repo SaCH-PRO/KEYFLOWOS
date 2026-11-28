@@ -1,32 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
-
-export type StatusPatchMode =
-  | 'TRANSITION_CHECKED'
-  | 'DECISION_REFUSED'
-  | 'FREE_LABEL'
-  | 'OPEN';
-
-export interface StatusPatchCensusEntry {
-  /** Path relative to repo root (`apps/server/src/...`). */
-  readonly file: string;
-  /** DTO class, interface, or type alias name (`Update*Dto`). */
-  readonly dtoName: string;
-  /** Status/stage field names declared on this DTO. */
-  readonly fields: readonly ('status' | 'stage')[];
-  /** Enforcement mode for status mutations through this DTO. */
-  readonly mode: StatusPatchMode;
-  /** Rationale, guard summary, or tracking packet/owner-question for OPEN rows. */
-  readonly reason: string;
-  /** Required for TRANSITION_CHECKED and DECISION_REFUSED: repo-relative path to proving spec. */
-  readonly specFile?: string;
-  /** Required for TRANSITION_CHECKED and DECISION_REFUSED: exact test case title inside specFile. */
-  readonly specCaseTitle?: string;
-}
-
-/** Intentionally empty in the pure tests-only RED commit. */
-const STATUS_PATCH_CENSUS: readonly StatusPatchCensusEntry[] = [];
+import {
+  STATUS_PATCH_CENSUS,
+  type StatusPatchCensusEntry,
+  type StatusPatchMode,
+} from './status-patch-census.registry';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
