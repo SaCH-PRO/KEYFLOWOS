@@ -460,6 +460,102 @@ test('RR-STATUS-STALL-REPORT: ready rows carry ready_since and stalled (14-day b
   const readme = readFileSync(resolve(repoRoot, 'docs/development/agent-memory/README.md'), 'utf8');
   assert.match(readme, /14 days/i, 'README must document the 14-day stall budget');
   assert.match(readme, /informational/i, 'README must state the stall signal is informational');
+  assert.match(readme, /stall state/i, 'README --check note must mention stall-state transitions');
 });
+
+test('RR-STATUS-STALL-REPORT R1 hardening: timezone offsets, unzoned normalization, corrupted snapshot, invalid dates, negative age, tabs, and fingerprint', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { resolve } = await import('node:path');
+  const { commitsSince } = await import('../git.mjs');
+  const { planSnapshotDate } = await import('../lib.mjs');
+
+  const cDated = (subject, date, sha = 'a'.repeat(40)) => ({ sha, subject, date });
+  const mainDate = '2026-11-28T12:00:00Z';
+
+  // Unzoned ISO timestamp with seconds must normalize to explicit UTC ('Z').
+  {
+    const plan = { packets: [pk('A'), pk('B', ['A'])], validation: { critical_path: [] } };
+    const commits = [cDated('fix(x): pkt/V1-A (compacted)', '2026-10-29T12:00:00', '1'.repeat(40))];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(s.ready[0].ready_since, '2026-10-29T12:00:00Z');
+    assert.equal(s.ready[0].stalled, true);
+  }
+
+  // Corrupted snapshot token with trailing digits must fail closed to null.
+  assert.equal(planSnapshotDate({ _about: { snapshot: '2026-11-16999; corrupted' } }), null);
+
+  // Non-UTC timezone offset (-08:00): 2026-11-14T04:00:00-08:00 === 2026-11-14T12:00:00Z (exact 14d -> not stalled; 1s earlier -> stalled).
+  {
+    const plan = { packets: [pk('A1'), pk('A2'), pk('B1', ['A1']), pk('B2', ['A2'])], validation: { critical_path: [] } };
+    const commits = [
+      cDated('fix(x): pkt/V1-A1 (compacted)', '2026-11-14T04:00:00-08:00', '2'.repeat(40)),
+      cDated('fix(x): pkt/V1-A2 (compacted)', '2026-11-14T03:59:59-08:00', '3'.repeat(40)),
+    ];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(s.ready.find((r) => r.id === 'B1').stalled, false);
+    assert.equal(s.ready.find((r) => r.id === 'B2').stalled, true);
+  }
+
+  // Negative age (mainDate < ready_since) and malformed / calendar-invalid / bad-offset dates fail safe.
+  {
+    const plan = {
+      packets: [
+        pk('A_FUTURE'), pk('A_CAL'), pk('A_TZ'),
+        pk('B_FUTURE', ['A_FUTURE']), pk('B_CAL', ['A_CAL']), pk('B_TZ', ['A_TZ']),
+      ],
+      validation: { critical_path: [] },
+    };
+    const commits = [
+      cDated('fix(x): pkt/V1-A_FUTURE (compacted)', '2026-12-05T12:00:00Z', '4'.repeat(40)),
+      cDated('fix(x): pkt/V1-A_CAL (compacted)', '2026-02-30T12:00:00Z', '5'.repeat(40)),
+      cDated('fix(x): pkt/V1-A_TZ (compacted)', '2026-10-01T12:00:00+99:99', '6'.repeat(40)),
+    ];
+    const s = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'f'.repeat(40), mainDate, baseSha: null });
+    assert.equal(s.ready.find((r) => r.id === 'B_FUTURE').stalled, false);
+    assert.equal(s.ready.find((r) => r.id === 'B_CAL').ready_since, null);
+    assert.equal(s.ready.find((r) => r.id === 'B_CAL').stalled, false);
+    assert.equal(s.ready.find((r) => r.id === 'B_TZ').ready_since, null);
+    assert.equal(s.ready.find((r) => r.id === 'B_TZ').stalled, false);
+  }
+
+  // statusFingerprint changes when advancing mainDate crosses the 14-day stall threshold.
+  {
+    const plan = { packets: [pk('A'), pk('B', ['A'])], validation: { critical_path: [] } };
+    const commits = [cDated('fix(x): pkt/V1-A (compacted)', '2026-11-01T00:00:00Z', '7'.repeat(40))];
+    const sFresh = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'a'.repeat(40), mainDate: '2026-11-10T00:00:00Z', baseSha: null });
+    const sStale = buildStatus({ plan, prior: null, commits, branches: null, mainSha: 'b'.repeat(40), mainDate: '2026-11-20T00:00:00Z', baseSha: null });
+    assert.notEqual(statusFingerprint(sFresh), statusFingerprint(sStale));
+  }
+
+  // commitsSince preserves tab characters inside commit subjects without shifting sha/date fields.
+  const tmpRepo = mkdtempSync(resolve(tmpdir(), 'kf-stall-tabs-'));
+  try {
+    const gitIn = (args) =>
+      execFileSync('git', args, {
+        cwd: tmpRepo,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'test',
+          GIT_AUTHOR_EMAIL: 't@e.com',
+          GIT_COMMITTER_NAME: 'test',
+          GIT_COMMITTER_EMAIL: 't@e.com',
+          GIT_AUTHOR_DATE: '2026-11-01T10:00:00Z',
+          GIT_COMMITTER_DATE: '2026-11-01T10:00:00Z',
+        },
+      });
+    gitIn(['init', '-b', 'main']);
+    gitIn(['commit', '--allow-empty', '-m', 'fix(a):\tpkt/V1-A\t(compacted)']);
+    const list = commitsSince(tmpRepo, null, 'HEAD');
+    assert.equal(list.length, 1);
+    assert.equal(list[0].date, '2026-11-01T10:00:00Z');
+    assert.equal(list[0].subject, 'fix(a):\tpkt/V1-A\t(compacted)');
+  } finally {
+    rmSync(tmpRepo, { recursive: true, force: true });
+  }
+});
+
 
 
