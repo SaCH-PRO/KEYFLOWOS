@@ -11,25 +11,31 @@
  *   - Total schema models at snapshot: 442
  *
  * What counts as "used" (to eliminate false positives):
- *   1. Direct Prisma delegate access on a Prisma client/tx/db receiver or chained
- *      Prisma delegate operation (`findUnique`, `findUniqueOrThrow`, `findFirst`,
+ *   1. Direct Prisma delegate access on a verified Prisma client/tx/db receiver
+ *      (`prisma`, `prisma.client`, `this.prisma.client`, `tx`, `db`, etc. — NOT
+ *      arbitrary `ctx`, `client`, or `*Client` objects) or chained Prisma
+ *      delegate operation (`findUnique`, `findUniqueOrThrow`, `findFirst`,
  *      `findFirstOrThrow`, `findMany`, `create`, `createMany`,
  *      `createManyAndReturn`, `update`, `updateMany`, `updateManyAndReturn`,
  *      `upsert`, `delete`, `deleteMany`, `count`, `aggregate`, `groupBy`,
- *      `fields`), including aliased/destructured clients and bracket access.
+ *      `fields`), including aliased/destructured Prisma clients and bracket access.
  *   2. Schema-guided nested relation access (`include`, `select`, `data`, `create`,
- *      `update`, `upsert`, `connectOrCreate`, `where` relation filters
- *      `some`/`every`/`none`/`is`/`isNot`, `_count`, `orderBy`) reachable from a
- *      used parent model (e.g. `DocumentType` -> `DocumentTemplate` ->
+ *      `createMany`, `update`, `updateMany`, `deleteMany`, `upsert`,
+ *      `connectOrCreate`, `where` relation filters `some`/`every`/`none`/`is`/
+ *      `isNot`, `_count`, `orderBy`, including array forms) reachable from a used
+ *      parent model (e.g. `DocumentType` -> `DocumentTemplate` ->
  *      `DocumentClause` -> `ClauseVariant`).
  *   3. Raw SQL queries (`$queryRaw`, `$queryRawUnsafe`, `$executeRaw`,
- *      `$executeRawUnsafe`, `Prisma.sql`, `Prisma.raw`, `pg.query`) referencing the
- *      model's `@@map` table name in a SQL clause (`FROM`, `JOIN`, `INTO`, `UPDATE`,
- *      `DELETE FROM`, `TRUNCATE`, `ALTER TABLE`, `LOCK TABLE`, `MERGE INTO`).
+ *      `$executeRawUnsafe`, `Prisma.sql`, `Prisma.raw`, and DB/pg `pool.query`
+ *      with a SQL string first argument — never tRPC `.query(...)` callbacks,
+ *      `String.raw`, or bind-parameter arrays) referencing the model's `@@map`
+ *      table name in a SQL clause (`FROM [ONLY]`, `JOIN`, `INTO`, `UPDATE [ONLY]`,
+ *      `DELETE FROM [ONLY]`, `TRUNCATE [TABLE] [ONLY]`, `ALTER TABLE`,
+ *      `LOCK TABLE`, `MERGE INTO`), excluding CTE aliases.
  *
- * Non-SQL strings (such as GitHub Actions `/workflow_runs` URLs) and comments do
- * NOT count as usage. Memory-store models (D-257) are only listed when unused,
- * never acted on here.
+ * Non-SQL strings (such as GitHub Actions `/workflow_runs` URLs), test/fixture
+ * directories, and comments do NOT count as usage. Memory-store models (D-257)
+ * are only listed when unused, never acted on here.
  *
  * Ratchet rules:
  *   - A new Prisma model with no reader or writer FAILS CI.
@@ -181,6 +187,11 @@ const EXCLUDED_DIRS = new Set([
   'generated',
   'migrations',
   '__pycache__',
+  'test',
+  'tests',
+  '__tests__',
+  '__mocks__',
+  'fixtures',
 ]);
 
 const SOURCE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -207,28 +218,20 @@ const PRISMA_DELEGATE_OPS = new Set([
   'fields',
 ]);
 
-const PRISMA_CLIENT_HINTS = new Set([
-  'prisma',
-  'client',
-  'tx',
-  'db',
-  'prismaClient',
-  'prismaService',
-  '_prisma',
-]);
+const PRISMA_CLIENT_IDENT_RE = /^(?:_?prisma(?:Client|Service|Tx)?|_?tx|db(?:Tx)?)$/i;
+const PG_QUERY_RECEIVER_RE = /^(?:pool|pg|pgClient|pgPool|db|conn|connection|sqlClient|database)$/i;
 
-const RAW_SQL_METHODS = new Set([
+const PRISMA_DOLLAR_SQL_METHODS = new Set([
   '$queryRaw',
   '$queryRawUnsafe',
   '$executeRaw',
   '$executeRawUnsafe',
-  'sql',
-  'raw',
-  'query',
 ]);
 
 const SQL_CLAUSE_TABLE_RE =
-  /\b(?:FROM|JOIN|INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM(?:\s+ONLY)?|TRUNCATE(?:\s+TABLE)?(?:\s+ONLY)?|ALTER\s+TABLE|LOCK\s+TABLE|MERGE\s+INTO)\s+(?:["`]?[a-z_][a-z0-9_]*["`]?\.)?["`]?([a-z_][a-z0-9_]*)["`]?/gi;
+  /\b(?:FROM(?:\s+ONLY)?|JOIN|INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM(?:\s+ONLY)?|TRUNCATE(?:\s+TABLE)?(?:\s+ONLY)?|ALTER\s+TABLE|LOCK\s+TABLE|MERGE\s+INTO)\s+(?:["`]?[a-z_][a-z0-9_]*["`]?\.)?["`]?([a-z_][a-z0-9_]*)["`]?/gi;
+
+const CTE_ALIAS_RE = /(?:^|\bWITH(?:\s+RECURSIVE)?|,)\s*["`]?([a-z_][a-z0-9_]*)["`]?\s*(?:\([^)]*\)\s*)?AS\s*\(/gi;
 
 export interface ParsedPrismaModel {
   readonly name: string;
@@ -237,21 +240,26 @@ export interface ParsedPrismaModel {
   readonly relations: ReadonlyMap<string, string>;
 }
 
+function stripSchemaComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, '');
+}
+
 export function parsePrismaSchemaModels(schemaSource: string): Map<string, ParsedPrismaModel> {
   const rawBodies = new Map<string, { table: string; body: string }>();
   const modelRe = /^([ \t]*)model\s+(\w+)\s*\{([\s\S]*?)^\1\}/gm;
   for (const match of schemaSource.matchAll(modelRe)) {
     const name = match[2];
     const body = match[3];
-    const mapMatch = body.match(/@@map\("([^"]+)"\)/);
-    rawBodies.set(name, { table: mapMatch ? mapMatch[1] : name, body });
+    const commentFreeBody = stripSchemaComments(body);
+    const mapMatch = commentFreeBody.match(/@@map\s*\(\s*(?:name\s*:\s*)?"([^"]+)"\s*\)/);
+    rawBodies.set(name, { table: mapMatch ? mapMatch[1] : name, body: commentFreeBody });
   }
 
   const models = new Map<string, ParsedPrismaModel>();
   for (const [name, { table, body }] of rawBodies.entries()) {
     const relations = new Map<string, string>();
     for (const rawLine of body.split('\n')) {
-      const cleaned = rawLine.replace(/\/\/.*/, '').trim();
+      const cleaned = rawLine.trim();
       if (!cleaned || cleaned.startsWith('@@')) continue;
       const parts = cleaned.split(/\s+/);
       if (parts.length < 2) continue;
@@ -318,19 +326,29 @@ function memberAccessProp(expr: ts.PropertyAccessExpression | ts.ElementAccessEx
 function isPrismaClientLike(expr: ts.Expression, clientAliases: ReadonlySet<string>): boolean {
   const u = unwrapExpr(expr);
   if (ts.isIdentifier(u)) {
-    return (
-      PRISMA_CLIENT_HINTS.has(u.text) ||
-      clientAliases.has(u.text) ||
-      /prisma|client|tx$/i.test(u.text)
-    );
+    return clientAliases.has(u.text) || PRISMA_CLIENT_IDENT_RE.test(u.text);
   }
   if (ts.isPropertyAccessExpression(u)) {
-    return (
-      PRISMA_CLIENT_HINTS.has(u.name.text) ||
-      clientAliases.has(u.name.text) ||
-      /prisma|client/i.test(u.name.text)
-    );
+    if (u.name.text === 'client') {
+      return isPrismaClientLike(u.expression, clientAliases);
+    }
+    return PRISMA_CLIENT_IDENT_RE.test(u.name.text);
   }
+  return false;
+}
+
+function isPrismaNamespaceOrClient(expr: ts.Expression, clientAliases: ReadonlySet<string>): boolean {
+  const u = unwrapExpr(expr);
+  if (ts.isIdentifier(u) && u.text === 'Prisma') return true;
+  if (ts.isPropertyAccessExpression(u) && u.name.text === 'Prisma') return true;
+  return isPrismaClientLike(u, clientAliases);
+}
+
+function isPgQueryReceiver(expr: ts.Expression, clientAliases: ReadonlySet<string>): boolean {
+  if (isPrismaClientLike(expr, clientAliases)) return true;
+  const u = unwrapExpr(expr);
+  if (ts.isIdentifier(u)) return PG_QUERY_RECEIVER_RE.test(u.text);
+  if (ts.isPropertyAccessExpression(u)) return PG_QUERY_RECEIVER_RE.test(u.name.text);
   return false;
 }
 
@@ -338,19 +356,46 @@ function stripSqlComments(sql: string): string {
   return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
 }
 
-function extractStringChunks(node: ts.Node, out: string[]): void {
-  if (ts.isJSDoc(node)) return;
-  if (
-    ts.isStringLiteral(node) ||
-    ts.isNoSubstitutionTemplateLiteral(node) ||
-    ts.isTemplateHead(node) ||
-    ts.isTemplateMiddle(node) ||
-    ts.isTemplateTail(node)
-  ) {
-    out.push(node.text);
+/**
+ * Extracts SQL text chunks ONLY from string/template/concatenation expressions
+ * (never descending into function bodies, callbacks, or bind-parameter objects).
+ */
+function extractSqlExprChunks(expr: ts.Expression, out: string[]): void {
+  const u = unwrapExpr(expr);
+  if (ts.isFunctionLike(u)) return;
+  if (ts.isStringLiteral(u) || ts.isNoSubstitutionTemplateLiteral(u)) {
+    out.push(u.text);
     return;
   }
-  ts.forEachChild(node, (child) => extractStringChunks(child, out));
+  if (ts.isTemplateExpression(u)) {
+    out.push(u.head.text);
+    for (const span of u.templateSpans) {
+      extractSqlExprChunks(span.expression, out);
+      out.push(span.literal.text);
+    }
+    return;
+  }
+  if (ts.isBinaryExpression(u) && u.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    extractSqlExprChunks(u.left, out);
+    extractSqlExprChunks(u.right, out);
+    return;
+  }
+  if (ts.isConditionalExpression(u)) {
+    extractSqlExprChunks(u.whenTrue, out);
+    extractSqlExprChunks(u.whenFalse, out);
+  }
+}
+
+function extractTaggedTemplateChunks(template: ts.TemplateLiteral, out: string[]): void {
+  if (ts.isNoSubstitutionTemplateLiteral(template)) {
+    out.push(template.text);
+    return;
+  }
+  out.push(template.head.text);
+  for (const span of template.templateSpans) {
+    // Only preserve static string fragments; interpolated expressions are bind params.
+    out.push(span.literal.text);
+  }
 }
 
 export interface ModelUsageScanResult {
@@ -376,6 +421,22 @@ export function scanModelUsage(
   const usedViaRelation = new Set<string>();
   const usedViaSql = new Set<string>();
 
+  const walkNestedValue = (val: ts.Expression, targetModel: string) => {
+    const u = unwrapExpr(val);
+    if (ts.isObjectLiteralExpression(u)) {
+      walkRelationFields(u, targetModel);
+      walkPrismaQueryObject(u, targetModel);
+    } else if (ts.isArrayLiteralExpression(u)) {
+      for (const el of u.elements) {
+        const ue = unwrapExpr(el);
+        if (ts.isObjectLiteralExpression(ue)) {
+          walkRelationFields(ue, targetModel);
+          walkPrismaQueryObject(ue, targetModel);
+        }
+      }
+    }
+  };
+
   const walkPrismaQueryObject = (obj: ts.ObjectLiteralExpression, modelName: string) => {
     const info = models.get(modelName);
     if (!info) return;
@@ -389,19 +450,17 @@ export function scanModelUsage(
         key === 'select' ||
         key === 'data' ||
         key === 'create' ||
+        key === 'createMany' ||
         key === 'update' ||
+        key === 'updateMany' ||
+        key === 'deleteMany' ||
+        key === 'upsert' ||
+        key === 'connectOrCreate' ||
         key === 'where' ||
         key === 'orderBy' ||
         key === '_count'
       ) {
-        if (ts.isObjectLiteralExpression(val)) {
-          walkRelationFields(val, modelName);
-        } else if (ts.isArrayLiteralExpression(val)) {
-          for (const el of val.elements) {
-            const ue = unwrapExpr(el);
-            if (ts.isObjectLiteralExpression(ue)) walkRelationFields(ue, modelName);
-          }
-        }
+        walkNestedValue(val, modelName);
       }
     }
   };
@@ -426,16 +485,11 @@ export function scanModelUsage(
         key === '_count' ||
         key === 'AND' ||
         key === 'OR' ||
-        key === 'NOT'
+        key === 'NOT' ||
+        key === 'data' ||
+        key === 'where'
       ) {
-        if (ts.isObjectLiteralExpression(val)) {
-          walkRelationFields(val, modelName);
-        } else if (ts.isArrayLiteralExpression(val)) {
-          for (const el of val.elements) {
-            const ue = unwrapExpr(el);
-            if (ts.isObjectLiteralExpression(ue)) walkRelationFields(ue, modelName);
-          }
-        }
+        walkNestedValue(val, modelName);
         continue;
       }
 
@@ -456,17 +510,20 @@ export function scanModelUsage(
           if (!sk) continue;
           const sv = unwrapExpr(sub.initializer);
           if (
-            (sk === 'some' ||
-              sk === 'every' ||
-              sk === 'none' ||
-              sk === 'is' ||
-              sk === 'isNot' ||
-              sk === 'upsert' ||
-              sk === 'connectOrCreate') &&
-            ts.isObjectLiteralExpression(sv)
+            sk === 'some' ||
+            sk === 'every' ||
+            sk === 'none' ||
+            sk === 'is' ||
+            sk === 'isNot' ||
+            sk === 'create' ||
+            sk === 'createMany' ||
+            sk === 'update' ||
+            sk === 'updateMany' ||
+            sk === 'deleteMany' ||
+            sk === 'upsert' ||
+            sk === 'connectOrCreate'
           ) {
-            walkRelationFields(sv, target);
-            walkPrismaQueryObject(sv, target);
+            walkNestedValue(sv, target);
           }
         }
       }
@@ -474,10 +531,18 @@ export function scanModelUsage(
   };
 
   const scanSqlChunks = (chunks: readonly string[]) => {
-    const joined = stripSqlComments(chunks.join(' '));
+    const cleaned = stripSqlComments(chunks.join(' '));
+    const cteAliases = new Set<string>();
+    CTE_ALIAS_RE.lastIndex = 0;
+    for (const cteMatch of cleaned.matchAll(CTE_ALIAS_RE)) {
+      cteAliases.add(cteMatch[1].toLowerCase());
+    }
+
     SQL_CLAUSE_TABLE_RE.lastIndex = 0;
-    for (const match of joined.matchAll(SQL_CLAUSE_TABLE_RE)) {
-      const mName = tableToModel.get(match[1].toLowerCase());
+    for (const match of cleaned.matchAll(SQL_CLAUSE_TABLE_RE)) {
+      const tableName = match[1].toLowerCase();
+      if (cteAliases.has(tableName)) continue;
+      const mName = tableToModel.get(tableName);
       if (mName) usedViaSql.add(mName);
     }
   };
@@ -566,9 +631,20 @@ export function scanModelUsage(
             }
           }
 
-          if (op && RAW_SQL_METHODS.has(op)) {
+          // Raw SQL call-form:
+          // - Prisma $queryRaw/$queryRawUnsafe/$executeRaw/$executeRawUnsafe
+          // - Prisma.raw / Prisma.sql (only on Prisma namespace or Prisma client)
+          // - pg/db pool.query(sqlString, ...) (only on DB/pg receivers with SQL string arg0)
+          if (
+            op &&
+            node.arguments.length >= 1 &&
+            (PRISMA_DOLLAR_SQL_METHODS.has(op) ||
+              ((op === 'raw' || op === 'sql') &&
+                isPrismaNamespaceOrClient(callee.expression, clientAliases)) ||
+              (op === 'query' && isPgQueryReceiver(callee.expression, clientAliases)))
+          ) {
             const chunks: string[] = [];
-            for (const arg of node.arguments) extractStringChunks(arg, chunks);
+            extractSqlExprChunks(node.arguments[0], chunks);
             if (chunks.length > 0) scanSqlChunks(chunks);
           }
         }
@@ -578,9 +654,14 @@ export function scanModelUsage(
         const tag = unwrapExpr(node.tag);
         if (ts.isPropertyAccessExpression(tag) || ts.isElementAccessExpression(tag)) {
           const op = memberAccessProp(tag);
-          if (op && RAW_SQL_METHODS.has(op)) {
+          if (
+            op &&
+            (PRISMA_DOLLAR_SQL_METHODS.has(op) ||
+              ((op === 'sql' || op === 'raw') &&
+                isPrismaNamespaceOrClient(tag.expression, clientAliases)))
+          ) {
             const chunks: string[] = [];
-            extractStringChunks(node.template, chunks);
+            extractTaggedTemplateChunks(node.template, chunks);
             if (chunks.length > 0) scanSqlChunks(chunks);
           }
         }
@@ -688,7 +769,7 @@ describe('RR-UNUSED-MODEL-CENSUS — shrink-only unused Prisma model ratchet', (
     expect(scan.usedViaSql.has('Tag')).toBe(true);
   });
 
-  it('NEGATIVE CONTROLS: fails when a scratch schema adds an unused model, fails when a listed model gains a fixture accessor, and handles relation/raw-SQL/non-SQL accurately', () => {
+  it('NEGATIVE CONTROLS: catches new unused models, list-outlived models, rejects ctx/client/tRPC/String.raw/CTE/bind-param false positives, and handles deep nested relations', () => {
     const scratchSchema = `
       model ParentDoc {
         id String @id
@@ -699,7 +780,15 @@ describe('RR-UNUSED-MODEL-CENSUS — shrink-only unused Prisma model ratchet', (
         id String @id
         parentId String
         parent ParentDoc @relation(fields: [parentId], references: [id])
-        @@map("child_clauses")
+        grandChildren GrandChildItem[]
+        // @@map("commented_old_name")
+        @@map(name: "child_clauses")
+      }
+      model GrandChildItem {
+        id String @id
+        clauseId String
+        clause ChildClause @relation(fields: [clauseId], references: [id])
+        @@map("grand_child_items")
       }
       model RawOnlyRow {
         id String @id
@@ -715,6 +804,8 @@ describe('RR-UNUSED-MODEL-CENSUS — shrink-only unused Prisma model ratchet', (
       }
     `;
     const scratchModels = parsePrismaSchemaModels(scratchSchema);
+    expect(scratchModels.get('ChildClause')?.table).toBe('child_clauses');
+
     const committed: UnusedModelEntry[] = [
       {
         model: 'ListedUnused',
@@ -724,16 +815,46 @@ describe('RR-UNUSED-MODEL-CENSUS — shrink-only unused Prisma model ratchet', (
       },
     ];
 
-    // Case 1: BrandNewOrphan has no accessor (even with a non-SQL string mention + comment) -> fails as newUnused
+    // Case 1: BrandNewOrphan has NO real Prisma/SQL usage — only non-Prisma lookalikes:
+    // ctx.*, httpClient.*, bare client.*, tRPC protectedProcedure.query(...), String.raw,
+    // SQL bind-parameter array, CTE alias named brand_new_orphans, and non-SQL URL.
+    // Meanwhile ChildClause & GrandChildItem ARE used via deep nested array upsert/update,
+    // and RawOnlyRow IS used via FROM ONLY.
     const sourcesNewOrphan = new Map<string, string>([
       [
         'apps/server/src/sample.ts',
         `
           // prisma.client.brandNewOrphan.findMany()
           const githubUrl = 'https://api.github.com/repos/org/repo/brand_new_orphans';
+          function nonPrismaNoise(ctx: any, httpClient: any, client: any, protectedProcedure: any, pool: any) {
+            const x = ctx.brandNewOrphan;
+            const y = httpClient.brandNewOrphan;
+            const z = client.brandNewOrphan;
+            const rawStr = String.raw\`SELECT * FROM brand_new_orphans\`;
+            protectedProcedure.query(async () => {
+              const a = 'from';
+              return 'brand_new_orphans';
+            });
+            pool.query('SELECT 1 FROM users WHERE x = $1', ['FROM brand_new_orphans']);
+            pool.query('WITH brand_new_orphans AS (SELECT 1) SELECT * FROM brand_new_orphans');
+            return [x, y, z, rawStr];
+          }
           async function run(prisma: any) {
-            await prisma.client.parentDoc.findMany({ include: { children: true } });
-            await prisma.client.$queryRaw\`SELECT id FROM raw_only_rows\`;
+            await prisma.client.parentDoc.update({
+              where: { id: 'p1' },
+              data: {
+                children: {
+                  upsert: [
+                    {
+                      where: { id: 'c1' },
+                      create: { grandChildren: { create: [{ id: 'g1' }] } },
+                      update: { data: { grandChildren: { deleteMany: {} } } },
+                    },
+                  ],
+                },
+              },
+            });
+            await prisma.client.$queryRaw\`SELECT id FROM ONLY raw_only_rows\`;
           }
         `,
       ],
@@ -741,6 +862,7 @@ describe('RR-UNUSED-MODEL-CENSUS — shrink-only unused Prisma model ratchet', (
     const scan1 = scanModelUsage(scratchModels, sourcesNewOrphan);
     expect(scan1.usedViaDirect.has('ParentDoc')).toBe(true);
     expect(scan1.usedViaRelation.has('ChildClause')).toBe(true);
+    expect(scan1.usedViaRelation.has('GrandChildItem')).toBe(true);
     expect(scan1.usedViaSql.has('RawOnlyRow')).toBe(true);
     const diff1 = diffUnusedModels(scan1.unusedModels, committed);
     expect(diff1.newUnused).toEqual(['BrandNewOrphan']);
@@ -752,7 +874,7 @@ describe('RR-UNUSED-MODEL-CENSUS — shrink-only unused Prisma model ratchet', (
         'apps/server/src/sample.ts',
         `
           async function run(prisma: any) {
-            await prisma.client.parentDoc.findMany({ include: { children: true } });
+            await prisma.client.parentDoc.findMany({ include: { children: { include: { grandChildren: true } } } });
             await prisma.client.$queryRaw\`SELECT id FROM raw_only_rows\`;
             await prisma.client.listedUnused.findMany();
             await prisma.client.brandNewOrphan.count();
