@@ -1,7 +1,7 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-28 ~10:20 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), while
-M47 is in proof. Main is `856abb03`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
+Last written: 2026-11-28 ~12:10 UTC by the acting orchestrator (`session_017o9EBfFipLMDKriFTiae7Y`, Claude Code), after
+M47 merged. Main is `8e0d070b`. Rewrite in place on every merge, packet return or owner ruling; never append. What you
 remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -17,7 +17,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 | How to brief a worker, review a return, build and merge a wave, ask the owner | `docs/development/agent-memory/` |
 | What happened, in order, with evidence | GitHub issue #80 (control room) and git history |
 
-## 0. Current state: the next session starts here (2026-11-28 ~08:45 UTC)
+## 0. Current state: the next session starts here (2026-11-28 ~12:10 UTC)
 
 **Control room: issue #273** (continuation of #80, which is full and read-only). Post with `gh api repos/KEYFLOWOS/KEYFLOWOS/issues/273/comments -F body=@<file>`. Wherever this file, CLAUDE.md or the agent-memory docs say "#80" for posting, read #273.
 
@@ -27,18 +27,24 @@ pushed `pkt/V1-*` branches. No local branch, worktree, log or agent of this sess
 **Orchestrator:** `session_017o9EBfFipLMDKriFTiae7Y` (since 2026-11-27 ~00:50 UTC). An hourly scheduled check
 (`trig_01HUyoEU9w9zzJBNR3t5qFjL`) runs section 0.5 step 7 in this session.
 
-**State:** main `856abb03` (M46 #300 merged 2026-11-28 08:43 UTC; M40 #284 and M44 #295 before it; Antigravity's M87 to M93 between). V1-STATUS: 269 of 396 done (70.5% of points; launch 179 of 255). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
+**State:** main `8e0d070b` (M47 #303 merged 2026-11-28 12:05 UTC; M46 #300 at 08:43 before it). V1-STATUS: 284 of 396 done (73.8% of points; launch 194 of 255). Production still runs `f5d58ef7` (16 Nov). Under D-321 the owner redeploys only after every launch-track packet has merged, with ADMIN_EMAIL and ADMIN_PASSWORD_HASH set (D-290); the owner runs the Q50 query (#273 7228553117) before that.
 
 **Board numbering (D-297):** Claude-lane rows number from P200 up; Antigravity keeps its own sequence below 200. Claude
 waves are even-numbered, Antigravity's odd. Server follow-ups found in Claude reviews become Antigravity board rows.
 
 ### 0.1 Waves this session
 
-**Checkpoint 2026-11-28 10:20 UTC: M47 built and in proof** (`wave/v1-wave-m47` on main `856abb03`): P257 FU-SIDESHEET-CLOSE-DISABLED-CUE (`50ff357b`, R1 to R5 each CONFIRMED x2) + P261 FU-EXPENSE-DETAIL-ONSAVED-ORDER (`58f11422`) + P259 FU-EXPENSES-DATA-GUARD-PINS (`80658317`) + P254 FU-RECURRING-NO-BUSINESS-READ (`02042f7c`, R9 CONFIRMED x2) + docs. 13 code files.
-- **Why it is urgent:** M46 put a MAJOR regression on main. Typing in the expense sheet moved focus to the panel after every keystroke, because a new `onClose` each render re-ran the commerce SideSheet focus effect. P257 R1 fixes it with refs and a stable `close()`. R2 to R5 hardened its source pin, which now uses the TypeScript parser, follows barrels, and has a 10 s walk guard (2 s flaked under parallel load).
-- **Next wave (M48):** P258 FU-EXPENSES-DEAD-SURFACES-2 (`cef7044e`, CONFIRMED x2; with M47 it was 55 files, over the gate). P231 is in round 20 (R19 dropped conditions markers after sentence punctuation that follows currency, a closer or an attached symbol).
-- **New board rows:** P263 FU-SIDESHEET-LAYOUT-FLIP-FOCUS, P264 FU-RECURRING-EXIT-BUILDER-INERT.
-- **Speed tracker (D-320):** P257 about 1.7 h from first review to wave (5 rounds). P254 R6 to R9 took about 1.5 h today. One restart about 09:02 UTC, no proof lost.
+**Checkpoint 2026-11-28 12:10 UTC: M47 merged (#303, main `8e0d070b`).** It carried P257 FU-SIDESHEET-CLOSE-DISABLED-CUE (`a4d2efa5`, R1 to R6), P261 FU-EXPENSE-DETAIL-ONSAVED-ORDER (`58f11422`), P259 FU-EXPENSES-DATA-GUARD-PINS (`80658317`), P254 FU-RECURRING-NO-BUSINESS-READ (`67139ea0`, R10) and docs. This removed M46's MAJOR typing-focus regression from main.
+- Proof at `5e568bbf` against `856abb03`: Release 0 and release0-live passed, and the receipt sweep passed. Journey H fails H1, H3 and H9 and journey J fails J10, identically at head and base (P247). The security confirmation's two MINOR test gaps were fixed as P257 R6 (the `closeDisabledRef` reset is pinned) and P254 R10 (comment only, compiled output identical), then the wave was rebuilt at `4939f4b0`. The two merge-delta confirmations were CONFIRMED; the live proof stands because no app code token changed.
+- **Merge queue:** the first merge_group run failed on server test `MGR-02`, where a `computedAt` timestamp at `:13.7xx` seconds matched a figures regex. That is unrelated, and the server lane fixed it (`FU-MGR02-TIMESTAMP-FLAKE`, its Wave M99). It was re-enqueued once and merged. Check a merge_group failure's log before re-enqueuing.
+- **P231 TRUST-BADGES-TRUE-ONLY is RETURNED** (`49226f8`, R20 CONFIRMED x2; #273 7238313191). At 63 files it is over the 50-file gate on its own, so it ships split, like EH3 (M40 + M44).
+- **Next Claude waves:**
+  - **M48:** P258 FU-EXPENSES-DEAD-SURFACES-2 (`cef7044e`, CONFIRMED x2; rebase onto main first, since it sits on P259, now merged).
+  - **Then:** P231 in two waves.
+  - **Then:** P263 FU-SIDESHEET-LAYOUT-FLIP-FOCUS (R1 `adea2f93` under review) and P265 FU-HUB3-REPAIR-PAGE-SWITCH-FLAKE (R2 `833a7453`, one review CONFIRMED).
+- **New board rows:** P263 to P267 (P266 has an owner question: whether `;`/`:` hold a conditions marker; P267 covers the expense form's field names and accessibility).
+- **Server lane:** M95 #301, M97 #302 and M99 are held until M47 merged (released at 12:05). The 10:48 silent-lane alert was cleared by its 11:40 post.
+- **Speed tracker (D-320):** M47 took about 3.5 h from P257's first review to merge (P257 6 rounds, P254 R6 to R10 today), including about 45 min for the two MINOR gaps and about 40 min of merge queue (one flake). No restart since about 09:02 UTC.
 
 **Checkpoint 2026-11-28 08:45 UTC: M46 merged (#300, main `856abb03`): P256 FU-EXPENSE-EDIT-CANCEL-MID-SAVE + P252 FU-EXPENSES-DEAD-SURFACES + docs.**
 - Proof at `c7af5115` against `cd31a482`: Release 0 and release0-live passed; journeys H and J have no head-only failures; the receipt sweep passed. CI's one red shard was `[CFN-X01]`, an order-dependent server fixture test (board P260, server lane), which passed on its single re-run. Both wave confirmations were CONFIRMED.
