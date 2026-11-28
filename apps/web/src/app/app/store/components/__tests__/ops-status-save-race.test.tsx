@@ -11,7 +11,7 @@
  * top, an array section (sections, faqEntries) is replaced, any other section is merged.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
+import { render, renderHook, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
 
 const A = "biz_A";
 type Res<T> = { data: T | null; error: string | null };
@@ -147,24 +147,18 @@ describe("P237: a store status change saves the status just chosen", () => {
 
 describe("P237 R1-1: a change-and-save made for A after a switch to B sends nothing", () => {
   it("the handler captured while A was shown, called once B is shown: no storefront config is written", async () => {
-    let captured: ((section: string, updates: Record<string, unknown>) => Promise<void>) | null = null;
-    let shown: string | null = null;
-    function Capture() {
-      const s = useStoreData();
-      shown = s.loading ? null : s.businessId;
-      if (shown === A && !captured) captured = s.handleConfigChangeAndSave;
-      return null;
-    }
-    render(<Capture />);
-    await waitFor(() => expect(shown).toBe(A));
-    expect(captured, "A's handler was not captured").not.toBeNull();
+    const hook = renderHook(() => useStoreData());
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(hook.result.current.businessId).toBe(A);
+    const captured = hook.result.current.handleConfigChangeAndSave; // A's handler
     act(() => {
       ws.businessId = "biz_B";
       window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: "biz_B" } }));
     });
-    await waitFor(() => expect(shown).toBe("biz_B"));
+    await waitFor(() => expect(hook.result.current.businessId).toBe("biz_B"));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
     client.updateStorefrontConfig.mockClear();
-    await act(async () => { await captured!("storeSettings", { storeStatus: "paused" }); });
+    await act(async () => { await captured("storeSettings", { storeStatus: "paused" }); });
     expect(client.updateStorefrontConfig, "A's change was written after the page switched to B").not.toHaveBeenCalled();
   });
 });

@@ -50,7 +50,7 @@ type Landed = { businessId: string; business: boolean; storefront: boolean; grap
 const ARRAY_CONFIG_KEYS = new Set(["sections", "faqEntries"]);
 
 /** A storefront config with one change applied: "__root" merges at the top, array sections replace, others merge. */
-function withConfigChange(prev: StorefrontConfig, section: string, updates: Record<string, unknown>): StorefrontConfig {
+export function withConfigChange(prev: StorefrontConfig, section: string, updates: Record<string, unknown>): StorefrontConfig {
   if (section === "__root") return { ...prev, ...updates };
   if (ARRAY_CONFIG_KEYS.has(section)) return { ...prev, [section]: updates };
   const prevSection = (prev as unknown as Record<string, Record<string, unknown> | undefined>)[section] ?? {};
