@@ -215,3 +215,53 @@ describe("P256: on the detail page", () => {
     expect(field.value).toBe("Saved description");
   });
 });
+
+describe("P257: the header Close shows it is held while the save is out", () => {
+  it("disabled and aria-disabled mid-save; enabled again once the save is refused", async () => {
+    const held = deferred<unknown>();
+    client.updateExpense.mockReturnValue(held.promise);
+    sheetFor(vi.fn());
+    const close = () => screen.getByRole("button", { name: "Close" }) as HTMLButtonElement;
+    expect(close().disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
+    await waitFor(() => expect(client.updateExpense).toHaveBeenCalled());
+    await waitFor(() => expect(close().disabled, "Close looks pressable mid-save").toBe(true));
+    expect(close().getAttribute("aria-disabled")).toBe("true");
+    await act(async () => { held.resolve({ data: null, error: "Request refused by the server", status: 503 }); });
+    await waitFor(() => expect(close().disabled).toBe(false));
+    expect(close().hasAttribute("aria-disabled")).toBe(false);
+  });
+});
+
+describe("P257 R1-1: typing in the edit sheet keeps focus in the field", () => {
+  it("several characters into the description: focus stays in it", async () => {
+    sheetFor(vi.fn());
+    await settle();
+    const field = () => screen.getByPlaceholderText("What was this expense for?") as HTMLInputElement;
+    field().focus();
+    for (const v of ["P", "Pr", "Pri", "Prin", "Print"]) {
+      fireEvent.change(field(), { target: { value: v } });
+      await settle();
+      expect(document.activeElement, `focus left the description after typing "${v}"`).toBe(field());
+    }
+  });
+});
+
+describe("P257 R6: after a save fails, the sheet's own controls close it again", () => {
+  const SHEET_WAYS = WAYS.filter((w) => w.name !== "Cancel");
+  for (const outcome of ["refused", "throws"] as const) {
+    for (const w of SHEET_WAYS) {
+      it(`a save that ${outcome}, then ${w.name}: the sheet closes`, async () => {
+        if (outcome === "refused") client.updateExpense.mockResolvedValue({ data: null, error: "Request refused by the server", status: 503 });
+        else client.updateExpense.mockRejectedValue(new TypeError("Failed to fetch"));
+        const onClose = vi.fn();
+        sheetFor(onClose);
+        fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        await waitFor(() => expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(false));
+        w.close();
+        expect(onClose, `${w.name} left the sheet trapped open after the save ${outcome === "refused" ? "was refused" : "threw"}`).toHaveBeenCalledTimes(1);
+      });
+    }
+  }
+});

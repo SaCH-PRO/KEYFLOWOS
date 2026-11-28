@@ -675,6 +675,9 @@ export default function ExpenseDetailPage() {
           onSaved={async () => {
             // R29-1: the read this open was made on (this closure's own), compared with the one shown after each step.
             const opened = editFor;
+            // P261: a save from a sheet opened on an earlier read (the expense id changed since) closes nothing: the
+            // sheet open now is the new expense's, with its own typing.
+            if (opened !== readGen.current) return;
             setEditFor(null);
             // R23-4: the saved expense is read again for this page only; a failed refresh is said, never thrown.
             try {
