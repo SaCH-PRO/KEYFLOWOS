@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ShieldCheck, Clock, CreditCard, Star } from "lucide-react";
 import type { TrustRailItem } from "@/lib/client";
 import { useStorefrontGateways } from "./checkout-flow";
+import { useServedOverHttps } from "@/lib/use-served-over-https";
 
 type Props = {
   primaryColor: string;
@@ -166,12 +167,9 @@ type FooterBadgeProps = {
   servedOverHttps?: boolean;
 };
 
-const noSubscribe = () => () => {};
-
-/** True only in a browser that loaded this page over https; false on the server render. */
-export function useServedOverHttps(): boolean {
-  return useSyncExternalStore(noSubscribe, () => window.location.protocol === "https:", () => false);
-}
+/** True only in a browser that loaded this page over https; false on the server render. One check for the homepage
+ * and the customer pages (P238): src/lib/use-served-over-https. Re-exported here for the storefront's importers. */
+export { useServedOverHttps };
 
 export function SecurityFooter({ primaryColor, businessName, servedOverHttps }: FooterBadgeProps) {
   const browserHttps = useServedOverHttps();
