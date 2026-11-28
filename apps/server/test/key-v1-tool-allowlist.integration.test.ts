@@ -29,18 +29,32 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildBoundaryFixture, settle } from './helpers/key-action-boundary.fixture';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 });
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v63c_';
-type BoundaryFixture = Awaited<ReturnType<typeof buildBoundaryFixture>>;
+const ID = {
+  owner: `${P}owner`,
+  bizA: `${P}bizA`,
+  mOwner: `${P}m_owner`,
+  contact1: `${P}contact_1`,
+};
 
-let fx: BoundaryFixture;
-let ID: BoundaryFixture['ID'];
+async function settle<T>(promise: Promise<T>): Promise<{ value?: T; err?: any }> {
+  try {
+    return { value: await promise };
+  } catch (err) {
+    return { err };
+  }
+}
+
 let db: any;
+let prisma: any;
+let oversight: any;
+let registryMap: Map<unknown, unknown>;
+let moduleRef: { get: (token: unknown) => any };
 let orchestrator: any;
 let FlowOrchestratorService: any;
 let KeyCortexActionsService: any;
@@ -48,14 +62,25 @@ let KeyCortexToolRegistry: any;
 
 const quiet = { log() {}, warn() {}, error() {}, debug() {}, verbose() {} };
 
-async function cleanupExtra() {
+async function listActions(businessId: string) {
+  return db.keyActionProposal.findMany({ where: { businessId }, orderBy: { createdAt: 'asc' } });
+}
+
+async function cleanupAll() {
   if (!db) return;
   for (const sql of [
     `DELETE FROM cortex_action_logs WHERE session_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM autopilot_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payroll_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payroll_runs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM pay_rates WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try {
       await db.$executeRawUnsafe(sql);
@@ -69,14 +94,48 @@ beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
 
-  fx = await buildBoundaryFixture(P);
-  ID = fx.ID;
-  await cleanupExtra();
-  await fx.seed();
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+  const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+  const { CapabilityContractService } = await import('../src/modules/capabilities/capability-contract.service');
+  const { TemporalFlowService } = await import('../src/modules/temporal-flow/temporal-flow.service');
+  const { KeyActionBoundaryService } = await import(
+    '../src/modules/key-autonomy/action-boundary/key-action-boundary.service'
+  );
+  ({ FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service'));
+  ({ KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service'));
+  ({ KeyCortexToolRegistryService: KeyCortexToolRegistry } = await import(
+    '../src/modules/key-cortex/key-cortex-tool-registry.service'
+  ));
 
+  prisma = new PrismaService();
+  oversight = new AiOversightService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any);
+  const capabilities = new CapabilityContractService();
+  const temporal = { emit: vi.fn(async () => undefined) };
+  const executionLog = { logToolExecution: vi.fn(async () => 'log_1'), log: vi.fn(async () => undefined) };
+
+  registryMap = new Map<unknown, unknown>([
+    [CapabilityContractService, capabilities],
+    [AiOversightService, oversight],
+    [TemporalFlowService, temporal],
+    [AiExecutionLogService, executionLog],
+  ]);
+  moduleRef = {
+    get(token: unknown) {
+      if (!registryMap.has(token)) throw new Error(`fixture has no provider for ${String((token as any)?.name ?? token)}`);
+      return registryMap.get(token);
+    },
+  };
+  const boundary = new KeyActionBoundaryService(prisma, moduleRef as any);
+  registryMap.set(KeyActionBoundaryService, boundary);
+
+  await cleanupAll();
+  await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizA, name: 'V63C Biz', ownerId: ID.owner } });
+  await db.membership.create({ data: { id: ID.mOwner, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
   await db.contact.create({
     data: {
-      id: `${P}contact_1`,
+      id: ID.contact1,
       businessId: ID.bizA,
       firstName: 'Ada',
       lastName: 'Lovelace',
@@ -85,18 +144,12 @@ beforeAll(async () => {
     },
   });
 
-  ({ FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service'));
-  ({ KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service'));
-  ({ KeyCortexToolRegistryService: KeyCortexToolRegistry } = await import(
-    '../src/modules/key-cortex/key-cortex-tool-registry.service'
-  ));
-
   orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     logger: quiet,
-    prisma: fx.prisma,
-    moduleRef: fx.moduleRef,
-    governance: fx.oversight,
-    executionLog: { logToolExecution: vi.fn(async () => undefined), log: vi.fn(async () => undefined) },
+    prisma,
+    moduleRef,
+    governance: oversight,
+    executionLog,
     businessGraph: {
       invalidateCache: vi.fn(),
       getSnapshot: async () => ({ business: { name: 'V63C Biz' } }),
@@ -107,20 +160,26 @@ beforeAll(async () => {
     semanticMemory: { search: async () => [] },
     attributeExecutionLog: async () => undefined,
   });
-  fx.provide(FlowOrchestratorService, orchestrator);
+  registryMap.set(FlowOrchestratorService, orchestrator);
 }, 180_000);
 
 beforeEach(async () => {
-  await fx.reset();
-  fx.provide(FlowOrchestratorService, orchestrator);
-  await fx.setAutonomy(4, {
-    approvedTools: [
-      'execute_custom_logic',
-      'payroll_set_rate',
-      'payroll_generate_run',
-      'payroll_approve_run',
-      'payroll_mark_paid',
-    ],
+  await db.$executeRawUnsafe(`DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await db.$executeRawUnsafe(`DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await db.$executeRawUnsafe(`DELETE FROM autopilot_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await db.autopilotSettings.create({
+    data: {
+      businessId: ID.bizA,
+      autonomyLevel: 4,
+      blockedTools: [],
+      approvedTools: [
+        'execute_custom_logic',
+        'payroll_set_rate',
+        'payroll_generate_run',
+        'payroll_approve_run',
+        'payroll_mark_paid',
+      ],
+    },
   });
 });
 
@@ -129,8 +188,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await cleanupExtra();
-  if (fx) await fx.cleanup();
+  await cleanupAll();
 });
 
 describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): real-DB runtime refusal & tool menu enforcement', () => {
@@ -193,7 +251,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): real-DB runtime refusal & 
 
     expect(sandboxExecute).not.toHaveBeenCalled();
     expect(getCodeExecutorSpy).not.toHaveBeenCalled();
-    expect(await fx.actions(ID.bizA)).toHaveLength(0);
+    expect(await listActions(ID.bizA)).toHaveLength(0);
   });
 
   it('[V63C-02] RED-BEFORE: payroll write tools are omitted from selectToolsForRequest and refused at dispatch for an OWNER with zero writes', async () => {
@@ -243,7 +301,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): real-DB runtime refusal & 
 
     expect(await db.payRate.count({ where: { businessId: ID.bizA } })).toBe(0);
     expect(await db.payrollRun.count({ where: { businessId: ID.bizA } })).toBe(0);
-    expect(await fx.actions(ID.bizA)).toHaveLength(0);
+    expect(await listActions(ID.bizA)).toHaveLength(0);
   });
 
   it('[V63C-03] RED-BEFORE: cortex stub tools (send_email, send_message, generate_report) are excluded from tool menus and refused at dispatch with zero side effects', async () => {
@@ -266,7 +324,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): real-DB runtime refusal & 
       failSaga: vi.fn(async () => undefined),
     };
     const registry = new KeyCortexToolRegistry(
-      fx.prisma,
+      prisma,
       safety as any,
       idempotency as any,
       saga as any,
@@ -290,7 +348,7 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): real-DB runtime refusal & 
     };
 
     const actionsService = new KeyCortexActionsService(
-      fx.prisma,
+      prisma,
       { enqueue: commandEnqueue } as any,
       registry,
       { create: proposalCreate, list: vi.fn() } as any,

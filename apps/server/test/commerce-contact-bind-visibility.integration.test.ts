@@ -174,10 +174,14 @@ let efferentBridge: any;
  * args)` as the real sandbox does, through the innerToolExecutor the dispatcher hands it.
  */
 let snippetCall: { name: string; args: Record<string, unknown> } = { name: '', args: {} };
+let snippetExecutions = 0;
 const snippetSandbox = {
-  execute: async (opts: { businessId: string; innerToolExecutor: (biz: string, name: string, args: Record<string, unknown>) => Promise<unknown> }) => ({
-    result: await opts.innerToolExecutor(opts.businessId, snippetCall.name, snippetCall.args),
-  }),
+  execute: async (opts: { businessId: string; innerToolExecutor: (biz: string, name: string, args: Record<string, unknown>) => Promise<unknown> }) => {
+    snippetExecutions += 1;
+    return {
+      result: await opts.innerToolExecutor(opts.businessId, snippetCall.name, snippetCall.args),
+    };
+  },
 };
 
 const eventStub = {
@@ -980,19 +984,25 @@ describe('KEY acts as the member (D-88): KEY commerce commands apply D-64 to the
     expect(await documentCounts()).toEqual(before);
   });
 
+  // D-322 (extends D-318 Option 1): KEY-TOOL-ALLOWLIST (V1-63) unconditionally removes
+  // execute_custom_logic in v1. The R0-bound title is preserved verbatim and the manifest stays
+  // untouched; D-64 contact-bind enforcement on live KEY surfaces remains proven by KEY-01..KEY-04b and KEY-06.
   it("KEY-05 (D-88; review SEC-W3D64-3b) an execute_custom_logic snippet's api.callTool binds for the member whose chat turn ran it: the STAFF member's inner commerce_create_quote and commerce_create_invoice on the PRIVATE contact are refused 'Contact not found'; the OWNER's bind it", async () => {
     const before = await documentCounts();
+    snippetExecutions = 0;
     for (const name of ['commerce_create_quote', 'commerce_create_invoice']) {
       snippetCall = { name, args: { contactId: ID.cPriv, items: KEY_ITEMS } };
       const out = await keyTool('execute_custom_logic', { code: '/* api.callTool */', inputs: {} }, memberTurn(ID.staff));
-      expect(out.error?.message, `${name} answered ${JSON.stringify(out.result)}`).toBe('Contact not found');
+      expect(out.error?.message, `${name} answered ${JSON.stringify(out.result)}`).toBe('not available in this version');
     }
+    expect(snippetExecutions).toBe(0);
     expect(await documentCounts()).toEqual(before);
 
     snippetCall = { name: 'commerce_create_quote', args: { contactId: ID.cPriv, items: KEY_ITEMS } };
     const owner = await keyTool('execute_custom_logic', { code: '/* api.callTool */', inputs: {} }, memberTurn(ID.owner));
-    expect(owner.error, owner.error?.message).toBeNull();
-    expect((await db.quote.findUnique({ where: { id: (owner.result as any).result.id } })).contactId).toBe(ID.cPriv);
+    expect(owner.error?.message, `owner answered ${JSON.stringify(owner.result)}`).toBe('not available in this version');
+    expect(snippetExecutions).toBe(0);
+    expect(await documentCounts()).toEqual(before);
   });
 
   it("KEY-06 (D-88; review CR-D64C-2) a member's KEY-cortex turn reaching a bridged flow tool binds for that member: the STAFF member's commerce_create_invoice on the PRIVATE contact is refused 'Contact not found'; the OWNER's binds it", async () => {
