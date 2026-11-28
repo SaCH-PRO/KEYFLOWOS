@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { securitySignals } from '../../core/observability/security-signals';
+import { redactSensitiveText } from '../../core/security/redaction';
 import { isLostTransactionConflict } from '../../core/prisma/transaction-conflict';
 import { CommerceService } from '../commerce/commerce.service';
 import {
@@ -36,6 +37,7 @@ import {
   stripeConfigured,
 } from './storefront-checkout-methods';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
+import { LegacyModulesService } from '../identity/legacy-modules.service';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
@@ -323,7 +325,62 @@ export class PaymentsService {
     @Optional() @Inject(forwardRef(() => StoreOrderService)) private readonly storeOrderService?: StoreOrderService,
     // FOLLOW3-A3 (D-56): the provider read that binds a platform-signed refund to its business.
     @Optional() @Inject(StripeConnector) private readonly stripeConnector?: StripeConnector,
+    // P253 (FU-STORE-GATE-SIDE-DOORS, D-297/D-315): direct store-module legacy gate for storefront_order checkouts.
+    @Optional() @Inject(LegacyModulesService) private readonly legacyModules?: LegacyModulesService,
   ) {}
+
+  private resolveLegacyModules(): LegacyModulesService {
+    return this.legacyModules ?? new LegacyModulesService(this.prisma);
+  }
+
+  /**
+   * P253 (FU-STORE-GATE-SIDE-DOORS, D-297/D-315): fail-closed check verifying
+   * that `businessId` is on the unfiltered `store` legacy list before allowing
+   * a `storefront_order` checkout session, without relying on the invariant
+   * that an existing order places the business on the list.
+   */
+  private async assertStoreCheckoutOffered(businessId: string): Promise<void> {
+    const legacyModules = await Promise.resolve()
+      .then(() => this.resolveLegacyModules().getLegacyModules(businessId))
+      .catch((err: unknown) => {
+        try {
+          const errObj =
+            err && typeof err === 'object' ? (err as { name?: unknown; code?: unknown; message?: unknown }) : null;
+          const errName = err instanceof Error && typeof err.name === 'string' && err.name ? err.name : 'Error';
+          const errCode =
+            errObj && typeof errObj.code === 'string' && /^[A-Za-z0-9_.-]{1,32}$/.test(errObj.code)
+              ? ` code=${errObj.code}`
+              : '';
+          const rawMsg =
+            err instanceof Error && typeof err.message === 'string'
+              ? err.message
+              : typeof err === 'string'
+                ? err
+                : '';
+          const lines = rawMsg.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          const summaryLine = lines.length > 0 ? lines[lines.length - 1] : '';
+          const sanitized = redactSensitiveText(
+            summaryLine.replace(/([a-z][a-z0-9+.-]*:\/\/)([^/\s@]+)@/gi, '$1***@'),
+          )
+            .replace(/[\r\n\t]+/g, ' ')
+            .slice(0, 200);
+          const suffix = sanitized ? `: ${sanitized}` : '';
+          this.logger.warn(
+            `Legacy modules read failed for storefront_order checkout business=${businessId} (${errName}${errCode}); failing closed to 403 STORE_CHECKOUT_NOT_OFFERED${suffix}`,
+          );
+        } catch {
+          // Never turn a logging failure into a 500.
+        }
+        return [] as string[];
+      });
+
+    if (!Array.isArray(legacyModules) || !legacyModules.includes('store')) {
+      throw new ForbiddenException({
+        code: 'STORE_CHECKOUT_NOT_OFFERED',
+        message: 'Online store checkout is not available for this business',
+      });
+    }
+  }
 
   /**
    * FIN2 — single tx wrapper for SUCCESSFUL provider payments. Persists
@@ -4357,6 +4414,9 @@ export class PaymentsService {
         select: { id: true, businessId: true, total: true, currency: true, paymentStatus: true, status: true },
       });
       if (!order) throw new BadRequestException('Storefront order not found');
+      // P253 (FU-STORE-GATE-SIDE-DOORS, D-297/D-315): enforce the store legacy
+      // gate directly instead of assuming an existing order implies access.
+      await this.assertStoreCheckoutOffered(order.businessId);
       // Trial-N review (G6PUB-SEC-2): closed in either status vocabulary (the marketplace route writes 'cancelled').
       if (order.paymentStatus === 'PAID' || isClosedStorefrontOrder(order)) {
         throw new BadRequestException('Storefront order is already paid or cancelled');

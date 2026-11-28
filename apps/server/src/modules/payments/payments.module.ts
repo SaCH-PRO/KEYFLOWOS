@@ -7,10 +7,11 @@ import { CurrencyRatesService } from './currency-rates.service';
 import { CurrencyRatesScheduler } from './currency-rates.scheduler';
 import { CommerceModule } from '../commerce/commerce.module';
 import { FinanceModule } from '../finance/finance.module';
+import { IdentityModule } from '../identity/identity.module';
 import { SiteModule } from '../site/site.module';
 
 @Module({
-  imports: [CommerceModule, FinanceModule, forwardRef(() => SiteModule)],
+  imports: [CommerceModule, FinanceModule, forwardRef(() => IdentityModule), forwardRef(() => SiteModule)],
   controllers: [PaymentsController, PaymentsOpsController],
   providers: [PaymentsService, PaymentsOpsService, CurrencyRatesService, CurrencyRatesScheduler],
   exports: [PaymentsService, PaymentsOpsService, CurrencyRatesService],

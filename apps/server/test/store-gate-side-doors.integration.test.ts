@@ -447,6 +447,7 @@ describe('P253 FU-STORE-GATE-SIDE-DOORS — /gateways, /validate-promo, and crea
     ];
 
     for (const { label, setup } of hiddenCases) {
+      await clearRateLimits();
       createPaymentSpy.mockClear();
       const legacySpy = setup();
       try {
@@ -477,6 +478,7 @@ describe('P253 FU-STORE-GATE-SIDE-DOORS — /gateways, /validate-promo, and crea
     }
 
     // Mutant 2 (positive control): with real DB ('store' in legacyModules), create-checkout passes the store gate!
+    await clearRateLimits();
     createPaymentSpy.mockClear();
     const openAllowedRes = await agent().post('/payments/create-checkout').send({
       payableType: 'storefront_order',
