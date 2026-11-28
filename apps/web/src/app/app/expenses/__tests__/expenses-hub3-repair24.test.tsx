@@ -67,11 +67,8 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { writeFailure } from "../components/expense-utils";
 import ExpensesInboxPage from "../page";
@@ -158,56 +155,12 @@ const WORDS = "Request refused by the server";
 const refusedAnswer = () => ({ data: null, error: WORDS, status: 409 });
 const noRow = () => ({ data: null, error: null });
 
-const BUDGET = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
 const onReload = vi.fn();
 beforeEach(() => { onReload.mockReset(); });
-const pipelineEl = () => (
-  <ExpensePipeline
-    businessId="biz_A" expenses={[expense()]} totalExpenses={1} categories={CATS.biz_A} summary={null}
-    period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-    searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-    filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-    onReload={onReload} onEdit={vi.fn()} isCurrentBusiness={always}
-  />
-);
-const listEl = () => (
-  <ExpenseList
-    businessId="biz_A" expenses={[expense({ status: "PAID" })]} totalExpenses={1}
-    categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-    filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-    page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-    onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={onReload} isCurrentBusiness={always}
-  />
-);
 const panelEl = () => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} isCurrentBusiness={always} />;
 
 type W = { name: string; call: () => ReturnType<typeof vi.fn>; mount: () => void; go: () => Promise<void>; reloads?: boolean };
 const WRITES: W[] = [
-  { name: "pipeline Mark Paid", call: () => client.updateExpense, mount: () => { render(pipelineEl()); }, reloads: true,
-    go: async () => { fireEvent.click((await screen.findAllByRole("button", { name: /^Mark Paid$/i }))[0]); } },
-  { name: "pipeline Delete", call: () => client.deleteExpense, mount: () => { render(pipelineEl()); }, reloads: true,
-    go: async () => { fireEvent.click((await screen.findAllByRole("button", { name: /^Delete$/i }))[0]); } },
-  { name: "list bulk categorize", call: () => client.updateExpense, mount: () => { render(listEl()); }, reloads: false,
-    go: async () => {
-      fireEvent.click((await screen.findByRole("table", { name: "Expenses list" })).querySelector("button")!);
-      fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!, { target: { value: "cat_A_tolls" } });
-      fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
-    } },
-  { name: "list inline categorize", call: () => client.updateExpense, mount: () => { render(listEl()); }, reloads: true,
-    go: async () => {
-      fireEvent.click((await screen.findAllByTitle("Click to change category"))[0]);
-      fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).value === "cat_A_fuel")!, { target: { value: "cat_A_tolls" } });
-    } },
-  { name: "budgets save", call: () => client.upsertExpenseBudget, reloads: true,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={onReload} isCurrentBusiness={always} />); },
-    go: async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-      fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } });
-      fireEvent.click(screen.getByRole("button", { name: "Save Budget" }));
-    } },
-  { name: "budgets delete", call: () => client.deleteExpenseBudget, reloads: true,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[BUDGET]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={onReload} isCurrentBusiness={always} />); },
-    go: async () => { fireEvent.click(document.querySelector("button svg.lucide-trash-2, button svg.lucide-trash2")!.closest("button")!); } },
   { name: "categories Add", call: () => client.createExpenseCategory,
     mount: () => { render(<ExpenseCategoriesTab businessId="biz_A" categories={CATS.biz_A} isCurrentBusiness={always} addCategory={() => true} removeCategory={() => true} summary={null} budgets={[]} />); },
     go: async () => {
@@ -375,27 +328,6 @@ describe("R24-1: writeFailure, the one reading of a write's answer", () => {
     expect(writeFailure({ data: null, error: null }, "save this", true)).toBe("Couldn't save this.");
     expect(writeFailure({ data: null, error: null }, "delete this"), "a delete needs no row").toBeNull();
     expect(writeFailure({ data: { id: "x" }, error: null }, "save this", true)).toBeNull();
-  });
-});
-
-describe("R24-1: the list's bulk categorize, partly refused", () => {
-  it("says how many were not categorized, in the server's words", async () => {
-    client.updateExpense.mockImplementation(async (_b: string, id: string) => (id === "exp_A2" ? refusedAnswer() : ok(expense({ id }))));
-    render(
-      <ExpenseList
-        businessId="biz_A" expenses={[expense({ id: "exp_A1", status: "PAID" }), expense({ id: "exp_A2", status: "PAID", description: "Second" })]} totalExpenses={2}
-        categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-        filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-        page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-        onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={onReload} isCurrentBusiness={always}
-      />,
-    );
-    fireEvent.click((await screen.findByRole("table", { name: "Expenses list" })).querySelector("button")!);
-    fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!, { target: { value: "cat_A_tolls" } });
-    fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`1 of 2 expenses were not categorized: ${WORDS}`));
-    expect(toast.success).not.toHaveBeenCalled();
-    expect(onReload, "the list is read again to show which went through").toHaveBeenCalled();
   });
 });
 

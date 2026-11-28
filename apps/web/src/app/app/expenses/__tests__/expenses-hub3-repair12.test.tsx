@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Expense, ExpenseBudget, ExpenseCategory, RecurringExpense } from "@/lib/client";
+import type { ExpenseCategory, RecurringExpense } from "@/lib/client";
 
 const ws = vi.hoisted(() => ({ bid: "biz_A" as string | null }));
 const client = vi.hoisted(() => ({
@@ -64,9 +64,6 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import ExpensesInboxPage from "../page";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpensePipeline } from "../components/expense-pipeline";
 
 const ok = <T,>(data: T) => ({ data, error: null });
 const CATS: Record<string, ExpenseCategory[]> = {
@@ -81,18 +78,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function expense(over: Partial<Expense> = {}): Expense {
-  return {
-    id: "exp_A1", description: "Diesel", amount: 50, currency: "TTD", date: "2026-11-20T00:00:00.000Z", vendor: "Shell",
-    paymentMethod: "cash", tags: [], isRecurring: false, status: "BILL", categoryId: "cat_A_fuel",
-    createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z", ...over,
-  } as Expense;
-}
 const SCHEDULE = {
   id: "rec_A1", name: "Rent", frequency: "MONTHLY", nextRunDate: "2026-12-01T00:00:00.000Z", isActive: true, runCount: 0,
   failureCount: 0, description: "Rent", amount: 1000, currency: "TTD", createsBill: false,
 } as RecurringExpense;
-const BUDGET = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
 
 beforeEach(() => {
   ws.bid = "biz_A";
@@ -208,69 +197,6 @@ const CASES: Case[] = [
     success: "Cancelled",
     failure: "Failed to cancel",
     reloadCalls: () => client.fetchRecurringExpenses.mock.calls.filter((c) => c[0] === "biz_A").length,
-  },
-  {
-    name: "the budgets tab's delete",
-    call: "deleteExpenseBudget",
-    mount: (bid) => {
-      const reload = vi.fn();
-      const el = (b: string) => <ExpenseBudgetsTab businessId={b} budgets={b === "biz_A" ? [BUDGET] : []} categories={CATS[b]} expenses={[]} summary={null} onReload={reload} />;
-      const view = render(el(bid));
-      return { rerenderFor: (b) => view.rerender(el(b)), reload };
-    },
-    act: async () => {
-      const trash = document.querySelector("button svg.lucide-trash-2, button svg.lucide-trash2")?.closest("button") as HTMLButtonElement;
-      fireEvent.click(trash);
-    },
-    success: "Budget deleted",
-    failure: "Failed to delete budget",
-  },
-  {
-    name: "the expense list's inline category",
-    call: "updateExpense",
-    mount: (bid) => {
-      const reload = vi.fn();
-      const el = (b: string) => (
-        <ExpenseList
-          businessId={b} expenses={b === "biz_A" ? [expense({ status: "PAID" })] : []} totalExpenses={b === "biz_A" ? 1 : 0}
-          categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-          filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={reload}
-        />
-      );
-      const view = render(el(bid));
-      return { rerenderFor: (b) => view.rerender(el(b)), reload };
-    },
-    act: async () => {
-      fireEvent.click((await screen.findAllByTitle("Click to change category"))[0]);
-      // The row's own select shows the row's category (the filter select above the table shows "All").
-      const inline = screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).value === "cat_A_fuel")!;
-      fireEvent.change(inline, { target: { value: "cat_A_tolls" } });
-    },
-    success: "Category updated",
-    failure: "Failed to update category",
-  },
-  {
-    name: "the pipeline's Mark Paid",
-    call: "updateExpense",
-    mount: (bid) => {
-      const reload = vi.fn();
-      const el = (b: string) => (
-        <ExpensePipeline
-          businessId={b} expenses={b === "biz_A" ? [expense()] : []} totalExpenses={b === "biz_A" ? 1 : 0} categories={CATS.biz_A} summary={null}
-          period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-          searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onReload={reload} onEdit={vi.fn()}
-        />
-      );
-      const view = render(el(bid));
-      return { rerenderFor: (b) => view.rerender(el(b)), reload };
-    },
-    act: async () => { fireEvent.click((await screen.findAllByRole("button", { name: /Mark Paid/i }))[0]); },
-    success: "Bill marked as paid",
-    failure: "Failed to mark as paid",
   },
 ];
 

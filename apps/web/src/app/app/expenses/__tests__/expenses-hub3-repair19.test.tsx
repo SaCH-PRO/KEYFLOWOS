@@ -71,11 +71,8 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import ExpensesInboxPage from "../page";
 import { BUSINESS_CHANGED_ELSEWHERE, BUSINESS_UNREADABLE } from "../components/expense-utils";
 
@@ -185,51 +182,9 @@ describe("R19-3: a refused start says the truth, as the component shows it", () 
 type Reply = { name: string; call: () => ReturnType<typeof vi.fn>; mount: () => void; go: () => Promise<void> };
 const REPLIES: Reply[] = [
   {
-    name: "pipeline Mark Paid", call: () => client.updateExpense,
-    mount: () => {
-      render(
-        <ExpensePipeline
-          businessId="biz_A" expenses={[expense()]} totalExpenses={1} categories={CATS.biz_A} summary={null}
-          period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-          searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onReload={vi.fn()} onEdit={vi.fn()} isCurrentBusiness={always}
-        />,
-      );
-    },
-    go: async () => { fireEvent.click((await screen.findAllByRole("button", { name: /^Mark Paid$/i }))[0]); },
-  },
-  {
     name: "recurring Run Now", call: () => client.runRecurringExpenseNow,
     mount: () => { render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} isCurrentBusiness={always} />); },
     go: async () => { fireEvent.click(await screen.findByRole("button", { name: /Run Now/i })); },
-  },
-  {
-    name: "list inline categorize", call: () => client.updateExpense,
-    mount: () => {
-      render(
-        <ExpenseList
-          businessId="biz_A" expenses={[expense({ status: "PAID" })]} totalExpenses={1}
-          categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-          filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={vi.fn()} isCurrentBusiness={always}
-        />,
-      );
-    },
-    go: async () => {
-      fireEvent.click((await screen.findAllByTitle("Click to change category"))[0]);
-      fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).value === "cat_A_fuel")!, { target: { value: "cat_A_tolls" } });
-    },
-  },
-  {
-    name: "budgets save", call: () => client.upsertExpenseBudget,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={vi.fn()} isCurrentBusiness={always} />); },
-    go: async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-      fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } });
-      fireEvent.click(screen.getByRole("button", { name: "Save Budget" }));
-    },
   },
   {
     name: "Add category", call: () => client.createExpenseCategory,

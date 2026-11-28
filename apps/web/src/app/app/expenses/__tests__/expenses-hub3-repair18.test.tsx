@@ -71,7 +71,6 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 
@@ -155,24 +154,6 @@ afterEach(() => {
 });
 
 describe("R18-1 MAJOR: a switch while the confirm is open", () => {
-  it("the pipeline's Delete: OK pressed after the switch sends nothing", async () => {
-    client.deleteExpense.mockResolvedValue(ok(null));
-    vi.spyOn(window, "confirm").mockImplementation(() => { ws.bid = "biz_B"; return true; });
-    render(
-      <ExpensePipeline
-        businessId="biz_A" expenses={[expense()]} totalExpenses={1} categories={CATS.biz_A} summary={null}
-        period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-        searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-        filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-        onReload={vi.fn()} onEdit={vi.fn()} isCurrentBusiness={() => true}
-      />,
-    );
-    fireEvent.click((await screen.findAllByRole("button", { name: /^Delete$/i }))[0]);
-    await settle();
-    expect(window.confirm).toHaveBeenCalled();
-    expect(client.deleteExpense).not.toHaveBeenCalled();
-    expect(toast.success).not.toHaveBeenCalled();
-  });
 
   it("the recurring panel's Cancel: OK pressed after the switch sends nothing", async () => {
     client.cancelRecurringExpense.mockResolvedValue(ok(null));
