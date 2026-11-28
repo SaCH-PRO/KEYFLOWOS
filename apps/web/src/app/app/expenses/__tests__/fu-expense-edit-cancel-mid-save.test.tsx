@@ -99,8 +99,6 @@ const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30
 
 
 const CAT = { id: "cat_1", name: "Supplies", color: "#f97316" };
-const refusedAnswer = () => ({ data: null, error: "Request refused by the server", status: 503 });
-const retryIn = (el: Element) => Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Retry") as HTMLButtonElement;
 function deferred<T>() {
   let resolve: (v: T) => void = () => {};
   let reject: (e: unknown) => void = () => {};
@@ -108,7 +106,6 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const A1 = (over: Partial<Expense> = {}) => expense({ id: "exp_A1", status: "PAID", categoryId: "cat_1", date: "2026-10-15T00:00:00.000Z", vendor: "October Vendor", ...over });
-const A2 = () => expense({ id: "exp_A2", status: "PAID", categoryId: "cat_1", date: "2026-11-15T00:00:00.000Z", vendor: "November Vendor" });
 let a1Status: Expense["status"] = "PAID";
 afterEach(() => { routeParams.id = "exp_A1"; a1Status = "PAID"; });
 beforeEach(() => {
@@ -121,32 +118,10 @@ async function onA1() {
   await screen.findByRole("heading", { name: "October Vendor" });
   return view;
 }
-async function toA2(view: ReturnType<typeof render>) {
-  routeParams.id = "exp_A2";
-  view.rerender(<ExpenseDetailPage />);
-  await screen.findByRole("heading", { name: "November Vendor" });
-}
-const noToasts = () => {
-  expect(toast.success, "A1's reply said on A2").not.toHaveBeenCalled();
-  expect(toast.error, "A1's failure said on A2").not.toHaveBeenCalled();
-};
 
 
 
 /** The dialog open on the page: Pay's has a Pay button, the edit sheet an Update Expense button. */
-const payOpen = () => screen.queryByRole("button", { name: /^Pay$/ });
-const editOpen = () => screen.queryByRole("button", { name: "Update Expense" });
-async function openPay() {
-  fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
-  const pay = await screen.findByRole("button", { name: /^Pay$/ });
-  await waitFor(() => expect((pay as HTMLButtonElement).disabled).toBe(false));
-  return pay;
-}
-async function openEditSheet() {
-  fireEvent.click(screen.getByRole("button", { name: /Edit expense/ }));
-  return screen.findByRole("button", { name: "Update Expense" });
-}
-const A2Bill = () => expense({ id: "exp_A2", status: "BILL", categoryId: "cat_1", date: "2026-11-15T00:00:00.000Z", vendor: "November Vendor" });
 
 
 const overlay = () => screen.getByRole("dialog").parentElement as HTMLElement;
