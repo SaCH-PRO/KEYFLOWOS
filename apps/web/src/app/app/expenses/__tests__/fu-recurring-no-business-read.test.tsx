@@ -5,6 +5,8 @@
  * empty state, "No recurring expenses" with Add), so the hub could offer "New recurring expense" with no business.
  * With no business the panel shows no list, no empty state and no Add, reports a read that is not ok, and the hub
  * offers no "New recurring expense".
+ * R1: the hub pin reaches the page's own no-business path ("No business is selected.", no Recurring panel); with no
+ * business a New request (triggerNew) opens no builder.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -151,6 +153,21 @@ describe("P254: the recurring panel with no business", () => {
     expect(screen.queryByText(/no recurring expenses/i)).toBeNull();
     expect(screen.queryByRole("button", { name: "Add Recurring Expense" })).toBeNull();
   });
+  it("R1-2: with no business, a New request (triggerNew) opens no builder", async () => {
+    const el = (t: number) => <RecurringExpensesPanel businessId={null} categories={[]} triggerNew={t} />;
+    const view = render(el(0));
+    await settle();
+    view.rerender(el(1));
+    await settle();
+    expect(screen.queryByRole("dialog"), "the builder opened with no business").toBeNull();
+  });
+  it("R1-2 control: with a business, a New request opens the builder", async () => {
+    const el = (t: number) => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={t} />;
+    const view = render(el(0));
+    await settle();
+    view.rerender(el(1));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
   it("control: a business whose list answers empty shows the empty state with Add", async () => {
     client.fetchRecurringExpenses.mockResolvedValue(ok([]));
     render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} />);
@@ -170,5 +187,8 @@ describe("P254: the hub with no business", () => {
     await settle();
     expect(screen.queryByRole("button", { name: /New recurring expense/ }), "offered with no business").toBeNull();
     expect(screen.queryByRole("button", { name: "Add Recurring Expense" })).toBeNull();
+    // P254 R1-1: the page's own no-business path (the panel is not mounted with no business), pinned as such.
+    expect(await screen.findByText("No business is selected.", {}, LONG)).toBeTruthy();
+    expect(document.getElementById("expenses-panel-recurring"), "the Recurring panel mounted with no business").toBeNull();
   }, 30000);
 });
