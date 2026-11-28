@@ -84,13 +84,34 @@ afterEach(() => cleanup());
 // default and the test's 5 s default (one timeout seen under load, 3 of 3 passes alone). The waits are longer; what
 // each test asserts is unchanged.
 vi.setConfig({ testTimeout: 30000 });
+/**
+ * P265 R2-3: reads held on a gate, for the twin below; the release is scheduled right after mountPage's call-only
+ * wait, so a lookup made at once always runs before any reply (as P265 R2-1 does in expenses-hub3-repair-page).
+ */
+const gate = { release: () => {} };
+function holdReads(fns: Array<ReturnType<typeof vi.fn>>) {
+  let release: () => void = () => {};
+  const opened = new Promise<void>((r) => { release = r; });
+  gate.release = release;
+  for (const fn of fns) {
+    const answer = fn.getMockImplementation();
+    fn.mockImplementation((...args: unknown[]) => opened.then(() => (answer ? answer(...args) : undefined)));
+  }
+}
+afterEach(() => { gate.release = () => {}; });
 async function mountPage() {
   const view = render(<ExpensesInboxPage />);
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled(), { timeout: 10000 });
+  const release = gate.release;
+  setTimeout(release, 0);
+  // P265 R2-3: the view tabs are rendered once the expenses read has answered ok, so the first one is waited for (as
+  // repair27 and repair28 do) before any case looks a tab up.
+  await screen.findByRole("tab", { name: "Expenses" }, { timeout: 10000 });
   return view;
 }
 
-describe("BUG-060: the categories tab and the recurring panel are mounted on the Expenses page", () => {
+/** BUG-060's cases (P265 R2-3: run as they were, and again with the reads held until after mountPage's wait). */
+function bug060Cases() {
   it("the page offers Expenses, Categories and Recurring views", async () => {
     await mountPage();
     const views = screen.getByRole("tablist", { name: /expenses views/i });
@@ -105,15 +126,15 @@ describe("BUG-060: the categories tab and the recurring panel are mounted on the
     fireEvent.change(screen.getByPlaceholderText(/category name/i), { target: { value: "Supplies" } });
     fireEvent.click(screen.getByRole("button", { name: /^add category$/i }));
 
-    await waitFor(() => expect(client.createExpenseCategory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(client.createExpenseCategory).toHaveBeenCalledTimes(1), { timeout: 10000 });
     expect(client.createExpenseCategory.mock.calls[0][0]).toBe(BUSINESS);
     expect(client.createExpenseCategory.mock.calls[0][1]).toMatchObject({ name: "Supplies" });
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Category created"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Category created"), { timeout: 10000 });
 
     // The category is the page's own list: the sheet opened from the Expenses view offers it.
     fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
     fireEvent.click(screen.getByRole("button", { name: /^add expense$/i }));
-    const sheet = await screen.findByRole("dialog");
+    const sheet = await screen.findByRole("dialog", {}, { timeout: 10000 });
     const options = within(sheet).getAllByRole("option").map((o) => o.textContent);
     expect(options).toContain("Supplies");
   });
@@ -125,7 +146,7 @@ describe("BUG-060: the categories tab and the recurring panel are mounted on the
     fireEvent.change(screen.getByPlaceholderText(/category name/i), { target: { value: "Fuel" } });
     fireEvent.click(screen.getByRole("button", { name: /^add category$/i }));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled(), { timeout: 10000 });
     expect(toast.success).not.toHaveBeenCalledWith("Category created");
     // What was typed stays, so the member can ask and try again.
     expect((screen.getByPlaceholderText(/category name/i) as HTMLInputElement).value).toBe("Fuel");
@@ -135,8 +156,8 @@ describe("BUG-060: the categories tab and the recurring panel are mounted on the
     client.fetchRecurringExpenses.mockResolvedValue(ok([]));
     await mountPage();
     fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
-    await waitFor(() => expect(client.fetchRecurringExpenses).toHaveBeenCalledWith(BUSINESS));
-    expect(await screen.findByText(/no recurring expenses/i)).toBeTruthy();
+    await waitFor(() => expect(client.fetchRecurringExpenses).toHaveBeenCalledWith(BUSINESS), { timeout: 10000 });
+    expect(await screen.findByText(/no recurring expenses/i, {}, { timeout: 10000 })).toBeTruthy();
   });
 
   it("the Expenses view's status tabs and table are not shown on the Categories view", async () => {
@@ -146,4 +167,11 @@ describe("BUG-060: the categories tab and the recurring panel are mounted on the
     expect(screen.queryByRole("button", { name: /^inbox/i })).toBeNull();
     expect(screen.getByText(/create category/i)).toBeTruthy();
   });
+}
+describe("BUG-060: the categories tab and the recurring panel are mounted on the Expenses page", bug060Cases);
+describe("P265 R2-3: BUG-060 with every default expenses read held until after mountPage's wait", () => {
+  beforeEach(() => {
+    holdReads([client.fetchExpenses, client.fetchExpenseCategories, client.fetchExpenseSummary, client.fetchExpenseBudgets]);
+  });
+  bug060Cases();
 });
