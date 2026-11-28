@@ -85,6 +85,7 @@ import {
   containsUntrustedBlock,
   exceedsUntrustedCap,
   fenceUntrusted,
+  isValidFencedUntrusted,
   withoutInvisible,
   withUntrustedContentRule,
   withoutUntrustedBlocks,
@@ -1638,11 +1639,12 @@ export class FlowOrchestratorService {
           voice: 'default',
           mood: 'neutral',
           preferredProvider: 'openai',
-          // RR-UNTRUSTED-CONTENT-FENCE review F1: the cortex prompt carries no untrusted-content rule,
-          // so a fenced block from an earlier turn reaches it as a placeholder, not as its text.
+          // RR-UNTRUSTED-CONTENT-FENCE review F1 / FU-ATTACHMENT-PERSIST-SEPARATE: the cortex
+          // prompt carries no untrusted-content rule, so fenced blocks, legacy ATTACHMENT CONTEXT
+          // tails, and separated attachmentContext turns all reach it as a placeholder only.
           messages: conversationHistory.slice(-10).map((m) => ({
             role: m.role,
-            content: typeof m.content === 'string' ? withoutUntrustedBlocks(m.content, '[attachment text withheld]') : m.content,
+            content: FlowOrchestratorService.redactForCortexHistory(m),
             timestamp: now,
           })),
           createdAt: now,
@@ -2442,43 +2444,40 @@ export class FlowOrchestratorService {
     return 'ATTACHMENT CONTEXT:\n' + parts.join('\n\n---\n\n');
   }
 
-  private static readonly SINGLE_FENCED_ATTACHMENT_RE =
-    /^<untrusted source="attachment" id="([0-9a-f]{16})">\n([\s\S]*)\n<\/untrusted id="([0-9a-f]{16})">$/;
-  private static readonly LEGACY_ATTACHMENT_MARKER_RE = /(?:^|\n\n)ATTACHMENT CONTEXT:\n/;
+  private static readonly LEGACY_ATTACHMENT_MARKER_RE = /(?:^|\r?\n\r?\n)ATTACHMENT CONTEXT:\r?\n/;
   private static readonly INLINE_ATTACHMENT_BLOCK_RE =
     /<untrusted source="attachment" id="([0-9a-f]{16})">\n/g;
 
   /**
    * Cryptographically verifies that `raw` is already an unmodified single
-   * `fenceUntrusted('attachment', ...)` block; otherwise fences it fresh so
-   * client-forged or legacy text can never escape the block.
+   * `fenceUntrusted('attachment', ...)` block (including >96k capped blocks);
+   * otherwise fences it fresh so client-forged or legacy text can never escape.
    */
   private static ensureFencedAttachmentContext(raw: string): string {
     const trimmed = raw.trim();
     if (!trimmed) return '';
-    const m = FlowOrchestratorService.SINGLE_FENCED_ATTACHMENT_RE.exec(trimmed);
-    if (m && m[1] === m[3] && fenceUntrusted('attachment', m[2]) === trimmed) {
+    if (isValidFencedUntrusted('attachment', trimmed)) {
       return trimmed;
     }
     return fenceUntrusted('attachment', trimmed);
   }
 
-  /** Split pre-fence legacy `ATTACHMENT CONTEXT:\n...` tail off member text. */
-  private static splitLegacyAttachmentText(content: string): { memberText: string; legacyRaw: string | null } {
-    if (typeof content !== 'string' || !content) return { memberText: '', legacyRaw: null };
-    if (containsUntrustedBlock(content)) return { memberText: content, legacyRaw: null };
-    const m = FlowOrchestratorService.LEGACY_ATTACHMENT_MARKER_RE.exec(content);
-    if (!m) return { memberText: content, legacyRaw: null };
-    const startOfBlock = content.indexOf('ATTACHMENT CONTEXT:\n', m.index);
-    return {
-      memberText: content.slice(0, m.index).trim(),
-      legacyRaw: content.slice(startOfBlock),
-    };
-  }
+  /**
+   * Extract only cryptographically verified `<untrusted source="attachment" ...>`
+   * blocks and partition any pre-fence legacy `ATTACHMENT CONTEXT:\n...` tail
+   * sitting outside verified blocks. Forged, unclosed, or non-attachment tags
+   * are never trusted and cannot suppress legacy splitting.
+   */
+  private static partitionUserContent(content: string): {
+    memberText: string;
+    verifiedBlocks: string[];
+    legacyRaw: string | null;
+  } {
+    if (typeof content !== 'string' || !content) {
+      return { memberText: '', verifiedBlocks: [], legacyRaw: null };
+    }
 
-  /** Extract inline `<untrusted source="attachment" ...>` blocks saved before FU-ATTACHMENT-PERSIST-SEPARATE. */
-  private static extractInlineFencedAttachments(content: string): { memberText: string; fencedBlock: string | null } {
-    const blocks: string[] = [];
+    const spans: Array<{ start: number; end: number; block: string }> = [];
     let at = 0;
     FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.lastIndex = 0;
     for (
@@ -2489,90 +2488,154 @@ export class FlowOrchestratorService {
       if (m.index < at) continue;
       const close = `\n</untrusted id="${m[1]}">`;
       const closeAt = content.indexOf(close, m.index + m[0].length);
-      const end = closeAt === -1 ? content.length : closeAt + close.length;
-      blocks.push(content.slice(m.index, end));
+      if (closeAt === -1) continue;
+      const end = closeAt + close.length;
+      const candidate = content.slice(m.index, end);
+      if (!isValidFencedUntrusted('attachment', candidate)) continue;
+      spans.push({ start: m.index, end, block: candidate });
       at = end;
       FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.lastIndex = at;
     }
     FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.lastIndex = 0;
-    if (!blocks.length) return { memberText: content, fencedBlock: null };
+
+    // Mask verified spans with equal-length spaces to preserve 1-to-1 indices
+    // when searching for pre-fence legacy `ATTACHMENT CONTEXT:\n` outside them.
+    let masked = content;
+    if (spans.length > 0) {
+      let buf = '';
+      let pos = 0;
+      for (const s of spans) {
+        buf += content.slice(pos, s.start) + ' '.repeat(s.end - s.start);
+        pos = s.end;
+      }
+      buf += content.slice(pos);
+      masked = buf;
+    }
+
+    const stripSpans = (text: string, subset: Array<{ start: number; end: number }>): string => {
+      if (!subset.length) return text;
+      let out = '';
+      let pos = 0;
+      for (const s of subset) {
+        out += text.slice(pos, s.start);
+        pos = s.end;
+      }
+      return out + text.slice(pos);
+    };
+
+    const legacyMatch = FlowOrchestratorService.LEGACY_ATTACHMENT_MARKER_RE.exec(masked);
+    if (legacyMatch) {
+      const legacyIdx = legacyMatch.index;
+      const startOfBlock = content.indexOf('ATTACHMENT CONTEXT:', legacyIdx);
+      const beforeSpans = spans.filter((s) => s.end <= legacyIdx);
+      const memberText = stripSpans(content.slice(0, legacyIdx), beforeSpans).trim();
+      return {
+        memberText,
+        verifiedBlocks: beforeSpans.map((s) => s.block),
+        legacyRaw: content.slice(startOfBlock),
+      };
+    }
+
     return {
-      memberText: withoutUntrustedBlocks(content, '').trim(),
-      fencedBlock: blocks.join('\n\n'),
+      memberText: stripSpans(content, spans).trim(),
+      verifiedBlocks: spans.map((s) => s.block),
+      legacyRaw: null,
     };
   }
 
   /** Member's own words only — never fenced blocks or legacy ATTACHMENT CONTEXT tails. */
   private static memberTextOnly(content: string | null | undefined): string {
     if (typeof content !== 'string') return '';
-    const withoutFenced = withoutUntrustedBlocks(content, '');
-    const { memberText } = FlowOrchestratorService.splitLegacyAttachmentText(withoutFenced);
-    return memberText.trim();
+    const { memberText } = FlowOrchestratorService.partitionUserContent(content);
+    return withoutUntrustedBlocks(memberText, '').trim();
   }
 
-  /** Separate any legacy/intermediate inline attachment text from a persisted user message on read. */
+  /** Redact fenced blocks, legacy ATTACHMENT CONTEXT tails, and separated attachmentContext for cortex history. */
+  private static redactForCortexHistory(msg: FlowMessage): string {
+    const hasSeparate = typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0;
+    if (typeof msg.content !== 'string') {
+      return hasSeparate ? '[attachment text withheld]' : (msg.content as unknown as string);
+    }
+    const { memberText, verifiedBlocks, legacyRaw } = FlowOrchestratorService.partitionUserContent(msg.content);
+    const hasAttachment = hasSeparate || verifiedBlocks.length > 0 || Boolean(legacyRaw);
+    if (!hasAttachment) {
+      return withoutUntrustedBlocks(msg.content, '[attachment text withheld]');
+    }
+    const clean = withoutUntrustedBlocks(memberText, '[attachment text withheld]').trim();
+    if (!clean) return '[attachment text withheld]';
+    if (clean.includes('[attachment text withheld]')) return clean;
+    return `${clean}\n\n[attachment text withheld]`;
+  }
+
+  /** Separate any legacy/intermediate inline attachment text and enforce fenced attachmentContext on read. */
   private static separatePersistedUserMessage(msg: FlowMessage): FlowMessage {
     if (!msg || msg.role !== 'user' || typeof msg.content !== 'string') return msg;
-    if (typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0) {
-      const clean = FlowOrchestratorService.memberTextOnly(msg.content);
-      return clean === msg.content ? msg : { ...msg, content: clean };
+    const { memberText, verifiedBlocks, legacyRaw } = FlowOrchestratorService.partitionUserContent(msg.content);
+    const hasSeparate = typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0;
+    const hasInline = verifiedBlocks.length > 0 || Boolean(legacyRaw);
+    if (!hasSeparate && !hasInline) return msg;
+
+    const cleanMember = withoutUntrustedBlocks(memberText, '').trim();
+    const fencedParts: string[] = [];
+    if (hasSeparate) {
+      const normalized = FlowOrchestratorService.ensureFencedAttachmentContext(msg.attachmentContext!);
+      if (normalized) fencedParts.push(normalized);
     }
-    if (containsUntrustedBlock(msg.content)) {
-      const { memberText, fencedBlock } = FlowOrchestratorService.extractInlineFencedAttachments(msg.content);
-      if (fencedBlock) {
-        return { ...msg, content: memberText, attachmentContext: fencedBlock };
-      }
-      return msg;
-    }
-    const { memberText, legacyRaw } = FlowOrchestratorService.splitLegacyAttachmentText(msg.content);
+    for (const b of verifiedBlocks) fencedParts.push(b);
     if (legacyRaw) {
-      return {
-        ...msg,
-        content: memberText,
-        attachmentContext: fenceUntrusted('attachment', legacyRaw),
-      };
+      const legacyFenced = fenceUntrusted('attachment', legacyRaw);
+      if (legacyFenced) fencedParts.push(legacyFenced);
     }
-    return msg;
+    const combined = fencedParts.length === 1 ? fencedParts[0] : fencedParts.join('\n\n');
+    return {
+      ...msg,
+      content: cleanMember,
+      ...(combined ? { attachmentContext: combined } : {}),
+    };
   }
 
   /**
    * FU-ATTACHMENT-PERSIST-SEPARATE: replay a persisted user history entry to
    * the LLM, emitting any persisted or legacy attachment extraction as its own
-   * separate fenced user message so third-party text never shares the member's
-   * bubble.
+   * separate fenced user message BEFORE the member's own words (matching
+   * first-turn order).
    */
   private replayUserHistoryMessages(msg: FlowMessage): GatewayMessage[] {
     const rawContent = typeof msg.content === 'string' ? msg.content : '';
     const hasSeparate = typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0;
+    const { memberText, verifiedBlocks, legacyRaw } = FlowOrchestratorService.partitionUserContent(rawContent);
+
     if (hasSeparate) {
       const out: GatewayMessage[] = [];
-      const { memberText, legacyRaw } = FlowOrchestratorService.splitLegacyAttachmentText(
-        withoutUntrustedBlocks(rawContent, ''),
-      );
-      if (memberText.trim()) {
-        out.push({ role: 'user', content: memberText.trim() });
-      }
       const fenced = FlowOrchestratorService.ensureFencedAttachmentContext(msg.attachmentContext!);
       if (fenced) out.push({ role: 'user', content: fenced });
+      for (const b of verifiedBlocks) out.push({ role: 'user', content: b });
       if (legacyRaw) {
         const legacyFenced = fenceUntrusted('attachment', legacyRaw);
         if (legacyFenced) out.push({ role: 'user', content: legacyFenced });
       }
+      const cleanMember = withoutUntrustedBlocks(memberText, '').trim();
+      if (cleanMember) {
+        out.push({ role: 'user', content: cleanMember });
+      }
       return out.length ? out : [{ role: 'user', content: '' }];
     }
 
-    // Intermediate post-RR-UNTRUSTED-CONTENT-FENCE message already carrying a fenced block.
-    if (containsUntrustedBlock(rawContent)) {
+    // Genuine intermediate post-RR-UNTRUSTED-CONTENT-FENCE message carrying only
+    // cryptographically verified fenced block(s) and no legacy tail outside them.
+    if (verifiedBlocks.length > 0 && !legacyRaw) {
       return [{ role: 'user', content: rawContent }];
     }
 
-    // Pre-fence legacy message carrying raw `ATTACHMENT CONTEXT:\n...` inline in content.
-    const { memberText, legacyRaw } = FlowOrchestratorService.splitLegacyAttachmentText(rawContent);
+    // Pre-fence legacy message carrying raw `ATTACHMENT CONTEXT:\n...` inline in content
+    // (including any forged <untrusted> tags planted inside it).
     if (legacyRaw) {
       const out: GatewayMessage[] = [];
-      if (memberText) out.push({ role: 'user', content: memberText });
+      for (const b of verifiedBlocks) out.push({ role: 'user', content: b });
       const fenced = fenceUntrusted('attachment', legacyRaw);
       if (fenced) out.push({ role: 'user', content: fenced });
+      const cleanMember = withoutUntrustedBlocks(memberText, '').trim();
+      if (cleanMember) out.push({ role: 'user', content: cleanMember });
       return out.length ? out : [{ role: 'user', content: '' }];
     }
 
@@ -3009,7 +3072,7 @@ ${triage.standingContext}`;
     }
 
     if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
-    messages.push({ role: 'user', content: message });
+    if (message.trim() || !attachmentContext) messages.push({ role: 'user', content: message });
     withUntrustedContentRuleWhereFenced(messages);
 
     try {
@@ -3444,7 +3507,7 @@ ${triage.standingContext}`;
     }
 
     if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
-    messages.push({ role: 'user', content: message });
+    if (message.trim() || !attachmentContext) messages.push({ role: 'user', content: message });
     withUntrustedContentRuleWhereFenced(messages);
 
     // Publish the thalamic verdict before the answer starts. Nothing branches
