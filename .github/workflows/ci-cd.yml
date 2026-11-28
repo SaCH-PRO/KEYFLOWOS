@@ -129,7 +129,7 @@ jobs:
       # specs on Node 20. No env here: NODE_TEST_CONTEXT=child alone makes
       # `node --test` skip every file and exit 0.
       - name: Verify launch health contract
-        run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs
+        run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs scripts/tests/uptime-monitor-slo.spec.mjs
 
       # scripts/deploy.sh: the .env.production preflight (the API's boot
       # rules, before the backup and the build) and the bounded /healthz wait
