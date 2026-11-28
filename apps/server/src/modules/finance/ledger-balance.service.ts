@@ -47,10 +47,21 @@ const ZERO = new D(0);
 /** A date with no time of day: YYYY-MM-DD. */
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
+/** The earliest instant a Postgres timestamp can hold (year 0001). */
+const MIN_INSTANT_MS = Date.parse('0001-01-01T00:00:00.000Z');
 /** The last instant a stored timestamp can hold (the end of year 9999). */
 const MAX_INSTANT_MS = Date.UTC(9999, 11, 31, 23, 59, 59, 999);
+/** Safe upper bounds for general-ledger pagination (prevents INT4 skip overflow / DoS). */
+export const MAX_GENERAL_LEDGER_PAGE = 10_000;
+export const MAX_GENERAL_LEDGER_PAGE_SIZE = 500;
 /** The zone of a business whose stored timezone is empty or is no zone (the schema default of Business.timezone). */
 export const DEFAULT_BUSINESS_TIMEZONE = 'America/Port_of_Spain';
+
+/** Whether `d` is a valid Date representable by PostgreSQL timestamp (years 0001..9999). */
+export function isValidPostgresTimestamp(d: Date): boolean {
+  const ms = d.getTime();
+  return Number.isFinite(ms) && ms >= MIN_INSTANT_MS && ms <= MAX_INSTANT_MS;
+}
 
 /**
  * V1-66 (SWP-FIN-LEDGER): whether `value` is a date-only string (YYYY-MM-DD)
@@ -60,7 +71,11 @@ export const DEFAULT_BUSINESS_TIMEZONE = 'America/Port_of_Spain';
 export function isDateOnly(value: unknown): value is string {
   if (typeof value !== 'string' || !DATE_ONLY.test(value)) return false;
   const utcMidnight = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(utcMidnight.getTime()) && utcMidnight.toISOString().slice(0, 10) === value;
+  return (
+    !Number.isNaN(utcMidnight.getTime()) &&
+    utcMidnight.getTime() >= MIN_INSTANT_MS &&
+    utcMidnight.toISOString().slice(0, 10) === value
+  );
 }
 
 /** Whether `value` has the date-only shape, on the calendar or not. */
@@ -142,6 +157,19 @@ function startOfZonedDay(utcMidnight: number, timeZone: string): number {
     else after = middle;
   }
   return after;
+}
+
+/**
+ * FU-LEDGER-ZONED-FROM: the first instant OF day `day` in `timeZone`.
+ * A date-only start date covers from `date >= beginOfZonedDay(day)` so adjacent
+ * single-day ranges (`from=D-1&to=D-1` and `from=D&to=D`) partition cleanly with
+ * zero overlap. Throws 400 for a `day` that is not a valid calendar date.
+ */
+export function beginOfZonedDay(day: string, timeZone: string | null | undefined): Date {
+  if (!isDateOnly(day)) throw new BadRequestException('Invalid from date');
+  const utcMidnight = new Date(`${day}T00:00:00.000Z`).getTime();
+  const instant = startOfZonedDay(utcMidnight, knownTimeZone(timeZone));
+  return new Date(Math.max(MIN_INSTANT_MS, instant));
 }
 
 /**
@@ -251,18 +279,19 @@ export class LedgerBalanceService {
    * General ledger detail view — chronological ledger rows with running balance.
    * Paginated; default page size 100.
    *
-   * V1-66 (SWP-FIN-LEDGER, BUG-029): the end of the range is `to` (a
-   * timestamp: lines dated at or before it) or `toDay` (a date-only day,
-   * YYYY-MM-DD: every line of that day in the business's timezone, that is
-   * dated before the next day starts there). A date-only end was read as
-   * midnight UTC with `<=`, which dropped the day after its first instant.
-   * `toDay` wins when both are given. `from` is unchanged (`>=` the instant).
+   * V1-66 (SWP-FIN-LEDGER, BUG-029) + FU-LEDGER-ZONED-FROM:
+   * - `fromDay` (YYYY-MM-DD) starts at local 00:00 in the business's timezone (`>= beginOfZonedDay`),
+   *   winning over `from` when both are passed; timestamp `from` keeps `>=`.
+   * - `toDay` (YYYY-MM-DD) covers the whole local day (`< endOfZonedDay`), winning over `to` when
+   *   both are passed; timestamp `to` keeps `<=`.
    */
   async getGeneralLedger(
     businessId: string,
     opts: {
       accountId?: string;
       from?: Date;
+      /** A date-only start day (YYYY-MM-DD), starting at local 00:00 in the business's timezone. */
+      fromDay?: string;
       to?: Date;
       /** A date-only end day (YYYY-MM-DD), covered whole in the business's timezone. */
       toDay?: string;
@@ -270,20 +299,48 @@ export class LedgerBalanceService {
       pageSize?: number;
     } = {},
   ): Promise<{ rows: GeneralLedgerRow[]; total: number; page: number; pageSize: number }> {
-    const page = Math.max(1, opts.page ?? 1);
-    const pageSize = Math.min(500, Math.max(1, opts.pageSize ?? 100));
+    const rawPage = opts.page ?? 1;
+    if (!Number.isInteger(rawPage) || rawPage < 1 || rawPage > MAX_GENERAL_LEDGER_PAGE) {
+      throw new BadRequestException('Invalid page');
+    }
+    const rawPageSize = opts.pageSize ?? 100;
+    if (!Number.isInteger(rawPageSize) || rawPageSize < 1 || rawPageSize > MAX_GENERAL_LEDGER_PAGE_SIZE) {
+      throw new BadRequestException('Invalid pageSize');
+    }
+    if (opts.fromDay !== undefined && !isDateOnly(opts.fromDay)) {
+      throw new BadRequestException('Invalid from date');
+    }
+    if (opts.toDay !== undefined && !isDateOnly(opts.toDay)) {
+      throw new BadRequestException('Invalid to date');
+    }
+    if (opts.from !== undefined && opts.fromDay === undefined && !isValidPostgresTimestamp(opts.from)) {
+      throw new BadRequestException('Invalid from date');
+    }
+    if (opts.to !== undefined && opts.toDay === undefined && !isValidPostgresTimestamp(opts.to)) {
+      throw new BadRequestException('Invalid to date');
+    }
+    const page = rawPage;
+    const pageSize = rawPageSize;
 
     const where: Prisma.LedgerEntryWhereInput = { businessId };
     if (opts.accountId) where.accountId = opts.accountId;
-    if (opts.from || opts.to || opts.toDay !== undefined) {
+    if (opts.from || opts.fromDay !== undefined || opts.to || opts.toDay !== undefined) {
       const date: Prisma.DateTimeFilter = {};
-      if (opts.from) date.gte = opts.from;
+      const business =
+        opts.fromDay !== undefined || opts.toDay !== undefined
+          ? await this.prisma.client.business.findUnique({
+              where: { id: businessId },
+              select: { timezone: true },
+            })
+          : null;
+
+      if (opts.fromDay !== undefined) {
+        date.gte = beginOfZonedDay(opts.fromDay, business?.timezone);
+      } else if (opts.from) {
+        date.gte = opts.from;
+      }
+
       if (opts.toDay !== undefined) {
-        // Read with businessId only: the day is this business's day.
-        const business = await this.prisma.client.business.findUnique({
-          where: { id: businessId },
-          select: { timezone: true },
-        });
         const end = endOfZonedDay(opts.toDay, business?.timezone);
         // Review N-1: the end of the last days of year 9999 is an instant in
         // year 10000, which the database cannot hold: nothing is dated past

@@ -7,20 +7,22 @@
  * a Date before the service saw it, so the service could not tell a date-only value from a timestamp.
  *
  * Packet rule: a date-only `to` (YYYY-MM-DD) covers the whole of that day in the business's timezone
- * (Business.timezone); a `to` that is a timestamp keeps `<=`. `from` is unchanged (midnight UTC, `>=`).
+ * (Business.timezone); a `to` that is a timestamp keeps `<=`. Under FU-LEDGER-ZONED-FROM, a date-only
+ * `from` also starts at 00:00 in the business's timezone (`>= beginOfZonedDay`), while a timestamp `from`
+ * keeps `>=` its exact instant.
  *
- * Business A keeps America/Port_of_Spain (UTC-4, no daylight saving). On D = 2026-03-10 it holds 9 postings
- * (18 lines): 3 dated midnight UTC (the 6 lines the old filter answered) and 6 through the day, the last at
- * 23:59:59.999 local (D+1 03:59:59.999Z). One posting sits just before D (D-1 23:59:59.999Z) and one at the
- * first instant of the next local day (D+1 04:00:00.000Z).
+ * Business A keeps America/Port_of_Spain (UTC-4, no daylight saving). On D = 2026-03-10 it holds 3 postings
+ * dated midnight UTC (2026-03-09 20:00 local, 6 lines) and 6 postings through local day D (12 lines, starting
+ * at D 04:00:00.000Z through D+1 03:59:59.999Z). One posting sits just before midnight UTC (D-1 23:59:59.999Z)
+ * and one at the first instant of the next local day (D+1 04:00:00.000Z).
  *
- *   GLD-01  RED-BEFORE  from=D&to=D answers the day's 18 lines (it answered 6), total 18
+ *   GLD-01  RED-BEFORE  from=D&to=D answers the 12 lines of local day D (FU-LEDGER-ZONED-FROM), total 12
  *   GLD-02  RED-BEFORE  to=D alone answers everything up to the end of local day D, and not the next day's line
  *   GLD-03  KEEP        a timestamp `to` keeps `<=`: the line dated exactly `to` is in, later lines are out;
  *                       midnight written as a timestamp is not widened to the day; an offset timestamp is read
  *                       as the instant it names
- *   GLD-04  RED-BEFORE  pageSize is honoured over the whole day: 5 a page, 4 pages, 18 distinct lines, total 18
- *                       (it paged the 6 lines); `limit` is not a parameter of this route
+ *   GLD-04  RED-BEFORE  pageSize is honoured over the whole local day: 5 a page, 3 pages, 12 distinct lines,
+ *                       total 12; `limit` is not a parameter of this route
  *   GLD-05  RED-BEFORE  the day is the BUSINESS's day: Asia/Kolkata (UTC+5:30) ends D at D 18:30Z; New York on
  *                       the day the clocks go forward (2026-03-08, a 23-hour day) ends it at 04:00Z, not 05:00Z
  *   GLD-06  RED-BEFORE  a date that is not on the calendar (2026-02-31) is refused 400 'Invalid to date' (it
@@ -330,12 +332,12 @@ afterAll(async () => {
 }, 60_000);
 
 describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day', () => {
-  it('GLD-01: from=D&to=D answers the 18 lines of the day', async () => {
+  it('GLD-01: from=D&to=D answers the 12 lines of the business day (FU-LEDGER-ZONED-FROM: D-1 20:00 local midnight UTC excluded)', async () => {
     const res = await ledger(ID.bizA, { from: D, to: D });
     expect(res.status).toBe(200);
-    expect(res.body.total).toBe(18);
-    expect(res.body.rows).toHaveLength(18);
-    expect(labels(res.body)).toEqual(twice(A_MIDNIGHT, A_DAY));
+    expect(res.body.total).toBe(12);
+    expect(res.body.rows).toHaveLength(12);
+    expect(labels(res.body)).toEqual(twice(A_DAY));
   });
 
   it('GLD-02: to=D alone answers everything up to the end of the business day, and nothing of the next', async () => {
@@ -347,45 +349,46 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
   });
 
   it('GLD-03: a timestamp end keeps <= and is not widened to a day', async () => {
+    const UTC_MIDNIGHT = '2026-03-10T00:00:00.000Z';
     // The line dated exactly the end instant is in; later lines are out.
-    const atNoon = await ledger(ID.bizA, { from: D, to: '2026-03-10T13:00:00.000Z' });
+    const atNoon = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T13:00:00.000Z' });
     expect(atNoon.status).toBe(200);
     expect(labels(atNoon.body)).toEqual(twice(A_MIDNIGHT, { 'local-start': '', morning: '', 'noon-usd': '' }));
 
-    const justBeforeNoon = await ledger(ID.bizA, { from: D, to: '2026-03-10T12:59:59.999Z' });
+    const justBeforeNoon = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T12:59:59.999Z' });
     expect(labels(justBeforeNoon.body)).toEqual(twice(A_MIDNIGHT, { 'local-start': '', morning: '' }));
 
     // Midnight written as a timestamp means midnight.
-    const midnight = await ledger(ID.bizA, { from: D, to: '2026-03-10T00:00:00.000Z' });
+    const midnight = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T00:00:00.000Z' });
     expect(midnight.status).toBe(200);
     expect(midnight.body.total).toBe(6);
     expect(labels(midnight.body)).toEqual(twice(A_MIDNIGHT));
 
     // An offset timestamp is the instant it names: 09:30 at UTC-4 is 13:30Z.
-    const offset = await ledger(ID.bizA, { from: D, to: '2026-03-10T09:30:00-04:00' });
+    const offset = await ledger(ID.bizA, { from: UTC_MIDNIGHT, to: '2026-03-10T09:30:00-04:00' });
     expect(offset.status).toBe(200);
     expect(labels(offset.body)).toEqual(twice(A_MIDNIGHT, { 'local-start': '', morning: '', 'noon-usd': '' }));
   });
 
-  it('GLD-04: pageSize is honoured across the whole day', async () => {
+  it('GLD-04: pageSize is honoured across the whole business day', async () => {
     const seen = new Set<string>();
     const sizes: number[] = [];
-    for (const page of [1, 2, 3, 4]) {
+    for (const page of [1, 2, 3]) {
       const res = await ledger(ID.bizA, { from: D, to: D, pageSize: 5, page });
       expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ total: 18, page, pageSize: 5 });
+      expect(res.body).toMatchObject({ total: 12, page, pageSize: 5 });
       sizes.push(res.body.rows.length);
       for (const row of res.body.rows) seen.add(row.entryId);
     }
-    expect(sizes).toEqual([5, 5, 5, 3]);
-    expect(seen.size).toBe(18);
+    expect(sizes).toEqual([5, 5, 2]);
+    expect(seen.size).toBe(12);
 
     // No pageSize: the default page (100) holds the day.
     const whole = await ledger(ID.bizA, { from: D, to: D });
-    expect(whole.body).toMatchObject({ total: 18, page: 1, pageSize: 100 });
+    expect(whole.body).toMatchObject({ total: 12, page: 1, pageSize: 100 });
     // `limit` is not a parameter of this route: it does not page.
     const limited = await ledger(ID.bizA, { from: D, to: D, limit: 5 });
-    expect(limited.body.rows).toHaveLength(18);
+    expect(limited.body.rows).toHaveLength(12);
     expect(limited.body.pageSize).toBe(100);
   });
 

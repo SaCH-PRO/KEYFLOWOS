@@ -392,7 +392,7 @@ const PROHIBITED = [
   'weakening or skipping a test or gate',
   'fabricated evidence',
   'secrets anywhere',
-  '.agent-control/* and issue #80 posts (the orchestrator handles them)',
+  '.agent-control/* and issue #273 posts (the orchestrator handles them; #80 is archived)',
   'Release 0 evidence files (scripts/proof-admission/manifests, release0-index.json) without an owner ruling',
 ];
 const STOP_CONDITIONS = [
@@ -491,7 +491,7 @@ export function buildBundle({ plan, packetId, rulings, statusById, fileExists, m
     provenance: { claims: [] },
     excluded: {
       sources: [
-        { source: 'issue #80 comments', revision: null, reason: 'TOO_BROAD' },
+        { source: 'issue #273 comments (and archived #80)', revision: null, reason: 'TOO_BROAD' },
         { source: `${BUILD_MAP_PATH} (rulings the packet does not cite)`, revision: mainSha, reason: 'IRRELEVANT' },
         { source: `${PLAN_PATH} (other packets)`, revision: mainSha, reason: 'IRRELEVANT' },
       ],
