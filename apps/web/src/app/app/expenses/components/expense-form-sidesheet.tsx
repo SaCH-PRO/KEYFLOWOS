@@ -481,6 +481,13 @@ export function ExpenseFormSideSheet({
       setSubmitting(false);
     }
   };
+  // P256: while a save is submitting the sheet stays open (as Pay does): Cancel is disabled, and Escape, the overlay
+  // and the header's Close do nothing. A sheet closed mid-save and reopened on the same read was then closed by the
+  // first save's late reply, losing what had been typed. The save's own success still closes it (submit calls onClose).
+  const closeUnlessSaving = () => {
+    if (submittingRef.current) return;
+    onClose();
+  };
 
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -569,7 +576,7 @@ export function ExpenseFormSideSheet({
     <>
       <SideSheet
         open={true}
-        onClose={onClose}
+        onClose={closeUnlessSaving}
         title={editingExpense ? "Edit Expense" : isBill ? "New Bill" : "New Expense"}
         subtitle={editingExpense ? `Editing ${editingExpense.description}` : isBill ? "Record a bill to pay later" : "Record a business expense"}
         width="md"
@@ -591,8 +598,9 @@ export function ExpenseFormSideSheet({
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={onClose}
-                className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.05] transition-colors border border-border/40"
+                onClick={closeUnlessSaving}
+                disabled={submitting}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.05] transition-colors border border-border/40 disabled:opacity-50"
               >
                 Cancel
               </button>
