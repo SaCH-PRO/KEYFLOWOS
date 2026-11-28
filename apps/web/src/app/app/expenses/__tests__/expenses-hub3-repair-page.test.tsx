@@ -126,6 +126,25 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+/**
+ * P265 R2: reads held on a gate, for the twins. A 0 ms timer raced the next poll of a call-only wait, so a twin failed
+ * in some whole-file runs and not others. Here the reads answer only once released, and the release is scheduled
+ * right after the call-only wait (afterRequest), so a lookup made at once always runs before any reply.
+ */
+const gate = { release: () => {} };
+function holdReads(fns: Array<ReturnType<typeof vi.fn>>) {
+  let release: () => void = () => {};
+  const opened = new Promise<void>((r) => { release = r; });
+  gate.release = release;
+  for (const fn of fns) {
+    const answer = fn.getMockImplementation();
+    fn.mockImplementation((...args: unknown[]) => opened.then(() => (answer ? answer(...args) : undefined)));
+  }
+}
+/** Right after a wait that only checks a read was made: the held reads answer once this task has run on. */
+const afterRequest = () => { const release = gate.release; setTimeout(release, 0); };
+afterEach(() => { gate.release = () => {}; });
+
 function switchTo(id: string) {
   ws.bid = id;
   act(() => {
@@ -217,14 +236,14 @@ describe("SEC-EXH3-1: a business switch with the Expenses page open", () => {
     switchTo("biz_B");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 10000 });
   }, 30000);
-  it("P265: the same, with the expenses read answering a macrotask later (as a network reply does)", async () => {
+  it("P265: the same, with the expenses read held until after the lookup (as a network reply can be)", async () => {
     // The Add expense button is offered only once the expenses read has answered ok (page.tsx). A read that has been
     // made but not answered yet must not be taken as the button being there.
-    client.fetchExpenses.mockImplementation(() => new Promise((r) => setTimeout(() => r(ok({ data: [], total: 0, page: 1, limit: 20 })), 0)));
+    holdReads([client.fetchExpenses]);
     render(<ExpensesInboxPage />);
     await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    // P265: the button is offered once the read has answered ok, so it is waited for, not looked up at once.
-    fireEvent.click(await screen.findByRole("button", { name: /^add expense$/i }, { timeout: 10000 }));
+    afterRequest();
+    fireEvent.click(screen.getByRole("button", { name: /^add expense$/i }));
     expect(await screen.findByRole("dialog", {}, { timeout: 10000 })).toBeTruthy();
     switchTo("biz_B");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 10000 });
@@ -278,8 +297,8 @@ async function categoriesInventNoTrend() {
   })));
   render(<ExpensesInboxPage />);
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-  // P265 R1-1: the tabs are rendered once the expenses read has answered ok, so the tab is waited for.
-  fireEvent.click(await screen.findByRole("tab", { name: "Categories" }, { timeout: 10000 }));
+  afterRequest();
+  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
   await waitFor(() => expect(text()).toMatch(/fuel/i));
   expect(text()).not.toMatch(/spike/i);
   expect(text()).not.toMatch(/\+100%/);
@@ -337,8 +356,8 @@ describe("COR MINOR-7: each block is gated on its own read", () => {
 async function recurringOpensOnce() {
   render(<ExpensesInboxPage />);
   await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-  // P265 R1-2: the same for the Recurring tab.
-  fireEvent.click(await screen.findByRole("tab", { name: "Recurring" }, { timeout: 10000 }));
+  afterRequest();
+  fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
   // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
   fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }));
   expect(await screen.findByRole("dialog")).toBeTruthy();
@@ -363,12 +382,9 @@ describe("COR MINOR-8: no expense writes are offered to a member refused the rea
   });
 });
 
-describe("P265 R1: the tab tests with every default expenses read answering a macrotask later (as network replies do)", () => {
+describe("P265 R1: the tab tests with every default expenses read held until after the lookup (as network replies can be)", () => {
   beforeEach(() => {
-    for (const fn of [client.fetchExpenses, client.fetchExpenseCategories, client.fetchExpenseSummary, client.fetchExpenseBudgets]) {
-      const answer = fn.getMockImplementation();
-      fn.mockImplementation((...args: unknown[]) => new Promise((r) => setTimeout(() => r(answer ? answer(...args) : undefined), 0)));
-    }
+    holdReads([client.fetchExpenses, client.fetchExpenseCategories, client.fetchExpenseSummary, client.fetchExpenseBudgets]);
   });
   it("COR MINOR-3, delayed: the Categories tab invents no trend", categoriesInventNoTrend, 30000);
   it("COR MINOR-6, delayed: the Recurring builder opens only on a new click", recurringOpensOnce, 30000);
