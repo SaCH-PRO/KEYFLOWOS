@@ -6,13 +6,6 @@
 import { readFileSync, writeFileSync } from "fs";
 
 const reverts = [
-  { file: "apps/web/src/app/app/crm/pipeline/page.tsx", from: "_businessId", to: "businessId" },
-  { file: "apps/web/src/app/app/expenses/components/expense-pipeline.tsx", from: "_filterCategory", to: "filterCategory" },
-  { file: "apps/web/src/app/app/expenses/components/expense-pipeline.tsx", from: "_setFilterCategory", to: "setFilterCategory" },
-  { file: "apps/web/src/app/app/expenses/components/expense-pipeline.tsx", from: "_filterPayment", to: "filterPayment" },
-  { file: "apps/web/src/app/app/expenses/components/expense-pipeline.tsx", from: "_setFilterPayment", to: "setFilterPayment" },
-  { file: "apps/web/src/app/app/expenses/components/expense-pipeline.tsx", from: "_filterStatus", to: "filterStatus" },
-  { file: "apps/web/src/app/app/expenses/components/expense-pipeline.tsx", from: "_setPageSize", to: "setPageSize" },
   { file: "apps/web/src/app/app/finance/components/finance-pipeline.tsx", from: "_contacts", to: "contacts" },
   { file: "apps/web/src/app/app/finance/components/records/record-card.tsx", from: "_compact", to: "compact" },
   { file: "apps/web/src/app/app/finance/components/revenue-composer.tsx", from: "_setEditingQuoteId", to: "setEditingQuoteId" },

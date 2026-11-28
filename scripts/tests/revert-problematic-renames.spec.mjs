@@ -14,7 +14,9 @@ const source = readFileSync(join(root, "scripts", "revert-problematic-renames.mj
 const listed = [...source.matchAll(/\{\s*file:\s*"([^"]+)"/g)].map((m) => m[1]);
 
 test("the script's list is read (the parse is not vacuous)", () => {
-  assert.ok(listed.length >= 10, `only ${listed.length} entries read from the script`);
+  // a known entry that stays, so a parse that read nothing (or the wrong thing) fails here, not silently passes below
+  assert.ok(listed.includes("apps/web/src/app/app/finance/components/finance-pipeline.tsx"), `entries read: ${listed.join(", ") || "none"}`);
+  assert.equal(listed.length, (source.match(/\bfile:/g) ?? []).length, "an entry was not read");
 });
 
 test("every file the script lists exists", () => {
