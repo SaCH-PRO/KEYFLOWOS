@@ -315,3 +315,22 @@ export function clipEndViolation(text: string, kept: string): string | null {
   }
   return null;
 }
+
+/**
+ * P231 r16 (R16-2): what a clip() must keep, independent of clip()'s rules too: when the kept part is the text's
+ * start (the cut at a word, not the hard-cut fallback), every token of the text that fits in the room left for the
+ * "..." (the first max - 3 graphemes), is followed by whitespace, and ends in a mark that closes or means something
+ * ("%", "+", a closing bracket or quote, a straight quote), is kept whole. Returns why not, or null.
+ */
+const KEPT_AT_END = ["%", "+", ")", "]", "}", "”", "’", "»", '"', "'"];
+export function clipKeepViolation(text: string, max: number, kept: string): string | null {
+  if (!text.startsWith(kept) || max <= 3) return null;
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const room = Array.from(seg.segment(text), (s) => s.segment).slice(0, max - 3).join("");
+  for (const m of text.matchAll(/\S+(?=\s)/gu)) {
+    const end = (m.index ?? 0) + m[0].length;
+    if (end > room.length) break;
+    if (KEPT_AT_END.some((c) => m[0].endsWith(c)) && kept.length < end) return `dropped ${JSON.stringify(m[0])}`;
+  }
+  return null;
+}
