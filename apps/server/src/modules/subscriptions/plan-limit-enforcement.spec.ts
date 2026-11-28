@@ -65,9 +65,8 @@ const SRC = join(__dirname, '..', '..');
  */
 const UNENFORCED_ACKNOWLEDGED = new Set<string>([
   // checkLimit implements these; nothing calls it for them. contacts,
-  // invoicesPerMonth and automations were on this list until the
-  // @RequirePlanLimit decorator was found — they are gated on a route.
-  'staffMembers',
+  // invoicesPerMonth, automations, staffMembers and recurringInvoices were on
+  // this list until gated on their routes via @RequirePlanLimit.
   'socialPosts',
   'marketplaceListings',
   'warehouses',
@@ -86,7 +85,6 @@ const UNENFORCED_ACKNOWLEDGED = new Set<string>([
   'communityAccess',
   'educationAccess',
   'calendarSync',
-  'recurringInvoices',
   'advancedAnalytics',
 ]);
 
