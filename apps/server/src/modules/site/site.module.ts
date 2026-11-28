@@ -7,6 +7,7 @@ import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
 import { FinanceModule } from '../finance/finance.module';
 import { PublicEventsModule } from '../public-events/public-events.module';
+import { IdentityModule } from '../identity/identity.module';
 import { SiteController } from './site.controller';
 import { SiteService } from './site.service';
 import { StoreOrderService } from './store-order.service';
@@ -27,6 +28,7 @@ import { CaseStudyService } from './case-study.service';
   imports: [
     PrismaModule,
     AiModule,
+    IdentityModule,
     forwardRef(() => PaymentsModule),
     NotificationsModule,
     CrmModule,

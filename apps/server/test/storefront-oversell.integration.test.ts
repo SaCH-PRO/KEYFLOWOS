@@ -201,6 +201,10 @@ beforeAll(async () => {
       { id: ID.bizB, name: 'V64I Store B', slug: `${P}store-b`, ownerId: ID.ownerB, storeEnabled: true, currency: 'TTD' },
     ],
   });
+  // P233 WEDGE-HIDE-STORE-SERVER: bizA tests public store checkout oversell guards on a selling store.
+  await db.marketplaceOrder.create({
+    data: { id: `${ID.bizA}_legacy_seed`, businessId: ID.bizA, orderNumber: `${ID.bizA.toUpperCase()}-LEGACY-0`, status: 'completed', customerName: 'Legacy Seed', total: 1, subtotal: 1, currency: 'TTD' },
+  });
 
   await db.contact.create({
     data: { id: ID.contactA, businessId: ID.bizA, firstName: 'Buyer', lastName: 'Oversell', email: `${P}buyer@test.local` },

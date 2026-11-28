@@ -97,7 +97,7 @@ export class ResourceMarketplaceService {
     const [data, total] = await Promise.all([
       this.prisma.client.product.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }],
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           business: { select: businessSelect },
           _count: { select: { resourceDownloads: true } },

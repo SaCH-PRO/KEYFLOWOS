@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { apiGet } from "@/lib/api";
@@ -34,6 +34,7 @@ import { Breadcrumbs } from "../../components/category-nav";
 import { ProductSchema, BreadcrumbListSchema } from "../../components/structured-data";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
 import { useServedOverHttps } from "../../components/trust-bar";
+import { storeCheckoutOffered, withoutStoreLines, STORE_CHECK_FAILED } from "@/lib/api/store-checkout";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -47,7 +48,15 @@ export default function ProductDetailPage() {
   const [relatedItems, setRelatedItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // WEDGE-HIDE-STORE part 2 (P225, D-263): as on /book/<slug>. null while the storefront read is out; only `true`
+  // sells. Otherwise nothing here goes in the cart and the cart shows no product line.
+  const [storeOffered, setStoreOffered] = useState<boolean | null>(null);
+  // The storefront read failed: not an answer. storeOffered stays null (nothing is sold, nothing is deleted from the
+  // stored cart) and the page offers Try again, which reads again.
+  const [storeCheckFailed, setStoreCheckFailed] = useState(false);
+  const [storeCheckRetrying, setStoreCheckRetrying] = useState(false);
+  const [storedCart, setCart] = useState<CartItem[]>([]);
+  const cart = useMemo(() => (storeOffered === true ? storedCart : withoutStoreLines(storedCart)), [storeOffered, storedCart]);
   const [cartOpen, setCartOpen] = useState(false);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -63,6 +72,9 @@ export default function ProductDetailPage() {
 
   const addToCart = useCallback(
     (ci: CatalogItem, qty = 1) => {
+      // WEDGE-HIDE-STORE part 2. Defence in depth: unreachable while the buttons are hidden (pinned by WHS2-14,
+      // WHS2-23). The server refuses the order itself (P233: 403 STORE_CHECKOUT_NOT_OFFERED); this guard stays as well.
+      if (!ci.requiresBooking && storeOffered !== true) return;
       setCart((prev) => {
         const existing = prev.find((c) => c.id === ci.id && c.itemType === ci.itemType);
         let next: CartItem[];
@@ -79,7 +91,7 @@ export default function ProductDetailPage() {
       });
       if (business?.id) trackStoreEvent(business.id, "add_to_cart", ci.id);
     },
-    [slug, business]
+    [slug, business, storeOffered]
   );
 
   const removeFromCart = useCallback(
@@ -113,6 +125,23 @@ export default function ProductDetailPage() {
     [slug]
   );
 
+  // A product (any line that is not a booking) cannot be bought here unless the store checkout is offered.
+  const notForSale = !!item && !item.requiresBooking && storeOffered !== true;
+
+  const retryStoreCheck = useCallback(async () => {
+    setStoreCheckRetrying(true);
+    try {
+      const sfRes = await apiGet<{ storefront?: StorefrontConfig; storefrontConfig?: StorefrontConfig }>(`/site/storefront/public/${encodeURIComponent(slug)}`);
+      if (sfRes.error) return;
+      if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
+      else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+      setStoreCheckFailed(false);
+      setStoreOffered(storeCheckoutOffered(sfRes.data));
+    } finally {
+      setStoreCheckRetrying(false);
+    }
+  }, [slug]);
+
   const isInCart = cart.some((c) => c.id === productId);
   const cartTotal = cart.reduce((sum, c) => sum + c.price * c.quantity, 0);
   const cartCount = cart.reduce((sum, c) => sum + c.quantity, 0);
@@ -135,6 +164,8 @@ export default function ProductDetailPage() {
       const sfRes = await apiGet<{ storefront?: StorefrontConfig; storefrontConfig?: StorefrontConfig }>(`/site/storefront/public/${encodeURIComponent(slug)}`);
       if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+      if (sfRes.error) setStoreCheckFailed(true);
+      else setStoreOffered(storeCheckoutOffered(sfRes.data));
 
       const [servicesRes, productsRes] = await Promise.all([
         apiGet<Service[]>(`/bookings/public/businesses/${res.data.id}/services`),
@@ -196,9 +227,16 @@ export default function ProductDetailPage() {
   }, [slug, productId]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
     if (slug) setCart(loadCart(slug));
   }, [slug]);
+
+  // WEDGE-HIDE-STORE part 2: `cart` above never holds a product line unless the store checkout is offered. Only a
+  // definite answer that is not `true` drops the product lines from the stored cart; a failed read deletes nothing.
+  useEffect(() => {
+    if (storeOffered !== false) return;
+    const kept = withoutStoreLines(storedCart);
+    if (kept.length !== storedCart.length) saveCart(slug, kept);
+  }, [storeOffered, slug, storedCart]);
 
   useEffect(() => {
     if (item && business) {
@@ -386,9 +424,11 @@ export default function ProductDetailPage() {
               );
             })()}
 
-            {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Secure Checkout' and no 'Instant Confirmation'. */}
+            {/* TRUST-BADGES-TRUE-ONLY (D-303): no 'Secure Checkout' and no 'Instant Confirmation', for any item (the
+                WEDGE-HIDE-STORE part 2 gate drew them only for an item for sale; they are claims, not doors: the two
+                buy buttons below stay this page's only doors to the cart, under that gate). */}
 
-            {item.itemType !== "service" && (
+            {item.itemType !== "service" && !notForSale && (
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400">Qty:</span>
                 <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-gray-50">
@@ -409,6 +449,20 @@ export default function ProductDetailPage() {
               </div>
             )}
 
+            {storeCheckFailed && notForSale && (
+              <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span>{STORE_CHECK_FAILED}</span>
+                <button
+                  type="button"
+                  onClick={retryStoreCheck}
+                  disabled={storeCheckRetrying}
+                  className="min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 text-sm font-medium disabled:opacity-60"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+
             <div className="flex flex-col gap-3 pt-2">
               {isInCart ? (
                 <button
@@ -418,7 +472,7 @@ export default function ProductDetailPage() {
                   <CheckCircle2 className="w-5 h-5" />
                   In Cart — Remove
                 </button>
-              ) : item.purchasable === false ? (
+              ) : notForSale ? null : item.purchasable === false ? (
                 <button
                   disabled
                   className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-semibold min-h-[44px] cursor-not-allowed bg-gray-100 text-gray-400 border border-gray-200"
@@ -513,7 +567,7 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 md:hidden z-30 p-4 backdrop-blur-xl border-t border-gray-200" style={{ backgroundColor: `${ts.pageBg}ee` }}>
+      {(isInCart || !notForSale) && <div data-buy-bar className="fixed bottom-0 left-0 right-0 md:hidden z-30 p-4 backdrop-blur-xl border-t border-gray-200" style={{ backgroundColor: `${ts.pageBg}ee` }}>
         {isInCart ? (
           <button
             onClick={() => removeFromCart(item.id, item.itemType)}
@@ -522,7 +576,7 @@ export default function ProductDetailPage() {
             <CheckCircle2 className="w-5 h-5" />
             In Cart — Tap to Remove
           </button>
-        ) : item.purchasable === false ? (
+        ) : notForSale ? null : item.purchasable === false ? (
           <button
             disabled
             className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-semibold min-h-[44px] cursor-not-allowed bg-gray-200 text-gray-500"
@@ -540,7 +594,7 @@ export default function ProductDetailPage() {
             {item.stockStatus === "backorder" ? "Pre-order" : "Add to Cart"} — {formatPrice(item.price * quantity, item.currency)}
           </button>
         )}
-      </div>
+      </div>}
 
       <CartDrawer
         cart={cart}

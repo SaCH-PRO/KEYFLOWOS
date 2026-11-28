@@ -55,6 +55,8 @@ type Props = {
   customerEmail?: string | null;
   onContinueShopping: () => void;
   onRetryPayment?: () => void;
+  /** Why the payment cannot be tried again here (shown in place of the retry button). */
+  retryUnavailableMessage?: string;
   formatDate: (d: string) => string;
   formatTime: (t: string) => string;
 };
@@ -136,6 +138,7 @@ export function OrderConfirmation({
   customerEmail,
   onContinueShopping,
   onRetryPayment,
+  retryUnavailableMessage,
   formatDate,
   formatTime,
 }: Props) {
@@ -161,10 +164,13 @@ export function OrderConfirmation({
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold text-yellow-600 mb-2">Payment Processing</h1>
+          {/* WEDGE-HIDE-STORE part 2: when the payment cannot be tried again here, the page says only what it knows:
+              the payment is not confirmed. It does not say it is being processed. */}
+          <h1 className="text-2xl font-bold text-yellow-600 mb-2">{retryUnavailableMessage ? "Payment not confirmed" : "Payment Processing"}</h1>
           <p className="text-sm text-gray-500 leading-relaxed max-w-sm mx-auto">
-            Your payment is still being processed. This may take a moment.
-            Please check back shortly or contact the business if the issue persists.
+            {retryUnavailableMessage
+              ? "We could not confirm this payment. Please contact the business about this order."
+              : "Your payment is still being processed. This may take a moment. Please check back shortly or contact the business if the issue persists."}
           </p>
         </div>
 
@@ -176,6 +182,7 @@ export function OrderConfirmation({
         )}
 
         <div className="flex flex-col gap-3 pt-2">
+          {retryUnavailableMessage && <p className="text-sm text-gray-600" role="status">{retryUnavailableMessage}</p>}
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}
@@ -218,11 +225,14 @@ export function OrderConfirmation({
         <div>
           <h1 className="text-2xl font-bold text-red-600 mb-2">Payment Failed</h1>
           <p className="text-sm text-gray-500 leading-relaxed max-w-sm mx-auto">
-            Something went wrong with your payment. Please try again or choose a different payment method.
+            {retryUnavailableMessage
+              ? "Something went wrong with your payment."
+              : "Something went wrong with your payment. Please try again or choose a different payment method."}
           </p>
         </div>
 
         <div className="flex flex-col gap-3 pt-2">
+          {retryUnavailableMessage && <p className="text-sm text-gray-600" role="status">{retryUnavailableMessage}</p>}
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}

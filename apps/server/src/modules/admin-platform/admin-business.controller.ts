@@ -49,7 +49,7 @@ export class AdminBusinessController {
           ownerId: true,
           _count: { select: { members: true, contacts: true, invoices: true } },
         },
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
         take: limit,
         skip: offset,
       }),

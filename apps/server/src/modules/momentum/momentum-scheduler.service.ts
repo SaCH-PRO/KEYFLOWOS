@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ClientMomentumService } from './client-momentum.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
-import { schedulersDisabled } from '../../core/config/env';
+import { momentumSchedulerDisabled, schedulersDisabled } from '../../core/config/env';
 
 const SWEEP_CHECK_INTERVAL_MS = 60 * 1000;
 const TARGET_SWEEP_HOUR = 6;
@@ -21,6 +21,10 @@ export class MomentumSchedulerService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     if (schedulersDisabled()) {
       this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
+    if (momentumSchedulerDisabled()) {
+      this.logger.log('MomentumSchedulerService disabled via MOMENTUM_SCHEDULER_DISABLED');
       return;
     }
     this.logger.log('[MomentumScheduler] Starting scheduler — checking every 60s');

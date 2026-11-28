@@ -937,6 +937,22 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
   // STAFF member could make owner-run plans. Only the owner switches on, switches off or edits a rule
   // that runs as the owner; a rule a member writes records that member (D-73) and is never the system's.
   describe('W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93): only the owner turns on or edits an owner-run default trigger', () => {
+    // SWP-CENSUS-KEY-A (V1-64): POST/PUT agent/triggers require ai:write; grant ai:write to ID.staffOwned
+    // inside this block so CV-08m..CV-08m4 exercise the inner D-73/D-93 creator & owner-only rules, then restore.
+    beforeAll(async () => {
+      const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffOwned, businessId: ID.biz } },
+        data: { permissionScopes: { ...defaultScopesForRole('STAFF'), crm: 'write', crm_view: 'owned', ai: 'write' } },
+      });
+    });
+    afterAll(async () => {
+      const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+      await db.membership.update({
+        where: { userId_businessId: { userId: ID.staffOwned, businessId: ID.biz } },
+        data: { permissionScopes: { ...defaultScopesForRole('STAFF'), crm: 'write', crm_view: 'owned' } },
+      });
+    });
     const triggerUrl = (id?: string) => `/ai/businesses/${ID.biz}/agent/triggers${id ? `/${id}` : ''}`;
     const paidDefault = () => DEFAULT_AGENT_TRIGGERS.find((t) => t.eventPattern === 'invoice.paid')!;
     /** The seeded 'Payment Received' rule, every rule of biz switched off first so only the rule a case switches on fires. */

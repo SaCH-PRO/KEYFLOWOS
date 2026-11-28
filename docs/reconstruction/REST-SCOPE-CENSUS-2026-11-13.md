@@ -64,13 +64,13 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
   Profile location, CW-3; connector Connect, CW-4); the round 3 class repair applied the channel
   connection health check (-1, CB-1) and moved the Drive share to exempt-check (WPH2-2).
   Now:
-  - exempt-check: 56 (66 before SWP-CENSUS-HIDDEN)
+  - exempt-check: 59 (66 before SWP-CENSUS-HIDDEN)
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
-  - deferred: 60 (none `held:`: the bank connections are settings admin since the PR195 merge, SWEEP-P0-FOLLOWUP)
-  - open: 271 (565 before SWP-CENSUS-HIDDEN)
-- Routes gated (applied): **406**: 304 by SWP-CENSUS-HIDDEN; **102** before it (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
+  - deferred: 53 (none `held:`: the bank connections are settings admin since the PR195 merge, SWEEP-P0-FOLLOWUP)
+  - open: 2 (57 before SWP-CENSUS-KEY-A; 271 after SWP-CENSUS-HIDDEN; 565 before SWP-CENSUS-HIDDEN)
+- Routes gated (applied): **683**: 55 by SWP-CENSUS-KEY-A; 222 across prior census sweeps; 304 by SWP-CENSUS-HIDDEN; **102** before it (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
   Outlook contacts consent start, SV-3; round 3: and crm read, WPH2-1); and 25 reads of the same controllers (round 2: the
   accounting summary, unsynced invoices and chart of accounts need revenue read). Beside these, the
   round 1 class repair added a settings admin check to routes that already enforced another scope
@@ -995,64 +995,64 @@ ModuleScopeGuard at class level).
 | --- | --- | --- | --- | --- |
 | `AgentController.abortPlan` | POST | `/ai/businesses/:businessId/agent/states/:planId/abort` | applied | `ai:write` (SWEEP-P0-FOLLOWUP, staffkeyplans ruling, recommended option; owner question 5: owners and admins by role default, STAFF only when given KEY access); the plan must be this business's (it took any plan id: a member of one business paused or aborted another business's plan; now 404) |
 | `AgentController.backfillSemanticMemory` | POST | `/ai/businesses/:businessId/agent/memory/backfill` | applied | `settings:admin` (MEM-SEMANTIC-SIGHT, D-257: it copies every AiMemory row of the business, document extractions included, into the semantic store through the embedding provider on the business's AI credits; a business-wide AI setting, gated as the connectors' backfills and PUT .../ai/preferences are: owners and admins by role default; the census's earlier follow-up suggested ai write) |
-| `AgentController.createAgentTrigger` | POST | `/ai/businesses/:businessId/agent/triggers` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY plan controls; plan steps are held to the creator's module scopes at run time (D-71, D-73), the control routes are not; STAFF default ai is none, so gating asks whether staff may pause or abort KEY plans (owner question) |
-| `AgentController.markMessageProcessed` | POST | `/ai/businesses/:businessId/agent/messages/:messageId/processed` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY plan controls; plan steps are held to the creator's module scopes at run time (D-71, D-73), the control routes are not; STAFF default ai is none, so gating asks whether staff may pause or abort KEY plans (owner question) |
+| `AgentController.createAgentTrigger` | POST | `/ai/businesses/:businessId/agent/triggers` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AgentController.markMessageProcessed` | POST | `/ai/businesses/:businessId/agent/messages/:messageId/processed` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
 | `AgentController.pausePlan` | POST | `/ai/businesses/:businessId/agent/states/:planId/pause` | applied | `ai:write` (SWEEP-P0-FOLLOWUP, staffkeyplans ruling, recommended option; owner question 5: owners and admins by role default, STAFF only when given KEY access); the plan must be this business's (it took any plan id: a member of one business paused or aborted another business's plan; now 404) |
-| `AgentController.processDocument` | POST | `/ai/businesses/:businessId/agent/documents/process` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY plan controls; plan steps are held to the creator's module scopes at run time (D-71, D-73), the control routes are not; STAFF default ai is none, so gating asks whether staff may pause or abort KEY plans (owner question) |
+| `AgentController.processDocument` | POST | `/ai/businesses/:businessId/agent/documents/process` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
 | `AgentController.resumePlan` | POST | `/ai/businesses/:businessId/agent/states/:planId/resume` | applied | `ai:write` (SWEEP-P0-FOLLOWUP, staffkeyplans ruling, recommended option; owner question 5: owners and admins by role default, STAFF only when given KEY access); the plan must be this business's (it took any plan id: a member of one business paused or aborted another business's plan; now 404) |
-| `AgentController.triggerPatternScan` | POST | `/ai/businesses/:businessId/agent/patterns/scan` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY plan controls; plan steps are held to the creator's module scopes at run time (D-71, D-73), the control routes are not; STAFF default ai is none, so gating asks whether staff may pause or abort KEY plans (owner question) |
-| `AgentController.undoAction` | POST | `/ai/businesses/:businessId/agent/undo/:undoId` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY plan controls; plan steps are held to the creator's module scopes at run time (D-71, D-73), the control routes are not; STAFF default ai is none, so gating asks whether staff may pause or abort KEY plans (owner question) |
-| `AgentController.updateAgentTrigger` | PUT | `/ai/businesses/:businessId/agent/triggers/:triggerId` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY plan controls; plan steps are held to the creator's module scopes at run time (D-71, D-73), the control routes are not; STAFF default ai is none, so gating asks whether staff may pause or abort KEY plans (owner question) |
+| `AgentController.triggerPatternScan` | POST | `/ai/businesses/:businessId/agent/patterns/scan` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AgentController.undoAction` | POST | `/ai/businesses/:businessId/agent/undo/:undoId` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AgentController.updateAgentTrigger` | PUT | `/ai/businesses/:businessId/agent/triggers/:triggerId` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
 
 ### AiController (`ai/ai.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `AiController.approvePlan` | POST | `/ai/businesses/:businessId/ai/plans/:planId/approve` | exempt-check | check:assertMayRunGraphAction (each step held to the member's module scopes, D-71) |
-| `AiController.assignThreadRole` | POST | `/ai/businesses/:businessId/inbox/:threadId/assign-role` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.blockSuggestionCategory` | POST | `/ai/businesses/:businessId/ai/suggestions/:category/block` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.chat` | POST | `/ai/businesses/:businessId/ai/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.createGoal` | POST | `/ai/businesses/:businessId/goals` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.createPlan` | POST | `/ai/businesses/:businessId/ai/plan` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.deleteGoal` | DELETE | `/ai/businesses/:businessId/goals/:goalId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.deleteMemory` | DELETE | `/ai/businesses/:businessId/ai/memory/:category/:key` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.dismissSuggestion` | POST | `/ai/businesses/:businessId/ai/suggestions/:suggestionId/dismiss` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.executeAllBriefingCards` | POST | `/ai/businesses/:businessId/briefing/:planId/execute-all` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.executeKeyCommand` | POST | `/ai/businesses/:businessId/key/command` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.generateBusinessModel` | POST | `/ai/businesses/:businessId/ai/business-model` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.instantiateWorkflow` | POST | `/ai/businesses/:businessId/ai/workflows/:templateKey/instantiate` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.parseIntent` | POST | `/ai/businesses/:businessId/ai/intent` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.profileChat` | POST | `/ai/businesses/:businessId/ai/profile/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.profileConfirm` | POST | `/ai/businesses/:businessId/ai/profile/confirm` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.profileReset` | POST | `/ai/businesses/:businessId/ai/profile/reset` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.rebalance` | POST | `/ai/businesses/:businessId/ai/rebalance` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.refreshSuggestions` | POST | `/ai/businesses/:businessId/ai/suggestions/refresh` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.replyToThread` | POST | `/ai/businesses/:businessId/inbox/:threadId/reply` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.resolveApproval` | POST | `/ai/businesses/:businessId/ai/approvals/:approvalId/resolve` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.resolveApprovalsBatch` | POST | `/ai/businesses/:businessId/ai/approvals/batch-resolve` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.resolveThread` | POST | `/ai/businesses/:businessId/inbox/:threadId/resolve` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.seoScore` | POST | `/ai/businesses/:businessId/ai/seo-score` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.simulate` | POST | `/ai/businesses/:businessId/ai/simulate` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.skipBriefing` | POST | `/ai/businesses/:businessId/briefing/:planId/skip` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.summarizePatterns` | POST | `/ai/businesses/:businessId/ai/memory/summarize-patterns` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
+| `AiController.assignThreadRole` | POST | `/ai/businesses/:businessId/inbox/:threadId/assign-role` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.blockSuggestionCategory` | POST | `/ai/businesses/:businessId/ai/suggestions/:category/block` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.chat` | POST | `/ai/businesses/:businessId/ai/chat` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.createGoal` | POST | `/ai/businesses/:businessId/goals` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.createPlan` | POST | `/ai/businesses/:businessId/ai/plan` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.deleteGoal` | DELETE | `/ai/businesses/:businessId/goals/:goalId` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.deleteMemory` | DELETE | `/ai/businesses/:businessId/ai/memory/:category/:key` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.dismissSuggestion` | POST | `/ai/businesses/:businessId/ai/suggestions/:suggestionId/dismiss` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.executeAllBriefingCards` | POST | `/ai/businesses/:businessId/briefing/:planId/execute-all` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.executeKeyCommand` | POST | `/ai/businesses/:businessId/key/command` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.generateBusinessModel` | POST | `/ai/businesses/:businessId/ai/business-model` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.instantiateWorkflow` | POST | `/ai/businesses/:businessId/ai/workflows/:templateKey/instantiate` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.parseIntent` | POST | `/ai/businesses/:businessId/ai/intent` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.profileChat` | POST | `/ai/businesses/:businessId/ai/profile/chat` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.profileConfirm` | POST | `/ai/businesses/:businessId/ai/profile/confirm` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.profileReset` | POST | `/ai/businesses/:businessId/ai/profile/reset` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.rebalance` | POST | `/ai/businesses/:businessId/ai/rebalance` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.refreshSuggestions` | POST | `/ai/businesses/:businessId/ai/suggestions/refresh` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.replyToThread` | POST | `/ai/businesses/:businessId/inbox/:threadId/reply` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.resolveApproval` | POST | `/ai/businesses/:businessId/ai/approvals/:approvalId/resolve` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.resolveApprovalsBatch` | POST | `/ai/businesses/:businessId/ai/approvals/batch-resolve` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.resolveThread` | POST | `/ai/businesses/:businessId/inbox/:threadId/resolve` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.seoScore` | POST | `/ai/businesses/:businessId/ai/seo-score` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.simulate` | POST | `/ai/businesses/:businessId/ai/simulate` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.skipBriefing` | POST | `/ai/businesses/:businessId/briefing/:planId/skip` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.summarizePatterns` | POST | `/ai/businesses/:businessId/ai/memory/summarize-patterns` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
 | `AiController.triggerJourney` | POST | `/ai/businesses/:businessId/journeys/:key/trigger` | exempt-check | check:assertJourneyContactsVisible (CRM visibility of every contact the journey touches) |
-| `AiController.undoPlanStep` | POST | `/ai/businesses/:businessId/ai/plans/:planId/steps/:stepId/undo` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateAgentConfig` | PUT | `/ai/businesses/:businessId/ai/agent-config` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateAutopilotRule` | PUT | `/ai/businesses/:businessId/autopilot-rules/:ruleId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateBusinessPlan` | PUT | `/ai/businesses/:businessId/ai/business-plan/:planId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateGoal` | PUT | `/ai/businesses/:businessId/goals/:goalId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateGoalProgress` | POST | `/ai/businesses/:businessId/goals/:goalId/progress` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateGovernanceSettings` | PUT | `/ai/businesses/:businessId/ai/governance` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateRoutingConfig` | PUT | `/ai/businesses/:businessId/ai/routing-config` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.upsertMemory` | PUT | `/ai/businesses/:businessId/ai/memory` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.upsertMemoryBulk` | PUT | `/ai/businesses/:businessId/ai/memory/bulk` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
+| `AiController.undoPlanStep` | POST | `/ai/businesses/:businessId/ai/plans/:planId/steps/:stepId/undo` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateAgentConfig` | PUT | `/ai/businesses/:businessId/ai/agent-config` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateAutopilotRule` | PUT | `/ai/businesses/:businessId/autopilot-rules/:ruleId` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateBusinessPlan` | PUT | `/ai/businesses/:businessId/ai/business-plan/:planId` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateGoal` | PUT | `/ai/businesses/:businessId/goals/:goalId` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateGoalProgress` | POST | `/ai/businesses/:businessId/goals/:goalId/progress` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateGovernanceSettings` | PUT | `/ai/businesses/:businessId/ai/governance` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.updateRoutingConfig` | PUT | `/ai/businesses/:businessId/ai/routing-config` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.upsertMemory` | PUT | `/ai/businesses/:businessId/ai/memory` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
+| `AiController.upsertMemoryBulk` | PUT | `/ai/businesses/:businessId/ai/memory/bulk` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
 
 ### BlueprintOnboardingController (`ai/blueprint-onboarding.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `BlueprintOnboardingController.onboardingChat` | POST | `/blueprint/businesses/:businessId/onboarding-chat` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding chat writes the business blueprint |
-| `BlueprintOnboardingController.onboardingReset` | POST | `/blueprint/businesses/:businessId/onboarding-reset` | open | membership only; follow-up SWEEP-CENSUS: settings write; onboarding chat writes the business blueprint |
+| `BlueprintOnboardingController.onboardingChat` | POST | `/blueprint/businesses/:businessId/onboarding-chat` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `BlueprintOnboardingController.onboardingReset` | POST | `/blueprint/businesses/:businessId/onboarding-reset` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
 
 ### AiFlowController (`ai/flow.controller.ts`)
 
@@ -1070,18 +1070,18 @@ ModuleScopeGuard at class level).
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `GraphActionsController.executeAction` | POST | `/actions/businesses/:businessId/execute` | exempt-check | check:assertMayRunGraphAction (the tool's module scope, GRAPH_ACTION_TOOL_MODULES) |
-| `GraphActionsController.planAction` | POST | `/actions/businesses/:businessId/plan` | open | membership only; follow-up SWEEP-CENSUS: ai write; planning only; execution is checked (assertMayRunGraphAction) |
+| `GraphActionsController.planAction` | POST | `/actions/businesses/:businessId/plan` | applied | ai:write (SWP-CENSUS-KEY-A, V1-64) |
 
 ### OutputTemplateController (`ai/output-template.controller.ts`)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `OutputTemplateController.create` | POST | `/api/ai/businesses/:businessId/output-templates` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide KEY output templates |
-| `OutputTemplateController.preview` | POST | `/api/ai/businesses/:businessId/output-templates/preview` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide KEY output templates |
-| `OutputTemplateController.remove` | DELETE | `/api/ai/businesses/:businessId/output-templates/:id` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide KEY output templates |
-| `OutputTemplateController.resetCategory` | POST | `/api/ai/businesses/:businessId/output-templates/reset/:category` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide KEY output templates |
-| `OutputTemplateController.setDefault` | POST | `/api/ai/businesses/:businessId/output-templates/:id/set-default` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide KEY output templates |
-| `OutputTemplateController.update` | PUT | `/api/ai/businesses/:businessId/output-templates/:id` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide KEY output templates |
+| `OutputTemplateController.create` | POST | `/api/ai/businesses/:businessId/output-templates` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `OutputTemplateController.preview` | POST | `/api/ai/businesses/:businessId/output-templates/preview` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `OutputTemplateController.remove` | DELETE | `/api/ai/businesses/:businessId/output-templates/:id` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `OutputTemplateController.resetCategory` | POST | `/api/ai/businesses/:businessId/output-templates/reset/:category` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `OutputTemplateController.setDefault` | POST | `/api/ai/businesses/:businessId/output-templates/:id/set-default` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
+| `OutputTemplateController.update` | PUT | `/api/ai/businesses/:businessId/output-templates/:id` | applied | settings:write (SWP-CENSUS-KEY-A, V1-64) |
 
 ### ApprovalController (`approvals/approval.controller.ts`)
 
@@ -1136,10 +1136,10 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `BookingsAiController.aiNoShowPredictor` | POST | `/bookings/businesses/:businessId/ai-no-show-predictor` | open | membership only; follow-up SWEEP-CENSUS: bookings read; AI analyses (POST, compute only) |
-| `BookingsAiController.aiRevenueInsights` | POST | `/bookings/businesses/:businessId/ai-revenue-insights` | open | membership only; follow-up SWEEP-CENSUS: bookings read; AI analyses (POST, compute only) |
-| `BookingsAiController.aiScheduleOptimizer` | POST | `/bookings/businesses/:businessId/ai-schedule-optimizer` | open | membership only; follow-up SWEEP-CENSUS: bookings read; AI analyses (POST, compute only) |
-| `BookingsAiController.aiSearch` | POST | `/bookings/businesses/:businessId/ai-search` | open | membership only; follow-up SWEEP-CENSUS: bookings read; AI analyses (POST, compute only) |
+| `BookingsAiController.aiNoShowPredictor` | POST | `/bookings/businesses/:businessId/ai-no-show-predictor` | applied | bookings:read (SWP-CENSUS-KEY-A, V1-64) |
+| `BookingsAiController.aiRevenueInsights` | POST | `/bookings/businesses/:businessId/ai-revenue-insights` | applied | bookings:read (SWP-CENSUS-KEY-A, V1-64) |
+| `BookingsAiController.aiScheduleOptimizer` | POST | `/bookings/businesses/:businessId/ai-schedule-optimizer` | applied | bookings:read (SWP-CENSUS-KEY-A, V1-64) |
+| `BookingsAiController.aiSearch` | POST | `/bookings/businesses/:businessId/ai-search` | applied | bookings:read (SWP-CENSUS-KEY-A, V1-64) |
 
 ### BookingsController (`bookings/bookings.controller.ts`)
 
@@ -1147,16 +1147,16 @@ ModuleScopeGuard at class level).
 | --- | --- | --- | --- | --- |
 | `BookingsController.getCalendarAuthUrl` | GET | `/bookings/businesses/:businessId/calendar/auth-url` | exempt-check | check:assertGoogleConnectOwner (a credential-binding start, CEN-09; the Google Calendar consent is the owner's, D-99) |
 | `BookingsController.addToWaitlist` | POST | `/bookings/businesses/:businessId/waitlist` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `BookingsController.cancelWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/cancel` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.convertWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/convert` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.createBooking` | POST | `/bookings/businesses/:businessId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.createExternalCalendarEvent` | POST | `/bookings/businesses/:businessId/calendar/events` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.createInvoiceFromBooking` | POST | `/bookings/businesses/:businessId/bookings/:bookingId/create-invoice` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.createService` | POST | `/bookings/businesses/:businessId/services` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.createService` | POST | `/bookings/businesses/:businessId/services` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `BookingsController.createStaff` | POST | `/bookings/businesses/:businessId/staff` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.deleteExternalCalendarEvent` | DELETE | `/bookings/businesses/:businessId/calendar/events/:eventId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.deleteService` | DELETE | `/bookings/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.deleteService` | DELETE | `/bookings/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `BookingsController.deleteStaff` | DELETE | `/bookings/businesses/:businessId/staff/:staffId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.disconnectCalendar` | POST | `/bookings/businesses/:businessId/calendar/disconnect` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `BookingsController.offerWaitlistSlot` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/offer` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
@@ -1171,7 +1171,7 @@ ModuleScopeGuard at class level).
 | `BookingsController.updateCalendarSettings` | PATCH | `/bookings/businesses/:businessId/calendar/settings` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `BookingsController.updateExternalCalendarEvent` | PATCH | `/bookings/businesses/:businessId/calendar/events/:eventId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
 | `BookingsController.updateReminderSettings` | PATCH | `/bookings/businesses/:businessId/reminder-settings` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
-| `BookingsController.updateService` | PATCH | `/bookings/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `BookingsController.updateService` | PATCH | `/bookings/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 
 ### BusinessAssetsController (`business-assets/business-assets.controller.ts`)
 
@@ -1278,14 +1278,14 @@ ModuleScopeGuard at class level).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `CatalogController.batchServices` | POST | `/catalog/businesses/:businessId/services/batch` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.batchServices` | POST | `/catalog/businesses/:businessId/services/batch` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `CatalogController.bulkUpdateProducts` | PATCH | `/catalog/businesses/:businessId/products/bulk` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
 | `CatalogController.createProduct` | POST | `/catalog/businesses/:businessId/products` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
-| `CatalogController.createService` | POST | `/catalog/businesses/:businessId/services` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.createService` | POST | `/catalog/businesses/:businessId/services` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `CatalogController.deleteProduct` | DELETE | `/catalog/businesses/:businessId/products/:productId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
-| `CatalogController.deleteService` | DELETE | `/catalog/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.deleteService` | DELETE | `/catalog/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 | `CatalogController.updateProduct` | PATCH | `/catalog/businesses/:businessId/products/:productId` | applied | revenue:write (P87 SWP-CENSUS-V1-A) |
-| `CatalogController.updateService` | PATCH | `/catalog/businesses/:businessId/services/:serviceId` | applied | bookings:write (P87 SWP-CENSUS-V1-A) |
+| `CatalogController.updateService` | PATCH | `/catalog/businesses/:businessId/services/:serviceId` | applied | storefront:write (OR bookings:admin, P234 FU-SERVICE-WRITE-SCOPE, D-317 Option B) |
 
 ### ChangeOrderController (`change-orders/change-order.controller.ts`)
 

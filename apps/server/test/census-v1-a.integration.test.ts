@@ -63,6 +63,7 @@ let db: any;
 let app: INestApplication;
 let controllersMap: Record<string, any> = {};
 let MODULE_SCOPE_KEY_VAL: string;
+let MODULE_SCOPE_ALT_KEY_VAL: string;
 const serviceCalls: Array<{ service: string; op: string }> = [];
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -86,7 +87,7 @@ interface Probe {
   method: 'post' | 'patch' | 'delete';
   path: (bizId: string) => string;
   body: Record<string, unknown>;
-  module: 'bookings' | 'revenue' | 'crm';
+  module: 'bookings' | 'revenue' | 'crm' | 'storefront';
   level: 'read' | 'write';
 }
 
@@ -96,7 +97,7 @@ const PROBES: Probe[] = [
     method: 'post',
     path: (b) => `/bookings/businesses/${b}/services`,
     body: { name: 'Haircut', duration: 30, price: 120 },
-    module: 'bookings',
+    module: 'storefront',
     level: 'write',
   },
   {
@@ -120,7 +121,7 @@ const PROBES: Probe[] = [
     method: 'post',
     path: (b) => `/catalog/businesses/${b}/services`,
     body: { name: 'Massage', duration: 60, price: 250 },
-    module: 'bookings',
+    module: 'storefront',
     level: 'write',
   },
   {
@@ -149,19 +150,43 @@ const PROBES: Probe[] = [
   },
 ];
 
-const EXPECTED_OPEN_SCOPES: Array<{ controller: string; handler: string; module: string; level: 'read' | 'write' }> = [
-  // BookingsController (24 -> bookings:write)
+const EXPECTED_OPEN_SCOPES: Array<{
+  controller: string;
+  handler: string;
+  module: string;
+  level: 'read' | 'write';
+  alternative?: { module: string; minLevel: 'read' | 'write' | 'admin' };
+}> = [
+  // BookingsController (20 -> bookings:write; 4 service writes -> storefront:write OR bookings:admin per D-317 Option B)
   { controller: 'BookingsController', handler: 'addToWaitlist', module: 'bookings', level: 'write' },
-  { controller: 'BookingsController', handler: 'batchServices', module: 'bookings', level: 'write' },
+  {
+    controller: 'BookingsController',
+    handler: 'batchServices',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
   { controller: 'BookingsController', handler: 'cancelWaitlistEntry', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'convertWaitlistEntry', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'createBooking', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'createExternalCalendarEvent', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'createInvoiceFromBooking', module: 'bookings', level: 'write' },
-  { controller: 'BookingsController', handler: 'createService', module: 'bookings', level: 'write' },
+  {
+    controller: 'BookingsController',
+    handler: 'createService',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
   { controller: 'BookingsController', handler: 'createStaff', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'deleteExternalCalendarEvent', module: 'bookings', level: 'write' },
-  { controller: 'BookingsController', handler: 'deleteService', module: 'bookings', level: 'write' },
+  {
+    controller: 'BookingsController',
+    handler: 'deleteService',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
   { controller: 'BookingsController', handler: 'deleteStaff', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'offerWaitlistSlot', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'rescheduleBooking', module: 'bookings', level: 'write' },
@@ -174,19 +199,49 @@ const EXPECTED_OPEN_SCOPES: Array<{ controller: string; handler: string; module:
   { controller: 'BookingsController', handler: 'updateBookingStatus', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'updateExternalCalendarEvent', module: 'bookings', level: 'write' },
   { controller: 'BookingsController', handler: 'updateReminderSettings', module: 'bookings', level: 'write' },
-  { controller: 'BookingsController', handler: 'updateService', module: 'bookings', level: 'write' },
+  {
+    controller: 'BookingsController',
+    handler: 'updateService',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
   // CalendarController (2 -> bookings:write)
   { controller: 'CalendarController', handler: 'keyExecuteCalendar', module: 'bookings', level: 'write' },
   { controller: 'CalendarController', handler: 'keyInterpretCalendar', module: 'bookings', level: 'write' },
-  // CatalogController (8 -> 4 products revenue:write, 4 services bookings:write)
+  // CatalogController (8 -> 4 products revenue:write, 4 services storefront:write OR bookings:admin per D-317 Option B)
   { controller: 'CatalogController', handler: 'createProduct', module: 'revenue', level: 'write' },
   { controller: 'CatalogController', handler: 'bulkUpdateProducts', module: 'revenue', level: 'write' },
   { controller: 'CatalogController', handler: 'updateProduct', module: 'revenue', level: 'write' },
   { controller: 'CatalogController', handler: 'deleteProduct', module: 'revenue', level: 'write' },
-  { controller: 'CatalogController', handler: 'createService', module: 'bookings', level: 'write' },
-  { controller: 'CatalogController', handler: 'updateService', module: 'bookings', level: 'write' },
-  { controller: 'CatalogController', handler: 'deleteService', module: 'bookings', level: 'write' },
-  { controller: 'CatalogController', handler: 'batchServices', module: 'bookings', level: 'write' },
+  {
+    controller: 'CatalogController',
+    handler: 'createService',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
+  {
+    controller: 'CatalogController',
+    handler: 'updateService',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
+  {
+    controller: 'CatalogController',
+    handler: 'deleteService',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
+  {
+    controller: 'CatalogController',
+    handler: 'batchServices',
+    module: 'storefront',
+    level: 'write',
+    alternative: { module: 'bookings', minLevel: 'admin' },
+  },
   // DocumentTemplateController (4 -> revenue:write)
   { controller: 'DocumentTemplateController', handler: 'create', module: 'revenue', level: 'write' },
   { controller: 'DocumentTemplateController', handler: 'update', module: 'revenue', level: 'write' },
@@ -226,7 +281,9 @@ beforeAll(async () => {
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
-  const { ModuleScopeGuard, MODULE_SCOPE_KEY } = await import('../src/core/auth/module-scope.guard');
+  const { ModuleScopeGuard, MODULE_SCOPE_KEY, MODULE_SCOPE_ALTERNATIVES_KEY } = await import(
+    '../src/core/auth/module-scope.guard'
+  );
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
   const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
   const { HoneypotGuard } = await import('../src/core/guards/honeypot.guard');
@@ -267,6 +324,7 @@ beforeAll(async () => {
   const { LeadFormsService } = await import('../src/modules/lead-forms/lead-forms.service');
 
   MODULE_SCOPE_KEY_VAL = MODULE_SCOPE_KEY;
+  MODULE_SCOPE_ALT_KEY_VAL = MODULE_SCOPE_ALTERNATIVES_KEY;
   controllersMap = {
     BookingsController,
     CalendarController,
@@ -364,21 +422,21 @@ beforeAll(async () => {
         userId: ID.staffNone,
         businessId: ID.bizA,
         role: 'STAFF',
-        permissionScopes: { bookings: 'none', revenue: 'none', crm: 'none' },
+        permissionScopes: { bookings: 'none', revenue: 'none', crm: 'none', storefront: 'none' },
       },
       {
         id: `${P}m_staffRead`,
         userId: ID.staffRead,
         businessId: ID.bizA,
         role: 'STAFF',
-        permissionScopes: { bookings: 'read', revenue: 'read', crm: 'read' },
+        permissionScopes: { bookings: 'read', revenue: 'read', crm: 'read', storefront: 'read' },
       },
       {
         id: `${P}m_staffWrite`,
         userId: ID.staffWrite,
         businessId: ID.bizA,
         role: 'STAFF',
-        permissionScopes: { bookings: 'write', revenue: 'write', crm: 'write' },
+        permissionScopes: { bookings: 'write', revenue: 'write', crm: 'write', storefront: 'write' },
       },
       { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' },
     ],
@@ -495,6 +553,21 @@ describe('P87 — SWP-CENSUS-V1-A (6 controllers, 47 open rows)', () => {
         failures.push(
           `${entry.controller}.${entry.handler}: expected ${entry.module}:${entry.level}, got ${scope ? `${scope.module}:${scope.minLevel}` : 'none'}`,
         );
+      }
+
+      if (entry.alternative) {
+        const alts =
+          (Reflect.getMetadata(MODULE_SCOPE_ALT_KEY_VAL, fn) as
+            | Array<{ module: string; minLevel: string }>
+            | undefined) ?? [];
+        const hasAlt = alts.some(
+          (a) => a.module === entry.alternative!.module && a.minLevel === entry.alternative!.minLevel,
+        );
+        if (!hasAlt) {
+          failures.push(
+            `${entry.controller}.${entry.handler}: missing alternative ${entry.alternative.module}:${entry.alternative.minLevel}`,
+          );
+        }
       }
     }
 

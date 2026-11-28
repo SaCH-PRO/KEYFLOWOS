@@ -583,6 +583,11 @@
       "packet": "V1-63 (TOF-KNOWLEDGE-UPLOAD)"
     },
     {
+      "prefix": "v64k_",
+      "owner": "apps/server/test/census-key-a.integration.test.ts",
+      "packet": "V1-64 (SWP-CENSUS-KEY-A)"
+    },
+    {
       "prefix": "v67a_",
       "owner": "apps/server/test/paged-order-ties.integration.test.ts",
       "packet": "V1-67 (W11-PAGING-TOTAL-ORDER-A)"
@@ -1692,6 +1697,16 @@
       "packet": "V1-92 (FU-KEY-SEND-INVOICE-PAID-REFUSE, P153)"
     },
     {
+      "prefix": "v67s_",
+      "owner": "apps/server/test/legacy-modules-store.integration.test.ts",
+      "packet": "V1-67 (WEDGE-HIDE-STORE, P225, D-263: the store on NAV-B-LEGACY-SERVER's legacy answer)"
+    },
+    {
+      "prefix": "v92g_",
+      "owner": "apps/server/test/storefront-checkout-gate.integration.test.ts",
+      "packet": "V1-92 (WEDGE-HIDE-STORE-SERVER, P233, D-263/D-300/D-304/D-305: storeCheckout flag and server-side checkout POST refusal)"
+    },
+    {
       "prefix": "v92c_",
       "owner": "apps/server/test/pricing-service.integration.test.ts",
       "packet": "V1-92 (TOF-TIER-PRICING-SCHEMA, P156)"
@@ -1725,6 +1740,11 @@
       "prefix": "v92n_",
       "owner": "apps/server/test/payroll-is-money.integration.test.ts",
       "packet": "V1-92 (FU-PAYROLL-IS-MONEY, P235)"
+    },
+    {
+      "prefix": "v92o_",
+      "owner": "apps/server/test/service-write-scope.integration.test.ts",
+      "packet": "V1-92 (P234 FU-SERVICE-WRITE-SCOPE, D-317)"
     }
   ],
   "pendingRenames": [],

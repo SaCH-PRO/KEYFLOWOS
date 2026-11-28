@@ -316,8 +316,26 @@ const CORTEX_MONEY_REPORT_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = ne
   ['analytics', new Set(['create_report', 'export_report'])],
 ]);
 
+/**
+ * P234 (FU-SERVICE-WRITE-SCOPE, D-309 / D-317 Option B): service, price, and deposit writes
+ * require `storefront:write` OR `bookings:admin` on HTTP (`CatalogController` / `BookingsController`),
+ * so KEY Cortex `bookings.add_service` and `bookings.update_service` hold the exact same rule.
+ */
+const SERVICE_WRITE_ANY_OF: readonly ModuleScopeRequirement[] = [
+  { module: 'storefront', minLevel: 'write' },
+  { module: 'bookings', minLevel: 'admin' },
+];
+const CORTEX_SERVICE_WRITE_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['bookings', new Set(['add_service', 'update_service'])],
+]);
+
 export type CortexCommandRequirement =
-  | { scope: CanonicalModule; ownerOnly?: string; alsoRequires?: ModuleScopeRequirement }
+  | {
+      scope: CanonicalModule;
+      ownerOnly?: string;
+      alsoRequires?: ModuleScopeRequirement;
+      anyOf?: readonly ModuleScopeRequirement[];
+    }
   | { adapterEnforced: string }
   | { executorRefused: string }
   | { refused: string };
@@ -335,6 +353,10 @@ export function cortexCommandRequirement(module: unknown, action: unknown): Cort
   if ('refused' in rule) return { refused: `Module "${module}" is not run as a direct command: ${rule.refused}` };
   if (!CORTEX_REGISTRY_ACTIONS.get(module)?.has(action)) {
     return { refused: `"${module}.${action}" is not an action the KEY capability registry lists, so it is not run` };
+  }
+  // P234 (D-317 Option B): service writes require storefront:write OR bookings:admin.
+  if ('scope' in rule && CORTEX_SERVICE_WRITE_ACTIONS.get(module)?.has(action)) {
+    return { scope: 'storefront', anyOf: SERVICE_WRITE_ANY_OF };
   }
   // W9-MONEY-REPORTS-KEY (A7-SEC-2, D-57): a money report also needs what its REST route needs.
   if ('scope' in rule && CORTEX_MONEY_REPORT_ACTIONS.get(module)?.has(action)) {
@@ -376,6 +398,17 @@ export function cortexCommandRefusal(authority: CortexMemberAuthority, module: u
   }
   if (requirement.ownerOnly && authority.role !== 'OWNER') {
     return `"${String(module)}.${String(action)}" is run as a direct command only for the business owner: ${requirement.ownerOnly}`;
+  }
+  if (requirement.anyOf && requirement.anyOf.length > 0) {
+    const allows = requirement.anyOf.some(
+      (req) => rankOf(authority.scopes[req.module] || 'none') >= LEVEL_RANK[req.minLevel],
+    );
+    if (!allows) {
+      const needed = requirement.anyOf.map((r) => `${r.module} ${r.minLevel}`).join(' or ');
+      const held = requirement.anyOf.map((r) => `${r.module}:${authority.scopes[r.module] || 'none'}`).join(', ');
+      return `Insufficient permissions: requires ${needed} access (you have ${held})`;
+    }
+    return null;
   }
   const level = authority.scopes[requirement.scope] || 'none';
   if (rankOf(level) < LEVEL_RANK.write) {
