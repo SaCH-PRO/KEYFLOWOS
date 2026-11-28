@@ -1,4 +1,7 @@
 /**
+ * R22: ExpenseFormModal is retired (it had no production mount); its tests in this file were removed. The R22
+ * PROGRESS on #273 names the side-sheet test that covers each.
+ *
  * EXPENSES-HUB-2 (SWP-EXPENSE-BILLS-RECURRING; BUG-059, BUG-061; journey H5, H7a).
  *
  * BUG-059: there is no way to record a bill to pay later: the expense sheet
@@ -52,10 +55,9 @@ vi.mock("@/lib/client", () => ({
 }));
 
 import { toast } from "sonner";
-import { ExpenseFormModal } from "../components/expense-form-modal";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 
-type Form = "modal" | "sidesheet";
+type Form = "sidesheet"; // R22: the modal is retired; the sheet is the form production mounts
 
 const EXISTING: Expense = {
   id: "exp_hub2",
@@ -78,7 +80,7 @@ function mount(form: Form, opts: { editing?: Expense | null; kind?: "expense" | 
   const onClose = vi.fn();
   const props = { businessId: BUSINESS, categories: [], editingExpense: opts.editing ?? null, onClose, onSaved };
   const view = render(
-    form === "modal" ? <ExpenseFormModal {...props} /> : <ExpenseFormSideSheet {...props} initialKind={opts.kind} />,
+    <ExpenseFormSideSheet {...props} initialKind={opts.kind} />,
   );
   return { onSaved, onClose, ...view };
 }
@@ -175,7 +177,7 @@ function pinClock(iso: string) {
   vi.setSystemTime(new Date(iso));
 }
 
-describe.each<Form>(["modal", "sidesheet"])("BUG-061: in the %s, 'Recurring' creates a real schedule", (form) => {
+describe.each<Form>(["sidesheet"])("BUG-061: in the %s, 'Recurring' creates a real schedule", (form) => {
   // 10:00 on 25 November in Port of Spain: the expenses below are dated today or ahead.
   beforeEach(() => pinClock("2026-11-25T14:00:00.000Z"));
   afterEach(() => vi.useRealTimers());
@@ -243,7 +245,7 @@ describe.each<Form>(["modal", "sidesheet"])("BUG-061: in the %s, 'Recurring' cre
   it("editing an expense to make it recurring creates its schedule; editing one already recurring does not create another", async () => {
     const first = mount(form, { editing: EXISTING });
     tickRecurring(first.container, "MONTHLY");
-    fireEvent.click(screen.getByRole("button", { name: form === "modal" ? "Update" : "Update Expense" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
     await waitFor(() => expect(updateExpense).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(createRecurringExpense).toHaveBeenCalledTimes(1));
     expect(createRecurringExpense.mock.calls[0][1]).toMatchObject({ frequency: "MONTHLY", nextRunDate: "2026-12-01", categoryId: "cat_rent", vendor: "Landlord Ltd" });
@@ -252,7 +254,7 @@ describe.each<Form>(["modal", "sidesheet"])("BUG-061: in the %s, 'Recurring' cre
     createRecurringExpense.mockClear();
     updateExpense.mockClear();
     mount(form, { editing: { ...EXISTING, isRecurring: true, recurringFrequency: "MONTHLY" } });
-    fireEvent.click(screen.getByRole("button", { name: form === "modal" ? "Update" : "Update Expense" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Expense" }));
     await waitFor(() => expect(updateExpense).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(createRecurringExpense).not.toHaveBeenCalled();
@@ -273,7 +275,7 @@ describe("BUG-061 with BUG-059: a recurring bill's schedule generates bills", ()
   });
 });
 
-describe.each<Form>(["modal", "sidesheet"])("COR-F1: in the %s, a back-dated recurring expense never catches up", (form) => {
+describe.each<Form>(["sidesheet"])("COR-F1: in the %s, a back-dated recurring expense never catches up", (form) => {
   // 10:00 on 26 November 2026 in Port of Spain. The server generates one expense per due period from nextRunDate,
   // so a schedule whose first run is already past would book every missed period at once: the first run is the
   // first period boundary after today.
@@ -301,7 +303,7 @@ describe.each<Form>(["modal", "sidesheet"])("COR-F1: in the %s, a back-dated rec
   });
 });
 
-describe.each<Form>(["modal", "sidesheet"])("COR-F3: in the %s, a double click saves once", (form) => {
+describe.each<Form>(["sidesheet"])("COR-F3: in the %s, a double click saves once", (form) => {
   it("a second click while the save is in flight sends nothing", async () => {
     let release: (v: unknown) => void = () => {};
     createExpense.mockImplementation(() => new Promise((r) => { release = r; }));
@@ -339,6 +341,7 @@ describe("COR-F3: a double click on Record bill records one bill", () => {
   });
 });
 
+// R25-7 (a correction, not a weakening): the bill carried tags only, so the notice names its tags, not a receipt.
 describe("COR-F5: a bill whose receipt and tags are refused says so", () => {
   it("the refused PATCH after the bill is shown, not 'Bill recorded' alone", async () => {
     updateExpense.mockResolvedValue({ data: null, error: "Forbidden", status: 403 });
@@ -346,13 +349,13 @@ describe("COR-F5: a bill whose receipt and tags are refused says so", () => {
     fillBasics(container, "Water bill", "75");
     fireEvent.change(screen.getByPlaceholderText(/tag1/i), { target: { value: "utilities" } });
     fireEvent.click(screen.getByRole("button", { name: /^record bill$/i }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^Bill recorded, but its receipt and tags were not saved: Forbidden/)));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^Bill recorded, but its tags were not saved: Forbidden/)));
     expect(toast.success).not.toHaveBeenCalled();
     expect(onSaved, "the bill exists: the sheet closes and the list reloads").toHaveBeenCalled();
   });
 });
 
-describe.each<Form>(["modal", "sidesheet"])("COR-r1-1: in the %s, the save guard clears after a refused save", (form) => {
+describe.each<Form>(["sidesheet"])("COR-r1-1: in the %s, the save guard clears after a refused save", (form) => {
   it("a save refused (409) can be pressed again, and the second press sends", async () => {
     createExpense.mockResolvedValueOnce({ data: null, error: "Conflict", status: 409 });
     const { container } = mount(form);
