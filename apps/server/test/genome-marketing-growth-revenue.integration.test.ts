@@ -308,8 +308,10 @@ describe('FU-GENOME-SURFACES-REVENUE round 2: marketing-growth money only to rev
     const computed = await post(mg('/snapshot/compute'), ID.staffNone);
     expect(computed.status).toBeLessThan(300);
     expectSnapshotProjected(computed.body);
-    // Regression pin for merge-queue run 46139929502: a valid ISO computedAt at :13.7xx seconds must never trip FIGURES.
+    // Regression pins for ISO-8601 computedAt collisions (run 46139929502 :13.734Z and unanchored :10.731Z).
     expectSnapshotProjected({ ...computed.body, computedAt: '2026-11-28T11:33:13.734Z' });
+    expectSnapshotProjected({ ...computed.body, computedAt: '2026-11-28T11:33:10.731Z' });
+    expect(JSON.stringify({ ...computed.body, funnelConversionEstimate: 0.731 })).toMatch(FIGURES);
   });
 
   it('MGR-03 the generated signals and recommendations answer no money row', async () => {
