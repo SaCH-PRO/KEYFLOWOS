@@ -85,6 +85,7 @@ import {
   containsUntrustedBlock,
   exceedsUntrustedCap,
   fenceUntrusted,
+  isValidFencedUntrusted,
   withoutInvisible,
   withUntrustedContentRule,
   withoutUntrustedBlocks,
@@ -193,6 +194,13 @@ export interface FlowAttachment {
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /**
+   * FU-ATTACHMENT-PERSIST-SEPARATE (D-261): fenced untrusted extraction for
+   * this turn's attachments, persisted separately from the member's own text
+   * (`content`) so reopened chats never show fence markup in the member bubble
+   * and replay emits it as its own fenced user message.
+   */
+  attachmentContext?: string;
   attachments?: FlowAttachment[];
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
@@ -1631,11 +1639,12 @@ export class FlowOrchestratorService {
           voice: 'default',
           mood: 'neutral',
           preferredProvider: 'openai',
-          // RR-UNTRUSTED-CONTENT-FENCE review F1: the cortex prompt carries no untrusted-content rule,
-          // so a fenced block from an earlier turn reaches it as a placeholder, not as its text.
+          // RR-UNTRUSTED-CONTENT-FENCE review F1 / FU-ATTACHMENT-PERSIST-SEPARATE: the cortex
+          // prompt carries no untrusted-content rule, so fenced blocks, legacy ATTACHMENT CONTEXT
+          // tails, and separated attachmentContext turns all reach it as a placeholder only.
           messages: conversationHistory.slice(-10).map((m) => ({
             role: m.role,
-            content: typeof m.content === 'string' ? withoutUntrustedBlocks(m.content, '[attachment text withheld]') : m.content,
+            content: FlowOrchestratorService.redactForCortexHistory(m),
             timestamp: now,
           })),
           createdAt: now,
@@ -2435,6 +2444,204 @@ export class FlowOrchestratorService {
     return 'ATTACHMENT CONTEXT:\n' + parts.join('\n\n---\n\n');
   }
 
+  private static readonly LEGACY_ATTACHMENT_MARKER_RE = /(?:^|\r?\n\r?\n)ATTACHMENT CONTEXT:\r?\n/;
+  private static readonly INLINE_ATTACHMENT_BLOCK_RE =
+    /<untrusted source="attachment" id="([0-9a-f]{16})">\n/g;
+
+  /**
+   * Cryptographically verifies that `raw` is already an unmodified single
+   * `fenceUntrusted('attachment', ...)` block (including >96k capped blocks);
+   * otherwise fences it fresh so client-forged or legacy text can never escape.
+   */
+  private static ensureFencedAttachmentContext(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    if (isValidFencedUntrusted('attachment', trimmed)) {
+      return trimmed;
+    }
+    return fenceUntrusted('attachment', trimmed);
+  }
+
+  /**
+   * Extract only cryptographically verified `<untrusted source="attachment" ...>`
+   * blocks and partition any pre-fence legacy `ATTACHMENT CONTEXT:\n...` tail
+   * sitting outside verified blocks. Forged, unclosed, or non-attachment tags
+   * are never trusted and cannot suppress legacy splitting.
+   */
+  private static partitionUserContent(content: string): {
+    memberText: string;
+    verifiedBlocks: string[];
+    legacyRaw: string | null;
+  } {
+    if (typeof content !== 'string' || !content) {
+      return { memberText: '', verifiedBlocks: [], legacyRaw: null };
+    }
+
+    const spans: Array<{ start: number; end: number; block: string }> = [];
+    let at = 0;
+    FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.lastIndex = 0;
+    for (
+      let m = FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.exec(content);
+      m;
+      m = FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.exec(content)
+    ) {
+      if (m.index < at) continue;
+      const close = `\n</untrusted id="${m[1]}">`;
+      const closeAt = content.indexOf(close, m.index + m[0].length);
+      if (closeAt === -1) continue;
+      const end = closeAt + close.length;
+      const candidate = content.slice(m.index, end);
+      if (!isValidFencedUntrusted('attachment', candidate)) continue;
+      spans.push({ start: m.index, end, block: candidate });
+      at = end;
+      FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.lastIndex = at;
+    }
+    FlowOrchestratorService.INLINE_ATTACHMENT_BLOCK_RE.lastIndex = 0;
+
+    // Mask verified spans with equal-length spaces to preserve 1-to-1 indices
+    // when searching for pre-fence legacy `ATTACHMENT CONTEXT:\n` outside them.
+    let masked = content;
+    if (spans.length > 0) {
+      let buf = '';
+      let pos = 0;
+      for (const s of spans) {
+        buf += content.slice(pos, s.start) + ' '.repeat(s.end - s.start);
+        pos = s.end;
+      }
+      buf += content.slice(pos);
+      masked = buf;
+    }
+
+    const stripSpans = (text: string, subset: Array<{ start: number; end: number }>): string => {
+      if (!subset.length) return text;
+      let out = '';
+      let pos = 0;
+      for (const s of subset) {
+        out += text.slice(pos, s.start);
+        pos = s.end;
+      }
+      return out + text.slice(pos);
+    };
+
+    const legacyMatch = FlowOrchestratorService.LEGACY_ATTACHMENT_MARKER_RE.exec(masked);
+    if (legacyMatch) {
+      const legacyIdx = legacyMatch.index;
+      const startOfBlock = content.indexOf('ATTACHMENT CONTEXT:', legacyIdx);
+      const beforeSpans = spans.filter((s) => s.end <= legacyIdx);
+      const memberText = stripSpans(content.slice(0, legacyIdx), beforeSpans).trim();
+      return {
+        memberText,
+        verifiedBlocks: beforeSpans.map((s) => s.block),
+        legacyRaw: content.slice(startOfBlock),
+      };
+    }
+
+    return {
+      memberText: stripSpans(content, spans).trim(),
+      verifiedBlocks: spans.map((s) => s.block),
+      legacyRaw: null,
+    };
+  }
+
+  /** Member's own words only — never fenced blocks or legacy ATTACHMENT CONTEXT tails. */
+  private static memberTextOnly(content: string | null | undefined): string {
+    if (typeof content !== 'string') return '';
+    const { memberText } = FlowOrchestratorService.partitionUserContent(content);
+    return withoutUntrustedBlocks(memberText, '').trim();
+  }
+
+  /** Redact fenced blocks, legacy ATTACHMENT CONTEXT tails, and separated attachmentContext for cortex history. */
+  private static redactForCortexHistory(msg: FlowMessage): string {
+    const hasSeparate = typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0;
+    if (typeof msg.content !== 'string') {
+      return hasSeparate ? '[attachment text withheld]' : (msg.content as unknown as string);
+    }
+    const { memberText, verifiedBlocks, legacyRaw } = FlowOrchestratorService.partitionUserContent(msg.content);
+    const hasAttachment = hasSeparate || verifiedBlocks.length > 0 || Boolean(legacyRaw);
+    if (!hasAttachment) {
+      return withoutUntrustedBlocks(msg.content, '[attachment text withheld]');
+    }
+    const clean = withoutUntrustedBlocks(memberText, '[attachment text withheld]').trim();
+    if (!clean) return '[attachment text withheld]';
+    if (clean.includes('[attachment text withheld]')) return clean;
+    return `${clean}\n\n[attachment text withheld]`;
+  }
+
+  /** Separate any legacy/intermediate inline attachment text and enforce fenced attachmentContext on read. */
+  private static separatePersistedUserMessage(msg: FlowMessage): FlowMessage {
+    if (!msg || msg.role !== 'user' || typeof msg.content !== 'string') return msg;
+    const { memberText, verifiedBlocks, legacyRaw } = FlowOrchestratorService.partitionUserContent(msg.content);
+    const hasSeparate = typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0;
+    const hasInline = verifiedBlocks.length > 0 || Boolean(legacyRaw);
+    if (!hasSeparate && !hasInline) return msg;
+
+    const cleanMember = withoutUntrustedBlocks(memberText, '').trim();
+    const fencedParts: string[] = [];
+    if (hasSeparate) {
+      const normalized = FlowOrchestratorService.ensureFencedAttachmentContext(msg.attachmentContext!);
+      if (normalized) fencedParts.push(normalized);
+    }
+    for (const b of verifiedBlocks) fencedParts.push(b);
+    if (legacyRaw) {
+      const legacyFenced = fenceUntrusted('attachment', legacyRaw);
+      if (legacyFenced) fencedParts.push(legacyFenced);
+    }
+    const combined = fencedParts.length === 1 ? fencedParts[0] : fencedParts.join('\n\n');
+    return {
+      ...msg,
+      content: cleanMember,
+      ...(combined ? { attachmentContext: combined } : {}),
+    };
+  }
+
+  /**
+   * FU-ATTACHMENT-PERSIST-SEPARATE: replay a persisted user history entry to
+   * the LLM, emitting any persisted or legacy attachment extraction as its own
+   * separate fenced user message BEFORE the member's own words (matching
+   * first-turn order).
+   */
+  private replayUserHistoryMessages(msg: FlowMessage): GatewayMessage[] {
+    const rawContent = typeof msg.content === 'string' ? msg.content : '';
+    const hasSeparate = typeof msg.attachmentContext === 'string' && msg.attachmentContext.trim().length > 0;
+    const { memberText, verifiedBlocks, legacyRaw } = FlowOrchestratorService.partitionUserContent(rawContent);
+
+    if (hasSeparate) {
+      const out: GatewayMessage[] = [];
+      const fenced = FlowOrchestratorService.ensureFencedAttachmentContext(msg.attachmentContext!);
+      if (fenced) out.push({ role: 'user', content: fenced });
+      for (const b of verifiedBlocks) out.push({ role: 'user', content: b });
+      if (legacyRaw) {
+        const legacyFenced = fenceUntrusted('attachment', legacyRaw);
+        if (legacyFenced) out.push({ role: 'user', content: legacyFenced });
+      }
+      const cleanMember = withoutUntrustedBlocks(memberText, '').trim();
+      if (cleanMember) {
+        out.push({ role: 'user', content: cleanMember });
+      }
+      return out.length ? out : [{ role: 'user', content: '' }];
+    }
+
+    // Genuine intermediate post-RR-UNTRUSTED-CONTENT-FENCE message carrying only
+    // cryptographically verified fenced block(s) and no legacy tail outside them.
+    if (verifiedBlocks.length > 0 && !legacyRaw) {
+      return [{ role: 'user', content: rawContent }];
+    }
+
+    // Pre-fence legacy message carrying raw `ATTACHMENT CONTEXT:\n...` inline in content
+    // (including any forged <untrusted> tags planted inside it).
+    if (legacyRaw) {
+      const out: GatewayMessage[] = [];
+      for (const b of verifiedBlocks) out.push({ role: 'user', content: b });
+      const fenced = fenceUntrusted('attachment', legacyRaw);
+      if (fenced) out.push({ role: 'user', content: fenced });
+      const cleanMember = withoutUntrustedBlocks(memberText, '').trim();
+      if (cleanMember) out.push({ role: 'user', content: cleanMember });
+      return out.length ? out : [{ role: 'user', content: '' }];
+    }
+
+    return [{ role: 'user', content: this.buildAttachmentContextSync(rawContent, msg.attachments) }];
+  }
+
   private buildAttachmentContextSync(
     content: string,
     attachments?: FlowAttachment[],
@@ -2458,7 +2665,7 @@ export class FlowOrchestratorService {
     sessionId: string,
     conversationHistory: FlowMessage[],
     message: string,
-    enrichedMessage: string,
+    attachmentContext: string,
     attachments: FlowAttachment[] | undefined,
     assistantContent: string,
     assistantToolCalls: FlowToolCall[] | undefined,
@@ -2472,7 +2679,8 @@ export class FlowOrchestratorService {
     if (message.trim() || attachments?.length) {
       sessionMessages.push({
         role: 'user',
-        content: enrichedMessage,
+        content: message,
+        ...(attachmentContext ? { attachmentContext } : {}),
         attachments,
         timestamp: new Date(),
       });
@@ -2511,7 +2719,7 @@ export class FlowOrchestratorService {
     sessionId: string,
     conversationHistory: FlowMessage[],
     message: string,
-    enrichedMessage: string,
+    attachmentContext: string,
     attachments: FlowAttachment[] | undefined,
     toolCalls: FlowToolCall[],
     toolResults: FlowToolResult[],
@@ -2521,7 +2729,8 @@ export class FlowOrchestratorService {
     if (message.trim() || attachments?.length) {
       sessionMessages.push({
         role: 'user',
-        content: enrichedMessage,
+        content: message,
+        ...(attachmentContext ? { attachmentContext } : {}),
         attachments,
         timestamp: new Date(),
       });
@@ -2642,7 +2851,6 @@ export class FlowOrchestratorService {
     const truncatedFiles: number[] = [];
     const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
     const attachmentContext = fenceUntrusted('attachment', extraction);
-    const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
     // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
     const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
@@ -2683,8 +2891,9 @@ export class FlowOrchestratorService {
     // Semantic memory search based on last user message (optional enrichment:
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
-    const semanticMemorySection = lastUserMessage?.content
-      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content, userId, server)
+    const lastUserMemberText = FlowOrchestratorService.memberTextOnly(lastUserMessage?.content);
+    const semanticMemorySection = lastUserMemberText
+      ? await this.buildSemanticMemorySection(businessId, lastUserMemberText, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -2741,7 +2950,7 @@ ${triage.standingContext}`;
 
     for (const msg of conversationHistory) {
       if (msg.role === 'user') {
-        messages.push({ role: 'user', content: this.buildAttachmentContextSync(msg.content, msg.attachments) });
+        messages.push(...this.replayUserHistoryMessages(msg));
       } else if (msg.role === 'assistant') {
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           messages.push({
@@ -2863,7 +3072,7 @@ ${triage.standingContext}`;
     }
 
     if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
-    messages.push({ role: 'user', content: message });
+    if (message.trim() || !attachmentContext) messages.push({ role: 'user', content: message });
     withUntrustedContentRuleWhereFenced(messages);
 
     try {
@@ -3078,7 +3287,7 @@ ${triage.standingContext}`;
           effectiveSessionId,
           conversationHistory,
           message,
-          enrichedMessage,
+          attachmentContext,
           attachments,
           announcedCalls,
           toolResults,
@@ -3109,9 +3318,13 @@ ${triage.standingContext}`;
     }
 
     // Persist the turn to the FlowSession so it can be resumed later.
+    // FU-ATTACHMENT-PERSIST-SEPARATE: keep the member's own words in `content`
+    // and store the fenced attachment extraction in `attachmentContext` so
+    // history reads, genome extraction, and follow-up turns never mix them.
     const userMessage: FlowMessage = {
       role: 'user',
-      content: enrichedMessage,
+      content: message,
+      ...(attachmentContext ? { attachmentContext } : {}),
       attachments,
       timestamp: new Date(),
     };
@@ -3157,7 +3370,6 @@ ${triage.standingContext}`;
     const truncatedFiles: number[] = [];
     const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
     const attachmentContext = fenceUntrusted('attachment', extraction);
-    const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
     // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
     const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
@@ -3206,8 +3418,8 @@ ${triage.standingContext}`;
 
     // Semantic memory search based on current message (optional enrichment:
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
-    const semanticMemorySection = enrichedMessage
-      ? await this.buildSemanticMemorySection(businessId, enrichedMessage, userId, server)
+    const semanticMemorySection = message
+      ? await this.buildSemanticMemorySection(businessId, message, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -3264,7 +3476,7 @@ ${triage.standingContext}`;
 
     for (const msg of conversationHistory) {
       if (msg.role === 'user') {
-        messages.push({ role: 'user', content: this.buildAttachmentContextSync(msg.content, msg.attachments) });
+        messages.push(...this.replayUserHistoryMessages(msg));
       } else if (msg.role === 'assistant') {
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           messages.push({
@@ -3295,7 +3507,7 @@ ${triage.standingContext}`;
     }
 
     if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
-    messages.push({ role: 'user', content: message });
+    if (message.trim() || !attachmentContext) messages.push({ role: 'user', content: message });
     withUntrustedContentRuleWhereFenced(messages);
 
     // Publish the thalamic verdict before the answer starts. Nothing branches
@@ -3336,7 +3548,7 @@ ${triage.standingContext}`;
       const phases: Array<{ label: string; step: number; of: number }> = [];
       const deliberation = await this.deliberate(
         businessId,
-        enrichedMessage,
+        message,
         conversationHistory,
         (label, step, of) => phases.push({ label, step, of }),
         userId,
@@ -3468,7 +3680,7 @@ ${triage.standingContext}`;
           effectiveSessionId,
           conversationHistory,
           message,
-          enrichedMessage,
+          attachmentContext,
           attachments,
           shown(fullContent),
           undefined,
@@ -3543,7 +3755,7 @@ ${triage.standingContext}`;
           effectiveSessionId,
           conversationHistory,
           message,
-          enrichedMessage,
+          attachmentContext,
           attachments,
           shown(blockMessage),
           announcedCalls,
@@ -3582,7 +3794,7 @@ ${triage.standingContext}`;
           effectiveSessionId,
           conversationHistory,
           message,
-          enrichedMessage,
+          attachmentContext,
           attachments,
           shown(formalMessage),
           announcedCalls,
@@ -3614,7 +3826,7 @@ ${triage.standingContext}`;
           effectiveSessionId,
           conversationHistory,
           message,
-          enrichedMessage,
+          attachmentContext,
           attachments,
           shown(fullContent),
           announcedCalls,
@@ -3684,7 +3896,7 @@ ${triage.standingContext}`;
               effectiveSessionId,
               conversationHistory,
               message,
-              enrichedMessage,
+              attachmentContext,
               attachments,
               announcedCalls,
               toolResults,
@@ -3703,7 +3915,7 @@ ${triage.standingContext}`;
             effectiveSessionId,
             conversationHistory,
             message,
-            enrichedMessage,
+            attachmentContext,
             attachments,
             announcedCalls,
             toolResults,
@@ -3717,7 +3929,7 @@ ${triage.standingContext}`;
         effectiveSessionId,
         conversationHistory,
         message,
-        enrichedMessage,
+        attachmentContext,
         attachments,
         shown(followUpContent),
         announcedCalls,
@@ -9288,7 +9500,8 @@ ${triage.standingContext}`;
       select: { messages: true },
     });
     if (!session) return [];
-    return (session.messages as any[]) || [];
+    const raw = (session.messages as unknown as FlowMessage[]) || [];
+    return raw.map((msg) => FlowOrchestratorService.separatePersistedUserMessage(msg));
   }
 
   async saveConversationHistory(
@@ -9320,11 +9533,15 @@ ${triage.standingContext}`;
     // Every conversation feeds the genome: extract durable business facts
     // from the fresh turn into pending genome signals. Fire-and-forget —
     // extraction must never block or break a turn.
+    // FU-ATTACHMENT-PERSIST-SEPARATE: pass only the member's own words, never
+    // untrusted attachment text (even if a legacy or caller-supplied message
+    // carried inline fenced or pre-fence attachment blocks).
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-    if (lastUser?.content && lastAssistant?.content) {
+    const cleanUserText = FlowOrchestratorService.memberTextOnly(lastUser?.content);
+    if (cleanUserText && lastAssistant?.content) {
       this.genomeExtractor
-        .extractFromTurn(businessId, lastUser.content, lastAssistant.content)
+        .extractFromTurn(businessId, cleanUserText, lastAssistant.content)
         .catch((err: unknown) => {
           this.logger.warn(`Genome extraction failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
         });
@@ -9346,6 +9563,11 @@ ${triage.standingContext}`;
     return rows.map((row) => ({
       ...row,
       id: this.clientSessionId(row.id, businessId, userId),
+      messages: Array.isArray(row.messages)
+        ? (row.messages as unknown as FlowMessage[]).map((msg) =>
+            FlowOrchestratorService.separatePersistedUserMessage(msg),
+          )
+        : row.messages,
     }));
   }
 

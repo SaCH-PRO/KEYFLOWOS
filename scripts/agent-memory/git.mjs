@@ -25,12 +25,14 @@ export function firstCommitAdding(root, ref, path) {
 /** Commits reachable from `ref` but not from `base` (all of history when base is null). */
 export function commitsSince(root, base, ref) {
   const range = base ? `${base}..${ref}` : ref;
-  return git(['log', '--format=%H%x09%s', range], root)
+  return git(['log', '--format=%H%x09%cI%x09%s', range], root)
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const i = line.indexOf('\t');
-      return { sha: line.slice(0, i), subject: line.slice(i + 1) };
+      const i1 = line.indexOf('\t');
+      const i2 = i1 === -1 ? -1 : line.indexOf('\t', i1 + 1);
+      if (i1 === -1 || i2 === -1) return { sha: line, date: null, subject: '' };
+      return { sha: line.slice(0, i1), date: line.slice(i1 + 1, i2), subject: line.slice(i2 + 1) };
     });
 }
 
