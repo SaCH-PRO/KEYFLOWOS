@@ -51,7 +51,6 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         delayMinutes: 3 * 24 * 60,
         inputMapping: (payload) => ({
           title: `Follow up with ${payload.contactName ?? 'client'} after service`,
-          description: `Check satisfaction after booking ${payload.bookingId}`,
           dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
           contactId: payload.contactId,
         }),
@@ -84,7 +83,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         condition: (payload) => payload.status === 'LEAD',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          tag: 'New Lead',
+          tags: ['New Lead'],
         }),
       },
       {
@@ -92,13 +91,10 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         toolName: 'create_followup_queue',
         description: 'Create follow-up queue for new lead',
         condition: (payload) => payload.status === 'LEAD',
-        inputMapping: (payload) => ({
-          contactId: payload.contactId,
-          steps: [
-            { delayDays: 1, action: 'Send welcome email', channel: 'email' },
-            { delayDays: 3, action: 'Check interest', channel: 'email' },
-            { delayDays: 7, action: 'Offer consultation', channel: 'email' },
-          ],
+        inputMapping: () => ({
+          staleDays: 14,
+          maxContacts: 20,
+          taskTitle: 'Follow up with {name}',
         }),
       },
       {
@@ -108,7 +104,6 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         condition: (payload) => payload.status === 'LEAD',
         inputMapping: (payload) => ({
           title: `Qualify lead: ${payload.contactName ?? 'New lead'}`,
-          description: `Review lead details and determine next steps. Source: ${payload.source ?? 'unknown'}`,
           contactId: payload.contactId,
           dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
         }),
@@ -176,7 +171,6 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Create collection follow-up task',
         inputMapping: (payload) => ({
           title: `Follow up on overdue invoice ${payload.invoiceNumber ?? payload.invoiceId}`,
-          description: `Invoice amount: ${payload.amount}. Days overdue: ${payload.daysOverdue ?? 7}`,
           contactId: payload.contactId,
           dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
         }),
@@ -188,7 +182,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         condition: (payload) => (payload.daysOverdue ?? 0) > 30,
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          tag: 'Slow Payer',
+          tags: ['Slow Payer'],
         }),
       },
     ],
@@ -216,7 +210,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Log payment in CRM',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          content: `Payment received: ${payload.amount} for invoice ${payload.invoiceNumber ?? payload.invoiceId}`,
+          body: `Payment received: ${payload.amount} for invoice ${payload.invoiceNumber ?? payload.invoiceId}`,
         }),
       },
     ],
@@ -244,7 +238,6 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Create recovery task for no-show',
         inputMapping: (payload) => ({
           title: `Rebook no-show: ${payload.contactName ?? 'Customer'}`,
-          description: `Booking ${payload.bookingId} was missed. Follow up to reschedule.`,
           contactId: payload.contactId,
           dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
         }),
@@ -255,7 +248,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Tag as no-show for tracking',
         inputMapping: (payload) => ({
           contactId: payload.contactId,
-          tag: 'No-Show',
+          tags: ['No-Show'],
         }),
       },
     ],
@@ -283,7 +276,7 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Create fulfillment task',
         inputMapping: (payload) => ({
           title: `Fulfill order ${payload.orderNumber ?? payload.orderId}`,
-          description: `Pack and ship order. Items: ${payload.itemCount ?? 'N/A'}. Total: ${payload.total}`,
+          contactId: payload.contactId,
           dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
         }),
       },
@@ -321,7 +314,6 @@ export const JOURNEY_TEMPLATES: JourneyTemplate[] = [
         description: 'Create follow-up task for stale quote',
         inputMapping: (payload) => ({
           title: `Follow up on stale quote ${payload.quoteId}`,
-          description: `Quote has been stale for ${payload.daysStale ?? 7} days. Value: ${payload.amount ?? 'N/A'}`,
           contactId: payload.contactId,
           dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
         }),
