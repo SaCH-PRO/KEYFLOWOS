@@ -29,7 +29,8 @@ describe("R16-3: a symbol after sentence punctuation is lone, and goes with it",
     expect(clip("日本、& more", 7)).toBe("日本...");
   });
   it("the security reviewer's two: what the rule gives", () => {
-    expect(clip("Wow!* terms", 9)).toBe("Wow...");
+    // r18 (R18-2), a correction: a conditions marker after sentence punctuation qualifies the claim, and stays.
+    expect(clip("Wow!* terms", 9)).toBe("Wow!*...");
     // A closing bracket is never dropped, so it ends the drop, and the "&" before it is not reached.
     expect(clip("Shop &) more", 11)).toBe("Shop &)...");
   });

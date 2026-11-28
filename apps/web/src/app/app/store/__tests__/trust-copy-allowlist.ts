@@ -293,7 +293,7 @@ export function onStore<D extends object>(d: D): D & { storeProducts: unknown; s
  */
 const ALWAYS_DROPPED = [".", ",", ";", ":", "!", "?", "…", "—", "–", "-", "(", "[", "{", "“", "‘", "«", "„", "。", "、", "，", "！", "？", "；", "：", "．", "｡", "､"];
 /** Symbols and marks that go when they stand alone (after a space): none of them closes or means anything there. */
-const LONE_DROPPED = ["&", "•", "/", "*", "#", "@", "¿", "¡", "<", "$", "€", "°", "★", "|", "©", "®", "™", "↔", "→", "‼"];
+const LONE_DROPPED = ["&", "•", "/", "*", "†", "‡", "#", "@", "¿", "¡", "<", "$", "€", "°", "★", "|", "©", "®", "™", "↔", "→", "‼"];
 const CURRENCY = ["$", "€"];
 /** What makes text more than punctuation and symbols: a letter, a digit, or one of the alphabets' emoji. */
 export const CLIP_EMOJI = ["🎉", "🌶️", "👍🏽", "#️⃣", "1️⃣", "🇹🇹", "🇺🇸", "👨‍👩‍👧", "🏳️‍🌈", "❤️"];
@@ -303,13 +303,27 @@ export function clipEndViolation(text: string, kept: string): string | null {
   if (/\s$/u.test(kept)) return "whitespace before the '...'";
   if (!hasWordOrEmoji(text)) return null;
   if (!hasWordOrEmoji(kept)) return "only punctuation and symbols kept from text that has words";
-  if (ALWAYS_DROPPED.some((c) => kept.endsWith(c))) return `ends in ${JSON.stringify(kept.slice(-1))}`;
+  // r18 (R18-3): a "“" or "‘" that closes a „ or ‚ opened before it (German, Polish) is a closing quote, and may end it.
+  // Reading left to right: a low quote opens; a "“" (or "‘") closes the last one still open, if any.
+  const closesLow = (q: string, low: string) => {
+    if (!kept.endsWith(q)) return false;
+    let open = 0;
+    for (const c of Array.from(kept.slice(0, -q.length))) {
+      if (c === low) open++;
+      else if (c === q && open > 0) open--;
+    }
+    return open > 0;
+  };
+  const closing = closesLow("“", "„") || closesLow("‘", "‚");
+  if (!closing && ALWAYS_DROPPED.some((c) => kept.endsWith(c))) return `ends in ${JSON.stringify(kept.slice(-1))}`;
   // The last token after a space, made only of characters that go when alone: a lone symbol left at the end.
   const m = /(\S*)\s+(\S+)$/u.exec(kept);
   if (m) {
     const token = Array.from(m[2]);
     if (token.every((c) => LONE_DROPPED.includes(c))) {
-      const afterNumber = token.every((c) => CURRENCY.includes(c)) && /[0-9]$/.test(m[1]);
+      // A currency run after a number is the number's, with any conditions marker on it (r18: "5 €*").
+      const signs = token.join("").replace(/[*†‡]+$/u, "");
+      const afterNumber = signs !== "" && Array.from(signs).every((c) => CURRENCY.includes(c)) && /[0-9]$/.test(m[1]);
       if (!afterNumber) return `ends in a lone ${JSON.stringify(m[2])}`;
     }
   }
@@ -339,4 +353,30 @@ export function clipKeepTokens(text: string, max: number, kept: string): { token
 export function clipKeepViolation(text: string, max: number, kept: string): string | null {
   const lost = clipKeepTokens(text, max, kept).find((t) => kept.length < t.end);
   return lost ? `dropped ${JSON.stringify(lost.token)}` : null;
+}
+
+/**
+ * P231 r18 (R18-1, R18-2): a conditions marker ("*", "†", "‡") points to terms, and must not go while the claim it
+ * qualifies stays. Independent of clip()'s rules, from explicit lists: when the kept part is the text's start, every
+ * token that fits in the room, is followed by whitespace, and ends in a run of markers right after a letter, a digit,
+ * a mark that closes or means something, or sentence punctuation ("50%*", "Free*", "( sale )*", "Free!*"), is kept
+ * whole. Returns why not, or null.
+ */
+const CONDITION_HOLDERS = /[\p{L}\p{N}%+)\]}”’»"'.,;:!?…。、，！？]/u;
+export function clipConditionsTokens(text: string, max: number, kept: string): { token: string; end: number }[] {
+  if (!text.startsWith(kept) || max <= 3) return [];
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const room = Array.from(seg.segment(text), (s) => s.segment).slice(0, max - 3).join("");
+  const out: { token: string; end: number }[] = [];
+  for (const m of text.matchAll(/\S+(?=\s)/gu)) {
+    const end = (m.index ?? 0) + m[0].length;
+    if (end > room.length) break;
+    const held = /(.)[*†‡]+$/u.exec(m[0]);
+    if (held && CONDITION_HOLDERS.test(held[1])) out.push({ token: m[0], end });
+  }
+  return out;
+}
+export function clipConditionsViolation(text: string, max: number, kept: string): string | null {
+  const lost = clipConditionsTokens(text, max, kept).find((t) => kept.length < t.end);
+  return lost ? `dropped the conditions marker of ${JSON.stringify(lost.token)}` : null;
 }
