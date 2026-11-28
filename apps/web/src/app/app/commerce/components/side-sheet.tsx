@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -43,19 +43,27 @@ export function SideSheet({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = `sidesheet-title-${title.replace(/\s+/g, "-").toLowerCase()}`;
 
-  // P257: every way the sheet closes itself goes through this, so closeDisabled holds them all.
+  // P257 R1-1: onClose and closeDisabled are read through refs, so the focus and keydown effect below depends on
+  // `open` only. A caller passing a new onClose each render (an inline arrow; the expense sheet re-rendering as it is
+  // typed in) or toggling closeDisabled re-ran that effect on every render: its cleanup focused the opener and the
+  // rerun focused the panel, so focus left the field after every keystroke.
+  const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+    closeDisabledRef.current = closeDisabled;
+  });
+  // P257: every way the sheet closes itself goes through this, so closeDisabled holds them all; it calls the latest
+  // onClose.
   const close = useCallback(() => {
-    if (!closeDisabled) onClose();
-  }, [closeDisabled, onClose]);
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    },
-    [close],
-  );
+    if (!closeDisabledRef.current) onCloseRef.current();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
     previousFocusRef.current = document.activeElement as HTMLElement;
     document.addEventListener("keydown", handleKeyDown);
     requestAnimationFrame(() => panelRef.current?.focus());
@@ -63,7 +71,7 @@ export function SideSheet({
       document.removeEventListener("keydown", handleKeyDown);
       previousFocusRef.current?.focus();
     };
-  }, [open, handleKeyDown]);
+  }, [open, close]);
 
   return (
     <AnimatePresence>
