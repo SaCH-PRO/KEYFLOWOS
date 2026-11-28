@@ -26,7 +26,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -68,7 +67,6 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import ExpensesInboxPage from "../page";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { renderHook } from "@testing-library/react";
 import { useExpensesData } from "../components/use-expenses-data";
@@ -109,7 +107,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
@@ -351,15 +348,4 @@ describe("R14-6: an editor opened on A closes on the switch to B", () => {
     expect(client.updateRecurringExpense).not.toHaveBeenCalled();
   });
 
-  it("the budgets tab's Set Budget modal closes", async () => {
-    const el = (b: string) => <ExpenseBudgetsTab businessId={b} budgets={[]} categories={CATS[b]} expenses={[]} summary={null} onReload={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-    fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } });
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    // The modal animates out (AnimatePresence): it is gone once its exit ends.
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Save Budget" }), "A's budget modal is open on B").toBeNull());
-    expect(client.upsertExpenseBudget).not.toHaveBeenCalled();
-  });
 });

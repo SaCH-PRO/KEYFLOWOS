@@ -7,9 +7,9 @@
  *          is usable again; it was left on "Extracting…")
  *   R22-3  the given check's half of every start and reply guard: this tab switched A -> B, another tab switched back
  *          to A, and A's held reply lands before the storage event. The stored id reads A, this tab shows B: nothing
- *          of A's starts or is said (the helper, the hook, the sheet, the panel, the pipeline, the list, budgets,
- *          categories, Pay, the page's upload; the detail page in -detail)
- *   R22-4  a refused pre-check shows no confirm (pipeline Delete, recurring Cancel)
+ *          of A's starts or is said (the helper, the hook, the sheet, the panel, categories, Pay, the page's upload;
+ *          the detail page in -detail; P258: the pipeline, list and budgets cases went with those components)
+ *   R22-4  a refused pre-check shows no confirm (recurring Cancel)
  *   R22-P  ported from the retired modal: the sheet's schedule that throws under a silent switch says nothing
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,7 +29,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -72,11 +71,8 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { useExpensesData } from "../components/use-expenses-data";
 import ExpensesInboxPage from "../page";
@@ -112,7 +108,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
@@ -165,25 +160,6 @@ const check = (b: string) => shown.id === b;
 const backToA = () => { shown.id = "biz_B"; ws.bid = "biz_A"; }; // this tab shows B; another tab stored A again
 afterEach(() => { shown.id = "biz_A"; });
 
-const BUDGET = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
-const pipelineEl = () => (
-  <ExpensePipeline
-    businessId="biz_A" expenses={[expense()]} totalExpenses={1} categories={CATS.biz_A} summary={null}
-    period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-    searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-    filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-    onReload={vi.fn()} onEdit={vi.fn()} isCurrentBusiness={check}
-  />
-);
-const listEl = () => (
-  <ExpenseList
-    businessId="biz_A" expenses={[expense({ status: "PAID" })]} totalExpenses={1}
-    categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-    filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-    page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-    onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={vi.fn()} isCurrentBusiness={check}
-  />
-);
 const panelEl = () => <RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} isCurrentBusiness={check} />;
 const withReceipt = () => {
   const file = new File(["x"], "r.jpg", { type: "image/jpeg" });
@@ -206,12 +182,6 @@ type Site = {
   clearAfterSend?: boolean; notAStart?: boolean;
 };
 const SITES: Site[] = [
-  { name: "pipeline Mark Paid", call: () => client.updateExpense, mount: () => { render(pipelineEl()); },
-    prep: async () => { await screen.findAllByRole("button", { name: /^Mark Paid$/i }); },
-    fire: async () => { fireEvent.click(screen.getAllByRole("button", { name: /^Mark Paid$/i })[0]); } },
-  { name: "pipeline Delete", call: () => client.deleteExpense, mount: () => { render(pipelineEl()); },
-    prep: async () => { await screen.findAllByRole("button", { name: /^Delete$/i }); },
-    fire: async () => { fireEvent.click(screen.getAllByRole("button", { name: /^Delete$/i })[0]); } },
   { name: "recurring save (Update)", call: () => client.updateRecurringExpense, mount: () => { render(panelEl()); },
     prep: async () => { fireEvent.click(await screen.findByRole("button", { name: /^Edit$/i })); await screen.findByRole("button", { name: /^Update$/ }); },
     fire: async () => { fireEvent.click(screen.getByRole("button", { name: /^Update$/ })); } },
@@ -221,22 +191,6 @@ const SITES: Site[] = [
   { name: "recurring Run Now", call: () => client.runRecurringExpenseNow, mount: () => { render(panelEl()); },
     prep: async () => { await screen.findByRole("button", { name: /Run Now/i }); },
     fire: async () => { fireEvent.click(screen.getByRole("button", { name: /Run Now/i })); } },
-  { name: "list bulk categorize", call: () => client.updateExpense, mount: () => { render(listEl()); },
-    prep: async () => {
-      fireEvent.click((await screen.findByRole("table", { name: "Expenses list" })).querySelector("button")!);
-      fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!, { target: { value: "cat_A_tolls" } });
-    },
-    fire: async () => { fireEvent.click(screen.getByRole("button", { name: /Apply/ })); } },
-  { name: "list inline categorize", call: () => client.updateExpense, mount: () => { render(listEl()); },
-    prep: async () => { fireEvent.click((await screen.findAllByTitle("Click to change category"))[0]); },
-    fire: async () => { fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).value === "cat_A_fuel")!, { target: { value: "cat_A_tolls" } }); } },
-  { name: "budgets save", call: () => client.upsertExpenseBudget,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={vi.fn()} isCurrentBusiness={check} />); },
-    prep: async () => { fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]); fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } }); },
-    fire: async () => { fireEvent.click(screen.getByRole("button", { name: "Save Budget" })); } },
-  { name: "budgets delete", call: () => client.deleteExpenseBudget,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[BUDGET]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={vi.fn()} isCurrentBusiness={check} />); },
-    fire: async () => { fireEvent.click(document.querySelector("button svg.lucide-trash-2, button svg.lucide-trash2")!.closest("button")!); } },
   { name: "categories Add", call: () => client.createExpenseCategory,
     mount: () => { render(<ExpenseCategoriesTab businessId="biz_A" categories={CATS.biz_A} isCurrentBusiness={check} addCategory={() => true} removeCategory={() => true} summary={null} budgets={[]} />); },
     prep: async () => { fireEvent.change(screen.getByPlaceholderText(/category name/i), { target: { value: "Supplies" } }); },
@@ -386,7 +340,6 @@ describe("R22-3: the page's receipt upload", () => {
 
 describe("R22-4: a refused pre-check shows no confirm", () => {
   const CASES = [
-    ["pipeline Delete", pipelineEl, /^Delete$/i],
     ["recurring Cancel", panelEl, /^Cancel$/i],
   ] as const;
   for (const [name, el, button] of CASES) {

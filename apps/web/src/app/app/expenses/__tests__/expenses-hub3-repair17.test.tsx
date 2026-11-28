@@ -24,7 +24,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -68,10 +67,7 @@ vi.mock("@/lib/workspace", () => ({
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 
 const ok = <T,>(data: T) => ({ data, error: null });
 const CATS: Record<string, ExpenseCategory[]> = {
@@ -102,7 +98,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
@@ -291,62 +286,6 @@ const STARTS: Start[] = [
     mount: () => { render(sheet("biz_A")); },
     go: async () => { fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "r.jpg", { type: "image/jpeg" })] } }); },
   },
-  {
-    name: "budgets save", call: () => client.upsertExpenseBudget,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={vi.fn()} isCurrentBusiness={always} />); },
-    go: async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-      fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } });
-      fireEvent.click(screen.getByRole("button", { name: "Save Budget" }));
-    },
-  },
-  {
-    name: "budgets delete", call: () => client.deleteExpenseBudget,
-    mount: () => {
-      const budget = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
-      render(<ExpenseBudgetsTab businessId="biz_A" budgets={[budget]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={vi.fn()} isCurrentBusiness={always} />);
-    },
-    go: async () => { fireEvent.click(document.querySelector("button svg.lucide-trash-2, button svg.lucide-trash2")!.closest("button")!); },
-  },
-  ...(["inline", "bulk"] as const).map((how): Start => ({
-    name: `the list's ${how} categorize`, call: () => client.updateExpense,
-    mount: () => {
-      render(
-        <ExpenseList
-          businessId="biz_A" expenses={[expense({ status: "PAID" })]} totalExpenses={1}
-          categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-          filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={vi.fn()} isCurrentBusiness={always}
-        />,
-      );
-    },
-    go: async () => {
-      if (how === "inline") {
-        fireEvent.click((await screen.findAllByTitle("Click to change category"))[0]);
-        fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).value === "cat_A_fuel")!, { target: { value: "cat_A_tolls" } });
-      } else {
-        fireEvent.click((await screen.findByRole("table", { name: "Expenses list" })).querySelector("button")!);
-        fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!, { target: { value: "cat_A_tolls" } });
-        fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
-      }
-    },
-  })),
-  ...(["Mark Paid", "Delete"] as const).map((label): Start => ({
-    name: `the pipeline's ${label}`, call: () => (label === "Delete" ? client.deleteExpense : client.updateExpense),
-    mount: () => {
-      render(
-        <ExpensePipeline
-          businessId="biz_A" expenses={[expense()]} totalExpenses={1} categories={CATS.biz_A} summary={null}
-          period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-          searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-          filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-          onReload={vi.fn()} onEdit={vi.fn()} isCurrentBusiness={always}
-        />,
-      );
-    },
-    go: async () => { fireEvent.click((await screen.findAllByRole("button", { name: new RegExp(`^${label}$`, "i") }))[0]); },
-  })),
 ];
 
 describe("R17-2b: the start check consults the check it is given", () => {
