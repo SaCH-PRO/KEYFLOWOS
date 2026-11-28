@@ -5,9 +5,9 @@
  *
  * Scans `apps/server/src` via TypeScript AST for every Prisma write
  * (create/createMany/createManyAndReturn/update/updateMany/updateManyAndReturn/
- * upsert/delete/deleteMany), nested relation write, raw SQL DML write, and
- * Flow-bound IdempotencyKey confirmation write across the five approval-shaped
- * stores:
+ * upsert/delete/deleteMany), nested relation write across all delegates, raw SQL
+ * DML write (including `idempotency_keys` Flow confirmations), and Flow-bound
+ * IdempotencyKey confirmation write across the five approval-shaped stores:
  *   - KeyActionProposal   (`key_action_proposals`)
  *   - AiApprovalItem      (`ai_approval_items`)
  *   - ApprovalRequest     (`approval_requests`)
@@ -37,6 +37,7 @@ import {
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const SERVER_SRC_DIR = path.join(REPO_ROOT, 'apps/server/src');
 const SCHEMA_PATH = path.join(REPO_ROOT, 'packages/db/prisma/schema.prisma');
+const SELF_REGISTRY_REL = 'apps/server/src/core/config/approval-model-registry.ts';
 
 const DELEGATE_TO_MODEL: Record<string, ApprovalModelName> = {
   keyActionProposal: 'KeyActionProposal',
@@ -75,6 +76,20 @@ const PRISMA_WRITE_OPS = new Set([
   'deleteMany',
 ]);
 
+const NESTED_PRISMA_WRITE_OPS = new Set([
+  ...PRISMA_WRITE_OPS,
+  'connectOrCreate',
+  'set',
+]);
+
+const NESTED_RELATION_TO_MODEL: Record<string, ApprovalModelName> = {
+  aiApprovalItems: 'AiApprovalItem',
+  aiApprovalResolutions: 'AiApprovalItem',
+  approvalRequest: 'ApprovalRequest',
+  approvalRequests: 'ApprovalRequest',
+  aiApprovalRequests: 'AiApprovalRequest',
+};
+
 const CALL_PROXY_METHODS = new Set(['call', 'apply', 'bind']);
 
 const FLOW_CONFIRM_IDENTIFIERS = [
@@ -92,7 +107,38 @@ interface DiscoveredWriter {
   line: number;
 }
 
-const SELF_REGISTRY_REL = 'apps/server/src/core/config/approval-model-registry.ts';
+interface LexicalScope {
+  constStrings: Map<string, string>;
+  delegateAliases: Map<string, string>;
+  methodAliases: Map<string, { delegate: string; op: string }>;
+}
+
+function lookupString(scopes: readonly LexicalScope[], name: string): string | null {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const v = scopes[i].constStrings.get(name);
+    if (v !== undefined) return v;
+  }
+  return null;
+}
+
+function lookupDelegateAlias(scopes: readonly LexicalScope[], name: string): string | null {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const v = scopes[i].delegateAliases.get(name);
+    if (v !== undefined) return v;
+  }
+  return null;
+}
+
+function lookupMethodAlias(
+  scopes: readonly LexicalScope[],
+  name: string,
+): { delegate: string; op: string } | null {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const v = scopes[i].methodAliases.get(name);
+    if (v !== undefined) return v;
+  }
+  return null;
+}
 
 function walkServerTsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -130,26 +176,48 @@ function unwrapExpr(node: ts.Expression): ts.Expression {
   return cur;
 }
 
-function staticStringValue(node: ts.Expression): string | null {
+function staticStringValue(node: ts.Expression, scopes: readonly LexicalScope[]): string | null {
   const u = unwrapExpr(node);
   if (ts.isStringLiteral(u) || ts.isNoSubstitutionTemplateLiteral(u)) {
     return u.text;
   }
+  if (ts.isIdentifier(u)) {
+    return lookupString(scopes, u.text);
+  }
   if (ts.isBinaryExpression(u) && u.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    const left = staticStringValue(u.left);
-    const right = staticStringValue(u.right);
+    const left = staticStringValue(u.left, scopes);
+    const right = staticStringValue(u.right, scopes);
     if (left !== null && right !== null) return left + right;
+  }
+  if (ts.isTemplateExpression(u)) {
+    let acc = u.head.text;
+    for (const span of u.templateSpans) {
+      const part = staticStringValue(span.expression, scopes);
+      if (part === null) return null;
+      acc += part + span.literal.text;
+    }
+    return acc;
   }
   return null;
 }
 
-function memberAccessParts(node: ts.Expression): { receiver: ts.Expression; prop: string } | null {
+function propertyNameText(name: ts.PropertyName, scopes: readonly LexicalScope[]): string | null {
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
+  if (ts.isComputedPropertyName(name)) return staticStringValue(name.expression, scopes);
+  return null;
+}
+
+function memberAccessParts(
+  node: ts.Expression,
+  scopes: readonly LexicalScope[],
+): { receiver: ts.Expression; prop: string } | null {
   const u = unwrapExpr(node);
   if (ts.isPropertyAccessExpression(u)) {
     return { receiver: u.expression, prop: u.name.text };
   }
   if (ts.isElementAccessExpression(u) && u.argumentExpression) {
-    const prop = staticStringValue(u.argumentExpression);
+    const prop = staticStringValue(u.argumentExpression, scopes);
     if (prop !== null) return { receiver: u.expression, prop };
   }
   return null;
@@ -175,7 +243,7 @@ function enclosingMethodName(node: ts.Node, sf: ts.SourceFile): string {
     } else if ((ts.isArrowFunction(cur) || ts.isFunctionExpression(cur)) && cur.parent && !fallback) {
       if (ts.isVariableDeclaration(cur.parent) && ts.isIdentifier(cur.parent.name)) {
         fallback = cur.parent.name.text;
-      } else if (ts.isPropertyAssignment(cur.parent)) {
+      } else if (ts.isPropertyAssignment(cur.parent) || ts.isPropertyDeclaration(cur.parent)) {
         fallback = cur.parent.name.getText(sf);
       }
     }
@@ -184,7 +252,7 @@ function enclosingMethodName(node: ts.Node, sf: ts.SourceFile): string {
   return fallback ?? '<module>';
 }
 
-function enclosingMethodNode(node: ts.Node): ts.Node | null {
+function enclosingMethodNode(node: ts.Node, sf: ts.SourceFile): ts.Node {
   let cur: ts.Node | undefined = node.parent;
   let fallback: ts.Node | null = null;
   while (cur) {
@@ -198,62 +266,113 @@ function enclosingMethodNode(node: ts.Node): ts.Node | null {
     }
     if (ts.isFunctionDeclaration(cur) && !fallback) {
       fallback = cur;
+    } else if ((ts.isArrowFunction(cur) || ts.isFunctionExpression(cur)) && cur.parent && !fallback) {
+      if (
+        ts.isVariableDeclaration(cur.parent) ||
+        ts.isPropertyAssignment(cur.parent) ||
+        ts.isPropertyDeclaration(cur.parent)
+      ) {
+        fallback = cur;
+      }
     }
     cur = cur.parent;
   }
-  return fallback;
+  return fallback ?? sf;
 }
 
 function stripSqlComments(sql: string): string {
   return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
 }
 
-function sqlWriteModelsInString(rawText: string): ApprovalModelName[] {
+function buildSqlDmlRegex(table: string): RegExp {
+  const escaped = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const schemaPrefix = `(?:(?:"[a-z_][a-z0-9_]*"|\`[a-z_][a-z0-9_]*\`|[a-z_][a-z0-9_]*)\\.)?`;
+  const tableIdent = `(?:${schemaPrefix}(?:"${escaped}"|\`${escaped}\`|\\b${escaped}\\b))`;
+  return new RegExp(
+    `\\b(?:INSERT\\s+INTO|UPDATE(?:\\s+ONLY)?|DELETE\\s+FROM(?:\\s+ONLY)?|MERGE\\s+INTO|TRUNCATE(?:\\s+TABLE)?(?:\\s+ONLY)?)\\s+${tableIdent}`,
+    'i',
+  );
+}
+
+const TABLE_DML_REGEXES: Array<[ApprovalModelName, RegExp]> = Object.entries(TABLE_TO_MODEL).map(
+  ([table, model]) => [model, buildSqlDmlRegex(table)],
+);
+const IDEMPOTENCY_KEYS_DML_RE = buildSqlDmlRegex('idempotency_keys');
+
+function sqlWriteModelsInString(
+  rawText: string,
+  getIncludeFlowIdempotencyKeys: () => boolean,
+): ApprovalModelName[] {
   const cleaned = stripSqlComments(rawText);
   const found = new Set<ApprovalModelName>();
-  for (const [table, model] of Object.entries(TABLE_TO_MODEL)) {
-    const escaped = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const ident = `(?:["\`]?[a-z_][a-z0-9_]*["\`]?\\.)?["\`]?${escaped}["\`]?`;
-    const dmlRe = new RegExp(
-      `\\b(?:INSERT\\s+INTO|UPDATE(?:\\s+ONLY)?|DELETE\\s+FROM(?:\\s+ONLY)?|MERGE\\s+INTO|TRUNCATE(?:\\s+TABLE)?(?:\\s+ONLY)?)\\s+${ident}\\b`,
-      'i',
-    );
+  for (const [model, dmlRe] of TABLE_DML_REGEXES) {
     if (dmlRe.test(cleaned)) {
       found.add(model);
     }
   }
+  if (
+    IDEMPOTENCY_KEYS_DML_RE.test(cleaned) &&
+    (FLOW_CONFIRM_IDENTIFIERS.some((needle) => cleaned.includes(needle)) ||
+      getIncludeFlowIdempotencyKeys())
+  ) {
+    found.add('IdempotencyKey');
+  }
   return [...found];
 }
 
-function collectNestedStepWriteOps(expr: ts.Expression, sf: ts.SourceFile): string[] {
-  const ops: string[] = [];
+function collectNestedApprovalWrites(
+  expr: ts.Expression,
+  parentDelegate: string | null,
+  getInFlowConfirmScope: () => boolean,
+  scopes: readonly LexicalScope[],
+): Array<{ model: ApprovalModelName; op: string }> {
+  const results: Array<{ model: ApprovalModelName; op: string }> = [];
+
+  function inspectNestedObj(
+    relName: string,
+    targetModel: ApprovalModelName,
+    obj: ts.ObjectLiteralExpression,
+  ) {
+    for (const p of obj.properties) {
+      let opName: string | null = null;
+      if (ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p)) {
+        opName = propertyNameText(p.name, scopes);
+      } else if (ts.isShorthandPropertyAssignment(p)) {
+        opName = p.name.text;
+      }
+      if (opName && NESTED_PRISMA_WRITE_OPS.has(opName)) {
+        results.push({ model: targetModel, op: `nested:${relName}.${opName}` });
+      }
+    }
+  }
+
   function scanObj(node: ts.Node) {
+    if (ts.isJSDoc(node)) return;
     if (ts.isPropertyAssignment(node)) {
-      const propName = ts.isIdentifier(node.name)
-        ? node.name.text
-        : ts.isStringLiteral(node.name)
-          ? node.name.text
-          : null;
-      if (propName === 'steps' && ts.isObjectLiteralExpression(node.initializer)) {
-        for (const p of node.initializer.properties) {
-          if (ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p)) {
-            const opName = p.name.getText(sf).replace(/^['"]|['"]$/g, '');
-            if (PRISMA_WRITE_OPS.has(opName)) {
-              ops.push(`nested:steps.${opName}`);
-            }
-          }
+      const relName = propertyNameText(node.name, scopes);
+      const val = unwrapExpr(node.initializer);
+      if (relName && ts.isObjectLiteralExpression(val)) {
+        if (relName === 'steps' && parentDelegate === 'approvalRequest') {
+          inspectNestedObj(relName, 'ApprovalStep', val);
+        } else if (relName in NESTED_RELATION_TO_MODEL) {
+          inspectNestedObj(relName, NESTED_RELATION_TO_MODEL[relName], val);
+        } else if (relName === 'idempotencyKeys' && getInFlowConfirmScope()) {
+          inspectNestedObj(relName, 'IdempotencyKey', val);
         }
       }
     }
     ts.forEachChild(node, scanObj);
   }
   scanObj(expr);
-  return ops;
+  return results;
 }
 
-function methodLooksLikeFlowConfirmation(node: ts.Node): boolean {
-  const owner = enclosingMethodNode(node);
-  if (!owner) return false;
+function methodLooksLikeFlowConfirmation(
+  node: ts.Node,
+  sf: ts.SourceFile,
+  scopes: readonly LexicalScope[],
+): boolean {
+  const owner = enclosingMethodNode(node, sf);
   let found = false;
   function scanTokens(n: ts.Node) {
     if (found || ts.isJSDoc(n)) return;
@@ -272,6 +391,13 @@ function methodLooksLikeFlowConfirmation(node: ts.Node): boolean {
       found = true;
       return;
     }
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const folded = staticStringValue(n, scopes);
+      if (folded !== null && FLOW_CONFIRM_IDENTIFIERS.some((needle) => folded.includes(needle))) {
+        found = true;
+        return;
+      }
+    }
     ts.forEachChild(n, scanTokens);
   }
   scanTokens(owner);
@@ -284,47 +410,22 @@ function scanSourceForApprovalWriters(sourceText: string, relFile: string): {
 } {
   const sf = ts.createSourceFile(relFile, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const writers: DiscoveredWriter[] = [];
+  const scopes: LexicalScope[] = [];
 
-  // Map local variable aliases (const x = this.prisma.client.aiApprovalItem,
-  // const { aiApprovalItem: a } = tx, const store = this.prisma.client.idempotencyKey)
-  // to their delegate name.
-  const delegateAliases = new Map<string, string>();
-
-  function collectAliases(node: ts.Node) {
-    if (ts.isVariableDeclaration(node) && node.initializer) {
-      const init = unwrapExpr(node.initializer);
-      if (ts.isIdentifier(node.name)) {
-        const parts = memberAccessParts(init);
-        if (parts && (parts.prop in DELEGATE_TO_MODEL || parts.prop === 'idempotencyKey')) {
-          delegateAliases.set(node.name.text, parts.prop);
-        }
-      } else if (ts.isObjectBindingPattern(node.name)) {
-        for (const el of node.name.elements) {
-          const propName = el.propertyName
-            ? el.propertyName.getText(sf).replace(/^['"]|['"]$/g, '')
-            : ts.isIdentifier(el.name)
-              ? el.name.text
-              : null;
-          if (
-            propName &&
-            (propName in DELEGATE_TO_MODEL || propName === 'idempotencyKey') &&
-            ts.isIdentifier(el.name)
-          ) {
-            delegateAliases.set(el.name.text, propName);
-          }
-        }
-      }
-    }
-    ts.forEachChild(node, collectAliases);
-  }
-  collectAliases(sf);
+  const pushScope = () =>
+    scopes.push({
+      constStrings: new Map(),
+      delegateAliases: new Map(),
+      methodAliases: new Map(),
+    });
+  const popScope = () => scopes.pop();
 
   function resolveDelegateName(expr: ts.Expression): string | null {
     const u = unwrapExpr(expr);
     if (ts.isIdentifier(u)) {
-      return delegateAliases.get(u.text) ?? null;
+      return lookupDelegateAlias(scopes, u.text);
     }
-    const parts = memberAccessParts(u);
+    const parts = memberAccessParts(u, scopes);
     if (parts && (parts.prop in DELEGATE_TO_MODEL || parts.prop === 'idempotencyKey')) {
       return parts.prop;
     }
@@ -342,81 +443,235 @@ function scanSourceForApprovalWriters(sourceText: string, relFile: string): {
     });
   }
 
+  function resolveWriteCall(
+    node: ts.CallExpression,
+  ): { delegate: string | null; op: string | null; rawDelegateProp: string | null } {
+    const expr = unwrapExpr(node.expression);
+
+    // Reflect.apply(targetFn, thisArg, args)
+    const directCallee = memberAccessParts(expr, scopes);
+    if (
+      directCallee &&
+      directCallee.prop === 'apply' &&
+      ts.isIdentifier(unwrapExpr(directCallee.receiver)) &&
+      (unwrapExpr(directCallee.receiver) as ts.Identifier).text === 'Reflect' &&
+      node.arguments.length >= 1
+    ) {
+      const target = unwrapExpr(node.arguments[0]);
+      if (ts.isIdentifier(target)) {
+        const aliased = lookupMethodAlias(scopes, target.text);
+        if (aliased) return { delegate: aliased.delegate, op: aliased.op, rawDelegateProp: aliased.delegate };
+      }
+      const targetParts = memberAccessParts(target, scopes);
+      if (targetParts && PRISMA_WRITE_OPS.has(targetParts.prop)) {
+        const delegate = resolveDelegateName(targetParts.receiver);
+        const recvParts = memberAccessParts(targetParts.receiver, scopes);
+        return { delegate, op: targetParts.prop, rawDelegateProp: delegate ?? recvParts?.prop ?? null };
+      }
+      return { delegate: null, op: null, rawDelegateProp: null };
+    }
+
+    // Bare identifier calling an extracted write-method alias: `const fn = prisma.aiApprovalItem.create; fn(...)`
+    if (ts.isIdentifier(expr)) {
+      const aliased = lookupMethodAlias(scopes, expr.text);
+      if (aliased) {
+        return { delegate: aliased.delegate, op: aliased.op, rawDelegateProp: aliased.delegate };
+      }
+      return { delegate: null, op: null, rawDelegateProp: null };
+    }
+
+    let callee = directCallee;
+    // Unwrap `.call(...)`, `.apply(...)`, `.bind(...)`
+    if (callee && CALL_PROXY_METHODS.has(callee.prop)) {
+      const recv = unwrapExpr(callee.receiver);
+      if (ts.isIdentifier(recv)) {
+        const aliased = lookupMethodAlias(scopes, recv.text);
+        if (aliased) {
+          return { delegate: aliased.delegate, op: aliased.op, rawDelegateProp: aliased.delegate };
+        }
+      }
+      callee = memberAccessParts(callee.receiver, scopes);
+    }
+
+    if (callee && PRISMA_WRITE_OPS.has(callee.prop)) {
+      const delegate = resolveDelegateName(callee.receiver);
+      const recvParts = memberAccessParts(callee.receiver, scopes);
+      return {
+        delegate,
+        op: callee.prop,
+        rawDelegateProp: delegate ?? recvParts?.prop ?? null,
+      };
+    }
+
+    return { delegate: null, op: null, rawDelegateProp: null };
+  }
+
+  function registerDeclarations(node: ts.VariableDeclaration) {
+    const curScope = scopes[scopes.length - 1];
+    if (!node.initializer) return;
+    const init = unwrapExpr(node.initializer);
+
+    if (ts.isIdentifier(node.name)) {
+      const name = node.name.text;
+      // 1. Static string const
+      const strVal = staticStringValue(init, scopes);
+      if (strVal !== null) {
+        curScope.constStrings.set(name, strVal);
+        return;
+      }
+      // 2. Transitive delegate alias: `const b = a` or `const store = this.prisma.client.aiApprovalItem`
+      const resolvedDelegate = resolveDelegateName(init);
+      if (resolvedDelegate) {
+        curScope.delegateAliases.set(name, resolvedDelegate);
+        return;
+      }
+      // 3. Extracted write-method alias: `const fn = prisma.aiApprovalItem.create`
+      const parts = memberAccessParts(init, scopes);
+      if (parts && PRISMA_WRITE_OPS.has(parts.prop)) {
+        const deg = resolveDelegateName(parts.receiver);
+        if (deg) {
+          curScope.methodAliases.set(name, { delegate: deg, op: parts.prop });
+        }
+      }
+    } else if (ts.isObjectBindingPattern(node.name)) {
+      // Case A: Destructuring write methods from a delegate: `const { create, update: upd } = prisma.aiApprovalItem`
+      const initDelegate = resolveDelegateName(init);
+      if (initDelegate) {
+        for (const el of node.name.elements) {
+          if (!ts.isIdentifier(el.name)) continue;
+          const propName = el.propertyName ? propertyNameText(el.propertyName, scopes) : el.name.text;
+          if (propName && PRISMA_WRITE_OPS.has(propName)) {
+            curScope.methodAliases.set(el.name.text, { delegate: initDelegate, op: propName });
+          }
+        }
+        return;
+      }
+      // Case B: Destructuring delegates from a client: `const { aiApprovalItem: a } = tx`
+      for (const el of node.name.elements) {
+        if (!ts.isIdentifier(el.name)) continue;
+        const propName = el.propertyName ? propertyNameText(el.propertyName, scopes) : el.name.text;
+        if (propName && (propName in DELEGATE_TO_MODEL || propName === 'idempotencyKey')) {
+          curScope.delegateAliases.set(el.name.text, propName);
+        }
+      }
+    }
+  }
+
   function visit(node: ts.Node) {
-    if (ts.isCallExpression(node)) {
-      let callee = memberAccessParts(node.expression);
-      // Unwrap `.call(...)`, `.apply(...)`, `.bind(...)`
-      if (callee && CALL_PROXY_METHODS.has(callee.prop)) {
-        callee = memberAccessParts(callee.receiver);
+    if (ts.isJSDoc(node)) return;
+
+    const createsScope =
+      ts.isSourceFile(node) ||
+      ts.isBlock(node) ||
+      ts.isFunctionLike(node) ||
+      ts.isClassLike(node) ||
+      ts.isModuleBlock(node);
+    if (createsScope) pushScope();
+
+    try {
+      if (ts.isVariableDeclaration(node)) {
+        registerDeclarations(node);
       }
 
-      if (callee && PRISMA_WRITE_OPS.has(callee.prop)) {
-        const delegate = resolveDelegateName(callee.receiver);
-        if (delegate && delegate in DELEGATE_TO_MODEL) {
-          const model = DELEGATE_TO_MODEL[delegate];
-          record(model, node, callee.prop);
-          if (model === 'ApprovalRequest' && node.arguments.length > 0) {
-            for (const nestedOp of collectNestedStepWriteOps(node.arguments[0], sf)) {
-              record('ApprovalStep', node, nestedOp);
+      if (ts.isCallExpression(node)) {
+        const { delegate, op, rawDelegateProp } = resolveWriteCall(node);
+        let flowConfirmCache: boolean | undefined;
+        const getInFlowConfirm = () => {
+          if (flowConfirmCache === undefined) {
+            flowConfirmCache = methodLooksLikeFlowConfirmation(node, sf, scopes);
+          }
+          return flowConfirmCache;
+        };
+
+        if (op) {
+          if (delegate && delegate in DELEGATE_TO_MODEL) {
+            record(DELEGATE_TO_MODEL[delegate], node, op);
+          } else if (delegate === 'idempotencyKey' && getInFlowConfirm()) {
+            record('IdempotencyKey', node, op);
+          }
+
+          // Inspect nested relation writes on ANY Prisma write call (e.g., business.update,
+          // user.update, approvalRequest.create, approvalStep.update).
+          const payloadArg =
+            node.arguments.length >= 3 &&
+            memberAccessParts(unwrapExpr(node.expression), scopes)?.prop === 'apply'
+              ? node.arguments[2]
+              : node.arguments[0];
+          if (payloadArg) {
+            const nestedWrites = collectNestedApprovalWrites(
+              payloadArg,
+              rawDelegateProp,
+              getInFlowConfirm,
+              scopes,
+            );
+            for (const nw of nestedWrites) {
+              record(nw.model, node, nw.op);
             }
           }
-        } else if (delegate === 'idempotencyKey' && methodLooksLikeFlowConfirmation(node)) {
-          record('IdempotencyKey', node, callee.prop);
+        }
+
+        // Raw SQL writes via $executeRaw / $executeRawUnsafe / $queryRaw / $queryRawUnsafe / Prisma.raw
+        const callee = memberAccessParts(node.expression, scopes);
+        if (
+          callee &&
+          (callee.prop === '$executeRaw' ||
+            callee.prop === '$executeRawUnsafe' ||
+            callee.prop === '$queryRaw' ||
+            callee.prop === '$queryRawUnsafe' ||
+            callee.prop === 'raw')
+        ) {
+          const rawText = node.arguments
+            .map((a) => staticStringValue(a, scopes) ?? a.getText(sf))
+            .join(' ');
+          for (const model of sqlWriteModelsInString(rawText, getInFlowConfirm)) {
+            record(model, node, `rawSql:${callee.prop}`);
+          }
         }
       }
 
-      // Raw SQL writes via $executeRaw / $executeRawUnsafe / $queryRaw / $queryRawUnsafe / Prisma.raw
-      if (
-        callee &&
-        (callee.prop === '$executeRaw' ||
-          callee.prop === '$executeRawUnsafe' ||
-          callee.prop === '$queryRaw' ||
-          callee.prop === '$queryRawUnsafe' ||
-          callee.prop === 'raw')
-      ) {
-        const rawText = node.arguments.map((a) => a.getText(sf)).join(' ');
-        for (const model of sqlWriteModelsInString(rawText)) {
-          record(model, node, `rawSql:${callee.prop}`);
+      // Tagged template SQL: tx.$executeRaw`UPDATE ai_approval_items ...`
+      if (ts.isTaggedTemplateExpression(node)) {
+        const tag = memberAccessParts(node.tag, scopes);
+        if (
+          tag &&
+          (tag.prop === '$executeRaw' ||
+            tag.prop === '$executeRawUnsafe' ||
+            tag.prop === '$queryRaw' ||
+            tag.prop === '$queryRawUnsafe' ||
+            tag.prop === 'sql')
+        ) {
+          const rawText = node.template.getText(sf);
+          for (const model of sqlWriteModelsInString(rawText, () =>
+            methodLooksLikeFlowConfirmation(node, sf, scopes),
+          )) {
+            record(model, node, `rawSql:${tag.prop}`);
+          }
         }
       }
+
+      ts.forEachChild(node, visit);
+    } finally {
+      if (createsScope) popScope();
     }
-
-    // Tagged template SQL: tx.$executeRaw`UPDATE ai_approval_items ...`
-    if (ts.isTaggedTemplateExpression(node)) {
-      const tag = memberAccessParts(node.tag);
-      if (
-        tag &&
-        (tag.prop === '$executeRaw' ||
-          tag.prop === '$executeRawUnsafe' ||
-          tag.prop === '$queryRaw' ||
-          tag.prop === '$queryRawUnsafe' ||
-          tag.prop === 'sql')
-      ) {
-        const rawText = node.template.getText(sf);
-        for (const model of sqlWriteModelsInString(rawText)) {
-          record(model, node, `rawSql:${tag.prop}`);
-        }
-      }
-    }
-
-    ts.forEachChild(node, visit);
   }
   visit(sf);
 
-  // Scan AST code tokens only (comments/JSDoc are excluded automatically) for
-  // any live reference to dormant AiApprovalRequest / ai_approval_requests.
+  // Scan AST code tokens only (comments/JSDoc excluded automatically) for any
+  // live reference to dormant AiApprovalRequest / aiApprovalRequest(s) / ai_approval_requests.
   const aiApprovalRequestCodeRefs: number[] = [];
   function scanDormantRefs(node: ts.Node) {
     if (ts.isJSDoc(node)) return;
     if (
       (ts.isIdentifier(node) &&
-        (node.text === 'AiApprovalRequest' || node.text === 'aiApprovalRequest')) ||
+        (node.text === 'AiApprovalRequest' ||
+          node.text === 'aiApprovalRequest' ||
+          node.text === 'aiApprovalRequests')) ||
       ((ts.isStringLiteral(node) ||
         ts.isNoSubstitutionTemplateLiteral(node) ||
         ts.isTemplateHead(node) ||
         ts.isTemplateMiddle(node) ||
         ts.isTemplateTail(node)) &&
-        /\b(?:AiApprovalRequest|aiApprovalRequest|ai_approval_requests)\b/.test(node.text))
+        /\b(?:AiApprovalRequest|aiApprovalRequests?|ai_approval_requests)\b/.test(node.text))
     ) {
       aiApprovalRequestCodeRefs.push(sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1);
     }
@@ -534,7 +789,7 @@ describe('RR-APPROVAL-MODEL-CENSUS — approval writer registry', () => {
     }
   });
 
-  it('negative controls: detects unregistered Prisma, aliased, nested, raw-SQL, Flow-confirm, and dormant writers', () => {
+  it('negative controls: detects unregistered Prisma, aliased, Reflect.apply, nested, raw-SQL, Flow-confirm, arrow, and dormant writers', () => {
     // 1. DoD RED fixture: unregistered prisma.aiApprovalItem.create
     const fixtureCreate = `
       class RogueService {
@@ -549,49 +804,91 @@ describe('RR-APPROVAL-MODEL-CENSUS — approval writer registry', () => {
       'apps/server/src/modules/rogue/rogue.service.ts#sneak::AiApprovalItem [create@L4]',
     ]);
 
-    // 2. Aliased delegate + nested ApprovalStep + raw SQL + Flow confirmation + dormant AiApprovalRequest
+    // 2. Comprehensive bypass negative controls (transitive alias, extracted method, destructured op,
+    //    const bracket op, Reflect.apply, nested Business/ApprovalStep writes, concatenated & var raw SQL,
+    //    raw SQL Flow confirm on idempotency_keys, top-level arrow Flow confirm, plural aiApprovalRequests,
+    //    and lexical-scope isolation proving a same-named Map in another method does NOT false-positive).
     const fixtureTricks = `
+      const topLevelFlowBind = async (prisma: any) => {
+        const prefix = 'flow-' + 'confirm:';
+        await prisma.client.idempotencyKey.create({ data: { idempotencyKey: prefix + 'abc' } });
+      };
       class TrickyService {
         async aliasWrite(prisma: any) {
           const store = prisma.client.keyActionProposal;
-          await store.updateMany({ where: {}, data: {} });
+          const alias2 = store;
+          await alias2.updateMany({ where: {}, data: {} });
         }
-        async nestedStep(prisma: any) {
-          await prisma.client.approvalRequest.create({
-            data: { steps: { create: [{ stepOrder: 0, approverId: 'u1' }] } },
+        async unrelatedMapScope() {
+          const store = new Map<string, string>();
+          store.delete('unrelated');
+        }
+        async extractedMethod(prisma: any) {
+          const fn = prisma.client.aiApprovalItem.create;
+          await fn({ data: {} });
+        }
+        async destructuredOp(prisma: any) {
+          const { update } = prisma.client.approvalRequest;
+          await update({ where: { id: '1' }, data: {} });
+        }
+        async constBracketOp(prisma: any) {
+          const op = 'create';
+          await prisma.client.aiApprovalItem[op]({ data: {} });
+        }
+        async reflectApplyWrite(prisma: any) {
+          await Reflect.apply(prisma.client.aiApprovalItem.create, prisma.client.aiApprovalItem, [{ data: {} }]);
+        }
+        async nestedBusinessWrites(prisma: any) {
+          await prisma.client.business.update({
+            where: { id: 'b1' },
+            data: {
+              aiApprovalItems: { connectOrCreate: [] },
+              aiApprovalRequests: { create: [] },
+            },
           });
         }
-        async rawWrite(tx: any) {
-          await tx.$executeRaw\`UPDATE ai_approval_items SET status = 'approved'\`;
+        async nestedStepParent(prisma: any) {
+          await prisma.client.approvalStep.update({
+            where: { id: 's1' },
+            data: { approvalRequest: { update: { status: 'approved' } } },
+          });
         }
-        async bindFlow(prisma: any) {
-          const key = 'flow-confirm:123';
-          await prisma.client.idempotencyKey.create({ data: { idempotencyKey: key } });
+        async rawSqlConcatAndVar(tx: any) {
+          await tx.$executeRawUnsafe('UPDATE ' + '"ai_approval_items" SET status = 1');
+          const q = "DELETE FROM approval_requests WHERE id = 'x'";
+          await tx.$executeRawUnsafe(q);
         }
-        async wakeDormant(prisma: any) {
-          await prisma.client.aiApprovalRequest.create({ data: {} });
+        async rawSqlFlowConfirm(tx: any) {
+          await tx.$executeRaw\`INSERT INTO idempotency_keys (idempotency_key) VALUES ('flow-confirm:z')\`;
         }
       }
     `;
     const r2 = scanSourceForApprovalWriters(fixtureTricks, 'apps/server/src/modules/rogue/tricky.service.ts');
     const keys2 = r2.writers.map((w) => writerKey(w));
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#topLevelFlowBind::IdempotencyKey');
     expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#aliasWrite::KeyActionProposal');
-    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#nestedStep::ApprovalRequest');
-    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#nestedStep::ApprovalStep');
-    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawWrite::AiApprovalItem');
-    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#bindFlow::IdempotencyKey');
-    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#wakeDormant::AiApprovalRequest');
+    expect(keys2).not.toContain('apps/server/src/modules/rogue/tricky.service.ts#unrelatedMapScope::KeyActionProposal');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#extractedMethod::AiApprovalItem');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#destructuredOp::ApprovalRequest');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#constBracketOp::AiApprovalItem');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#reflectApplyWrite::AiApprovalItem');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#nestedBusinessWrites::AiApprovalItem');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#nestedBusinessWrites::AiApprovalRequest');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#nestedStepParent::ApprovalRequest');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawSqlConcatAndVar::AiApprovalItem');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawSqlConcatAndVar::ApprovalRequest');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawSqlFlowConfirm::IdempotencyKey');
+    // Plural `aiApprovalRequests` must ALSO trip the dormant-ref gate
     expect(r2.aiApprovalRequestCodeRefs.length).toBeGreaterThan(0);
 
-    // 3. DoD negative control: removing a registry row fails the census
+    // 3. DoD negative control: scanning the real source file on disk with a registry row removed fails the census
     const nonDormant = APPROVAL_MODEL_WRITERS.filter((e) => e.kind !== 'dormant');
     expect(nonDormant.length).toBeGreaterThan(0);
     const removed = nonDormant[0];
     const withoutOne = APPROVAL_MODEL_WRITERS.filter((e) => e !== removed);
-    const diffRemoved = evaluateRegistryAgainstWriters(
-      [{ model: removed.model, file: removed.file, method: removed.method, operation: 'create', line: 1 }],
-      withoutOne,
-    );
-    expect(diffRemoved.unregistered).toContain(`${writerKey(removed)} [create@L1]`);
+    const realFileSrc = fs.readFileSync(path.join(REPO_ROOT, removed.file), 'utf8');
+    const scannedReal = scanSourceForApprovalWriters(realFileSrc, removed.file);
+    const diffRemoved = evaluateRegistryAgainstWriters(scannedReal.writers, withoutOne);
+    expect(diffRemoved.unregistered.some((u) => u.startsWith(writerKey(removed)))).toBe(true);
   });
 });

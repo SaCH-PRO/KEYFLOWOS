@@ -16,7 +16,7 @@
  * Enforced by `approval-model-census.spec.ts`:
  *  - Any unregistered writer fails CI.
  *  - Any stale row whose writer was removed/renamed fails CI.
- *  - `AiApprovalRequest` must remain dormant (zero code references).
+ *  - `AiApprovalRequest` must remain dormant (zero code references, singular or plural).
  *  - Writers where an effect can run without the approval created/managed are
  *    explicitly flagged (`effectRunsWithoutApproval: true` + `bypassNote`) to
  *    become REDs in their own follow-up packets.
@@ -78,14 +78,16 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     method: 'createApprovalItem',
     kind: 'KEY approval queue',
     gatedEffect:
-      'Queues high-risk Flow chat, graph action, plan step, intake, or delegation-loop tool invocations requiring formal/admin approval.',
+      'Queues high-risk Flow chat, graph action, plan step, drive/message/ingestion intake, or delegation-loop tool invocations requiring formal/admin approval.',
     executionSite:
-      'apps/server/src/modules/ai/graph-actions.controller.ts#executeAction (re-run after step reset to pending) and apps/server/src/modules/ai/plan-executor.service.ts (plan steps); chat/intake/delegation callers queue items without an automatic post-approval executor unless migrated to KeyActionProposal.',
+      'apps/server/src/modules/ai/graph-actions.controller.ts#executeAction and apps/server/src/modules/ai/plan-executor.service.ts (plan steps); apps/server/src/modules/commerce/drive-intake-orchestrator.service.ts#executePlan, apps/server/src/modules/communications/message-intake-orchestrator.service.ts#executePlan, and apps/server/src/modules/ingestion/ingestion-orchestrator.service.ts#execute (intake executors — bypass AiApprovalItem gate); chat/delegation callers queue items without an automatic executor unless migrated to KeyActionProposal.',
     clearerScope:
-      'Authenticated member with ai:write + membershipApprovalTier >= item.riskTier (or SUPER_ADMIN) via AiController; or resolved OrgAssignment holder with autoApprovalViaReply=true & capped position tier >= item.riskTier via StaffChatBridgeService.',
+      'Authenticated member with operations:write + membershipApprovalTier >= item.riskTier (or SUPER_ADMIN) via AiApprovalsController; ai:write + membershipApprovalTier >= item.riskTier (or SUPER_ADMIN) via AiController; resolved OrgAssignment holder with autoApprovalViaReply=true & capped position tier >= item.riskTier via StaffChatBridgeService; or post-hoc resolution by DriveIntakeOrchestrator/MessageIntakeOrchestrator.',
     manualPath:
-      'POST /businesses/:businessId/ai/approvals/:approvalId/resolve or POST /businesses/:businessId/ai/approvals/batch-resolve (or reply approval via StaffChatBridgeService).',
-    effectRunsWithoutApproval: false,
+      'POST /ai-approvals/businesses/:businessId/items/:itemId/resolve, POST /ai-approvals/businesses/:businessId/items/bulk-resolve, POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve, POST /ai/businesses/:businessId/ai/approvals/batch-resolve, or reply approval via StaffChatBridgeService.',
+    effectRunsWithoutApproval: true,
+    bypassNote:
+      'Three intake executors queue an AiApprovalItem via createApprovalItem but execute all side effects without checking AiApprovalItem.status==="approved": DriveIntakeOrchestrator.executePlan (commits invoices/payments/credit notes/notifications/tasks before resolvePendingApproval), MessageIntakeOrchestrator.executePlan (creates threads, sends email/SMS/WhatsApp replies, tasks/notes via a route without ModuleScopeGuard before resolvePendingApproval), and IngestionOrchestratorService.execute (runs without checking or, for message sources, resolving the AiApprovalItem).',
   },
   {
     model: 'AiApprovalItem',
@@ -96,7 +98,8 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
       'Records resolved approverAssignmentId, approverMethod, and notifiedAt metadata on a queued AiApprovalItem (routing/notification bookkeeping only).',
     executionSite: 'none (routing metadata update; does not execute gated tool)',
     clearerScope: 'Internal fire-and-forget from AiOversightService.createApprovalItem; does not clear the item.',
-    manualPath: 'Shared queue visible via GET /businesses/:businessId/ai/approvals.',
+    manualPath:
+      'Shared AiApprovalItem queue visible via GET /ai-approvals/businesses/:businessId/items and GET /actions/businesses/:businessId/queue.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -107,12 +110,14 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     gatedEffect:
       'Marks AiApprovalItem approved/rejected/deferred; when approved with a planStepId, resets AiPlanStep.status to pending so the gated plan step can run.',
     executionSite:
-      'apps/server/src/modules/ai/graph-actions.controller.ts#executeAction and apps/server/src/modules/ai/plan-executor.service.ts (executes unlocked AiPlanStep).',
+      'apps/server/src/modules/ai/graph-actions.controller.ts#executeAction and apps/server/src/modules/ai/plan-executor.service.ts (executes unlocked AiPlanStep); also invoked post-hoc AFTER side effects have already committed by DriveIntakeOrchestrator.resolvePendingApproval and MessageIntakeOrchestrator.resolvePendingApproval.',
     clearerScope:
-      'Called by resolveApproval (business member with membershipApprovalTier >= riskTier or SUPER_ADMIN) and resolveApprovalByAssignment (resolved OrgAssignment with autoApprovalViaReply=true & approvalTierForPosition >= riskTier).',
+      'Called by resolveApproval (AiApprovalsController with AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) + membershipApprovalTier >= riskTier or SUPER_ADMIN; or post-hoc from DriveIntakeOrchestrator/MessageIntakeOrchestrator) and resolveApprovalByAssignment (resolved OrgAssignment with autoApprovalViaReply=true & approvalTierForPosition >= riskTier).',
     manualPath:
-      'Reply-based approval via StaffChatBridgeService (WhatsApp/SMS) or direct service invocation of AiOversightService.resolveApproval.',
-    effectRunsWithoutApproval: false,
+      'POST /ai-approvals/businesses/:businessId/items/:itemId/resolve, POST /ai-approvals/businesses/:businessId/items/bulk-resolve, reply-based approval via StaffChatBridgeService (WhatsApp/SMS), or post-hoc via intake approve endpoints.',
+    effectRunsWithoutApproval: true,
+    bypassNote:
+      'DriveIntakeOrchestrator.executePlan (POST /commerce/businesses/:businessId/drive/intake/:intakeFileId/approve) and MessageIntakeOrchestrator.executePlan (POST /communications/businesses/:businessId/message-intake/:intakeId/approve, lacking ModuleScopeGuard) run all mutations first and only invoke resolveApproval -> finalizeResolution afterward.',
   },
   {
     model: 'AiApprovalItem',
@@ -126,7 +131,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     clearerScope:
       'Automated timeout sweep (no human clearer recorded for tier <= 2 auto-approvals when autonomyLevel >= 3; tier 3–4 marked escalated only).',
     manualPath:
-      'Human resolution before timeout via POST /businesses/:businessId/ai/approvals/:approvalId/resolve or lowering autonomyLevel < 3.',
+      'Human resolution before timeout via POST /ai-approvals/businesses/:businessId/items/:itemId/resolve or POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve, or lowering autonomyLevel < 3.',
     effectRunsWithoutApproval: true,
     bypassNote:
       'When settings.autonomyLevel >= 3 and item.riskTier <= 2, escalateStaleApprovals auto-marks the AiApprovalItem approved with no human clearer and re-opens linked AiPlanStep to pending after approvalTimeoutHours.',
@@ -139,11 +144,11 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     gatedEffect:
       'Defers a legacy AiApprovalItem directly, or migrates it to a KeyActionProposal, approves/rejects the proposal (autoExecute=false), and mirrors resolution onto the legacy AiApprovalItem.',
     executionSite:
-      'apps/server/src/modules/key-autonomy/key-action-proposal.service.ts#execute (explicit post-approval execution of the migrated KeyActionProposal).',
+      'apps/server/src/modules/key-autonomy/key-action-proposal.service.ts#execute (explicit post-approval execution of the migrated KeyActionProposal) and apps/server/src/modules/ai/plan-executor.service.ts#onProposalApproved (listens to key.action.approved, resets linked AiPlanStep to pending, and re-enqueues execution).',
     clearerScope:
       'AuthGuard + BusinessGuard + ModuleScopeGuard(ai:write) + assertCanResolveApproval (membershipApprovalTier >= riskTier or SUPER_ADMIN).',
     manualPath:
-      'POST /businesses/:businessId/ai/approvals/:approvalId/resolve and POST /businesses/:businessId/ai/approvals/batch-resolve.',
+      'POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve and POST /ai/businesses/:businessId/ai/approvals/batch-resolve.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -157,7 +162,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     clearerScope:
       'Invoked only from AiController.resolveLegacyApproval after AuthGuard + BusinessGuard + ModuleScopeGuard(ai:write) + assertCanResolveApproval.',
     manualPath:
-      'POST /businesses/:businessId/ai/approvals/:approvalId/resolve and POST /businesses/:businessId/ai/approvals/batch-resolve.',
+      'POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve and POST /ai/businesses/:businessId/ai/approvals/batch-resolve.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -169,7 +174,8 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
       'Stamps the confirming member userId onto an already-queued AiApprovalItem created during a confirmed Flow chat turn (requester attribution only).',
     executionSite: 'none (requester attribution update; item remains pending)',
     clearerScope: 'Internal post-create attribution after claimFlowConfirmation verifies requestedBy === userId.',
-    manualPath: 'POST /businesses/:businessId/ai/approvals/:approvalId/resolve.',
+    manualPath:
+      'POST /ai-approvals/businesses/:businessId/items/:itemId/resolve or POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -182,8 +188,9 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     executionSite:
       'apps/server/src/modules/ai/graph-actions.controller.ts#executeAction (executes FlowOrchestratorService.executeToolDirect only once an approved AiApprovalItem exists for planStepId).',
     clearerScope:
-      'Queues on behalf of authenticated graph-action caller; cleared by member with ai:write + membershipApprovalTier >= riskTier via AiController or AiOversightService.',
-    manualPath: 'POST /businesses/:businessId/ai/approvals/:approvalId/resolve.',
+      'Queues on behalf of authenticated graph-action caller; cleared by member with operations:write (AiApprovalsController) or ai:write (AiController) + membershipApprovalTier >= riskTier.',
+    manualPath:
+      'POST /ai-approvals/businesses/:businessId/items/:itemId/resolve or POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -196,9 +203,9 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     executionSite:
       'apps/server/src/modules/commerce/commerce.controller.ts#sendQuoteFollowUp -> CommerceService.markQuoteFollowedUp.',
     clearerScope:
-      'Either resolved directly via CommerceController.sendQuoteFollowUp (revenue:write) or via AiController (ai:write + tier >= 1).',
+      'Either resolved directly via CommerceController.sendQuoteFollowUp (revenue:write), AiApprovalsController (operations:write + tier >= 1), or AiController (ai:write + tier >= 1).',
     manualPath:
-      'POST /businesses/:businessId/quotes/:quoteId/follow-up (one-click Action Queue button) or POST /businesses/:businessId/ai/approvals/:approvalId/resolve.',
+      'POST /commerce/businesses/:businessId/quotes/:quoteId/follow-up (one-click Action Queue button), POST /ai-approvals/businesses/:businessId/items/:itemId/resolve, or POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve.',
     effectRunsWithoutApproval: true,
     bypassNote:
       'Stale-quote follow-up executes directly in CommerceController.sendQuoteFollowUp without checking whether an AiApprovalItem was previously approved; the card is advisory only.',
@@ -214,7 +221,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
       'apps/server/src/modules/commerce/commerce.controller.ts#sendQuoteFollowUp (calls this.commerce.markQuoteFollowedUp before updating AiApprovalItem).',
     clearerScope:
       'AuthGuard + BusinessGuard + ModuleScopeGuard(revenue:write) + assertSuperAdminMayWriteRevenue (does not check membershipApprovalTier).',
-    manualPath: 'POST /businesses/:businessId/quotes/:quoteId/follow-up.',
+    manualPath: 'POST /commerce/businesses/:businessId/quotes/:quoteId/follow-up.',
     effectRunsWithoutApproval: true,
     bypassNote:
       'Executes markQuoteFollowedUp first and then marks matching pending AiApprovalItems approved under revenue:write without prior approval or membershipApprovalTier enforcement.',
@@ -241,10 +248,11 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     gatedEffect:
       'Binds a Flow tool call (toolName, canonical args, requestedBy, crew, surface, 24h TTL, SHA-256 requestHash) to a server-issued `flowc_*` confirmation id for non-boundary tools.',
     executionSite:
-      'apps/server/src/modules/ai/flow-orchestrator.service.ts#chat (executes bound tool via executeToolAction or escalates to AiApprovalItem after claimFlowConfirmation succeeds).',
+      'apps/server/src/modules/ai/flow-orchestrator.service.ts#chat -> this.executeTool (which calls executeToolAction) or escalates to AiApprovalItem after claimFlowConfirmation succeeds.',
     clearerScope:
       'Strictly the same authenticated member (`bound.requestedBy === userId`) in the same businessId before expiresAt; memberless turns cannot bind or confirm.',
-    manualPath: 'POST /ai/businesses/:businessId/flow/confirm (inline chat confirmation button).',
+    manualPath:
+      'POST /ai/businesses/:businessId/flow/confirm or POST /ai/businesses/:businessId/flow/chat (with body.pendingConfirmation).',
     effectRunsWithoutApproval: false,
   },
   {
@@ -255,10 +263,11 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     gatedEffect:
       'Single-use compare-and-set transition of `flow-confirm:<id>` (`pending` -> `claimed`/`cancelled`/`expired`, then `settle` -> `completed`/`failed`/`refused`) gating execution of the server-bound Flow tool call.',
     executionSite:
-      'apps/server/src/modules/ai/flow-orchestrator.service.ts#chat (runs bound tool only on `claim.kind === "claimed"` and re-evaluates governance).',
+      'apps/server/src/modules/ai/flow-orchestrator.service.ts#chat -> this.executeTool (runs bound tool only on `claim.kind === "claimed"` and re-evaluates governance).',
     clearerScope:
       'Authenticated business member matching `bound.requestedBy === userId` with intact `requestHash` and unexpired TTL; refuses boundary-adopted tools.',
-    manualPath: 'POST /ai/businesses/:businessId/flow/confirm.',
+    manualPath:
+      'POST /ai/businesses/:businessId/flow/confirm or POST /ai/businesses/:businessId/flow/chat (with body.pendingConfirmation).',
     effectRunsWithoutApproval: false,
   },
 
@@ -308,7 +317,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     clearerScope:
       'AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) + tenant match (requestInBusiness) + currentStep.approverId or delegatedTo === principal.',
     manualPath:
-      'POST /businesses/:businessId/approvals/:approvalId/approve or /reject (also exposed via Flow tool decide_approval_step).',
+      'POST /businesses/:businessId/approvals/:approvalId/approve or /reject (also exposed via Flow tool approval_decide_step, which passes hardcoded approverId="key_ai").',
     effectRunsWithoutApproval: false,
   },
   {
@@ -322,7 +331,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     clearerScope:
       'AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) + tenant match + currentStep.approverId or delegatedTo === principal.',
     manualPath:
-      'POST /businesses/:businessId/approvals/:approvalId/approve or /reject.',
+      'POST /businesses/:businessId/approvals/:approvalId/approve or /reject (also Flow tool approval_decide_step).',
     effectRunsWithoutApproval: false,
   },
   {
@@ -399,7 +408,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     clearerScope:
       'Evaluated by policy: NONE (clearable on trusted surface), PRINCIPAL_CONFIRMATION (same requester), or HUMAN_APPROVAL (member with approval tier >= capability.riskTier or SUPER_ADMIN).',
     manualPath:
-      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve (or Flow confirm -> confirmAndExecute).',
+      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve, POST /api/v1/cortex/actions/approve, or Flow confirm -> confirmAndExecute.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -412,9 +421,9 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     executionSite:
       'apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts#admit (re-checks ControlEvidence, expiry, fingerprint, and principal authority before committing effect).',
     clearerScope:
-      'Authenticated user (`principalUserId`) verified on locked rows via readFresh + evidenceKindFor (requester for CONFIRMATION, or member with approvalTier >= capability.riskTier / SUPER_ADMIN for APPROVAL).',
+      'Authenticated user (`principalUserId`) verified on locked rows via readFresh + evidenceKindFor (requester for CONFIRMATION, or member with approvalTier >= capability.riskTier / SUPER_ADMIN for APPROVAL), via KeyActionProposalController (operations:write), AiController (ai:write + tier check), KeyCortexController (ai:write + CortexMemberAuthorityGuard), or Flow confirm.',
     manualPath:
-      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve, POST /businesses/:businessId/ai/approvals/:approvalId/resolve, or Flow confirm.',
+      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve, POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve, POST /api/v1/cortex/actions/approve, or Flow confirm.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -424,9 +433,9 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     kind: 'KEY action proposal',
     gatedEffect:
       'Seals an older or externally created boundary-governed KeyActionProposal with actionEnvelope, actionFingerprint, capabilityName, and monotonic carriesMoney before evidence can bind.',
-    executionSite: 'none (pre-evidence sealing inside recordEvidence/admit transactions)',
-    clearerScope: 'Internal transaction helper called inside KeyActionBoundaryService.recordEvidence and admit.',
-    manualPath: 'Triggered automatically when approving/admitting an unsealed proposal for an adopted capability.',
+    executionSite: 'none (pre-evidence sealing inside KeyActionBoundaryService.recordEvidence transaction)',
+    clearerScope: 'Internal transaction helper called inside KeyActionBoundaryService.recordEvidence.',
+    manualPath: 'Triggered automatically when approving an unsealed proposal for an adopted capability.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -453,9 +462,9 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
       'Claims the execution idempotencyKey as voided and marks a boundary-governed KeyActionProposal REJECTED or CANCELLED so it can never execute.',
     executionSite: 'none (terminal void; blocks future admission)',
     clearerScope:
-      'Authenticated member via KeyActionProposalController (operations:write) or AiController (ai:write + tier check); Flow cancel enforces `onlyIfRequestedBy`.',
+      'Authenticated member via KeyActionProposalController (operations:write), AiController (ai:write + tier check), or KeyCortexController (ai:write + CortexMemberAuthorityGuard); Flow cancel enforces `onlyIfRequestedBy`.',
     manualPath:
-      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/reject or /cancel.',
+      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/reject or /cancel, POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve, or POST /api/v1/cortex/actions/approve.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -496,7 +505,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     clearerScope:
       'Created via KeyActionProposalController (operations:write), Cortex orchestrator, genome bridge, or shadow migration; cleared via approve (operations:write / ai:write + authority check).',
     manualPath:
-      'POST /key-autonomy/businesses/:businessId/actions/proposals to create; .../approve + .../execute to clear and run.',
+      'POST /key-autonomy/businesses/:businessId/actions/proposals to create; .../approve + .../execute (or POST /api/v1/cortex/actions/approve) to clear and run.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -507,11 +516,11 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     gatedEffect:
       'Transitions a non-boundary PENDING KeyActionProposal to APPROVED via conditional updateMany while snapping the approver PrincipalAuthority into resolution JSON (for boundary proposals, delegates to recordEvidence).',
     executionSite:
-      'apps/server/src/modules/key-autonomy/key-action-proposal.service.ts#execute (executes only after claimForExecution re-verifies approver authority on locked rows).',
+      'apps/server/src/modules/key-autonomy/key-action-proposal.service.ts#execute (executes only after claimForExecution re-verifies approver authority on locked rows) and apps/server/src/modules/ai/plan-executor.service.ts#onProposalApproved.',
     clearerScope:
-      'AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) via KeyActionProposalController (or ai:write + assertCanResolveApproval via AiController); authority re-checked at execution.',
+      'AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) via KeyActionProposalController, ai:write + assertCanResolveApproval via AiController, or ai:write + CortexMemberAuthorityGuard via KeyCortexController; authority re-checked at execution.',
     manualPath:
-      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve or POST /businesses/:businessId/ai/approvals/:approvalId/resolve.',
+      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/approve, POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve, or POST /api/v1/cortex/actions/approve.',
     effectRunsWithoutApproval: false,
   },
   {
@@ -550,9 +559,9 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
     executionSite:
       'apps/server/src/modules/key-autonomy/key-action-proposal.service.ts#reject, #cancel, and #recordOutcome (post-execution outcome recording only).',
     clearerScope:
-      'AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) via KeyActionProposalController (reject/cancel/execute) or AiController (ai:write + tier check).',
+      'AuthGuard + BusinessGuard + ModuleScopeGuard(operations:write) via KeyActionProposalController (reject/cancel/execute), ai:write + assertCanResolveApproval via AiController, or ai:write + CortexMemberAuthorityGuard via KeyCortexController.',
     manualPath:
-      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/reject, /cancel, or /execute.',
+      'POST /key-autonomy/businesses/:businessId/actions/proposals/:proposalId/reject, /cancel, /execute, POST /ai/businesses/:businessId/ai/approvals/:approvalId/resolve, or POST /api/v1/cortex/actions/approve.',
     effectRunsWithoutApproval: false,
   },
 ];
