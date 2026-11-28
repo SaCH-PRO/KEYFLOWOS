@@ -514,30 +514,36 @@ test('TOF-LISTER-FORK-PRS: fork impl/* PRs (and deleted forks) are excluded and 
     { number: 304, headRefName: 'impl/deleted-fork', isDraft: true, isCrossRepository: true, headRepository: null },
     { number: 305, headRefName: 'impl/mismatched-repo', isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: 'other-org/KEYFLOWOS' } },
     { number: 306, headRefName: 'chore/fork-non-impl', isDraft: false, isCrossRepository: true, headRepository: { nameWithOwner: 'attacker/KEYFLOWOS' } },
+    { number: 307, headRefName: 'impl/cross-flag-with-same-repo', isDraft: true, isCrossRepository: true, headRepository: { nameWithOwner: REPO } },
   ];
 
   const fetch1 = fakeFetch(pagesOf(prs));
   const result = await listOpenImplPrs({ fetchImpl: fetch1, token: TOKEN, repository: REPO });
   assert.deepEqual(result.numbers, [301, 302]);
-  assert.deepEqual(result.excludedForks, [303, 304, 305]);
+  assert.deepEqual(result.excludedForks, [303, 304, 305, 307]);
 
-  // Verify the GraphQL query actually requests isCrossRepository and headRepository
+  // Verify the GraphQL query actually requests isCrossRepository and headRepository { nameWithOwner }
   const sentQuery = JSON.parse(fetch1.calls[0].init.body).query;
   assert.match(sentQuery, /\bisCrossRepository\b/);
   assert.match(sentQuery, /\bheadRepository\b/);
+  assert.match(sentQuery, /\bnameWithOwner\b/);
 
   // Verify CLI stdout lists only same-repo PRs and stderr reports the excluded forks
   const run = await runMain(fakeFetch(pagesOf(prs)));
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.stdout, '301\n302\n');
-  assert.match(run.stderr, /excluded 3 fork impl\/\* PR\(s\): #303, #304, #305/);
+  assert.match(run.stderr, /excluded 4 fork impl\/\* PR\(s\): #303, #304, #305, #307/);
 });
 
-test('TOF-LISTER-FORK-PRS: missing or non-boolean isCrossRepository or malformed headRepository fails closed with SHAPE', async () => {
+test('TOF-LISTER-FORK-PRS: missing or non-boolean isCrossRepository or malformed/missing headRepository fails closed with SHAPE', async () => {
   const badPages = [
     pagesOf([{ number: 401, headRefName: 'impl/x', isDraft: true, headRepository: { nameWithOwner: REPO } }]),
     pagesOf([{ number: 402, headRefName: 'impl/x', isDraft: true, isCrossRepository: 'false', headRepository: { nameWithOwner: REPO } }]),
     pagesOf([{ number: 403, headRefName: 'impl/x', isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: 123 } }]),
+    pagesOf([{ number: 404, headRefName: 'impl/x', isDraft: true, isCrossRepository: false }]),
+    pagesOf([{ number: 405, headRefName: 'impl/x', isDraft: true, isCrossRepository: false, headRepository: null }]),
+    pagesOf([{ number: 406, headRefName: 'impl/x', isDraft: true, isCrossRepository: false, headRepository: { nameWithOwner: '' } }]),
+    pagesOf([{ number: 407, headRefName: 'impl/x', isDraft: true, isCrossRepository: false, headRepository: 'not-an-object' }]),
   ];
   for (const pages of badPages) {
     await rejectsWith(
