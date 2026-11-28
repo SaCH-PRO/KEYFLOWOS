@@ -416,8 +416,23 @@ beforeAll(async () => {
   }
 
   // ---- definitions: B's first, then A's -----------------------------------
+  // P260 (FU-CFN-X01-ORDER-FLAKE): explicit strictly increasing createdAt (1s
+  // apart, before defARetired's 2026-10-01 archivedAt) so ORDER BY created_at, id
+  // never breaks same-millisecond ties by id.
+  const defCreatedBaseMs = Date.parse('2026-09-30T00:00:00.000Z');
+  let defSeq = 0;
   const def = (id: string, businessId: string, name: string, extra: Record<string, unknown> = {}) =>
-    db.customFieldDefinition.create({ data: { id, businessId, name, label: `${name} label`, type: 'TEXT', ...extra } });
+    db.customFieldDefinition.create({
+      data: {
+        id,
+        businessId,
+        name,
+        label: `${name} label`,
+        type: 'TEXT',
+        createdAt: new Date(defCreatedBaseMs + defSeq++ * 1_000),
+        ...extra,
+      },
+    });
   await def(ID.defBOnly, ID.bizB, NAME.bOnly, { ...B_SECRET, type: 'SELECT' });
   await def(ID.defBShared, ID.bizB, NAME.shared, { label: `${B_SECRET.label} (shared name)` });
   await def(ID.defBRetired, ID.bizB, NAME.retired, { label: `${B_SECRET.label} (retired name)` });
