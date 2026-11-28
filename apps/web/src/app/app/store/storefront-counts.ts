@@ -254,11 +254,12 @@ function dropTrailing(g: string[]): string[] {
     // qualifies that, and stays too: after a word, a kept mark, a kept currency run ("50 %*", "( sale )*", "5 €*"), or
     // sentence punctuation ("Free!*", "Free.*"). After whitespace or nothing, or after a lone symbol that goes
     // ("Shop •*"), it goes with the rest of its run, as any lone mark does.
+    // "What stays" is asked of the part before it (dropTrailing of it keeps its last grapheme): whitespace never
+    // stays there, and a marker before this one stays exactly when what it is attached to does ("Free**" keeps both,
+    // "Shop **" neither), so no separate test for either is needed.
     if (CONDITIONS.test(c)) {
-      let j = end - 1;
-      while (j > 0 && CONDITIONS.test(g[j - 1])) j--;
-      const before = g[j - 1];
-      if (before !== undefined && !isSpace(before) && (ALWAYS_DROPPED.test(before) || dropTrailing(g.slice(0, j)).length === j)) break;
+      const before = g[end - 2];
+      if (before !== undefined && (ALWAYS_DROPPED.test(before) || dropTrailing(g.slice(0, end - 1)).length === end - 1)) break;
     }
     if (!ALWAYS_DROPPED.test(c)) {
       // The run this grapheme ends: the marks before it, back to content, whitespace, the start, or (r16, R16-3)
