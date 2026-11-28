@@ -591,11 +591,17 @@ function scanSourceForApprovalWriters(sourceText: string, relFile: string): {
           }
 
           // Inspect nested relation writes on ANY Prisma write call (e.g., business.update,
-          // user.update, approvalRequest.create, approvalStep.update).
-          const payloadArg =
-            node.arguments.length >= 3 &&
-            memberAccessParts(unwrapExpr(node.expression), scopes)?.prop === 'apply'
-              ? node.arguments[2]
+          // user.update, approvalRequest.create, approvalStep.update), including via
+          // Reflect.apply(fn, thisArg, [arg]), fn.call(thisArg, arg), and fn.apply(thisArg, [arg]).
+          const outerCallee = memberAccessParts(unwrapExpr(node.expression), scopes);
+          const isReflectApply =
+            outerCallee?.prop === 'apply' &&
+            ts.isIdentifier(unwrapExpr(outerCallee.receiver)) &&
+            (unwrapExpr(outerCallee.receiver) as ts.Identifier).text === 'Reflect';
+          const payloadArg = isReflectApply
+            ? node.arguments[2]
+            : outerCallee && (outerCallee.prop === 'call' || outerCallee.prop === 'apply')
+              ? node.arguments[1]
               : node.arguments[0];
           if (payloadArg) {
             const nestedWrites = collectNestedApprovalWrites(
@@ -861,6 +867,12 @@ describe('RR-APPROVAL-MODEL-CENSUS — approval writer registry', () => {
         async rawSqlFlowConfirm(tx: any) {
           await tx.$executeRaw\`INSERT INTO idempotency_keys (idempotency_key) VALUES ('flow-confirm:z')\`;
         }
+        async nestedViaCall(prisma: any) {
+          await prisma.client.business.update.call(prisma.client.business, {
+            where: { id: 'b1' },
+            data: { aiApprovalItems: { create: [] } },
+          });
+        }
       }
     `;
     const r2 = scanSourceForApprovalWriters(fixtureTricks, 'apps/server/src/modules/rogue/tricky.service.ts');
@@ -878,6 +890,7 @@ describe('RR-APPROVAL-MODEL-CENSUS — approval writer registry', () => {
     expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawSqlConcatAndVar::AiApprovalItem');
     expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawSqlConcatAndVar::ApprovalRequest');
     expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#rawSqlFlowConfirm::IdempotencyKey');
+    expect(keys2).toContain('apps/server/src/modules/rogue/tricky.service.ts#nestedViaCall::AiApprovalItem');
     // Plural `aiApprovalRequests` must ALSO trip the dormant-ref gate
     expect(r2.aiApprovalRequestCodeRefs.length).toBeGreaterThan(0);
 

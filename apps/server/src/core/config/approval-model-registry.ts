@@ -117,7 +117,7 @@ export const APPROVAL_MODEL_WRITERS: readonly ApprovalModelWriterEntry[] = [
       'POST /ai-approvals/businesses/:businessId/items/:itemId/resolve, POST /ai-approvals/businesses/:businessId/items/bulk-resolve, reply-based approval via StaffChatBridgeService (WhatsApp/SMS), or post-hoc via intake approve endpoints.',
     effectRunsWithoutApproval: true,
     bypassNote:
-      'DriveIntakeOrchestrator.executePlan (POST /commerce/businesses/:businessId/drive/intake/:intakeFileId/approve) and MessageIntakeOrchestrator.executePlan (POST /communications/businesses/:businessId/message-intake/:intakeId/approve, lacking ModuleScopeGuard) run all mutations first and only invoke resolveApproval -> finalizeResolution afterward.',
+      'DriveIntakeOrchestrator.executePlan (POST /drive/businesses/:businessId/intake/:intakeFileId/approve, also reached via POST /data-inbox/businesses/:businessId/items/:itemId/approve) and MessageIntakeOrchestrator.executePlan (POST /communications/businesses/:businessId/message-intake/:intakeId/approve, lacking ModuleScopeGuard) run all mutations first and only invoke resolveApproval -> finalizeResolution afterward.',
   },
   {
     model: 'AiApprovalItem',
