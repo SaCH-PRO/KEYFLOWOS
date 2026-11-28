@@ -1760,6 +1760,21 @@
       "prefix": "v92q_",
       "owner": "apps/server/test/push-multi-business.integration.test.ts",
       "packet": "V1-92 (P242 FU-PUSH-MULTI-BUSINESS, D-319 / Q45)"
+    },
+    {
+      "prefix": "v92s_",
+      "owner": "apps/server/test/reminder-honesty.integration.test.ts",
+      "packet": "V1-92 (FU-REMINDER-HONESTY)"
+    },
+    {
+      "prefix": "v92t_",
+      "owner": "apps/server/test/invoice-list-remaining.integration.test.ts",
+      "packet": "V1-92 (FU-LIST-CREDIT-AWARE-REMAINING, Journey H)"
+    },
+    {
+      "prefix": "v72k_",
+      "owner": "apps/server/test/key-learning-outcome-semantics.integration.test.ts",
+      "packet": "V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)"
     }
   ],
   "pendingRenames": [],

@@ -121,7 +121,7 @@ const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
  *   - DRAFT and VOID are never credited, and a credit note never voids an
  *     invoice or returns it to DRAFT.
  */
-const CREDITED_STATUSES: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus>(['PARTIALLY_CREDITED', 'FULLY_CREDITED']);
+export const CREDITED_STATUSES: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus>(['PARTIALLY_CREDITED', 'FULLY_CREDITED']);
 const CREDIT_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
   DRAFT: new Set<InvoiceStatus>([]),
   SENT: CREDITED_STATUSES,

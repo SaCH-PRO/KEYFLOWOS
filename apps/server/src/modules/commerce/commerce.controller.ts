@@ -1804,29 +1804,29 @@ export class CommerceController {
   async sendInvoiceReminder(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { recipientEmail?: string; message?: string; channel?: 'email' | 'whatsapp' | 'manual' },
+    @Body() body: { recipientEmail?: string; message?: string; channel?: 'email' | 'whatsapp' | 'manual' } | undefined,
     @Req() req: any,
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
+    const payload = body && typeof body === 'object' ? body : {};
     return this.commerce.sendInvoiceReminder({
       invoiceId,
       businessId,
       actorId: req?.user?.id,
-      customMessage: body.message,
-      channel: body.channel,
-      deliver: async ({ invoice, recipientEmail, paymentUrl }) => {
-        const channel = body.channel ?? (recipientEmail ? 'email' : 'manual');
-        if (channel !== 'email') return { delivered: false };
-        const target = body.recipientEmail || recipientEmail;
-        if (!target) return { delivered: false };
-        const html = this.buildInvoiceEmailContext(invoice, paymentUrl, body.message, 'reminder');
+      recipientEmail: payload.recipientEmail,
+      customMessage: payload.message,
+      channel: payload.channel,
+      deliver: async ({ invoice, recipientEmail, paymentUrl, channel }) => {
+        if (channel !== 'email') return { delivered: false, recipientEmail: null };
+        if (!recipientEmail) return { delivered: false, recipientEmail: null };
+        const html = this.buildInvoiceEmailContext(invoice, paymentUrl, payload.message, 'reminder');
         const result = await this.gmail.sendEmail({
           businessId,
-          to: target,
+          to: recipientEmail,
           subject: `Reminder: Invoice #${invoice.invoiceNumber} — payment due`,
           htmlBody: html,
         });
-        return { delivered: true, messageId: result.messageId };
+        return { delivered: true, messageId: result.messageId, recipientEmail };
       },
     });
   }

@@ -232,7 +232,7 @@ describe('KeyCortexLearningService', () => {
     expect(calibration.calibrated).toBe(0.8);
   });
 
-  it('recordOutcome creates a cognition memory for tool execution', async () => {
+  it('recordOutcome creates a cognition memory for tool execution with userResponse no_action (RR-LEARNING-OUTCOME-SEMANTICS)', async () => {
     const mockPrisma = createMockPrisma();
     const service = createService(mockPrisma, false);
 
@@ -251,7 +251,7 @@ describe('KeyCortexLearningService', () => {
           businessId: 'biz_1',
           sessionId: 'sess_tool_1',
           query: 'Tool execution: crm.create_contact',
-          userResponse: 'accepted',
+          userResponse: 'no_action',
           confidence: 0.85,
           metadata: expect.objectContaining({
             category: 'execution_patterns',
@@ -264,7 +264,7 @@ describe('KeyCortexLearningService', () => {
     );
   });
 
-  it('recordOutcome stores failure details in cognition memory', async () => {
+  it('recordOutcome stores failure details in cognition memory with userResponse no_action (RR-LEARNING-OUTCOME-SEMANTICS)', async () => {
     const mockPrisma = createMockPrisma();
     const service = createService(mockPrisma, false);
 
@@ -281,7 +281,7 @@ describe('KeyCortexLearningService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           businessId: 'biz_1',
-          userResponse: 'rejected',
+          userResponse: 'no_action',
           confidence: 0.4,
           metadata: expect.objectContaining({
             category: 'execution_patterns',
@@ -291,5 +291,51 @@ describe('KeyCortexLearningService', () => {
         }),
       }),
     );
+  });
+
+  it('RR-LEARNING-OUTCOME-SEMANTICS: five failed recordOutcome calls do not count as user rejections or lower calibrateConfidence', async () => {
+    const stored: Array<Record<string, any>> = [];
+    const mockPrisma = {
+      client: {
+        cognitionMemory: {
+          create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, any> }) => {
+            stored.push(data);
+            return { id: `cm_${stored.length}`, ...data };
+          }),
+          count: vi.fn().mockImplementation(async ({ where }: { where: Record<string, any> }) => {
+            return stored.filter((row) => {
+              if (where.businessId && row.businessId !== where.businessId) return false;
+              if (where.userResponse) {
+                if (typeof where.userResponse === 'string' && row.userResponse !== where.userResponse) return false;
+                if (typeof where.userResponse === 'object' && where.userResponse.not && row.userResponse === where.userResponse.not) {
+                  return false;
+                }
+              }
+              return true;
+            }).length;
+          }),
+        },
+      },
+    };
+    const service = createService(mockPrisma, false);
+
+    for (let i = 0; i < 5; i++) {
+      await service.recordOutcome({
+        businessId: 'biz_outage',
+        sessionId: `sess_fail_${i}`,
+        toolName: 'commerce_send_invoice',
+        success: false,
+        error: 'upstream 503',
+        durationMs: 25,
+      });
+    }
+
+    const rate = await service.getAcceptanceRate('biz_outage');
+    expect(rate.rejected).toBe(0);
+    expect(rate.total).toBe(0);
+
+    const cal = await service.calibrateConfidence(0.9, 'biz_outage');
+    expect(cal.calibrated).toBe(0.9);
+    expect(cal.reliable).toBe(false);
   });
 });

@@ -18,7 +18,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
-import type { PromptVariant } from '@prisma/client';
+import { Prisma, type PromptVariant } from '@prisma/client';
 import {
   evaluateMemoryClassAccess,
   getMemoryClassReadMode,
@@ -136,7 +136,10 @@ export class KeyCortexLearningService {
           sessionId: input.sessionId,
           query: `Tool execution: ${input.toolName}`,
           recommendation: input.success ? 'Executed successfully' : `Failed: ${input.error ?? 'unknown error'}`,
-          userResponse: input.success ? 'accepted' : 'rejected',
+          // RR-LEARNING-OUTCOME-SEMANTICS: tool execution outcomes are not user
+          // feedback; keep execution status in metadata so failures never count
+          // as user rejections or distort confidence calibration.
+          userResponse: 'no_action',
           actualOutcome: input.success
             ? `Completed in ${input.durationMs}ms`
             : `Failed in ${input.durationMs}ms: ${input.error ?? ''}`,
@@ -364,11 +367,21 @@ export class KeyCortexLearningService {
     options: { roleId?: string; functionId?: string } = {},
   ): Promise<AcceptanceRate> {
     try {
-      const where = {
+      const where: Prisma.CognitionMemoryWhereInput = {
         businessId,
         ...(options.roleId ? { roleId: options.roleId } : {}),
         ...(options.functionId ? { functionId: options.functionId } : {}),
         userResponse: { not: 'no_action' },
+        // RR-LEARNING-OUTCOME-SEMANTICS: exclude legacy tool-execution rows
+        // (metadata.category === 'execution_patterns') while still counting
+        // real user feedback rows whose metadata is SQL NULL (Prisma.DbNull),
+        // JSON null, omits `category`, has `category: null`, or has another category.
+        OR: [
+          { metadata: { equals: Prisma.DbNull } },
+          { metadata: { path: ['category'], equals: Prisma.DbNull } },
+          { metadata: { path: ['category'], equals: Prisma.JsonNull } },
+          { metadata: { path: ['category'], not: 'execution_patterns' } },
+        ],
       };
 
       const [accepted, rejected, modified, total] = await Promise.all([
