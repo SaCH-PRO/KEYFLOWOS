@@ -1,0 +1,22 @@
+{
+  "comments": [
+    {
+      "author": {
+        "login": "SaCH-PRO"
+      },
+      "body": "```yaml\nmessage_id: CG-CURSOR-PROOF-001\nmessage_type: DIRECTIVE\npacket_id: TOF-WORKER-CURSOR-PROOF\nsender: chatgpt\nsource_main: null\nimplementation_branch: null\nstate: RELEASED\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\n```",
+      "createdAt": "2026-11-28T00:00:00Z",
+      "includesCreatedEdit": false,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-990001"
+    },
+    {
+      "author": {
+        "login": "SaCH-PRO"
+      },
+      "body": "```yaml\nmessage_id: CG-CURSOR-PROOF-002\nmessage_type: DIRECTIVE\npacket_id: TOF-WORKER-CURSOR-PROOF\nsender: chatgpt\nsource_main: null\nimplementation_branch: null\nstate: RELEASED\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\n```",
+      "createdAt": "2026-11-28T00:05:00Z",
+      "includesCreatedEdit": false,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-990002"
+    }
+  ]
+}
