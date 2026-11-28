@@ -1755,6 +1755,11 @@
       "prefix": "v92r_",
       "owner": "apps/server/test/general-ledger-zoned-from.integration.test.ts",
       "packet": "V1-92 (FU-LEDGER-ZONED-FROM, Journey H)"
+    },
+    {
+      "prefix": "v92q_",
+      "owner": "apps/server/test/push-multi-business.integration.test.ts",
+      "packet": "V1-92 (P242 FU-PUSH-MULTI-BUSINESS, D-319 / Q45)"
     }
   ],
   "pendingRenames": [],
