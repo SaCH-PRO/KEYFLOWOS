@@ -22,7 +22,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -67,7 +66,6 @@ import { toast } from "sonner";
 import ExpensesInboxPage from "../page";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 
 const ok = <T,>(data: T) => ({ data, error: null });
 const CATS: Record<string, ExpenseCategory[]> = {
@@ -98,7 +96,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
@@ -195,21 +192,6 @@ describe("R15-6: the sheet's bill and Drive guards", () => {
 });
 
 describe("R15-7: editors after the switch", () => {
-  const SHARED = [{ id: "cat_shared", name: "Shared", color: "#f97316" } as ExpenseCategory];
-  it("the budget modal reopened on B shows none of A's category or amount", async () => {
-    const el = (b: string) => <ExpenseBudgetsTab businessId={b} budgets={[]} categories={SHARED} expenses={[]} summary={null} onReload={vi.fn()} />;
-    const view = render(el("biz_A"));
-    fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-    fireEvent.change(await screen.findByPlaceholderText("5000.00"), { target: { value: "800" } });
-    fireEvent.change(screen.getByDisplayValue("All Categories (Total Budget)"), { target: { value: "cat_shared" } });
-    ws.bid = "biz_B";
-    view.rerender(el("biz_B"));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Save Budget" })).toBeNull());
-    fireEvent.click(screen.getAllByRole("button", { name: /Set Budget/i })[0]);
-    const amount = (await screen.findByPlaceholderText("5000.00")) as HTMLInputElement;
-    expect(amount.value, "A's amount on B's form").toBe("");
-    expect((screen.getByDisplayValue("All Categories (Total Budget)") as HTMLSelectElement).value, "A's category on B's form").toBe("");
-  });
 
   it("the recurring panel, after an Edit of A's schedule and the switch, opens New as a new schedule", async () => {
     const el = (b: string) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={0} />;

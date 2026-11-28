@@ -24,7 +24,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -69,7 +68,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockImplementation(async (b: string) => ok([{ id: `p_${b}`, name: `Project ${b}` }]));
   client.fetchServices.mockImplementation(async (b: string) => ok([{ id: `s_${b}`, name: `Service ${b}` }]));
   client.fetchContacts.mockImplementation(async (b: string) => ok({ contacts: [{ id: `c_${b}`, displayName: `Contact ${b}` }] }));
