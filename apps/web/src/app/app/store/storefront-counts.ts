@@ -184,11 +184,13 @@ const segmenter =
 const graphemes = (text: string): string[] => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
 const isSpace = (g: string | undefined) => g !== undefined && /^\s+$/u.test(g);
 /**
- * r15 (R15-3): an emoji, as a reader sees one: a grapheme shown as a picture (\p{Emoji_Presentation}, or asked to be
- * with U+FE0F), a flag, a keycap (U+20E3), or a ZWJ sequence. Text-style ©, ®, ™, ‼, ↔ are Extended_Pictographic but
- * read as symbols, and are not.
+ * r15 (R15-3): an emoji, as a reader sees one: a grapheme holding a character shown as a picture
+ * (\p{Emoji_Presentation}: 🎉, 👍, a flag's regional indicators). Text-style ©, ®, ™, ‼, ↔ are Extended_Pictographic
+ * but read as symbols, and are not. A grapheme asked to show as a picture (U+FE0F: ❤️), a keycap (U+20E3) or a ZWJ
+ * sequence needs no test here: U+FE0F, U+20E3 and U+200D are marks and a format character, never punctuation or a
+ * symbol, so such a grapheme is never a mark to drop (isMark) and always counts as content (hasContent).
  */
-const isEmoji = (g: string) => /\p{Emoji_Presentation}|\uFE0F|\u20E3|\u200D|\p{Regional_Indicator}/u.test(g);
+const isEmoji = (g: string) => /\p{Emoji_Presentation}/u.test(g);
 /** Holds a letter, a digit, a mark, or is an emoji: more than whitespace, punctuation and symbols. */
 const hasContent = (t: string | undefined) => t !== undefined && (/[^\s\p{P}\p{S}]/u.test(t) || isEmoji(t));
 /** Punctuation or symbols only, and no emoji: what may be dropped at the cut. */
