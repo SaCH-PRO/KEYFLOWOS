@@ -421,6 +421,31 @@ function numbersIn(value: any, at = '$'): Array<[string, number]> {
   return [];
 }
 
+const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const UUID_CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Serialize an HTTP 403 refusal body for cash-figure leak checks (CP-28b).
+ * Strips only strictly-validated envelope metadata (`timestamp`, `correlationId`)
+ * so a wall-clock `.550Z` millisecond or hex UUID never false-positives on `/550/`.
+ */
+function refusalBodyText(body: unknown): string {
+  if (Buffer.isBuffer(body)) {
+    return body.toString('utf8');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return JSON.stringify(body) ?? '';
+  }
+  const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  if (typeof rest.timestamp === 'string' && ISO_UTC_TIMESTAMP.test(rest.timestamp)) {
+    delete rest.timestamp;
+  }
+  if (typeof rest.correlationId === 'string' && UUID_CORRELATION_ID.test(rest.correlationId)) {
+    delete rest.correlationId;
+  }
+  return JSON.stringify(rest);
+}
+
 /** V1-37c: a balanced posting through the door in `currency` (sourced, so D-13 lets another supported currency through). */
 async function postIn(currency: string, businessId: string, kind: string, amount: number, debitKey: string, creditKey: string) {
   const dr = await coaSeeder.getBySystemKey(businessId, debitKey);
@@ -1780,7 +1805,7 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
     for (const as of [staffNone, ID.ownerA]) {
       const refused = await moneyMoves(ID.bizK, as);
       expect(refused.status, as).toBe(403);
-      expect(JSON.stringify(refused.body), as).not.toMatch(/USD|runway|550/i);
+      expect(refusalBodyText(refused.body), as).not.toMatch(/USD|runway|550/i);
     }
 
     // A legacy lower-case business currency: the move is labelled with the normalized code.
@@ -2101,7 +2126,7 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     for (const as of [staffMn, ownerL]) {
       const refused = await forecastRoute(bizM, as);
       expect(refused.status, as).toBe(403);
-      expect(JSON.stringify(refused.body)).not.toMatch(/openingCash|550/);
+      expect(refusalBodyText(refused.body)).not.toMatch(/openingCash|550/);
     }
     // L's cash never reaches M's forecast, nor M's L's.
     expect((await forecastRoute(bizL, ownerL)).body.openingCash).toBe(-4285);
@@ -2165,7 +2190,7 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     expect(refused.status, JSON.stringify(refused.body).slice(0, 200)).toBe(403);
     // Delta review: the refusal is ModuleScopeGuard's, naming revenue read.
     expect(JSON.stringify(refused.body)).toMatch(/revenue requires read/);
-    expect(JSON.stringify(refused.body)).not.toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText(refused.body)).not.toMatch(/openingCash|otherCurrencyCash|550/);
 
     // Controls: the owner reads it, and so does a member whose only scope is revenue read.
     expect((await forecastRoute(bizM, ownerM)).status).toBe(200);
@@ -2175,6 +2200,29 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     const reader = await forecastRoute(bizM, staffMr);
     expect(reader.status, JSON.stringify(reader.body).slice(0, 200)).toBe(200);
     expect(reader.body).toMatchObject({ currency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }] });
+  });
+
+  it('CP-28b (FU-CP28-TIMESTAMP-FLAKE): 403 refusal leak checks ignore ISO-8601 timestamp (.550Z) and UUID correlationId envelope metadata while still catching any leaked 550/USD/openingCash figure', () => {
+    const cleanRefusalAt550Ms = {
+      statusCode: 403,
+      code: 'FORBIDDEN',
+      message: 'Insufficient permissions: revenue requires read access (you have none)',
+      error: 'Forbidden',
+      timestamp: '2026-11-28T11:50:58.550Z',
+      correlationId: 'a1b2c3d4-550e-4f5a-8b9c-0d1e2f3a4b5c',
+      path: '/finance/businesses/v34a_bizM/cashflow-forecast',
+    };
+    expect(refusalBodyText(cleanRefusalAt550Ms)).not.toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText(cleanRefusalAt550Ms)).not.toMatch(/USD|runway|550/i);
+
+    // Negative controls: any real figure leak in message, data, or a non-ISO timestamp must still match.
+    expect(refusalBodyText({ ...cleanRefusalAt550Ms, message: 'Forbidden: USD 550 held apart' })).toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText({ ...cleanRefusalAt550Ms, otherCurrencyCash: [{ currency: 'USD', amount: 550 }] })).toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText({ ...cleanRefusalAt550Ms, timestamp: '550' })).toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText({ ...cleanRefusalAt550Ms, correlationId: 'leaked-550-usd' })).toMatch(/openingCash|otherCurrencyCash|550/);
+    expect(refusalBodyText(undefined)).toBe('');
+    expect(refusalBodyText(Buffer.from('USD 550'))).toMatch(/USD|runway|550/i);
+    expect(refusalBodyText(Buffer.from('USD 550'))).toMatch(/openingCash|otherCurrencyCash|550/);
   });
 
   // Orchestrator review M2: metrics.cashCurrency is named only when the business currency is a

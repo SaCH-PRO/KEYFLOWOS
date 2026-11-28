@@ -1,5 +1,7 @@
 "use client";
 
+import { HAS_PLACEHOLDER } from "../storefront-counts";
+import { FaqPlaceholderWarning } from "./faq-placeholder-warning";
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -17,14 +19,19 @@ import {
 } from "lucide-react";
 import type { StorefrontConfig, FaqEntry } from "@/lib/client";
 
+/** P231 r6-r7 (D-303): an entry still holding a [bracketed] part (a suggestion's placeholder) for the merchant to fill in. */
+const needsFilling = (e: FaqEntry) => HAS_PLACEHOLDER.test(e.question) || HAS_PLACEHOLDER.test(e.answer);
+
 type Props = {
   config: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSave: () => Promise<void>;
   saving: boolean;
+  /** P231 r8: off where the tab already shows the warning by its saves (Merchandising), so it is not shown twice. */
+  saveWarning?: boolean;
 };
 
-export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
+export function FaqManager({ config, onConfigChange, onSave, saving, saveWarning = true }: Props) {
   const faqEntries: FaqEntry[] = config.faqEntries ?? [];
   const [showForm, setShowForm] = useState(false);
   const [newQuestion, setNewQuestion] = useState("");
@@ -132,6 +139,7 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
       </div>
 
       <div className="p-5 space-y-3">
+        {saveWarning && faqEntries.length > 0 && <FaqPlaceholderWarning entries={faqEntries} where="faq-manager" />}
         {faqEntries.length === 0 && !showForm && (
           <div
             className="text-center py-8 rounded-xl"
@@ -199,6 +207,11 @@ export function FaqManager({ config, onConfigChange, onSave, saving }: Props) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium">{entry.question}</p>
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{entry.answer}</p>
+                    {needsFilling(entry) && (
+                      <p role="note" className="text-[10px] font-semibold mt-1" style={{ color: "hsl(var(--kf-warning))" }}>
+                        Fill in the [bracketed] part: click edit.
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button

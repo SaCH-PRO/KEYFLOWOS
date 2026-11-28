@@ -65,11 +65,16 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
-import { computeBalance } from '../src/modules/commerce/invoice-workflow.service';
+import type { computeBalance as ComputeBalanceFn } from '../src/modules/commerce/invoice-workflow.service';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
+// D-323 (FU-TEST-FLAKES-2026-11-23 file 3): computeBalance is loaded dynamically
+// in beforeAll after loadEnv() so importing invoice-workflow.service does not
+// hoist @keyflow/db ahead of dotenv.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
+
+let computeBalance: typeof ComputeBalanceFn;
 
 const P = 'k22a_';
 const HEADER = 'x-k22a-user';
@@ -276,7 +281,10 @@ beforeAll(async () => {
   const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
   const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
-  const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+  const { InvoiceWorkflowService, computeBalance: computeBalanceFn } = await import(
+    '../src/modules/commerce/invoice-workflow.service'
+  );
+  computeBalance = computeBalanceFn;
   const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
   const { GmailService } = await import('../src/modules/commerce/gmail.service');
   const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');

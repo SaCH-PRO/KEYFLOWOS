@@ -1,5 +1,6 @@
 "use client";
 
+import { FaqPlaceholderWarning } from "./faq-placeholder-warning";
 import { useState } from "react";
 import { Palette, Type, LayoutGrid, Monitor, Smartphone, Columns, Wand2 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
@@ -9,6 +10,7 @@ import { FontBrandingPanel } from "./font-branding-panel";
 import { SectionLayoutManager } from "./section-layout-manager";
 import { AiHeroCopyPanel } from "./ai-hero-copy-panel";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
+import { storefrontOffer, type StockByProduct } from "../storefront-counts";
 
 type Props = {
   businessData: {
@@ -22,6 +24,12 @@ type Props = {
   } | null;
   services: Service[];
   commerceProducts: Product[];
+  /** P231 r6: the products live on the store, so the AI Hero Copy panel counts what the storefront shows. */
+  liveProductIds?: ReadonlySet<string>;
+  /** P231 r7: the store's stock, so the panel leaves out what the stock hides on /book. */
+  stockByProduct?: StockByProduct | null;
+  /** P231 r11: what is known about the store (absent: everything): see storefront-counts.ts StorefrontOffer. */
+  storeView?: { productsKnown: boolean; servicesKnown: boolean };
   storefrontConfig: StorefrontConfig;
   onConfigChange: (section: string, updates: Record<string, unknown>) => void;
   onSaveConfig: () => Promise<void>;
@@ -33,6 +41,9 @@ export function DesignMode({
   businessData,
   services,
   commerceProducts,
+  liveProductIds,
+  stockByProduct,
+  storeView,
   storefrontConfig,
   onConfigChange,
   onSaveConfig,
@@ -41,6 +52,8 @@ export function DesignMode({
 }: Props) {
   const appearance = storefrontConfig.appearance as { primaryColor?: string; secondaryColor?: string } | undefined;
   const sc = appearance?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
+  // P231 r7 (D-303): what the storefront shows, by the kind /book names it, for the AI Hero Copy panel.
+  const storeOffer = storefrontOffer(services, commerceProducts, liveProductIds, { stock: stockByProduct, storefrontConfig });
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile" | "both">("mobile");
 
   const previewOptions: { key: "mobile" | "desktop" | "both"; icon: React.ElementType; label: string }[] = [
@@ -60,6 +73,8 @@ export function DesignMode({
 
   return (
     <div className="space-y-5">
+      {/* P231 r7: the Design saves write the whole storefront config, the FAQ entries included. */}
+      <FaqPlaceholderWarning entries={storefrontConfig.faqEntries} where="elsewhere" />
       <AccordionGroup title="Design" brandColor={sc}>
         <AccordionSection
           title="Appearance"
@@ -121,8 +136,12 @@ export function DesignMode({
             currentHeadline={(storefrontConfig.hero as { headline?: string } | undefined)?.headline}
             currentSubheadline={(storefrontConfig.hero as { subheadline?: string } | undefined)?.subheadline}
             currentCta={(storefrontConfig.hero as { ctaLabel?: string } | undefined)?.ctaLabel}
-            productsCount={commerceProducts.length}
-            servicesCount={services.length}
+            productsCount={storeOffer.products}
+            servicesCount={storeOffer.services}
+            packagesCount={storeOffer.packages}
+            orderableServicesCount={storeOffer.orderableServices}
+            productsKnown={storeView?.productsKnown ?? true}
+            servicesKnown={storeView?.servicesKnown ?? true}
             onApply={handleApplyHeroCopy}
           />
         </AccordionSection>
