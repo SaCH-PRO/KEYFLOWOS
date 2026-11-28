@@ -24,11 +24,16 @@ describe('KeyCortexActionDetectionService', () => {
       expect(actions.some((a) => a.actionType === 'CREATE_TASK')).toBe(true);
     });
 
-    it('detects high-approval actions like send email', () => {
-      const actions = service.detectActions('Send an email to the team');
-      const emailAction = actions.find((a) => a.actionType === 'SEND_EMAIL');
-      expect(emailAction).toBeDefined();
-      expect(emailAction?.requiresApproval).toBe(true);
+    it('detects high-approval v1 actions like create invoice and omits v1-removed stub actions', () => {
+      const invoiceActions = service.detectActions('Bill the client for consulting');
+      const invoiceAction = invoiceActions.find((a) => a.actionType === 'CREATE_INVOICE');
+      expect(invoiceAction).toBeDefined();
+      expect(invoiceAction?.requiresApproval).toBe(true);
+
+      const emailActions = service.detectActions('Send an email to the team');
+      expect(emailActions.find((a) => a.actionType === 'SEND_EMAIL')).toBeUndefined();
+      const reportActions = service.detectActions('Generate a monthly sales report');
+      expect(reportActions.find((a) => a.actionType === 'GENERATE_REPORT')).toBeUndefined();
     });
 
     it('deduplicates duplicate intent matches', () => {

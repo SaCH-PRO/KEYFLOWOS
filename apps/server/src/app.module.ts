@@ -81,7 +81,6 @@ import { BusinessGenesisModule } from './modules/business-genesis/business-genes
 import { BusinessAssetsModule } from './modules/business-assets/business-assets.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { PublicEventsModule } from './modules/public-events/public-events.module';
-import { DirectoryModule } from './modules/directory/directory.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { AssetModule } from './modules/assets/asset.module';
 import { CallTaskModule } from './modules/call-tasks/call-task.module';
@@ -207,7 +206,6 @@ import { RiscModule } from './modules/risc/risc.module';
     BusinessAssetsModule,
     CalendarModule,
     PublicEventsModule,
-    DirectoryModule,
     AdminAuthModule,
     AssetModule,
     CallTaskModule,

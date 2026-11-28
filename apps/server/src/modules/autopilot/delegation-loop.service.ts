@@ -13,6 +13,7 @@ import { CommerceService } from '../commerce/commerce.service';
 import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { schedulersDisabled } from '../../core/config/env';
+import { v1ToolRefusalReason } from '../ai/v1-tool-allowlist';
 import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 
 const MOMENTUM_SWEEP_HOUR = 6;
@@ -362,7 +363,10 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const toolName = `delegation_${loop.loopType}`;
-      const decision = await this.governance.evaluate(loop.businessId, toolName);
+      const v1Refusal = v1ToolRefusalReason(toolName);
+      const decision = v1Refusal
+        ? { allowed: false, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier: 4 as const, reason: v1Refusal }
+        : await this.governance.evaluate(loop.businessId, toolName);
 
       this.events.emit('delegation_loop.started', {
         businessId: loop.businessId,

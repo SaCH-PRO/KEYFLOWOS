@@ -1270,6 +1270,8 @@ function PublicBookingPageInner() {
         const showPaymentBadge = trustSectionStyle?.showPaymentBadge !== false;
         return (
           <div key="trust" className="flex items-center justify-between">
+            {/* P231 r1: a wrapper that stays when the bar has no line, so the share and wishlist group keeps its place. */}
+            <div className="min-w-0">
             <TrustBar
               primaryColor={primaryColor}
               secondaryColor={secondaryColor}
@@ -1277,8 +1279,11 @@ function PublicBookingPageInner() {
               completedOrdersCount={completedOrdersCount}
               configuredRails={storefrontConfig?.merchandising?.trustRails}
               showPaymentBadge={showPaymentBadge}
+              slug={slug}
+              currency={cartCurrency}
               businessHoursToday={todaysHoursLabel(business?.businessHours, business?.timezone)}
             />
+            </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <ShareStoreButton
                 url={pageUrl}

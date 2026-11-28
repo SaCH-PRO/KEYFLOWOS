@@ -27,7 +27,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -70,11 +69,8 @@ vi.mock("@/lib/workspace", () => ({
 
 import { toast } from "sonner";
 import RecurringExpensesPanel from "../components/recurring-expenses-panel";
-import { ExpensePipeline } from "../components/expense-pipeline";
 import { BillPayDialog } from "../components/bill-pay-dialog";
 import { ExpenseCategoriesTab } from "../components/expense-categories-tab";
-import { ExpenseList } from "../components/expense-list";
-import { ExpenseBudgetsTab } from "../components/expense-budgets-tab";
 
 const ok = <T,>(data: T) => ({ data, error: null });
 const CATS: Record<string, ExpenseCategory[]> = {
@@ -105,7 +101,6 @@ beforeEach(() => {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchProjects.mockResolvedValue(ok([]));
   client.fetchServices.mockResolvedValue(ok([]));
   client.fetchContacts.mockResolvedValue(ok({ contacts: [] }));
@@ -148,31 +143,7 @@ const always = () => true;
 
 
 type Site = { name: string; call: () => ReturnType<typeof vi.fn>; mount: () => { onPaid?: ReturnType<typeof vi.fn>; onSaved?: ReturnType<typeof vi.fn>; onClose?: ReturnType<typeof vi.fn> } | void; go: () => Promise<void>; answer?: () => unknown; outcomes?: ("answers" | "throws")[] };
-const pipeline = () => render(
-  <ExpensePipeline
-    businessId="biz_A" expenses={[expense()]} totalExpenses={1} categories={CATS.biz_A} summary={null}
-    period="month" setPeriod={vi.fn()} customStart="" setCustomStart={vi.fn()} customEnd="" setCustomEnd={vi.fn()}
-    searchQuery="" setSearchQuery={vi.fn()} filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-    filterStatus="" setFilterStatus={vi.fn()} page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-    onReload={vi.fn()} onEdit={vi.fn()} isCurrentBusiness={always}
-  />,
-);
-const list = () => render(
-  <ExpenseList
-    businessId="biz_A" expenses={[expense({ status: "PAID" })]} totalExpenses={1}
-    categories={[...CATS.biz_A, { id: "cat_A_tolls", name: "Tolls A", color: "#22c55e" } as ExpenseCategory]}
-    filterCategory="" setFilterCategory={vi.fn()} filterPayment="" setFilterPayment={vi.fn()}
-    page={1} setPage={vi.fn()} pageSize={20} setPageSize={vi.fn()}
-    onEdit={vi.fn()} onDelete={vi.fn()} onViewDetail={vi.fn()} onReload={vi.fn()} isCurrentBusiness={always}
-  />,
-);
-const BUDGET = { id: "bud_A1", amount: 500, spent: 100, remaining: 400, percentUsed: 20, isOverBudget: false, isNearAlert: false, categoryId: "cat_A_fuel", category: CATS.biz_A[0], month: 11, year: 2026, alertAt: 80 } as unknown as ExpenseBudget;
 const SITES: Site[] = [
-  {
-    name: "pipeline Delete", call: () => client.deleteExpense,
-    mount: () => { vi.spyOn(window, "confirm").mockReturnValue(true); pipeline(); },
-    go: async () => { fireEvent.click((await screen.findAllByRole("button", { name: /^Delete$/i }))[0]); },
-  },
   {
     name: "recurring save (Update)", call: () => client.updateRecurringExpense,
     mount: () => { render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} isCurrentBusiness={always} />); },
@@ -185,20 +156,6 @@ const SITES: Site[] = [
     name: "recurring Cancel", call: () => client.cancelRecurringExpense,
     mount: () => { vi.spyOn(window, "confirm").mockReturnValue(true); render(<RecurringExpensesPanel businessId="biz_A" categories={[]} triggerNew={0} isCurrentBusiness={always} />); },
     go: async () => { fireEvent.click(await screen.findByRole("button", { name: /^Cancel$/i })); },
-  },
-  {
-    name: "list bulk categorize", call: () => client.updateExpense,
-    mount: () => { list(); },
-    go: async () => {
-      fireEvent.click((await screen.findByRole("table", { name: "Expenses list" })).querySelector("button")!);
-      fireEvent.change(screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).options[0]?.textContent === "Assign category...")!, { target: { value: "cat_A_tolls" } });
-      fireEvent.click(screen.getByRole("button", { name: /Apply/ }));
-    },
-  },
-  {
-    name: "budgets delete", call: () => client.deleteExpenseBudget,
-    mount: () => { render(<ExpenseBudgetsTab businessId="biz_A" budgets={[BUDGET]} categories={CATS.biz_A} expenses={[]} summary={null} onReload={vi.fn()} isCurrentBusiness={always} />); },
-    go: async () => { fireEvent.click(document.querySelector("button svg.lucide-trash-2, button svg.lucide-trash2")!.closest("button")!); },
   },
   {
     name: "categories delete", call: () => client.deleteExpenseCategory,

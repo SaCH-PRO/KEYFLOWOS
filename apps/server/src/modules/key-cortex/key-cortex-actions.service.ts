@@ -26,6 +26,7 @@ import {
   type MemoryReaderContext,
 } from './memory-class-read-projection';
 import { KeyCommandService } from '../ai/key-command.service';
+import { isToolAllowedInV1, v1ToolRefusalReason, v1ToolRefusalReasonForInvocation, V1_TOOL_UNAVAILABLE_MESSAGE } from '../ai/v1-tool-allowlist';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
@@ -213,6 +214,11 @@ export class KeyCortexActionsService implements OnModuleInit {
     // batch closed, so no action runs and no approval is created.
     const verdicts: LegacyAutonomyDecision[] = [];
     for (const action of actions) {
+      const v1Refusal = this.v1RefusalForAction(action);
+      if (v1Refusal) {
+        verdicts.push({ allowed: false, requiresApproval: false, reason: v1Refusal });
+        continue;
+      }
       const verdict = await this.evaluateAutonomy(action, session);
       if (verdict.failedClosed !== undefined) {
         return this.failBatchClosed(actions, session, verdict.failedClosed);
@@ -286,9 +292,21 @@ export class KeyCortexActionsService implements OnModuleInit {
   ): Promise<CortexActionResult> {
     const { actionType, result: params = {} } = action;
     this.logger.debug(`Executing action "${actionType}" for business ${businessId}`);
-    this.validateActionParams(actionType, params);
 
     const toolName = this.actionTypeToToolName(actionType);
+    const v1Refusal = this.v1RefusalForAction(action);
+    if (v1Refusal) {
+      return {
+        actionType,
+        status: 'blocked',
+        description: v1Refusal,
+        requiresApproval: false,
+        error: v1Refusal,
+      };
+    }
+
+    this.validateActionParams(actionType, params);
+
     const autonomyLevel = await this.resolveAutonomyLevel(businessId);
     const ctx: KeyCortexToolContext = {
       businessId,
@@ -311,7 +329,11 @@ export class KeyCortexActionsService implements OnModuleInit {
   }
 
   private actionTypeToToolName(actionType: CortexActionType): string {
-    return `cortex.${actionType.toLowerCase()}`;
+    return `cortex.${String(actionType).trim().toLowerCase()}`;
+  }
+
+  private v1RefusalForAction(action: CortexActionResult): string | null {
+    return v1ToolRefusalReasonForInvocation(this.actionTypeToToolName(action.actionType), action.result);
   }
 
   private async resolveAutonomyLevel(businessId: string): Promise<number> {
@@ -411,6 +433,11 @@ export class KeyCortexActionsService implements OnModuleInit {
     action: CortexActionResult,
     session?: CortexSession,
   ): Promise<{ approved: boolean; approvalRequestId?: string }> {
+    const v1Refusal = this.v1RefusalForAction(action);
+    if (v1Refusal) {
+      this.logger.warn(`Refused approval request for disabled v1 action "${action.actionType}": ${v1Refusal}`);
+      return { approved: false };
+    }
     this.logger.warn(
       `Approval required for "${action.actionType}" — ` +
         `Impact: ${action.estimatedImpact ?? 'unknown'}`,
@@ -478,7 +505,7 @@ export class KeyCortexActionsService implements OnModuleInit {
   ): Promise<Array<{ name: string; description: string; params: object }>> {
     this.logger.debug(`Fetching available tools for business ${businessId}`);
     try {
-      const tools = this.keyCortexToolRegistry.listTools();
+      const tools = this.keyCortexToolRegistry.listTools().filter((tool) => isToolAllowedInV1(tool.name));
       return tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -494,7 +521,9 @@ export class KeyCortexActionsService implements OnModuleInit {
   async buildToolDefinitions(
     _businessId: string,
   ): Promise<GatewayToolDefinition[]> {
-    return this.keyCortexToolRegistry.buildGatewayDefinitions();
+    return this.keyCortexToolRegistry
+      .buildGatewayDefinitions()
+      .filter((def) => isToolAllowedInV1(def.function.name));
   }
 
   // ========================================================================
@@ -618,19 +647,8 @@ export class KeyCortexActionsService implements OnModuleInit {
     return { success: true, data: { eventId: event.id, title: event.title, startTime: event.startTime } };
   }
 
-  private async handleSendMessage(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
-    const { recipientId, content, channel = 'in_app' } = params;
-    const message = await (this.prisma.client as any).message.create({
-      data: {
-        recipientId: String(recipientId),
-        content: String(content),
-        channel: String(channel),
-        businessId,
-        status: 'sent',
-        sentAt: new Date(),
-      },
-    });
-    return { success: true, data: { messageId: message.id, channel } };
+  private async handleSendMessage(_params: Record<string, unknown>, _businessId: string): Promise<KeyCortexToolResult> {
+    return { success: false, error: V1_TOOL_UNAVAILABLE_MESSAGE };
   }
 
   private async handleCreateDocument(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
@@ -679,6 +697,10 @@ export class KeyCortexActionsService implements OnModuleInit {
   }
 
   private async handleGenerateReport(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
+    const v1Refusal = v1ToolRefusalReason('cortex.generate_report');
+    if (v1Refusal) {
+      return { success: false, error: v1Refusal };
+    }
     const { reportType, timeframe = '30d', format = 'pdf' } = params;
     const report = await (this.prisma.client as any).report.create({
       data: {
@@ -857,20 +879,8 @@ export class KeyCortexActionsService implements OnModuleInit {
     return { success: true, data: { recordType, recordId: (updated as { id: string }).id } };
   }
 
-  private async handleSendEmail(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
-    const { to, subject, body, cc, bcc } = params;
-    await (this.commandService as any).enqueue({
-      type: 'SEND_EMAIL',
-      payload: {
-        to: String(to),
-        subject: String(subject),
-        body: String(body),
-        cc: cc ? String(cc) : undefined,
-        bcc: bcc ? String(bcc) : undefined,
-        businessId,
-      },
-    });
-    return { success: true, data: { recipient: to, subject } };
+  private async handleSendEmail(_params: Record<string, unknown>, _businessId: string): Promise<KeyCortexToolResult> {
+    return { success: false, error: V1_TOOL_UNAVAILABLE_MESSAGE };
   }
 
   private async handleScheduleReminder(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {

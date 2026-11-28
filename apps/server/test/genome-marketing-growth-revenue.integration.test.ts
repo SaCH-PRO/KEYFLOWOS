@@ -41,8 +41,8 @@ const ID = {
   biz: `${P}biz`,
   biz2: `${P}biz2`,
 };
-/** Figures only the money fields of this fixture carry. */
-const FIGURES = /1234\.5|87\.65|0\.137|13\.7/;
+/** Figures only the money fields of this fixture carry (non-digit lookbehind + 73.1 prevent any ISO-8601 timestamp match). */
+const FIGURES = /(?<!\d)(?:1234\.5|87\.65|0\.731|73\.1)/;
 const MONEY_CHANNEL_FIELDS = ['monthlyBudget', 'targetCac', 'targetConversionRate'];
 const MONEY_SNAPSHOT_FIELDS = [
   'blendedCac',
@@ -249,7 +249,7 @@ beforeAll(async () => {
     monthlyBudget: 1234.5,
     currency: 'TTD',
     targetCac: 87.65,
-    targetConversionRate: 0.137,
+    targetConversionRate: 0.731,
   } as any);
   await channels.create(ID.biz, {
     key: 'seo',
@@ -308,6 +308,10 @@ describe('FU-GENOME-SURFACES-REVENUE round 2: marketing-growth money only to rev
     const computed = await post(mg('/snapshot/compute'), ID.staffNone);
     expect(computed.status).toBeLessThan(300);
     expectSnapshotProjected(computed.body);
+    // Regression pins for ISO-8601 computedAt collisions (run 46139929502 :13.734Z and unanchored :10.731Z).
+    expectSnapshotProjected({ ...computed.body, computedAt: '2026-11-28T11:33:13.734Z' });
+    expectSnapshotProjected({ ...computed.body, computedAt: '2026-11-28T11:33:10.731Z' });
+    expect(JSON.stringify({ ...computed.body, funnelConversionEstimate: 0.731 })).toMatch(FIGURES);
   });
 
   it('MGR-03 the generated signals and recommendations answer no money row', async () => {
@@ -354,6 +358,7 @@ describe('FU-GENOME-SURFACES-REVENUE round 2: marketing-growth money only to rev
       const ads = list.body.find((c: any) => c.key === 'ads');
       expect(ads.monthlyBudget).toBe(1234.5);
       expect(ads.targetCac).toBe(87.65);
+      expect(ads.targetConversionRate).toBe(0.731);
       expect(ads.withheldForRevenue).toBeUndefined();
       const snapshot = await get(mg('/snapshot'), reader);
       expect(typeof snapshot.body.blendedCac).toBe('number');

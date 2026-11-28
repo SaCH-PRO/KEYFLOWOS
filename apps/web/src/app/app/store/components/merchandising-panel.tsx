@@ -17,10 +17,8 @@ import {
   Save,
   Loader2,
   Search,
-  Shield,
   Truck,
   CheckCircle2,
-  Headphones,
   Zap,
   Briefcase,
   LayoutGrid,
@@ -30,7 +28,7 @@ import {
   Boxes,
   Layers,
 } from "lucide-react";
-import type { StorefrontConfig, Product, Service, BadgeType, TrustRailItem } from "@/lib/client";
+import type { StorefrontConfig, Product, Service, BadgeType } from "@/lib/client";
 
 type Props = {
   config: StorefrontConfig;
@@ -64,15 +62,6 @@ const BANNER_COLORS = [
   { label: "Blue", value: "hsl(217 91% 60%)" },
   { label: "Red", value: "hsl(0 72% 51%)" },
   { label: "Purple", value: "hsl(263 70% 58%)" },
-];
-
-const TRUST_RAIL_OPTIONS: { key: TrustRailItem; label: string; icon: React.ElementType }[] = [
-  { key: "secure_checkout", label: "Secure Checkout", icon: Shield },
-  { key: "fast_delivery", label: "Fast Delivery", icon: Truck },
-  { key: "verified_business", label: "Verified Business", icon: BadgeCheck },
-  { key: "instant_booking", label: "Instant Booking", icon: Zap },
-  { key: "custom_support", label: "Custom Support", icon: Headphones },
-  { key: "digital_delivery", label: "Digital Delivery", icon: Layers },
 ];
 
 const RAIL_TYPE_OPTIONS = [
@@ -173,7 +162,6 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
   const featuredIds = merchandising.featuredItemIds ?? [];
   const badges = merchandising.badges ?? {};
   const collections = merchandising.collections ?? [];
-  const trustRails = merchandising.trustRails ?? [];
   const spotlights = merchandising.spotlights ?? [];
 
   const [addDropdownOpen, setAddDropdownOpen] = useState(false);
@@ -248,13 +236,6 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
   function getBadgeConfig(badge: BadgeType | undefined) {
     if (!badge) return null;
     return BADGE_OPTIONS.find((b) => b.value === badge) ?? null;
-  }
-
-  function toggleTrustRail(key: TrustRailItem) {
-    const current = trustRails.includes(key)
-      ? trustRails.filter((k) => k !== key)
-      : [...trustRails, key];
-    onConfigChange("merchandising", { trustRails: current });
   }
 
   function addCollection() {
@@ -684,47 +665,8 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection
-        icon={Shield}
-        title="Trust Rails"
-        subtitle="Display trust signals on your storefront to build buyer confidence"
-        accent="hsl(142 70% 45% / 0.15)"
-        defaultOpen={false}
-      >
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Select which trust signals to show on your storefront. Unchecked items are hidden.</p>
-          <div className="grid grid-cols-2 gap-2">
-            {TRUST_RAIL_OPTIONS.map((opt) => {
-              const Icon = opt.icon;
-              const active = trustRails.includes(opt.key);
-              return (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => toggleTrustRail(opt.key)}
-                  className="flex items-center gap-2.5 px-3 py-3 rounded-xl text-left transition-all"
-                  style={{
-                    background: active ? "hsl(142 70% 45% / 0.1)" : "hsl(var(--kf-muted) / 0.2)",
-                    border: active ? "1px solid hsl(142 70% 45% / 0.3)" : "1px solid hsl(var(--kf-border) / 0.3)",
-                  }}
-                >
-                  <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{ background: active ? "hsl(142 70% 45% / 0.2)" : "hsl(var(--kf-muted) / 0.3)" }}
-                  >
-                    <Icon className="w-3.5 h-3.5" style={{ color: active ? "hsl(142 70% 45%)" : "hsl(var(--kf-muted-foreground))" }} />
-                  </div>
-                  <span className="text-xs font-medium">{opt.label}</span>
-                  {active && <CheckCircle2 className="w-3.5 h-3.5 ml-auto flex-shrink-0" style={{ color: "hsl(142 70% 45%)" }} />}
-                </button>
-              );
-            })}
-          </div>
-          {trustRails.length === 0 && (
-            <p className="text-[10px] text-muted-foreground/60 text-center">No trust rails selected — default platform rails will show.</p>
-          )}
-        </div>
-      </CollapsibleSection>
+      {/* TRUST-BADGES-TRUE-ONLY (D-303): no Trust Rails picker. The storefront no longer renders the picked rails
+         (the product verifies none of them); the stored merchandising.trustRails value is left as it is. */}
 
       <CollapsibleSection
         icon={Boxes}

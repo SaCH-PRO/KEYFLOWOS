@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ShieldCheck, Clock, CreditCard, Star, Zap, Truck, Headphones, Layers, BadgeCheck } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { ShieldCheck, Clock, CreditCard, Star } from "lucide-react";
 import type { TrustRailItem } from "@/lib/client";
+import { useStorefrontGateways } from "./checkout-flow";
 
 type Props = {
   primaryColor: string;
@@ -11,26 +12,16 @@ type Props = {
   showPaymentBadge?: boolean;
   completedOrdersCount?: number;
   businessHoursToday?: string | null;
+  /**
+   * TRUST-BADGES-TRUE-ONLY (D-303): the owner's picked rails are no longer rendered. None of them ("Verified
+   * Business", "Instant Booking", "Secure Checkout", ...) is something the product checks. Kept in the type so the
+   * stored setting still reads; the value is ignored.
+   */
   configuredRails?: TrustRailItem[];
+  /** The storefront slug and the currency the checkout would ask for: "Payments by <gateway>" names what is connected. */
+  slug?: string;
+  currency?: string;
   variant?: "inline" | "banner";
-};
-
-const TRUST_RAIL_ICONS: Record<TrustRailItem, React.ElementType> = {
-  secure_checkout: ShieldCheck,
-  fast_delivery: Truck,
-  verified_business: BadgeCheck,
-  instant_booking: Zap,
-  custom_support: Headphones,
-  digital_delivery: Layers,
-};
-
-const TRUST_RAIL_LABELS: Record<TrustRailItem, string> = {
-  secure_checkout: "Secure Checkout",
-  fast_delivery: "Fast Delivery",
-  verified_business: "Verified Business",
-  instant_booking: "Instant Booking",
-  custom_support: "Custom Support",
-  digital_delivery: "Digital Delivery",
 };
 
 function formatOrderCount(count: number): string {
@@ -40,40 +31,45 @@ function formatOrderCount(count: number): string {
   return `${count}`;
 }
 
-export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true, completedOrdersCount, businessHoursToday, configuredRails, variant = "inline" }: Props) {
+/** "WiPay", "PayPal" or "WiPay and PayPal": the gateways the server's storefront list carries; null for none or no answer. */
+function connectedGatewaysLabel(gateways: { wipay: boolean; paypal: boolean } | null): string | null {
+  if (!gateways) return null;
+  const names = [gateways.wipay ? "WiPay" : null, gateways.paypal ? "PayPal" : null].filter(Boolean);
+  return names.length ? names.join(" and ") : null;
+}
+
+export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true, completedOrdersCount, businessHoursToday, slug, currency, variant = "inline" }: Props) {
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // The checkout's own read of the storefront's gateway list; no slug, no read.
+  const gateways = useStorefrontGateways(slug ?? "", currency ?? "");
+  const paymentsBy = slug ? connectedGatewaysLabel(gateways) : null;
 
+  // TRUST-BADGES-TRUE-ONLY (D-303): only statements the product can stand behind. No 'Secure Checkout', no 'Instant
+  // Confirmation' (a booking can wait for the owner), no 'Secure Payments' whatever is connected.
+  const visibleItems: { icon: React.ElementType; label: string; key: string }[] = [
+    ...(completedOrdersCount && completedOrdersCount > 0
+      ? [{ icon: Star, label: `${formatOrderCount(completedOrdersCount)} Orders Completed`, key: "orders" }]
+      : []),
+    ...(showPaymentBadge && paymentsBy ? [{ icon: CreditCard, label: `Payments by ${paymentsBy}`, key: "payments" }] : []),
+    // CUSTOMER-PAGE-HONESTY: no 'Guaranteed by KeyFlowOS' fallback; KeyFlowOS guarantees nothing.
+    ...(businessHoursToday ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }] : []),
+  ];
+  const hasItems = visibleItems.length > 0;
+
+  // P231 r1 (MAJOR-2): the bar renders nothing until it has a line, and a line can arrive late (the gateway list, the
+  // order count), so the fade-in observer attaches when the bar first has a line, not only on mount.
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!hasItems || !el) return;
     const obs = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) { setVisible(true); obs.disconnect(); }
     }, { threshold: 0.3 });
     obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }, [hasItems]);
 
-  let visibleItems: { icon: React.ElementType; label: string; key: string }[];
-
-  if (configuredRails && configuredRails.length > 0) {
-    visibleItems = configuredRails.map((rail) => ({
-      icon: TRUST_RAIL_ICONS[rail],
-      label: TRUST_RAIL_LABELS[rail],
-      key: rail,
-    }));
-  } else {
-    const trustItems = [
-      { icon: ShieldCheck, label: "Secure Checkout", key: "secure" },
-      ...(completedOrdersCount && completedOrdersCount > 0
-        ? [{ icon: Star, label: `${formatOrderCount(completedOrdersCount)} Orders Completed`, key: "orders" }]
-        : [{ icon: Clock, label: "Instant Confirmation", key: "instant" }]),
-      ...(showPaymentBadge ? [{ icon: CreditCard, label: "Secure Payments", key: "payments" }] : []),
-      // CUSTOMER-PAGE-HONESTY: no 'Guaranteed by KeyFlowOS' fallback; KeyFlowOS guarantees nothing.
-      ...(businessHoursToday ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }] : []),
-    ];
-    visibleItems = trustItems;
-  }
+  if (!hasItems) return null;
 
   if (variant === "banner") {
     return (
@@ -166,24 +162,36 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
 type FooterBadgeProps = {
   primaryColor: string;
   businessName: string;
+  /** Overrides the browser's own answer; for tests and server renders that know the scheme. */
+  servedOverHttps?: boolean;
 };
 
-export function SecurityFooter({ primaryColor, businessName }: FooterBadgeProps) {
+const noSubscribe = () => () => {};
+
+/** True only in a browser that loaded this page over https; false on the server render. */
+export function useServedOverHttps(): boolean {
+  return useSyncExternalStore(noSubscribe, () => window.location.protocol === "https:", () => false);
+}
+
+export function SecurityFooter({ primaryColor, businessName, servedOverHttps }: FooterBadgeProps) {
+  const browserHttps = useServedOverHttps();
+  const https = servedOverHttps ?? browserHttps;
+  // TRUST-BADGES-TRUE-ONLY (D-303): no 'Trusted Platform'; 'SSL Encrypted' only when the page is served over https.
+  // CUSTOMER-PAGE-HONESTY: no 'Instant Booking' (a booking may wait for the owner's confirmation).
+  const badges = https ? [{ icon: ShieldCheck, label: "SSL Encrypted" }] : [];
   return (
     <div className="pt-10 pb-8 space-y-6">
       <div className="h-px w-full" style={{ background: `linear-gradient(to right, transparent, ${primaryColor}12, transparent)` }} />
-      <div className="flex items-center justify-center gap-8 flex-wrap">
-        {[
-          // CUSTOMER-PAGE-HONESTY: no 'Instant Booking' (a booking may wait for the owner's confirmation).
-          { icon: ShieldCheck, label: "SSL Encrypted" },
-          { icon: Star, label: "Trusted Platform" },
-        ].map((item) => (
-          <div key={item.label} className="flex items-center gap-1.5 text-[10px] text-gray-400 hover:text-gray-500 transition-colors">
-            <item.icon className="w-3 h-3" />
-            <span className="font-medium">{item.label}</span>
-          </div>
-        ))}
-      </div>
+      {badges.length > 0 && (
+        <div className="flex items-center justify-center gap-8 flex-wrap">
+          {badges.map((item) => (
+            <div key={item.label} className="flex items-center gap-1.5 text-[10px] text-gray-400 hover:text-gray-500 transition-colors">
+              <item.icon className="w-3 h-3" />
+              <span className="font-medium">{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="space-y-1.5">
         <p className="text-center text-[10px] text-gray-500 font-medium">
           &copy; {new Date().getFullYear()} {businessName}. All rights reserved.

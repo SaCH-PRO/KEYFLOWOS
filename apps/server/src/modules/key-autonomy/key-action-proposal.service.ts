@@ -33,6 +33,7 @@ import {
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
+import { v1ToolRefusalReasonForInvocation } from '../ai/v1-tool-allowlist';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
 import { ActionNotClearedError, KeyActionBoundaryService } from './action-boundary/key-action-boundary.service';
@@ -542,6 +543,10 @@ export class KeyActionProposalService {
     input: CreateKeyActionProposalInput,
     userId?: string,
   ): Promise<KeyActionProposalData> {
+    const v1Refusal = v1ToolRefusalReasonForInvocation(input.toolName ?? input.actionType, input);
+    if (v1Refusal) {
+      throw new ForbiddenException(v1Refusal);
+    }
     this.policy.getPolicy(input.actionType);
     const riskLevel = this.policy.riskLevel(input.actionType);
     // KF-EXEC-ACTION-001: a proposal for a capability the action boundary has
@@ -911,6 +916,11 @@ export class KeyActionProposalService {
 
     if (!this.policy.isExecutable(proposal.actionType)) {
       throw new NotFoundException(`Action ${proposal.actionType} is not executable`);
+    }
+
+    const v1Refusal = v1ToolRefusalReasonForInvocation(proposal.toolName ?? proposal.actionType, proposal);
+    if (v1Refusal) {
+      throw new ForbiddenException(v1Refusal);
     }
 
     if ((proposal.riskLevel === 'HIGH' || proposal.riskLevel === 'CRITICAL') && !confirm) {

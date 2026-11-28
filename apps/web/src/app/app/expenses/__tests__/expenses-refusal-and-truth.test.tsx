@@ -28,7 +28,6 @@ const client = vi.hoisted(() => ({
   fetchVendorAnalytics: vi.fn(),
   fetchExpenseBudgets: vi.fn(),
   fetchMarginAnalysis: vi.fn(),
-  fetchRecurringCandidates: vi.fn(),
   fetchProjects: vi.fn(),
   fetchServices: vi.fn(),
   fetchContacts: vi.fn(),
@@ -97,7 +96,6 @@ function allowed(expenses: Expense[] = [], total = 0) {
   client.fetchVendorAnalytics.mockResolvedValue(ok([]));
   client.fetchExpenseBudgets.mockResolvedValue(ok([]));
   client.fetchMarginAnalysis.mockResolvedValue(ok(null));
-  client.fetchRecurringCandidates.mockResolvedValue(ok({ candidates: [] }));
   client.fetchRecurringExpenses.mockResolvedValue(ok([]));
 }
 
@@ -127,7 +125,6 @@ describe("BUG-064 / J6: a member refused the expenses read sees no access, never
     client.fetchVendorAnalytics.mockResolvedValue(refused);
     client.fetchExpenseBudgets.mockResolvedValue(refused);
     client.fetchMarginAnalysis.mockResolvedValue(refused);
-    client.fetchRecurringCandidates.mockResolvedValue(refused);
     client.fetchRecurringExpenses.mockResolvedValue(refused);
   });
 
