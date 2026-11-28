@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "856abb03e65004efae332a92ae532b9d856ee84d",
-  "main_commit_date": "2026-11-28T08:30:07+00:00",
+  "main_sha": "bd7897774845a1cef56301ba1db43c86fb38d5d8",
+  "main_commit_date": "2026-11-28T12:33:53+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 570.5,
   "by_status": {
    "done": {
-    "packets": 284,
-    "points": 421,
-    "pct_by_points": 73.8
+    "packets": 286,
+    "points": 425,
+    "pct_by_points": 74.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 112,
-    "points": 149.5,
-    "pct_by_points": 26.2
+    "packets": 110,
+    "points": 145.5,
+    "pct_by_points": 25.5
    }
   },
   "by_step": {
@@ -66,9 +66,9 @@
     "total": 7
    },
    "3": {
-    "done": 111,
+    "done": 112,
     "in-progress": 0,
-    "todo": 38,
+    "todo": 37,
     "total": 149
    },
    "4": {
@@ -84,9 +84,9 @@
     "total": 92
    },
    "6": {
-    "done": 29,
+    "done": 30,
     "in-progress": 0,
-    "todo": 11,
+    "todo": 10,
     "total": 40
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 194,
+    "done": 196,
     "in-progress": 0,
-    "todo": 61,
+    "todo": 59,
     "total": 255
    },
    "follow-on": {
@@ -123,11 +123,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 66,
-   "code-commit-subject": 132,
+   "prior-status-file": 65,
+   "code-commit-subject": 134,
    "prior-status-file+wave-2b-commit": 28,
    "compacted-commit": 103,
-   "no-evidence": 65,
+   "no-evidence": 64,
    "compacted-tests-only": 2
   },
   "uncertain": [
@@ -167,6 +167,7 @@
    "SWP-INV-SKU-COUNT",
    "QUICK-SALE-SERVER",
    "SWP-CENSUS-MARKETPLACE",
+   "PLAN-TABLE",
    "SWP-CENSUS-OPEN-WRITES",
    "W11-CALLS-LIST-PAGING",
    "W11-QUERY-DTO-COERCION",
@@ -241,6 +242,7 @@
    "RR-OBJECT-STORAGE-POSTURE-CHECK",
    "RR-CI-REQUIRED-JOBS-AGGREGATE",
    "RR-GATE-LEDGER-MONOTONIC",
+   "RR-GATE-LEDGER-CENSUS",
    "RR-HOOK-PACKET-SCOPE",
    "RR-STATUS-STALL-REPORT",
    "RR-PRIVACY-DELETED-CONTACT-GATES",
@@ -264,8 +266,8 @@
    "FU-WA-INBOUND-KEY-EXCLUDE",
    "FU-TIMELINE-EVENTS-PAGING"
   ],
-  "todo_with_dependencies_met": 67,
-  "todo_with_dependencies_met_launch": 29,
+  "todo_with_dependencies_met": 66,
+  "todo_with_dependencies_met_launch": 28,
   "stalled_ready": 0,
   "stalled_ready_launch": 0
  },
@@ -320,7 +322,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 32,
+   "unblocks": 31,
    "ready_since": "2026-11-26T04:11:16+00:00",
    "stalled": false
   },
@@ -373,18 +375,6 @@
    "stalled": false
   },
   {
-   "id": "PLAN-TABLE",
-   "step": 6,
-   "priority": "P1",
-   "size": "L",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8,
-   "ready_since": "2026-11-26T02:37:12+00:00",
-   "stalled": false
-  },
-  {
    "id": "RR-OWNER-RULINGS-RECORD",
    "step": 3,
    "priority": "P2",
@@ -394,6 +384,18 @@
    "on_critical_path": false,
    "unblocks": 7,
    "ready_since": null,
+   "stalled": false
+  },
+  {
+   "id": "SWP-PUBLIC-SITE-MINOR",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7,
+   "ready_since": "2026-11-28T07:30:56+00:00",
    "stalled": false
   },
   {
@@ -937,18 +939,6 @@
    "stalled": false
   },
   {
-   "id": "RR-GATE-LEDGER-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0,
-   "ready_since": "2026-11-23T03:49:05+00:00",
-   "stalled": false
-  },
-  {
    "id": "RR-HOTSPOT-SCANNER",
    "step": 3,
    "priority": "P3",
@@ -1126,7 +1116,7 @@
    "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 32,
+   "unblocks": 31,
    "ready_since": "2026-11-26T04:11:16+00:00",
    "stalled": false
   },
@@ -1179,18 +1169,6 @@
    "stalled": false
   },
   {
-   "id": "PLAN-TABLE",
-   "step": 6,
-   "priority": "P1",
-   "size": "L",
-   "lane": "both",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 8,
-   "ready_since": "2026-11-26T02:37:12+00:00",
-   "stalled": false
-  },
-  {
    "id": "RR-OWNER-RULINGS-RECORD",
    "step": 3,
    "priority": "P2",
@@ -1200,6 +1178,18 @@
    "on_critical_path": false,
    "unblocks": 7,
    "ready_since": null,
+   "stalled": false
+  },
+  {
+   "id": "SWP-PUBLIC-SITE-MINOR",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 7,
+   "ready_since": "2026-11-28T07:30:56+00:00",
    "stalled": false
   },
   {
@@ -1428,18 +1418,6 @@
    "on_critical_path": false,
    "unblocks": 0,
    "ready_since": "2026-11-23T07:54:10+00:00",
-   "stalled": false
-  },
-  {
-   "id": "RR-GATE-LEDGER-CENSUS",
-   "step": 3,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
-   "track": "launch",
-   "on_critical_path": false,
-   "unblocks": 0,
-   "ready_since": "2026-11-23T03:49:05+00:00",
    "stalled": false
   },
   {
@@ -4020,17 +3998,20 @@
    "size": "L",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "46b06599",
+    "02590bc9"
+   ],
    "depends_on": [
     "QUICK-SALE-SERVER",
     "W11-OWNER-HELPER-REST",
     "DEMO-PREVIEW"
    ],
    "title": "One plan and feature table: every advertised limit is enforced or removed; FREE lets a habit form; plan copy without autopilot, unlimited AI or dormant features",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-PUBLIC-SITE-MINOR",
@@ -4047,7 +4028,7 @@
     "PLAN-TABLE"
    ],
    "title": "Public site: the Pricing choice carries into sign-up; 'View demo' goes to the pricing page",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-FIN-LEDGER",
@@ -7602,15 +7583,19 @@
    "size": "S",
    "lane": "gate",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "4aa98e68",
+    "e792ff0f",
+    "e1cb1ce7"
+   ],
    "depends_on": [
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Every file that declares a shrink-only ledger or ratchet is registered in ledger-sizes.mjs, or exempt with a reason",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-BUNDLE-RULING-CONFLICTS",
