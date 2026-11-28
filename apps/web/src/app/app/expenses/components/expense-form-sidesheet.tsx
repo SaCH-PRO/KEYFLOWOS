@@ -577,6 +577,9 @@ export function ExpenseFormSideSheet({
       <SideSheet
         open={true}
         onClose={closeUnlessSaving}
+        // P257: the header Close shows it is held while the save is out; closeUnlessSaving stays as the guard for an
+        // Escape or click in the same tick as the submit, before this render lands.
+        closeDisabled={submitting}
         title={editingExpense ? "Edit Expense" : isBill ? "New Bill" : "New Expense"}
         subtitle={editingExpense ? `Editing ${editingExpense.description}` : isBill ? "Record a bill to pay later" : "Record a business expense"}
         width="md"

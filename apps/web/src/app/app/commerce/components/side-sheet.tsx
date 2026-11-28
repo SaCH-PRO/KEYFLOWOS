@@ -14,6 +14,11 @@ interface SideSheetProps {
   children: ReactNode;
   footer?: ReactNode;
   width?: "sm" | "md" | "lg";
+  /**
+   * P257: while set, the sheet cannot be closed by its own controls: the header Close is disabled and says so
+   * (disabled, aria-disabled), and Escape and the overlay do nothing. For a sheet whose save is in flight. Default false.
+   */
+  closeDisabled?: boolean;
 }
 
 const WIDTH_MAP = {
@@ -31,17 +36,22 @@ export function SideSheet({
   children,
   footer,
   width = "lg",
+  closeDisabled = false,
 }: SideSheetProps) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = `sidesheet-title-${title.replace(/\s+/g, "-").toLowerCase()}`;
 
+  // P257: every way the sheet closes itself goes through this, so closeDisabled holds them all.
+  const close = useCallback(() => {
+    if (!closeDisabled) onClose();
+  }, [closeDisabled, onClose]);
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     },
-    [onClose],
+    [close],
   );
 
   useEffect(() => {
@@ -64,7 +74,7 @@ export function SideSheet({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
           className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)] flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)]"}
-          onClick={(e) => e.target === e.currentTarget && onClose()}
+          onClick={(e) => e.target === e.currentTarget && close()}
         >
           {/* MOUNT-QUOTES: the two branches are keyed. useIsMobile() starts false, so a sheet
               that mounts when it opens shows the desktop panel for a frame and then the bottom
@@ -105,7 +115,9 @@ export function SideSheet({
                     </div>
                   </div>
                   <button
-                    onClick={onClose}
+                    onClick={close}
+                    disabled={closeDisabled}
+                    aria-disabled={closeDisabled || undefined}
                     aria-label="Close"
                     className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-xl transition-colors"
                   >
@@ -151,7 +163,9 @@ export function SideSheet({
                     </div>
                   </div>
                   <button
-                    onClick={onClose}
+                    onClick={close}
+                    disabled={closeDisabled}
+                    aria-disabled={closeDisabled || undefined}
                     aria-label="Close"
                     className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-xl transition-colors"
                   >
