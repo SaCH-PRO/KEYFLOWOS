@@ -16,7 +16,7 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
+import { CREDITED_STATUSES, InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
 import { visibleVatNumber } from './invoice-email.types';
 import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
@@ -1227,6 +1227,35 @@ export class CommerceService {
   }
 
   /**
+   * FU-LIST-CREDIT-AWARE-REMAINING (Journey H, D-249, D-250, D-256): single
+   * credit-aware money summary shared by `listInvoices` and
+   * `getInvoiceForBusiness`. Nets own-tenant payments (minus refunds) and
+   * own-tenant APPLIED credit notes in cents, caps remaining at
+   * `owedCap = max(0, total - credited)` (D-250 orphan-refund bound, matching
+   * `readInvoiceMoney`), and clamps PAID, VOID, and FULLY_CREDITED remaining
+   * to 0.
+   */
+  private static computeInvoiceMoneySummary(
+    invoice: { total: unknown; status: string; currency?: string | null; payments: readonly Payment[] },
+    credited: number,
+  ) {
+    const total = Number(invoice.total ?? 0) || 0;
+    const rowsBalance = balanceOfStoredRows(total, invoice.payments, invoice.currency);
+    const balance = creditAwareBalance(rowsBalance, credited);
+    const owedCap = Math.max(0, toCents(rowsBalance.total) - toCents(balance.credited));
+    const cappedRemaining = fromCents(Math.min(toCents(balance.remaining), owedCap));
+    const remaining =
+      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED' || invoice.status === 'PAID'
+        ? 0
+        : cappedRemaining;
+    return {
+      paidAmount: balance.net,
+      creditedAmount: balance.credited,
+      remaining,
+    };
+  }
+
+  /**
    * @param filter.contactId SWEEP-P0-SCOPES (browser sweep BUG-030): only that contact's invoices,
    *   in this business (a contact's Money and Quotes & Invoices tabs); omitted: every invoice.
    */
@@ -1234,7 +1263,7 @@ export class CommerceService {
     page = Math.max(page, 1);
     pageSize = Math.min(Math.max(pageSize, 1), 100);
     const where = { businessId, deletedAt: null, ...(filter.contactId ? { contactId: filter.contactId } : {}) };
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.client.invoice.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -1246,6 +1275,37 @@ export class CommerceService {
       }),
       this.prisma.client.invoice.count({ where }),
     ]);
+
+    const creditedIds = rows
+      .filter((r) => CREDITED_STATUSES.has(r.status as InvoiceStatus))
+      .map((r) => r.id);
+    const creditedByInvoice = new Map<string, number>();
+    if (creditedIds.length > 0) {
+      // FU-LIST-CREDIT-AWARE-REMAINING (D-75 / D-256): one batched own-tenant
+      // APPLIED credit-note sum for credited rows on the page (no N+1).
+      const groups = await this.prisma.client.creditNote.groupBy({
+        by: ['invoiceId'],
+        where: { businessId, invoiceId: { in: creditedIds }, status: 'APPLIED' },
+        _sum: { amount: true },
+      });
+      for (const g of groups) {
+        creditedByInvoice.set(
+          g.invoiceId,
+          fromCents(Math.max(0, toCents(Number(g._sum.amount ?? 0) || 0))),
+        );
+      }
+    }
+
+    const data = rows.map((row) => {
+      const ownPayments = ownTenantPayments(row);
+      const credited = creditedByInvoice.get(row.id) ?? 0;
+      return {
+        ...row,
+        payments: ownPayments,
+        ...CommerceService.computeInvoiceMoneySummary({ ...row, payments: ownPayments }, credited),
+      };
+    });
+
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
@@ -1664,18 +1724,10 @@ export class CommerceService {
     // (same credit-aware contract as getInvoicePublicView / payment reconcile)
     // and clamp VOID & FULLY_CREDITED remaining to 0.
     const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
-    const balance = creditAwareBalance(
-      balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency),
-      credited,
-    );
-    const remaining =
-      invoice.status === 'VOID' || invoice.status === 'FULLY_CREDITED'
-        ? 0
-        : balance.remaining;
+    const summary = CommerceService.computeInvoiceMoneySummary(invoice, credited);
     return {
       ...withLegacySubtotal(invoice),
-      paidAmount: balance.net,
-      remaining,
+      ...summary,
     };
   }
 
@@ -4980,6 +5032,65 @@ export class CommerceService {
 
   /** The statuses a reminder may be sent for (fail closed: every other status is refused). */
   private static readonly REMINDABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+  private static readonly REMINDER_CHANNELS: ReadonlySet<string> = new Set(['email', 'whatsapp', 'manual']);
+  // Disallows whitespace, control/CRLF characters, quotes, angle brackets, and empty/degenerate domain labels while accepting local test TLDs.
+  private static readonly REMINDER_EMAIL_PATTERN =
+    /^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:"'.]+(?:\.[^\s@<>()[\]\\,;:"'.]+)+$/;
+
+  private static normalizeOptionalEmail(raw: unknown): string | null {
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('recipientEmail must be a valid email address');
+    }
+    // Reject CR/LF, C0 controls (except horizontal tab), DEL, and C1 controls (incl. U+0085 NEL) BEFORE trimming.
+    for (let i = 0; i < raw.length; i++) {
+      const code = raw.charCodeAt(i);
+      if ((code <= 0x1f && code !== 0x09) || (code >= 0x7f && code <= 0x9f)) {
+        throw new BadRequestException('recipientEmail must be a valid email address');
+      }
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    if (trimmed.length > 320 || !CommerceService.REMINDER_EMAIL_PATTERN.test(trimmed)) {
+      throw new BadRequestException('recipientEmail must be a valid email address');
+    }
+    return trimmed;
+  }
+
+  /**
+   * FU-REMINDER-HONESTY: re-read the invoice's status, contactId, and own-tenant
+   * payments from Postgres right before delivering a reminder so a concurrent
+   * payment, refund, void, credit, soft-delete, or contact reassignment cannot
+   * slip through between the initial read/link creation and email delivery.
+   */
+  private async assertRemindableAtSend(
+    invoiceId: string,
+    businessId: string,
+    expectedContactId?: string | null,
+  ): Promise<{
+    status: import('@prisma/client').Invoice['status'];
+    payments: import('@prisma/client').Payment[];
+  }> {
+    const current = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        contactId: true,
+        payments: { where: { businessId } },
+      },
+    });
+    if (!current) throw new NotFoundException('Invoice not found');
+    if (!CommerceService.REMINDABLE_INVOICE_STATUSES.has(current.status)) {
+      throw new ConflictException(
+        `A reminder can only be sent for a SENT, OVERDUE or PARTIALLY_PAID invoice; this invoice is ${current.status}`,
+      );
+    }
+    if (expectedContactId !== undefined && current.contactId !== expectedContactId) {
+      throw new ConflictException('Invoice contact changed before reminder could be sent');
+    }
+    return { status: current.status, payments: current.payments };
+  }
 
   /**
    * Sends a payment reminder for the given invoice via Gmail (if connected)
@@ -4991,6 +5102,7 @@ export class CommerceService {
     invoiceId: string;
     businessId: string;
     actorId?: string;
+    recipientEmail?: string | null;
     customMessage?: string;
     channel?: 'email' | 'whatsapp' | 'manual';
     deliver: (params: {
@@ -5002,8 +5114,14 @@ export class CommerceService {
       };
       recipientEmail: string | null;
       paymentUrl: string | null;
-    }) => Promise<{ delivered: boolean; messageId?: string }>;
+      channel: 'email' | 'whatsapp' | 'manual';
+    }) => Promise<{ delivered: boolean; messageId?: string; recipientEmail?: string | null }>;
   }) {
+    if (input.channel !== undefined && !CommerceService.REMINDER_CHANNELS.has(input.channel)) {
+      throw new BadRequestException('channel must be email, whatsapp, or manual');
+    }
+    const requestedRecipient = CommerceService.normalizeOptionalEmail(input.recipientEmail);
+
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId: input.businessId, deletedAt: null },
       include: { contact: true, items: true, payments: true, business: true },
@@ -5020,6 +5138,18 @@ export class CommerceService {
       );
     }
 
+    const contactEmail =
+      typeof invoice.contact?.email === 'string' ? invoice.contact.email.trim() || null : null;
+    const targetRecipientEmail = requestedRecipient ?? contactEmail;
+    const channel: 'email' | 'whatsapp' | 'manual' =
+      input.channel ?? (targetRecipientEmail ? 'email' : 'manual');
+    const emailRecipient =
+      channel === 'email'
+        ? CommerceService.normalizeOptionalEmail(
+            requestedRecipient !== null ? requestedRecipient : invoice.contact?.email ?? null,
+          )
+        : null;
+
     // Always provide a pay CTA in the reminder. Reuse the active link if one
     // already exists, otherwise create one — `createPaymentLink` itself
     // returns the existing active row when present, so this is idempotent.
@@ -5034,14 +5164,14 @@ export class CommerceService {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
       } catch (err: any) {
-        // Reminders are only sent for SENT/OVERDUE/PARTIALLY_PAID invoices, so the
-        // "paid or voided" refusal shouldn't normally fire — but if a
-        // payment landed between the status check above and link creation
-        // we degrade to a CTA-less reminder rather than 500. Anything else
-        // is a real failure and should surface.
+        // FU-REMINDER-HONESTY: if the invoice became paid, voided, credited, or
+        // deleted concurrently before link creation, never degrade to a CTA-less
+        // reminder — re-read and surface the canonical 404/409 refusal.
         const msg = err instanceof Error ? err.message : String(err);
-        if (!/paid or voided/i.test(msg)) throw err;
-        link = null;
+        if (/paid or voided/i.test(msg)) {
+          await this.assertRemindableAtSend(invoice.id, input.businessId, invoice.contactId);
+        }
+        throw err;
       }
     }
     if (link) {
@@ -5049,37 +5179,51 @@ export class CommerceService {
       paymentUrl = `${appUrl()}/public/invoice/${link.token}`;
     }
 
-    const recipientEmail = invoice.contact?.email ?? null;
-    const channel = input.channel ?? (recipientEmail ? 'email' : 'manual');
+    // FU-REMINDER-HONESTY: re-check status, contactId & own-tenant payments right
+    // before delivery to close the TOCTOU window opened by link lookup/rotation/creation.
+    const current = await this.assertRemindableAtSend(invoice.id, input.businessId, invoice.contactId);
+    const freshInvoice = { ...invoice, status: current.status, payments: current.payments };
 
     let delivered: boolean;
     let messageId: string | undefined;
+    let recordedRecipientEmail: string | null;
     try {
-      const result = await input.deliver({ invoice, recipientEmail, paymentUrl });
+      const result = await input.deliver({
+        invoice: freshInvoice,
+        recipientEmail: emailRecipient,
+        paymentUrl,
+        channel,
+      });
       delivered = result.delivered;
       messageId = result.messageId;
+      recordedRecipientEmail =
+        channel === 'email' && delivered
+          ? result.recipientEmail !== undefined
+            ? CommerceService.normalizeOptionalEmail(result.recipientEmail)
+            : emailRecipient
+          : null;
     } catch (err: any) {
       // Persist the event regardless so the timeline shows the operator's
       // intent even when delivery fails — but surface the error to the UI.
       this.events.emit('invoice.reminder_failed', {
-        invoice,
-        businessId: invoice.businessId,
+        invoice: freshInvoice,
+        businessId: freshInvoice.businessId,
         reason: (err as Error).message,
       });
       throw err;
     }
 
-    if (invoice.contactId) {
+    if (freshInvoice.contactId) {
       await this.crm.logContactEvent({
-        businessId: invoice.businessId,
-        contactId: invoice.contactId,
+        businessId: freshInvoice.businessId,
+        contactId: freshInvoice.contactId,
         type: 'invoice.payment_reminder_sent',
         data: {
-          invoiceId: invoice.id,
+          invoiceId: freshInvoice.id,
           channel,
           messageId: messageId ?? null,
-          recipientEmail,
-          status: invoice.status,
+          recipientEmail: recordedRecipientEmail,
+          status: current.status,
         },
         actorType: input.actorId ? 'USER' : 'SYSTEM',
         actorId: input.actorId,
@@ -5088,13 +5232,14 @@ export class CommerceService {
     }
 
     this.events.emit('invoice.payment_reminder_sent', {
-      invoice,
-      businessId: invoice.businessId,
+      invoice: freshInvoice,
+      businessId: freshInvoice.businessId,
       channel,
+      recipientEmail: recordedRecipientEmail,
       eventName: 'invoice.payment_reminder_sent',
     });
 
-    return { delivered, channel, messageId, paymentUrl };
+    return { delivered, channel, messageId, paymentUrl, recipientEmail: recordedRecipientEmail };
   }
 
   /**

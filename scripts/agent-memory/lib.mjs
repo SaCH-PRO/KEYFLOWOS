@@ -140,28 +140,119 @@ export function longestRemainingChain(packets, statusById) {
 
 const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
+/** Informational liveness budget for ready packets (RR-STATUS-STALL-REPORT). */
+export const STALL_BUDGET_DAYS = 14;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/**
+ * Parse an ISO-8601 date or timestamp (also accepting the plan's "YYYY-MM-DD HH:MMZ" form)
+ * into { ms, iso }. Returns null for empty, malformed, or calendar-invalid dates.
+ */
+function parseIsoDate(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  const m = trimmed.match(ISO_DATE_RE);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = m[4] === undefined ? 0 : Number(m[4]);
+  const minute = m[5] === undefined ? 0 : Number(m[5]);
+  const second = m[6] === undefined ? 0 : Number(m[6]);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
+  // Calendar round-trip rejects impossible dates such as 2026-02-30.
+  const cal = new Date(Date.UTC(year, month - 1, day));
+  if (cal.getUTCFullYear() !== year || cal.getUTCMonth() + 1 !== month || cal.getUTCDate() !== day) return null;
+  let normalized;
+  if (m[4] === undefined) {
+    normalized = `${m[1]}-${m[2]}-${m[3]}T00:00:00Z`;
+  } else {
+    const frac = m[7] ? `.${m[7]}` : '';
+    const tz = m[8] ?? 'Z';
+    const sec = m[6] ?? '00';
+    normalized = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${sec}${frac}${tz}`;
+  }
+  const ms = Date.parse(normalized);
+  if (!Number.isFinite(ms)) return null;
+  const iso = m[4] !== undefined && m[6] !== undefined && m[8] !== undefined && !trimmed.includes(' ') ? trimmed : normalized;
+  return { ms, iso };
+}
+
+/** Extract the plan's leading snapshot timestamp (e.g. "2026-11-16 21:50Z; ...") as ISO-8601, or null. */
+export function planSnapshotDate(plan) {
+  const raw = typeof plan?._about?.snapshot === 'string'
+    ? plan._about.snapshot
+    : (typeof plan?.snapshot_date === 'string' ? plan.snapshot_date : null);
+  if (!raw) return null;
+  const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)(?=$|[\s;,)])/);
+  if (!m) return null;
+  return parseIsoDate(m[1])?.iso ?? null;
+}
+
+function newestCommitDate(list) {
+  let best = null;
+  for (const c of list ?? []) {
+    const parsed = parseIsoDate(c?.date);
+    if (parsed && (!best || parsed.ms > best.ms)) best = parsed;
+  }
+  return best?.iso ?? null;
+}
+
 /**
  * Packets that can start now: status todo and every depends_on done.
  * Ranked: on the plan's critical path first, then by how many not-done packets wait on it,
  * then priority, then id.
  */
-export function readyList(packets, statusById, criticalPath) {
+export function readyList(packets, statusById, criticalPath, options = {}) {
+  const {
+    mainDate = null,
+    snapshotDate = null,
+    evidenceDateById = {},
+    stallBudgetDays = STALL_BUDGET_DAYS,
+  } = options;
+  const mainParsed = parseIsoDate(mainDate);
+  const snapParsed = parseIsoDate(snapshotDate);
+  const budgetMs = stallBudgetDays * MS_PER_DAY;
   const dependents = transitiveDependents(packets);
   const ids = new Set(packets.map((p) => p.id));
   const crit = new Set(criticalPath ?? []);
   return packets
     .filter((p) => statusById[p.id] === 'todo')
     .filter((p) => (p.depends_on ?? []).every((d) => ids.has(d) && statusById[d] === 'done'))
-    .map((p) => ({
-      id: p.id,
-      step: p.step,
-      priority: p.priority,
-      size: p.size,
-      lane: p.lane,
-      track: p.track ?? null,
-      on_critical_path: crit.has(p.id),
-      unblocks: [...(dependents.get(p.id) ?? [])].filter((d) => statusById[d] !== 'done').length,
-    }))
+    .map((p) => {
+      const deps = p.depends_on ?? [];
+      let readySinceParsed = null;
+      if (deps.length === 0) {
+        readySinceParsed = snapParsed;
+      } else {
+        let newest = null;
+        let allDated = true;
+        for (const d of deps) {
+          const parsed = parseIsoDate(evidenceDateById[d]);
+          if (!parsed) {
+            allDated = false;
+            break;
+          }
+          if (!newest || parsed.ms > newest.ms) newest = parsed;
+        }
+        readySinceParsed = allDated ? newest : null;
+      }
+      const stalled = Boolean(mainParsed && readySinceParsed && (mainParsed.ms - readySinceParsed.ms) > budgetMs);
+      return {
+        id: p.id,
+        step: p.step,
+        priority: p.priority,
+        size: p.size,
+        lane: p.lane,
+        track: p.track ?? null,
+        on_critical_path: crit.has(p.id),
+        unblocks: [...(dependents.get(p.id) ?? [])].filter((d) => statusById[d] !== 'done').length,
+        ready_since: readySinceParsed ? readySinceParsed.iso : null,
+        stalled,
+      };
+    })
     .sort(
       (a, b) =>
         Number(b.on_critical_path) - Number(a.on_critical_path) ||
@@ -175,8 +266,16 @@ export function readyList(packets, statusById, criticalPath) {
 export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate, baseSha }) {
   const priorById = new Map((prior?.packets ?? []).map((r) => [r.id, r]));
   const wave2bOnMain = wave2bMerged(commits);
+  const evidenceDateById = {};
   const rows = plan.packets.map((p) => {
     const d = deriveStatus(p, { priorRow: priorById.get(p.id), commits, wave2bOnMain, branches });
+    if (d.status === 'done') {
+      const ev = commitEvidence(p.id, commits);
+      if (d.derived_from === 'compacted-commit') evidenceDateById[p.id] = newestCommitDate(ev.compacted);
+      else if (d.derived_from === 'compacted-tests-only') evidenceDateById[p.id] = newestCommitDate(ev.testsOnly);
+      else if (d.derived_from === 'code-commit-subject') evidenceDateById[p.id] = newestCommitDate(ev.code);
+      else evidenceDateById[p.id] = null;
+    }
     return {
       id: p.id,
       step: p.step,
@@ -221,7 +320,12 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
   const by_derivation = {};
   for (const r of rows) by_derivation[r.derived_from] = (by_derivation[r.derived_from] ?? 0) + 1;
   const planCritical = plan.validation?.critical_path ?? [];
-  const ready = readyList(plan.packets, statusById, planCritical);
+  const ready = readyList(plan.packets, statusById, planCritical, {
+    mainDate,
+    snapshotDate: planSnapshotDate(plan),
+    evidenceDateById,
+    stallBudgetDays: STALL_BUDGET_DAYS,
+  });
   const readyLaunch = ready.filter((r) => r.track === 'launch');
   return {
     _generated: {
@@ -257,6 +361,8 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
       uncertain: rows.filter((r) => r.uncertain).map((r) => r.id),
       todo_with_dependencies_met: ready.length,
       todo_with_dependencies_met_launch: readyLaunch.length,
+      stalled_ready: ready.filter((r) => r.stalled).length,
+      stalled_ready_launch: readyLaunch.filter((r) => r.stalled).length,
     },
     critical_path: {
       plan_recorded_remaining: planCritical.filter((id) => statusById[id] !== 'done'),
@@ -311,6 +417,17 @@ export function renderStatusMd(status, { readyLimit = 25 } = {}) {
     const followOn = status.ready.filter((r) => r.track === 'follow-on').length;
     const untracked = status.ready.length - launch.length - followOn;
     L.push('', `Follow-on packets ready (D-263; only on the owner's assignment): ${followOn}.${untracked ? ` Ready with no track: ${untracked}.` : ''} All ${status.ready.length} are in the JSON file, \`ready\`.`);
+  }
+  const stalled = status.ready.filter((r) => r.stalled);
+  L.push('', `## Ready but stalled (${stalled.length}; > ${STALL_BUDGET_DAYS} days, informational)`, '');
+  L.push(`Informational liveness signal from main alone (no wall clock, no branches, no automatic action; a person decides what a stall means). Budget: ${STALL_BUDGET_DAYS} days between \`ready_since\` and \`main_commit_date\`.`, '');
+  if (!stalled.length) {
+    L.push('(none)');
+  } else {
+    for (const r of stalled.slice(0, readyLimit)) {
+      L.push(`- ${r.id} (${r.track ?? 'untracked'}, ${r.priority}, ${r.lane}, ready_since: ${r.ready_since})`);
+    }
+    if (stalled.length > readyLimit) L.push(`- (${stalled.length - readyLimit} more in the JSON file, \`ready\`.)`);
   }
   const inprog = status.packets.filter((p) => p.status === 'in-progress');
   if (inprog.length) {
@@ -585,3 +702,174 @@ export function statusFilesCurrent({ jsonText, mdText, status, md }) {
   if (body(mdText) !== body(md)) return { current: false, reason: 'V1-STATUS.md differs from what the generator renders' };
   return { current: true, reason: '' };
 }
+
+// ---------------------------------------------------------------- packet write-set matching (RR-HOOK-PACKET-SCOPE)
+
+const REPO_ROOT_PREFIX_RE =
+  /^(?:apps|packages|scripts|docs|architecture|infrastructure|prisma|public|src|test|tests|patches|artifacts|\.github|\.claude|\.agents|\.agent-control)\/[A-Za-z0-9._/*[\]-]*$/;
+const TOP_LEVEL_FILE_RE =
+  /^(?:CLAUDE\.md|AGENTS\.md|README\.md|SECURITY\.md|MAINTENANCE\.md|MIGRATION\.md|DEPLOYMENT\.md|CODEOWNERS|Dockerfile|Makefile|\.env(?:\.example)?|\.nvmrc|\.gitignore|\.dockerignore|\.npmrc|\.prettierrc|\.mcp\.json|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|turbo\.json|render\.yaml|stackhawk\.yml|next\.config\.mjs|tailwind\.config\.ts|postcss\.config\.js|tsconfig(?:\.base)?\.json|docker-compose(?:\.production)?\.yml|ecosystem\.config\.js)$/;
+
+function cleanPathToken(raw) {
+  let tok = raw.replace(/^[`'"({+]+/, '').replace(/[`'"\)},;:]+$/, '');
+  // Strip outer wrapping brackets "[path]" without breaking Next.js dynamic routes like ".../[id]"
+  if (tok.startsWith('[') && !tok.includes('/')) {
+    tok = tok.replace(/^\[+/, '').replace(/\]+$/, '');
+  } else {
+    tok = tok.replace(/^\[+/, '');
+    // Strip trailing ']' ONLY when unbalanced (more ']' than '[').
+    while (tok.endsWith(']') && (tok.match(/\[/g)?.length ?? 0) < (tok.match(/\]/g)?.length ?? 0)) {
+      tok = tok.slice(0, -1);
+    }
+  }
+  return tok.replace(/^\.\//, '');
+}
+
+/** Pure POSIX path normalization (no node:path import required, stays browser/pure-lib safe). */
+function normalizePosixPath(raw) {
+  if (typeof raw !== 'string') return '';
+  const slashed = raw.replace(/\\/g, '/').trim();
+  if (!slashed || slashed.startsWith('/')) return '';
+  const trailingSlash = slashed.endsWith('/');
+  const parts = slashed.split('/');
+  const out = [];
+  for (const part of parts) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (out.length === 0) return ''; // escapes repo root
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  if (out.length === 0) return '';
+  return trailingSlash ? `${out.join('/')}/` : out.join('/');
+}
+
+/**
+ * Extract repo-relative path or glob patterns from one plan `files` entry (which may carry prose
+ * like "apps/server/src/modules/identity/ (business settings route)" or "a/b.ts (new)").
+ * Returns an array of normalized pattern strings, or [] if no path can be extracted.
+ */
+export function extractWriteSetPatterns(entry) {
+  if (typeof entry !== 'string') return [];
+  const trimmed = entry.trim();
+  if (!trimmed) return [];
+  const patterns = [];
+  for (const part of trimmed.split(/\s+/)) {
+    const tok = cleanPathToken(part);
+    if (!tok || /^https?:\/\//i.test(tok)) continue;
+    if (tok.split('/').some((seg) => seg === '..')) continue;
+    if (REPO_ROOT_PREFIX_RE.test(tok) || TOP_LEVEL_FILE_RE.test(tok)) {
+      patterns.push(tok.replace(/\/+/g, '/'));
+    }
+  }
+  return patterns;
+}
+
+/** Linear-time O(n) single-segment wildcard matcher (`*` matches 0+ chars within one segment). */
+function matchSegmentGlob(seg, pat) {
+  // Collapse consecutive '*' within a segment to prevent redundant states.
+  const p = pat.replace(/\*+/g, '*');
+  let si = 0;
+  let pi = 0;
+  let starIdx = -1;
+  let matchIdx = 0;
+  while (si < seg.length) {
+    if (pi < p.length && p[pi] === seg[si]) {
+      si += 1;
+      pi += 1;
+    } else if (pi < p.length && p[pi] === '*') {
+      starIdx = pi;
+      matchIdx = si;
+      pi += 1;
+    } else if (starIdx !== -1) {
+      pi = starIdx + 1;
+      matchIdx += 1;
+      si = matchIdx;
+    } else {
+      return false;
+    }
+  }
+  while (pi < p.length && p[pi] === '*') pi += 1;
+  return pi === p.length;
+}
+
+/** Linear-time segment-level glob matcher supporting `**` (0+ segments) and `*` (within 1 segment). */
+function matchPathGlob(normFile, pattern) {
+  const fileSegs = normFile.split('/');
+  const rawPatSegs = pattern.split('/');
+  // Collapse adjacent '**' segments so matching is strictly linear.
+  const patSegs = [];
+  for (const s of rawPatSegs) {
+    if (s === '**' && patSegs.at(-1) === '**') continue;
+    patSegs.push(s);
+  }
+  let fi = 0;
+  let pi = 0;
+  let starSeg = -1;
+  let matchFi = 0;
+  while (fi < fileSegs.length) {
+    if (pi < patSegs.length && patSegs[pi] === '**') {
+      starSeg = pi;
+      matchFi = fi;
+      pi += 1;
+    } else if (pi < patSegs.length && matchSegmentGlob(fileSegs[fi], patSegs[pi])) {
+      fi += 1;
+      pi += 1;
+    } else if (starSeg !== -1) {
+      pi = starSeg + 1;
+      matchFi += 1;
+      fi = matchFi;
+    } else {
+      return false;
+    }
+  }
+  while (pi < patSegs.length && patSegs[pi] === '**') pi += 1;
+  return pi === patSegs.length;
+}
+
+function matchSinglePattern(normFile, pattern) {
+  const p = pattern.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!p) return false;
+  // Directory prefix (explicit trailing slash)
+  if (p.endsWith('/')) {
+    return normFile.startsWith(p);
+  }
+  // Wildcards: linear-time segment matcher ('*' within 1 segment, '**' across 0+ segments)
+  if (p.includes('*')) {
+    return matchPathGlob(normFile, p);
+  }
+  // Exact file match
+  if (normFile === p) return true;
+  // Directory path without trailing slash (no file extension in last segment, e.g. "apps/server/src/modules/ai" or ".../[id]")
+  const lastSeg = p.split('/').at(-1) ?? '';
+  if (p.includes('/') && !lastSeg.includes('.')) {
+    return normFile.startsWith(`${p}/`);
+  }
+  return false;
+}
+
+/**
+ * Pure check of whether repo-relative `filePath` falls inside a packet's `files` write set.
+ * Returns `{ inside, checkable }`. If `files` is empty or ANY entry yields no extractable path
+ * (prose-only entry), returns `{ inside: false, checkable: false }`.
+ */
+export function writeSetMatch(filePath, files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { inside: false, checkable: false };
+  }
+  const allPatterns = [];
+  for (const entry of files) {
+    const pats = extractWriteSetPatterns(entry);
+    if (pats.length === 0) {
+      return { inside: false, checkable: false };
+    }
+    allPatterns.push(...pats);
+  }
+  const norm = normalizePosixPath(filePath);
+  if (!norm) return { inside: false, checkable: true };
+  const inside = allPatterns.some((pat) => matchSinglePattern(norm, pat));
+  return { inside, checkable: true };
+}
+

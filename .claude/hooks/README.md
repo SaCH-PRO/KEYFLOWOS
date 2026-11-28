@@ -53,10 +53,20 @@ wrong; the checks below are built on what was actually reproduced.
 | Whole-tree staging | `git add -A` / `git add .` / `git commit -a` while a peer's file is dirty | **ask**, listing whose work would be swept in |
 | Repo-global destructive git | `git stash` / `checkout -- .` / `restore .` / `clean -f` / `reset --hard` / `checkout -f`, **and** the tree is dirty | **deny**, naming the scoped command to use instead |
 | File claim conflict | Another live session edited this exact file in the last 30 min | **ask**, naming the holder |
+| Packet write-set scope (`RR-HOOK-PACKET-SCOPE`) | Editing a file outside the packet's `files` write set on a `pkt/V1-<ID>` branch (when the plan at `HEAD` has a checkable write set) | **warn** (non-blocking `systemMessage` + recorded in session file); **ask** when `KF_PACKET_SCOPE=ask` — never **deny** |
 
 All automatic. Claims are recorded on every write, so nothing has to be
 declared — a protocol that relies on sessions remembering to announce
 themselves is a protocol that fails.
+
+### Packet write-set scope & known gap
+
+On `pkt/V1-<ID>` branches, `modeEdit` reads `docs/reconstruction/V1-PLAN-RECUT.json` at `HEAD` and checks the edited path against packet `<ID>`'s write set via `writeSetMatch` (`scripts/agent-memory/lib.mjs`).
+
+- Default mode is a non-blocking warning (`outside the write set: keep it minimal and report it`) so unattended parallel child sessions (D-241) never stall on a prompt; setting `KF_PACKET_SCOPE=ask` upgrades the warning to **ask** (never **deny**).
+- Packets whose write set contains a prose-only entry with no extractable path are treated as `not checkable` and allowed silently; corrupt or unreadable plan files fail open with a note on `stderr`.
+- For D-239 merge-check re-verification, run `node scripts/agent-memory/scope.mjs <PACKET-ID> [--ref <branch>]` to list all files changed on `origin/main...<ref>` outside the write set.
+- **Known gap:** file writes performed through `Bash` (`sed -i`, heredocs, shell redirects) are not seen by the `Edit|Write` hook; `scope.mjs` catches them at review/merge time.
 
 The path checks work by matching command tokens **against existing claims**, not
 by parsing paths properly. `git checkout main` yields the token `main`, which no

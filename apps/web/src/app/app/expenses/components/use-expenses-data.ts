@@ -5,20 +5,14 @@ import {
   fetchExpenses,
   fetchExpenseCategories,
   fetchExpenseSummary,
-  fetchVendorAnalytics,
   fetchExpenseBudgets,
-  fetchMarginAnalysis,
-  fetchRecurringCandidates,
   fetchProjects,
   fetchServices,
   fetchContacts,
   Expense,
   ExpenseCategory,
   ExpenseSummary,
-  VendorAnalytics,
   ExpenseBudget,
-  MarginAnalysis,
-  RecurringCandidate,
 } from "@/lib/client";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 import { EXPENSES_BUSINESS_ID_KEY } from "./expense-utils";
@@ -45,9 +39,6 @@ export function useExpensesData() {
   // R24b (D-315): each secondary read keeps its own state, so a refused one is said ("Couldn't load ...") where its
   // block shows, never shown as an empty block.
   const [categoriesRead, setCategoriesRead] = useState<BlockRead>({ kind: "loading" });
-  const [vendorsRead, setVendorsRead] = useState<BlockRead>({ kind: "loading" });
-  const [marginRead, setMarginRead] = useState<BlockRead>({ kind: "loading" });
-  const [candidatesRead, setCandidatesRead] = useState<BlockRead>({ kind: "loading" });
   const [pickersRead, setPickersRead] = useState<BlockRead>({ kind: "loading" });
   const [pickersAgain, setPickersAgain] = useState(0);
   // R25-4: the picker read's generation, as the main read has: an older reply never lands over a newer one.
@@ -74,10 +65,7 @@ export function useExpensesData() {
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
-  const [vendors, setVendors] = useState<VendorAnalytics[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
-  const [marginData, setMarginData] = useState<MarginAnalysis | null>(null);
-  const [recurringCandidates, setRecurringCandidates] = useState<RecurringCandidate[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
@@ -96,12 +84,11 @@ export function useExpensesData() {
 
   // R24b: when the whole read fails, its secondary blocks failed with it (never "loading" for good, never empty).
   const failSecondary = useCallback((st: BlockRead) => {
-    setCategoriesRead(st); setVendorsRead(st); setMarginRead(st); setCandidatesRead(st);
+    setCategoriesRead(st);
   }, []);
 
   const clearAll = useCallback(() => {
     setExpenses([]); setTotalExpenses(0); setSummary(null); setBudgets([]); setCategories([]);
-    setVendors([]); setMarginData(null); setRecurringCandidates([]);
   }, []);
 
   // SEC-EXH3-1: the business is read on mount and again whenever it changes (this tab's switcher announces
@@ -122,9 +109,6 @@ export function useExpensesData() {
       setSummaryRead({ kind: "loading" });
       setBudgetsRead({ kind: "loading" });
       setCategoriesRead({ kind: "loading" });
-      setVendorsRead({ kind: "loading" });
-      setMarginRead({ kind: "loading" });
-      setCandidatesRead({ kind: "loading" });
       setPickersRead({ kind: "loading" });
       // COR MINOR-7: with no business there is nothing to read; say so instead of spinning.
       setRead(next ? { kind: "loading" } : { kind: "no-business" });
@@ -216,14 +200,11 @@ export function useExpensesData() {
     setLoading(true);
     try {
       const useCustom = period === "custom" && customStart && customEnd;
-      const [expRes, catRes, sumRes, venRes, budRes, margRes, recRes] = await Promise.all([
+      const [expRes, catRes, sumRes, budRes] = await Promise.all([
         fetchExpenses(businessId, { search: debouncedSearch || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, status: filterStatus || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined, page, limit: pageSize }),
         fetchExpenseCategories(businessId),
         fetchExpenseSummary(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
-        fetchVendorAnalytics(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchExpenseBudgets(businessId),
-        fetchMarginAnalysis(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
-        fetchRecurringCandidates(businessId),
       ]);
       // A reply for a business the page has left, or for a read a newer one replaced, is dropped.
       if (!current()) return;
@@ -244,18 +225,9 @@ export function useExpensesData() {
       const sumState = readState(sumRes, { what: "the expense summary" });
       setSummaryRead(sumState);
       setSummary(sumState.kind === "ok" ? sumRes.data ?? null : null);
-      const venState = readState(venRes, { what: "vendor analytics" });
-      setVendorsRead(venState);
-      setVendors(venState.kind === "ok" ? venRes.data ?? [] : []);
       const budState = readState(budRes, { what: "the budgets" });
       setBudgetsRead(budState);
       setBudgets(budState.kind === "ok" ? budRes.data ?? [] : []);
-      const margState = readState(margRes, { what: "the margin analysis" });
-      setMarginRead(margState);
-      setMarginData(margState.kind === "ok" ? margRes.data ?? null : null);
-      const recState = readState(recRes, { what: "recurring patterns" });
-      setCandidatesRead(recState);
-      setRecurringCandidates(recState.kind === "ok" ? recRes.data?.candidates ?? [] : []);
     } catch {
       if (!current()) return;
       clearAll();
@@ -287,10 +259,10 @@ export function useExpensesData() {
   const nearAlertCount = budgets.filter(b => b.isNearAlert && !b.isOverBudget).length;
 
   return {
-    businessId, read, summaryRead, budgetsRead, categoriesRead, vendorsRead, marginRead, candidatesRead, pickersRead, retryPickers,
+    businessId, read, summaryRead, budgetsRead, categoriesRead, pickersRead, retryPickers,
     expenses, totalExpenses, categories,
     isCurrentBusiness, addCategory, removeCategory,
-    summary, vendors, budgets, marginData, recurringCandidates, loading, loadData,
+    summary, budgets, loading, loadData,
     projects, services, contacts,
     period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd,
     searchQuery, setSearchQuery,

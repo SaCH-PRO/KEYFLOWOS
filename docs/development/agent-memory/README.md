@@ -10,10 +10,11 @@ points at an authoritative source or is derived from one.
 2. `docs/reconstruction/handoff/V1-STATUS.md`: what is done, what is ready (generated).
 3. The one procedure file below that matches what you are about to do.
 
-Then run `git fetch origin main && node scripts/agent-memory/status.mjs --check`. It compares packet status, not
-the sha, so it stays "current" across merges that change no packet's status. If it says STALE, packets have landed
-since the status was generated: regenerate it, and expect the state file to be behind too. "Current" says nothing
-about the state file: that is hand-written, carries its own timestamp, and is only as fresh as that.
+Then run `git fetch origin main && node scripts/agent-memory/status.mjs --check`. It compares packet status and
+stall state, not the sha, so it stays "current" across merges that change neither packet status nor stall state. If it
+says STALE, packets have landed or crossed the stall budget since the status was generated: regenerate it, and expect
+the state file to be behind too. "Current" says nothing about the state file: that is hand-written, carries its own
+timestamp, and is only as fresh as that.
 
 | Layer | What it is here | Authoritative? |
 |---|---|---|
@@ -100,7 +101,12 @@ then the generated status. A contradiction is reported (CONTRADICTION on #273, u
 silently resolved (#106 comment 5994966639: "A contradiction is a valid state, not an exception to hide").
 
 `V1-STATUS` says how each packet's status was derived and lists the uncertain ones. It sees only main: work on
-branches, PRs and child sessions is in the state file's section 3.
+branches, PRs and child sessions is in the state file's section 3. Each ready row also carries `ready_since` (the newest
+evidence commit date among its dependencies, the plan's snapshot date when it has none, or `null` when unknown) and
+`stalled: true` when `main_commit_date - ready_since` exceeds the default **14 days** budget (`STALL_BUDGET_DAYS` in
+`scripts/agent-memory/lib.mjs`); unknown `ready_since` is never marked stalled. The **Ready but stalled** section in
+`V1-STATUS.md` is purely **informational** and deterministic from `main` alone (no wall clock, no branches, no automatic
+action, notification, or reassignment — a person decides what a stall means).
 
 ## 4. Procedural memory: how to do it
 

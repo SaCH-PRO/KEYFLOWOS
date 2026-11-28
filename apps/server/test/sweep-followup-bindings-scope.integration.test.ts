@@ -551,7 +551,11 @@ describe('whatsappsmoke (amended P90 D-181 owner ruling A1): the WhatsApp test r
 describe('Owner question 3 (answered by default): the push subscription routes are the member\'s own device, open to members', () => {
   const push = `/api/businesses/${ID.bizA}/push`;
   const sub = (tag: string) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${P}${tag}`, keys: { p256dh: `${P}p256dh_${tag}`, auth: `${P}auth_${tag}` } });
-  const rowOf = (tag: string) => db.pushSubscription.findUnique({ where: { endpoint: sub(tag).endpoint }, select: { userId: true, businessId: true } });
+  const rowOf = (tag: string) =>
+    db.pushSubscription.findUnique({
+      where: { businessId_endpoint: { businessId: ID.bizA, endpoint: sub(tag).endpoint } },
+      select: { userId: true, businessId: true },
+    });
 
   it('[SFB-PUSH-01] RED-BEFORE: a STAFF member on role defaults subscribes their device (201), and the subscription is theirs whatever userId the body names (the owner\'s pushes never reach it)', async () => {
     const res = await send('post', `${push}/subscribe`, ID.staffDefault, { userId: ID.owner, subscription: sub('staff_device') });
