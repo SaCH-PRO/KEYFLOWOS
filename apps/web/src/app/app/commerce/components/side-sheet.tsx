@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+
+/** No store to subscribe to: useSyncExternalStore here only tells the server render (and hydration) from the client. */
+const subscribeNothing = () => () => {};
 
 /** A text field's caret and selection, or null (P263 R1-6). */
 function selectionOf(el: Element): [number, number] | null {
@@ -102,14 +105,15 @@ export function SideSheet({
   // drops its focus, so the node focused before the flip is focused again (exactly that node; no matching), and its
   // caret and selection are put back. A control in the shell itself (the header's Close, a footer button) is
   // focused in the new shell when one stands for it, otherwise the panel is. Focus outside the sheet is left alone.
-  // The container is made once, on the client only (the server has no document and renders no children, as before
-  // R3, since the sheet is closed there), and the children stay rendered while the sheet animates out (present until
-  // AnimatePresence reports its exit complete). The container is put in the slot by the slot's ref, and the portal is
-  // rendered after the shell, so the slot is in place before the children's own layout effects run: a child that
-  // measures itself, or autoFocus, finds itself in the document on mount.
+  // The container is made once, on the client only (the server has no document). The portal sits inside the overlay,
+  // after the keyed panel: the overlay is not remounted by a flip, so in the React tree the children stay under the
+  // sheet (R4): they read the sheet's own presence (a child's exit runs when the sheet closes; a caller's
+  // AnimatePresence is not held by them), and their clicks stop at the sheet as the panel's do. The slot's ref puts the
+  // container in place before the children's own layout effects run, so a child that measures itself, or autoFocus,
+  // finds itself in the document on mount. The portal is rendered only once mounted on the client: a sheet rendered
+  // open on the server has an empty slot there, and hydrates to the same before the children are put in (R4-3).
   const [content] = useState<HTMLDivElement | null>(() => (typeof document === "undefined" ? null : document.createElement("div")));
-  const [present, setPresent] = useState(open);
-  if (open && !present) setPresent(true);
+  const mounted = useSyncExternalStore(subscribeNothing, () => true, () => false);
   /** Set when the container moved into a new slot: what had focus then (the old shell is already gone) and its caret. */
   const movedRef = useRef<{ last: HTMLElement | null; selection: [number, number] | null } | null>(null);
   // R2-4: a focus change only records the focused node (O(1)); nothing is read from the panel until a flip.
@@ -154,8 +158,7 @@ export function SideSheet({
   }); // every commit: whatever remounted the slot, the move is handled in the commit that made it
 
   return (
-    <>
-    <AnimatePresence onExitComplete={() => setPresent(false)}>
+    <AnimatePresence>
       {open && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -270,11 +273,10 @@ export function SideSheet({
               )}
             </motion.div>
           )}
+          {mounted && content && createPortal(<div onClick={(e) => e.stopPropagation()}>{children}</div>, content)}
         </motion.div>
       )}
     </AnimatePresence>
-    {present && content && createPortal(children, content)}
-    </>
   );
 }
 
