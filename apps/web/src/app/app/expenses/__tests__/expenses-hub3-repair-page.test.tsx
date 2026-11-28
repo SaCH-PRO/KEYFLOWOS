@@ -269,23 +269,25 @@ describe("COR MINOR-2: the toolbar upload keeps the Drive copy", () => {
   });
 });
 
+/** COR MINOR-3's body (P265 R1: shared with the delayed-read twin below). */
+async function categoriesInventNoTrend() {
+  client.fetchExpenseCategories.mockResolvedValue(ok([{ id: "c1", name: "Fuel", color: "#f97316", _count: { expenses: 2 } }]));
+  client.fetchExpenseSummary.mockResolvedValue(ok(summary(200, {
+    byCategory: [{ categoryId: "c1", name: "Fuel", color: "#f97316", total: 200, count: 2, prevTotal: 0, percent: 100 }],
+    comparison: { prevTotal: 0, prevCount: 0, changePercent: 0, direction: "flat" },
+  })));
+  render(<ExpensesInboxPage />);
+  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
+  await waitFor(() => expect(text()).toMatch(/fuel/i));
+  expect(text()).not.toMatch(/spike/i);
+  expect(text()).not.toMatch(/\+100%/);
+  expect(text()).not.toMatch(/saved/i);
+  expect(text()).not.toMatch(/trending down/i);
+  expect(text()).not.toMatch(/vs prev period/i);
+}
 describe("COR MINOR-3: the Categories tab invents no trend", () => {
-  it("a category with no spend last period shows no 'Spike' and no browser-made percentage", async () => {
-    client.fetchExpenseCategories.mockResolvedValue(ok([{ id: "c1", name: "Fuel", color: "#f97316", _count: { expenses: 2 } }]));
-    client.fetchExpenseSummary.mockResolvedValue(ok(summary(200, {
-      byCategory: [{ categoryId: "c1", name: "Fuel", color: "#f97316", total: 200, count: 2, prevTotal: 0, percent: 100 }],
-      comparison: { prevTotal: 0, prevCount: 0, changePercent: 0, direction: "flat" },
-    })));
-    render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("tab", { name: "Categories" }));
-    await waitFor(() => expect(text()).toMatch(/fuel/i));
-    expect(text()).not.toMatch(/spike/i);
-    expect(text()).not.toMatch(/\+100%/);
-    expect(text()).not.toMatch(/saved/i);
-    expect(text()).not.toMatch(/trending down/i);
-    expect(text()).not.toMatch(/vs prev period/i);
-  });
+  it("a category with no spend last period shows no 'Spike' and no browser-made percentage", categoriesInventNoTrend);
 });
 
 describe("COR MINOR-5: page figures say what they are", () => {
@@ -330,21 +332,23 @@ describe("COR MINOR-7: each block is gated on its own read", () => {
   });
 });
 
+/** COR MINOR-6's body (P265 R1: shared with the delayed-read twin below). */
+async function recurringOpensOnce() {
+  render(<ExpensesInboxPage />);
+  await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
+  // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
+  fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }));
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
+  await screen.findByText(/no recurring expenses/i);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByRole("dialog")).toBeNull();
+}
 describe("COR MINOR-6: the Recurring builder opens only on a new click", () => {
-  it("New recurring opens it once; leaving and coming back to the tab does not reopen it", async () => {
-    render(<ExpensesInboxPage />);
-    await waitFor(() => expect(client.fetchExpenses).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
-    // R26-6: the button is offered once the Recurring list's read has answered, so it is awaited.
-    fireEvent.click(await screen.findByRole("button", { name: /new recurring expense/i }));
-    expect(await screen.findByRole("dialog")).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "Expenses" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    fireEvent.click(screen.getByRole("tab", { name: "Recurring" }));
-    await screen.findByText(/no recurring expenses/i);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
+  it("New recurring opens it once; leaving and coming back to the tab does not reopen it", recurringOpensOnce);
 });
 
 describe("COR MINOR-8: no expense writes are offered to a member refused the read", () => {
@@ -355,4 +359,15 @@ describe("COR MINOR-8: no expense writes are offered to a member refused the rea
     expect(screen.queryByRole("button", { name: /^record bill$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^add expense$/i })).toBeNull();
   });
+});
+
+describe("P265 R1: the tab tests with every default expenses read answering a macrotask later (as network replies do)", () => {
+  beforeEach(() => {
+    for (const fn of [client.fetchExpenses, client.fetchExpenseCategories, client.fetchExpenseSummary, client.fetchExpenseBudgets]) {
+      const answer = fn.getMockImplementation();
+      fn.mockImplementation((...args: unknown[]) => new Promise((r) => setTimeout(() => r(answer ? answer(...args) : undefined), 0)));
+    }
+  });
+  it("COR MINOR-3, delayed: the Categories tab invents no trend", categoriesInventNoTrend, 30000);
+  it("COR MINOR-6, delayed: the Recurring builder opens only on a new click", recurringOpensOnce, 30000);
 });
