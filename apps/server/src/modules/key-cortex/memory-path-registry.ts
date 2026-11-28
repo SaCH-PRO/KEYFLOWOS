@@ -1770,8 +1770,7 @@ export const MEMORY_STORE_PATHS: readonly MemoryStorePathEntry[] = [
     surface: 'internal',
     projection: 'system-internal',
     dataClass: 'PERSONAL',
-    followUp: 'RR-LEARNING-OUTCOME-SEMANTICS',
-    notes: 'Computes acceptance rate from CognitionMemory counts (currently includes tool execution rows; fixed in RR-LEARNING-OUTCOME-SEMANTICS).',
+    notes: 'Computes acceptance rate from CognitionMemory counts, excluding metadata.category=execution_patterns rows while retaining NULL-metadata and non-execution user feedback (RR-LEARNING-OUTCOME-SEMANTICS).',
   },
   {
     file: 'modules/key-cortex/key-cortex-learning.service.ts',
@@ -1785,8 +1784,7 @@ export const MEMORY_STORE_PATHS: readonly MemoryStorePathEntry[] = [
     surface: 'internal',
     projection: 'system-internal',
     dataClass: 'PERSONAL',
-    followUp: 'RR-LEARNING-OUTCOME-SEMANTICS',
-    notes: 'Computes acceptance rate from CognitionMemory counts (currently includes tool execution rows; fixed in RR-LEARNING-OUTCOME-SEMANTICS).',
+    notes: 'Computes acceptance rate from CognitionMemory counts, excluding metadata.category=execution_patterns rows while retaining NULL-metadata and non-execution user feedback (RR-LEARNING-OUTCOME-SEMANTICS).',
   },
   {
     file: 'modules/key-cortex/key-cortex-learning.service.ts',
@@ -1800,8 +1798,7 @@ export const MEMORY_STORE_PATHS: readonly MemoryStorePathEntry[] = [
     surface: 'internal',
     projection: 'system-internal',
     dataClass: 'PERSONAL',
-    followUp: 'RR-LEARNING-OUTCOME-SEMANTICS',
-    notes: 'Computes acceptance rate from CognitionMemory counts (currently includes tool execution rows; fixed in RR-LEARNING-OUTCOME-SEMANTICS).',
+    notes: 'Computes acceptance rate from CognitionMemory counts, excluding metadata.category=execution_patterns rows while retaining NULL-metadata and non-execution user feedback (RR-LEARNING-OUTCOME-SEMANTICS).',
   },
   {
     file: 'modules/key-cortex/key-cortex-learning.service.ts',
@@ -1815,8 +1812,7 @@ export const MEMORY_STORE_PATHS: readonly MemoryStorePathEntry[] = [
     surface: 'internal',
     projection: 'system-internal',
     dataClass: 'PERSONAL',
-    followUp: 'RR-LEARNING-OUTCOME-SEMANTICS',
-    notes: 'Computes acceptance rate from CognitionMemory counts (currently includes tool execution rows; fixed in RR-LEARNING-OUTCOME-SEMANTICS).',
+    notes: 'Computes acceptance rate from CognitionMemory counts, excluding metadata.category=execution_patterns rows while retaining NULL-metadata and non-execution user feedback (RR-LEARNING-OUTCOME-SEMANTICS).',
   },
   {
     file: 'modules/key-cortex/key-cortex-learning.service.ts',
