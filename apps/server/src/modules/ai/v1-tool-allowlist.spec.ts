@@ -530,4 +530,239 @@ describe('KEY-TOOL-ALLOWLIST (V1-63, D-318 Option 1): single v1 allowlist & FLOW
     expect(refusals.get('execute_custom_logic')).toBe('not available in this version');
     expect(refusals.get('crm_list_contacts')).toMatch(/Not a member of this business/);
   });
+
+  it('R3 RED (SEC MAJOR-1): AutonomyOrchestratorService.evaluate refuses direct and nested v1-disabled tools before invoking aiOversight.evaluate', async () => {
+    const { AutonomyOrchestratorService } = await import('../key-autonomy/autonomy-orchestrator.service');
+    const oversightEvaluate = vi.fn(async () => ({
+      allowed: true,
+      requiresFormalApproval: false,
+      requiresAdminApproval: false,
+      requiresQuickConfirm: false,
+      tier: 1,
+      reason: 'allowed',
+    }));
+    const levelResolve = vi.fn(async () => ({ level: 3, mode: 'autonomous', label: 'full', maxAutoRiskTier: 3 }));
+    const persistVerdict = vi.fn(async () => ({}));
+    const svc = Object.assign(Object.create(AutonomyOrchestratorService.prototype), {
+      logger: quiet,
+      levelService: { resolve: levelResolve },
+      ruleDb: { findMatchingRules: vi.fn(async () => []) },
+      aiOversight: { evaluate: oversightEvaluate },
+      prisma: { client: { autonomyVerdict: { create: persistVerdict } } },
+    }) as any;
+
+    for (const [actionKey, parameters] of [
+      ['execute_custom_logic', undefined],
+      ['payroll_mark_paid', { runId: 'r1' }],
+      ['cortex.send_email', { to: 'a@b.com' }],
+      ['cortex.execute_tool', { toolName: 'execute_custom_logic', toolParams: { code: '1+1' } }],
+    ] as const) {
+      const verdict = await svc.evaluate({
+        businessId: BIZ,
+        actionKey,
+        parameters,
+        role: 'OWNER',
+        proposalId: 'prop_1',
+      });
+      expect(verdict.allowed, `allowed for ${actionKey}`).toBe(false);
+      expect(verdict.requiresApproval, `requiresApproval for ${actionKey}`).toBe(false);
+      expect(verdict.tier, `tier for ${actionKey}`).toBe('manual');
+      expect(verdict.reason, `reason for ${actionKey}`).toBe('not available in this version');
+      expect(verdict.ruleTrace[0]).toMatchObject({ source: 'V1ToolAllowlist', rule: 'v1-disabled', result: 'block' });
+    }
+    expect(oversightEvaluate).not.toHaveBeenCalled();
+    expect(levelResolve).not.toHaveBeenCalled();
+  });
+
+  it('R3 RED (SEC MAJOR-2): v1ToolRefusalReasonForInvocation fails closed on wrapper depth/node truncation, walks wrapper arrays/aliases, guards own properties, and allows benign deep non-wrapper payloads', async () => {
+    const { v1ToolRefusalReasonForInvocation } = await import('./v1-tool-allowlist');
+
+    // 1. Depth > 6 wrapper nesting must fail CLOSED
+    let deepNested: Record<string, unknown> = { toolName: 'execute_custom_logic' };
+    for (let i = 0; i < 8; i++) {
+      deepNested = { toolName: 'cortex.execute_tool', toolParams: deepNested };
+    }
+    expect(v1ToolRefusalReasonForInvocation('cortex.execute_tool', deepNested)).toBe('not available in this version');
+
+    // 2. Node-budget > 24 decoy siblings under a wrapper must fail CLOSED
+    const decoys: Record<string, unknown> = {};
+    for (let i = 0; i < 6; i++) {
+      const child: Record<string, unknown> = {};
+      for (let j = 0; j < 6; j++) child[`k${j}`] = { a: j };
+      decoys[`d${i}`] = child;
+    }
+    const decoyPayload = {
+      payload: { payload: decoys },
+      toolParams: { toolParams: { toolParams: { toolName: 'execute_custom_logic' } } },
+    };
+    // Build a >24-node wrapper payload via chained wrapper keys + array decoys
+    const wideArrayDecoys = Array.from({ length: 30 }, (_, idx) => ({ noop: idx }));
+    expect(
+      v1ToolRefusalReasonForInvocation('cortex.execute_tool', {
+        actions: [...wideArrayDecoys, { toolName: 'execute_custom_logic' }],
+      }),
+    ).toBe('not available in this version');
+    expect(v1ToolRefusalReasonForInvocation('cortex.execute_tool', decoyPayload)).toBe('not available in this version');
+
+    // 3. Wrapper arrays & alias containers/fields
+    expect(
+      v1ToolRefusalReasonForInvocation('cortex.execute_tool', {
+        toolCalls: [{ tool: 'payroll_mark_paid' }],
+      }),
+    ).toBe('not available in this version');
+    expect(
+      v1ToolRefusalReasonForInvocation('EXECUTE_TOOL', {
+        steps: [{ tool_name: 'execute_custom_logic' }],
+      }),
+    ).toBe('not available in this version');
+    expect(
+      v1ToolRefusalReasonForInvocation('cortex.execute_tool', {
+        args: { input: { toolName: 'cortex.send_email' } },
+      }),
+    ).toBe('not available in this version');
+
+    // 4. Prototype-inherited properties are ignored via hasOwnProperty
+    const inherited = Object.create({ toolName: 'execute_custom_logic' });
+    expect(v1ToolRefusalReasonForInvocation('crm_create_contact', inherited)).toBeNull();
+
+    // 5. Benign deep non-wrapper payload does NOT false-positive
+    let benignDeep: Record<string, unknown> = { note: 'hello' };
+    for (let i = 0; i < 10; i++) {
+      benignDeep = { payload: benignDeep };
+    }
+    expect(v1ToolRefusalReasonForInvocation('crm_create_contact', benignDeep)).toBeNull();
+
+    // 6. Cyclic wrapper payload terminates safely
+    const cyclic: Record<string, unknown> = { toolName: 'crm_list_contacts' };
+    cyclic.toolParams = cyclic;
+    expect(v1ToolRefusalReasonForInvocation('cortex.execute_tool', cyclic)).toBeNull();
+  });
+
+  it('R3 RED (SEC MINOR-1 & COR MAJOR-2/MINOR-2): nested wrappers refused in PlanExecutor, QueueService, ActionDispatcher; QueueService handles allowed===false vs omitted allowed stub', async () => {
+    // 1. PlanExecutorService.evaluateStep refuses nested cortex.execute_tool payload
+    const { PlanExecutorService } = await import('./plan-executor.service');
+    const oversightEval = vi.fn(async () => ({ allowed: true, tier: 1, reason: 'ok' }));
+    const planExec = Object.assign(Object.create(PlanExecutorService.prototype), {
+      logger: quiet,
+      governance: { evaluate: oversightEval },
+    }) as any;
+    const stepEval = await planExec.evaluateStep(BIZ, 'cortex.execute_tool', {
+      toolName: 'execute_custom_logic',
+    });
+    expect(stepEval).toMatchObject({ allowed: false, reason: 'not available in this version' });
+    expect(oversightEval).not.toHaveBeenCalled();
+
+    // 2. ActionDispatcherService.dispatch refuses nested cortex.execute_tool payload
+    const { ActionDispatcherService } = await import('./action-dispatcher.service');
+    const dispOversight = vi.fn(async () => ({ allowed: true, tier: 1, reason: 'ok' }));
+    const dispatcher = Object.assign(Object.create(ActionDispatcherService.prototype), {
+      logger: quiet,
+      governance: { evaluate: dispOversight },
+      events: { emit: vi.fn() },
+    }) as any;
+    const dispRes = await dispatcher.dispatch({
+      businessId: BIZ,
+      toolName: 'cortex.execute_tool',
+      args: { toolName: 'payroll_mark_paid' },
+      userId: OWNER,
+      role: 'OWNER',
+      surface: 'CHAT',
+    });
+    expect(dispRes).toMatchObject({ success: false, error: 'not available in this version' });
+    expect(dispOversight).not.toHaveBeenCalled();
+
+    // 3. QueueService.processPlanStep:
+    // (a) nested wrapper refused before evaluateAutoApproval
+    const { QueueService } = await import('./queue.service');
+    const stepUpdateA = vi.fn(async () => ({}));
+    const evalAutoA = vi.fn();
+    const queueA = Object.assign(Object.create(QueueService.prototype), {
+      logger: quiet,
+      prisma: { client: { aiPlanStep: { update: stepUpdateA }, aiPlan: { findFirst: vi.fn() } } },
+      events: { emit: vi.fn() },
+      governance: { evaluateAutoApproval: evalAutoA },
+      stateMachine: { transition: vi.fn() },
+      actionDispatcher: { dispatch: vi.fn() },
+    }) as any;
+    const resNested = await queueA.processPlanStep({
+      data: {
+        businessId: BIZ,
+        planId: 'plan_1',
+        stepId: 'step_nested',
+        toolName: 'cortex.execute_tool',
+        args: { toolName: 'execute_custom_logic' },
+        idempotencyKey: 'k_nested',
+      },
+    });
+    expect(resNested).toEqual({ refused: 'not available in this version' });
+    expect(evalAutoA).not.toHaveBeenCalled();
+
+    // (b) evaluateAutoApproval returning { allowed: false, autoApproved: false } marks step failed
+    const stepUpdateB = vi.fn(async () => ({}));
+    const dispatchB = vi.fn();
+    const queueB = Object.assign(Object.create(QueueService.prototype), {
+      logger: quiet,
+      prisma: {
+        client: {
+          aiPlanStep: { update: stepUpdateB },
+          aiPlan: { findFirst: vi.fn(async () => ({ userId: OWNER })) },
+          membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })) },
+          business: { findUnique: vi.fn(async () => ({ ownerId: OWNER })) },
+        },
+      },
+      events: { emit: vi.fn() },
+      governance: {
+        evaluateAutoApproval: vi.fn(async () => ({
+          allowed: false,
+          autoApproved: false,
+          reason: 'not available in this version',
+        })),
+      },
+      stateMachine: { transition: vi.fn() },
+      actionDispatcher: { dispatch: dispatchB },
+    }) as any;
+    const resDisallowed = await queueB.processPlanStep({
+      data: {
+        businessId: BIZ,
+        planId: 'plan_1',
+        stepId: 'step_disallowed',
+        toolName: 'crm_list_contacts',
+        args: {},
+        idempotencyKey: 'k_disallowed',
+      },
+    });
+    expect(resDisallowed).toEqual({ refused: 'not available in this version' });
+    expect(dispatchB).not.toHaveBeenCalled();
+
+    // (c) COR MAJOR-2: partial stub { autoApproved: true } omitting `allowed` MUST still dispatch
+    const stepUpdateC = vi.fn(async () => ({}));
+    const dispatchC = vi.fn(async () => ({ success: true, result: { ok: true }, durationMs: 1 }));
+    const queueC = Object.assign(Object.create(QueueService.prototype), {
+      logger: quiet,
+      prisma: {
+        client: {
+          aiPlanStep: { update: stepUpdateC, findMany: vi.fn(async () => [{ status: 'completed' }]) },
+          aiPlan: { findFirst: vi.fn(async () => ({ userId: OWNER })), update: vi.fn(async () => ({})) },
+          membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })) },
+          business: { findUnique: vi.fn(async () => ({ ownerId: OWNER })) },
+        },
+      },
+      events: { emit: vi.fn() },
+      governance: { evaluateAutoApproval: vi.fn(async () => ({ autoApproved: true })) },
+      stateMachine: { transition: vi.fn(async () => ({})) },
+      actionDispatcher: { dispatch: dispatchC },
+    }) as any;
+    const resStub = await queueC.processPlanStep({
+      data: {
+        businessId: BIZ,
+        planId: 'plan_1',
+        stepId: 'step_stub',
+        toolName: 'crm_list_contacts',
+        args: {},
+        idempotencyKey: 'k_stub',
+      },
+    });
+    expect(dispatchC).toHaveBeenCalledTimes(1);
+    expect(resStub).not.toHaveProperty('refused');
+  });
 });
