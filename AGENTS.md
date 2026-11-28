@@ -196,6 +196,10 @@ After any architecture-affecting change, re-run the scanners and update the rele
 Process memory for coding agents lives in `docs/development/agent-memory/` (layers, worker and review briefs, wave
 runbook, owner question format) and `scripts/agent-memory/` (generated status, per-packet context bundle, compaction
 helper). A packet worker is assigned by a pointer to `PACKET-WORKER-BRIEF.md` and a packet id. Keep the conversation
-small: delegate wide reads, never paste logs, and write every ruling and finding to issue #80 or a file in the turn it
-happens. Anything needed to continue the work must be pushed to GitHub (a branch, a PR, issue #80), never left only in
-a session, a container or a scratch directory.
+small: delegate wide reads, never paste logs, and write every ruling and finding to the active control room (**issue #273**;
+archived predecessor: issue #80 at GitHub's 2,500-comment limit) or a file in the turn it happens. Anything needed to
+continue the work must be pushed to GitHub (a branch, a PR, issue #273), never left only in a session, a container or a
+scratch directory. **Control-room rollover (D-319 / Q69):** when the active control-room issue reaches 2,350 comments
+(150-comment buffer before GitHub's 2,500-comment cap), open a successor control-room issue, post a final pointer on
+the retiring issue, and update `CLAUDE.md`, `AGENTS.md`, `docs/development/agent-memory/*`, `scripts/agent-memory/lib.mjs`
+(and `scripts/agent-memory/tests/lib.spec.mjs`), and `BOARD.md` in the next wave.
