@@ -255,3 +255,43 @@ describe("P254 R3-2: the hub's New request does not outlive the business it was 
     }, 30000);
   }
 });
+
+describe("P254 R4-1: a New queued for A, then the business changes in the same task, before the builder opens", () => {
+  const el = (b: string | null, t: number) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={t} />;
+  for (const next of [null, "biz_B"] as const) {
+    it(`A, New, then ${next ?? "none"} before the queued open runs: no builder`, async () => {
+      const view = render(el("biz_A", 0));
+      await settle();
+      // Two commits in one task: the open queued by the first has not run when the second lands.
+      view.rerender(el("biz_A", 1));
+      view.rerender(el(next, 1));
+      await settle();
+      await settle();
+      expect(screen.queryByRole("dialog"), `A's queued New opened the builder under ${next ?? "none"}`).toBeNull();
+    });
+  }
+  it("control: A, New, and no change: the builder opens", async () => {
+    const view = render(el("biz_A", 0));
+    await settle();
+    view.rerender(el("biz_A", 1));
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+  });
+});
+
+describe("P254 R4-2: a New and a business change in the same commit", () => {
+  const el = (b: string | null, t: number) => <RecurringExpensesPanel businessId={b} categories={[]} triggerNew={t} />;
+  it("A to none, with New: no builder (the ref follows the business before the New is read)", async () => {
+    const view = render(el("biz_A", 0));
+    await settle();
+    view.rerender(el(null, 1));
+    await settle();
+    await settle();
+    expect(screen.queryByRole("dialog"), "the builder opened with no business").toBeNull();
+  });
+  it("A to B, with New: the builder opens, for B", async () => {
+    const view = render(el("biz_A", 0));
+    await settle();
+    view.rerender(el("biz_B", 1));
+    expect(await screen.findByRole("dialog", {}, LONG)).toBeTruthy();
+  });
+});
